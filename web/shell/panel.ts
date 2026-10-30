@@ -1,7 +1,7 @@
 // The terminal panel (plan-bash-shell r8c E5; step 6): a bottom dock on the notebook page that runs one command at a
 // time through the page's ShellHost with the person principal.  From scratch: no emulator, no innerHTML from data
 // (text nodes and class names from a fixed table only); the output is rendered in slices (web/shell/panel-render.ts).
-// ROUGH PREVIEW (DEV/preview hosts only): the E5.8 tests, the scrollback's exact caps and the gates come next.
+// A preview: the page shows it on preview and DEV hosts only (web/index.html), until E5.5's timing gates are met.
 import css from "./panel.css" with { type: "text" };
 import { Render, SLICE, SCROLLBACK, dropMarker, evictCount, type Run } from "./panel-render.ts";
 import type { HostOutcome, ShellHost } from "./host.ts";
@@ -9,6 +9,8 @@ import type { HostOutcome, ShellHost } from "./host.ts";
 export { SCROLLBACK };
 const HISTORY_MAX = 500;
 const MIN_H = 120;
+// (a prompt line shows at most this much of a long or pasted input)
+const PROMPT_LINES = 100, PROMPT_UNITS = 4096;
 // E5.3's 16 colours, light and dark (each >= 4.5:1 on its theme's background: min 4.91 light, 6.15 dark), and their
 // fixed class table: sb-fg-N, sb-bg-N, and sb-fga-N (a background alone: the theme's bg reads best on all 16)
 const LIGHT = "1f2328 b3261e 116329 7a4a00 0550ae 8250df 0e6e74 59636e 424a53 c9271b 1a7f37 8a5300 0969da 9e45d6 0b7a80 59636e";
@@ -22,9 +24,10 @@ export function palette(): string {
 }
 // (the page's fixed bottom overlays, found by layout, not by name: the site's early-alpha notice, a hosted preview's
 // notice gutter and its pill; any direct child of body fixed along the window's lower edge, wide or at the bottom)
-// (the command's last line: its exit status, then its final directory after a record separator, so `cd` carries to
-// the next command; a script that exits early keeps the directory it started in)
-const TRAILER = "\n__sb_s=$?; printf '\\036'; pwd; exit $__sb_s";
+// (the person's text runs as one eval of a quoted word, so a continuation, an open quote or heredoc, or a parse error
+// stays inside it (its errors keep its own line numbers); then its exit status, and its final directory after a
+// record separator, so `cd` carries to the next command; a script that exits early keeps the directory it began in)
+export const wrap = (script: string) => `eval -- '${script.replace(/'/g, "'\\''")}'\n__sb_s=$?; printf '\\036'; pwd; exit $__sb_s`;
 
 type Cmd = { el: HTMLElement; out: HTMLElement; units: number; lines: number; spans: number };
 
@@ -119,13 +122,22 @@ export class TerminalPanel {
     const root = (this.root = el("section", "sb-term"));
     root.setAttribute("aria-label", "Terminal");
     root.hidden = true;
-    const h = Number(sessionStorage.getItem("sb-term-h"));
-    if (h >= MIN_H) root.style.height = `${h}px`;
-    const grip = root.appendChild(el("div", "sb-term-grip"));
+    const grip = (this.grip = root.appendChild(el("div", "sb-term-grip")));
     grip.setAttribute("role", "separator");
     grip.setAttribute("aria-orientation", "horizontal");
-    grip.title = "Drag to resize";
+    grip.setAttribute("aria-label", "Resize the terminal");
+    grip.tabIndex = 0;
+    grip.title = "Drag, or use the arrow keys, to resize";
     grip.addEventListener("pointerdown", (e) => this.drag(e));
+    // (the non-drag way: Up/Down by 24 px, with Shift by 96: TP-8)
+    grip.addEventListener("keydown", (e) => {
+      const d = e.key === "ArrowUp" ? 1 : e.key === "ArrowDown" ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      this.setHeight(this.root.getBoundingClientRect().height + d * (e.shiftKey ? 96 : 24), true);
+    });
+    // (the remembered height, clamped on read; else the default: the grip's value is set either way: TP-8)
+    this.setHeight(Number(sessionStorage.getItem("sb-term-h")) || 280, false);
 
     const head = root.appendChild(el("div", "sb-term-head"));
     head.appendChild(el("span", "sb-term-set", opts.label));
@@ -160,10 +172,14 @@ export class TerminalPanel {
     this.input.autocapitalize = "off";
     this.input.setAttribute("autocomplete", "off");
     this.input.id = "sb-term-input";
+    this.input.setAttribute("aria-describedby", "sb-term-note");
     this.inputLabel.htmlFor = this.input.id;
     form.appendChild(this.input);
+    // (the note under the input: polite, apart from the log, which is never live; the input names it: TP-6)
     this.note = root.appendChild(el("div", "sb-term-note"));
     this.note.hidden = true;
+    this.note.id = "sb-term-note";
+    this.note.setAttribute("aria-live", "polite");
     this.input.addEventListener("keydown", (e) => this.key(e));
     this.input.addEventListener("input", () => this.grow());
     root.addEventListener("keydown", (e) => this.globalKey(e));
@@ -198,8 +214,10 @@ export class TerminalPanel {
   get shown() {
     return !this.root.hidden;
   }
+  private opener: Element | null = null;
   show() {
     if (this.ended) return;
+    if (!this.root.contains(document.activeElement)) this.opener = document.activeElement;
     this.root.hidden = false;
     this.place();
     requestAnimationFrame(() => this.place());
@@ -209,8 +227,12 @@ export class TerminalPanel {
   }
   /** Hiding keeps the session, its history and its scrollback (E5.1). */
   hide() {
+    const back = this.root.contains(document.activeElement);
     this.root.hidden = true;
     document.body.classList.remove("sb-term-open");
+    // (focus goes back where it came from: TP-7)
+    const o = this.opener as HTMLElement | null;
+    if (back) (o?.isConnected && o !== document.body ? o : document.getElementById("morebtn"))?.focus();
   }
   toggle() {
     if (this.shown) this.hide();
@@ -224,6 +246,8 @@ export class TerminalPanel {
     removeEventListener("resize", this.place);
     this.watch.disconnect();
     this.root.remove();
+    // (the shell's worker too: the panel's own, so a page's onEnd can't drop it: TP-1)
+    this.opts.host.endShell("the terminal was ended");
     this.onEnd?.();
   }
   onEnd: (() => void) | null = null;
@@ -240,20 +264,33 @@ export class TerminalPanel {
     this.input.style.height = `${Math.min(this.input.scrollHeight, 240)}px`;
   }
 
+  private grip: HTMLElement;
+  /** The dock's height, within 120 px and 80% of the window (E5.1), remembered for the session. */
+  setHeight(h: number, keep: boolean) {
+    const max = Math.round(innerHeight * 0.8);
+    h = Math.round(Math.max(MIN_H, Math.min(max, h)));
+    this.root.style.height = `${h}px`;
+    this.grip.setAttribute("aria-valuemin", String(MIN_H));
+    this.grip.setAttribute("aria-valuemax", String(max));
+    this.grip.setAttribute("aria-valuenow", String(h));
+    if (keep) sessionStorage.setItem("sb-term-h", String(h));
+    this.place();
+  }
+
   private drag(e: PointerEvent) {
     e.preventDefault();
-    const y0 = e.clientY, h0 = this.root.getBoundingClientRect().height;
-    const move = (m: PointerEvent) => {
-      const h = Math.max(MIN_H, Math.min(innerHeight * 0.8, h0 + (y0 - m.clientY)));
-      this.root.style.height = `${h}px`;
-    };
+    const g = this.grip, y0 = e.clientY, h0 = this.root.getBoundingClientRect().height;
+    g.setPointerCapture?.(e.pointerId);
+    const move = (m: PointerEvent) => this.setHeight(h0 + (y0 - m.clientY), false);
     const up = () => {
-      removeEventListener("pointermove", move);
-      removeEventListener("pointerup", up);
-      sessionStorage.setItem("sb-term-h", String(Math.round(this.root.getBoundingClientRect().height)));
+      g.removeEventListener("pointermove", move);
+      g.removeEventListener("pointerup", up);
+      g.removeEventListener("pointercancel", up);
+      this.setHeight(this.root.getBoundingClientRect().height, true);
     };
-    addEventListener("pointermove", move);
-    addEventListener("pointerup", up);
+    g.addEventListener("pointermove", move);
+    g.addEventListener("pointerup", up);
+    g.addEventListener("pointercancel", up);
   }
 
   // ---------------------------------------------------------------- the shell's start (William: "show something
@@ -265,7 +302,8 @@ export class TerminalPanel {
   private warm(): Promise<void> {
     if (this.ready) return Promise.resolve();
     if (this.starting) return this.starting;
-    this.loadingEl ??= this.log.appendChild(el("div", "sb-term-loading", "Starting the shell\u2026"));
+    // (in the header, beside the cwd: not in the scrollback, whose every line is charged to its caps)
+    this.loadingEl ??= this.cwdEl.insertAdjacentElement("afterend", el("span", "sb-term-loading", "Starting the shell\u2026")) as HTMLElement;
     this.root.classList.add("loading");
     const t0 = performance.now();
     this.starting = this.opts.host.shellFor().then(
@@ -316,6 +354,8 @@ export class TerminalPanel {
   }
 
   private key(e: KeyboardEvent) {
+    // (an input method's Enter confirms its composition: never a submit: TP-4)
+    if (e.isComposing || e.keyCode === 229) return;
     const ta = this.input;
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
@@ -392,10 +432,18 @@ export class TerminalPanel {
   }
 
   private newCmd(prompt: string): Cmd {
+    // (a long or many-line input shows its start: the prompt line is charged like content, before it goes in)
+    let shown = prompt;
+    const nl = shown.split("\n");
+    if (nl.length > PROMPT_LINES) shown = nl.slice(0, PROMPT_LINES).join("\n");
+    if (shown.length > PROMPT_UNITS) shown = shown.slice(0, PROMPT_UNITS);
+    if (shown !== prompt) shown += " \u2026";
+    const t = { units: shown.length, lines: shown.split("\n").length, spans: 1 };
+    this.makeRoomNew(t);
     const c = el("div", "sb-term-cmd");
-    c.appendChild(el("div", "sb-term-pl", prompt));
+    c.appendChild(el("div", "sb-term-pl", shown));
     const out = c.appendChild(el("pre", "sb-term-out"));
-    const cmd = { el: c, out, units: prompt.length, lines: 1, spans: 1 };
+    const cmd = { el: c, out, ...t };
     this.log.appendChild(c);
     this.cmds.push(cmd);
     // (a command just entered: the view goes to it, as a terminal's does; its output then sticks only if still there)
@@ -405,13 +453,31 @@ export class TerminalPanel {
 
   private echo(prompt: string, text: string) {
     const c = this.newCmd(prompt);
-    if (text) c.out.textContent = text;
+    if (text) this.addLine(c, text, "sb-term-echo");
   }
+
+  /** A synthetic line under a command (its exit, a status, the loading note, an echo): room made in the scrollback
+   * before it goes in, and charged to the command (E5.4: every live representation charged before insertion). */
+  private addLine(cmd: Cmd, text: string, cls: string): HTMLElement {
+    const t = { units: text.length, lines: 1, spans: 1 };
+    this.makeRoom(t.units, t.lines, t.spans);
+    const e = cmd.el.appendChild(el("div", cls, text));
+    cmd.units += t.units, cmd.lines += t.lines, cmd.spans += t.spans;
+    const stick = this.atBottom();
+    if (stick) this.log.scrollTop = this.log.scrollHeight;
+    return e;
+  }
+
+  /** Room for a new command's prompt line: any of the commands shown may be dropped (the new one isn't in yet). */
+  private makeRoomNew(t: { units: number; lines: number; spans: number }) {
+    this.makeRoom(t.units, t.lines, t.spans, true);
+  }
+
 
   /** Before a slice goes into the newest command: the oldest commands dropped, whole, until it and the drop marker
    * fit the scrollback's caps (E5.4, panel-render.ts evictCount); the marker charged like content. */
-  private makeRoom(units: number, lines: number, spans: number) {
-    const k = evictCount(this.cmds, { units, lines, spans }, this.dropped);
+  private makeRoom(units: number, lines: number, spans: number, fresh = false) {
+    const k = evictCount(fresh ? [...this.cmds, { units: 0, lines: 0, spans: 0 }] : this.cmds, { units, lines, spans }, this.dropped);
     for (const c of this.cmds.splice(0, k)) c.el.remove();
     this.dropped += k;
     if (this.dropped) {
@@ -448,32 +514,37 @@ export class TerminalPanel {
     this.running = { ctl, t0, timer, cmd };
     this.stopBtn.hidden = false;
     this.root.classList.add("running");
+    // (a page command's output goes through the same capped, sliced rendering as a shell's: its text is kept as
+    // stdout and stderr, and the command's output is painted again from them, coalesced, as they change)
+    let outBuf = "", errBuf = "", painting: Promise<void> | null = null, dirty = false;
+    const base = { units: cmd.units, lines: cmd.lines, spans: cmd.spans };
+    const repaint = () => {
+      if (painting) return void (dirty = true);
+      painting = (async () => {
+        do {
+          dirty = false;
+          await Promise.resolve();
+          cmd.out.textContent = "";
+          Object.assign(cmd, base);
+          await this.paint(cmd, outBuf, errBuf, ctl.signal);
+        } while (dirty);
+        painting = null;
+      })();
+    };
     const write = (text: string, err = false) => {
-      const lines = text.split("\n").length - 1;
-      this.makeRoom(text.length, lines, 1);
-      cmd.units += text.length, cmd.lines += lines, cmd.spans++;
-      const stick = this.atBottom();
-      if (err) cmd.out.appendChild(el("span", "sb-err", text));
-      else cmd.out.appendChild(document.createTextNode(text));
-      if (stick) this.log.scrollTop = this.log.scrollHeight;
+      if (err) errBuf += text;
+      else outBuf += text;
+      repaint();
     };
     let code = 0;
-    let shown = { units: 0, lines: 0, on: false };
     const io: CommandIO = {
       cwd: this.cwd,
       signal: ctl.signal,
       write,
       replace: (text) => {
-        // (a refreshing listing replaces itself: its charge is its latest text)
-        const lines = text.split("\n").length - 1;
-        this.makeRoom(Math.max(0, text.length - shown.units), Math.max(0, lines - shown.lines), shown.on ? 0 : 1);
-        cmd.units += text.length - shown.units;
-        cmd.lines += lines - shown.lines;
-        if (!shown.on) cmd.spans++;
-        shown = { units: text.length, lines, on: true };
-        const stick = this.atBottom();
-        cmd.out.textContent = text;
-        if (stick) this.log.scrollTop = this.log.scrollHeight;
+        outBuf = text;
+        errBuf = "";
+        repaint();
       },
     };
     try {
@@ -482,15 +553,14 @@ export class TerminalPanel {
       write(`${argv[0]}: ${String((e as Error)?.message ?? e)}\n`, true);
       code = 1;
     } finally {
+      while (painting) await painting;
       clearInterval(timer);
       this.timeEl.textContent = "";
       this.stopBtn.hidden = true;
       this.root.classList.remove("running");
       this.running = null;
-      if (code) {
-        cmd.el.appendChild(el("div", "sb-term-exit", `exit ${code}`));
-        cmd.units += `exit ${code}`.length, cmd.lines++, cmd.spans++;
-      }
+      this.say("");
+      if (code) this.addLine(cmd, `exit ${code}`, "sb-term-exit");
       this.status.textContent = "";
       this.status.textContent = code ? `exit ${code}` : "done";
       if (this.shown) this.input.focus();
@@ -505,9 +575,10 @@ export class TerminalPanel {
     const cmd = this.newCmd(`${this.cwd} $ ${script}`);
     if (!this.ready) {
       // (the first command while bash loads: says so, under its prompt, until the shell is up)
-      const wait = cmd.el.appendChild(el("div", "sb-term-loading", "Starting the shell\u2026"));
+      const wait = this.addLine(cmd, "Starting the shell\u2026", "sb-term-loading");
       await this.warm();
       wait.remove();
+      cmd.units -= "Starting the shell\u2026".length, cmd.lines--, cmd.spans--;
     }
     const ctl = new AbortController();
     const t0 = performance.now();
@@ -517,18 +588,13 @@ export class TerminalPanel {
     this.root.classList.add("running");
     let r: HostOutcome;
     try {
-      r = await this.opts.host.exec({ kind: "person" }, script + TRAILER, { cwd: this.cwd, signal: ctl.signal });
+      r = await this.opts.host.exec({ kind: "person" }, wrap(script), { cwd: this.cwd, signal: ctl.signal });
     } catch (e) {
       r = { kind: "unavailable", row: 2, reason: String((e as Error)?.message ?? e), ops: [] };
     }
     let status: string;
     // (the closing lines below keep the view at the bottom if the output left it there)
-    const end = (text: string, cls = "") => {
-      const stick = this.atBottom();
-      cmd.el.appendChild(el("div", "sb-term-exit" + cls, text));
-      cmd.units += text.length, cmd.lines++, cmd.spans++;
-      if (stick) this.log.scrollTop = this.log.scrollHeight;
-    };
+    const end = (text: string, cls = "") => void this.addLine(cmd, text, "sb-term-exit" + cls);
     if (r.kind === "exit") {
       let out = r.stdout;
       const k = out.lastIndexOf("\x1e");
@@ -558,6 +624,7 @@ export class TerminalPanel {
     this.stopBtn.hidden = true;
     this.root.classList.remove("running");
     this.running = null;
+    this.say("");
     // (after the output is in: the polite status says only "done" or "exit N"; the log itself is never live)
     this.status.textContent = "";
     this.status.textContent = status;
@@ -565,29 +632,62 @@ export class TerminalPanel {
   }
 
   /** The output, rendered in slices (E5.5): each slice's runs go in as one fragment, then the page yields. */
+  /**
+   * The output, rendered in slices (E5.5): each slice's runs go in as one fragment, then the page yields.  E5.5's gates
+   * read performance measures: sb-term:first-paint and sb-term:last-paint (from the command's finishing, its outcome
+   * in, to the animation frame after its first and last slices), and each slice's sb-term:parse and sb-term:patch.
+   */
   private async paint(cmd: Cmd, stdout: string, stderr: string, signal: AbortSignal) {
+    const t0 = performance.now();
     const r = new Render(stdout, stderr);
-    for (let runs: Run[] | null; (runs = r.next(SLICE)); ) {
+    let first = true;
+    // (the nodes of the line still open: what a later lone \r takes back)
+    let open: Node[] = [];
+    for (;;) {
+      const p0 = performance.now();
+      const runs = r.next(SLICE);
+      if (!runs) break;
+      const p1 = performance.now();
       if (signal.aborted && this.running?.cmd !== cmd) return;
       const f = document.createDocumentFragment();
-      let units = 0, lines = 0;
+      let units = 0, lines = 0, spans = 0;
       for (const run of runs) {
-        units += run.text.length;
-        for (let i = run.text.indexOf("\n"); i >= 0; i = run.text.indexOf("\n", i + 1)) lines++;
-        if (run.cls === "" && !run.err) f.appendChild(document.createTextNode(run.text));
-        else {
-          const s = el("span", (run.err ? "sb-err " : "") + run.cls, run.text);
-          f.appendChild(s);
+        if (run.restart) {
+          // (a lone \r over this line's earlier slices: their nodes go, uncharged: TP-2)
+          for (const nd of open) {
+            if (nd.parentNode === f) continue;
+            cmd.units -= nd.textContent!.length, cmd.spans--;
+            nd.parentNode?.removeChild(nd);
+          }
+          for (const nd of open) if (nd.parentNode === f) units -= nd.textContent!.length, spans--, f.removeChild(nd);
+          open = [];
+          continue;
         }
+        units += run.text.length;
+        spans++;
+        for (let i = run.text.indexOf("\n"); i >= 0; i = run.text.indexOf("\n", i + 1)) lines++;
+        const nd = run.cls === "" && !run.err ? document.createTextNode(run.text) : el("span", (run.err ? "sb-err " : "") + run.cls, run.text);
+        f.appendChild(nd);
+        if (run.text.endsWith("\n")) open = [];
+        else open.push(nd);
       }
-      this.makeRoom(units, lines, runs.length);
+      this.makeRoom(units, lines, spans);
       const stick = this.atBottom();
       cmd.out.appendChild(f);
       cmd.units += units;
       cmd.lines += lines;
-      cmd.spans += runs.length;
+      cmd.spans += spans;
       if (stick) this.log.scrollTop = this.log.scrollHeight;
+      const p2 = performance.now();
+      performance.measure("sb-term:parse", { start: p0, end: p1 });
+      performance.measure("sb-term:patch", { start: p1, end: p2 });
+      if (first) {
+        first = false;
+        requestAnimationFrame(() => performance.measure("sb-term:first-paint", { start: t0, end: performance.now() }));
+      }
       await yieldNow();
     }
+    requestAnimationFrame(() => performance.measure("sb-term:last-paint", { start: t0, end: performance.now() }));
   }
+
 }

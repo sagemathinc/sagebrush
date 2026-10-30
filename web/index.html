@@ -2239,7 +2239,8 @@ if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
       term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = null; };
+      term.onEnd = () => { term = null; window.__sbTerm = null; };
+      window.__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
     }
     term.toggle();
   };

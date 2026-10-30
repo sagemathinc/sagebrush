@@ -1,8 +1,8 @@
 // The terminal panel on the notebook page (plan-bash-shell r8c E5; step 6's preview): a smoke test in headless
 // Chromium against web/dist built with SAGEBRUSH_TERMINAL=1 (the bash set in dist, as a hosted preview has it).
 // ⋯ ▸ Terminal opens the dock; commands run through the page's ShellHost with the person principal: text, SGR
-// colour, visible escapes, cd carried to the next command, stderr and a non-zero exit, Stop-free.  E5.8's full
-// list (keys, caps, slices, screen-reader order, placement) follows in step 6's PR.
+// colour, visible escapes, cd carried to the next command, stderr and a non-zero exit; E5.8's keys, caps, placement
+// and screen-reader order; the page commands; and the r1 reviews' findings (board TP-1..TP-9, daybreak2 326-2).
 //   SAGEBRUSH_TERMINAL=1 bun web/build.ts && bun web/shell/test-panel-page.mjs [SHOT.png]
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -75,6 +75,35 @@ try {
     return { taBottom: ta.bottom, tops, focused: document.activeElement === document.querySelector(".sb-term textarea") };
   })()`);
   check(covered && covered.tops.every((t) => covered.taBottom <= t) && covered.focused, `the prompt is above every bottom overlay, and focused: ${JSON.stringify(covered)}`);
+  // (the live DOM's totals, counted from the DOM itself, independently of the panel's own accounting: code units,
+  // lines (each block line, plus each line end inside an output) and runs (each element or text node in an output,
+  // and each block line), the drop marker included; DB2-TERM-326-2: never over the scrollback's caps)
+  const DOM_TOTALS = `(() => {
+    const log = document.querySelector(".sb-term-log");
+    if (!log) return null;
+    let units = 0, lines = 0, spans = 0;
+    for (const c of log.children) {
+      if (!c.classList.contains("sb-term-cmd")) { units += c.textContent.length; lines++; spans++; continue; }
+      for (const b of c.children) {
+        units += b.textContent.length;
+        if (b.classList.contains("sb-term-out")) {
+          lines += (b.textContent.match(/\\n/g) || []).length;
+          spans += b.childNodes.length;
+        } else {
+          lines += 1 + (b.textContent.match(/\\n/g) || []).length;
+          spans++;
+        }
+      }
+    }
+    return { units, lines, spans };
+  })()`;
+  const CAPS_SB = { units: 4194304, lines: 6000, spans: 50000 };
+  const over = [];
+  const invariant = async (what) => {
+    const t = await evaluate(DOM_TOTALS);
+    if (t && (t.units > CAPS_SB.units || t.lines > CAPS_SB.lines || t.spans > CAPS_SB.spans)) over.push(`${what}: ${JSON.stringify(t)}`);
+    return t;
+  };
   // one command: type, Enter, wait for the polite status after its output
   let n = 0;
   const run = async (cmd) => {
@@ -86,6 +115,7 @@ try {
       ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     })()`);
     await until(`document.querySelectorAll(".sb-term-cmd").length >= ${n} && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""`, 60000);
+    await invariant(cmd);
     return evaluate(`(() => {
       const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1);
       return { out: c.querySelector(".sb-term-out").textContent, html: c.querySelector(".sb-term-out").innerHTML,
@@ -235,6 +265,101 @@ try {
     return { cmds: log.querySelectorAll(".sb-term-cmd").length, drop: log.querySelector(".sb-term-drop")?.textContent ?? null, lines }; })()`);
   check(sb && sb.cmds === 1 && sb.drop === "[1 earlier command dropped]" && sb.lines <= 6000 && r?.out.startsWith("5000\n") && r.out.endsWith("9998\n"),
     `the scrollback drops the older command whole when the sum crosses its line cap: ${JSON.stringify(sb)}`);
+  // (DB2-TERM-326-2: every displayed path capped before insertion) a page command writing past the per-command caps,
+  // in many writes and in one; one replacing its output past them; prompt-only lines past the scrollback's line cap;
+  // exit lines at the scrollback's line boundary
+  await run("clear");
+  n = 0;
+  await evaluate(`(() => { const c = window.__sbTerm.opts.commands;
+    c.manylines = async (a, io) => { for (let i = 0; i < 7000; i++) io.write("w" + i + "\\n"); return 0; };
+    c.bigwrite = async (a, io) => { io.write("y".repeat(2 * 1048576)); return 0; };
+    c.bigreplace = async (a, io) => { io.replace("r\\n".repeat(6000)); await new Promise((r) => setTimeout(r, 50)); io.replace("s\\n".repeat(7000)); return 0; };
+  })()`);
+  const outOf = (sel = ".sb-term-out") => evaluate(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); const o = c.querySelector("${sel}"); return { text: o.textContent, lines: (o.textContent.match(/\\n/g) || []).length, nodes: o.childNodes.length }; })()`);
+  r = await run("manylines");
+  let o = await outOf();
+  check(r?.status === "done" && o.lines === 4999 && /\[\u2026 \d+ more bytes not shown\]$/.test(o.text), `a page command's 7 000 writes: its first 4 999 lines, then the omission line (${o.lines} lines; ${JSON.stringify(o.text.slice(-40))})`);
+  r = await run("bigwrite");
+  o = await outOf();
+  check(r?.status === "done" && o.text.length <= 1048576 && /more bytes not shown\]$/.test(o.text), `a page command's 2 MiB write: within the per-command units, with the omission line (${o.text.length})`);
+  r = await run("bigreplace");
+  o = await outOf();
+  check(r?.status === "done" && o.lines === 4999 && o.text.startsWith("s\n") && /more bytes not shown\]$/.test(o.text), `a page command's replace past the caps: the latest text, capped (${o.lines} lines)`);
+  // (prompt-only lines: 6 100 Enters on an empty input; the scrollback's line cap holds, the oldest dropped)
+  await evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); for (let i = 0; i < 6100; i++) { ta.value = ""; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); } })()`);
+  let dt = await invariant("6 100 prompt-only lines");
+  check(dt && dt.lines <= 6000 && dt.lines >= 5990 && /earlier commands dropped/.test(await evaluate(`document.querySelector(".sb-term-drop")?.textContent ?? ""`)), `6 100 prompt-only lines: the scrollback holds its line cap, with the marker (${JSON.stringify(dt)})`);
+  // (exit lines at the boundary: commands that fail, each a prompt and an exit line, past the cap)
+  await run("clear");
+  n = 0;
+  await run("seq 1 4990");
+  for (let i = 0; i < 8; i++) await run("false");
+  dt = await invariant("exit lines at the boundary");
+  check(dt && dt.lines <= 6000, `exit lines at the scrollback's line boundary: within the cap (${JSON.stringify(dt)})`);
+  check(over.length === 0, `after every command, the live DOM within the scrollback's caps: ${over.length ? over.slice(0, 3).join("; ") : "all"}`);
+  // ---- board's r1 findings
+  // (TP-3: the person's text is one eval: a trailing backslash, an open heredoc or quote never reach the bookkeeping)
+  await run("clear");
+  n = 0;
+  await run("cd /tdir");
+  for (const [what, cmd] of [["a trailing backslash", "echo a \\"], ["an unterminated heredoc", "cat <<EOF\nhello"], ["an unterminated quote", 'echo "abc']]) {
+    r = await run(cmd);
+    const all = await evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).textContent`);
+    check(!/__sb|\x1e/.test(all) && r?.cwd === "/tdir" && (r?.status === "done" || /^exit \d+$/.test(r?.status ?? "")), `${what}: no bookkeeping shown, the status (${r?.status}) and the cwd (${r?.cwd}) kept: ${JSON.stringify(all.slice(0, 120))}`);
+  }
+  r = await run(`echo 'x'"y" && echo "it's" && echo '$HOME \\ \`'`);
+  check(r?.out === "xy\nit's\n$HOME \\ `\n", `quoting through the eval: ${JSON.stringify(r?.out)}`);
+  r = await run("cd / && pwd");
+  check(r?.out === "/\n" && r?.cwd === "/", "cd still carries through the eval");
+  // (TP-4: an input method's Enter confirms its composition, never a submit)
+  const before4 = await cmdCount();
+  await setInput("echo 日本");
+  const composing = await evaluate(`(() => { const e = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229, bubbles: true, cancelable: true }); ${ta}.dispatchEvent(e); return ${ta}.value; })()`);
+  check((await cmdCount()) === before4 && composing === "echo 日本", "TP-4: Enter while composing adds no command and keeps the input");
+  await setInput("");
+  // (TP-6: the running note is polite, named by the input, and gone when the run ends)
+  await setInput(LOOP);
+  await key("Enter");
+  await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000);
+  await setInput("echo later");
+  await key("Enter");
+  const note = await evaluate(`(() => { const nt = document.querySelector(".sb-term-note"); return { shown: !nt.hidden, live: nt.getAttribute("aria-live"), described: ${ta}.getAttribute("aria-describedby") === nt.id }; })()`);
+  await evaluate(`document.querySelector(".sb-term-stop").click()`);
+  await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+  check(note.shown && note.live === "polite" && note.described && (await evaluate(`document.querySelector(".sb-term-note").hidden`)) === true, `TP-6: the note is polite and describes the input, and is gone after the run: ${JSON.stringify(note)}`);
+  await setInput("");
+  // (TP-8: the grip: focusable, its value, Up/Down within 120 px and 80% of the window, remembered for the session)
+  const g0 = await evaluate(`(() => { const g = document.querySelector(".sb-term-grip"); return { tab: g.tabIndex, now: +g.getAttribute("aria-valuenow"), min: +g.getAttribute("aria-valuemin"), max: +g.getAttribute("aria-valuemax"), h: Math.round(document.querySelector(".sb-term").getBoundingClientRect().height) }; })()`);
+  const gkey = (k, shift = false) => evaluate(`document.querySelector(".sb-term-grip").dispatchEvent(new KeyboardEvent("keydown", { key: "${k}", shiftKey: ${shift}, bubbles: true, cancelable: true }))`);
+  await gkey("ArrowUp");
+  const g1 = await evaluate(`+document.querySelector(".sb-term-grip").getAttribute("aria-valuenow")`);
+  for (let i = 0; i < 40; i++) await gkey("ArrowUp", true);
+  const gMax = await evaluate(`({ now: +document.querySelector(".sb-term-grip").getAttribute("aria-valuenow"), h: Math.round(document.querySelector(".sb-term").getBoundingClientRect().height), ih: innerHeight, kept: +sessionStorage.getItem("sb-term-h") })`);
+  for (let i = 0; i < 60; i++) await gkey("ArrowDown", true);
+  const gMin = await evaluate(`+document.querySelector(".sb-term-grip").getAttribute("aria-valuenow")`);
+  check(g0.tab === 0 && g0.min === 120 && g0.now === g0.h && g1 === g0.now + 24 && gMax.now === Math.round(gMax.ih * 0.8) && gMax.h === gMax.now && gMax.kept === gMax.now && gMin === 120,
+    `TP-8: the grip resizes from the keyboard within 120 px and 80%, and is remembered: ${JSON.stringify({ g0, g1, gMax, gMin })}`);
+  await gkey("ArrowUp", true);
+  // (TP-9: the history: 500 at most, oldest dropped; a command repeated at once kept once)
+  const hist = await evaluate(`(() => { const t = window.__sbTerm; for (let i = 0; i < 520; i++) t.remember("h" + i); t.remember("same"); t.remember("same");
+    return { len: t.history.length, first: t.history[0], last2: t.history.slice(-2) }; })()`);
+  check(hist.len === 500 && hist.first === "h21" && hist.last2[0] === "h519" && hist.last2[1] === "same", `TP-9: history holds 500, oldest dropped, an immediate repeat kept once: ${JSON.stringify(hist)}`);
+  // (TP-9: hiding by ⋯ ▸ Terminal as well as by the dock's own control; TP-7: focus doesn't fall to body)
+  await evaluate(`document.querySelector(".sb-term textarea").focus(); document.querySelector("#termbtn").click()`);
+  check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true && (await evaluate(`document.activeElement !== document.body`)), "TP-9/TP-7: ⋯ ▸ Terminal hides an open dock, and focus goes back, not to body");
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  await evaluate(`document.querySelector(".sb-term textarea").focus(); document.querySelector(".sb-term-hide").click()`);
+  check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true && (await evaluate(`document.activeElement?.id`)) === "morebtn", `TP-7: the dock's own hide returns focus to the ⋯ button (${await evaluate(`document.activeElement?.id || document.activeElement?.tagName`)})`);
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  // (TP-1: ✕ ends the shell's worker: counted, with reset as the control that fires)
+  await evaluate(`window.__term = 0; const t0 = Worker.prototype.terminate; Worker.prototype.terminate = function () { window.__term++; return t0.call(this); }`);
+  await run("echo before-reset");
+  await typeEnter("reset");
+  await until(`document.querySelector(".sb-term").dataset.startMs !== undefined`, 10000);
+  n = 0;
+  r = await run("echo after-reset");
+  const afterReset = await evaluate(`window.__term`);
+  check(afterReset === 1 && r?.out === "after-reset\n", `TP-1 control: reset ends one worker (${afterReset}), and a fresh one runs`);
   // (hide keeps the session; ✕ ends it)
   const kept = await cmdCount();
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
@@ -243,6 +368,7 @@ try {
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await cmdCount()) === kept, "⋯ ▸ Terminal again: the same session, its scrollback kept");
   await evaluate(`document.querySelector(".sb-term-end").click()`);
   check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  check((await evaluate(`window.__term`)) === 2, `TP-1: ✕ ends the shell's worker too (terminate calls: ${await evaluate(`window.__term`)}, after reset's 1)`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden`, 10000);
   await key("ArrowUp");
