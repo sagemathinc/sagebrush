@@ -1224,6 +1224,7 @@ jobs:
           python3 engine/py/test_runs.py
           python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
+          python3 engine/py/test_latex_comments.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
