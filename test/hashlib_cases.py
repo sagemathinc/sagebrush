@@ -70,3 +70,31 @@ print(type(hashlib.md5()).__name__, type(hashlib.md5()).__module__, isinstance(h
 print(callable(hashlib.md5), callable(hashlib.new))
 print(repr(hashlib.sha256()).startswith("<sha256 _hashlib.HASH object @ 0x"))
 print(sorted(n for n in dir(hashlib) if not n.startswith("_") and n in ("HASH", "new", "md5")))
+
+# a buffer must be C-contiguous, as CPython's BufferError says (H345-A1)
+mv = memoryview(b"abcdef")
+for v in (mv[::2], mv[::-1], mv[1:5:2]):
+    show(lambda: hashlib.md5(v).hexdigest())
+    show(lambda: hashlib.sha256().update(v))
+for v in (mv[1:4], mv[::1], memoryview(b"abcd").cast("H"), memoryview(bytearray(b"xyz"))):
+    show(lambda: hashlib.sha1(v).hexdigest())
+
+# data and string: given or not given, as CPython tells them apart (H345-A2)
+for kw in ({"string": None}, {"data": None}, {"data": b"", "string": b"x"}, {"data": b"a", "string": None},
+           {"data": b"", "string": None}, {"string": b""}, {"string": ""}, {"string": b"s"}, {"data": b""}, {}):
+    show(lambda: hashlib.md5(**kw).hexdigest())
+    show(lambda: hashlib.new("sha1", **kw).hexdigest())
+show(lambda: hashlib.md5(b"", string=b"x"))
+show(lambda: hashlib.md5(b"", string=None))
+show(lambda: hashlib.new("md5", b"", string=None))
+
+# a name's own characters, whatever a str subclass's methods say (H345-A3)
+class Liar(str):
+    def lower(self): return "md5"
+    def upper(self): return "MD5"
+    def __eq__(self, other): return True
+    def __hash__(self): return 0
+    def __str__(self): return "md5"
+for n in ("sha256", "SHA384", "Sha1", "nope", "MD5"):
+    show(lambda: hashlib.new(Liar(n)).name)
+    show(lambda: hashlib.new(n).name)

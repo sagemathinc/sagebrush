@@ -2,11 +2,16 @@
 digests, for md5, sha1, sha224, sha256, sha384 and sha512.
 
 The hashes are written in Python here (CPython's come from OpenSSL or HACL*):
-the same digests, for any data, but slow (fine for keys, ids and checksums
-of small data; megabytes take seconds), and NOT hardened: no constant-time
-guarantee, no protection against timing or other side channels.  Don't use
-them where an attacker can measure them.  blake2, sha3, shake, pbkdf2_hmac,
-scrypt and file_digest are not here yet.
+the same digests, for any data, but slow (megabytes take seconds) and NOT
+hardened: no constant-time guarantee, no protection against timing or other
+side channels.  They are for compatibility and non-security uses: reproducing
+a digest another program computes, a content checksum, uuid3/uuid5.  Don't
+use them where an attacker can measure them or choose the input to defeat
+them: MD5 and SHA-1 are broken for collision resistance (two different inputs
+with the same digest can be made), so neither may authenticate or sign
+anything.  usedforsecurity is accepted, as CPython's, and changes nothing
+here: every algorithm is available either way, and none is hardened.
+blake2, sha3, shake, pbkdf2_hmac, scrypt and file_digest are not here yet.
 
 The interface is CPython 3.14's: new(name, data=b"") and the named
 constructors (data=b"", *, usedforsecurity=True, string=None), each hash
@@ -31,12 +36,14 @@ def _bytes_of(data):
         raise TypeError("Strings must be encoded before hashing")
     if isinstance(data, (bytes, bytearray)):
         return bytes(data)
-    if isinstance(data, memoryview):
-        return data.tobytes()
-    try:
-        return bytes(memoryview(data))
-    except TypeError:
-        raise TypeError("object supporting the buffer API required") from None
+    if not isinstance(data, memoryview):
+        try:
+            data = memoryview(data)
+        except TypeError:
+            raise TypeError("object supporting the buffer API required") from None
+    if not data.c_contiguous:
+        raise BufferError("memoryview: underlying buffer is not C-contiguous")
+    return data.tobytes()
 
 
 _MD5_K = (
@@ -209,7 +216,7 @@ class HASH:
     """A hash object: update(data) adds bytes, digest() and hexdigest() give
     the digest of everything added so far, copy() a copy."""
 
-    __slots__ = ("_name", "_h", "_buf", "_count")
+    __slots__ = ("_name", "_state")
 
     def __new__(cls, *args, **kwargs):
         raise TypeError("cannot create '_hashlib.HASH' instances")
@@ -228,21 +235,22 @@ class HASH:
         """Update this hash object's state with the provided string."""
         data = _bytes_of(obj)
         _, compress, bs = _ALGORITHMS[self._name][:3]
-        buf = self._buf + data
-        self._count += len(data)
-        h = self._h
+        h, buf, count = self._state
+        buf += data
         n = len(buf) - len(buf) % bs
         for i in range(0, n, bs):
             h = compress(h, buf[i:i + bs])
-        self._h, self._buf = h, buf[n:]
+        # (the new state is published in one store, after every block: an
+        # exception or an interrupt in the loop leaves the old state whole)
+        self._state = (h, buf[n:], count + len(data))
 
     def digest(self):
         """Return the digest value as a bytes object."""
         _, compress, bs, wb, order, size, lb = _ALGORITHMS[self._name]
-        bits = (self._count * 8).to_bytes(lb, order)
-        pad = b"\x80" + b"\x00" * ((bs - lb - 1 - len(self._buf)) % bs)
-        tail = self._buf + pad + bits
-        h = self._h
+        h, buf, count = self._state
+        bits = (count * 8).to_bytes(lb, order)
+        pad = b"\x80" + b"\x00" * ((bs - lb - 1 - len(buf)) % bs)
+        tail = buf + pad + bits
         for i in range(0, len(tail), bs):
             h = compress(h, tail[i:i + bs])
         return b"".join(v.to_bytes(wb, order) for v in h)[:size]
@@ -253,7 +261,7 @@ class HASH:
 
     def copy(self):
         """Return a copy of the hash object."""
-        return _make(self._name, self._h, self._buf, self._count)
+        return _make(self._name, *self._state)
 
     def __repr__(self):
         return "<%s _hashlib.HASH object @ %#x>" % (self._name, id(self))
@@ -266,19 +274,36 @@ del HASH
 
 def _make(name, h, buf, count):
     obj = object.__new__(_HASH)
-    obj._name, obj._h, obj._buf, obj._count = name, list(h), buf, count
+    obj._name = name
+    obj._state = (tuple(h), buf, count)
     return obj
 
 
+class _Absent:
+    # (a default that says it wasn't given: CPython tells data=b"" and
+    # string=None given from not given; its repr is CPython's default's)
+    __slots__ = ("_r",)
+
+    def __init__(self, r):
+        self._r = r
+
+    def __repr__(self):
+        return self._r
+
+
+_NO_DATA = _Absent("b''")
+_NO_STRING = _Absent("None")
+
+
 def _constructor(name):
-    def construct(data=b"", *, usedforsecurity=True, string=None):
-        if string is not None:
-            if data != b"":
+    def construct(data=_NO_DATA, *, usedforsecurity=True, string=_NO_STRING):
+        if string is not _NO_STRING:
+            if data is not _NO_DATA:
                 raise TypeError("'data' and 'string' are mutually exclusive and support for "
                                 "'string' keyword parameter is slated for removal in a future version.")
             data = string
         obj = _make(name, _ALGORITHMS[name][0], b"", 0)
-        if data != b"" or not isinstance(data, bytes):
+        if data is not _NO_DATA:
             obj.update(data)
         return obj
     construct.__name__ = construct.__qualname__ = name
@@ -300,7 +325,8 @@ def new(name, *args, **kwargs):
     """
     if not isinstance(name, str):
         raise TypeError("new() argument 'name' must be str, not %s" % type(name).__name__)
-    key = name.lower()
+    name = str.__str__(name)  # (its own characters, whatever a subclass's methods say)
+    key = str.lower(name)
     if key not in _ALGORITHMS:
         raise ValueError("unsupported hash type " + name)
     return globals()[key](*args, **kwargs)
