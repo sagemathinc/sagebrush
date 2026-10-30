@@ -207,6 +207,11 @@ try {
     b.session = (await b.send("Network.getCookies", { urls: [ORIGIN + "/"] })).cookies?.find((c) => c.name === SESSION_COOKIE)?.value ?? null;
     check(!!b.session, `${b.name}: holds the __Host- session cookie`);
   }
+  // (sync-docs, #1 (a): two notebooks made in A BEFORE sync, never opened there afterwards; with sync on, their synced
+  // histories are started by A's own walk (notebook/start-all.js), and B opens each with A's cells.  Their names are A's
+  // own and unique, so this asserts nothing of how same-path collisions are named)
+  const PRE = [["/PreSyncA1.ipynb", "pre_a1 = 11"], ["/PreSyncA2.ipynb", "pre_a2 = 22"]];
+  for (const [p, code] of PRE) obs(`A makes ${p} before sync`, await A.ev(`${W}.create(${J(p)}, { content: { mode: "python", cells: [{ id: "c1", code: ${J(code)} }] } }).then((e) => e.path, (e) => "refused: " + (e?.message ?? e))`));
   // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted
   for (const b of [A, B]) {
     check(await b.until(`!!document.querySelector("#wssidebar .fh button[aria-label=More]")`, 10_000), `${b.name}: the Files sidebar is shown`);
@@ -228,6 +233,17 @@ try {
   for (const b of [A, B]) {
     check(await b.go(), `${b.name}: reloaded after turning sync on`);
     check(await b.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `${b.name}: the sidebar says Synced (${J(await b.syncLine())})`);
+  }
+  // (#1 (a): A's pre-sync notebooks, never opened since sync was turned on, arrive in B with their cells)
+  {
+    obs("A's walk of its notebooks", await A.until(`!!window.sagebrush?.startAll`, 30_000).then(() => A.ev(`window.sagebrush.startAll`)));
+    for (const [p, code] of PRE) {
+      const click = () => B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(p)})?.click()`);
+      check(await B.until(row(p), 20_000), `B lists A's pre-sync ${p}`);
+      let got = false;
+      for (let i = 0; i < 15 && !got; i++) { await click(); got = await B.until(B.has(code), 2000); }
+      check(got, `B opens A's pre-sync ${p}, never opened in A since sync was on, with its cell (${J(await B.codes())})`);
+    }
   }
   // ---- 3. a notebook made and typed in A appears, with its cell, in B; B's edit comes back
   // (the Files sidebar's New, Notebook, with the journal on: a notebook made, listed (it was refused before the fix))
