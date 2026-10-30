@@ -342,6 +342,7 @@
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
+  <button role="menuitem" id="termbtn" hidden title="A bash shell on your workspace's files (a preview)">Terminal</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -427,6 +428,10 @@ import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
+// (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
+// shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
+import { answerPresence, TAB } from "./shell/presence.ts";
+import { openPreview } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -2178,6 +2183,68 @@ const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
 // ⋯ Whiteboard: the latest board in the notebook's language, or a new one (board/page.ts ?recent=); this notebook stays saved
 $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb.mode));
+// ⋯ Terminal (plan-bash-shell r8c E5, step 6): a bash shell on the workspace's files, in a bottom dock.  A preview:
+// the item shows only on preview and DEV hosts.  The shell's set: the preview's own (web/build.ts), else the site's
+// latest; one ShellHost per page tab, made at the first open, with the person principal.
+if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+  const termBtn = $("#termbtn");
+  termBtn.hidden = false;
+  let term = null;
+  // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
+  const here = async () => {
+    let path;
+    try { if (ws && current.id && current.kind !== "file") path = await ws.pathOf("notebook", current.id); } catch {}
+    const busy = !!document.querySelector("#cells .running, #cells .queued");
+    const procs = [{ tab: TAB, kind: "notebook", name: nbName.value || "Untitled", path, mode: nb.mode,
+      state: busy ? "running" : document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: performance.memory?.usedJSHeapSize }];
+    if (term) procs.push({ tab: TAB, kind: "terminal", name: "bash", mode: "bash", state: term.busy ? "running" : "idle", since: term.since });
+    return procs;
+  };
+  answerPresence(here);
+  // (open FILE: a notebook or board in a new tab, as the File menu's Open… does; a data file in its preview here)
+  const openPath = async (p) => {
+    const w = await wsNow();
+    if (!w) throw new Error("the workspace isn't open");
+    const e = await w.stat(p);
+    if (!e) throw new Error("No such file or directory");
+    if (e.kind === "folder") throw new Error("Is a directory");
+    if (e.kind === "notebook" || e.kind === "board") {
+      openEntry(e, "tab");
+      return `opened ${p} (a ${e.kind}, in a new tab)`;
+    }
+    void openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) });
+    return `opened ${p} (its preview)`;
+  };
+  const shellSet = async () => {
+    for (const url of ["shell/preview-set.json", "pkgset/latest.json"]) {
+      try {
+        const r = await fetch(url, { cache: "no-store", redirect: "error" });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const S = j?.S ?? j?.id ?? (typeof j === "string" ? j : null);
+        if (typeof S === "string" && /^[0-9a-f]{64}$/.test(S)) return S;
+      } catch {}
+    }
+    return null;
+  };
+  termBtn.onclick = async () => {
+    if (!term) {
+      const w = await wsNow();
+      if (!w) { savedEl.textContent = "the terminal needs this browser's workspace, which isn't open"; return; }
+      const S = await shellSet();
+      if (!S) { savedEl.textContent = "the terminal: this site has no shell package set"; return; }
+      // (the module, from this page's directory: a variable, so the bundler leaves it to the browser)
+      const mod = "./shell/terminal.js";
+      let openTerminal;
+      try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
+      if (term) return term.toggle();
+      term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      term.onEnd = () => { term = null; window.__sbTerm = null; };
+      window.__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
+    }
+    term.toggle();
+  };
+}
 // (to the board once this notebook is saved, every change of it; not saved:
 // it stays open, and says so, CORR-7F9-1)
 async function toBoard(url) {
