@@ -3605,11 +3605,6 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
- "lib/_operator.py :: _compare_digest :: raise TypeError(\"unsupported operand types(s) or combination of types: '%s' and '%s'\" #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
- },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -3624,6 +3619,11 @@
   "class": "1+2",
   "owner": "raster/image I/O",
   "row": "inv-31"
+ },
+ "lib/_pyjs_digest.py :: _compare_digest :: raise TypeError(\"unsupported operand types(s) or combination of types: '%s' and '%s'\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
  "lib/_sage_ec.py :: _quotient_coords :: E(F_q) is too large to enumerate. P -> m P maps E(F_q) onto its Sylow #0": {
   "class": "3",
