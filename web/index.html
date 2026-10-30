@@ -2201,12 +2201,19 @@ function menuOf(btn, menu) {
   };
   // (fixed, as its button is in the toolbar that stays in view: kept under it
   // as the page scrolls or the window changes, and no taller than the window
-  // leaves, scrolling within itself, astra's UI-CA2-2)
+  // leaves, scrolling within itself, astra's UI-CA2-2), above what is fixed at
+  // the window's foot: the alpha notice and a preview host's notice gutter (the
+  // ⋯ menu's last entry went under the alpha notice in a 420 px window once
+  // the Terminal made it an entry longer, #358)
   const place = () => {
     const r = btn.getBoundingClientRect();
+    // (what is fixed at the foot, under the window's bottom middle; not named here: build-cli strips the alpha
+    // notice by its name and refuses the page if the name is left anywhere else)
+    const foot = Math.max(0, ...document.elementsFromPoint(innerWidth / 2, innerHeight - 1)
+      .filter((e) => e !== menu && !menu.contains(e) && getComputedStyle(e).position === "fixed").map((e) => innerHeight - e.getBoundingClientRect().top));
     menu.style.position = "fixed";
     menu.style.top = `${r.bottom + 4}px`;
-    menu.style.maxHeight = `${Math.max(120, innerHeight - r.bottom - 12)}px`;
+    menu.style.maxHeight = `${Math.max(120, innerHeight - r.bottom - 12 - foot)}px`;
     menu.style.overflowY = "auto";
     menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
   };
