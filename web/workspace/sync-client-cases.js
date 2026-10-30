@@ -336,7 +336,7 @@ async function refusal() {
   const refused = (await metaGet(w.ws, `sync:${ns}:refused`)) ?? [];
   const rb = await metaGet(w.ws, `sync:${ns}:rebuild`);
   const puts = (await ctl("log")).http.filter((h) => h.method === "PUT");
-  check(puts.length === 0 && refused.length === 1 && refused[0].code === "missing" && refused[0].path === "/f.txt", "refusal: no bytes to upload, the op sent anyway, refused `missing`, listed with its code and path: " + J(refused));
+  check(puts.length === 0 && refused.length === 1 && refused[0].code === "missing" && refused[0].path === "/f.txt" && refused[0].n === 1, "refusal: no bytes to upload, the op sent anyway, refused `missing`, listed with its code and path, numbered 1: " + J(refused));
   check(rb?.why === "refused", "refusal: the rebuild asked for (done in step 4): " + J(rb));
   const { mine } = await serverOps(w);
   check(mine.some((o) => o.op === "mkdir" && o.path === "/after"), "refusal: the op after the refused one accepted");
@@ -2459,13 +2459,15 @@ async function s5DetailsGap() {
 }
 
 async function s5Refused() {
-  // (sync-docs' follow-up, @sagebrush's call: a change the server refused never leaves the foot at "Synced" alone.  The
-  // foot counts the refusals nobody has looked at and points to their list; opening it marks them looked at, the
-  // count goes, the list stays open and keeps them all)
+  // (sync-docs' follow-up, @sagebrush's calls: a change the server refused never leaves the foot at "Synced" alone.  The
+  // foot counts the refusals nobody has looked at and points to their list; the list shows every one kept; opening it
+  // marks them looked at by number (never by clock), the mark only moving on; the count goes, the list stays open)
   const now = Date.now();
   check(W.foot({ state: "synced" }, now, 1) === `Synced · 1 change couldn't sync (see "the server refused" below)` && W.foot({ state: "synced" }, now, 0) === "Synced" && W.foot({ state: "off" }, now, 3) === "Sync off" && /· 2 changes couldn't sync/.test(W.foot({ state: "offline", waiting: 1 }, now, 2)), "refused: the foot's words with and without unseen refusals, never when sync is off");
-  const rs = [{ dseq: 1, code: "conflict", path: "/a.txt", at: 10 }, { dseq: 2, code: "too_large", path: "/b.bin", at: 20 }, { dseq: 3, code: "x", path: "", at: 30 }];
-  check(W.unseenRefusals(rs, 0) === 3 && W.unseenRefusals(rs, 20) === 1 && W.unseenRefusals(rs, 30) === 0 && W.unseenRefusals(undefined, 0) === 0, "refused: unseenRefusals counts those after the mark");
+  const rs = [{ dseq: 1, code: "conflict", path: "/a.txt", at: 10, n: 1 }, { dseq: 2, code: "too_large", path: "/b.bin", at: 20, n: 2 }, { dseq: 3, code: "x", path: "", at: 20, n: 3 }];
+  // (by number: two at the same time, or a clock that went back, still counted; one without a number (kept before
+  // refusals were numbered) isn't new)
+  check(W.unseenRefusals(rs, 0) === 3 && W.unseenRefusals(rs, 2) === 1 && W.unseenRefusals(rs, 3) === 0 && W.unseenRefusals(undefined, 0) === 0 && W.unseenRefusals([{ dseq: 9, code: "c", path: "", at: 99 }], 0) === 0 && W.unseenRefusals([{ ...rs[0], at: 5, n: 7 }], 6) === 1, "refused: unseenRefusals counts by number after the mark, ties and older clocks included");
   const w = await fresh();
   const ns = nsFor(w, "e");
   await W.switchTo(w, ns);
@@ -2473,30 +2475,48 @@ async function s5Refused() {
   const owner = W.SyncOwner.of(w), view = owner.view;
   owner.view = () => ({ from: "own", s: { state: "synced" } });
   try {
-  const marks = [];
-  // (the mark as the meta would keep it: a redraw after opening reads the new one)
-  const readDetails = async () => [undefined, rs, marks.length ? marks.at(-1)[1] : 10];
-  const markSeen = async (n, at) => { marks.push([n, at]); };
-  const el = document.body.appendChild(document.createElement("div")), srv = fakeServer({ available: true, state: "active", generation: 2 });
-  const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails, markSeen });
-  const seen = await until(() => /2 changes couldn't sync/.test(text(el)), 3000);
-  const first = el.querySelector("details.sync-refused");
-  check(seen && /Sync is on: Synced · 2 changes couldn't sync \(see "the server refused" below\)/.test(text(el)) && /3 changes the server refused \(2 new\)/.test(text(el)) && !!first && !first.open, "refused: the foot counts the 2 after the mark and points to the list, which says so: " + text(el).slice(0, 200));
-  // (opened as a person would, the list as drawn now: a poll's redraw may have replaced the one found first)
-  const opened = () => { const l = el.querySelector("details.sync-refused"); if (l && !l.open) l.open = true; return l; };
-  const cleared = await until(() => { opened(); return marks.length > 0 && !/couldn't sync/.test(text(el)); }, 3000);
-  const list = el.querySelector("details.sync-refused");
-  check(cleared && J(marks) === J([[ns, 30]]) && !!list?.open && /Sync is on: Synced/.test(text(el)) && /3 changes the server refused/.test(text(el)) && !/new\)/.test(text(el)), "refused: opening the list marks up to the newest (30), the foot's count goes, the list stays open with all 3: " + J(marks) + " " + text(el).slice(0, 200));
-  s.dispose();
-  // (nothing unseen: the foot as before, no mark written on opening)
-  const el2 = document.body.appendChild(document.createElement("div"));
-  const s2 = W.syncSection(w, el2, hostOf(w), { fetch: srv.fetch, readDetails: async () => [undefined, rs, 30], markSeen });
-  await until(() => !!el2.querySelector("details.sync-refused"), 3000);
-  for (let i = 0; i < 5; i++) { const l = el2.querySelector("details.sync-refused"); if (l) l.open = true; await sleep(100); }
-  check(!/couldn't sync/.test(text(el2)) && marks.length === 1 && /Sync is on/.test(text(el2)), "refused: all seen: the foot without a count, opening writes no mark: " + text(el2).slice(0, 160));
-  s2.dispose();
-  el.remove();
-  el2.remove();
+    const marks = [];
+    // (the mark as the meta would keep it: a redraw after opening reads the new one)
+    const readDetails = async () => [undefined, rs, marks.length ? marks.at(-1)[1] : 1];
+    const markSeen = async (n, m) => { marks.push([n, m]); };
+    const el = document.body.appendChild(document.createElement("div")), srv = fakeServer({ available: true, state: "active", generation: 2 });
+    const s = W.syncSection(w, el, hostOf(w), { fetch: srv.fetch, readDetails, markSeen });
+    const seen = await until(() => /2 changes couldn't sync/.test(text(el)), 3000);
+    const first = el.querySelector("details.sync-refused");
+    check(seen && /Sync is on: Synced · 2 changes couldn't sync \(see "the server refused" below\)/.test(text(el)) && /3 changes the server refused \(3 shown of 3 kept, 2 new\)/.test(text(el)) && first?.querySelectorAll(".sync-refused-rows > div").length === 3 && !first.open, "refused: the foot counts the 2 after the mark and points to the list, which shows all 3 kept and says so: " + text(el).slice(0, 200));
+    // (opened as a person would, the list as drawn now: a poll's redraw may have replaced the one found first)
+    const opened = () => { const l = el.querySelector("details.sync-refused"); if (l && !l.open) l.open = true; return l; };
+    const cleared = await until(() => { opened(); return marks.length > 0 && !/couldn't sync/.test(text(el)); }, 3000);
+    const list = el.querySelector("details.sync-refused");
+    check(cleared && J(marks) === J([[ns, 3]]) && !!list?.open && /Sync is on: Synced/.test(text(el)) && /3 changes the server refused \(3 shown of 3 kept\)/.test(text(el)) && !/new\)/.test(text(el)), "refused: opening the list marks up to the newest number (3), the foot's count goes, the list stays open with all 3: " + J(marks) + " " + text(el).slice(0, 200));
+    s.dispose();
+    // (nothing unseen: the foot as before, no mark written on opening)
+    const el2 = document.body.appendChild(document.createElement("div"));
+    const s2 = W.syncSection(w, el2, hostOf(w), { fetch: srv.fetch, readDetails: async () => [undefined, rs, 3], markSeen });
+    await until(() => !!el2.querySelector("details.sync-refused"), 3000);
+    for (let i = 0; i < 5; i++) { const l = el2.querySelector("details.sync-refused"); if (l) l.open = true; await sleep(100); }
+    check(!/couldn't sync/.test(text(el2)) && marks.length === 1 && /Sync is on/.test(text(el2)), "refused: all seen: the foot without a count, opening writes no mark: " + text(el2).slice(0, 160));
+    s2.dispose();
+    // (the panel's own meta, no seams: the refusals and the mark as the client and the panel keep them; the mark raised
+    // on opening, and never taken back by a panel that read an older list)
+    const metaPut = (k, v) => new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put(v, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    await metaPut(`sync:${ns}:refused`, rs);
+    await metaPut(`sync:${ns}:refusedSeen`, 1);
+    const el3 = document.body.appendChild(document.createElement("div"));
+    const s3 = W.syncSection(w, el3, hostOf(w), { fetch: srv.fetch });
+    const counted = await until(() => /2 changes couldn't sync/.test(text(el3)), 3000);
+    const raised = await until(async () => { const l = el3.querySelector("details.sync-refused"); if (l && !l.open) l.open = true; return (await metaGet(w.ws, `sync:${ns}:refusedSeen`)) === 3; }, 3000);
+    check(counted && raised && (await until(() => !/couldn't sync/.test(text(el3)), 3000)), "refused: the panel's own meta: counted from it, the mark raised to 3 in it on opening, the count gone");
+    s3.dispose();
+    // (raiseSeen, the panel's writer: raised, never lowered (a racing panel's older list), nothing else written)
+    await metaPut(`sync:${ns}:refusedSeen`, 9);
+    await W.raiseSeen(w.ws, ns, 6);
+    const kept9 = await metaGet(w.ws, `sync:${ns}:refusedSeen`);
+    await W.raiseSeen(w.ws, ns, 12);
+    const now12 = await metaGet(w.ws, `sync:${ns}:refusedSeen`);
+    await W.raiseSeen(w.ws, ns, NaN);
+    check(kept9 === 9 && now12 === 12 && (await metaGet(w.ws, `sync:${ns}:refusedSeen`)) === 12, "refused: raiseSeen only moves the mark on: 9 stays 9 over 6, then 12; NaN ignored: " + J({ kept9, now12 }));
+    for (const e of [el, el2, el3]) e.remove();
   } finally {
     owner.view = view;
   }

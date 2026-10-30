@@ -18,7 +18,7 @@ import { readLife, sameLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
 import { DOC_SYNC_NOTE, docSyncOrigin } from "./doc-sync-switch";
 import { accountHash } from "../sync-protocol/protocol";
-import type { Refusal } from "./sync-client";
+import { CLIENT, type Refusal } from "./sync-client";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -150,10 +150,10 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 
 /** The Sync section, drawn into `into`; dispose() (the panel's close) ends its poll and its subscription. */
 /** What the details read gives: the listed paths and the refusals of namespace `ns` (a seam for tests). */
-/** (and when the refusals were last looked at: the time of the newest one then shown, 0 if never) */
+/** (and the refusals' seen mark: the n of the newest one shown when their list was last opened, 0 if never) */
 type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
-/** Records that this device's refusals up to `at` were looked at (a seam for tests). */
-type MarkSeen = (ns: string, at: number) => Promise<void>;
+/** Records that this device's refusals up to number `n` were looked at (a seam for tests). */
+type MarkSeen = (ns: string, n: number) => Promise<void>;
 export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
   const f: Fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
@@ -172,12 +172,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const meta = w.ws.transaction("meta").objectStore("meta");
     Promise.all([req(meta.get(`sync:${ns}:listed`)), req(meta.get(`sync:${ns}:refused`)), req(meta.get(`sync:${ns}:refusedSeen`))]).then((v) => ok(v as any), no);
   }));
-  const markSeen: MarkSeen = opts.markSeen ?? ((ns, at) => new Promise((ok, no) => {
-    const tx = w.ws.transaction("meta", "readwrite");
-    tx.objectStore("meta").put(at, `sync:${ns}:refusedSeen`);
-    tx.oncomplete = () => ok();
-    tx.onerror = tx.onabort = () => no(tx.error);
-  }));
+  const markSeen: MarkSeen = opts.markSeen ?? ((ns, n) => raiseSeen(w.ws, ns, n));
   // (every status read bound to the lifecycle it started under: one that a lifecycle change overtook is dropped and
   // asked again, never applied (astra3's CORR-PR130-3))
   const boundStatus = async (signal: AbortSignal): Promise<Answer> => {
@@ -284,26 +279,32 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     try {
       const life = await owner.durable();
       if (!life || !current()) return;
-      const [listed, refused, seenAt] = await readDetails(life.ns);
+      const [listed, refused, seenMark] = await readDetails(life.ns);
       if (!current()) return;
       const now = await owner.durable();
       if (!current() || !now || now.ns !== life.ns || now.epoch !== life.epoch) return;
       const parts: HTMLElement[] = [];
       if (listed?.count) parts.push(h("details", {}, h("summary", { textContent: `${listed.count} item${listed.count === 1 ? "" : "s"} sync kept aside` }), ...listed.paths.slice(0, 20).map(([p, why]) => h("div", { textContent: `${p} (${why})` }))));
       // (changes the server refused that nobody has looked at yet: counted in the foot, which points here; opening
-      // this list marks them looked at, and the count goes)
-      const unseen = unseenRefusals(refused, seenAt ?? 0);
+      // this list, which shows every one kept (the last 100), marks them looked at, and the count goes)
+      const seen = Number.isSafeInteger(seenMark) ? seenMark! : 0;
+      const unseen = unseenRefusals(refused, seen);
       if (refused?.length) {
-        const what = `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused`;
-        const summary = h("summary", { textContent: what + (unseen ? ` (${unseen} new)` : "") });
-        const list = h("details", { className: "sync-refused" }, summary, ...refused.slice(-20).map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` })));
+        const shown = refused.slice(-CLIENT.refusalsKept);
+        const what = `${refused.length} change${refused.length === 1 ? "" : "s"} the server refused (${shown.length} shown of ${refused.length} kept`;
+        const summary = h("summary", { textContent: what + (unseen ? `, ${unseen} new)` : ")") });
+        const rows = h("div", { className: "sync-refused-rows" }, ...shown.map((r) => h("div", { textContent: `${r.path || "(no path)"}: ${r.code}` })));
+        rows.style.maxHeight = "12em";
+        rows.style.overflowY = "auto";
+        const list = h("details", { className: "sync-refused" }, summary, rows);
         // (marked in place, the list left open: the foot and the summary lose the count once the mark is kept)
         if (unseen) list.addEventListener("toggle", () => {
           if (!list.open || !current()) return;
-          const newest = Math.max(...refused.map((r) => r.at));
+          // (up to the newest shown: every row is drawn, so opening means each was shown)
+          const newest = Math.max(0, ...shown.map((r) => r.n).filter((n): n is number => Number.isSafeInteger(n)));
           markSeen(life.ns, newest).then(() => {
             if (!current()) return;
-            summary.textContent = what;
+            summary.textContent = what + ")";
             const f = sec.querySelector(".sync-foot");
             if (f) f.textContent = `Sync is on: ${foot(owner.view().s)}`;
           }, () => {});
@@ -486,9 +487,21 @@ function footOf(s: { state: string; waiting?: number; reason?: string; lastSynce
     default: return "Sync off";
   }
 }
-/** How many of `refused` came after `seenAt` (the newest refusal's time when the list was last opened). */
-export function unseenRefusals(refused: Refusal[] | undefined, seenAt: number): number {
-  return (refused ?? []).filter((r) => typeof r?.at === "number" && r.at > seenAt).length;
+/** Raises namespace `ns`'s refusals' seen mark to `n` in the workspace database `db`; never lowers it: read and raised in
+ * one transaction, so a panel that read an older list, in this tab or another, never takes it back. */
+export function raiseSeen(db: IDBDatabase, ns: string, n: number): Promise<void> {
+  return new Promise((ok, no) => {
+    const tx = db.transaction("meta", "readwrite"), st = tx.objectStore("meta"), k = `sync:${ns}:refusedSeen`;
+    const g = st.get(k);
+    g.onsuccess = () => { const cur = Number.isSafeInteger(g.result) ? g.result : 0; if (Number.isSafeInteger(n) && n > cur) st.put(n, k); };
+    tx.oncomplete = () => ok();
+    tx.onerror = tx.onabort = () => no(tx.error);
+  });
+}
+/** How many of `refused` came after the seen mark `seen` (the n of the newest shown when the list was last opened).
+ * An entry without a number (kept before refusals were numbered) isn't counted as new. */
+export function unseenRefusals(refused: Refusal[] | undefined, seen: number): number {
+  return (refused ?? []).filter((r) => Number.isSafeInteger(r?.n) && r.n! > seen).length;
 }
 function ago(ms: number) {
   const m = Math.floor(ms / 60_000);
