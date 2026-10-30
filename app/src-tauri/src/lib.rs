@@ -30,8 +30,28 @@ fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
 }
 
 #[tauri::command]
-fn selftest_file() -> Option<String> {
-    std::env::var("SAGEBRUSH_APP_SELFTEST").ok().filter(|s| !s.is_empty())
+fn selftest_file(app: tauri::AppHandle) -> Option<String> {
+    if let Some(path) = std::env::var("SAGEBRUSH_APP_SELFTEST").ok().filter(|s| !s.is_empty()) {
+        return Some(path);
+    }
+    android_selftest_dir(&app).map(|d| d.join("selftest.ipynb").to_string_lossy().into_owned())
+}
+
+// Android has no environment for SAGEBRUSH_APP_SELFTEST: in a DEBUG build
+// only, a self-test notebook placed in the app's own files directory (by
+// `adb shell run-as`, which works only for a debuggable APK) is run instead,
+// and its report is written next to it (stdout goes nowhere on Android).
+// .github/workflows/app-mobile-selftest.yml does this on an emulator.  A
+// release build has none of it.
+#[cfg(all(target_os = "android", debug_assertions))]
+fn android_selftest_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from(format!("/data/user/0/{}/files/selftest", app.config().identifier));
+    dir.join("selftest.ipynb").is_file().then_some(dir)
+}
+
+#[cfg(not(all(target_os = "android", debug_assertions)))]
+fn android_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    None
 }
 
 // the page's console during a self-test (it has no other window to the outside)
@@ -43,6 +63,14 @@ fn app_log(message: String) {
 #[tauri::command]
 fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
     println!("{report}");
+    // (written whole, then renamed into place: a reader polling for
+    // report.txt never sees half of it)
+    if let Some(dir) = android_selftest_dir(&app) {
+        let tmp = dir.join("report.txt.tmp");
+        if std::fs::write(&tmp, format!("{report}\n")).is_ok() {
+            let _ = std::fs::rename(&tmp, dir.join("report.txt"));
+        }
+    }
     app.exit(if ok { 0 } else { 1 });
 }
 
