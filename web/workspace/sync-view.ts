@@ -451,7 +451,9 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     // exactly that is said the same way))
     const [ob, oe] = splitExt(nameOf(old)), [nb, ne] = splitExt(nameOf(to));
     const suffixed = oe === ne && nb.startsWith(ob + " (") && /^ \(\d+\)$/.test(nb.slice(ob.length));
-    if (to !== old && parentOf(to) === parentOf(old) && (c.ownPlaced?.get(item.id) === old || suffixed)) {
+    // (by shape only for this device's own entry: another device's (`remote`) renamed by its owner to `X (k)` is a
+    // rename, not this; sync-docs' N-AD-1)
+    if (to !== old && parentOf(to) === parentOf(old) && (c.ownPlaced?.get(item.id) === old || (suffixed && !n.remote))) {
       n.renamed = { from: old, to };
       list(to, "renamed");
     }
