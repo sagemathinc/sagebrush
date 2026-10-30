@@ -15,7 +15,7 @@ export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordB
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
 export { SyncClient, CLIENT, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
 export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
-export { applyView, VIEW_STORES, type ListedWhy, type JournalRecord } from "./sync-view";
+export { applyView, VIEW_STORES, listedSummary, type ListedWhy, type JournalRecord } from "./sync-view";
 export { REBUILD, passOf, obligationOf, cleanKey, journalKey, floorKey, journalPrefix, cleanStep, stage, stageEchoes, logDone, captureStep, done as rebuildDone, viewStep, retireStep, acked as rebuiltAcked, type Pass } from "./sync-rebuild";
 export { obligate, rebuildKey, type Obligation } from "./sync-outbox";
 export { ADOPT, adoptPrefix, capture as captureAdoption } from "./sync-adopt";
@@ -28,6 +28,7 @@ export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, 
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot, unseenRefusals, raiseSeen, type Notebooks } from "./sync-panel";
+export { fileRowMeta, isElsewhere, type ContentHere } from "./row-meta";
 export { renewLease } from "./sync-outbox";
 export { rowIcons, ROWICON } from "./sync-rows";
 export { LEDGER, WAIT, STATE, CODE, HUB, OBSOLETE, OBSOLETE_KEY, hubOf, waitCount, noteSkip, queueObsolete, cleanObsoleteStep, seedLedger, ledgerKeys, classOf as ledgerClass, isWire, type SyncAnswer, type WaitResult } from "./sync-ledger";

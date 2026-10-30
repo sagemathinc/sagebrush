@@ -1,0 +1,4 @@
+10-30 09:46:00.100   612   640 I ActivityTaskManager: START u0 {cmp=space.sagebrush.notebook/.MainActivity} from uid 2000
+10-30 09:46:00.500  1234  1234 I RustStdout: sagebrush app starting
+10-30 09:46:01.200  1234  1260 I cr_AwBrowserProcess: Starting browser process
+10-30 09:46:02.000   612   650 I ActivityTaskManager: Displayed space.sagebrush.notebook/.MainActivity: +1s900ms

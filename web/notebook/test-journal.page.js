@@ -2,7 +2,7 @@
 // core (journal.js).  W the workspace, N the journal, H the notebook's history (history.js), R sync's rows.  Each case
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
-import { W, N, H, R, B, S } from "./all.js";
+import { W, N, H, R, B, S, P } from "./all.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -1903,9 +1903,78 @@ async function arrivingStarted() {
   await close(w);
   hdb.close();
 }
+// ---- astra3's A-SA-1 on #353: the root patch measured as doc-sync sends it, under the writer's lock.  Empty code cells:
+// what the history keeps (versionedOf) is under the bound, but the root patch's payload is over it, so the start is
+// refused as too large, the notebook kept and saved here; a small notebook still starts (the control).  The bound is
+// sync-protocol's LIMITS.batchBytes, the one object store.js and doc-sync read, lowered for this case to what the
+// notebook's versionedOf takes (2000 cells, not the 16000 that 1 MiB needs: the case runs in seconds, not minutes in
+// the web-runner's 20).
+// astra3's A-SA-2 on #353 r2: refused before anything is committed or appended (the session's preview measured): the
+// whole history database (the old key's rows, J, the registry, slots, debt, l rows, the synced key's) exactly as it was
+// before the refused start, with the store still open as the writer (its appends drained: released first, a queued
+// T1 would be refused as not the writer's, and the check would pass by its timing) and after it is let go; again after
+// a second refused start (no roots accumulate), and after a refused start of a changed value (an edit saved with sync
+// off, then recovered)
+const snapAll = async (hdb) => {
+  const out = {};
+  for (const name of hdb.objectStoreNames) {
+    const os = hdb.transaction(name).objectStore(name);
+    const req = (r) => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    out[name] = J([await req(os.getAllKeys()), await req(os.getAll())]);
+  }
+  return out;
+};
+const snapDiff = (a, b) => Object.keys({ ...a, ...b }).filter((k) => a[k] !== b[k]);
+async function startTooLarge() {
+  const was = P.LIMITS.batchBytes;
+  try { await startTooLargeAt(was); } finally { P.LIMITS.batchBytes = was; }
+}
+async function startTooLargeAt(real) {
+  const { w, hdb } = await active();
+  const cells = Array.from({ length: 2000 }, (_, i) => ["c" + i, ""]);
+  const vbytes = new TextEncoder().encode(JSON.stringify(N.versionedOf(doc(cells)))).length;
+  P.LIMITS.batchBytes = vbytes;
+  check(real === 2 ** 20 && P.LIMITS.batchBytes === vbytes, "the bound lowered for this case: " + J({ real, bound: P.LIMITS.batchBytes }));
+  // (made with sync off: a notebook from before sync, its local history and J as they are)
+  const { id, st } = await loadNew(w, hdb, cells);
+  await close(st);
+  const refusedStart = async (what, before) => {
+    const s2 = store(w, hdb, id, doc(cells));
+    await synced(() => s2.load());
+    const refused = s2.startRefused, on = !!s2.synced;
+    // (its appends drained while it is still open, its writer's (writerOK): a T1 queued by the refused start would be
+    // written now, not refused as a released store's, so the database is compared first here, then after the release)
+    for (let a = null; a !== s2.patches.appending; ) { a = s2.patches.appending; await Promise.allSettled([a]); }
+    const open = await snapAll(hdb), openDiff = snapDiff(before, open), writer = s2.patches.writerOK?.() === true;
+    await close(s2);
+    const after = await snapAll(hdb), diff = [...new Set([...openDiff, ...snapDiff(before, after)])], js = await jState(hdb, id), rec = await rawGet(w.main, "notebooks", id);
+    check(writer && !on && refused?.tooLarge === true && refused?.room === false && js.start === null && diff.length === 0 && (rec?.cells ?? []).length === 2000, `${what} (versionedOf ${vbytes} B, the bound): refused as too large, the history database unchanged with the store open as the writer (its appends drained) and after it is let go, the notebook kept here: ` + J({ writer, synced: on, refused, start: js.start, changed: diff, cells: (rec?.cells ?? []).length }));
+    return after;
+  };
+  const s0 = await snapAll(hdb);
+  const s1 = await refusedStart("a refused start", s0);
+  await refusedStart("a second refused start (nothing accumulates)", s1);
+  // (the changed value: an edit saved with sync off (a version under the old key), then a refused start of it)
+  const s3 = store(w, hdb, id, doc(cells));
+  const d = await s3.load();
+  const out = await s3.save({ ...d, cells: d.cells.map((c, i) => (i === 0 ? { ...c, code: "x = 1" } : c)), baseRev: d.rev });
+  await close(s3);
+  const s4 = await snapAll(hdb);
+  check(!!out?.saved && snapDiff(s1, s4).length > 0, "the edit saved with sync off, its version kept (the history database changed): " + J({ saved: !!out?.saved }));
+  await refusedStart("a refused start of the changed value", s4);
+  const rec = await rawGet(w.main, "notebooks", id);
+  check(rec?.cells?.[0]?.code === "x = 1", "…the edit kept here");
+  await synced(async () => {
+    const small = await loadNew(w, hdb, [["a", "A"]]);
+    check(!!small.st.synced && small.st.startRefused === null, "a small notebook still starts (the control): " + J({ synced: small.st.synced, refused: small.st.startRefused }));
+    await close(small.st);
+  });
+  await close(w);
+  hdb.close();
+}
 const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted];
+  arrivingStarted, startTooLarge];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

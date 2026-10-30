@@ -125,6 +125,8 @@ const webkitPaths = [
   /^web\/test-kedlaya-worker\.mjs$/, /^web\/test-port\.mjs$/, /^test\/kedlaya[^/]*$/,
   /^scripts\/build-cli\.mjs$/, /^scripts\/ci-paths\.mjs$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^tsconfig(?:\.[^/]*)?\.json$/,
   /^\.github\/workflows\/ci\.yml$/,
+  // (the terminal panel's long-line pages, copied as one line in WebKit: board's B-LL-4)
+  /^web\/shell\/panel\.(?:ts|css)$/, /^web\/shell\/test-panel-pages-copy\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
@@ -180,6 +182,10 @@ const unsafeSweepPaths = [
   /^\.github\/workflows\/ci\.yml$/,
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
+// The engine's full tier (engine-node, engine-language, engine-modes): master pushes, the nightly schedule and a
+// dispatch, and a pull request that touches the engine's runtime (src/runtime/), whose Magma, MATLAB and engine tests
+// otherwise first ran on master (@sagebrush, Oct 30).  Those jobs need engine-wasm, which engine_smoke selects.
+const engineFull = full || matches([/^src\/runtime\//]);
 
 const outputs = {
   full,
@@ -189,8 +195,8 @@ const outputs = {
   node,
   web,
   modes,
-  engine_smoke: engineSmoke,
-  engine_full: full,
+  engine_smoke: engineSmoke || engineFull,
+  engine_full: engineFull,
   engine_cpython: engineCpython,
   webkit,
   census,

@@ -29,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DIST = process.env.SITE ?? join(here, "..", "dist");
 const ORIGIN = "https://dev.sagebrush.space";
 const ACCOUNT = "7e57d5d5-0000-4ccc-8ccc-7e57d5d5d5d5";
-const RUN_S = Number(process.env.TRYIT_RUN_S ?? 540);
+const RUN_S = Number(process.env.TRYIT_RUN_S ?? 570);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 const fails = [];
@@ -207,6 +207,11 @@ try {
     b.session = (await b.send("Network.getCookies", { urls: [ORIGIN + "/"] })).cookies?.find((c) => c.name === SESSION_COOKIE)?.value ?? null;
     check(!!b.session, `${b.name}: holds the __Host- session cookie`);
   }
+  // (sync-docs, #1 (a): two notebooks made in A BEFORE sync, never opened there afterwards; with sync on, their synced
+  // histories are started by A's own walk (notebook/start-all.js), and B opens each with A's cells.  Their names are A's
+  // own and unique, so this asserts nothing of how same-path collisions are named)
+  const PRE = [["/PreSyncA1.ipynb", "pre_a1 = 11"], ["/PreSyncA2.ipynb", "pre_a2 = 22"]];
+  for (const [p, code] of PRE) obs(`A makes ${p} before sync`, await A.ev(`${W}.create(${J(p)}, { content: { mode: "python", cells: [{ id: "c1", code: ${J(code)} }] } }).then((e) => e.path, (e) => "refused: " + (e?.message ?? e))`));
   // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted
   for (const b of [A, B]) {
     check(await b.until(`!!document.querySelector("#wssidebar .fh button[aria-label=More]")`, 10_000), `${b.name}: the Files sidebar is shown`);
@@ -228,6 +233,29 @@ try {
   for (const b of [A, B]) {
     check(await b.go(), `${b.name}: reloaded after turning sync on`);
     check(await b.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `${b.name}: the sidebar says Synced (${J(await b.syncLine())})`);
+  }
+  // ---- 2b (P0 #1): each had its own /Welcome.ipynb before sync, and A turned sync on first: B's own is placed at
+  // "Welcome (2).ipynb" by the server's index (its shared reducer gives the later one the next free name, on every
+  // device), and says "(renamed)"; A's, at the name, has no content in B yet: "on another device", never "missing"
+  // (and B's in A the same)
+  const metaAt = (b, p) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].filter((r) => r.dataset.path === ${J(p)}).map((r) => r.querySelector(".m")?.textContent ?? "")`);
+  const rowSays = (p, t) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)} && r.querySelector(".m")?.textContent === ${J(t)})`;
+  check(await B.until(rowSays("/Welcome (2).ipynb", "(renamed)"), 30_000), `B: its own Welcome, placed at "Welcome (2).ipynb" by the server's index, says "(renamed)" (${J(await metaAt(B, "/Welcome (2).ipynb"))})`);
+  check(await B.until(rowSays("/Welcome.ipynb", "on another device"), 30_000), `B: A's Welcome, its content not here, says "on another device" (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
+  // "on another device" depends on that timing; it is never "missing")
+  await sleep(2000);
+  check(!(await metaAt(A, "/Welcome (2).ipynb")).includes("missing"), `A: B's Welcome is never "missing" (${J(await metaAt(A, "/Welcome (2).ipynb"))})`);
+  // (#1 (a): A's pre-sync notebooks, never opened since sync was turned on, arrive in B with their cells)
+  {
+    obs("A's walk of its notebooks", await A.until(`!!window.sagebrush?.startAll`, 30_000).then(() => A.ev(`window.sagebrush.startAll`)));
+    for (const [p, code] of PRE) {
+      const click = () => B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(p)})?.click()`);
+      check(await B.until(row(p), 20_000), `B lists A's pre-sync ${p}`);
+      let got = false;
+      for (let i = 0; i < 15 && !got; i++) { await click(); got = await B.until(B.has(code), 2000); }
+      check(got, `B opens A's pre-sync ${p}, never opened in A since sync was on, with its cell (${J(await B.codes())})`);
+    }
   }
   // ---- 3. a notebook made and typed in A appears, with its cell, in B; B's edit comes back
   // (the Files sidebar's New, Notebook, with the journal on: a notebook made, listed (it was refused before the fix))
@@ -308,9 +336,17 @@ try {
   await sleep(2000);
   check(!(await A.ev(A.has("x = offline"))), "…which A doesn't have yet");
   obs("B's sync line while offline, after typing", await B.syncLine());
+  // (offline long enough for the connection's backoff to grow (1, 2, 4, 8, 16 s: the next try ~32 s on), as William's
+  // wifi off did: back online, it reconnects at once (P0 #3), not when that wait ends)
+  await sleep(35_000);
+  obs("B's sync line after 35 s offline", await B.syncLine());
   cut.delete(B.session);
   await B.offline(false);
-  check(await A.until(A.has("x = offline"), 45_000), "B back online: its edit reaches A within 45 s");
+  const back = Date.now();
+  const reached = await A.until(A.has("x = offline"), 45_000);
+  const took = Date.now() - back;
+  obs("B back online: its edit reached A after (ms)", took);
+  check(reached && took < 10_000, `B back online after 35 s offline: its edit reaches A within 10 s (${reached ? took + " ms" : "not within 45 s"})`);
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
   // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
   // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
