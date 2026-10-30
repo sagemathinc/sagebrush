@@ -1,0 +1,4 @@
+10-30 09:46:00.500  1234  1234 I RustStdout: sagebrush app starting
+10-30 09:46:09.000  5555  5555 F DEBUG   : *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+10-30 09:46:09.000  5555  5555 F DEBUG   : pid: 1234, tid: 1250, name: tokio-runtime  >>> space.sagebrush.notebook <<<
+10-30 09:46:09.000  5555  5555 F DEBUG   : signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0
