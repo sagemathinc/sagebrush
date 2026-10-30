@@ -1186,7 +1186,10 @@ export class Workspace {
       } finally {
         hdb.close();
       }
-    } catch {}
+    } catch (e) {
+      // (the history database unreadable here: notebooks known only by their records; said, sync-docs' N-AD-3)
+      console.warn("workspace: the notebooks' synced histories couldn't be read for the Files list:", e);
+    }
     return { notebook, board };
   }
   async list(folder: string = "/", opts: { recursive?: boolean } & Admitted = {}): Promise<Entry[]> {
