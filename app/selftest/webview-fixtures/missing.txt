@@ -1,0 +1,4 @@
+Fallback logic enabled: false
+WebView packages:
+Valid package com.android.webview (versionName: 158.0.7500.0, versionCode: 750000000, targetSdkVersion: 37) is  installed/enabled for all users
+Valid package com.google.android.webview (versionName: 113.0.5672.136, versionCode: 567213600, targetSdkVersion: 33) is  installed/enabled for all users

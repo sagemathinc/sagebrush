@@ -1,0 +1,15 @@
+Packages:
+  Package [com.android.webview] (5c0e1a2):
+    userId=10112
+    pkg=Package{8f1d0c3 com.android.webview}
+    codePath=/data/app/~~Qx3/com.android.webview-AbC==
+    primaryCpuAbi=x86_64
+    secondaryCpuAbi=x86
+    versionCode=812700007 minSdk=29 targetSdk=37
+    versionName=158.0.8127.0
+    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
+
+Hidden system packages:
+  Package [com.android.webview] (1b2c3d4):
+    versionCode=567213603 minSdk=29 targetSdk=33
+    versionName=113.0.5672.136
