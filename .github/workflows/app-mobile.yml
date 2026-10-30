@@ -1,0 +1,126 @@
+# The Android app, a debug APK, built from the desktop app's Tauri project
+# (app/: the same notebook page in the system's web view; src-tauri/src/lib.rs
+# is shared, with Tauri's mobile entry point).  Debug only: it is signed with
+# the build's own debug key, so there are no secrets here, and it installs by
+# sideloading.  The APK is kept as an artifact.
+#
+# Pinned:
+# - Android SDK, NDK and JDK: the runner image's own, no downloads. The step
+#   below fails unless NDK 27.3.13750724 and JDK 17 are on the runner.
+# - Rust 1.99.0, with the aarch64-linux-android target: rustup checks each
+#   component against the channel manifest's SHA-256.
+# - The Tauri CLI: crate tauri-cli 2.12.4, installed --locked; crates.io
+#   packages are checked against the index's SHA-256.
+# Not yet pinned: the Gradle distribution and the Maven packages the
+# generated Android project downloads.  This job prints the wrapper's
+# properties and uploads the generated project, so that a follow-up can
+# commit gen/android with distributionSha256Sum and Gradle dependency
+# verification.
+name: app-mobile
+
+on:
+  push:
+    branches: [master]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app-mobile.yml"]
+  pull_request:
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app-mobile.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: app-mobile-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  # (the same page as app.yml's page job)
+  page:
+    if: github.repository == 'sagemathinc/sagebrush'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node scripts/build-cli.mjs
+      - run: bun web/build.ts
+      - run: node app/build-frontend.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-page
+          path: app/dist
+
+  android:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: page
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      NDK_VERSION: 27.3.13750724
+      TAURI_CLI_VERSION: 2.12.4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-page
+          path: app/dist
+      - name: the runner's Android SDK, NDK and JDK 17 (no downloads)
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          if [ ! -f "$ndk/source.properties" ]; then echo "NDK $NDK_VERSION is not on this runner image:"; ls "$ANDROID_HOME/ndk"; exit 1; fi
+          if [ -z "${JAVA_HOME_17_X64:-}" ] || [ ! -x "$JAVA_HOME_17_X64/bin/java" ]; then echo "no JDK 17 on this runner image"; exit 1; fi
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          grep Pkg.Revision "$ndk/source.properties"
+          "$JAVA_HOME_17_X64/bin/java" -version
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: android
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: |
+          cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: the Android project (generated)
+        working-directory: app/src-tauri
+        run: |
+          cargo tauri android init --ci
+          echo "--- gen/android/gradle/wrapper/gradle-wrapper.properties"
+          cat gen/android/gradle/wrapper/gradle-wrapper.properties
+      - name: build (debug APK, arm64)
+        working-directory: app/src-tauri
+        run: cargo tauri android build --debug --apk --target aarch64
+      - name: the APK
+        run: |
+          set -euo pipefail
+          find app/src-tauri/gen/android -name '*.apk' -path '*outputs*' -print0 | xargs -0 ls -l
+          find app/src-tauri/gen/android -name '*.apk' -path '*outputs*' -print0 | xargs -0 sha256sum
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sagebrush-android-debug
+          path: app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+      # (the generated project, without its build outputs, for the follow-up
+      # that commits it with the Gradle checksums)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-project-generated
+          path: |
+            app/src-tauri/gen/android
+            !app/src-tauri/gen/android/**/build/**
+            !app/src-tauri/gen/android/.gradle/**
+          if-no-files-found: warn
