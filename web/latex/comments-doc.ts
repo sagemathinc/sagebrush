@@ -68,8 +68,12 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const todo = live().filter((t: any) => places.get(t.id)?.op !== t.anchor.op);
     if (todo.length) {
       let t0 = performance.now(), slices = 1, maxSlice = 0, phase = "hash", maxPhase = "";
+      // (the longest single step, timed around it: its phase, kind and size, recorded beside the longest slice, so a
+      // slice over the bound tells a step's own overrun from a pause outside the steps)
+      let maxStep = { ms: 0, phase: "", kind: "", size: 0, thread: "" };
+      const stepped = (ms: number, kind: string, size: number, thread = "") => { if (ms > maxStep.ms) maxStep = { ms: Math.round(ms * 100) / 100, phase, kind, size, thread }; };
       const pause = async () => { const d = performance.now() - t0; if (d < SLICE_MS) return false; if (d > maxSlice) { maxSlice = d; maxPhase = phase; } slices++; await frame(); t0 = performance.now(); return stale(); };
-      if ((await hashOf(text, pause)) === null) return;
+      if ((await hashOf(text, pause, stepped)) === null) return;
       phase = "resolve";
       if (await pause()) return;
       const R = C.resolver(text, undefined, { textSha: shaFor.sha });
@@ -77,21 +81,26 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
         // (each anchor's search, a step at a time: a window of the text searched, or a piece of a long span hashed)
         const g = R.steps(t.anchor.value);
         let r: any;
-        for (;;) { const x = g.next(); if (x.done) { r = x.value; break; } if (await pause()) return; }
+        for (;;) {
+          const s0 = performance.now(), x = g.next(), ms = performance.now() - s0;
+          if (x.done) { stepped(ms, "anchor end (" + x.value.status + ")", 0, t.id); r = x.value; break; }
+          const st = R.lastStep(); stepped(ms, st?.kind ?? "step", st?.size ?? 0, t.id);
+          if (await pause()) return;
+        }
         if (await pause()) return;
         places.set(t.id, { op: t.anchor.op, status: r.status, s: r.start ?? -1, e: r.end ?? -1, candidates: r.candidates });
       }
       if (performance.now() - t0 > maxSlice) { maxSlice = performance.now() - t0; maxPhase = phase; }
       const statuses: Record<string, number> = {}; for (const t of todo) { const st = places.get(t.id)!.status; statuses[st] = (statuses[st] ?? 0) + 1; }
-      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, maxSlicePhase: maxPhase, work: R.work(), units: text.length, statuses });
+      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, maxSlicePhase: maxPhase, maxStep, work: R.work(), units: text.length, statuses });
     }
     if (!stale()) { queueDraw(); showList(); }
   };
   // the text's hash, in pieces, `pause` between them (true: stop, null returned); kept for the text it was taken of
-  async function hashOf(text: string, pause: () => Promise<boolean>): Promise<string | null> {
+  async function hashOf(text: string, pause: () => Promise<boolean>, stepped?: (ms: number, kind: string, size: number) => void): Promise<string | null> {
     if (shaFor.text === text) return shaFor.sha;
     const h = C.sha256Hasher();
-    for (let i = 0; i < text.length;) { const j = C.sliceAt(text, i + HASH_PIECE); h.update(text.slice(i, j)); i = j; if (await pause()) return null; }
+    for (let i = 0; i < text.length;) { const s0 = performance.now(), j = C.sliceAt(text, i + HASH_PIECE); h.update(text.slice(i, j)); stepped?.(performance.now() - s0, "text hash", j - i); i = j; if (await pause()) return null; }
     shaFor = { text, sha: h.digest() };
     return shaFor.sha;
   }
