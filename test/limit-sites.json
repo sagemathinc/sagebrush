@@ -4897,6 +4897,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
  },
+ "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "hashlib has md5, sha1, sha224, sha256, sha384 and sha512; any other name is CPython's own ValueError('unsupported hash type ...'), as CPython says for an algorithm its build lacks: a missing feature (blake2, sha3, shake deferred), not a size cap"
+ },
  "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
