@@ -88,8 +88,9 @@ try {
         units += b.textContent.length;
         if (b.classList.contains("sb-term-out")) {
           lines += (b.textContent.match(/\\n/g) || []).length;
-          // (a long line's page boxes: each one, and each node in it)
-          for (const nd of b.childNodes) spans += 1 + (nd.classList?.contains("sb-term-page") ? nd.childNodes.length : 0);
+          // (a long line's page boxes and a slice's chunk boxes: each one, and each node in it, a chunk's page boxes too)
+          const count = (p) => [...p.childNodes].reduce((a, nd) => a + 1 + (nd.matches?.(".sb-term-page, .sb-term-chunk") ? count(nd) : 0), 0);
+          spans += count(b);
         } else {
           lines += 1 + (b.textContent.match(/\\n/g) || []).length;
           spans++;

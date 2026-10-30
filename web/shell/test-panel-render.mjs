@@ -26,12 +26,13 @@ function apply(runs) {
   }
   return kept;
 }
+// (a chunk run, a box for a slice's lines, charged as a run: left out of `runs`, counted in `chunks`)
 function render(out, err = "", budget = ALL, now = () => 0) {
   const r = new Render(out, err, now);
   const raw = [];
   for (let s; (s = r.next(budget)); ) raw.push(...s);
-  const runs = apply(raw);
-  return { runs, text: runs.map((x) => x.text).join(""), totals: r.totals };
+  const runs = apply(raw.filter((x) => !x.chunk));
+  return { runs, chunks: raw.filter((x) => x.chunk).length, text: runs.map((x) => x.text).join(""), totals: r.totals };
 }
 const PLAIN = { fg: -1, bg: -1, b: false, i: false, u: false, rev: false };
 
@@ -324,7 +325,7 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
         const r = render(input + "\n", "", b, now);
         const ps = pagesOf(r.runs)[0];
         const ok = ps.join("") === plain && ps.every((p) => p.length <= PAGE) && ps[0].length === firstLen && ps[1]?.startsWith(firstStart) &&
-          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (!whole || atBounds(ps)) && r.totals.spans === r.runs.length + 1;
+          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (!whole || atBounds(ps)) && r.totals.spans === r.runs.length + r.chunks + 1;
         check(ok, `${what}, ${how}: pages ${ps.map((p) => p.length).join(", ")}, page 2 starts ${JSON.stringify(ps[1]?.slice(0, 3))}, spans ${r.totals.spans} for ${r.runs.length} runs`);
       }
     };
@@ -356,10 +357,10 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
       kept("2 050 alternating RIs (daybreak2's case)", ab(2050) + "b", ab(2050) + "b", PAGE, A + B);
       kept("a, then 2 050 RIs: pairs from unit 1", "a" + ab(2050) + "b", "a" + ab(2050) + "b", PAGE - 3, A + B);
       kept("a, then 6 000 RIs over three joins", "a" + ab(6000) + "b", "a" + ab(6000) + "b", PAGE - 3, A + B);
-      // (style runs of 3 RIs each, so pairs straddle the runs)
-      const styled = Array.from({ length: 700 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + ab(3)).join("") + "\x1b[0mb";
-      const plainStyled = ab(3).repeat(700) + "b";
-      kept("2 100 RIs in style runs of 3", "a" + styled, "a" + plainStyled, PAGE - 3, ab(3).slice(0, 4));
+      // (style runs of 7 RIs each, so pairs straddle the runs; 300 runs, under a page's PAGE_RUNS)
+      const styled = Array.from({ length: 300 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + ab(7)).join("") + "\x1b[0mb";
+      const plainStyled = ab(7).repeat(300) + "b";
+      kept("2 100 RIs in style runs of 7", "a" + styled, "a" + plainStyled, PAGE - 3, ab(7).slice(0, 4));
     }
     // (a cluster over PAGE_BACK: split at the edge, the defined behaviour; with astral marks, at a scalar boundary)
     {
@@ -376,12 +377,48 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
       check(ps.join("") === line && ps.every((p) => p.length === PAGE || p === ps.at(-1)) && ps.length === 4, `one cluster longer than the line's pages: split at each edge (pages ${ps.map((p) => p.length).join(", ")})`);
     }
   }
+  // (chunk runs, E5.5's batching: a slice's lines go in chunks of about 8 Ki units (a run counting 16), each at a line
+  // start, each charged as a run, at most one per slice more than that size asks; the text unchanged; at four slicings)
+  {
+    const text = Array.from({ length: 3000 }, (_, i) => `line ${i} ` + "x".repeat(i % 90)).join("\n") + "\n";
+    let tick = 0;
+    for (const [how, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = new Render(text, "", now);
+      const raw = [];
+      let slices = 0;
+      for (let s; (s = r.next(b)); slices++) raw.push(...s);
+      // (each chunk run right after a line end, or first)
+      const atStarts = raw.every((x, i) => !x.chunk || i === 0 || raw.slice(0, i).filter((y) => !y.chunk).map((y) => y.text).join("").endsWith("\n"));
+      const chunks = raw.filter((x) => x.chunk).length;
+      const shown = raw.filter((x) => !x.chunk).map((x) => x.text).join("");
+      const bound = Math.ceil((text.length + 16 * 3000) / 8192) + slices;
+      check(shown === text && atStarts && chunks >= 10 && chunks <= bound && r.totals.spans === raw.length,
+        `chunks, ${how}: ${chunks} chunk runs (bound ${bound}), each at a line start and charged (spans ${r.totals.spans} for ${raw.length} runs), the text unchanged`);
+    }
+  }
+  // (a page holds at most PAGE_RUNS runs, so one on screen lays out quickly: a line of 2 000 one-unit style runs makes
+  // pages of at most 512 runs, the text unchanged, every join at a cluster boundary, at four slicings)
+  {
+    const line = Array.from({ length: 2000 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + (i % 5 ? "x" : "e\u0301")).join("") + "\x1b[0m";
+    const plain = Array.from({ length: 2000 }, (_, i) => (i % 5 ? "x" : "e\u0301")).join("");
+    let tick = 0;
+    for (const [how, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = render(line + "\n", "", b, now);
+      const runsPer = [0];
+      for (const x of r.runs) x.page ? runsPer.push(0) : runsPer[runsPer.length - 1]++;
+      const ps = pagesOf(r.runs)[0];
+      check(ps.join("") === plain && runsPer.length >= 4 && runsPer.every((n) => n <= 512 + 1) && atBounds(ps) && r.totals.spans === r.runs.length + r.chunks + 1,
+        `a line of 2 000 style runs, ${how}: ${runsPer.length} pages of ${Math.max(...runsPer)} runs at most, joins at cluster boundaries`);
+    }
+  }
   // (a styled run across a join: two runs with the same classes, each charged: B-LL-2)
   {
     const r = render("\x1b[31;1m" + "y".repeat(PAGE + 50) + "\x1b[0m\n");
     const styled = r.runs.filter((x) => x.cls && !x.page);
     check(styled.length === 2 && styled.every((x) => x.cls === "sb-fg-1 sb-b") && styled[0].text.length === PAGE && pageRuns(r.runs) === 1, `a styled run across a join: ${styled.length} runs of "${styled[0]?.cls}"`);
-    check(r.totals.spans === r.runs.length + 1, `each part and the join charged as runs, plus the line end after the last page (${r.totals.spans} for ${r.runs.length} runs)`);
+    check(r.totals.spans === r.runs.length + r.chunks + 1, `each part and the join charged as runs, plus the line end after the last page (${r.totals.spans} for ${r.runs.length} runs)`);
   }
   // (escapes and controls at a join: the same text as without pages)
   {
