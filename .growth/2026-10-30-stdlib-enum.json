@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "enum: CPython 3.14's Lib/enum.py, copied unchanged into lib/ (its own group, mod-enum, a new bundle authorized by its budgets.json entry), and CPython's types.DynamicClassAttribute class (lib/_pytypes.py, in core because types is imported at start) taken by the builtin types module (src/runtime/modules.ts). Measured locally with CI's bun 1.4.4 tool, this branch merged onto master 18538b87 and onto 30746ca3: the same rows, except cli/pyjs.cjs +88541 and +88521 (the larger is kept, within the 1024 B slack of either).",
+  "bytes": {
+    "cli/lib.gen.js": 90913,
+    "cli/pyjs.cjs": 88541,
+    "engine/lib/core.pre": 12014,
+    "engine/lib/core.src": 2726,
+    "engine/sagebrush-worker.js": 302
+  }
+}
