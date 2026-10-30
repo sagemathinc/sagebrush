@@ -1,16 +1,14 @@
-// web/index.html's diagnose() (the self-test's COI diagnosis lines), taken
-// from the page's source and run with stand-ins for the browser: every key
+// web/notebook/selftest-diagnose.js (the self-test's COI diagnosis lines,
+// built into sagebrush-selftest.js), run with stand-ins for the browser: every key
 // gets a value, each value is one line (an error message with a newline can't
 // forge a report line), long values are cut with a marker, a failed or slow
 // fetch says so (never an empty value), and the whole thing is bounded.
 //   node app/selftest/test-diagnose.mjs
 import { readFileSync } from "node:fs";
 
-const html = readFileSync(new URL("../../web/index.html", import.meta.url), "utf8");
-const start = html.indexOf("const SELFTEST_INFO_KEYS = ");
-const end = html.indexOf("\n}\n", html.indexOf("async function diagnose(info) {"));
-if (start < 0 || end < 0) throw new Error("diagnose() not found in web/index.html");
-const source = html.slice(start, end + 2);
+// (the module's source, its two exports made plain declarations, run in a
+// function whose parameters are the browser's globals)
+const source = readFileSync(new URL("../../web/notebook/selftest-diagnose.js", import.meta.url), "utf8").replace(/^export /gm, "");
 
 let bad = 0;
 const check = (name, cond, detail = "") => { console.log((cond ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : "")); if (!cond) bad = 1; };
@@ -22,7 +20,6 @@ async function run({ fetchImpl, context = { isolated: false, sab: "undefined" },
     window: { isSecureContext: true, crossOriginIsolated: false },
     navigator: { userAgent: ua },
     document: policy === undefined ? {} : { featurePolicy: policy },
-    kernel: { interruptFlag: null, context },
     fetch: fetchImpl,
     AbortController,
     setTimeout,
@@ -31,12 +28,12 @@ async function run({ fetchImpl, context = { isolated: false, sab: "undefined" },
     console: { log() {} },
   };
   g.window.top = g.window;
-  const f = new Function(...Object.keys(g), source + "\nreturn { SELFTEST_INFO_KEYS, diagnose };");
-  const { SELFTEST_INFO_KEYS, diagnose } = f(...Object.values(g));
-  const info = Object.fromEntries(SELFTEST_INFO_KEYS.map((k) => [k, 'error: "not reached"']));
+  const f = new Function(...Object.keys(g), source + "\nreturn { SELFTEST_INFO_KEYS, diagnoseLines };");
+  const { SELFTEST_INFO_KEYS, diagnoseLines } = f(...Object.values(g));
   const t0 = Date.now();
-  await diagnose(info);
-  return { lines: SELFTEST_INFO_KEYS.map((k) => "info " + k + ": " + info[k]), info, ms: Date.now() - t0, keys: SELFTEST_INFO_KEYS };
+  const lines = await diagnoseLines({ interruptFlag: null, context });
+  const info = Object.fromEntries(lines.map((l) => /^info ([a-z-]+): (.*)$/s.exec(l)).filter(Boolean).map((m) => [m[1], m[2]]));
+  return { lines, info, ms: Date.now() - t0, keys: SELFTEST_INFO_KEYS };
 }
 // (headers.get gives null when absent, as Headers does)
 const response = (url, headers, status = 200) => ({ status, ok: status === 200, url, redirected: false, headers: { get: (n) => headers[n] ?? null }, body: { cancel: async () => {} } });
@@ -50,8 +47,8 @@ const oneLine = (lines) => lines.every((l) => !/[\r\n]/.test(l));
   check("the keys are the judge's closed list, in order", JSON.stringify(keys) === JSON.stringify(KEYS));
   check("every key has a value, none 'not reached'", lines.every((l) => !/not reached/.test(l)));
   check("one line each", oneLine(lines));
-  check("fetch-page records status, url, headers", info["fetch-page"] === '{"status":200,"ok":true,"url":"/?sb-diag=1","redirected":false,"COOP":"same-origin","COEP":"require-corp"}', info["fetch-page"]);
-  check("fetch-kernel-script is the kernel's script, with CORP", info["fetch-kernel-script"].startsWith('{"status":200,"ok":true,"url":"/sagebrush-worker.js?sb-diag=2"') && info["fetch-kernel-script"].includes('"CORP":null'), info["fetch-kernel-script"]);
+  check("fetch-page records status, the requested and final URLs, headers", info["fetch-page"] === '{"status":200,"ok":true,"requested":"http://127.0.0.1:41234/?sb-diag=1","final":"http://127.0.0.1:41234/?sb-diag=1","redirected":false,"COOP":"same-origin","COEP":"require-corp"}', info["fetch-page"]);
+  check("fetch-kernel-script is the kernel's script, whole (not cut), with CORP", info["fetch-kernel-script"] === '{"status":200,"ok":true,"requested":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","final":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","redirected":false,"COOP":"same-origin","COEP":"require-corp","CORP":null}', info["fetch-kernel-script"]);
   check("kernel facts from the kernel's own ready message", info["kernel-isolated"] === "false" && info["kernel-sab"] === '"undefined"' && info["kernel-interrupt-shared"] === "false");
   check("no permission-policy API -> unsupported", info["coi-policy"] === "unsupported", info["coi-policy"]);
 }
@@ -74,6 +71,12 @@ const oneLine = (lines) => lines.every((l) => !/[\r\n]/.test(l));
 {
   const { info } = await run({ fetchImpl: good, policy: { features: () => ["cross-origin-isolated"], allowsFeature: (f) => f !== "cross-origin-isolated" } });
   check("a policy that knows the feature and denies it -> false", info["coi-policy"] === "false", info["coi-policy"]);
+}
+{
+  // (every fetch is aborted by the time diagnoseLines() returns: none is left running)
+  let started = 0, aborted = 0;
+  await run({ fetchImpl: (url, { signal }) => { started++; return new Promise((_, reject) => signal.addEventListener("abort", () => { aborted++; reject(new DOMException("aborted", "AbortError")); })); } });
+  check("no fetch is left running", started === 2 && aborted === 2, `${started} started, ${aborted} aborted`);
 }
 if (bad) { console.log("FAIL: diagnose()"); process.exit(1); }
 console.log("ok: diagnose() fills every key with one bounded line");

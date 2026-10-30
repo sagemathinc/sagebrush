@@ -11,13 +11,13 @@ ok   saved the notebook with its outputs
 info origin: "http://127.0.0.1:41234"
 info secure-context: true
 info top-level: true
-info isolated-document: false
-info sab-document: "undefined"
+info isolated-document: true
+info sab-document: "function"
 info coi-policy: unsupported
-info kernel-interrupt-shared: false
-info kernel-isolated: false
-info kernel-sab: "undefined"
+info kernel-interrupt-shared: true
+info kernel-isolated: true
+info kernel-sab: "function"
 info fetch-page: error: "TypeError: Failed to fetch"
 info fetch-kernel-script: timeout
-info user-agent: "Mozilla/5.0 (Linux; Android 14; wv) Chrome/158.0.8127.0 Mobile Safari/537.36"
+info user-agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15"
 all passed

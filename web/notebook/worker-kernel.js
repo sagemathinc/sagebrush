@@ -145,7 +145,6 @@ export class WorkerKernel {
     this.started = Promise.resolve();
     this.startError = null;
     this.interruptFlag = null;
-    this.context = null;
     // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
@@ -175,6 +174,7 @@ export class WorkerKernel {
 
   start() {
     this.ready = false;
+    this.context = null;
     clearTimeout(this.libTimer);
     this.libShown = false;
     this.emit("status", "loading…");
