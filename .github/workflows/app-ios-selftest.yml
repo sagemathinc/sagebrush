@@ -1,0 +1,207 @@
+# The iOS app's self-test on a simulator (iOS v0 plan r1b, I-0b): the same
+# Tauri project (app/src-tauri, gen/apple committed by I-0a), built for the
+# simulator, UNSIGNED, and run twice on created iPhone simulators:
+# - debug: the self-test notebook placed in the app's Documents/selftest is
+#   run and its report judged (app/selftest/ios-selftest.sh, the shared
+#   android-report.py), with the COI diagnosis read (coi-reading.py);
+# - release: the same file in the same place must NOT be picked up (no
+#   report, the notebook unchanged, the app still running): the debug-only
+#   boundary in lib.rs, shown at run time (astra's R-IOS-1).
+# There are no secrets, no signing and no upload here.  Never a required check.
+#
+# Pinned, each failing by name when absent (never a fallback):
+# - runner macos-15 (arm64); Xcode 26.2 by path, asserted exactly; the
+#   simulator runtime and device type by identifier; the image recorded;
+# - Rust 1.99.0 with the iOS simulator target; tauri-cli =2.12.4 --locked;
+#   XcodeGen 2.46.0 by sha256 (as app-ios-generate.yml);
+# - brew, gem and pod allow-listed and their installed sets unchanged (the
+#   Tauri CLI may try to install its iOS dependencies; nothing may be).
+# After each build, gen/apple may differ in ONE way only: the Tauri CLI's
+# merge of app/src-tauri/Info.ios.plist into sagebrush-app_iOS/Info.plist,
+# compared parsed (app/selftest/ios-judge.py tree).
+name: app-ios-selftest
+
+on:
+  push:
+    branches: [master]
+    paths: ["app/**", "web/index.html", ".github/workflows/app-ios-selftest.yml"]
+  pull_request:
+    paths: ["app/src-tauri/**", "app/selftest/**", ".github/workflows/app-ios-selftest.yml"]
+  schedule:
+    - cron: "41 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ios-selftest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  # (the same page as app.yml's page job)
+  page:
+    if: github.repository == 'sagemathinc/sagebrush'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node scripts/build-cli.mjs
+      - run: bun web/build.ts
+      - run: node app/build-frontend.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-page
+          path: app/dist
+
+  simulator:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: page
+    runs-on: macos-15
+    # (two builds and two simulator runs; N-1: the first green run's duration
+    # goes into the PR, and a slow release leg becomes its own job rather than
+    # a longer timeout here)
+    timeout-minutes: 90
+    env:
+      XCODE_APP: /Applications/Xcode_26.2.app
+      XCODE_VERSION: "Xcode 26.2"
+      RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+      DEVTYPE: com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
+      TAURI_CLI_VERSION: 2.12.4
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # (the judges on fixed inputs, before anything slow)
+      - name: the judges (fixtures)
+        run: bash app/selftest/test-ios-judge.sh && bash app/selftest/test-android-report.sh
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: app-page
+          path: app/dist
+      - name: the runner, Xcode 26.2, the simulator runtime and device type
+        run: |
+          set -euo pipefail
+          echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          arch=$(uname -m)
+          [ "$arch" = arm64 ] || { echo "FAIL: the runner is '$arch', not arm64"; exit 1; }
+          [ -d "$XCODE_APP" ] || { echo "FAIL: $XCODE_APP is not on this runner image:"; ls -d /Applications/Xcode*; exit 1; }
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version | tee "$RUNNER_TEMP/xcodebuild-version.txt"
+          got=$(head -1 "$RUNNER_TEMP/xcodebuild-version.txt")
+          [ "$got" = "$XCODE_VERSION" ] || { echo "FAIL: xcodebuild says '$got', not '$XCODE_VERSION'"; exit 1; }
+          xcrun simctl list runtimes -j > "$RUNNER_TEMP/runtimes.json"
+          xcrun simctl list devicetypes -j > "$RUNNER_TEMP/devicetypes.json"
+          python3 -I -c 'import json,sys; ids={r["identifier"]:r.get("isAvailable") for r in json.load(open(sys.argv[1]))["runtimes"]}; sys.exit(0 if ids.get(sys.argv[2]) else 1)' "$RUNNER_TEMP/runtimes.json" "$RUNTIME" || { echo "FAIL: the simulator runtime $RUNTIME is not available:"; xcrun simctl list runtimes; exit 1; }
+          python3 -I -c 'import json,sys; ids={d["identifier"] for d in json.load(open(sys.argv[1]))["devicetypes"]}; sys.exit(0 if sys.argv[2] in ids else 1)' "$RUNNER_TEMP/devicetypes.json" "$DEVTYPE" || { echo "FAIL: the device type $DEVTYPE is not available"; exit 1; }
+          command -v pod > /dev/null || { echo "FAIL: no CocoaPods (pod) on this runner image"; exit 1; }
+          echo "ok: $XCODE_VERSION, $RUNTIME, $DEVTYPE, pod $(pod --version)"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios-sim
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: |
+          set -euo pipefail
+          cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: XcodeGen ${{ env.XCODEGEN_VERSION }} (its release zip, by sha256)
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/xcodegen-dl"; x="$RUNNER_TEMP/xcodegen"
+          mkdir "$d" "$x"
+          curl -fsSL --retry 3 -o "$d/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $d/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$d/xcodegen.zip" -d "$x"
+          "$x/xcodegen/bin/xcodegen" --version | grep -q "$XCODEGEN_VERSION" || { echo "FAIL: not XcodeGen $XCODEGEN_VERSION"; exit 1; }
+          echo "$x/xcodegen/bin" >> "$GITHUB_PATH"
+      # (as app-ios-generate.yml: brew, gem and pod run only their read-only
+      # subcommands, every call logged; idevicesyslog is a stub; and the
+      # installed sets are recorded for the check after the builds)
+      - name: brew, gem and pod allow-listed (wrappers), the libimobiledevice stub, and the installed sets
+        run: |
+          set -euo pipefail
+          g="$RUNNER_TEMP/guard"; mkdir "$g"
+          wrap() {  # the tool, then the first arguments it may be called with
+            local tool=$1 real
+            shift
+            real=$(command -v "$tool")
+            cat > "$g/$tool" <<EOF
+          #!/bin/bash
+          echo "$tool \$*" >> "$RUNNER_TEMP/guard-calls.txt"
+          for ok in $*; do [ "\${1:-}" = "\$ok" ] && exec "$real" "\$@"; done
+          echo "app-ios-selftest: REFUSED: $tool \$* (allowed first arguments: $*; see the workflow's header)" >&2
+          echo "$tool \$*" >> "$RUNNER_TEMP/guard-refused.txt"
+          exit 1
+          EOF
+            chmod 0755 "$g/$tool"
+            echo "$real" > "$g/$tool.real"
+          }
+          wrap brew list outdated info --prefix --version
+          wrap gem list outdated --version
+          wrap pod --version
+          printf '%s\n' '#!/bin/bash' 'echo "idevicesyslog: a stub in app-ios-selftest (no physical devices here)" >&2' 'exit 1' > "$g/idevicesyslog"
+          chmod 0755 "$g/idevicesyslog"
+          s="$RUNNER_TEMP/state"; mkdir "$s"
+          "$(cat "$g/brew.real")" list --versions > "$s/brew-before.txt"
+          "$(cat "$g/gem.real")" list > "$s/gem-before.txt"
+          "$(cat "$g/pod.real")" --version > "$s/pod-before.txt"
+          echo "$g" >> "$GITHUB_PATH"
+      # (the iOS arm of lib.rs compiles, debug and release: the debug-only
+      # self-test directory and its release stub)
+      - name: cargo check for the simulator, debug and release
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          cargo check --locked --target aarch64-apple-ios-sim
+          cargo check --locked --target aarch64-apple-ios-sim --release
+      # (each build, then: the one change allowed under gen/apple, and the
+      # .app found, unsigned, and of the configuration asked for)
+      - name: build (debug, simulator, unsigned)
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          touch "$RUNNER_TEMP/debug-start"
+          cargo tauri ios build --ci --debug --target aarch64-sim
+      - name: the debug build's tree, app and signature
+        run: bash app/selftest/ios-built-app.sh debug "$RUNNER_TEMP/debug-start" "$RUNNER_TEMP/debug-app.txt"
+      - name: the self-test on the simulator (debug)
+        run: bash app/selftest/ios-selftest.sh debug "$(cat "$RUNNER_TEMP/debug-app.txt")" "$GITHUB_STEP_SUMMARY"
+      - name: build (release, simulator, unsigned)
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          touch "$RUNNER_TEMP/release-start"
+          cargo tauri ios build --ci --target aarch64-sim
+      - name: the release build's tree, app and signature
+        run: bash app/selftest/ios-built-app.sh release "$RUNNER_TEMP/release-start" "$RUNNER_TEMP/release-app.txt"
+      - name: the release build doesn't pick up the self-test notebook
+        run: bash app/selftest/ios-selftest.sh release "$(cat "$RUNNER_TEMP/release-app.txt")" "$GITHUB_STEP_SUMMARY"
+      - name: nothing was installed (brew, gem, pod)
+        if: always()
+        run: |
+          set -euo pipefail
+          g="$RUNNER_TEMP/guard"; s="$RUNNER_TEMP/state"
+          [ -d "$s" ] || { echo "(the guard step didn't run)"; exit 0; }
+          echo "--- brew/gem/pod calls"; cat "$RUNNER_TEMP/guard-calls.txt" 2>/dev/null || echo "(none)"
+          [ ! -s "$RUNNER_TEMP/guard-refused.txt" ] || { echo "FAIL: a call that isn't allowed:"; cat "$RUNNER_TEMP/guard-refused.txt"; exit 1; }
+          "$(cat "$g/brew.real")" list --versions > "$s/brew-after.txt"
+          "$(cat "$g/gem.real")" list > "$s/gem-after.txt"
+          "$(cat "$g/pod.real")" --version > "$s/pod-after.txt"
+          for t in brew gem pod; do
+            cmp -s "$s/$t-before.txt" "$s/$t-after.txt" || { echo "FAIL: what $t has installed changed:"; diff "$s/$t-before.txt" "$s/$t-after.txt" || true; exit 1; }
+          done
+          echo "ok: what brew, gem and pod have installed is unchanged"
