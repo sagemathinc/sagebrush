@@ -201,6 +201,8 @@ jobs:
           node web/test-llms.mjs
           node web/test-alpha-banner.mjs
           node web/test-ipynb.mjs
+          node web/latex/test-comments-core.mjs
+          node web/latex/test-latex-comments-cli.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs
@@ -458,7 +460,7 @@ jobs:
           (cd web/test-workers && npm ci --silent)
           node web/share/test-share.mjs
           node web/sync/test-sync.mjs
-          CHROME=google-chrome node web/workspace/test-workspace-sync-client.mjs
+          SYNC_REQUIRE_CLAIM=1 CHROME=google-chrome bun web/workspace/test-sync-client-ref.mjs
           bun web/sync/test-inventory.mjs
           bun web/workspace/test-sync-reduce.mjs
           bun web/workspace/test-sync-overlay.mjs
@@ -472,6 +474,24 @@ jobs:
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+      # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
+      # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
+      # up; its result and diagnostics go to the job summary and never fail the job.  Made gating in a later PR once it is
+      # green here 10 runs in a row, or once that first load is explained)
+      - name: DEV try-it flow (report-only)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          c=0
+          CHROME=google-chrome bun web/workspace/test-dev-sync-tryit.mjs > tryit.log 2>&1 || c=$?
+          cat tryit.log
+          {
+            echo "### DEV try-it flow (report-only): exit $c"
+            echo '```'
+            grep -E "^(ok:|FAIL)|didn't come up" tryit.log | cut -c1-400 | head -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $c
       # (the share dialog, in its own step with its own bound, in its place in the order: about 13 min on a healthy runner
       # since #243's registry cases (it was about 7), 20 here. A hang fails this named step, not the whole job at its 40 min,
       # and the steps before it keep their output.
@@ -525,6 +545,8 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome node web/test-runner.mjs
           CHROME=google-chrome node web/test-runner-files.mjs
+          CHROME=google-chrome node web/test-runner-pill.mjs
+          CHROME=google-chrome node --test web/preview/test-preview.mjs
           CHROME=google-chrome node web/test-catalog.mjs
           CHROME=google-chrome node web/board/test-frame.mjs
           CHROME=google-chrome bun web/board/test-submit.mjs
@@ -533,6 +555,11 @@ jobs:
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
+          # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
+          # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
+          bun web/workspace/test-agent-grant.mjs
+          bun web/workspace/test-agent-pair.mjs
+          CHROME=google-chrome bun web/workspace/test-agent-e2e.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-admit.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
@@ -735,9 +762,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [notebook, board-a, board-b, board-c, board-unit]
+        group: [notebook, board-a, board-b, board-c, board-unit, terminal]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25)
+    timeout-minutes: ${{ matrix.group == 'terminal' && 25 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -777,6 +805,7 @@ jobs:
               node web/test-replay.mjs
               node web/test-timetravel.mjs
               node web/test-widgets.mjs
+              node web/test-input.mjs
               node web/test-graph-view.mjs
               node web/test-kernels.mjs
               node web/test-time.mjs
@@ -797,6 +826,15 @@ jobs:
               bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
+              ;;
+            terminal)
+              # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged
+              # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,
+              # as a hosted preview has it)
+              bun web/shell/test-panel-render.mjs
+              bun web/shell/panel-size.mjs
+              SAGEBRUSH_TERMINAL=1 bun web/build.ts
+              bun web/shell/test-panel-page.mjs
               ;;
             board-a)
               node web/board/bench.mjs
@@ -828,20 +866,22 @@ jobs:
               node web/board/test-ask.mjs
               ;;
             board-c)
-              node web/board/test-find.mjs
-              node web/board/test-titles.mjs
-              node web/board/test-fit.mjs
-              node web/board/test-local.mjs
-              node web/board/test-links.mjs
-              node web/board/test-version.mjs
-              node web/board/test-blocks.mjs
-              node web/board/test-history.mjs
-              node web/board/test-history-order.mjs
+              board_c_test() { printf 'START board-c: %s\n' "$*"; "$@"; }
+              board_c_test node web/board/test-find-cdp-unit.mjs
+              board_c_test node web/board/test-find.mjs
+              board_c_test node web/board/test-titles.mjs
+              board_c_test node web/board/test-fit.mjs
+              board_c_test node web/board/test-local.mjs
+              board_c_test node web/board/test-links.mjs
+              board_c_test node web/board/test-version.mjs
+              board_c_test node web/board/test-blocks.mjs
+              board_c_test node web/board/test-history.mjs
+              board_c_test node web/board/test-history-order.mjs
               # (the board page under the board journal; its own server, one origin)
-              bun web/board/test-board-journal-page.mjs
-              node web/board/test-cocalc.mjs
-              node web/board/test-mount.mjs
-              node web/board/test-xss.mjs
+              board_c_test bun web/board/test-board-journal-page.mjs
+              board_c_test node web/board/test-cocalc.mjs
+              board_c_test node web/board/test-mount.mjs
+              board_c_test node web/board/test-xss.mjs
               ;;
             board-unit)
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)

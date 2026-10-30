@@ -63,15 +63,17 @@ export const DOC_SYNC_RELOAD = "Notebook sync was turned on for this browser, bu
 /** The channel the pages of one workspace use for document sync (a notebook saved here; the switch on here). */
 export const docSyncChannel = (wsName: string) => "sagebrush-docsync:" + wsName;
 type Channel = { postMessage(m: unknown): void; onmessage: ((ev: { data: unknown }) => void) | null };
-type Docs = { kick(id: string): void; kickStarted?(): Promise<void> };
-// (a message on the channel: a notebook saved in some tab (`kick`), or the switch turned on in some tab (`on`))
+type Docs = { kick(id: string, startHere?: boolean): void; kickStarted?(): Promise<void>; stopped?: ReadonlyMap<string, { code: string }> };
+// (a message on the channel: a notebook saved in some tab (`kick`), one a page asks to have pulled and started here (`pull`:
+// a notebook listed by sync whose history this device hasn't yet), or the switch turned on in some tab (`on`))
 const kickOf = (data: unknown) => { const k = (data as { kick?: unknown } | null)?.kick; return typeof k === "string" ? k : null; };
 const onOf = (data: unknown) => (data as { on?: unknown } | null)?.on === true;
+const pullOf = (data: unknown) => { const p = (data as { pull?: unknown } | null)?.pull; return typeof p === "string" ? p : null; };
 
 /** What turning the switch on needs from the notebook page (index.html), each a seam the tests replace. */
 export interface EnableDeps {
   /** the history bundle (sagebrush-history.js): its DOC_SYNC */
-  loadHistory(): Promise<{ DOC_SYNC: { on: boolean; saved: ((id: string) => void) | null } }>;
+  loadHistory(): Promise<{ DOC_SYNC: { on: boolean; saved: ((id: string) => void) | null; pull?: ((id: string) => void) | null; stoppedOf?: ((id: string) => { code: string } | null) | null } }>;
   /** a DocSync, and the workspace's channel (docSyncChannel; null where there is none) */
   makeDocs(): Docs;
   makeChannel(): Channel | null;
@@ -142,11 +144,17 @@ export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
       return (out = "reload");
     }
     mod.DOC_SYNC.saved = (id) => { docs.kick(id); try { ch?.postMessage({ kick: id }); } catch {} };
+    // (a notebook listed here by sync with none of its history yet (the page's openArrived): pulled and started on
+    // whichever page holds the connection; a pull of one the server doesn't have yet does nothing (unknown_doc))
+    mod.DOC_SYNC.pull = (id) => { docs.kick(id, true); try { ch?.postMessage({ pull: id }); } catch {} };
+    // (a notebook this page's DocSync stopped (a snapshot start, a chain, an invalid answer): never "still arriving")
+    mod.DOC_SYNC.stoppedOf = (id) => docs.stopped?.get(id) ?? null;
     // (another tab's save kicks this DocSync; another tab's switch turned on kicks every notebook started (its reopened
     // notebook's start was told to no one), whichever tab's connection this is)
     if (ch) ch.onmessage = (ev) => {
-      const k = kickOf(ev.data);
+      const k = kickOf(ev.data), p = pullOf(ev.data);
       if (k !== null) docs.kick(k);
+      else if (p !== null) docs.kick(p, true);
       else if (onOf(ev.data)) void docs.kickStarted?.()?.catch((e) => d.warn("sync: notebooks' switch:", e));
     };
     d.setDocs(docs);
@@ -157,6 +165,8 @@ export async function enableDocSync(d: EnableDeps): Promise<Enabled> {
     if (asked && (await d.begun().catch(() => true))) {
       mod.DOC_SYNC.on = false;
       mod.DOC_SYNC.saved = null;
+      mod.DOC_SYNC.pull = null;
+      mod.DOC_SYNC.stoppedOf = null;
       out = "reload";
     }
     return out;
@@ -205,8 +215,9 @@ export async function followDocSync<D extends Docs>(d: FollowDeps<D>): Promise<(
       .catch((e) => d.warn("sync: notebooks on this page's connection:", e))
       .finally(() => { joining = null; }));
   if (ch) ch.onmessage = (ev) => {
-    const k = kickOf(ev.data);
+    const k = kickOf(ev.data), p = pullOf(ev.data);
     if (k !== null) docs?.kick(k);
+    else if (p !== null) docs?.kick(p, true);
     // (the switch turned on in another page: this page's DocSync joins, or, if it already has, sends what started
     // there since it connected: that notebook's synced history began in the reopen, before any save was told to it)
     else if (onOf(ev.data)) void join().then(() => docs?.kickStarted?.()).catch((e) => d.warn("sync: notebooks on this page's connection:", e));

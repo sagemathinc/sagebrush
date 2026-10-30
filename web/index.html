@@ -309,6 +309,7 @@
     </div>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
@@ -391,6 +392,7 @@
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
+  <button role="menuitem" id="termbtn" hidden title="A bash shell on your workspace's files (a preview)">Terminal</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -450,6 +452,8 @@ import { createNotebook, esc } from "./notebook/notebook.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
+import { createRunnerPill } from "./notebook/runner-pill.js";
+const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") });
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
 // where the page is cross-origin isolated (the runner hands files to the
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
@@ -466,12 +470,18 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+// (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
+import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
+// (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
+// shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
+import { answerPresence, TAB } from "./shell/presence.ts";
+import { openPreview } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -766,7 +776,8 @@ function makeKernel(owner) {
       reproducible: () => !REACTIVE && (current.id !== owner || nb.meta.reproducible !== false),
     });
   }
-  return { kernel: k, journal: j, used: 0, started: false };
+  const stopRunnerInfo = LOCAL || window.__TAURI__ ? () => {} : runnerPill.watch(k, w => w instanceof RunnerWorker && !w.inner);
+  return { kernel: k, journal: j, used: 0, started: false, stopRunnerInfo };
 }
 // The interpreter of a notebook (made if needed); the least recently used
 // beyond MAX_KERNELS stop (their notebooks' outputs are stale when reopened).
@@ -778,6 +789,7 @@ function kernelFor(id) {
   for (const [oid, o] of byUse.slice(MAX_KERNELS)) {
     if (oid === id) continue;
     o.kernel.close();
+    o.stopRunnerInfo();
     kernels.delete(oid);
   }
   return e;
@@ -792,6 +804,7 @@ function startKernel(e) {
 // Make a notebook's interpreter the current one (before its document loads,
 // so that the outputs it computed are not marked stale).
 function useKernel(id) {
+  leaveRemote(); // (a notebook's own interpreter: remote compute, if it was in use, is closed)
   const e = kernelFor(id);
   kernel = e.kernel;
   journal = e.journal;
@@ -848,7 +861,53 @@ const analyzer = {
     return new Promise((resolve) => { const id = ++analyzeId; analyzeWaiting.set(id, resolve); analyzeWorker.postMessage({ id, ...msg }); });
   },
 };
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE });
+// Remote compute, as a preview (web/notebook/remote-ui.js, its own bundle sagebrush-remote.js, loaded on
+// first use): offered only in a page opened with ?remote=1.  Its gateway is simulated in the page, and its
+// runs execute on a second interpreter in this browser; every run is still approved by the page's gate.
+// One attempt at a time is current (remoteSwitch): choosing This browser, opening another notebook (useKernel)
+// or choosing remote compute again ends whatever is pending or installed.  The module's own load is fenced the same way:
+// `remoteGen` is taken before its await, and changed by every leave.
+const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
+const kernelPick = $("#kernelpick");
+let remoteMod = null, remoteLoad = null, remoteSw = null, remoteGen = 0;
+function leaveRemote() {
+  remoteGen++;
+  remoteSw?.leave();
+  kernelPick.value = "local";
+}
+async function useRemote() {
+  // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
+  if (kernelPick.value !== "gpu") return useKernel(current.id);
+  const gen = ++remoteGen, id = current.id;
+  remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
+  try {
+    remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
+    const mod = await remoteLoad;
+    if (gen !== remoteGen || current.id !== id || kernelPick.value !== "gpu") return;
+    remoteMod = mod;
+    remoteSw ??= mod.remoteSwitch({
+      currentId: () => current.id,
+      picked: () => kernelPick.value,
+      pickLocal: () => { kernelPick.value = "local"; },
+      status: (t) => { statusEl.textContent = t; },
+      reactive: () => REACTIVE,
+      makeLocal: () => makeKernel(null).kernel,
+      network: () => mod.parseNetwork(location.search), // (&latency=MS &jitter=MS &loss=P: the simulated network)
+      setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+    });
+    await remoteSw.connect(id);
+  } catch (e) {
+    remoteLoad = null; // (a failed load is tried again next time)
+    if (gen !== remoteGen) return;
+    kernelPick.value = "local";
+    statusEl.textContent = `Remote compute (preview): ${e?.message ?? e}`;
+  }
+}
+if (REMOTE_PREVIEW) {
+  kernelPick.hidden = false;
+  kernelPick.addEventListener("change", useRemote);
+}
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page) });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
@@ -1489,9 +1548,53 @@ async function openDocument(doc, here = false, made = "elsewhere") {
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
 async function openId(id) {
+  // (the LaTeX editor has this page, web/latex/page.ts: a notebook opened from it (its files, their menus, an
+  // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
   const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-  if (!doc) return false;
+  if (!doc) return openArrived(id);
   await open(await storeFor(id), id);
+  savedEl.textContent = "opened";
+  return true;
+}
+// (a notebook another device made, listed here by sync with no record yet (2c-3): opened through the journal's store
+// only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
+// answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
+// and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
+const STILL_ARRIVING = "This notebook is still arriving from sync: try again in a moment";
+async function openArrived(id) {
+  const w = await wsNow();
+  const at = w && !w.closed && (await w.journalActive().catch(() => false)) ? await w.pathOf("notebook", id).catch(() => undefined) : undefined;
+  if (!at) return false;
+  const [hdb, mod] = await Promise.all([historyDbReady, loadHistory()]);
+  const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+  // (still arriving: its pull asked for, which starts it here once the server has it (sync-docs: as a received
+  // `changed` does; nothing made if there is nothing); or, if this page's sync stopped it, why, as it won't arrive)
+  const arriving = () => {
+    const stopped = mod.DOC_SYNC?.stoppedOf?.(id) ?? null;
+    if (!stopped) try { mod.DOC_SYNC?.pull?.(id); } catch {}
+    const msg = stopped ? `This notebook can't sync here: ${stopped.code}` : STILL_ARRIVING;
+    statusEl.textContent = msg;
+    wsBrowser?.say(msg);
+    return false;
+  };
+  if (!s || s.start === null || !(s.jOf?.size > 0)) return arriving();
+  // (its name and mode are its entry's, as listed here: the synced history carries the cells, not the name, so the
+  // record made from it would otherwise be "Untitled", and this page would then retitle the file)
+  const e = await w.stat(at).catch(() => undefined);
+  const st = await storeFor(id, { name: splitExt(nameOf(at))[0], mode: e?.mode ?? "python", cells: [] });
+  if (!st.journaled) return arriving();
+  await open(st, id);
+  // (the load must have made the record from the history: anything else is a bug, said and logged, nothing deleted)
+  // (never expected: rows only grow between the check and the load's own read.  If it happens, a fresh record was made
+  // that would fork the notebook: shown read-only here, so nothing is typed into it, said, and logged; nothing deleted
+  // (the grader's N-ST-2))
+  if (st.recovered?.row === "new") {
+    console.warn("sync: a notebook that arrived by sync loaded as a new one, not from its history:", id);
+    nb.setReadOnly(true);
+    statusEl.textContent = STILL_ARRIVING + " (opened read-only: reload this page to try again)";
+    return true;
+  }
   savedEl.textContent = "opened";
   return true;
 }
@@ -2181,6 +2284,68 @@ const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
 // ⋯ Whiteboard: the latest board in the notebook's language, or a new one (board/page.ts ?recent=); this notebook stays saved
 $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb.mode));
+// ⋯ Terminal (plan-bash-shell r8c E5, step 6): a bash shell on the workspace's files, in a bottom dock.  A preview:
+// the item shows only on preview and DEV hosts.  The shell's set: the preview's own (web/build.ts), else the site's
+// latest; one ShellHost per page tab, made at the first open, with the person principal.
+if (/(^|\.)sagebrush\.cloud$|^dev\.sagebrush\.space$|^localhost$|^127\.0\.0\.1$/.test(location.hostname)) {
+  const termBtn = $("#termbtn");
+  termBtn.hidden = false;
+  let term = null;
+  // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
+  const here = async () => {
+    let path;
+    try { if (ws && current.id && current.kind !== "file") path = await ws.pathOf("notebook", current.id); } catch {}
+    const busy = !!document.querySelector("#cells .running, #cells .queued");
+    const procs = [{ tab: TAB, kind: "notebook", name: nbName.value || "Untitled", path, mode: nb.mode,
+      state: busy ? "running" : document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: performance.memory?.usedJSHeapSize }];
+    if (term) procs.push({ tab: TAB, kind: "terminal", name: "bash", mode: "bash", state: term.busy ? "running" : "idle", since: term.since });
+    return procs;
+  };
+  answerPresence(here);
+  // (open FILE: a notebook or board in a new tab, as the File menu's Open… does; a data file in its preview here)
+  const openPath = async (p) => {
+    const w = await wsNow();
+    if (!w) throw new Error("the workspace isn't open");
+    const e = await w.stat(p);
+    if (!e) throw new Error("No such file or directory");
+    if (e.kind === "folder") throw new Error("Is a directory");
+    if (e.kind === "notebook" || e.kind === "board") {
+      openEntry(e, "tab");
+      return `opened ${p} (a ${e.kind}, in a new tab)`;
+    }
+    void openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) });
+    return `opened ${p} (its preview)`;
+  };
+  const shellSet = async () => {
+    for (const url of ["shell/preview-set.json", "pkgset/latest.json"]) {
+      try {
+        const r = await fetch(url, { cache: "no-store", redirect: "error" });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const S = j?.S ?? j?.id ?? (typeof j === "string" ? j : null);
+        if (typeof S === "string" && /^[0-9a-f]{64}$/.test(S)) return S;
+      } catch {}
+    }
+    return null;
+  };
+  termBtn.onclick = async () => {
+    if (!term) {
+      const w = await wsNow();
+      if (!w) { savedEl.textContent = "the terminal needs this browser's workspace, which isn't open"; return; }
+      const S = await shellSet();
+      if (!S) { savedEl.textContent = "the terminal: this site has no shell package set"; return; }
+      // (the module, from this page's directory: a variable, so the bundler leaves it to the browser)
+      const mod = "./shell/terminal.js";
+      let openTerminal;
+      try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
+      if (term) return term.toggle();
+      term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      term.onEnd = () => { term = null; window.__sbTerm = null; };
+      window.__sbTerm = term; // (the tests' handle, on these hosts only: web/shell/test-panel-page.mjs)
+    }
+    term.toggle();
+  };
+}
 // (to the board once this notebook is saved, every change of it; not saved:
 // it stays open, and says so, CORR-7F9-1)
 async function toBoard(url) {
@@ -3223,6 +3388,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the workspace opened first, at most a few seconds: its fence in the notebooks' store is there before any
   // notebook is loaded, so each store is bound to it: design/workspace-durability.md A.3)
   await wsNow();
+  // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
+  // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
