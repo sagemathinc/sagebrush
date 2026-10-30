@@ -13,6 +13,8 @@
 //                                       accepted once; never from a document, a URL
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
+//                                       (stdin below: the page answers in `buffer`)
 //           {initFailed: message}      the limits are invalid: this worker is done
 //                                       (each run then answers with the message)
 //           {ready, version, interrupt, progress, seeded, startup}  started (interrupt: the
@@ -49,6 +51,7 @@ import { onChunkInstalled, prefetchMode } from "./lib-lazy";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
+import { waitForLine } from "../src/stdin-wait";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 
@@ -65,7 +68,28 @@ let gate: "awaiting-init" | "validating" | "ready" | "failed" = "awaiting-init";
 let failure = "";
 let giveLimits: (l: LimitsText) => void = () => {}, refuseLimits: (e: Error) => void = () => {};
 const limits = new Promise<LimitsText>((ok, no) => ((giveLimits = ok), (refuseLimits = no)));
+// input(): a line typed in the page.  This run posts {input, buffer} and waits
+// on the buffer, which the page fills: Int32 [0] the state (0 waiting, 1 a
+// line, 2 end of input), [1] the line's length in bytes, then its UTF-8 bytes.
+// It waits in slices, so a Stop (the shared interrupt flag) still ends it.
+// Only in a cross-origin isolated page, where memory can be shared; elsewhere
+// input() reads end of input.  Each request has its own key (this worker's
+// tag and a count), which the answer names: an answer to an earlier question
+// of the same run, one asked before a Stop say, can't fill a later one
+// (web/runner/index.html, web/notebook/worker-kernel.js).
+const INPUT_MAX = 1 << 16;
+const INPUT_TAG = Math.random().toString(36).slice(2, 10);
+let inputCount = 0;
+function stdin(req: { id: number; target: number | null; prompt: string }) {
+  if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer)) return null;
+  const buffer = new SharedArrayBuffer(8 + INPUT_MAX);
+  const key = `${INPUT_TAG}.${++inputCount}`;
+  postMessage({ id: req.id, target: req.target, input: { prompt: req.prompt.slice(0, 4096), max: INPUT_MAX, key }, buffer });
+  // (a Stop wins over an answer, even one landing during the same wait: src/stdin-wait.ts)
+  return waitForLine(buffer, R.INTR);
+}
 const session = notebookSession((m) => postMessage(m), {
+  stdin,
   limits,
   runs: {
     begin: (m) => {
