@@ -11,6 +11,7 @@ export class SyncOwner {
   }
 }
 export const foot = (): never => never("foot");
+export const sidebarLine = (): never => never("sidebarLine");
 export const syncSection = (): never => never("syncSection");
 export const rowIcons = (): never => never("rowIcons");
 export const ROWICON = { max: 0, minGapMs: 0 };
