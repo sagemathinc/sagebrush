@@ -7,52 +7,55 @@
 // Seams (the page's; a test's fakes):
 //   list()          this device's own notebooks: [{ ref, path }] (not listed from the server, not missing, not in Trash)
 //   startOf(ref)    the notebook's synced history's start, or null if it hasn't started here (readJournal's)
-//   sizeOf(ref)     the UTF-8 bytes of what its history keeps (versionedOf), or null if it has no record here
 //   storeFor(ref)   a journal store for it (the page's storeFor), or one that isn't journaled
+//   syncOn()        whether the page's notebooks' sync is (still) on (DOC_SYNC.on)
 //   current()       the notebook the page has open (its own load already started it), or null
 //   idle()          a pause between notebooks (the page's idle time), resolved when the next may go
 //   stopped()       true once the page is leaving: the walk ends where it is, and the next load goes on from there
 //   progress(done, total)
-// A notebook another tab writes is left (its load here is read-only): that tab starts it at its next load as writer,
-// or a later walk does.  One whose root patch couldn't be sent (over the batch bound, LIMITS.batchBytes: doc-sync
-// stops a patch over 1 MiB) is never started, only counted: started, it would be stopped for good.  A start refused
-// for room (the history's quota, the sync debt's caps) ends the walk: the rest would be refused the same way.
+// Each load's outcome is the store's own (store.js keeps why a start was refused, `startRefused`): started; another
+// tab writes it (a read-only load: held, that tab or a later walk starts it); too large (its root patch, measured under
+// the writer's lock as doc-sync would send it, over the batch bound: never started, counted by name); refused for room
+// (the walk ends: the rest would be refused the same way); anything else (counted by name, the walk goes on).  Sync
+// turned off meanwhile ends the walk, said as nothing.  Every store loaded is let go.
 export async function startAll(s) {
   const out = { total: 0, started: 0, held: 0, tooLarge: [], noRoom: [], failed: [], stopped: false };
   const cur = s.current();
   const todo = [];
   for (const n of await s.list()) {
     if (n.ref === cur) continue;
-    if ((await s.startOf(n.ref)) === null) todo.push(n);
+    try {
+      if ((await s.startOf(n.ref)) === null) todo.push(n);
+    } catch (e) {
+      out.failed.push(n.path);
+      console.warn("sync: a notebook's synced history not read:", n.path, e);
+    }
   }
   out.total = todo.length;
   for (let i = 0; i < todo.length; i++) {
-    if (s.stopped()) { out.stopped = true; break; }
+    if (s.stopped() || !s.syncOn()) { out.stopped = true; break; }
     const { ref, path } = todo[i];
     s.progress(i, todo.length);
-    // (checked again: another tab may have started it since the list was read)
-    if ((await s.startOf(ref)) !== null) continue;
-    const size = await s.sizeOf(ref);
-    if (size === null) continue;
-    if (size > s.maxBytes) { out.tooLarge.push(path); continue; }
-    let st = null;
+    let st = null, end = false;
     try {
+      // (checked again: another tab may have started it since the list was read)
+      if ((await s.startOf(ref)) !== null) continue;
       st = await s.storeFor(ref);
       if (!st?.journaled) continue;
       await st.load();
       if (!st.writer) out.held++;
       else if (st.synced) out.started++;
-      else {
-        // (the load's start refused: for room (it said so, and stays local until a later load), so the rest are too)
-        out.noRoom.push(path);
-        break;
-      }
+      else if (!s.syncOn()) { out.stopped = true; end = true; }
+      else if (st.startRefused?.tooLarge) out.tooLarge.push(path);
+      else if (st.startRefused?.room) { out.noRoom.push(path); end = true; }
+      else out.failed.push(path);
     } catch (e) {
       out.failed.push(path);
       console.warn("sync: a notebook's synced history not started:", path, e);
     } finally {
       try { await st?.release?.(); } catch {}
     }
+    if (end) break;
     await s.idle();
   }
   s.progress(todo.length, todo.length);
@@ -64,7 +67,7 @@ export function startAllSummary(r) {
   const parts = [];
   if (r.tooLarge.length) parts.push(`${r.tooLarge.length} notebook${r.tooLarge.length === 1 ? " is" : "s are"} too large to sync yet (${names(r.tooLarge)})`);
   if (r.noRoom.length) parts.push(`starting the rest stopped at ${names(r.noRoom)}: this browser's storage for sync is full`);
-  if (r.failed.length) parts.push(`${r.failed.length} couldn't start syncing (${names(r.failed)})`);
+  if (r.failed.length) parts.push(`${r.failed.length} couldn't start syncing (${names(r.failed)}); they're tried again at the next load`);
   return parts.length ? `Sync: ${parts.join("; ")}` : null;
 }
 const names = (paths) => paths.slice(0, 3).map((p) => p.split("/").pop()).join(", ") + (paths.length > 3 ? `, and ${paths.length - 3} more` : "");

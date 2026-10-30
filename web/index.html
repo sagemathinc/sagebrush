@@ -3133,13 +3133,10 @@ docSyncReady.then(async (on) => {
   if (!on) return;
   const w = await wsReady, hdb = await historyDbReady, mod = await loadHistory();
   if (!w || w.closed || !hdb || !db) return;
-  const enc = new TextEncoder();
   const r = await startAll({
     list: async () => (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed).map((e) => ({ ref: e.ref, path: e.path })),
     startOf: async (ref) => (await readJournal(hdb, ref).catch(() => ({ start: undefined }))).start,
-    sizeOf: async (ref) => { const rec = await idb(db, "notebooks", "readonly", (st) => st.get(ref)); return rec ? enc.encode(JSON.stringify(mod.versionedOf(rec))).length : null; },
-    // (doc-sync stops a patch over the batch bound (1 MiB); a root patch's JSON is a little larger than the value it holds)
-    maxBytes: Math.floor((1 << 20) * 0.9),
+    syncOn: () => !!mod.DOC_SYNC?.on,
     storeFor: (ref) => storeFor(ref),
     current: () => (current.kind === "browser" ? current.id : null),
     idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
