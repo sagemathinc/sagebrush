@@ -1,0 +1,1 @@
+small fixture for the wrong-hash control
