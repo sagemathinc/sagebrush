@@ -442,6 +442,42 @@ try {
   const sheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
   check(sheet && sheet.top <= 1 && sheet.h >= sheet.ih * 0.85, `under 700 px the dock is a full-height sheet: ${JSON.stringify(sheet)}`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // ---- the board page's dock (TP-5, #326's deferral; plan E5.1: "the notebook page and the board page"): ⋯ ▸ Terminal
+  // there too, placed as on the notebook page (above the bottom overlays, the board ending above it, hide and ✕, the
+  // sheet under 700 px), with ps listing the board
+  await evaluate(`document.querySelector(".sb-term-end")?.click()`);
+  await send("Page.navigate", { url: url + "board/?new=python" });
+  const BTERM = `document.querySelector('#board [data-sbb="term"]')`, BMORE = `document.querySelector('#board [data-sbb="menubtn"]')`;
+  check(!!(await until(`(() => { const b = ${BTERM}; return !!b && !b.hidden; })()`, 30000)), "board: ⋯ ▸ Terminal shows on a local host");
+  await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
+  check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading"); })()`, 30000)),
+    "board: the dock opens and its shell starts (the module and the set from a directory up)");
+  n = 0;
+  r = await run("echo board-ok");
+  check(r?.out === "board-ok\n" && r.status === "done", `board: a command runs: ${JSON.stringify(r)}`);
+  const bp = await evaluate(`(() => {
+    const ta = document.querySelector(".sb-term textarea").getBoundingClientRect(), dock = document.querySelector(".sb-term").getBoundingClientRect();
+    const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter((e) => e && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top);
+    return { taBottom: ta.bottom, tops, dockTop: dock.top, boardBottom: document.getElementById("board").getBoundingClientRect().bottom };
+  })()`);
+  check(bp && bp.tops.every((t) => bp.taBottom <= t) && bp.boardBottom <= bp.dockTop + 1,
+    `board: the prompt above every bottom overlay, the board ending above the dock: ${JSON.stringify(bp)}`);
+  r = await run("ps");
+  check(/\bboard\b/.test(r?.out ?? "") && /\bterminal\b/.test(r?.out ?? ""), `board: ps lists this tab's board and its terminal: ${JSON.stringify(r?.out)}`);
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
+    boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
+  check(bf.hidden && bf.focus === "menubtn" && bf.boardBottom > bp.boardBottom + 100,
+    `board: hide gives focus back to the ⋯ button, and the board its height: ${JSON.stringify(bf)}`);
+  await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
+  await until(`!document.querySelector(".sb-term").hidden`, 10000);
+  await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
+  await new Promise((res) => setTimeout(res, 300));
+  const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
+  check(bsheet && bsheet.top <= 1 && bsheet.h >= bsheet.ih * 0.85, `board: under 700 px the dock is a full-height sheet: ${JSON.stringify(bsheet)}`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await evaluate(`document.querySelector(".sb-term-end").click()`);
+  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "board: ✕ ends the session (the dock is gone)");
   if (process.argv[2]) {
     const shot = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(process.argv[2], Buffer.from(shot.result.data, "base64"));

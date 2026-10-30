@@ -14,6 +14,8 @@
   #board { position: fixed; inset: 0; bottom: var(--sb-alpha-banner, 0px); }
   /* (presenting, the board fills the window and the notice steps aside; no notice elsewhere, so no effect) */
   #board.sbb-present { bottom: 0; }
+  /* (the terminal's dock open, web/shell/panel.ts: the board ends above it; --sb-term-h is the dock's height and its lift) */
+  body.sb-term-open #board:not(.sbb-present) { bottom: var(--sb-term-h, 280px); }
   html:has(.sbb-present) #sb-alpha-banner { display: none !important; }
 </style>
 </head>
