@@ -1847,12 +1847,29 @@ async function arrivingStarted() {
     // (a save through it is refused too: never ready)
     const saved = await st.save({ name: "t", mode: "python", cells: [{ id: "x", code: "1" }] }).then((r) => (typeof r === "string" ? r : "saved"), (e) => "threw: " + e?.message);
     check(saved !== "saved" && (await lrows(hdb, id)).length === 0 && (await rawGet(w.main, "notebooks", id)) == null, "…a save through it is refused, still nothing written: " + J(saved));
-    await close(st, helper.st);
+    // (the refused store holds the writer's lock until it is let go: a retry meanwhile loads read-only, an empty notebook
+    // (astra3's A-SAG-1, the grader's G-SAG-1); the page now lets it go at once, as here)
+    const early = store(w, hdb, id);
+    const eDoc = await early.load().catch((e) => ({ threw: e?.message }));
+    check(early.recovered?.row === "read-only" && (eDoc?.cells ?? []).length === 0, "a retry while the refused store still holds the lock: read-only, empty: " + J({ row: early.recovered?.row }));
+    await close(early);
+    await st.release();
+    // (then its rows arrive (a pull's page: another device's real patches), and the retry is the writer, from the server,
+    // with the other device's cells)
+    const src = (await keyRows(hdb, N.syncedKey(helper.id, 1))).map((r) => ({ time: r.time, env: r.env }));
+    const page = await helper.st.patches.queue(() => helper.st.patches.journalTx((s) => N.applyPage(s, id, { expect: null, next: { epoch: 1, after: src.length, recv: 1, chain: "c".repeat(64) }, rows: src }))).catch((e) => ({ refused: String(e?.message ?? e) }));
+    const retry = store(w, hdb, id);
+    const rd = await retry.load().catch((e) => ({ threw: e?.message, arriving: !!e?.arriving }));
+    const rec2 = await rawGet(w.main, "notebooks", id);
+    check(!page?.refused && src.length >= 1 && retry.recovered?.row === "from-server" && retry.writer === true && codes(rd) === J([["a", "A"]]) && rec2 && codes(rec2) === J([["a", "A"]]), "once its rows arrive, the retry is the writer, from the server, with the other device's cells: " + J({ rows: src.length, page: page?.refused ?? "applied", row: retry.recovered?.row, writer: retry.writer, cells: codes(rd) }));
+    await close(retry, helper.st);
   });
   await close(w);
   hdb.close();
 }
-const CASES = [arrivingStarted, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
+const CASES = [workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+  // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
+  arrivingStarted];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
