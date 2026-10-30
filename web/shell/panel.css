@@ -1,0 +1,38 @@
+/* The terminal panel (plan-bash-shell r8c E5): a bottom dock; the 16 colours of E5.3, each >= 4.5:1 on its theme's
+   background (min 4.91 light, 6.15 dark); a background-only style takes the theme's bg as its text colour (the higher
+   contrast on every one of the 16, in both themes). */
+.sb-term { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 280px; min-height: 120px; max-height: 80vh;
+  display: flex; flex-direction: column; background: var(--sb-term-bg); color: var(--sb-term-fg);
+  border-top: 1px solid var(--line, #d4d4cb); box-shadow: 0 -2px 8px rgba(0,0,0,.12); font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.sb-term[hidden] { display: none; }
+body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
+.sb-term-grip { height: 6px; cursor: ns-resize; flex: none; touch-action: none; }
+.sb-term-grip:hover { background: var(--line, #d4d4cb); }
+.sb-term-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px; flex: none; font-size: 12px; opacity: .85;
+  border-bottom: 1px solid var(--line, #d4d4cb); }
+.sb-term-set { max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-term-cwd { font-weight: 600; }
+.sb-term-sp { flex: 1; }
+.sb-term-head button { font: inherit; background: none; color: inherit; border: 1px solid var(--line, #d4d4cb); border-radius: 4px; padding: 0 8px; cursor: pointer; }
+.sb-term-stop { color: var(--sb-term-c1) !important; }
+.sb-term-log { flex: 1; overflow: auto; padding: 4px 8px; }
+.sb-term-cmd { margin: 0 0 4px; }
+.sb-term-pl { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 600; }
+.sb-term-out { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; }
+.sb-term-out:empty { display: none; }
+.sb-term-loading { opacity: .75; font-style: italic; }
+.sb-term-loading::after { content: ""; display: inline-block; width: .8em; height: .8em; margin-left: .5em; vertical-align: -1px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sb-term-spin .8s linear infinite; }
+@keyframes sb-term-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sb-term-loading::after { animation: none; } }
+.sb-term-exit, .sb-term-drop, .sb-omit { opacity: .7; font-style: italic; }
+.sb-term-err, .sb-err { color: var(--sb-term-c1); }
+.sb-term-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.sb-term-in { display: flex; gap: 6px; align-items: flex-start; padding: 4px 8px; flex: none; border-top: 1px solid var(--line, #d4d4cb); }
+.sb-term-prompt { white-space: nowrap; font-weight: 600; padding-top: 2px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.sb-term-in textarea { flex: 1; resize: none; border: none; outline: none; background: transparent; color: inherit; font: inherit; padding: 2px 0; max-height: 240px; }
+.sb-term-note { padding: 0 8px 4px; font-size: 12px; color: var(--sb-term-c3); }
+.sb-term-note[hidden] { display: none; }
+.sb-b { font-weight: 700; } .sb-i { font-style: italic; } .sb-u { text-decoration: underline; }
+.sb-fg-rev { color: var(--sb-term-bg); } .sb-bg-rev { background: var(--sb-term-fg); }
+@media (max-width: 700px) { .sb-term { top: 0; height: auto !important; max-height: none; } body.sb-term-open { overflow: hidden; } }

@@ -760,9 +760,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [notebook, board-a, board-b, board-c, board-unit]
+        group: [notebook, board-a, board-b, board-c, board-unit, terminal]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25)
+    timeout-minutes: ${{ matrix.group == 'terminal' && 25 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - name: detect CI CPU quota
@@ -823,6 +824,15 @@ jobs:
               bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
+              ;;
+            terminal)
+              # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged
+              # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,
+              # as a hosted preview has it)
+              bun web/shell/test-panel-render.mjs
+              bun web/shell/panel-size.mjs
+              SAGEBRUSH_TERMINAL=1 bun web/build.ts
+              bun web/shell/test-panel-page.mjs
               ;;
             board-a)
               node web/board/bench.mjs
