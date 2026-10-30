@@ -6982,6 +6982,31 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/index.ts :: pyFrames :: captureLimit: Infinity, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys._getframe's capture: the JS engine's stack-trace limit lifted to Infinity for one capture (a private test hook may lower it) and restored after; it refuses nothing, and a capture cut short is reported incomplete (RuntimeError), never guessed."
+ },
+ "src/runtime/index.ts :: sourceOf :: if (src instanceof CodeObject && src.mode === \"frame\") raise(T.NotImplementedError, `${fn}() of a frame's code object: sys._getframe's frames have no code to run`); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "exec/eval of a frame's f_code: sys._getframe's frames are snapshots of compiled JavaScript with no bytecode to run, an unsupported feature, not a cap."
+ },
+ "src/runtime/index.ts :: withSites :: Error.stackTraceLimit = frameState.captureLimit; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys._getframe's capture: the JS engine's stack-trace limit lifted to Infinity for one capture (a private test hook may lower it) and restored after; it refuses nothing, and a capture cut short is reported incomplete (RuntimeError), never guessed."
+ },
+ "src/runtime/index.ts :: withSites :: Error.stackTraceLimit = limit; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys._getframe's capture: the JS engine's stack-trace limit lifted to Infinity for one capture (a private test hook may lower it) and restored after; it refuses nothing, and a capture cut short is reported incomplete (RuntimeError), never guessed."
+ },
+ "src/runtime/index.ts :: withSites :: const limit = Error.stackTraceLimit; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys._getframe's capture: the JS engine's stack-trace limit lifted to Infinity for one capture (a private test hook may lower it) and restored after; it refuses nothing, and a capture cut short is reported incomplete (RuntimeError), never guessed."
+ },
  "src/runtime/json.ts :: deeper :: if (stack.length >= MAX_DEPTH) raise(T.RecursionError, \"maximum recursion depth exceeded while encoding a JSON object\"); #0": {
   "class": "2",
   "owner": "pyjs JSON/runtime memory",
