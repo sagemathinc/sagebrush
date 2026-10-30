@@ -282,6 +282,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
       parts.push(
         `<div class="attention ${a.state}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
+          (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
           (open
             ? `<div class="att-actions"><button class="primary" data-approve="1">Allow</button><button data-approve="0">Deny</button></div>`
             : `<div class="att-state">${a.state === "approved" ? "Allowed" : a.state === "denied" ? "Denied" : "No answer"}</div>`) +

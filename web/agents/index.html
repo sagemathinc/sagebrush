@@ -102,7 +102,10 @@
   .attention.approved { border-color: #b9d7b5; background: #f2f8f0; }
   .attention.denied { border-color: #e2b9b0; background: #fbf1ee; }
   .att-title { font-weight: 600; }
-  .att-summary { font-size: 14px; color: var(--muted); margin-top: 2px; }
+  .att-summary { font-size: 14px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .att-detail { margin-top: 6px; font-size: 13px; }
+  .att-detail > summary { cursor: pointer; color: var(--muted); }
+  .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
   .att-actions { display: flex; gap: 8px; margin-top: 8px; }
   .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
