@@ -12,3 +12,11 @@ test("type() with keywords makes the class as CPython does", () => {
   const want = execFileSync("python3", [CASES], { encoding: "utf8" });
   assert.equal(cli([CASES]), want);
 });
+
+// type(name, bases, ns) without keywords: the same path (the winner's own
+// __new__ directly, with the caller's dict; then __init__)
+const THREE = __dirname + "/../../test/type_three_args_cases.py";
+test("type() with three arguments makes the class as CPython does", () => {
+  const want = execFileSync("python3", [THREE], { encoding: "utf8" });
+  assert.equal(cli([THREE]), want);
+});
