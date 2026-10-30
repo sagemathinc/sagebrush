@@ -2130,8 +2130,7 @@ function menuOf(btn, menu) {
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
-  // (a resize after the change: what places itself above the toolbar, the terminal's sheet, places itself again)
-  const update = () => { const was = document.documentElement.classList.contains("typing"), now = typing(); if (was === now) return; document.documentElement.classList.toggle("typing", now); dispatchEvent(new Event("resize")); };
+  const update = () => document.documentElement.classList.toggle("typing", typing());
   document.addEventListener("focusin", update);
   document.addEventListener("focusout", () => setTimeout(update, 0));
 }
