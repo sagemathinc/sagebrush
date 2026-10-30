@@ -24,10 +24,5 @@ export interface OpenTerminal {
 export function openTerminal(o: OpenTerminal): TerminalPanel {
   const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, "./", { signal })).shell);
   const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }) });
-  const ended = term.onEnd;
-  term.onEnd = () => {
-    host.endShell("the terminal was ended");
-    ended?.();
-  };
-  return term;
+  return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }

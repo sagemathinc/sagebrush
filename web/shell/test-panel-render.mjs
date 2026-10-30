@@ -11,10 +11,26 @@ const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
 const ALL = { bytes: Infinity, spans: Infinity, ms: Infinity };
-function render(out, err = "") {
-  const r = new Render(out, err, () => 0);
-  const runs = [];
-  for (let s; (s = r.next(ALL)); ) runs.push(...s);
+// (as web/shell/panel.ts paints: a restart run takes back the open line's runs, those since its last line end)
+function apply(runs) {
+  const kept = [];
+  let open = 0;
+  for (const x of runs) {
+    if (x.restart) {
+      kept.splice(kept.length - open, open);
+      open = 0;
+      continue;
+    }
+    kept.push(x);
+    open = x.text.endsWith("\n") ? 0 : open + 1;
+  }
+  return kept;
+}
+function render(out, err = "", budget = ALL, now = () => 0) {
+  const r = new Render(out, err, now);
+  const raw = [];
+  for (let s; (s = r.next(budget)); ) raw.push(...s);
+  const runs = apply(raw);
   return { runs, text: runs.map((x) => x.text).join(""), totals: r.totals };
 }
 const PLAIN = { fg: -1, bg: -1, b: false, i: false, u: false, rev: false };
@@ -44,6 +60,22 @@ check(render("\x1b]0;title\x07").text === "␛]0;title␇", "OSC and BEL shown")
 check(render("a\x00b\x7f").text === "a␀b␡", "NUL and DEL shown");
 check(render("\x1b").text === "␛", "a lone ESC shown");
 check(render("<b>&amp;</b>").text === "<b>&amp;</b>", "markup is text");
+
+// TP-2: a lone \r over a line longer than one slice: the same text whatever the slicing (bytes, runs, a clock whose
+// 8 ms cut falls mid-line), and the totals take the dropped runs back
+{
+  const prog = Array.from({ length: 20001 }, (_, i) => "\rprogress " + String(i).padStart(5)).join("") + "\n" +
+    "\x1b[32mok\x1b[0m " + Array.from({ length: 3000 }, (_, i) => "\r\x1b[31m" + i + "\x1b[0m%").join("") + "\n";
+  const want = render(prog).text;
+  let tick = 0;
+  const budgets = [["one byte", { bytes: 1, spans: Infinity, ms: Infinity }], ["one run", { bytes: Infinity, spans: 1, ms: Infinity }],
+    ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }], ["8 ms on an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }]];
+  check(want === "progress 20000\n2999%\n", `a progress line, one slice: ${JSON.stringify(want)}`);
+  for (const [what, b] of budgets) {
+    const r = render(prog, "", b, what.startsWith("8 ms") ? () => (tick += 0.37) : () => 0);
+    check(r.text === want && r.totals.units === want.length, `a progress line, sliced by ${what}: the same text (${JSON.stringify(r.text.slice(0, 60))}), units ${r.totals.units}`);
+  }
+}
 
 // stderr: marked, on its own line
 {
@@ -112,8 +144,28 @@ for (const [what, out] of [
   const t = r.totals;
   const text = runs.map((x) => x.text).join("");
   check(t.units <= CAPS.units && t.lines <= CAPS.lines && t.spans <= CAPS.spans && text.length === t.units, `${what}: within the per-command caps (${JSON.stringify(t)})`);
-  check(t.omitted === r.totalBytes - t.consumed, `${what}: omitted = original bytes - consumed (${t.omitted})`);
+  check(t.omitted === utf8Bytes(out) - t.consumed, `${what}: omitted = original bytes - consumed (${t.omitted})`);
   check(t.omitted === 0 ? runs.at(-1)?.cls !== "sb-omit" : runs.at(-1).text.replace(/^\n/, "") === `[\u2026 ${t.omitted} more bytes not shown]`, `${what}: the omission line says exactly that`);
+}
+
+// E5.5 (DB2-TERM-326-1): no slice scans more than its byte budget, construction included: a 32 MiB result whose
+// 31 MiB tail is omitted takes many slices, each charged at most its 64 KiB plus one token (a plain run: 4 096
+// scalars, at most 16 KiB), and the omitted count is still exact
+{
+  const MiB = 1048576, BUDGET = { bytes: 65536, spans: Infinity, ms: Infinity };
+  const tail = "\u00e9".repeat(16 * MiB); // 2 bytes each: 32 MiB
+  const err = "e".repeat(MiB);
+  const r = new Render(tail, err, () => 0);
+  let calls = 0, maxStep = 0, prev = 0;
+  for (let sl; (sl = r.next(BUDGET)); calls++) {
+    const t = r.totals, done = t.consumed + t.work;
+    maxStep = Math.max(maxStep, done - prev);
+    prev = done;
+  }
+  const t = r.totals;
+  check(maxStep <= 65536 + 16384, `a large omitted tail: every slice's scan within its budget plus one token (max ${maxStep} B)`);
+  check(calls >= Math.floor((32 * MiB + MiB) / (65536 + 16384)), `a large omitted tail takes many slices (${calls})`);
+  check(t.omitted === 32 * MiB + MiB - t.consumed, `a large omitted tail: the omitted count exact (${t.omitted})`);
 }
 
 // the scrollback (E5.4): evictCount at each cap's value and one past, several commands whose sum crosses each cap,
@@ -155,6 +207,41 @@ for (const key of ["units", "lines", "spans"]) {
 check(evictCount([{ ...Z, units: 5 }], { ...Z, units: SCROLLBACK.units * 2 }, 0) === 0, "scrollback: the newest command is never dropped");
 check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.lines + 2 + 1 <= SCROLLBACK.lines && CAPS.spans + 2 + 1 <= SCROLLBACK.spans,
   "scrollback: a command at its own caps, with its prompt and exit lines and the marker, always fits");
+
+// TP-9: no class name outside the fixed table: every SGR parameter 0..255, alone, after 7, and in 38/48 forms
+{
+  const TABLE = new Set(["sb-fg-rev", "sb-bg-rev", "sb-b", "sb-i", "sb-u"]);
+  for (let i = 0; i < 16; i++) for (const k of ["fg", "bg", "fga"]) TABLE.add(`sb-${k}-${i}`);
+  const seen = new Set();
+  const forms = [];
+  for (let p = 0; p < 256; p++) forms.push([p], [7, p], [p, 7], [38, 5, p], [48, 5, p], [38, 2, p, p, p], [48, 2, p, 0, p], [p, 41, 7], [p, 102]);
+  for (const ps of forms) for (const c of classOf(applySgr(PLAIN, ps)).split(" ").filter(Boolean)) seen.add(c);
+  for (const ps of forms) {
+    const r = render(`\x1b[${ps.join(";")}mx`);
+    for (const x of r.runs) for (const c of x.cls.split(" ").filter(Boolean)) seen.add(c);
+  }
+  const outside = [...seen].filter((c) => !TABLE.has(c));
+  check(outside.length === 0 && seen.size >= 50, `every class from the fixed table (${seen.size} seen${outside.length ? "; outside: " + outside.join(" ") : ""})`);
+}
+
+// TP-9: both themes' contrast, computed from the palette the panel injects: each of the 16 >= 4.5:1 on its theme's
+// background (min 4.91 light, 6.15 dark), and the background-only rule (sb-fga-N: the theme's bg as text) the better
+// of the theme's fg and bg on every one of the 16
+{
+  const { palette } = await import("./panel.ts");
+  const css = palette();
+  const blocks = [...css.matchAll(/\{([^{}]*--sb-term-c0[^{}]*)\}/g)].map((m) => Object.fromEntries([...m[1].matchAll(/--sb-term-(\w+):(#[0-9a-f]{6})/g)].map((x) => [x[1], x[2]]))).filter((b) => b.c0 && b.bg);
+  const lin = (c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const L = (h) => 0.2126 * lin(parseInt(h.slice(1, 3), 16)) + 0.7152 * lin(parseInt(h.slice(3, 5), 16)) + 0.0722 * lin(parseInt(h.slice(5, 7), 16));
+  const cr = (a, b) => { const [x, y] = [L(a), L(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  check(blocks.length === 3 && JSON.stringify(blocks[1]) === JSON.stringify(blocks[2]), `the palette: light, dark, and dark again for the system setting (${blocks.length} blocks)`);
+  for (const [name, t, minWant] of [["light", blocks[0], 4.91], ["dark", blocks[1], 6.15]]) {
+    const ratios = Array.from({ length: 16 }, (_, i) => cr(t["c" + i], t.bg));
+    const min = Math.min(...ratios);
+    check(min >= 4.5 && Math.abs(min - minWant) < 0.005, `${name}: every colour >= 4.5:1 on the background (min ${min.toFixed(2)})`);
+    check(Array.from({ length: 16 }, (_, i) => cr(t.bg, t["c" + i]) >= cr(t.fg, t["c" + i])).every(Boolean), `${name}: on each colour as a background, the theme's bg reads better than its fg (sb-fga-N)`);
+  }
+}
 
 if (fails.length) {
   console.log(`test-panel-render: ${fails.length} of ${checks} FAILED:\n  ` + fails.join("\n  "));

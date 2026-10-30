@@ -20,7 +20,9 @@ export const CAPS = Object.freeze({
 /** A slice ends at whichever comes first (E5.5): consumed input bytes, runs, or elapsed ms. */
 export const SLICE = Object.freeze({ bytes: 64 * 1024, spans: 1000, ms: 8 });
 
-export type Run = { text: string; cls: string; err: boolean };
+/** A run of one style; `restart`: a lone \r over runs of the open line already returned in an earlier slice:
+ * the painter removes what it put in for this line since its start (TP-2: the same text whatever the slicing). */
+export type Run = { text: string; cls: string; err: boolean; restart?: true };
 
 type Style = { fg: number; bg: number; b: boolean; i: boolean; u: boolean; rev: boolean };
 const PLAIN: Style = Object.freeze({ fg: -1, bg: -1, b: false, i: false, u: false, rev: false });
@@ -109,18 +111,20 @@ export class Render {
   private omitted = 0; // the original UTF-8 bytes not shown
   private stopped = false;
   private finished = false;
-  private budgets: [number, number];
+  // (S1's budgets, stdout's and stderr's: set inside the first slice, from at most 64 KiB of stderr; stderr's from
+  // what stdout actually consumed, when stdout ends)
+  private budgets: [number, number] | null = null;
+  private consumedOut = 0;
+  // (the bytes scanned without being consumed: the stderr reservation's look, the omitted tail's count; charged
+  // to the same slice budget as consumed input, so no slice does more than its budget of scanning: E5.5)
+  private work = 0;
   // (the current line's runs since its last \r: a lone \r drops them before they are returned)
   private line: Run[] = [];
-  readonly totalBytes: number;
+  // (the open line's runs already returned at a slice's end: units and runs, for a later lone \r to take back)
+  private lineOut = { units: 0, spans: 0 };
 
-  constructor(private out: string, private err: string, private now: () => number = () => performance.now()) {
-    const ob = utf8Bytes(out), eb = utf8Bytes(err);
-    this.totalBytes = ob + eb;
-    const errKeep = Math.min(eb, CAPS.errReserve);
-    const outBudget = Math.min(ob, CAPS.inBytes - errKeep);
-    this.budgets = [outBudget, Math.min(eb, CAPS.inBytes - outBudget)];
-  }
+  /** Nothing is scanned here: every byte's work is inside a slice (next()). */
+  constructor(private out: string, private err: string, private now: () => number = () => performance.now()) {}
 
   /** The omission line's text (charged against the caps in advance). */
   static marker(n: number): string {
@@ -143,27 +147,62 @@ export class Render {
   }
 
   /** Moves the current line's runs to `out` (at a \n, or at the end). */
-  private flush(out: Run[]) {
-    for (const r of this.line) out.push(r);
+  private flush(out: Run[], midLine = false) {
+    for (const r of this.line) {
+      out.push(r);
+      if (midLine) (this.lineOut.units += r.text.length), this.lineOut.spans++;
+    }
     this.line = [];
+    if (!midLine) this.lineOut = { units: 0, spans: 0 };
   }
+
 
   /** The next slice's runs, or null when the output is done. */
   next(budget: { bytes: number; spans: number; ms: number } = SLICE): Run[] | null {
     if (this.finished) return null;
     const out: Run[] = [];
     const t0 = this.now();
-    const b0 = this.consumed, s0 = this.spans;
+    const b0 = this.consumed, s0 = this.spans, w0 = this.work;
+    const spent = () => this.consumed - b0 + (this.work - w0);
+    if (!this.budgets) {
+      // (stderr's reservation needs only its first 64 KiB: scanned no further, and charged)
+      let eb = 0;
+      for (let j = 0; j < this.err.length && eb < CAPS.errReserve; ) {
+        const c = this.err.codePointAt(j)!;
+        eb += utf8Len(c);
+        j += c > 0xffff ? 2 : 1;
+      }
+      this.work += eb;
+      this.budgets = [CAPS.inBytes - Math.min(eb, CAPS.errReserve), 0];
+    }
     while (this.part < 2) {
-      if (this.consumed - b0 >= budget.bytes || this.spans - s0 >= budget.spans || this.now() - t0 >= budget.ms) {
-        this.flush(out);
+      if (spent() >= budget.bytes || this.spans - s0 >= budget.spans || this.now() - t0 >= budget.ms) {
+        this.flush(out, true);
         return out;
       }
       const src = this.part === 0 ? this.out : this.err;
       const err = this.part === 1;
+      if (this.stopped && this.pos < src.length) {
+        // (the omitted tail, counted exactly in original bytes, in place and incrementally: as much as this slice's
+        // budget has left, then the loop's top decides whether the slice ends)
+        let j = this.pos, n = 0;
+        const lim = budget.bytes - spent();
+        while (j < src.length && n < lim) {
+          const c = src.codePointAt(j)!;
+          n += utf8Len(c);
+          j += c > 0xffff ? 2 : 1;
+        }
+        this.omitted += n;
+        this.work += n;
+        this.pos = j;
+        continue;
+      }
       if (this.stopped || this.pos >= src.length) {
-        // (this part's end: what wasn't consumed is omitted, counted exactly in original bytes)
-        if (this.pos < src.length) this.omitted += utf8Bytes(src.slice(this.pos));
+        // (this part's end; stdout's: stderr gets what stdout left of the 1 MiB)
+        if (this.part === 0) {
+          this.consumedOut = this.consumed;
+          this.budgets[1] = CAPS.inBytes - this.consumedOut;
+        }
         this.part++;
         this.pos = 0;
         this.stopped = false;
@@ -217,7 +256,7 @@ export class Render {
         shown = src.slice(this.pos, j);
       }
       // S1: the input budget, cut at a scalar boundary and never inside an escape token
-      const left = this.budgets[this.part] - (this.part === 0 ? this.consumed : this.consumed - this.budgets[0]);
+      const left = this.budgets[this.part] - (this.part === 0 ? this.consumed : this.consumed - this.consumedOut);
       if (bytes > left) {
         if (shown && !sgr) {
           // (as much of a plain run as fits, whole scalars only)
@@ -247,10 +286,17 @@ export class Render {
           continue;
         }
       } else if (cr) {
-        // (a lone \r: back to the line's start; the runs since the line began are dropped, uncounted)
+        // (a lone \r: back to the line's start; the runs since the line began are dropped, uncounted, those this
+        // slice holds and those an earlier slice returned: the painter takes those back on the restart run)
         for (const r of this.line) this.units -= r.text.length;
         this.spans -= this.line.length;
         this.line = [];
+        if (this.lineOut.spans) {
+          this.units -= this.lineOut.units;
+          this.spans -= this.lineOut.spans;
+          this.lineOut = { units: 0, spans: 0 };
+          out.push({ text: "", cls: "", err, restart: true });
+        }
       } else if (!this.show(out, shown, err)) {
         this.stopped = true;
         continue;
@@ -287,7 +333,7 @@ export class Render {
     if (this.lines + 1 > CAPS.lines) return false;
     if (this.units + 1 > CAPS.units - Render.MARK_UNITS) return false;
     const last = out[out.length - 1];
-    if (last && last.err === err && (last.cls === "" || err)) last.text += "\n";
+    if (last && !last.restart && last.err === err && (last.cls === "" || err)) last.text += "\n";
     else {
       if (this.spans + 1 > CAPS.spans - 1) return false;
       out.push({ text: "\n", cls: "", err });
@@ -320,7 +366,7 @@ export class Render {
 
   /** The totals so far, for the tests and the scrollback's caps. */
   get totals() {
-    return { units: this.units, spans: this.spans, lines: this.lines, consumed: this.consumed, omitted: this.omitted };
+    return { units: this.units, spans: this.spans, lines: this.lines, consumed: this.consumed, omitted: this.omitted, work: this.work };
   }
 }
 
