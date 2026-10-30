@@ -31,7 +31,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       diff?: { path: string; before: string; after: string };
     }
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string }
-  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff"; title: string; lang?: string; body: string }
+  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
@@ -74,6 +74,8 @@ export interface Artifact {
   lang?: string;
   body: string;
   turn_id: string;
+  // a workspace file: the pane shows (and edits) the file itself
+  path?: string;
 }
 
 // A turn's parts in arrival order: what the page lays out top to bottom.
@@ -191,7 +193,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       break;
     case "artifact": {
       const existing = thread.artifacts.find((a) => a.id === e.id);
-      const value: Artifact = { id: e.id, kind: e.kind, title: e.title, lang: e.lang, body: e.body, turn_id: e.turn_id };
+      const value: Artifact = { id: e.id, kind: e.kind, title: e.title, lang: e.lang, body: e.body, turn_id: e.turn_id, ...(e.path ? { path: e.path } : {}) };
       if (existing) Object.assign(existing, value);
       else {
         thread.artifacts.push(value);

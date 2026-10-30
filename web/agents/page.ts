@@ -1,14 +1,20 @@
 // The agents chat preview (web/agents): a full-page chat with artifacts beside
 // it, the model claude.ai and chatgpt.com have converged on. The chat is
 // primary; an artifact opens floating to the right, or full screen. This
-// preview drives it with a scripted agent (fake-agent.ts); the real one
-// speaks the same turn events (events.ts). Threads are kept in this
-// browser's localStorage only.
+// preview drives it with a scripted agent (fake-agent.ts), or with Claude on
+// the person's own computer (sagebrush-agent, paired over the loopback
+// address like any agent: design/workspace-agent-protocol.md), which speaks
+// the same turn events (events.ts). Files the agent writes are workspace
+// files (this browser's workspace), shown and edited beside the chat.
+// Threads are kept in this browser's localStorage.
 
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
+import type { AgentPairing } from "../workspace/agent-pair";
+import { mountAgentPairing } from "../workspace/agent-ui";
+import { Workspace } from "../workspace/api";
 
 const STORE = "sagebrush-agents-preview-v1";
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -44,7 +50,12 @@ function save() {
   saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(state)), 300);
 }
 
-const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // by thread
+const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
+const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
+let pairing: AgentPairing | null = null;
+let workspace: Workspace | null = null; // this browser's workspace: where the paired agent's files are
+const live = () => pairing?.state === "granted";
+const isRunning = (thread: Thread) => agents.has(thread.id) || liveRunning.has(thread.id);
 const queues = new Map<string, UserEntry[]>(); // queued messages, by thread
 let openArtifact: string | null = null;
 let fullscreen = false;
@@ -66,22 +77,20 @@ function submit(mode: UserEntry["mode"]) {
   const text = editor.value.trim();
   if (!text) return;
   const thread = current();
-  const running = agents.get(thread.id);
-  if (mode === "sent" && running) {
-    // Sending while a turn runs interrupts it, as in Claude Code.
-    running.turn.interrupt();
-  }
-  if (mode === "queued" && !running) mode = "sent";
+  const busy = isRunning(thread);
+  if (mode === "queued" && !busy) mode = "sent";
   const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
   thread.entries.push(entry);
   if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
   editor.value = "";
   if (mode === "queued") {
     queues.set(thread.id, [...(queues.get(thread.id) ?? []), entry]);
+  } else if (mode === "sent" && busy) {
+    // Sending while a turn runs interrupts it, as in Claude Code; this goes first once it has stopped.
+    queues.set(thread.id, [entry, ...(queues.get(thread.id) ?? [])]);
+    interrupt(thread);
   } else if (mode === "sent") {
-    const go = () => startTurn(thread, text);
-    if (running) running.turn.done.then(go);
-    else go();
+    send(thread, entry);
   }
   save();
   renderAll();
@@ -95,14 +104,57 @@ function startTurn(thread: Thread, prompt: string) {
   renderComposer();
   turn.done.then(() => {
     if (agents.get(thread.id)?.turn === turn) agents.delete(thread.id);
-    const next = queues.get(thread.id)?.shift();
-    if (next) {
-      next.mode = "sent";
-      save();
-      startTurn(thread, next.text);
-    }
-    renderAll();
+    next(thread);
   });
+}
+
+// The next queued message, once a turn has ended.
+function next(thread: Thread) {
+  const entry = queues.get(thread.id)?.shift();
+  if (entry) {
+    entry.mode = "sent";
+    save();
+    send(thread, entry);
+  }
+  renderAll();
+}
+
+function send(thread: Thread, entry: UserEntry) {
+  if (live()) {
+    liveRunning.add(thread.id);
+    if (!pairing!.notify("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text })) {
+      liveRunning.delete(thread.id);
+      toast("The agent is disconnected");
+    }
+    renderComposer();
+  } else {
+    startTurn(thread, entry.text);
+  }
+}
+
+function interrupt(thread: Thread) {
+  const scripted = agents.get(thread.id);
+  if (scripted) scripted.turn.interrupt();
+  else if (liveRunning.has(thread.id)) pairing?.notify("chat.interrupt", { conversation: thread.id });
+}
+
+function answer(thread: Thread, attention: string, approve: boolean) {
+  const scripted = agents.get(thread.id);
+  if (scripted) scripted.turn.answer(attention, approve);
+  else pairing?.notify("chat.permission", { request_id: attention, behavior: approve ? "allow" : "deny" });
+}
+
+// What the paired agent says: turn events for one of this page's threads.
+function onAgent(method: string, params: unknown) {
+  if (method !== "turn.event") return;
+  const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
+  const thread = state.threads.find((t) => t.id === p?.conversation);
+  if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+  emitTo(thread, p.turn_id, p.event as Draft);
+  if (p.event.type === "turn_finished") {
+    liveRunning.delete(thread.id);
+    next(thread);
+  }
 }
 
 function speed() {
@@ -145,7 +197,7 @@ function renderSidebar() {
     const a = document.createElement("button");
     a.className = "thread" + (t.id === state.current ? " on" : "");
     a.textContent = t.title;
-    if (agents.has(t.id)) a.append(Object.assign(document.createElement("span"), { className: "dot", title: "working" }));
+    if (isRunning(t)) a.append(Object.assign(document.createElement("span"), { className: "dot", title: "working" }));
     a.onclick = () => {
       state.current = t.id;
       openArtifact = t.artifacts.at(-1)?.id ?? null;
@@ -224,7 +276,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
       parts.push(toolHtml(turn.tools[p.call]));
     } else if (p.kind === "attention") {
       const a = turn.attention[p.id];
-      const open = a.state === "open" && agents.get(thread.id)?.turn_id === turn.turn_id;
+      const open = a.state === "open" && !turn.outcome;
       parts.push(
         `<div class="attention ${a.state}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
@@ -251,7 +303,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
-      agents.get(thread.id)?.turn.answer(att, b.dataset.approve === "1");
+      answer(thread, att, b.dataset.approve === "1");
     };
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
@@ -297,12 +349,18 @@ function diffHtml(before: string, after: string): string {
   return `<div class="diff">${rows.join("")}</div>`;
 }
 
+// What the pane shows, so streaming frames don't redraw it (an editor in it keeps its caret).
+let paneKey = "";
+
 function renderArtifacts() {
   const thread = current();
   const pane = $("#artifacts");
   const a = thread.artifacts.find((x) => x.id === openArtifact);
   document.body.classList.toggle("has-artifact", !!a);
   document.body.classList.toggle("fullscreen", !!a && fullscreen);
+  const key = a ? JSON.stringify([thread.id, thread.artifacts.map((x) => x.id), a.id, a.body, fullscreen, !!workspace]) : "";
+  if (key === paneKey) return;
+  paneKey = key;
   if (!a) {
     pane.innerHTML = "";
     return;
@@ -311,7 +369,8 @@ function renderArtifacts() {
     .map((x) => `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}</button>`)
     .join("");
   let body: string;
-  if (a.kind === "markdown") body = `<div class="doc board-text">${md(a.body)}</div>`;
+  if (a.path && workspace) body = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
+  else if (a.kind === "markdown") body = `<div class="doc board-text">${md(a.body)}</div>`;
   else if (a.kind === "diff") {
     const d = JSON.parse(a.body) as { before: string; after: string };
     body = diffHtml(d.before, d.after);
@@ -325,15 +384,68 @@ function renderArtifacts() {
   for (const t of pane.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
   $("#full", pane).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
   $("#close", pane).onclick = () => ((openArtifact = null), (fullscreen = false), renderArtifacts());
+  let copyText = () => (a.kind === "diff" ? (JSON.parse(a.body) as { after: string }).after : a.body);
+  if (a.path && workspace) copyText = mountFile(a, $(".file-body", pane), $(".saved", pane));
   $("#copy", pane).onclick = () => {
-    const text = a.kind === "diff" ? (JSON.parse(a.body) as { after: string }).after : a.body;
-    navigator.clipboard?.writeText(text).then(() => toast("Copied"), () => toast("Couldn't copy"));
+    navigator.clipboard?.writeText(copyText()).then(() => toast("Copied"), () => toast("Couldn't copy"));
   };
   typeset(pane);
 }
 
+// An artifact that is a workspace file: the file itself, editable here (saved as the person, with its
+// revision as base, so a change the agent made meanwhile is never overwritten). Returns its current text.
+function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): () => string {
+  const path = a.path!;
+  let rev = -1;
+  let text = a.body;
+  let timer = 0;
+  const say = (s: string) => (saved.textContent = s);
+  const write = async (value: string) => {
+    try {
+      const r = await workspace!.write(path, value, rev >= 0 ? { base: rev } : {});
+      rev = r.rev;
+      say("saved");
+    } catch (e) {
+      say(`not saved: ${(e as Error).message}`);
+    }
+  };
+  const changed = (value: string) => {
+    text = value;
+    say("editing…");
+    clearTimeout(timer);
+    timer = window.setTimeout(() => void write(value), 700);
+  };
+  let set: (v: string) => void;
+  if (a.kind === "markdown") {
+    const ed = new BlockEditor(text, { render: md, typeset: (el) => typeset(el), onChange: changed });
+    ed.el.classList.add("doc");
+    box.append(ed.el);
+    set = (v) => (ed.value = v);
+  } else {
+    const ta = document.createElement("textarea");
+    ta.className = "code-edit";
+    ta.spellcheck = false;
+    ta.value = text;
+    ta.oninput = () => changed(ta.value);
+    box.append(ta);
+    set = (v) => (ta.value = v);
+  }
+  // (the file as it is now: the agent may have written it again since this artifact)
+  workspace!.read(path).then(
+    (r) => {
+      rev = r.rev;
+      if (typeof r.content === "string" && r.content !== text) {
+        text = r.content;
+        set(text);
+      }
+    },
+    () => say("(not in this browser's workspace)"),
+  );
+  return () => text;
+}
+
 function renderComposer() {
-  const running = agents.has(current().id);
+  const running = isRunning(current());
   $("#send").textContent = running ? "Send now" : "Send";
   $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : "Send (Shift+Enter)";
   $("#queue").hidden = !running;
@@ -368,7 +480,7 @@ $("#editor").append(editor.el);
 $("#send").onclick = () => submit("sent");
 $("#queue").onclick = () => submit("queued");
 $("#note").onclick = () => submit("note");
-$("#stop").onclick = () => agents.get(current().id)?.turn.interrupt();
+$("#stop").onclick = () => interrupt(current());
 $("#new").onclick = () => {
   const t = newThread(id(), "New chat");
   state.threads.push(t);
@@ -390,8 +502,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" && fullscreen) {
     fullscreen = false;
     renderArtifacts();
-  } else if (e.key === "Escape" && agents.has(current().id) && !editor.field) {
-    agents.get(current().id)?.turn.interrupt();
+  } else if (e.key === "Escape" && isRunning(current()) && !editor.field) {
+    interrupt(current());
   }
 });
 
@@ -400,6 +512,52 @@ for (const t of state.threads) {
   const r = runningTurn(t);
   if (r) emitTo(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
 }
+// The workspace, and the pairing with an agent on this computer (a ?pair=CODE&port=N link opens it at once).
+try {
+  workspace = await Workspace.open();
+} catch {
+  workspace = null; // (no IndexedDB: the scripted demo still works)
+}
+$("#connect").hidden = !workspace;
+if (workspace) {
+  mountAgentPairing(workspace, {
+    button: $("#connect"),
+    onPairing(p) {
+      pairing = p;
+      p.onNotification(onAgent);
+      p.onChange(() => {
+        if (p.state === "closed" && pairing === p) {
+          // (turns the agent can no longer finish end here, as interrupted)
+          for (const tid of [...liveRunning]) {
+            const thread = state.threads.find((t) => t.id === tid);
+            const r = thread && runningTurn(thread);
+            if (thread && r) emitTo(thread, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
+          }
+          liveRunning.clear();
+        }
+        renderHeader();
+        renderComposer();
+      });
+      renderHeader();
+    },
+  });
+}
+$("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+
+function renderHeader() {
+  const who = $("#who");
+  if (live()) {
+    who.innerHTML = `<span class="conn on"></span>Claude <small>on your computer · ${esc(pairing!.hello?.agent.name ?? "")}</small>`;
+  } else if (pairing && pairing.state === "paired") {
+    who.innerHTML = `<span class="conn wait"></span>Claude <small>connected: allow it in the dialog</small>`;
+  } else {
+    who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
+  }
+  $("#connect").textContent = live() ? "Connected" : "Connect Claude";
+  $("#connect").toggleAttribute("disabled", live());
+}
+
+renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
 renderAll();
 scrollToEnd(true);
