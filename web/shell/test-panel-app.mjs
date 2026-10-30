@@ -3,7 +3,8 @@
 // included), in headless Chromium with window.__TAURI__ before the page's scripts, as the app's web view has it.
 // Twice: cross-origin isolated, as the desktop app, and not (--no-coi), as Android's web view, which has no
 // SharedArrayBuffer.  Each time ⋯ ▸ Terminal shows, the dock opens, the bash set loads from the app's own files,
-// and `echo ok` prints ok; the worker comes with its own policy (no network).
+// and `echo ok` prints ok; the worker comes with its own policy, and from inside it a fetch (this origin's, another's),
+// a module from another origin and a worker of its own are refused by that policy.
 //   bun web/build.ts && node app/build-frontend.mjs && bun web/shell/test-panel-app.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
@@ -32,14 +33,17 @@ try {
   await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
   let seq = 0;
   const waiting = new Map();
+  // (the page's workers, attached as they start: the shell worker's session, by its script)
+  const workers = new Map();
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) (waiting.get(m.id)(m), waiting.delete(m.id));
+    if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") workers.set(m.params.targetInfo.url, m.params.sessionId);
   };
-  const send = (method, params = {}) => new Promise((r) => {
+  const send = (method, params = {}, sessionId) => new Promise((r) => {
     const id = ++seq;
     waiting.set(id, r);
-    ws.send(JSON.stringify({ id, method, params }));
+    ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const evaluate = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -57,6 +61,7 @@ try {
   };
   // (the app's start: no files handed to it, no self-test; app/src-tauri/src/lib.rs's commands)
   await send("Page.enable");
+  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__TAURI__ = { core: { invoke: async (c) => (c === "startup_files" ? [] : null) }, event: { listen: async () => () => {} } };` });
   for (const coi of [true, false]) {
     const as = coi ? "the desktop app (isolated)" : "Android (not isolated)";
@@ -86,6 +91,30 @@ try {
     await until(`document.querySelectorAll(".sb-term-cmd").length >= 1 && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""`, 60000);
     const r = await evaluate(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return c && { out: c.querySelector(".sb-term-out")?.textContent, status: document.querySelector(".sb-term-status").textContent }; })()`);
     check(r?.out === "ok\n" && r.status === "done", `${as}: echo ok prints ok: ${JSON.stringify(r)}`);
+    // The policy at work in the shell worker itself, from inside it (R-380-3, astra's S2): a fetch of this origin's own
+    // page and one of another origin (localhost, the same server, readable from anywhere: app/serve-app.py), a module imported
+    // from that other origin, and a worker of its own, each refused, and each refusal the policy's (a
+    // securitypolicyviolation event names its directive; the shell's own sandbox would refuse without one).  No
+    // network connections; a module from this origin is still allowed (script-src 'self')
+    const wsess = [...workers].find(([u]) => u === `http://127.0.0.1:${port}/shell/worker-boot.js`)?.[1];
+    const probe = wsess && (await send("Runtime.evaluate", { awaitPromise: true, returnByValue: true, expression: `(async () => {
+      const seen = [];
+      self.addEventListener("securitypolicyviolation", (e) => seen.push(e.effectiveDirective));
+      const own = await fetch(location.origin + "/index.html", { cache: "no-store" }).then((r) => "fetched " + r.status, (e) => "refused");
+      const other = await fetch("http://localhost:${port}/index.html", { mode: "no-cors", cache: "no-store" }).then((r) => "fetched", (e) => "refused");
+      const mod = await import("http://localhost:${port}/shell/worker-boot.js").then(() => "imported", (e) => "refused");
+      let worker;
+      try {
+        const w = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));
+        worker = await new Promise((r) => { w.onmessage = () => r("ran"); w.onerror = () => r("refused"); setTimeout(() => r("no answer"), 5000); });
+        w.terminate();
+      } catch (e) { worker = "refused " + e.name; }
+      await new Promise((r) => setTimeout(r, 500));
+      return { own, other, mod, worker, seen: seen.sort() };
+    })()` }, wsess))?.result?.result?.value;
+    check(!!probe && probe.own === "refused" && probe.other === "refused" && probe.mod === "refused" && /^refused/.test(probe.worker) &&
+      probe.seen.filter((d) => d === "connect-src").length === 2 && probe.seen.includes("worker-src") && probe.seen.some((d) => /^script-src/.test(d)),
+      `${as}: in the shell worker, a fetch of this origin and of another, a module from another origin, and a worker of its own, refused by its policy (connect-src, script-src, worker-src): ${wsess ? JSON.stringify(probe) : "no shell worker attached: " + JSON.stringify([...workers.keys()])}`);
   }
   ws.close();
 } finally {

@@ -5,7 +5,9 @@ plugin's on_request), for a test of the app's page in a browser:
 Every response: COOP/COEP, as the desktop app's (--no-coi: without them, as
 Android's web view, which is not cross-origin isolated); the Terminal's
 shell worker (/shell/worker-boot.js): the CSP lib.rs's SHELL_WORKER_CSP gives
-it, read from lib.rs itself.  No other header: the app sets no CSP of its own.
+it, read from lib.rs itself.  No other header: the app sets no CSP of its own.  (One exception, for
+the tests only: requests to localhost, the probes' "other origin", come back
+readable from anywhere: see end_headers.)
 
 Port 0: the system picks a free port, and the server prints it (one line, on
 stdout) once it is listening (web/test-port.mjs startServe)."""
@@ -32,6 +34,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if COI:
             self.send_header("Cross-Origin-Opener-Policy", "same-origin")
             self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        # (localhost, not the app's 127.0.0.1: the "other origin" of web/shell/test-panel-app.mjs's probes, served
+        # as a permissive site elsewhere may be, readable from anywhere; so only the shell worker's policy refuses it)
+        if self.headers.get("Host", "").split(":")[0] == "localhost":
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
         # (lib.rs: the path, its query or fragment cut off, exactly)
         if re.split(r"[?#]", self.path, maxsplit=1)[0] == "/shell/worker-boot.js":
             self.send_header("Content-Security-Policy", SHELL_WORKER_CSP)
