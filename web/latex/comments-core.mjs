@@ -31,6 +31,8 @@ export function sha256Hasher() {
   const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]), W = new Uint32Array(64);
   const r = (x, k) => (x >>> k) | (x << (32 - k));
   const pend = new Uint8Array(64); let np = 0, total = 0;
+  // (one encode buffer, grown when a piece needs more and reused: hashing in pieces allocates nothing per piece)
+  const enc = new TextEncoder(); let buf = new Uint8Array(0);
   const block = (b, o) => {
     for (let i = 0; i < 16; i++) W[i] = (b[o + 4 * i] << 24) | (b[o + 4 * i + 1] << 16) | (b[o + 4 * i + 2] << 8) | b[o + 4 * i + 3];
     for (let i = 16; i < 64; i++) { const s0 = r(W[i - 15], 7) ^ r(W[i - 15], 18) ^ (W[i - 15] >>> 3), s1 = r(W[i - 2], 17) ^ r(W[i - 2], 19) ^ (W[i - 2] >>> 10); W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0; }
@@ -48,7 +50,10 @@ export function sha256Hasher() {
     while (i < b.length) pend[np++] = b[i++];
   };
   return {
-    update(piece) { bytes(new TextEncoder().encode(piece)); return this; },
+    update(piece) {
+      if (buf.length < piece.length * 3) buf = new Uint8Array(piece.length * 3);
+      bytes(buf.subarray(0, enc.encodeInto(piece, buf).written)); return this;
+    },
     digest() {
       const bits = total * 8, tail = new Uint8Array(((np + 9 + 63) >> 6) << 6);
       tail.set(pend.subarray(0, np)); tail[np] = 0x80;
@@ -59,6 +64,14 @@ export function sha256Hasher() {
   };
 }
 export const sha256 = (str) => sha256Hasher().update(str).digest();
+/** A text's SHA-256 a piece at a time, yielding after each piece ({size}) and returning the digest: the first piece
+ * `first` units, each next one twice the last, up to `max` (the code is cold for the first pieces: short ones keep
+ * those steps short); never cut inside a surrogate pair. */
+export function* sha256Steps(text, first = 256, max = 1 << 13) {
+  const h = sha256Hasher();
+  for (let i = 0, n = first; i < text.length; n = Math.min(2 * n, max)) { const j = sliceAt(text, i + n); h.update(text.slice(i, j)); yield { size: j - i }; i = j; }
+  return h.digest();
+}
 /** Where to cut a string near `i` for slicing (never inside a surrogate pair). */
 export const sliceAt = (s, i) => (i < s.length && i > 0 && (s.charCodeAt(i - 1) & 0xfc00) === 0xd800 ? i + 1 : Math.min(i, s.length));
 
@@ -171,6 +184,8 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   let lineIdx = null;
   const lines = () => (lineIdx ??= lineIndex(text));
   const can = (n) => work + n <= budget;
+  // (the last bounded step a generator yielded after: its kind and size, for the page's slice record)
+  let last = null;
   // every copy of the source goes through here, after its length was checked against the budget and charged
   // (onCopy: the tests' seam, told each copy's span)
   const copy = (a, b) => { onCopy?.(a, b); return text.slice(a, b); };
@@ -198,7 +213,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
       const i = text.indexOf(s, at);
       work += i < 0 ? rest : i - at + s.length;
       if (i < 0 || i >= end) break;
-      out.push(i); at = i + 1;
+      out.push(i); last = { kind: "search", size: i - at + s.length }; at = i + 1;
       yield;
     }
     return out;
@@ -206,7 +221,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   // the SHA-256 of [a, b), a piece at a time, each charged before it is hashed
   function* sha(a, b) {
     const h = sha256Hasher();
-    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(copy(i, j)); i = j; yield; }
+    for (let i = a; i < b;) { const j = Math.min(b, sliceAt(text, i + WINDOW)); if (!can(j - i)) return OUT; work += j - i; h.update(copy(i, j)); last = { kind: "span hash", size: j - i }; i = j; yield; }
     return h.digest();
   }
   // the whole span at i, if the anchor's quote (head; and for a long one tail, length and sha) is there
@@ -275,7 +290,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     }
     return out.join("\n");
   };
-  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work };
+  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work, lastStep: () => last };
 }
 
 // ---- the operations: each returns a new document (the input is never changed) and checks admission first

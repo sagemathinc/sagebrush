@@ -1252,13 +1252,22 @@ class _Cancelled(Exception):
     """A request cancelled before its computation started."""
 
 
-def _version():
+def _version(package="sagebrush"):
     try:
         from importlib.metadata import version
 
-        return version("sagebrush")
+        return version(package)
     except Exception:
         return "dev"
+
+
+def _version_line():
+    """`sagebrush-mcp --version`: the installed versions of both packages
+    (the sagebrush-mcp wrapper's only when it is installed)."""
+    from importlib.util import find_spec
+
+    wrapper = " " + _version("sagebrush-mcp") if find_spec("sagebrush_mcp") is not None else ""
+    return "sagebrush-mcp%s (sagebrush %s)" % (wrapper, _version())
 
 
 def main():
@@ -1270,6 +1279,10 @@ def main():
     inp = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
         print(__doc__, file=sys.stderr)
+        return
+    if len(sys.argv) > 1 and sys.argv[1] in ("-V", "--version"):
+        out.write(_version_line() + "\n")
+        out.flush()
         return
     Server(out).serve(inp)
 

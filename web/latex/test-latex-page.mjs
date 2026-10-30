@@ -482,7 +482,7 @@ try {
       // the time bounds (PR 316): slices at most 8 ms up to 256 KiB and 32 ms up to 2 MiB; drawing within the same; checked
       // on a timing box, reported on a build box (its load and GC pauses aren't the code's: a sanity bound only)
       const timed = (r, ms, what) => {
-        const t = { slice: r.placed?.maxSliceMs, phase: r.placed?.maxSlicePhase, draw: Math.max(r.drawMaxMs, r.steady?.maxMs ?? 0), list: r.list?.ms };
+        const t = { slice: r.placed?.maxSliceMs, phase: r.placed?.maxSlicePhase, maxStep: r.placed?.maxStep, draw: Math.max(r.drawMaxMs, r.steady?.maxMs ?? 0), list: r.list?.ms };
         if (BOX === "timing") check(t.slice <= ms && t.draw <= ms && t.list <= ms, `comments: ${what}: slices, drawing and the list each at most ${ms} ms (a timing box)`, t);
         else { console.log(`timing, reported, not gated (a build box): ${what}, bound ${ms} ms:`, JSON.stringify(t)); check(t.slice < 200 && t.draw < 200 && t.list < 200, `comments: ${what}: no slice, draw or list over 200 ms (a build box's sanity bound)`, t); }
       };

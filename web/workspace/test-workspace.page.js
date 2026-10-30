@@ -886,6 +886,15 @@ async function migrateV1() {
   check(st.done === true, "the migrator ran to done: " + JSON.stringify(st));
   check((await legacyLeft(w)) === 0, "…every data file moved, Trash's too");
   check(dec(await fb(w, "/L/big.bin")) === big && dec(await fb(w, "/Trash/t.txt")) === "in trash" && dec((await w.read("/top.csv")).content) === "x,y\n1,2\n", "…their bytes the same, in fileBytes");
+  check(JSON.stringify((await w.dataFiles()).map(([p, b]) => [p, dec(b)]).sort()) === JSON.stringify([["/L/a.txt", "AAA"], ["/L/big.bin", big], ["/top.csv", "x,y\n1,2\n"]]), "…and given to a notebook's interpreter from there, read together (dataFiles: not Trash's)");
+  {
+    // (in one transaction on fileBytes, not one a file: what a kernel's start waits for)
+    let n = 0;
+    const tx = w.ws.transaction;
+    w.ws.transaction = function (stores, ...rest) { if ([].concat(stores).includes("fileBytes")) n++; return tx.call(this, stores, ...rest); };
+    try { await w.dataFiles(); } finally { delete w.ws.transaction; }
+    check(n === 1 && w.ws.transaction === tx, `…in one transaction on fileBytes (${n})`);
+  }
   const e = await w.stat("/L/big.bin");
   check(e.size === 70000 && /^[0-9a-f]{64}$/.test(e.sha256 ?? ""), "…with their size and SHA-256 on the entry");
   check((await rawKeys(w.main, "files")).length === 0 && (await rawKeys(w.ws, "trash")).length === 0, "…their old copies deleted");
