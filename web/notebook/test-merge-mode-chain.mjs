@@ -1,23 +1,22 @@
-// The safety claim behind P2b's codec choice (plan-merge-align r3.2 §5; grader's G-P2b-2): before a synced history's
-// mode is recorded it holds one line of this device's patches, and the legacy codec and the exact one (codecFor, with
-// cocalc-ai's dbMerge3 as merge3) give the same value at every version of a line.  Seeded random notebook histories (cells
-// added, deleted, typed in, moved, retyped; the kernel), each one line of commits through patchflow's Session, read
-// back by a fresh session under each codec; any difference prints its seed and version.  Bounded: SEEDS histories of up
-// to STEPS commits, and a wall-clock budget past which it stops and says how many ran.
+// The safety claim behind exact-only merges for histories made before them (plan-exact-only r1 §7, risk 5; first the
+// grader's G-P2b-2): a history of one writer (every notebook's own history: a single writer per device) is one line of
+// patches, and the codec without merge3 (patchflow's apply-all, every history's rule until now) and the notebook codec
+// (history.js notebookCodec, cocalc-ai's dbMerge3 as merge3) give the same value at every version of a line.  Seeded
+// random notebook histories (cells added, deleted, typed in, moved, retyped; the kernel), each one line of commits
+// through patchflow's Session, read back by a fresh session under each codec; any difference prints its seed and
+// version.  Bounded: SEEDS histories of up to STEPS commits, and a wall-clock budget past which it stops and says how
+// many ran.
 //   bun web/notebook/test-merge-mode-chain.mjs [first-seed] [count]
 import { Session, MemoryPatchStore } from "patchflow";
-// (exact merges compiled in for this test: run unbundled, the define merge-client.ts reads is absent, so it reads the
-// global of that name, set before history.js loads; a production build defines it false (test-merge-client-off.mjs))
-globalThis.__SB_EXACT_MERGE__ = true;
-const { codecFor } = await import("./history.js");
+import { createImmerDbCodec, notebookCodec, SCHEMA } from "./history.js";
 
 const FIRST = Number(process.argv[2] ?? 20261030), SEEDS = Number(process.argv[3] ?? 300), STEPS = 40, BUDGET_MS = 60_000;
-const legacy = codecFor(null), exact = codecFor({ docId: "x", id: "x:s1", mergeMode: "exact-v1" });
+const legacy = createImmerDbCodec(SCHEMA), exact = notebookCodec;
 const J = JSON.stringify;
 let checks = 0;
 const fails = [];
 const check = (ok, what) => { checks++; if (!ok && fails.length < 10) fails.push(what); };
-check(legacy.merge3 === undefined && typeof exact.merge3 === "function", "the two codecs: legacy without merge3, exact with it");
+check(legacy.merge3 === undefined && typeof exact.merge3 === "function", "the two codecs: the old rule without merge3, the notebook codec with it");
 
 // (mulberry32)
 const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };

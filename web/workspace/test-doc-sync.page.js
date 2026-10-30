@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, MC, ST } from "./all.js";
+import { W, N, H, DS, P, NB, ST } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [] };
@@ -40,8 +40,7 @@ T.connect = async (dev, account) => {
     ws.onclose = () => { for (const [, f] of T.pending) f({ t: "error", code: "busy" }); T.pending.clear(); T.ds.disconnected(); };
   });
   await new Promise((ok) => { ws.onopen = ok; });
-  // (the build's own hello field: its merge modes, as SyncClient's hello says them (merge-client.ts))
-  ws.send(J({ t: "hello", v: 1, device: `device-${dev}-0000`, name: dev, index_after: 0, ...MC.helloMergeField() }));
+  ws.send(J({ t: "hello", v: 1, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
   await Promise.race([welcome, new Promise((_, no) => setTimeout(() => no(new Error("no welcome: " + J(T.log))), 10_000))]);
   await T.ds.connected({
     owner,
@@ -205,13 +204,12 @@ T.typeUnsaved = (cid, text, start, end = start, dir = "none") => {
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
 T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
 
-// ---- the editor alone (notebook.js createNotebook) on a memory store whose document is exact-v1 or not: what
-// applyRemote does with an incoming document, as a journal store's merge would hand it on (plan-p2c r0 S2)
-T.edFake = async (exact, cells) => {
+// ---- the editor alone (notebook.js createNotebook) on a memory store with the journal store's merge (`merge`) or without
+// one (a page's local store before the journal, the embed's): what applyRemote does with an incoming document
+T.edFake = async (merge, cells) => {
   T.edDiv?.remove();
   const store = new ST.MemoryStore({ name: "f", mode: "python", cells: cells.map(([id, code]) => ({ id, code })) });
-  Object.defineProperty(store, "mergeMode", { get: () => (exact ? "exact-v1" : "legacy") });
-  Object.defineProperty(store, "mergeText", { get: () => (exact ? H.mergeTextAt : undefined) });
+  Object.defineProperty(store, "mergeText", { get: () => (merge ? H.mergeTextAt : undefined) });
   T.edDiv = document.body.appendChild(document.createElement("div"));
   T.edNb = NB.createNotebook(T.edDiv, {});
   T.edStore = store;

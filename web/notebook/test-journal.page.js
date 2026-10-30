@@ -3,8 +3,6 @@
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
 import { W, N, H, R, B, S, P } from "./all.js";
-// (the same modules built without exact merges: a production build (the fail-closed case))
-import * as OFF from "./off.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -56,7 +54,7 @@ async function recount(hdb) {
   for (const r of rows) if (r.nb === R.SYNC_NB && r.time.startsWith("d:")) {
     // (its j row, and a synced document's start and slot rows (2c-2))
     measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta });
-    for (const L of ["j", "m", "s", "a"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
+    for (const L of ["j", "m", "s"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
   }
   return { meta, pend, counted, measured };
 }
@@ -1905,137 +1903,6 @@ async function arrivingStarted() {
   await close(w);
   hdb.close();
 }
-// ---- merge modes (plan-merge-align r3.2 §5, P2b): the server's word on a document's mode recorded once in its start
-// row (from a claim's answer or a page's, with the page's rows); another mode later, or exact-v1 over more than this
-// device's one line, refused with nothing written; the codec exact only for a synced history whose mode is exact-v1; a
-// live history told the mode before the remote patches it came with reads them with it; a replay restore asks legacy
-const snapHistory = async (hdb) => J(await rawAll(hdb, "history", IDBKeyRange.lowerBound([""])));
-async function mergeModes() {
-  const { w, hdb } = await active();
-  await synced(async () => {
-    // (recorded from a claim, once; the same again changes nothing; another refused, nothing written)
-    const one = await loadNew(w, hdb, [["a", "x = 1"], ["b", "keep"]]);
-    const jtx = (st, fn) => st.patches.queue(() => st.patches.journalTx(async (s) => ({ j: 0, out: await fn(s) }))).catch((e) => ({ refused: String(e?.message ?? e) }));
-    const slot = (await jState(hdb, one.id)).slot;
-    const claim = (merge) => jtx(one.st, (s) => N.recordClaim(s, one.id, { gen: slot.gen, client: slot.client, epoch: 1, fgen: 0, merge }));
-    const c1 = await claim("exact-v1"), m1 = (await jState(hdb, one.id)).start;
-    check(c1.out === true && m1.merge === "exact-v1", "merge: a claim's answer records the document's mode in its start: " + J({ c1, m1 }));
-    const before = await snapHistory(hdb);
-    const same = await claim("exact-v1"), other = await claim("legacy"), unknown = await claim("exact-v9");
-    check(same.out === true && /another merge mode/.test(other.refused ?? "") && /doesn't know/.test(unknown.refused ?? "") && (await snapHistory(hdb)) === before, "merge: the same mode again changes nothing; another (or an unknown one) is refused and nothing is written: " + J({ same, other, unknown }));
-    // (astra3's R-MC-2: an empty page's mode, recorded or checked as a page's: mismatched in both directions refused,
-    // nothing written; a first answer on an empty page recorded; a document not started here records nothing)
-    const em = (id, st, merge) => jtx(st, (s) => N.recordMerge(s, id, { merge }));
-    const bEm = await snapHistory(hdb);
-    const emDown = await em(one.id, one.st, "legacy");
-    check(/another merge mode/.test(emDown.refused ?? "") && (await snapHistory(hdb)) === bEm, "merge: an empty page saying legacy for an exact-v1 document: refused, nothing written: " + J(emDown));
-    const fresh = await loadNew(w, hdb, [["c", "1"]]);
-    const emFirst = await em(fresh.id, fresh.st, "legacy"), emUp = await em(fresh.id, fresh.st, "exact-v1"), bUp = await snapHistory(hdb), emUp2 = await em(fresh.id, fresh.st, "exact-v1");
-    check(emFirst.out === true && (await jState(hdb, fresh.id)).start.merge === "legacy" && /another merge mode/.test(emUp.refused ?? "") && /another merge mode/.test(emUp2.refused ?? "") && (await snapHistory(hdb)) === bUp, "merge: an empty page's first answer recorded (legacy); one saying exact-v1 after: refused, nothing written: " + J({ emFirst, emUp: emUp.refused }));
-    const emNone = await em(newId(), fresh.st, "exact-v1");
-    check(emNone.out === false, "merge: an empty page for a document not started here records nothing: " + J(emNone));
-    await close(fresh.st);
-    const none = await claim(undefined);
-    check(none.out === true && (await jState(hdb, one.id)).start.merge === "exact-v1", "merge: an answer that says no mode (an older server) records nothing and changes nothing");
-    // (the codec: exact only for a journal store's synced key with exact-v1 recorded)
-    const ex = (o) => typeof H.codecFor(o).merge3 === "function";
-    check(ex({ docId: "x", id: "x:s1", mergeMode: "exact-v1" }) && !ex({ docId: "x", id: "x", mergeMode: "exact-v1" }) && !ex({ docId: "x", id: "x:s1", mergeMode: "legacy" }) && !ex({ docId: "x", id: "x:s1" }) && !ex({ id: "x:s1", mergeMode: "exact-v1" }) && !ex(null), "merge: the codec is exact only for a synced history whose recorded mode is exact-v1 (never a notebook's own key, never with no mode)");
-    // (a store loaded after: its mode read with its patches, its codec exact)
-    await close(one.st);
-    const re = store(w, hdb, one.id);
-    await re.load();
-    check(re.patches.mergeMode === "exact-v1" && typeof re.history.codec.merge3 === "function", "merge: a store loaded later reads the mode with its patches: exact: " + J({ mode: re.patches.mergeMode }));
-    await close(re);
-    // (exact-v1 over more than this device's one line (an older server's page brought another root): refused, nothing
-    // written; the page that says legacy is taken)
-    const two = await loadNew(w, hdb, [["a", "A"]]);
-    const k1 = { epoch: 1, after: 1, recv: 10, chain: "a".repeat(64) }, k2 = { epoch: 1, after: 2, recv: 20, chain: "b".repeat(64) };
-    const fork = { time: "zz-remote-1", env: { time: "zz-remote-1", parents: [], v: 1 } }, next = { time: "zz-remote-2", env: { time: "zz-remote-2", parents: ["zz-remote-1"], v: 2 } };
-    const p1 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: null, next: k1, rows: [fork] }));
-    const b2 = await snapHistory(hdb);
-    const p2 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: k1, next: k2, rows: [next], merge: "exact-v1" }));
-    const slot2 = (await jState(hdb, two.id)).slot;
-    const c2 = await jtx(two.st, (s) => N.recordClaim(s, two.id, { gen: slot2.gen, client: slot2.client, epoch: 1, fgen: 0, merge: "exact-v1" }));
-    check(!p1.refused && /isn't one line/.test(p2.refused ?? "") && /isn't one line/.test(c2.refused ?? "") && (await snapHistory(hdb)) === b2 && (await jState(hdb, two.id)).start.merge === undefined, "merge: exact-v1 over more than this device's one line: refused (page and claim), nothing written, every row kept: " + J({ p2: p2.refused, c2: c2.refused }));
-    const p3 = await jtx(two.st, (s) => N.applyPage(s, two.id, { expect: k1, next: k2, rows: [next], merge: "legacy" }));
-    check(!p3.refused && (await jState(hdb, two.id)).start.merge === "legacy" && (await keyRows(hdb, N.syncedKey(two.id, 1))).some((r) => r.time === "zz-remote-2"), "merge: …a page that says legacy is taken, its mode recorded with its rows: " + J(p3));
-    await close(two.st);
-    // (a live history: the mode told before the remote patch it came with, so the session reads it exact.  This device
-    // deleted cell a; the other device (later) changed its text: exact keeps the cell whole, with the other's text)
-    const three = await loadNew(w, hdb, [["a", "x = 1"], ["b", "keep"]]);
-    const key3 = N.syncedKey(three.id, 1), root = (await keyRows(hdb, key3))[0];
-    let rec3 = await rawGet(w.main, "notebooks", three.id);
-    await three.st.save({ ...three.d, cells: [{ id: "b", code: "keep" }], baseRev: rec3.rev });
-    const codec = three.st.history.codec, base = three.st.history.valueAt(root.time);
-    const changed = base.set({ ...base.getOne({ type: "cell", id: "a" }), input: "x = 2" });
-    const rt = (Date.now() + 60_000).toString(36).padStart(11, "0") + "_otherdevice01";
-    const renv = { time: rt, wall: Date.now(), patch: codec.makePatch(base, changed), parents: [root.time], userId: 0, version: 1 };
-    // (and a second view of it, read-only (the writer holds the lock), loaded before the mode was recorded: its session
-    // takes the remote patch live, with no reload from the database, so only the mode told first makes it read exact)
-    const ro = store(w, hdb, three.id);
-    await ro.load();
-    const pg = await jtx(three.st, (s) => N.applyPage(s, three.id, { expect: null, next: k1, rows: [{ time: rt, env: renv }], merge: "exact-v1" }));
-    const roBefore = ro.patches.mergeMode;
-    S.tellMerge(key3, "exact-v1");
-    S.tellHistory(key3, renv);
-    const roHas = ro.history.session?.versions().includes(rt);
-    const roCells = roHas ? J(ro.history.session.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null;
-    check(ro.writer === false && roBefore === undefined && roHas && roCells === J([["a", "x = 2"], ["b", "keep"]]), "merge: a read-only view loaded before the mode, given the remote patch live (no reload), reads it exact, as the mode is told first: " + J({ writer: ro.writer, roBefore, roHas, roCells }));
-    await close(ro);
-    let cells = null;
-    for (let i = 0; i < 100 && !cells; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      const v = three.st.history.session?.value();
-      if (three.st.history.session?.versions().includes(rt)) cells = J(v.get({ type: "cell" }).map((r) => [r.id, r.input]).sort());
-    }
-    check(!pg.refused && three.st.patches.mergeMode === "exact-v1" && cells === J([["a", "x = 2"], ["b", "keep"]]), "merge: a live history told the mode before the remote patch reads it exact (a deleted cell another device edited is kept whole, with its text): " + J({ pg, mode: three.st.patches.mergeMode, cells }));
-    await close(three.st);
-    // (a replay restore asks legacy, in the restore's own transaction; its start keeps the ask)
-    const rid = newId();
-    await B.keepBundle({ notebook: {}, history: [], blobs: {} }, rid, { hdb, bdb: null });
-    const restored = store(w, hdb, rid, doc([["r", "1"]]));
-    await restored.load();
-    const rs = (await jState(hdb, rid)).start;
-    check(rs?.asked === "legacy" && rs.merge === undefined, "merge: a replay restore asks legacy, kept with its start (no mode recorded yet): " + J(rs));
-    await close(restored);
-  });
-  await close(w);
-  hdb.close();
-}
-// ---- the grader's G-P2b-5: a build without the exact reader (off.js, the production define) fails closed on a synced
-// history recorded exact-v1: its load refused before the history is opened, read, recovered or written (the whole
-// history database unchanged); the rows refuse to record exact-v1 for it; its codec throws rather than read legacy
-async function failClosed() {
-  const { w, hdb } = await active();
-  const OFFKIT = OFF.N.journalClasses({ IdbStore: OFF.W.IdbStore, IdbPatchStore: OFF.W.IdbPatchStore });
-  const offStore = (id, initial) => new OFFKIT.JournalStore(w.main, hdb, id, initial, OFF.H);
-  await synced(async () => {
-    // (a notebook started and recorded exact-v1 by this page's own build, then let go)
-    const one = await loadNew(w, hdb, [["a", "x = 1"]]);
-    const slot = (await jState(hdb, one.id)).slot;
-    const rec = await one.st.patches.queue(() => one.st.patches.journalTx(async (s) => ({ j: 0, out: await N.recordClaim(s, one.id, { gen: slot.gen, client: slot.client, epoch: 1, fgen: 0, merge: "exact-v1" }) })));
-    check(rec?.out === true && (await jState(hdb, one.id)).start.merge === "exact-v1", "fail closed: (a notebook recorded exact-v1 by the build with the reader)");
-    await close(one.st);
-    const before = await snapHistory(hdb), recBefore = J(await rawGet(w.main, "notebooks", one.id));
-    // (the build without it: its load refused, nothing touched)
-    const off = offStore(one.id, doc([["z", "never"]]));
-    const out = await off.load().then(() => "loaded", (e) => ({ message: e?.message, noExact: !!e?.noExact }));
-    check(out?.noExact === true && /exact merges/.test(out.message) && off.history.session === null && (await snapHistory(hdb)) === before && J(await rawGet(w.main, "notebooks", one.id)) === recBefore, "fail closed: a build without the exact reader refuses the exact-v1 notebook's load before its history is opened, and nothing is written: " + J({ out, session: !!off.history.session }));
-    await close(off);
-    // (its rows refuse to record exact-v1; its codec throws rather than read legacy)
-    const two = await loadNew(w, hdb, [["b", "1"]]);
-    const s2 = (await jState(hdb, two.id)).slot;
-    const b2 = await snapHistory(hdb);
-    const r2 = await two.st.patches.queue(() => two.st.patches.journalTx(async (s) => ({ j: 0, out: await OFF.N.recordClaim(s, two.id, { gen: s2.gen, client: s2.client, epoch: 1, fgen: 0, merge: "exact-v1", canExact: false }) }))).catch((e) => ({ refused: String(e?.message ?? e) }));
-    check(/can't read/.test(r2?.refused ?? "") && (await snapHistory(hdb)) === b2, "fail closed: recording exact-v1 for a build without the reader is refused, nothing written: " + J(r2));
-    let threw = null;
-    try { void OFF.H.codecFor({ docId: "x", id: "x:s1", mergeMode: "exact-v1" }).merge3; } catch (e) { threw = String(e?.message ?? e); }
-    check(/aren't in this build/.test(threw ?? "") && OFF.H.codecFor({ docId: "x", id: "x:s1", mergeMode: "legacy" }).merge3 === undefined, "fail closed: the codec without the reader throws for an exact-v1 history (never legacy), and is legacy for a legacy one: " + J(threw));
-    await close(two.st);
-  });
-  await close(w);
-  hdb.close();
-}
 // ---- astra3's A-SA-1 on #353: the root patch measured as doc-sync sends it, under the writer's lock.  Empty code cells:
 // what the history keeps (versionedOf) is under the bound, but the root patch's payload is over it, so the start is
 // refused as too large, the notebook kept and saved here; a small notebook still starts (the control).  The bound is
@@ -2107,7 +1974,7 @@ async function startTooLargeAt(real) {
 }
 const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted, startTooLarge, mergeModes, failClosed];
+  arrivingStarted, startTooLarge];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

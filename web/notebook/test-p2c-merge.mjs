@@ -1,23 +1,19 @@
-// P2c's merges for an exact-v1 notebook (plan-p2c r0), as units: the store's (history.js exactRecords3, through
+// The notebooks' merges outside the patch graph (plan-exact-only r1, P2c's), as units: the store's (history.js exactRecords3, through
 // journal.js notebookKind.apply) and the editor's (history.js mergeText, mergeTextAt with the selection mapped).
 //   bun web/notebook/test-p2c-merge.mjs
 // - T1: cocalc-ai's jupyter-core-merge cases (and more) give what cocalc-ai's own mergeDbStrings gives
 //   (p2c-merge-vectors.json, made by gen-p2c-merge-vectors.mjs from cocalc-ai 0b8b7547); through apply, the side
-//   `wins` names is the later side `b`, never a clash; a build without the merge refuses an exact-v1 document.
+//   `wins` names is the later side `b`, never a clash.
 // - T2: mergeText gives what cocalc-ai's mergeText gives, on every vector.
-// - T3 (unit part): a legacy document still clashes as before, whatever the build.
 // - The editor's selection mapped through the merge: text merged in before it, after it, across it, deleted before it,
 //   non-ASCII before it, and text inserted exactly at it (the affinity).
-// The exact merges are compiled in only with __SB_EXACT_MERGE__; run unbundled here, the define is this global, set
-// before the modules load (as test-merge-mode-chain.mjs does).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as H from "./history.js";
+import * as N from "./journal.js";
 
-globalThis.__SB_EXACT_MERGE__ = true;
 const here = dirname(fileURLToPath(import.meta.url));
-const H = await import("./history.js");
-const N = await import("./journal.js");
 const V = JSON.parse(readFileSync(join(here, "p2c-merge-vectors.json"), "utf8"));
 const J = JSON.stringify;
 let pass = 0, fail = 0;
@@ -36,35 +32,27 @@ const nb = (cells, mode = "python") => ({ mode, cells: cells.map(([id, code]) =>
 const codes = (d) => J(d.cells.map((c) => [c.id, c.code]));
 {
   const base = nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]]);
-  const r = kind.apply(base, nb([["a", "x = 10\ny = 2\n"], ["b", "keep"]]), nb([["a", "x = 1\ny = 20\n"], ["b", "keep"]]), "remote", "exact-v1");
+  const r = kind.apply(base, nb([["a", "x = 10\ny = 2\n"], ["b", "keep"]]), nb([["a", "x = 1\ny = 20\n"], ["b", "keep"]]), "remote");
   check(r.clashes.length === 0 && codes(r.value) === J([["a", "x = 10\ny = 20\n"], ["b", "keep"]]), "T1 apply: one cell's lines edited on both sides: both kept, no clash: " + J(r));
-  const s = kind.apply(nb([["a", "x = 1\n"]]), nb([["a", "x = 1\nprint('here')\n"]]), nb([["a", "x = 1\nprint('there')\n"]]), "shown", "exact-v1");
+  const s = kind.apply(nb([["a", "x = 1\n"]]), nb([["a", "x = 1\nprint('here')\n"]]), nb([["a", "x = 1\nprint('there')\n"]]), "shown");
   check(s.clashes.length === 0 && /here/.test(s.value.cells[0].code) && /there/.test(s.value.cells[0].code), "T1 apply: the same spot typed on both sides: both kept: " + J(s));
-  const d = kind.apply(base, nb([["b", "keep"]]), nb([["a", "x = 1\ny = 2\nz = 3\n"], ["b", "keep"]]), "shown", "exact-v1");
+  const d = kind.apply(base, nb([["b", "keep"]]), nb([["a", "x = 1\ny = 2\nz = 3\n"], ["b", "keep"]]), "shown");
   check(codes(d.value) === J([["a", "x = 1\ny = 2\nz = 3\n"], ["b", "keep"]]) && d.clashes.length === 0, "T1 apply: deleted here, its input edited there: kept whole: " + J(d));
   // (a deleted cell whose only change elsewhere is not its input (here its type): stays deleted)
-  const g = kind.apply(base, nb([["b", "keep"]]), { mode: "python", cells: [{ id: "a", code: "x = 1\ny = 2\n", type: "markdown" }, { id: "b", code: "keep" }] }, "remote", "exact-v1");
+  const g = kind.apply(base, nb([["b", "keep"]]), { mode: "python", cells: [{ id: "a", code: "x = 1\ny = 2\n", type: "markdown" }, { id: "b", code: "keep" }] }, "remote");
   check(codes(g.value) === J([["b", "keep"]]), "T1 apply: deleted here, only its type changed there: stays deleted (the ghost cell): " + J(g));
   // (the kernel changed on both sides: the side `wins` names, both ways)
-  const m1 = kind.apply(base, nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "sage"), nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "magma"), "remote", "exact-v1");
-  const m2 = kind.apply(base, nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "sage"), nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "magma"), "shown", "exact-v1");
+  const m1 = kind.apply(base, nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "sage"), nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "magma"), "remote");
+  const m2 = kind.apply(base, nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "sage"), nb([["a", "x = 1\ny = 2\n"], ["b", "keep"]], "magma"), "shown");
   check(m1.value.mode === "magma" && m2.value.mode === "sage" && !m1.clashes.length && !m2.clashes.length, "T1 apply: a field changed on both sides: the later side, by `wins`, both ways: " + J([m1.value.mode, m2.value.mode]));
   // (no lastSynced: both sides' cells merged from an empty notebook)
-  const e = kind.apply(null, nb([["a", "1"]]), nb([["a", "1"], ["b", "2"]]), "remote", "exact-v1");
+  const e = kind.apply(null, nb([["a", "1"]]), nb([["a", "1"], ["b", "2"]]), "remote");
   check(codes(e.value) === J([["a", "1"], ["b", "2"]]), "T1 apply: from an empty notebook: " + J(e));
 }
-// ---- A2: an exact-v1 document in a build without the merge: refused, never merged the older way
+// ---- no clash, ever: the same line edited on both sides is merged, the later side's edit after the other's
 {
-  const noExact = { ...H, exactRecords3: undefined };
-  const k = N.notebookKind(noExact);
-  let err = null;
-  try { k.apply(nb([["a", "1"]]), nb([["a", "2"]]), nb([["a", "3"]]), "remote", "exact-v1"); } catch (e) { err = e; }
-  check(err?.noExact === true && /exact merges/.test(err.message), "A2: an exact-v1 document's merge in a build without it is refused: " + String(err?.message));
-}
-// ---- T3 (unit part): a legacy document clashes as before (the recorded mode decides, not the build: the define is on here)
-for (const mode of ["legacy", undefined]) {
-  const r = kind.apply(nb([["a", "x = 1\n"]]), nb([["a", "x = 2\n"]]), nb([["a", "x = 3\n"]]), "remote", mode);
-  check(r.clashes.length === 1 && r.clashes[0].kind === "text-overlap" && codes(r.value) === J([["a", "x = 3\n"]]), `T3 apply: a ${mode ?? "unrecorded"} document's same line edited on both sides: a clash, the side \`wins\` names kept whole: ` + J(r));
+  const r = kind.apply(nb([["a", "x = 1\n"]]), nb([["a", "x = 2\n"]]), nb([["a", "x = 3\n"]]), "remote");
+  check(r.clashes.length === 0 && r.value.cells[0].code.includes("2") && r.value.cells[0].code.includes("3"), "apply: the same line edited on both sides: both kept, no clash: " + J(r));
 }
 
 // ---- T2: mergeText against cocalc-ai's

@@ -564,14 +564,13 @@ const C1 = "clientA1", C2 = "clientB1";
   const ok = await n.ask(batch(D1, 1, { cMerge1: 0 }, [{ cseq: 1, id: pid(1, "cMerge1") }]));
   check(ok.t === "ack" && ok.batch.new === 1, "merge: a batch on an exact-v1 document from a socket that runs it: stored: " + J(ok));
   const before = J(on.controls.doc(M.account, D1));
-  const beforeClients = J(on.controls.clients(M.account, D1));
   const refused = (r, what) => check(r.t === "error" && r.code === "merge_mode" && r.detail?.merge === "exact-v1" && (what === "fence" || what === "clear" || shapeMismatch(r, by(what === "claim" ? "doc_claim" : what, "the document's mode")) === null), `merge: ${what} on an exact-v1 document from a socket that doesn't run it: merge_mode, detail.merge: ` + J(r));
   refused(await claim(old, D1, "cOld1"), "claim");
   refused(await old.ask({ t: "doc_fence", epoch: 1, doc: D1, clients: [{ client: "cMerge1", target: 1 }] }), "fence");
   refused(await old.ask(batch(D1, 1, { cOld1: 0 }, [{ cseq: 1, id: pid(2, "cOld1") }])), "batch");
   refused(await old.ask({ t: "pull", doc: D1, epoch: 1, after: 0 }), "pull");
   refused(await old.ask({ t: "clear", doc: D1, expect_head: { epoch: 1, seq: 1 }, root: patches([{ cseq: 2, id: pid(3, "cMerge1") }]), fgen: { cMerge1: 0 } }), "clear");
-  check(J(on.controls.doc(M.account, D1)) === before && J(on.controls.clients(M.account, D1)) === beforeClients && on.controls.doc(M.account, D1).merge === "exact-v1", "merge: …and none of them changed the document (its batches, head, mode and clients)");
+  check(J(on.controls.doc(M.account, D1)) === before, "merge: …and none of them changed the document");
   // (`changed`: to a socket that runs the mode, never to one that doesn't; nor in hello's documents)
   const n3 = await socket(on, M, "devM0004", RUNS);
   await n.ask(batch(D1, 1, { cMerge1: 0 }, [{ cseq: 2, id: pid(4, "cMerge1"), parents: [pid(1, "cMerge1")] }]));

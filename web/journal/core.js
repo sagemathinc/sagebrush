@@ -40,9 +40,6 @@ export function journalTexts(noun) {
     NO_CLEAR_SYNCED: `TimeTravel's history can't be cleared while this ${noun} syncs (it will be, once conflicts are handled)`,
     BUSY: `the ${noun} kept changing while it was opened: reload this page`,
     ARRIVING: `this ${noun} is still arriving from sync: try again in a moment`,
-    // (a synced history whose recorded mode is exact-v1, in a build without the exact reader: not opened, nothing
-    // written (plan-merge-align r3.2, the grader's G-P2b-5): never read with the legacy codec)
-    NO_EXACT: `this ${noun} syncs with exact merges, which this page can't read: reload this page`,
     TOO_LARGE_TO_SYNC: `this ${noun} is too large to sync yet (its first synced version would be over 1 MiB): it is kept in this browser`,
     STARTED: `this ${noun}'s synced history has already started`,
     PAUSED: `TimeTravel is paused for this ${noun}`,
