@@ -117,10 +117,10 @@ async function theirRenameNotOurs() {
   // (sync-docs' N-AD-1: another device's entry renamed by its owner to "y (2)" is no rename of ours by the index)
   const { w, op, apply } = await setup();
   const fid = hex(16);
-  await apply([op({ op: "create", path: "/y.txt", kind: "file", fid, sha256: SHA("y"), size: 1 })]);
+  await apply([op({ op: "create", path: "/y.txt", kind: "file", fid, sha256: SHA("d"), size: 1 })]);
   await apply([op({ op: "rename", path: "/y.txt", to: "/y (2).txt", kind: "file", fid })]);
-  const e = await byIdent(w, fid);
-  check(e?.path === "/y (2).txt" && e.remote && !e.renamed, `another device's own rename to "/y (2).txt": moved, not marked renamed (${J(e)})`);
+  const e = await entry(w, "/y (2).txt");
+  check(e?.fid === fid && e.remote && !e.renamed && !(await entry(w, "/y.txt")), `another device's own rename to "/y (2).txt": moved, not marked renamed (${J(e)}; listed ${J((await w.list("/", { recursive: true })).map((x) => [x.path, x.fid === fid, x.remote, x.renamed]))})`);
 }
 
 async function intentsKept() {
