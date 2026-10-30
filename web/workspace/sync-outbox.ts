@@ -28,6 +28,7 @@ import { jsonTextSize } from "../notebook/stores.js";
 import { genKey, genPrefix } from "./sync-confirmed";
 import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, epochOf, lifeMarkOf, sameLife, type LifeMark, pendingOf, stateOf, putPending, release, pinPresent, pinOfCurrent, type NsState, type Pin } from "./sync-pins";
 import { LedgerTx, isWire, queueObsolete, cleanObsoleteStep, hubOf } from "./sync-ledger";
+import { PROTO, PROTO_KEY, OLD_SYNC_HOOK, OldSyncError, detectOldSync } from "./sync-old";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -131,20 +132,29 @@ export async function switchTo(w: Workspace, ns: string): Promise<Lease> {
 }
 /** switchTo, and with `expect` only as a compare-and-set (step 5, astra3's CORR-PR130-1): if this browser's lifecycle is
  * still the one the action saw, in the same transaction; otherwise nothing is written and null is returned (a late
- * enable never replaces a newer lifecycle). */
+ * enable never replaces a newer lifecycle).  EXACT-ONLY: refused (OldSyncError, nothing written) where this browser
+ * holds sync state from a build before the cutover (sync-old.ts), read afresh; the lease written with this build's
+ * marker, in its transaction. */
 export async function switchToIf(w: Workspace, ns: string, expect?: LifeMark): Promise<Lease | null> {
   checkNs(ns);
+  const old = await detectOldSync(w);
+  if (old.old) throw new OldSyncError(old.why ?? "");
+  await OLD_SYNC_HOOK.between?.();
   for (;;) {
     const r = await inTx(w.ws, "meta", "readwrite", async (tx) => {
       const meta = tx.objectStore("meta"), cur = (await req(meta.get(CURRENT))) as (Lease & { off?: boolean }) | undefined;
       // (step 5: the lifecycle the action saw, checked first in this transaction: a late enable writes nothing, not
       // even the ledger's queue)
       if (expect && !sameLife(await lifeMarkOf(meta), expect)) return { stale: true as const };
+      // (EXACT-ONLY: without the marker, any sync meta written since the detection read is old sync state: refused)
+      if ((await req(meta.get(PROTO_KEY))) !== PROTO && ((await req(meta.count(IDBKeyRange.bound("sync:", "sync;", false, true)))) as number) > 0) return { old: true as const };
       // (task #14: the namespace left queued for its ledger's deletion, the one taken out of the queue; a full queue:
       // nothing done, one cleanup step, and again (the compare-and-set read again in the next transaction))
       if (!(await queueObsolete(meta, cur?.ns, ns))) return null;
       const lease = { ns, gen: (cur?.gen ?? 0) + 1 };
       metaWrite(meta, CURRENT, lease);
+      metaWrite(meta, PROTO_KEY, PROTO);
+      OLD_SYNC_HOOK.fault?.("lease");
       // (another namespace: a lifecycle change, the previous one's pins purged (sync-pins: newEpoch); a reconnect,
       // or turning sync on again for the same namespace, isn't: its pins are kept)
       let ended: { ns: string; fromEpoch: number } | null = null;
@@ -160,6 +170,7 @@ export async function switchToIf(w: Workspace, ns: string, expect?: LifeMark): P
       continue;
     }
     if ("stale" in r) return null;
+    if ("old" in r) throw new OldSyncError("meta");
     // (the waits of the namespace left told their epoch ended, by type (task #14))
     if (r.ended) hubOf(w.ws).post({ t: "lifecycle", ns: r.ended.ns, fromEpoch: r.ended.fromEpoch, toEpoch: r.ended.fromEpoch + 1, kind: "switch" });
     // (another namespace: the old one's purge, begun)
