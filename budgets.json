@@ -213,6 +213,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-hmac.src": {
+   "exact": false,
+   "ceiling": 11135,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-html.src": {
    "exact": false,
    "ceiling": 94176,
@@ -300,6 +307,13 @@
   "engine/lib/mod-pydatetime.src": {
    "exact": false,
    "ceiling": 116372,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-digest.src": {
+   "exact": false,
+   "ceiling": 2939,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -606,6 +620,7 @@
    "engine/lib/mod-graph-spring.src": 12473,
    "engine/lib/mod-hashlib.src": 14750,
    "engine/lib/mod-heapq.src": 24333,
+   "engine/lib/mod-hmac.src": 10123,
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
    "engine/lib/mod-io.src": 13519,
@@ -619,6 +634,7 @@
    "engine/lib/mod-png.src": 5970,
    "engine/lib/mod-pprint.src": 25584,
    "engine/lib/mod-pydatetime.src": 105793,
+   "engine/lib/mod-pyjs-digest.src": 2672,
    "engine/lib/mod-pyjs-doctest.src": 14117,
    "engine/lib/mod-pyjs-help.src": 8050,
    "engine/lib/mod-pyjs-magic.src": 21074,
