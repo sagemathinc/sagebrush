@@ -76,9 +76,30 @@ const plain = JSON.stringify(C.emptyDoc({ fid: "f9", path: "/q.tex" })), file = 
 const literals = ["NaN", "Infinity", "-Infinity", "1e-7", "1.0", "1e21", "1E+2", "-0", "0.1", "123456789012345678901234", "1e400", "5e-324", "1.5e-7", "100", "-1.25e-10", "0.000001", "1e-6", "[1.0, 2.50, 3e0]"]
   .map((x) => plain.replace("{", `{"x":${x},`));
 literals.push(file.replace('"rev": 1', '"rev": 1.0'), file.replace('"rev": 0', '"rev": 0e0'), file.replace('"rev": 0', '"rev": 0.5'), file.replace('"start": ', '"start": 1e0 * '));
+// (the version a number equal to 1 only; JavaScript's property order, array indices first, in the text, the snapshot
+//  and the file; the format's types where merge and list rely on them; null fields read as JavaScript reads them)
+const edit = (f) => { const d = JSON.parse(file); f(d); return JSON.stringify(d); };
+literals.push(...["true", '"1"', "null", "1.0", "[1]", "2"].map((v) => plain.replace('"version":1', `"version":${v}`)));
+literals.push(plain.replace("{", '{"x":{"b":1,"2":"two","1":"one","01":"lead","4294967295":"max","4294967294":"last","-1":"neg","1.5":"frac","a":{"10":0,"9":1}},'));
+for (const f of [
+  (d) => { d.threads[0].anchor.value.quote = null; d.threads[0].anchor.value.prefix = null; },
+  (d) => { d.threads.push(null); }, (d) => { d.threads.push(5); }, (d) => { d.threads.push([]); },
+  (d) => { d.threads[0].messages.push(null); }, (d) => { d.threads[0].messages.push([]); }, (d) => { d.threads[0].messages = "abc"; },
+  (d) => { delete d.threads[0].created; }, (d) => { d.threads[0].created = 5; }, (d) => { delete d.threads[0].messages[0].time; },
+  (d) => { d.threads[0].resolved.value = []; }, (d) => { d.threads[0].deleted.value = {}; }, (d) => { d.threads[0].deleted.value = 0; },
+  (d) => { d.threads[0].messages[0].deleted.value = "yes"; }, (d) => { d.threads[0].anchor.value = []; },
+]) literals.push(edit(f));
 for (const s of literals) out.literal.push({ in: s, out: err(() => { const doc = C.parse(s); return { json: JSON.stringify(doc), sha: C.sha256(JSON.stringify(doc)), file: C.serialize(doc) }; }) });
 // (a tie between two writes of one register, broken by the value's JSON: 1e-7 against 1e-70 orders by "1e-7}" and
 //  "1e-70", not by Python's "1e-07" and "1e-70")
 const tie = (x) => { const c = structuredClone(ds); c.threads[0].anchor.value = { ...c.threads[0].anchor.value, x }; return c; };
 out.merge.push({ a: tie(1e-7), b: tie(1e-70), out: C.merge(tie(1e-7), tie(1e-70)) }, { a: tie(1e-70), b: tie(1e-7), out: C.merge(tie(1e-70), tie(1e-7)) });
+// (a tie broken by values whose JSON depends on property order: {"b":1,"1":2} is {"1":2,"b":1} to JavaScript, which
+//  sorts below {"a":0}; in the files' literal text, so the reader's order is what's checked)
+out.literalMerge = [];
+const tieText = (x) => JSON.stringify(tie("@@X@@")).replace('"@@X@@"', x);
+for (const [x, y] of [['{"b":1,"1":2}', '{"a":0}'], ['{"a":0}', '{"b":1,"1":2}']]) {
+  const a = tieText(x), b = tieText(y);
+  out.literalMerge.push({ a, b, out: JSON.stringify(C.merge(C.parse(a), C.parse(b))) });
+}
 process.stdout.write(JSON.stringify(out, null, 1) + "\n");

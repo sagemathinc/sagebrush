@@ -108,16 +108,19 @@ export function validate(doc) {
   if (doc.version !== VERSION) fail("version", "version " + doc.version + " is not supported (this reads " + VERSION + ")");
   if (!Array.isArray(doc.threads)) fail("invalid", "threads");
   if (doc.threads.length > LIMITS.threads) fail("limit", "threads", { limit: "threads", max: LIMITS.threads, size: doc.threads.length });
-  if (doc.threads.filter((t) => !t.deleted?.value).length > LIMITS.liveThreads) fail("limit", "live threads", { limit: "liveThreads", max: LIMITS.liveThreads });
+  // (the fields merge and list rely on, of the format's types: created and time strings, resolved and deleted booleans)
+  const obj = (x, what) => { if (!x || typeof x !== "object") fail("invalid", what); return x; }, bool = (r) => typeof r.value === "boolean";
   const ids = new Set();
   for (const t of doc.threads) {
-    str(t.id, LIMITS.id, "thread.id"); if (ids.has(t.id)) fail("invalid", "duplicate thread id " + t.id); ids.add(t.id);
-    if (!isReg(t.anchor) || !isReg(t.resolved) || !isReg(t.deleted)) fail("invalid", "thread " + t.id + " registers");
+    obj(t, "thread"); str(t.id, LIMITS.id, "thread.id"); if (ids.has(t.id)) fail("invalid", "duplicate thread id " + t.id); ids.add(t.id);
+    str(t.created, LIMITS.id, "thread.created");
+    if (!isReg(t.anchor) || !isReg(t.resolved) || !isReg(t.deleted) || !bool(t.resolved) || !bool(t.deleted)) fail("invalid", "thread " + t.id + " registers");
     checkAnchor(t.anchor.value);
-    if (!Array.isArray(t.messages) || t.messages.length > LIMITS.messages) fail("limit", "messages", { limit: "messages", max: LIMITS.messages, size: t.messages?.length });
-    for (const m of t.messages) { str(m.id, LIMITS.id, "message.id"); str(m.author, LIMITS.author, "author"); if (!isReg(m.text) || !isReg(m.deleted)) fail("invalid", "message registers"); str(m.text.value, LIMITS.text, "text"); }
+    if (!Array.isArray(t.messages) || t.messages.length > LIMITS.messages) fail("limit", "messages", { limit: "messages", max: LIMITS.messages, size: Array.isArray(t.messages) ? t.messages.length : null });
+    for (const m of t.messages) { obj(m, "message"); str(m.id, LIMITS.id, "message.id"); str(m.author, LIMITS.author, "author"); str(m.time, LIMITS.id, "message.time"); if (!isReg(m.text) || !isReg(m.deleted) || !bool(m.deleted)) fail("invalid", "message registers"); str(m.text.value, LIMITS.text, "text"); }
     const tb = utf8(JSON.stringify(t)); if (tb > LIMITS.threadBytes) fail("limit", "thread " + t.id + " is over 256 KiB", { limit: "threadBytes", max: LIMITS.threadBytes, size: tb });
   }
+  if (doc.threads.filter((t) => !t.deleted.value).length > LIMITS.liveThreads) fail("limit", "live threads", { limit: "liveThreads", max: LIMITS.liveThreads });
   return doc;
 }
 /** The file's text parsed and validated (a missing file: null gives an empty document). */
