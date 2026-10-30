@@ -2,7 +2,7 @@
 // escapes, and the per-command caps with the omission line charged.  A first set (the preview); E5.8's full list
 // follows in step 6's PR.
 //   bun web/shell/test-panel-render.mjs
-import { Render, CAPS, SCROLLBACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
+import { Render, CAPS, SCROLLBACK, PAGE, joinsCluster, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
 
 let checks = 0;
 const fails = [];
@@ -259,6 +259,98 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     const min = Math.min(...ratios);
     check(min >= 4.5 && Math.abs(min - minWant) < 0.005, `${name}: every colour >= 4.5:1 on the background (min ${min.toFixed(2)})`);
     check(Array.from({ length: 16 }, (_, i) => cr(t.bg, t["c" + i]) >= cr(t.fg, t["c" + i])).every(Boolean), `${name}: on each colour as a background, the theme's bg reads better than its fg (sb-fga-N)`);
+  }
+}
+
+// ---- long lines: pages of PAGE units (the long-line design: pages, not a cap; @sagebrush, board, daybreak2)
+{
+  // (the pages of each line: the text of each page, its first one the part before any page run)
+  const pagesOf = (runs) => {
+    const lines = [];
+    let cur = [""];
+    for (const x of runs) {
+      if (x.page) cur.push("");
+      else {
+        const parts = x.text.split("\n");
+        cur[cur.length - 1] += parts[0];
+        for (const q of parts.slice(1)) (lines.push(cur), (cur = [q]));
+      }
+    }
+    if (cur.join("")) lines.push(cur);
+    return lines;
+  };
+  const pageRuns = (runs) => runs.filter((x) => x.page).length;
+  // (at 4 095, 4 096 and 4 097 units: no page, no page, one)
+  for (const [n, want] of [[PAGE - 1, 0], [PAGE, 0], [PAGE + 1, 1]]) {
+    const r = render("a".repeat(n) + "\n");
+    check(pageRuns(r.runs) === want && r.text === "a".repeat(n) + "\n", `a line of ${n} units: ${want} page run(s)`);
+  }
+  // (every page at most PAGE units; the text the same as without pages)
+  const big = render("x".repeat(3 * PAGE + 100) + "\n");
+  const pg = pagesOf(big.runs)[0];
+  check(pg.length === 4 && pg.every((p) => p.length <= PAGE) && pg.join("") === "x".repeat(3 * PAGE + 100), `a line of 3 pages and 100: pages ${pg.map((p) => p.length).join(", ")}`);
+  // (astral pairs and clusters never split at a join, and no page starts with a continuation: B-LL-1)
+  const cases = [
+    ["an astral pair across the edge", "a".repeat(PAGE - 1) + "\u{1d7d8}".repeat(10)],
+    ["a combining mark at the edge", "a".repeat(PAGE - 1) + "é" + "b".repeat(10)],
+    ["a ZWJ emoji at the edge", "a".repeat(PAGE - 3) + "\u{1f469}‍\u{1f4bb}" + "b".repeat(10)],
+    ["a variation selector at the edge", "a".repeat(PAGE - 1) + "❤️" + "b".repeat(10)],
+    ["a skin-tone modifier at the edge", "a".repeat(PAGE - 2) + "\u{1f44d}\u{1f3fd}" + "b".repeat(10)],
+  ];
+  for (const [what, line] of cases) {
+    const r = render(line + "\n");
+    const ps = pagesOf(r.runs)[0];
+    const ok = ps.join("") === line && ps.every((p) => p.length <= PAGE) && ps.slice(1).every((p) => !joinsCluster(" " + p, 1)) &&
+      ps.slice(0, -1).every((p, i) => !joinsCluster(p + ps[i + 1], p.length));
+    check(ok, `${what}: the cluster kept whole, no page over ${PAGE} (pages ${ps.map((p) => p.length).join(", ")})`);
+  }
+  // (a styled run across a join: two runs with the same classes, each charged: B-LL-2)
+  {
+    const r = render("\x1b[31;1m" + "y".repeat(PAGE + 50) + "\x1b[0m\n");
+    const styled = r.runs.filter((x) => x.cls && !x.page);
+    check(styled.length === 2 && styled.every((x) => x.cls === "sb-fg-1 sb-b") && styled[0].text.length === PAGE && pageRuns(r.runs) === 1, `a styled run across a join: ${styled.length} runs of "${styled[0]?.cls}"`);
+    check(r.totals.spans === r.runs.length + 1, `each part and the join charged as runs, plus the line end after the last page (${r.totals.spans} for ${r.runs.length} runs)`);
+  }
+  // (escapes and controls at a join: the same text as without pages)
+  {
+    const line = "z".repeat(PAGE - 3) + "\x1b[2J\x01\x1b]0;t\x07" + "\x1b[32mgreen\x1b[0m" + "w".repeat(PAGE);
+    const r = render(line + "\n");
+    const want = "z".repeat(PAGE - 3) + "␛[2J␁␛]0;t␇green" + "w".repeat(PAGE) + "\n";
+    check(r.text === want && pagesOf(r.runs)[0].every((p) => p.length <= PAGE), "escapes and controls across a join: the same text, pages within PAGE");
+  }
+  // (TP-2's \r restart across joins and slices: the line shows its text after the last \r, at any slicing)
+  {
+    const line = Array.from({ length: 6 }, (_, i) => "\r" + String(i).repeat(PAGE + 300)).join("") + "\n";
+    const want = "5".repeat(PAGE + 300) + "\n";
+    let tick = 0;
+    for (const [what, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = render(line, "", b, now);
+      check(r.text === want && pageRuns(r.runs) === 1 && r.totals.units === want.length, `\\r over a paged line, ${what}: only the last text and its one join (units ${r.totals.units})`);
+    }
+  }
+  // (the caps hold with pages: one 1 MiB line of alternating styles: runs <= 20 000 with the joins, units <= 1 MiB)
+  {
+    const r = render("\x1b[31ma\x1b[32mb".repeat(100000) + "\n" + "q".repeat(2 * CAPS.inBytes));
+    const t = r.totals;
+    check(t.spans <= CAPS.spans && t.units <= CAPS.units && t.lines <= CAPS.lines, `the caps hold on paged lines (${JSON.stringify({ units: t.units, spans: t.spans, lines: t.lines })})`);
+    check(r.runs.at(-1).cls === "sb-omit", "and the omission line still ends a capped command");
+  }
+  // (a paged line cut by the caps: the omission line starts a line of its own, even when the slice before it ended on
+  // a join, or the marker's slice has no other run)
+  for (const [what, b] of [["one slice", ALL], ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }], ["4 Ki slices", { bytes: PAGE, spans: Infinity, ms: Infinity }]]) {
+    const r = render("q".repeat(2 * CAPS.inBytes), "", b);
+    const m = r.runs.at(-1);
+    const ps = pagesOf(r.runs);
+    check(m.cls === "sb-omit" && m.text.startsWith("\n") && ps.length === 2 && ps[0].every((p) => p.length <= PAGE) && r.totals.units <= CAPS.units,
+      `a paged line past the unit cap, ${what}: the omission line on its own line (${JSON.stringify(m.text.slice(0, 12))}, pages ${ps[0].length})`);
+  }
+  // (past the run cap, a join costs a run: no page run ever holds text, and no page grows past PAGE)
+  {
+    const r = render("\x1b[31ma\x1b[32mb".repeat(15000) + "\x1b[0m" + "p".repeat(3 * PAGE) + "\n");
+    const ps = pagesOf(r.runs);
+    check(r.runs.every((x) => !x.page || x.text === "") && ps.every((l) => l.every((p) => p.length <= PAGE)) && r.totals.spans <= CAPS.spans,
+      `past the run cap: page runs empty, pages within PAGE (max ${Math.max(...ps.flat().map((p) => p.length))}, spans ${r.totals.spans})`);
   }
 }
 

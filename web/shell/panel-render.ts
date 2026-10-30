@@ -24,7 +24,24 @@ const CHECK = 4096;
 
 /** A run of one style; `restart`: a lone \r over runs of the open line already returned in an earlier slice:
  * the painter removes what it put in for this line since its start (TP-2: the same text whatever the slicing). */
-export type Run = { text: string; cls: string; err: boolean; restart?: true };
+export type Run = { text: string; cls: string; err: boolean; restart?: true; page?: true };
+/** A shown line longer than this many code units is cut into pages of it: from the second page on, each in an
+ * inline-block box of its own (the painter's), so no slice lays out more than its own pages whatever the line's length,
+ * and a selection still copies the line as one (no break at a join). A page run is charged as a run. */
+export const PAGE = 4096;
+
+/** Whether a page may not start at code unit k of s: inside a surrogate pair, or before a continuation of the
+ * previous character's cluster (a combining mark, ZWJ, a variation selector, an emoji modifier, a tag), or after ZWJ
+ * (board's B-LL-1). */
+export function joinsCluster(s: string, k: number): boolean {
+  if (k <= 0 || k >= s.length) return false;
+  const p = s.charCodeAt(k - 1);
+  if (p >= 0xd800 && p < 0xdc00) return true;
+  if (p === 0x200d) return true;
+  const c = s.codePointAt(k)!;
+  return c === 0x200d || (c >= 0xfe00 && c <= 0xfe0f) || (c >= 0xe0100 && c <= 0xe01ef) || (c >= 0x1f3fb && c <= 0x1f3ff) ||
+    (c >= 0xe0020 && c <= 0xe007f) || /\p{M}/u.test(String.fromCodePoint(c));
+}
 
 type Style = { fg: number; bg: number; b: boolean; i: boolean; u: boolean; rev: boolean };
 const PLAIN: Style = Object.freeze({ fg: -1, bg: -1, b: false, i: false, u: false, rev: false });
@@ -127,6 +144,10 @@ export class Render {
   private line: Run[] = [];
   // (the open line's runs already returned at a slice's end: units and runs, for a later lone \r to take back)
   private lineOut = { units: 0, spans: 0 };
+  // (the open line's shown units, for its pages: reset at a line end and by a lone \r)
+  private lineUnits = 0;
+  // (where the line's current page began, in its shown units: each page is at most PAGE from there)
+  private pageStart = 0;
 
   /** Nothing is scanned here: every byte's work is inside a slice (next()). */
   constructor(private out: string, private err: string, private now: () => number = () => performance.now()) {}
@@ -143,12 +164,13 @@ export class Render {
     if (!text) return;
     const cls = classOf(this.style);
     const last = this.line[this.line.length - 1];
-    if (last && last.cls === cls && last.err === err) last.text += text;
+    if (last && !last.page && last.cls === cls && last.err === err) last.text += text;
     else {
       this.line.push({ text, cls, err });
       this.spans++;
     }
     this.units += text.length;
+    this.lineUnits += text.length;
   }
 
   /** Moves the current line's runs to `out` (at a \n, or at the end). */
@@ -304,6 +326,7 @@ export class Render {
         for (const r of this.line) this.units -= r.text.length;
         this.spans -= this.line.length;
         this.line = [];
+        this.lineUnits = this.pageStart = 0;
         if (this.lineOut.spans) {
           this.units -= this.lineOut.units;
           this.spans -= this.lineOut.spans;
@@ -322,7 +345,8 @@ export class Render {
     if (this.omitted > 0) {
       // (the omission line, on a line of its own: one run, its line end included, charged to every cap; its room
       // was kept all along: MARK_UNITS, one line, one run)
-      const nl = this.units > 0 && !this.atLineStart(out) ? "\n" : "";
+      // (mid-line: the open line has units, whichever slice its runs went out in; an empty page run is not a line start)
+      const nl = this.lineUnits > 0 ? "\n" : "";
       const text = nl + Render.marker(this.omitted);
       out.push({ text, cls: "sb-omit", err: false });
       this.spans++;
@@ -333,11 +357,6 @@ export class Render {
     return out;
   }
 
-  private lastText = "";
-  private atLineStart(out: Run[]) {
-    const t = out.length ? out[out.length - 1].text : this.lastText;
-    return t === "" || t.endsWith("\n");
-  }
 
   /** A line end, if a line is left after keeping the omission line's (S2 lines). */
   private newline(out: Run[], err: boolean): boolean {
@@ -346,12 +365,14 @@ export class Render {
     if (this.lines + 1 > CAPS.lines) return false;
     if (this.units + 1 > CAPS.units - Render.MARK_UNITS) return false;
     const last = out[out.length - 1];
-    if (last && !last.restart && last.err === err && (last.cls === "" || err)) last.text += "\n";
-    else {
-      if (this.spans + 1 > CAPS.spans - 1) return false;
-      out.push({ text: "\n", cls: "", err });
-      this.spans++;
-    }
+    // (a paged line's end: the painter puts the line end after the last page box, one node more: charged here)
+    const paged = this.pageStart > 0 ? 1 : 0;
+    const merge = last && !last.restart && !last.page && last.err === err && (last.cls === "" || err);
+    if (this.spans + paged + (merge ? 0 : 1) > CAPS.spans - 1) return false;
+    if (merge) last.text += "\n";
+    else out.push({ text: "\n", cls: "", err });
+    this.spans += paged + (merge ? 0 : 1);
+    this.lineUnits = this.pageStart = 0;
     this.units++;
     this.lines++;
     return true;
@@ -368,10 +389,52 @@ export class Render {
       // (past the run cap: the rest of the consumed text is plain)
       if (this.style !== PLAIN) this.style = { ...PLAIN };
       const plain = this.line[this.line.length - 1];
-      if (!(plain && plain.cls === "" && plain.err === err)) return false;
+      if (!(plain && !plain.page && plain.cls === "" && plain.err === err)) return false;
+      // (a page costs a run: none is left, so text past this page's edge is not shown)
+      if (this.lineUnits + text.length > this.pageStart + PAGE) return false;
       plain.text += text;
       this.units += text.length;
+      this.lineUnits += text.length;
       return true;
+    }
+    // (the line's next page boundary: up to it, then a page run, then the rest, as often as it takes; a line of at most
+    // PAGE units gets no page run; a surrogate pair is never split at an edge)
+    while (text) {
+      const edge = this.pageStart + PAGE;
+      if (this.lineUnits + text.length <= edge) break;
+      let k = edge - this.lineUnits;
+      // (back to a cluster boundary, at most 32 units; a boundary at the very start of this text whose first character
+      // continues the previous one's cluster: the cluster's rest stays on the page before, past PAGE by that much)
+      for (let b = 0; b < 32 && k > 0 && joinsCluster(text, k); b++) k--;
+      if (k === 0 && joinsCluster(" " + text, 1)) {
+        // (this text begins with a continuation, and the edge falls just before it: the cluster's start goes after
+        // the join too, taken from the end of this line's last run (its classes kept, as its own run))
+        const last = this.line[this.line.length - 1];
+        let m = last && !last.page ? last.text.length : 0;
+        for (let b = 0; b < 32 && m > 0 && joinsCluster(last.text + text, m); b++) m--;
+        if (last && m > 0 && m < last.text.length && this.spans + 3 <= CAPS.spans - 1) {
+          const tail = last.text.slice(m);
+          last.text = last.text.slice(0, m);
+          this.lineUnits -= tail.length;
+          this.line.push({ text: "", cls: "", err, page: true });
+          this.pageStart = this.lineUnits;
+          this.line.push({ text: tail, cls: last.cls, err: last.err });
+          this.spans += 2;
+          this.lineUnits += tail.length;
+          continue;
+        }
+        // (that run already left in an earlier slice: the cluster's rest stays on this page, past PAGE by that much)
+        k = 1;
+        while (k < text.length && k < 32 && joinsCluster(text, k)) k++;
+      }
+      if (k > 0) {
+        this.push(out, text.slice(0, k), err);
+        text = text.slice(k);
+      }
+      if (!text || this.spans + 1 > CAPS.spans - 1) break;
+      this.line.push({ text: "", cls: "", err, page: true });
+      this.spans++;
+      this.pageStart = this.lineUnits;
     }
     this.push(out, text, err);
     return true;

@@ -125,6 +125,8 @@ const webkitPaths = [
   /^web\/test-kedlaya-worker\.mjs$/, /^web\/test-port\.mjs$/, /^test\/kedlaya[^/]*$/,
   /^scripts\/build-cli\.mjs$/, /^scripts\/ci-paths\.mjs$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^tsconfig(?:\.[^/]*)?\.json$/,
   /^\.github\/workflows\/ci\.yml$/,
+  // (the terminal panel's long-line pages, copied as one line in WebKit: board's B-LL-4)
+  /^web\/shell\/panel\.(?:ts|css)$/, /^web\/shell\/test-panel-pages-copy\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their

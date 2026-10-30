@@ -88,7 +88,8 @@ try {
         units += b.textContent.length;
         if (b.classList.contains("sb-term-out")) {
           lines += (b.textContent.match(/\\n/g) || []).length;
-          spans += b.childNodes.length;
+          // (a long line's page boxes: each one, and each node in it)
+          for (const nd of b.childNodes) spans += 1 + (nd.classList?.contains("sb-term-page") ? nd.childNodes.length : 0);
         } else {
           lines += 1 + (b.textContent.match(/\\n/g) || []).length;
           spans++;
@@ -379,6 +380,29 @@ try {
   r = await run("echo after-reset");
   const afterReset = await evaluate(`window.__term`);
   check(afterReset === 1 && r?.out === "after-reset\n", `TP-1 control: reset ends one worker (${afterReset}), and a fresh one runs`);
+  // ---- long lines: pages (the long-line design; @sagebrush's conditions, board's B-LL-*, daybreak2's)
+  await run("clear");
+  n = 0;
+  check((await evaluate(`document.querySelectorAll(".sb-term-page").length`)) === 0, "B-LL-6: no page element for lines of 4 Ki or less (all output so far)");
+  await evaluate(`window.__lt = []; window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(e.duration); }); window.__lto.observe({ type: "longtask" })`);
+  r = await run("seq 1 200000 | tr -d '\\n'; echo");
+  const ll = await evaluate(`(() => {
+    window.__lto.disconnect();
+    const out = [...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out");
+    const pages = out.querySelectorAll(".sb-term-page");
+    const sel = getSelection(); sel.selectAllChildren(out); const copied = sel.toString(); sel.removeAllRanges();
+    const body = copied.replace(/\\n?\\[\\u2026 \\d+ more bytes not shown\\]\\n?$/, "");
+    return { pages: pages.length, maxPage: Math.max(...[...pages].map((p) => p.textContent.length)), copiedLines: body.replace(/\\n$/, "").split("\\n").length,
+             head: body.slice(0, 20), markInPage: [...pages].some((p) => p.textContent.includes("not shown")), textLen: out.textContent.length, longMax: Math.max(0, ...window.__lt), longN: window.__lt.length };
+  })()`);
+  check(r?.status === "done" && ll.pages >= 200 && ll.maxPage <= 4096 && ll.copiedLines === 1 && !ll.markInPage && ll.head === "12345678910111213141",
+    `a 1 MiB line: ${ll.pages} pages of at most 4 096, and select-all copies it as ONE line, no break at a join, the omission line after the last page (${JSON.stringify(ll)})`);
+  console.log(`info: the 1 MiB line's Long Tasks during its render: ${ll.longN}, the longest ${ll.longMax.toFixed(1)} ms (the gates are E5.5's, on the timing box)`);
+  r = await run("printf 'A%.0s' $(seq 1 5000); printf '\\r'; printf 'B%.0s' $(seq 1 4500); echo");
+  const rp = await evaluate(`(() => { const out = [...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out");
+    return { text: out.textContent, pages: out.querySelectorAll(".sb-term-page").length }; })()`);
+  check(rp.text === "B".repeat(4500) + "\n" && rp.pages === 1, `\\r over a paged line (TP-2, B-LL-3): only the last text, with its one page (${rp.pages} pages, ${rp.text.length} units)`);
+  await invariant("long lines");
   // (hide keeps the session; ✕ ends it)
   const kept = await cmdCount();
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
