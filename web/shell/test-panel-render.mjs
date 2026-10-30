@@ -2,7 +2,7 @@
 // escapes, and the per-command caps with the omission line charged.  A first set (the preview); E5.8's full list
 // follows in step 6's PR.
 //   bun web/shell/test-panel-render.mjs
-import { Render, CAPS, SCROLLBACK, PAGE, joinsCluster, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
+import { Render, CAPS, SCROLLBACK, PAGE, PAGE_BACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
 
 let checks = 0;
 const fails = [];
@@ -280,6 +280,12 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     return lines;
   };
   const pageRuns = (runs) => runs.filter((x) => x.page).length;
+  // (every join at a grapheme-cluster boundary of the whole line, by its own Intl.Segmenter pass: B-LL-1)
+  const atBounds = (ps) => {
+    const b = new Set([...new Intl.Segmenter().segment(ps.join(""))].map((g) => g.index));
+    let at = 0;
+    return ps.slice(0, -1).every((p) => b.has((at += p.length)));
+  };
   // (at 4 095, 4 096 and 4 097 units: no page, no page, one)
   for (const [n, want] of [[PAGE - 1, 0], [PAGE, 0], [PAGE + 1, 1]]) {
     const r = render("a".repeat(n) + "\n");
@@ -296,13 +302,66 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     ["a ZWJ emoji at the edge", "a".repeat(PAGE - 3) + "\u{1f469}‍\u{1f4bb}" + "b".repeat(10)],
     ["a variation selector at the edge", "a".repeat(PAGE - 1) + "❤️" + "b".repeat(10)],
     ["a skin-tone modifier at the edge", "a".repeat(PAGE - 2) + "\u{1f44d}\u{1f3fd}" + "b".repeat(10)],
+    ["a flag (a regional-indicator pair) on the edge (BLL1-R1)", "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(10)],
+    ["a Hangul L+V+T syllable on the edge (BLL1-R1)", "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(10)],
   ];
   for (const [what, line] of cases) {
     const r = render(line + "\n");
     const ps = pagesOf(r.runs)[0];
-    const ok = ps.join("") === line && ps.every((p) => p.length <= PAGE) && ps.slice(1).every((p) => !joinsCluster(" " + p, 1)) &&
-      ps.slice(0, -1).every((p, i) => !joinsCluster(p + ps[i + 1], p.length));
+    const ok = ps.join("") === line && ps.every((p) => p.length <= PAGE) && atBounds(ps);
     check(ok, `${what}: the cluster kept whole, no page over ${PAGE} (pages ${ps.map((p) => p.length).join(", ")})`);
+  }
+  // (the finite cluster policy, @sagebrush's ruling on DB2-LL-337-1 with board's CONCUR: a join moves back at most
+  // PAGE_BACK units to its cluster's start, on the logical line (across slice flushes and style runs); a longer
+  // cluster is split at a scalar boundary.  Each at three slicings)
+  {
+    let tick = 0;
+    const slicings = [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]];
+    const M = "\u0301";
+    const kept = (what, input, plain, firstLen, firstStart) => {
+      for (const [how, b, now] of slicings) {
+        const r = render(input + "\n", "", b, now);
+        const ps = pagesOf(r.runs)[0];
+        const ok = ps.join("") === plain && ps.every((p) => p.length <= PAGE) && ps[0].length === firstLen && ps[1]?.startsWith(firstStart) &&
+          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (firstLen === PAGE || firstLen === PAGE - 1 || atBounds(ps)) && r.totals.spans === r.runs.length + 1;
+        check(ok, `${what}, ${how}: pages ${ps.map((p) => p.length).join(", ")}, page 2 starts ${JSON.stringify(ps[1]?.slice(0, 3))}, spans ${r.totals.spans} for ${r.runs.length} runs`);
+      }
+    };
+    // (a cluster across a slice flush: the base ends the tokenizer's 4 096-scalar run, its marks start the next;
+    // and an SGR that changes nothing between them, so the one-byte slicing flushes there)
+    kept("a cluster across a slice flush", "a".repeat(PAGE - 1) + "e" + M + M + "b".repeat(20), "a".repeat(PAGE - 1) + "e" + M + M + "b".repeat(20), PAGE - 1, "e" + M);
+    kept("a cluster across a flush at an SGR", "a".repeat(PAGE - 2) + "e" + "\x1b[0m" + M + M + M + "b".repeat(20), "a".repeat(PAGE - 2) + "e" + M + M + M + "b".repeat(20), PAGE - 2, "e" + M);
+    // (a cluster over two style runs, its base inside a run: that run splits, its classes on both parts)
+    {
+      const input = "a".repeat(PAGE - 4) + "\x1b[31mxe\x1b[32m" + M + M + M + M + "\x1b[0m" + "b".repeat(20);
+      kept("a cluster over two style runs", input, "a".repeat(PAGE - 4) + "xe" + M + M + M + M + "b".repeat(20), PAGE - 3, "e" + M);
+      const r = render(input + "\n");
+      const red = r.runs.filter((x) => x.cls === "sb-fg-1");
+      check(red.length === 2 && red[0].text === "x" && red[1].text === "e", `the base's run split at the join, its classes on both: ${JSON.stringify(red.map((x) => x.text))}`);
+    }
+    // (a base 33 and 64 units back: kept whole, the page that much shorter)
+    for (const back of [33, 40, PAGE_BACK]) {
+      const line = "a".repeat(PAGE - back) + "e" + M.repeat(back + 10) + "b".repeat(20);
+      kept(`a base ${back} units back`, line, line, PAGE - back, "e" + M);
+    }
+    // (BLL1-R1 at every slicing: a flag and a Hangul syllable across the edge move whole to the next page)
+    kept("a flag on the edge", "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), PAGE - 2, "\u{1f1f8}\u{1f1ea}");
+    kept("a Hangul L+V+T syllable on the edge", "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), PAGE - 2, "\u1100\u1161\u11a8");
+    // (a cluster over PAGE_BACK: split at the edge, the defined behaviour; with astral marks, at a scalar boundary)
+    {
+      const line = "a".repeat(PAGE - 100) + "e" + M.repeat(200) + "b".repeat(20);
+      kept("a cluster over PAGE_BACK, split at the edge", line, line, PAGE, M);
+      const astral = "a".repeat(PAGE - 100) + "e" + "\u{1d167}".repeat(100) + "b".repeat(20);
+      kept("a cluster of astral marks over PAGE_BACK, split at a scalar boundary", astral, astral, PAGE - 1, "\u{1d167}");
+    }
+    // (a cluster at the page's own start needs no move: a line of marks after one base, two pages over)
+    {
+      const line = "e" + M.repeat(3 * PAGE);
+      const r = render(line + "\n");
+      const ps = pagesOf(r.runs)[0];
+      check(ps.join("") === line && ps.every((p) => p.length === PAGE || p === ps.at(-1)) && ps.length === 4, `one cluster longer than the line's pages: split at each edge (pages ${ps.map((p) => p.length).join(", ")})`);
+    }
   }
   // (a styled run across a join: two runs with the same classes, each charged: B-LL-2)
   {

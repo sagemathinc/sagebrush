@@ -666,8 +666,9 @@ export class TerminalPanel {
           if (pf) (units -= pf.textContent!.length), (spans -= pf.childNodes.length), (pf = pfPage = null);
           for (const nd of open) {
             const [u, n] = cost(nd);
-            if (nd.parentNode === f) (units -= u), (spans -= n), f.removeChild(nd);
-            else (cmd.units -= u), (cmd.spans -= n), nd.parentNode?.removeChild(nd);
+            if (nd.parentNode === f) (units -= u), (spans -= n);
+            else (cmd.units -= u), (cmd.spans -= n);
+            (nd as ChildNode).remove();
           }
           open = [];
           page = null;
@@ -688,8 +689,7 @@ export class TerminalPanel {
         // and no later line: the omission line's run starts with its line end)
         const node = (s: string) => (run.cls === "" && !run.err ? document.createTextNode(s) : el("span", (run.err ? "sb-err " : "") + run.cls, s));
         const nl = page ? run.text.indexOf("\n") : -1;
-        const end = nl >= 0;
-        const text = end ? run.text.slice(0, nl) : run.text;
+        const text = nl < 0 ? run.text : run.text.slice(0, nl);
         if (text) {
           const nd = node(text);
           if (!page) {
@@ -701,13 +701,12 @@ export class TerminalPanel {
             pf!.appendChild(nd);
           }
         }
-        if (end) {
+        if (nl >= 0) {
           if (text) spans++;
-          const rest = run.text.slice(nl);
-          f.appendChild(rest === "\n" ? document.createTextNode(rest) : node(rest));
-          (open = []), (page = null);
+          f.appendChild(node(run.text.slice(nl)));
         }
-        if (run.text.endsWith("\n")) (open = []), (page = null);
+        // (a line end closes the line: only the omission line's run has text after its line end, and nothing follows it)
+        if (run.text.includes("\n")) (open = []), (page = null);
       }
       this.makeRoom(units, lines, spans);
       const stick = this.atBottom();

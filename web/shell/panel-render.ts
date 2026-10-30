@@ -29,18 +29,24 @@ export type Run = { text: string; cls: string; err: boolean; restart?: true; pag
  * inline-block box of its own (the painter's), so no slice lays out more than its own pages whatever the line's length,
  * and a selection still copies the line as one (no break at a join). A page run is charged as a run. */
 export const PAGE = 4096;
+// (how far a join may move back to a cluster's start: a longer cluster is split, at a scalar boundary)
+export const PAGE_BACK = 64;
 
-/** Whether a page may not start at code unit k of s: inside a surrogate pair, or before a continuation of the
- * previous character's cluster (a combining mark, ZWJ, a variation selector, an emoji modifier, a tag), or after ZWJ
- * (board's B-LL-1). */
-export function joinsCluster(s: string, k: number): boolean {
-  if (k <= 0 || k >= s.length) return false;
-  const p = s.charCodeAt(k - 1);
-  if (p >= 0xd800 && p < 0xdc00) return true;
-  if (p === 0x200d) return true;
-  const c = s.codePointAt(k)!;
-  return c === 0x200d || (c >= 0xfe00 && c <= 0xfe0f) || (c >= 0xe0100 && c <= 0xe01ef) || (c >= 0x1f3fb && c <= 0x1f3ff) ||
-    (c >= 0xe0020 && c <= 0xe007f) || /\p{M}/u.test(String.fromCodePoint(c));
+const graphemes = new Intl.Segmenter();
+/** Where a page may start at the edge e of s (lo: the page's own start there, never reached): the last grapheme-cluster
+ * boundary (UAX #29, Intl.Segmenter: marks, ZWJ sequences, flags, Hangul syllables...) at most PAGE_BACK units before
+ * e; for a longer cluster, e itself, or e - 1 inside a surrogate pair: always a scalar boundary.  @sagebrush's ruling
+ * on DB2-LL-337-1 (board's CONCUR, replacing B-LL-1's "never"). */
+export function cut(s: string, e: number, lo: number): number {
+  const a = Math.max(lo, e - PAGE_BACK - 2);
+  let j = lo;
+  for (const g of graphemes.segment(s.slice(a, e + 2))) {
+    if (a + g.index > e) break;
+    j = a + g.index;
+  }
+  if (j > lo && j >= e - PAGE_BACK) return j;
+  const c = s.charCodeAt(e - 1);
+  return c >= 0xd800 && c < 0xdc00 ? e - 1 : e;
 }
 
 type Style = { fg: number; bg: number; b: boolean; i: boolean; u: boolean; rev: boolean };
@@ -175,14 +181,50 @@ export class Render {
 
   /** Moves the current line's runs to `out` (at a \n, or at the end). */
   private flush(out: Run[], midLine = false) {
+    let keep: Run[] = [];
+    if (midLine) {
+      // (at a slice's end the units within PAGE_BACK + 2 of the next edge stay here, so the join there is decided on
+      // the logical line, across this flush and any style runs (DB2-LL-337-1, BLL1-R2); a run across the hold is split
+      // in two of its classes, the second charged, if a run is left, else all goes)
+      const hold = this.pageStart + PAGE - PAGE_BACK - 2;
+      let at = this.lineUnits, i = this.line.length;
+      while (i && at > hold) at -= this.line[--i].text.length;
+      if (at < hold && i < this.line.length) i = this.spans < CAPS.spans - 1 ? this.split(i, hold - at) : this.line.length;
+      keep = this.line.splice(i);
+    }
     for (const r of this.line) {
       out.push(r);
       if (midLine) (this.lineOut.units += r.text.length), this.lineOut.spans++;
     }
-    this.line = [];
+    this.line = keep;
     if (!midLine) this.lineOut = { units: 0, spans: 0 };
   }
 
+  /** Splits the line's run i at n units: two runs of its classes, the second charged; the second's index. */
+  private split(i: number, n: number) {
+    const r = this.line[i];
+    this.line.splice(i + 1, 0, { ...r, text: r.text.slice(n) });
+    r.text = r.text.slice(0, n);
+    this.spans++;
+    return i + 1;
+  }
+
+  /** A page run at unit J of the line: in the held runs (a run across it split: B-LL-2), or after `text`'s first part;
+   * returns the text left. */
+  private join(out: Run[], text: string, err: boolean, J: number): string {
+    const page: Run = { text: "", cls: "", err, page: true };
+    this.spans++;
+    let at = this.lineUnits, i = this.line.length;
+    this.pageStart = J;
+    if (J >= at) {
+      this.push(out, text.slice(0, J - at), err);
+      this.line.push(page);
+      return text.slice(J - at);
+    }
+    while (at > J) at -= this.line[--i].text.length;
+    this.line.splice(at < J ? this.split(i, J - at) : i, 0, page);
+    return text;
+  }
 
   /** The next slice's runs, or null when the output is done. */
   next(budget: { bytes: number; spans: number; ms: number } = SLICE): Run[] | null {
@@ -397,44 +439,17 @@ export class Render {
       this.lineUnits += text.length;
       return true;
     }
-    // (the line's next page boundary: up to it, then a page run, then the rest, as often as it takes; a line of at most
-    // PAGE units gets no page run; a surrogate pair is never split at an edge)
+    // (the line's page boundaries: the runs they take are charged before any text goes in, or nothing is shown: each
+    // join one run and the run it may split one more, a page short by up to PAGE_BACK + 1)
+    const over = this.lineUnits + text.length - this.pageStart - PAGE;
+    if (over > 0 && this.spans + 2 * Math.ceil(over / (PAGE - PAGE_BACK - 1)) + 1 > CAPS.spans - 1) return false;
+    // (each join decided on the logical line: the held runs back to PAGE_BACK + 2 before the edge, then this text)
     while (text) {
       const edge = this.pageStart + PAGE;
       if (this.lineUnits + text.length <= edge) break;
-      let k = edge - this.lineUnits;
-      // (back to a cluster boundary, at most 32 units; a boundary at the very start of this text whose first character
-      // continues the previous one's cluster: the cluster's rest stays on the page before, past PAGE by that much)
-      for (let b = 0; b < 32 && k > 0 && joinsCluster(text, k); b++) k--;
-      if (k === 0 && joinsCluster(" " + text, 1)) {
-        // (this text begins with a continuation, and the edge falls just before it: the cluster's start goes after
-        // the join too, taken from the end of this line's last run (its classes kept, as its own run))
-        const last = this.line[this.line.length - 1];
-        let m = last && !last.page ? last.text.length : 0;
-        for (let b = 0; b < 32 && m > 0 && joinsCluster(last.text + text, m); b++) m--;
-        if (last && m > 0 && m < last.text.length && this.spans + 3 <= CAPS.spans - 1) {
-          const tail = last.text.slice(m);
-          last.text = last.text.slice(0, m);
-          this.lineUnits -= tail.length;
-          this.line.push({ text: "", cls: "", err, page: true });
-          this.pageStart = this.lineUnits;
-          this.line.push({ text: tail, cls: last.cls, err: last.err });
-          this.spans += 2;
-          this.lineUnits += tail.length;
-          continue;
-        }
-        // (that run already left in an earlier slice: the cluster's rest stays on this page, past PAGE by that much)
-        k = 1;
-        while (k < text.length && k < 32 && joinsCluster(text, k)) k++;
-      }
-      if (k > 0) {
-        this.push(out, text.slice(0, k), err);
-        text = text.slice(k);
-      }
-      if (!text || this.spans + 1 > CAPS.spans - 1) break;
-      this.line.push({ text: "", cls: "", err, page: true });
-      this.spans++;
-      this.pageStart = this.lineUnits;
+      let s = text, at = this.lineUnits;
+      for (let i = this.line.length; i-- && at > edge - PAGE_BACK - 2; ) (at -= this.line[i].text.length), (s = this.line[i].text + s);
+      text = this.join(out, text, err, at + cut(s, edge - at, Math.max(0, this.pageStart - at)));
     }
     this.push(out, text, err);
     return true;
