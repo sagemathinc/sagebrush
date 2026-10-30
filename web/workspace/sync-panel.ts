@@ -157,7 +157,7 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
 /** The notebooks with edits the server hasn't acknowledged (their ids), or `over` when there are too many to count
  * (a seam for tests). */
-type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
+export type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
 /** Records that this device's refusals up to number `n` were looked at (a seam for tests). */
 type MarkSeen = (ns: string, n: number) => Promise<void>;
 export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, opts: { fetch?: Fetch; random?: () => number; after?: (ms: number, f: () => void) => () => void; readDetails?: DetailsRead; markSeen?: MarkSeen; readUnacked?: ReadUnacked } = {}): { dispose: () => void; poll: PanelPoll; refresh: () => void } {
@@ -321,21 +321,9 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
         parts.push(list);
       }
       box.replaceChildren(...parts);
-      // (notebooks (2c-3): those this page's document sync stopped, which won't send, and, while offline or syncing,
-      // those with edits waiting; the count read never holds the foot back: a failed or too large one says less)
-      const s0 = owner.view().s, stopped = owner.stoppedDocs();
-      let nb: Notebooks | undefined = stopped.length ? { waiting: 0, stopped: stopped.length } : undefined;
-      if (s0.state === "offline" || s0.state === "syncing") {
-        try {
-          const u = await readUnacked();
-          if (!current()) return;
-          const halted = new Set(stopped);
-          nb = u.over ? { waiting: 0, stopped: stopped.length, unknown: true } : { waiting: u.ids.filter((id) => !halted.has(id)).length, stopped: stopped.length };
-        } catch {
-          if (!current()) return;
-          nb = { waiting: 0, stopped: stopped.length, unknown: true };
-        }
-      }
+      // (notebooks (2c-3), as the sidebar's line reads them too (readNotebooks))
+      const nb = await readNotebooks(owner, readUnacked);
+      if (!current()) return;
       lastNb = nb;
       const footEl = sec.querySelector(".sync-foot");
       if ((unseen || nb) && footEl) footEl.textContent = `Sync is on: ${foot(owner.view().s, Date.now(), unseen, nb)}`;
@@ -493,10 +481,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
 }
 
-/** The Files sidebar's sync line ("" hides it): the foot's words while sync is on; once sync was used here and is
+/** The Files sidebar's sync line ("" hides it): the foot's words while sync is on (with the notebooks', `nb`: readNotebooks); once sync was used here and is
  * off, "Sync off" (and why: "Sync off: your synced data was deleted"); never used here, nothing. */
-export function sidebarLine(s: { state: string; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now()): string {
-  if (s.state !== "off") return foot(s, now);
+export function sidebarLine(s: { state: string; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
+  if (s.state !== "off") return foot(s, now, 0, nb);
   return s.reason ? `Sync off: ${s.reason}` : s.used ? "Sync off" : "";
 }
 /** Notebooks for the foot (2c-3): how many have edits waiting to go up, how many this page's document sync stopped
@@ -537,6 +525,20 @@ function footOf(s: { state: string; waiting?: number; reason?: string; lastSynce
 // the namespace's debt row changes: a T1's charge, an acknowledgement or a dropped notebook changes it)
 let unackedDb: Promise<IDBDatabase> | null = null;
 let unackedLast: { key: string; ids: string[]; over: boolean } | null = null;
+/** The notebooks' words for the foot (2c-3), for `owner`'s view now: those its document sync stopped, which won't send,
+ * and, while offline or syncing, those with edits waiting; the count read never holds the foot back: a failed or too
+ * large one says "notebook edits".  Nothing to say: undefined.  Read by the panel's foot and the sidebar's line. */
+export async function readNotebooks(owner: { view(): { s: { state: string } }; stoppedDocs(): string[] }, read: ReadUnacked = unackedNotebooks): Promise<Notebooks | undefined> {
+  const s0 = owner.view().s, stopped = owner.stoppedDocs();
+  if (s0.state !== "offline" && s0.state !== "syncing") return stopped.length ? { waiting: 0, stopped: stopped.length } : undefined;
+  try {
+    const u = await read();
+    const halted = new Set(stopped);
+    return u.over ? { waiting: 0, stopped: stopped.length, unknown: true } : { waiting: u.ids.filter((id) => !halted.has(id)).length, stopped: stopped.length };
+  } catch {
+    return { waiting: 0, stopped: stopped.length, unknown: true };
+  }
+}
 /** The notebooks with edits the server hasn't acknowledged: the debt row read first (cheap), the registry and slots
  * (one transaction) only when it changed since the last count. */
 async function unackedNotebooks(): Promise<{ ids: string[]; over: boolean }> {
