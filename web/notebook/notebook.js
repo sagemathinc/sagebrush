@@ -477,14 +477,46 @@ export function createNotebook(root, opts = {}) {
   // nbformat keeps JSON MIME types (application/json, */*+json) as JSON
   const isJsonMime = (k) => k === "application/json" || k.endsWith("+json");
   // Where output goes: {out, display, interact, clear} for a box.
-  function areaSink(box) {
+  // (waiting(on): an input() field shown, then answered or gone; a run's
+  // sink uses it to pause its timer)
+  function areaSink(box, waiting) {
     if (!box) return null;
     return {
       out: (text, isErr) => appendText(box, text, isErr),
       display: (b) => appendDisplay(box, b),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
+      input: (prompt, reply) => askInput(box, prompt, reply, waiting),
     };
+  }
+  // input(): a text field under the cell, as in Jupyter.  Enter sends the
+  // line; the run then writes the prompt and the line as its output.  A Stop
+  // ends the wait in the worker and removes the field at once (the kernel
+  // retires the question: reply.onretire); so does the run's end (settle).
+  function askInput(box, prompt, reply, waiting) {
+    if (opts.readOnly) return reply(null);
+    const row = h("div", "stdin");
+    let open = true;
+    const close = () => {
+      row.remove();
+      if (open) waiting?.(false);
+      open = false;
+    };
+    reply.onretire = close;
+    waiting?.(true);
+    const field = h("input", "stdin-field", { type: "text", spellcheck: false, autocomplete: "off" });
+    field.setAttribute("aria-label", prompt ? `input: ${prompt}` : "input");
+    row.append(h("span", "stdin-prompt", { textContent: prompt }), field);
+    field.addEventListener("keydown", (e) => {
+      // (the notebook's own keys don't act while typing an answer)
+      e.stopPropagation();
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      close();
+      reply(field.value);
+    });
+    box.appendChild(row);
+    field.focus({ preventScroll: true });
   }
 
   // A cell's output as Jupyter outputs (stream and display_data).
@@ -775,6 +807,8 @@ export function createNotebook(root, opts = {}) {
     clearInterval(cell.timer);
     cell.runb.textContent = "▶";
     cell.el.classList.remove("queued", "running");
+    // (an input() field still waiting: its run ended, by a Stop or a restart)
+    for (const row of cell.out.querySelectorAll(".stdin")) row.remove();
   }
   // A code cell's last run time, kept in the document (for the estimates of
   // stale cells, and the time limit's choices, after a reload): two
@@ -825,16 +859,31 @@ export function createNotebook(root, opts = {}) {
     cell.n.textContent = "[*]";
     cell.runb.textContent = "■";
     let failed = false;
+    let waited = 0, waitFrom = null;
     const k = kernel;
     return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         cell.el.classList.replace("queued", "running");
         const t0 = (cell.t0 = performance.now());
-        cell.timer = setInterval(() => { cell.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; }, 250);
+        cell.timer = setInterval(() => {
+          if (waitFrom === null) cell.time.textContent = `running… ${((performance.now() - t0 - waited) / 1000).toFixed(1)} s`;
+        }, 250);
       },
-      ...areaSink(cell.out),
+      // (while input() waits for a person, the timer stops and says so; the
+      // wait isn't the cell's time, shown or remembered for the estimates)
+      ...areaSink(cell.out, (on) => {
+        if (on && waitFrom === null) {
+          waitFrom = performance.now();
+          cell.time.textContent = "waiting for input";
+        } else if (!on && waitFrom !== null) {
+          waited += performance.now() - waitFrom;
+          waitFrom = null;
+        }
+      }),
       out(text, isErr) { failed ||= isErr; appendText(cell.out, text, isErr); },
       done(ms, info) {
+        if (waitFrom !== null) waited += performance.now() - waitFrom;
+        ms = Math.max(0, ms - waited);
         settle(cell);
         // (the notebook was switched away from while this ran: its output went to
         // the cell as it was then; if the notebook is shown again, the cell shown
@@ -860,7 +909,10 @@ export function createNotebook(root, opts = {}) {
       stopped(message) {
         // (a running cell whose interpreter was ended, Stop's last resort:
         // how long it ran, and why it stopped, rather than no time at all)
-        const ran = cell.el.classList.contains("running") && cell.t0 != null ? performance.now() - cell.t0 : null;
+        // (less any wait for a person at input(), as for a finished run)
+        if (waitFrom !== null) waited += performance.now() - waitFrom;
+        waitFrom = null;
+        const ran = cell.el.classList.contains("running") && cell.t0 != null ? Math.max(0, performance.now() - cell.t0 - waited) : null;
         settle(cell);
         cell.n.textContent = "[ ]";
         cell.stoppedAfter = ran;

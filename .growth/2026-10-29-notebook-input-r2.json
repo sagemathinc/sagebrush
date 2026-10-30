@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Notebook input() (PR 308) after merging master 1b86ca84: cli/pyjs.cjs grew 3566 bytes in all against that master (measured locally with CI's bun 1.4.4 tool), 12 over 2026-10-29-notebook-input.json's 3554; the other rows are unchanged.",
+  "bytes": {
+    "cli/pyjs.cjs": 12
+  }
+}
