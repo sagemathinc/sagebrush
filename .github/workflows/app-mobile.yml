@@ -1,12 +1,16 @@
-# The Android app, a debug APK, built from the desktop app's Tauri project
-# (app/: the same notebook page in the system's web view; src-tauri/src/lib.rs
-# is shared, with Tauri's mobile entry point).  Debug only: it is signed with
-# the build's own debug key, so there are no secrets here, and it installs by
-# sideloading.  The APK is kept as an artifact.
+# The Android app, built from the desktop app's Tauri project (app/: the same
+# notebook page in the system's web view; src-tauri/src/lib.rs is shared, with
+# Tauri's mobile entry point).  Two builds:
+# - android: a debug APK, signed with the build's own debug key; it installs by
+#   sideloading.
+# - release: the release profile (see that job), unsigned, plus a copy signed
+#   with a throwaway key made in the job, for testing only.
+# There are no secrets here.  The APKs are kept as artifacts.
 #
 # Pinned:
 # - Android SDK, NDK and JDK: the runner image's own, no downloads. The step
-#   below fails unless NDK 27.3.13750724 and JDK 17 are on the runner.
+#   below fails unless NDK 27.3.13750724 and JDK 17 are on the runner (and,
+#   for the release job, build-tools 35.0.0: apksigner, zipalign, aapt2).
 # - Rust 1.99.0, with the aarch64-linux-android target: rustup checks each
 #   component against the channel manifest's SHA-256.
 # - The Tauri CLI: crate tauri-cli 2.12.4, installed --locked; crates.io
@@ -17,8 +21,10 @@
 #   (gradle/verification-metadata.xml); two negative controls show a tampered
 #   checksum fails.
 #
-# It runs only when this file or the committed Android project changes, or by
-# hand (workflow_dispatch), and is
+# It runs when this file, the committed Android project, or the app's Rust side
+# (src-tauri/src, Cargo.toml, Cargo.lock, tauri.conf.json: a release-only
+# breakage, e.g. R8 or LTO, can come from there) changes, or by hand
+# (workflow_dispatch), and is
 # never a required check or a need of ci.yml's aggregate (@sagebrush's ruling
 # after #304); making it gate is a separate decision.
 name: app-mobile
@@ -26,9 +32,9 @@ name: app-mobile
 on:
   push:
     branches: [master]
-    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**", "app/src-tauri/src/**", "app/src-tauri/Cargo.toml", "app/src-tauri/Cargo.lock", "app/src-tauri/tauri.conf.json"]
   pull_request:
-    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**", "app/src-tauri/src/**", "app/src-tauri/Cargo.toml", "app/src-tauri/Cargo.lock", "app/src-tauri/tauri.conf.json"]
   workflow_dispatch:
 
 permissions:
@@ -131,6 +137,16 @@ jobs:
           set -euo pipefail
           find app/src-tauri/gen/android -name '*.apk' -path '*outputs*' -print0 | xargs -0 ls -l
           find app/src-tauri/gen/android -name '*.apk' -path '*outputs*' -print0 | xargs -0 sha256sum
+      # (the positive control for the release job's check that the debug-only
+      # self-test hook is gone: in this debug build it must be there, so that
+      # check can't pass vacuously; same run, same sha)
+      - name: "positive control: the debug .so has the self-test hook"
+        run: |
+          set -euo pipefail
+          apk=app/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+          n=$(unzip -p "$apk" lib/arm64-v8a/libsagebrush_app_lib.so | grep -c -a -F 'files/selftest' || true)
+          [ "${n:-0}" -gt 0 ] || { echo "FAIL: the debug .so has no 'files/selftest' (the release job's check would be vacuous)"; exit 1; }
+          echo "ok: the debug .so has the self-test hook ($n matching lines)"
       - uses: actions/upload-artifact@v4
         with:
           name: sagebrush-android-debug
@@ -170,3 +186,147 @@ jobs:
           echo "ok: a tampered distribution sha256 fails (exit $c)"
       - name: the committed project is unchanged after the controls
         run: test -z "$(git status --porcelain -- app/src-tauri/gen/android)"
+
+  # The release build, as we would ship it: Cargo's release profile (LTO, one
+  # codegen unit, opt-level "s", stripped) and Gradle's release type (R8). Not
+  # a signed release: CI holds no signing key. Gradle's output is unsigned
+  # (kept as an artifact for a real signing step later); a COPY is signed with
+  # a throwaway key made in the job, only so that it installs for testing
+  # (artifact sagebrush-android-release-TESTKEY-not-for-distribution). Its
+  # password is random, masked, in one step's environment only (never argv,
+  # $GITHUB_ENV, outputs or files), and the keystore is deleted in that step.
+  # Non-gating, like the rest of this file.
+  release:
+    if: github.repository == 'sagemathinc/sagebrush'
+    needs: page
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      NDK_VERSION: 27.3.13750724
+      BUILD_TOOLS_VERSION: 35.0.0
+      TAURI_CLI_VERSION: 2.12.4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-page
+          path: app/dist
+      - name: the runner's Android SDK, NDK, build-tools and JDK 17 (no downloads)
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          if [ ! -f "$ndk/source.properties" ]; then echo "NDK $NDK_VERSION is not on this runner image:"; ls "$ANDROID_HOME/ndk"; exit 1; fi
+          for t in apksigner zipalign aapt2; do [ -x "$bt/$t" ] || { echo "build-tools $BUILD_TOOLS_VERSION has no $t on this runner image:"; ls "$ANDROID_HOME/build-tools"; exit 1; }; done
+          if [ -z "${JAVA_HOME_17_X64:-}" ] || [ ! -x "$JAVA_HOME_17_X64/bin/java" ]; then echo "no JDK 17 on this runner image"; exit 1; fi
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "BT=$bt" >> "$GITHUB_ENV"
+          echo "runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          grep Pkg.Revision "$ndk/source.properties"
+          "$JAVA_HOME_17_X64/bin/java" -version
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: android-release
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: |
+          cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: the committed Android project and its wrapper jar
+        working-directory: app/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          printf '%s\n' '497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          grep -qx 'distributionSha256Sum=9c0f7faeeb306cb14e4279a3e084ca6b596894089a0638e68a07c945a32c9e14' gradle/wrapper/gradle-wrapper.properties
+          test -f gradle/verification-metadata.xml
+      - name: build (release APK, arm64)
+        working-directory: app/src-tauri
+        run: |
+          set -euo pipefail
+          s=$(date +%s)
+          cargo tauri android build --apk --target aarch64
+          echo "release build: $(( $(date +%s) - s )) s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: the committed project is unchanged by the build
+        run: |
+          set -euo pipefail
+          changed=$(git status --porcelain -- app/src-tauri/gen/android)
+          if [ -n "$changed" ]; then echo "the build changed the committed Android project:"; echo "$changed"; git diff --stat -- app/src-tauri/gen/android; exit 1; fi
+      - name: exactly one APK, unsigned
+        id: apk
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/src-tauri/gen/android/app/build/outputs/apk -name '*.apk')
+          [ "${#apks[@]}" = 1 ] || { echo "expected exactly one APK, found ${#apks[@]}: ${apks[*]}"; exit 1; }
+          case "${apks[0]}" in */app-universal-release-unsigned.apk) ;; *) echo "expected app-universal-release-unsigned.apk, found ${apks[0]}"; exit 1;; esac
+          echo "path=${apks[0]}" >> "$GITHUB_OUTPUT"
+      # (every check is closed and fails loudly)
+      - name: it is a release build
+        env:
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          set -euo pipefail
+          so=lib/arm64-v8a/libsagebrush_app_lib.so
+          unzip -l "$APK" "$so" > /dev/null || { echo "FAIL: no $so in the APK:"; unzip -l "$APK" | grep '\.so$' || true; exit 1; }
+          "$BT/aapt2" dump badging "$APK" > /tmp/badging.txt
+          if grep -q '^application-debuggable' /tmp/badging.txt; then echo "FAIL: the release APK is debuggable"; exit 1; fi
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > /tmp/manifest.txt
+          grep 'usesCleartextTraffic' /tmp/manifest.txt || { echo "FAIL: no usesCleartextTraffic in the manifest"; exit 1; }
+          grep -q 'usesCleartextTraffic([^)]*)=false' /tmp/manifest.txt || { echo "FAIL: usesCleartextTraffic is not false"; exit 1; }
+          unzip -p "$APK" "$so" > /tmp/lib.so
+          if "$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -S -W /tmp/lib.so | grep -F '.debug_'; then echo "FAIL: the release .so has debug sections"; exit 1; fi
+          n=$(grep -c -a -F 'files/selftest' /tmp/lib.so || true)
+          [ "${n:-0}" = 0 ] || { echo "FAIL: the release .so has the debug-only self-test hook ($n matching lines)"; exit 1; }
+          {
+            echo "ok: not debuggable; usesCleartextTraffic=false; $so stripped; no self-test hook"
+            grep -m1 '^package:' /tmp/badging.txt
+            echo "sizes (bytes): APK $(stat -c %s "$APK"); $(unzip -l "$APK" "$so" classes.dex | awk '$4 ~ /(\.so|\.dex)$/ {printf "%s %s; ", $4, $1}')"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: a copy signed with a throwaway key (TESTKEY, not for distribution)
+        env:
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          set -euo pipefail
+          umask 077
+          kdir=$(mktemp -d "$RUNNER_TEMP/testkey.XXXXXX")
+          trap 'rm -rf "$kdir"' EXIT
+          KS_PASS=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          echo "::add-mask::$KS_PASS"
+          export KS_PASS
+          "$JAVA_HOME/bin/keytool" -genkeypair -keystore "$kdir/test.p12" -storetype PKCS12 -alias test \
+            -keyalg RSA -keysize 4096 -validity 2 -dname "CN=sagebrush CI test key, NOT FOR DISTRIBUTION" \
+            -storepass:env KS_PASS -keypass:env KS_PASS > /dev/null
+          out=build/release-testkey
+          mkdir -p "$out"
+          "$BT/zipalign" -P 16 -f 4 "$APK" "$kdir/aligned.apk"
+          "$BT/apksigner" sign --ks "$kdir/test.p12" --ks-key-alias test --ks-pass env:KS_PASS --key-pass env:KS_PASS \
+            --out "$out/sagebrush-release-TESTKEY-not-for-distribution.apk" "$kdir/aligned.apk"
+          rm -rf "$kdir"
+          [ ! -e "$kdir" ] || { echo "FAIL: the keystore directory is still there"; exit 1; }
+          unset KS_PASS
+          signed="$out/sagebrush-release-TESTKEY-not-for-distribution.apk"
+          "$BT/zipalign" -c -P 16 4 "$signed" > /dev/null || { echo "FAIL: the signed APK is not aligned"; exit 1; }
+          "$BT/apksigner" verify --print-certs "$signed" > /tmp/certs.txt || { cat /tmp/certs.txt; echo "FAIL: apksigner verify"; exit 1; }
+          grep -q 'NOT FOR DISTRIBUTION' /tmp/certs.txt || { cat /tmp/certs.txt; echo "FAIL: not signed by the test key"; exit 1; }
+          {
+            echo "TESTKEY (made in this run, deleted; NOT FOR DISTRIBUTION): $(grep -m1 'certificate SHA-256 digest' /tmp/certs.txt)"
+            echo "apksigner $("$BT/apksigner" --version), build-tools $BUILD_TOOLS_VERSION, $("$JAVA_HOME/bin/java" -version 2>&1 | head -1)"
+            sha256sum "$APK" "$signed"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sagebrush-android-release-unsigned
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sagebrush-android-release-TESTKEY-not-for-distribution
+          path: build/release-testkey/sagebrush-release-TESTKEY-not-for-distribution.apk
+          if-no-files-found: error
+          retention-days: 14
