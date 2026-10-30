@@ -242,7 +242,7 @@
   html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
   html.phone.typing .bar { display: none; }
-  html.phone #writerbar { top: 0; }
+  html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
   /* (over the early-alpha notice, whose z-index is 2147483000; its script's name isn't written here,
      as scripts/build-cli.mjs takes the notice out of the CLI's page by that name) */
@@ -2130,7 +2130,8 @@ function menuOf(btn, menu) {
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
-  const update = () => document.documentElement.classList.toggle("typing", typing());
+  // (a resize after the change: what places itself above the toolbar, the terminal's sheet, places itself again)
+  const update = () => { const was = document.documentElement.classList.contains("typing"), now = typing(); if (was === now) return; document.documentElement.classList.toggle("typing", now); dispatchEvent(new Event("resize")); };
   document.addEventListener("focusin", update);
   document.addEventListener("focusout", () => setTimeout(update, 0));
 }
