@@ -263,6 +263,30 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("source-limit-one-over-refused", e1?.code === "limit" && e1.detail?.limit === "sourceUnits" && e2?.code === "limit" && /up to 2 MiB \(this one is 2\.0 MiB\)/.test(e1.message), e1?.message);
 }
 
+// ---- DB3-BUDGET-1-R1: no copy of the source before its charge: with less budget left than the next step needs (a
+// short range's piece; a context line), the step is refused without copying anything (the onCopy seam sees every copy)
+{
+  const short = "\\begin{document}\nAlpha words. Beta words here. Gamma words.\n\\end{document}\n";   // under a window: a copy
+  const a = { start: 30, end: 40, textSha: "stale", quote: "", prefix: "Alpha words. ", suffix: " here." };
+  const piece = short.length;                                   // find(prefix) copies the whole short text
+  const copies = [];
+  const R = C.resolver(short, 2 * short.length + piece - 1, { onCopy: (x, y) => copies.push([x, y]) });
+  const r = R.resolve(a);
+  check("DB3-BUDGET-1-R1-short-find-refused-before-copy", r.status === "unresolved" && copies.length === 0 && R.work() === 2 * short.length, { r, copies, work: R.work() });
+  // the same with one more unit: the copy happens, charged
+  const copies2 = [], R2 = C.resolver(short, 2 * short.length + piece, { onCopy: (x, y) => copies2.push([x, y]) });
+  R2.resolve(a);
+  check("DB3-BUDGET-1-R1-short-find-copy-charged", copies2.length >= 1 && copies2[0][1] - copies2[0][0] === piece && R2.work() >= 2 * short.length + piece, { copies2, work: R2.work() });
+  // context: a line it can't afford isn't copied
+  const lines = "line one\nline two is longer\nline three\n", copies3 = [];
+  const R3 = C.resolver(lines, 2 * lines.length + 5, { onCopy: (x, y) => copies3.push([x, y]) });
+  const ctx = R3.context(10, 12);
+  check("DB3-BUDGET-1-R1-context-refused-before-copy", copies3.length === 0 && ctx === "" && R3.work() === 2 * lines.length, { copies3, ctx, work: R3.work() });
+  const copies4 = [], R4 = C.resolver(lines, 2 * lines.length + 8, { onCopy: (x, y) => copies4.push([x, y]) });
+  const ctx4 = R4.context(10, 12);
+  check("DB3-BUDGET-1-R1-context-each-line-charged-first", ctx4 === "line one" && copies4.length === 1 && R4.work() === 2 * lines.length + 8, { copies4, ctx4, work: R4.work() });
+}
+
 // ---- LC316-A1: the 2 MiB bound on reading is in UTF-8 bytes, as on writing: multibyte text at, and one byte over
 {
   const enc = (x) => new TextEncoder().encode(x).length, LIM = C.LIMITS.sidecarBytes;
