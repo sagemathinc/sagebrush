@@ -362,8 +362,9 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const lim = supported && st.limit_bytes !== null && st.limit_bytes !== undefined ? `\nYour plan's storage: ${fmt(st.used_bytes ?? 0)} of ${fmt(st.limit_bytes)} used.` : "";
     const warn = supported ? "" : "\nIf another tab signs in as another account meanwhile, check the account here afterwards.";
     // (sync used here before (its off lease kept, #375): the files may include ones fetched from other devices, which
-    // are uploaded again as they are (sync-docs' ruling (5)); said, not counted: @sagebrush's ruling (b))
-    const fetched = owner.view().s.used ? " (files fetched from your other devices included)" : "";
+    // are uploaded again as they are (sync-docs' ruling (5)); said, not counted: @sagebrush's ruling (b); not beside
+    // "0 data files")
+    const fetched = owner.view().s.used && use.files.count > 0 ? " (files fetched from your other devices included)" : "";
     if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. Your notebooks and boards are listed; their contents sync in a later step.${lim}${warn}`)) return;
     // (without the server's precondition: the account read again just before, and the enable not sent if it moved)
     if (!supported) {

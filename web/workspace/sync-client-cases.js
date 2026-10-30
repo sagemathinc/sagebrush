@@ -2609,8 +2609,9 @@ async function s5ConfirmFetched() {
   // (@sagebrush's ruling (b) on the backlog's item 3: turning sync on again where it was used before, the confirm says
   // the files may include ones fetched from other devices; a device that never used sync says nothing of it)
   const said = {};
-  for (const used of [true, false]) {
+  for (const [name, used, files] of [["used", true, 1], ["usedNoFiles", true, 0], ["never", false, 1]]) {
     const w = await fresh();
+    for (let i = 0; i < files; i++) await w.create(`/f${i}.txt`, { content: "x" });
     const owner = W.SyncOwner.of(w), view = owner.view;
     owner.view = () => ({ from: "own", s: used ? { state: "off", used: true } : { state: "off" } });
     const srv = fakeServer({ available: true, state: "off", limit_bytes: null, used_bytes: 0 });
@@ -2622,7 +2623,7 @@ async function s5ConfirmFetched() {
       await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
       [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
       await until(() => asked !== null, 3000);
-      said[used ? "used" : "never"] = asked;
+      said[name] = asked;
     } finally {
       sec.dispose();
       el.remove();
@@ -2630,7 +2631,9 @@ async function s5ConfirmFetched() {
     }
   }
   const phrase = "(files fetched from your other devices included)";
-  check(typeof said.used === "string" && said.used.includes("will be uploaded " + phrase + ".") && typeof said.never === "string" && /will be uploaded\. /.test(said.never) && !said.never.includes(phrase), "turn-on confirm: used here before, the fetched files said; never used, not: " + J(said));
+  check(typeof said.used === "string" && /^Turn on sync\?\n1 data file \(/.test(said.used) && said.used.includes("will be uploaded " + phrase + "."), "turn-on confirm: used here before, with files: the fetched files said: " + J(said.used));
+  check(typeof said.usedNoFiles === "string" && /^Turn on sync\?\n0 data files/.test(said.usedNoFiles) && /will be uploaded\. /.test(said.usedNoFiles) && !said.usedNoFiles.includes(phrase), "turn-on confirm: used here before, no files: not beside \"0 data files\": " + J(said.usedNoFiles));
+  check(typeof said.never === "string" && /will be uploaded\. /.test(said.never) && !said.never.includes(phrase), "turn-on confirm: never used: not said: " + J(said.never));
 }
 
 async function s5Notebooks() {
