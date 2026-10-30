@@ -429,6 +429,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
         if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
       }
       if (this.recovered.row === "busy") throw new Error(this.T.BUSY);
+      // (2c-3: started here with none of its synced history yet: not opened, nothing written; the page says it is still
+      // arriving and asks for its pull (sync-docs' N-2C3-1))
+      if (this.recovered.row === "arriving") throw Object.assign(new Error(this.T.ARRIVING), { arriving: true });
       // (2c-2: a document not yet synced starts its synced history now, from the value recovered; one that can't (no
       // room, say) stays local this time, and tries again at its next load)
       if (this.kind.sync.on && !this.synced) await this.startSynced(this.recovered.doc).catch((e) => console.warn(`sync: a ${this.kind.noun}'s synced history not started:`, e));
@@ -444,8 +447,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   }
   // (the record with the versioned part of `value` (the history's records): the kind's withValue)
   withValue(rec, value) { return this.kind.withValue(rec, value); }
-  /** Recovery (design r4 §3): {doc, row: "consistent" | "stamped" | "rewritten" | "new", catchUp?}, or null when the
-   * record changed under its compare and swap (load reads it again and replays again). */
+  /** Recovery (design r4 §3): {doc, row: "consistent" | "stamped" | "rewritten" | "new" | "from-server", catchUp?},
+   * {row: "arriving"} (nothing written), or null when the record changed under its compare and swap (load reads it
+   * again and replays again). */
   async recover(rec) {
     const state = await readJournal(this.hdb, this.id);
     const above = state.intents.filter((it) => it.j > (rec && Number.isSafeInteger(rec.j) ? rec.j : 0));
@@ -460,8 +464,15 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (typeof out === "string") throw new Error(out);
       return out.conflict ? null : { doc: { ...doc, rev: out.rev, j: state.J, hash }, row: "from-server" };
     }
+    if (!rec && !chosen && this.synced) {
+      // (2c-3: started here, no record, and none of its synced history yet (a start whose pull brought nothing, or rows
+      // a remove dropped meanwhile): still arriving, and nothing written.  A fresh record here would fork it: its first
+      // save is a local root patch on the synced history (t1Write's l row), which the page's DocSync sends before any
+      // page could stop it (sync-docs' N-2C3-1, after the grader's N-ST-2))
+      return { doc: null, row: "arriving" };
+    }
     if (!rec && !chosen) {
-      // (a new document: its first save journaled like any other)
+      // (a new document, never started: its first save journaled like any other)
       const fresh = this.kind.empty(this.id, this.initial);
       const saved = await this.writeSave(fresh);
       if (typeof saved === "string") throw new Error(saved);
