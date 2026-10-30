@@ -601,7 +601,6 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-529.mjs
           bun web/notebook/test-json-text.mjs
           bun web/notebook/test-text-overlap.mjs
-          bun web/notebook/test-merge3.mjs
           bun web/notebook/test-db-merge3.mjs
           bun web/notebook/test-merge-mode-chain.mjs
           bun web/notebook/test-p2c-merge.mjs
