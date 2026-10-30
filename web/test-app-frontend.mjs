@@ -22,12 +22,22 @@ const files = readdirSync(tz);
 ok(files.some((f) => /^index-[0-9a-f]{64}\.json$/.test(f)) && files.filter((f) => f.endsWith(".tzif")).length > 300, `app/dist/lib/tzdata has the index and the zone files (${files.length} files)`);
 
 // The Terminal's shell worker in the app: the app serves it with the site's own policy (web/csp-policy.mts
-// shellWorkerPolicy: no network), from lib.rs's SHELL_WORKER_CSP, on its exact path
-const policyOf = (mts) => { const m = /export function shellWorkerPolicy\(\): string \{\s*return \[([^\]]*)\]\.join\("; "\);/.exec(mts); return m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("; ") : null; };
+// shellWorkerPolicy: no fetch/XHR/WebSocket connections, no further workers, module scripts only from 'self'
+// and blob:), from lib.rs's SHELL_WORKER_CSP, on its exact path
+// (a closed grammar: the array holds string literals only, so no element the parse can't read drops out unseen;
+// anything else, a constant, a template, a spread, and there is no policy to compare: R-380-1)
+const policyOf = (mts) => {
+  const m = /export function shellWorkerPolicy\(\): string \{\s*return \[([^\]]*)\]\.join\("; "\);\s*\}/.exec(mts);
+  if (!m || !/^\s*"[^"\\]*"(?:\s*,\s*"[^"\\]*")*\s*,?\s*$/.test(m[1])) return null;
+  return [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("; ");
+};
 const appServes = (rs, policy) => !!policy && /const SHELL_WORKER_CSP: &str = "([^"]*)";/.exec(rs)?.[1] === policy &&
   rs.includes(`if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {\n                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);`);
 const libRs = readFileSync(join(here, "..", "app", "src-tauri", "src", "lib.rs"), "utf8");
-const policy = policyOf(readFileSync(join(here, "csp-policy.mts"), "utf8"));
+const policyMts = readFileSync(join(here, "csp-policy.mts"), "utf8");
+const policy = policyOf(policyMts);
+ok(policyOf(policyMts.replace(`"connect-src 'none'",`, "CONNECT,")) === null && policyOf(policyMts.replace(`"connect-src 'none'",`, "`connect-src 'none'`,")) === null &&
+  policyOf(policyMts.replace(`"connect-src 'none'",`, `"connect-src 'none'", ...more,`)) === null, "a shell worker policy with an element other than a string literal: no policy read (a constant, a template, a spread)");
 ok(!!policy && /connect-src 'none'/.test(policy) && appServes(libRs, policy), "the app serves shell/worker-boot.js with the site's shell worker policy (lib.rs = csp-policy.mts)");
 ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`Some("/shell/worker-boot.js")`, `Some("/shell/worker.js")`), policy),
   "a lib.rs policy other than the site's, or on another path: refused");

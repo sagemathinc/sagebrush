@@ -104,9 +104,10 @@ pub fn run() {
                 .on_request(|request, response| {
                     response.add_header("Cross-Origin-Opener-Policy", "same-origin");
                     response.add_header("Cross-Origin-Embedder-Policy", "require-corp");
-                    // the Terminal's shell worker, with its own policy as the site serves it (no network, no
-                    // eval, no further workers: web/csp-policy.mts shellWorkerPolicy, checked equal by
-                    // web/test-app-frontend.mjs); the app sets no other CSP (tauri.conf.json)
+                    // the Terminal's shell worker, with its own policy as the site serves it (no network
+                    // connections, no eval, no further workers, scripts from this origin and blob: only:
+                    // web/csp-policy.mts shellWorkerPolicy, checked equal by web/test-app-frontend.mjs); the app
+                    // sets no other CSP (tauri.conf.json)
                     if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {
                         response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);
                     }
