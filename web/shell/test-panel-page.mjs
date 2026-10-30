@@ -488,6 +488,13 @@ try {
   await realClick(at.x, at.y);
   const k0 = await boardState();
   check(k0.ids === "a,b" && k0.selected === 1 && !k0.find, `board: two items, one selected, in Edit: ${JSON.stringify(k0)}`);
+  // (one real, undoable board edit first, an arrow nudge of the selected item, so that a Ctrl+Z or an arrow reaching
+  // the board from the dock would change its document: the loop below compares the whole document, board's B363-3)
+  const doc = () => evaluate(`JSON.stringify(window.sagebrush.board.snapshot().doc)`);
+  const d0 = await doc();
+  await rawKey("ArrowRight", "ArrowRight", 39);
+  const d1 = await doc();
+  check(d1 !== d0 && (await ids()) === "a,b", `board: a real arrow on the board nudges the selected item (an edit to undo): ${d0 === d1 ? "unchanged" : "changed"}`);
   const logAt = await evaluate(`(() => { const r = document.querySelector(".sb-term-log").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 10 }; })()`);
   const KEYS = [["Delete", "Delete", 46], ["Backspace", "Backspace", 8], ["ArrowUp", "ArrowUp", 38], ["ArrowLeft", "ArrowLeft", 37], ["z", "KeyZ", 90, 2], ["y", "KeyY", 89, 2], ["f", "KeyF", 70, 2]];
   for (const [where, focus] of [["the log", null], ["the grip", ".sb-term-grip"], ["the Hide button", ".sb-term-hide"], ["the input", ".sb-term textarea"]]) {
@@ -497,11 +504,18 @@ try {
     const h0 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
     for (const k of KEYS) await rawKey(...k);
     const s = await boardState();
+    const same = (await doc()) === d1;
     const h1 = await evaluate(`document.querySelector(".sb-term").getBoundingClientRect().height`);
-    check(inDock && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
-      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F): ${JSON.stringify({ inDock, ...s, h0, h1 })}`);
+    check(inDock && same && s.ids === "a,b" && s.selected === 1 && !s.find && (where !== "the grip" || h1 > h0),
+      `board: real keys with the focus on ${where} are the terminal's (Delete, Backspace, arrows, Ctrl+Z, Ctrl+Y, Ctrl+F; the board's document unchanged): ${JSON.stringify({ inDock, same, ...s, h0, h1 })}`);
   }
   await evaluate(`document.querySelector(".sb-term textarea").value = ""`);
+  // (the control: with the board's keys back after a real click on item a, Ctrl+Z does undo the nudge, so the loop's
+  // Ctrl+Z had an edit to undo)
+  const atA = await evaluate(`(() => { const r = window.board.clientRect("a"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
+  await realClick(atA.x, atA.y);
+  await rawKey("z", "KeyZ", 90, 2);
+  check((await doc()) === d0, `board: Ctrl+Z with the board's keys undoes the nudge (the dock's Ctrl+Z had one to undo): ${(await doc()) === d0 ? "undone" : "not undone"}`);
   // (a click on the other, unselected item: selected by it, then Delete deletes it)
   const atB = await evaluate(`(() => { const r = window.board.clientRect("b"); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 20) }; })()`);
   await realClick(atB.x, atB.y);
