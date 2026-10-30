@@ -2167,6 +2167,27 @@ export class Workspace {
     });
   }
 
+  /** The grants the person gave paired agents (design/workspace-agent-protocol.md §2.2), by pairing id: kept in
+   * this browser's workspace (so per site and workspace), for the page's pairing alone, never offered to agents
+   * (forAgent). */
+  async agentGrants(): Promise<Record<string, unknown>> {
+    return inTx(this.ws, "meta", "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), out: Record<string, unknown> = {};
+      const keys = (await req(st.getAllKeys(IDBKeyRange.bound("grant:", "grant:\uffff")))) as IDBValidKey[];
+      for (const k of keys) if (typeof k === "string") out[k.slice("grant:".length)] = await req(st.get(k));
+      return out;
+    });
+  }
+  /** Keep (or, with null, forget) the grant of pairing `id`: revoking a grant forgets it here too. */
+  async putAgentGrant(id: string, g: unknown | null): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new WorkspaceError("invalid", "a pairing id is 1 to 64 letters, digits, _ or -");
+    await inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta");
+      if (g === null) st.delete("grant:" + id);
+      else st.put(g, "grant:" + id);
+    });
+  }
+
   /** The workspace as an agent sees it (§8.2): the verbs, its changes
    * credited to `actor` ("agent:<name>"), and none of what only a person
    * does (dropVersions, forget). */
@@ -2784,10 +2805,21 @@ export class Workspace {
   /** Every data file not in Trash, with its bytes (where they are): what a notebook's interpreter is given when it starts. */
   async dataFiles(): Promise<[string, Uint8Array][]> {
     const all = (await this.list("/", { recursive: true })).filter((e) => e.kind === "file");
+    // (the bytes kept beside the index read in one transaction, not one each: what a kernel's start waits for;
+    // any other, or all of them if that transaction fails, read one at a time as before)
+    const kept = all.filter((e) => e.migrated && !e.remote && e.fid !== undefined);
+    const got = new Map<Entry, unknown>();
+    if (kept.length) {
+      const read = await inTx(this.ws, "fileBytes", "readonly", (tx) => {
+        const st = tx.objectStore("fileBytes");
+        return Promise.all(kept.map((e) => req(st.get(e.fid!))));
+      }).catch(() => null);
+      if (read) kept.forEach((e, i) => got.set(e, read[i]));
+    }
     const out: [string, Uint8Array][] = [];
     for (const e of all) {
-      const b = await this.contents(e).catch(() => undefined);
-      if (b !== undefined) out.push([e.path, b]);
+      const b = got.has(e) ? got.get(e) : await this.contents(e).catch(() => undefined);
+      if (b !== undefined) out.push([e.path, b as Uint8Array]);
     }
     return out;
   }
@@ -2815,7 +2847,12 @@ export class Workspace {
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();
       mode = mode ?? doc.mode ?? "python";
-      const out = await new IdbStore(this.main, ref).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true });
+      // (with the journal active (the notebooks' fence says "journal": plan-sync-slice2-client r4 §1a), the record is
+      // written as the journal's own store leaves a save whose T1 isn't made yet: marked unjournaled, with no j, so the
+      // notebook's first writer load takes it into the journal (recovery's catch-up, 2c-1d-iii §3); a plain store's
+      // save is refused there, and so was every notebook made here: the Files' New, create, duplicate, an upload)
+      const journaled = (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal";
+      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.mainTx("notebooks", "readwrite", (st) => st.delete(ref));
     } else if (kind === "board") {

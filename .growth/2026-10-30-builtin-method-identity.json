@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "A builtin method or getset read through an int, float or str subclass is the base's own object (J.__repr__ is int.__repr__), and the base's checked form takes subclass instances as arguments (src/runtime/object.ts, types.ts). Measured locally with CI's bun 1.4.4 tool: master ae02160b against this branch merged.",
+  "bytes": {
+    "cli/pyjs.cjs": 315,
+    "engine/sagebrush-worker.js": 294
+  }
+}

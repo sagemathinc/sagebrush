@@ -801,5 +801,12 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   console.log(`remote-gate: ${ran} controls ran`);
   check(ran === 32, `remote-gate: every control ran (${ran} of 32)`);
 }
+// ---- the GPU kernel's preview (remote-ui.js): its simulated gateway and startPreview
+{
+  const { runUiTests } = await import("./test-remote-ui.mjs");
+  const ran = await runUiTests(check);
+  console.log(`remote-ui: ${ran} controls ran`);
+  check(ran === 50, `remote-ui: every control ran (${ran} of 50)`);
+}
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

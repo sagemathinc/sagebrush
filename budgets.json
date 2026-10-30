@@ -61,7 +61,7 @@
   },
   "engine/lib/matlab-lu.src": {
    "exact": false,
-   "ceiling": 52360,
+   "ceiling": 67051,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -160,6 +160,13 @@
   "engine/lib/mod-datetime.src": {
    "exact": false,
    "ceiling": 1538,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-enum.src": {
+   "exact": false,
+   "ceiling": 97082,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -474,7 +481,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 4702,
+   "ceiling": 6530,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -557,6 +564,7 @@
    "engine/lib/mod-copyreg.src": 8446,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
+   "engine/lib/mod-enum.src": 88257,
    "engine/lib/mod-future.src": 5652,
    "engine/lib/mod-graph-spring.src": 12473,
    "engine/lib/mod-heapq.src": 24333,

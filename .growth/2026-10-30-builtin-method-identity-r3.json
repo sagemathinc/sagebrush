@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Builtin method identity, revision for P327-R2-A1 (only str's str-valued arguments are taken by value; every other argument keeps its own protocol). A second top-up over the -identity and -r2 markers: measured locally with CI's bun 1.4.4 tool, master ae02160b against this head, cli/pyjs.cjs +1051 and engine/sagebrush-worker.js +871 in all.",
+  "bytes": {
+    "cli/pyjs.cjs": 604,
+    "engine/sagebrush-worker.js": 456
+  }
+}

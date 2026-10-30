@@ -74,6 +74,7 @@ const CASES = [
   // so the heap+external series grows 48 MB from repeat 3 to 5: the leak check must FAIL it, every
   // run (leakControlOutcome; the row PASSes only then).  Its Stops are a plain interruptible loop.
   { id: "L1c", mode: "python", leak_measure: "heap+external", expect_leak: true, calibration: "nonterminating", hosts: ["cli"], setup: "import numpy as np\n_keep = globals().setdefault('_keep', [])\n_keep.append(np.ones(3_000_000))\nk = 0", target: "while True:\n    k += 1", probe: "assert len(_keep) >= 1 and float(_keep[-1][0]) == 1.0" },
+  { id: "M2b", mode: "python", leak_measure: "heap+external", s0: 15000, smin: 2000, smax: 2000000, grow: (s, r) => Math.round(s * r), phase: "band", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nn = S\n_kl = _ku = 20\n_rs, _cs = [], []\nfor _d in range(-_kl, _ku + 1):\n    _ii = np.arange(max(0, -_d), min(n, n - _d), dtype=np.int64)\n    _rs.append(_ii); _cs.append(_ii + _d)\n_r = np.concatenate(_rs); _c = np.concatenate(_cs)\n_v = np.where(_r == _c, 50.0, 1.0 / (1.0 + np.abs(_r - _c)))\nA = _sp.make(n, n, _r, _c, _v)\n_B = np.ones((n, 1))", target: "_X, _sg = _L.band_solve(A, _B, _kl, _ku, _L.Ledger(\"m2b\"), _L.Work(\"m2b\"))", probe: "_T = _sp.make(3, 3, np.array([0, 1, 1, 2]), np.array([0, 0, 1, 2]), np.array([2.0, 1.0, 4.0, 8.0]))\n_Y, _s = _L.band_solve(_T, np.ones((3, 1)), 1, 0, _L.Ledger(\"p\"), _L.Work(\"p\"))\nassert _Y[0, 0] == 0.5 and _Y[1, 0] == 0.125 and _Y[2, 0] == 0.125" },
   { id: "E13g", mode: "sage", s0: 40, smin: 4, smax: 4000, grow: (s, r) => Math.max(1, Math.round(s * r)), xk: { kind: "window", wrap: "_sbraster.render" }, call: "_sbraster.render", hosts: ["cli"], setup: "import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))", target: "P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)", probe: "line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0" },
 ].filter((c) => !ROWS || ROWS.split(",").includes(c.id));
 const FLAGS = { python: [], sage: ["--sage"], magma: ["--magma"], matlab: ["--matlab"] };
@@ -350,7 +351,7 @@ async function runHost(host) {
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
     // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c"]).includes(c.id)) continue;
+    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c", "M2b"]).includes(c.id)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));

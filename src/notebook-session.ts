@@ -39,6 +39,9 @@
 //      {id, target, display: {mime: data}}   rich output (Jupyter MIME bundle)
 //      {id, target, interact: spec}           controls to draw
 //      {id, target, clear: true}              clear_output()
+//      {id, target, input: {prompt, max}, buffer}  input() waits for a line (the
+//                                 browser worker, web/worker.ts: `buffer` is the
+//                                 SharedArrayBuffer the page answers in)
 //      then {id, done, ms, error?} (or {id, skipped} for a run queued before an
 //      interrupt); `error`: the code raised (a traceback was written); `names`:
 //      global names whose widgets changed (an interact update: the reactive
@@ -127,8 +130,14 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 // browser worker's init message); the session's runtime is given them before
 // anything else runs, and is never ready if they are invalid (ready rejects
 // with a LimitsError).  None: the defaults.
+// stdin: how input() asks the person for a line, synchronously (the browser
+// worker waits on shared memory the page fills, web/worker.ts): the line
+// typed, null for end of input, or {interrupted: true} if a Stop came while
+// it waited.  None: input() reads end of input, as CPython with no stdin.
+export type StdinRequest = { id: number; target: number | null; prompt: string };
+export type StdinAnswer = string | null | { interrupted: true };
 export class LimitsError extends Error {}
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -245,6 +254,17 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       for (const n of JSON.parse(spec)) changedNames.add(String(n));
       return true;
     },
+    // input(): a line the page asks the person for (opts.stdin), when the
+    // host gives a way to ask; otherwise input() reads end of input
+    ...(opts.stdin
+      ? {
+          input(prompt: string) {
+            if (current === null) return null;
+            flush();
+            return opts.stdin!({ id: current, target, prompt });
+          },
+        }
+      : {}),
   };
   let changedNames = new Set<string>();
   let seededBefore = false;
@@ -347,9 +367,22 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         if (s.text !== null) R.stderr.write(s.text + "\n");
         return false;
       }
+      // A magic Sagebrush does not have, or used wrongly (lib/_pyjs_magic.py's
+      // UsageError): its one line, as IPython prints a UsageError, without the
+      // frames of the magic's machinery.
+      const ty = R.typeOf(exc);
+      if (ty.$qualname === "UsageError" && ty.$module === "_pyjs_magic") {
+        const lines = String(R.formatException(exc)).trimEnd().split("\n");
+        R.stderr.write(lines[lines.length - 1].replace(/^_pyjs_magic\.UsageError\b/, "UsageError") + "\n");
+        return false;
+      }
       // (a cell's renamed `_` names are shown as written)
       // (and page-order scoping's names, as written: the run's `scoped`)
       let text = R.formatException(exc).replace(/\b_cell_[A-Za-z0-9]+(?=_\w)/g, "");
+      // A module Sagebrush does not include: the traceback, then why, in one sentence.
+      if (ty.$mro.includes(R.T.ModuleNotFoundError) && typeof exc.name === "string" && exc.name !== "" && !moduleNames().includes(exc.name)) {
+        text += `Sagebrush runs Python in this page, compiled to JavaScript: it includes numpy, parts of scipy, a subset of matplotlib.pyplot, ipywidgets and a subset of the standard library, and packages cannot be installed. '${exc.name}' is not included (yet).\n`;
+      }
       // (whole names only: xʹ2 is not the start of xʹ20)
       for (const [n, w] of scopedNames) text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}\\p{Mn}_])`, "gu"), w);
       R.stderr.write(text);

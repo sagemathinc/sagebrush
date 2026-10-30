@@ -104,8 +104,8 @@ export class BoardCode {
   private parts: EngineParts;
 
   /** @param engine the engine's parts, or where its files are (siteEngine(base, opts.runner)) */
-  constructor(engine: URL | EngineParts, opts: { runner: boolean } = { runner: true }) {
-    this.parts = engine instanceof URL ? siteEngine(engine, opts.runner) : engine;
+  constructor(engine: URL | EngineParts, private opts: { runner?: boolean; observeRunner?: (kernel: any, mod: any) => () => void } = { runner: true }) {
+    this.parts = engine instanceof URL ? siteEngine(engine, opts.runner ?? true) : engine;
     this.ready = this.start().then(() => true, (e) => {
       console.warn("board: code items cannot run here:", e);
       this.error = String(e?.message ?? e);
@@ -117,6 +117,7 @@ export class BoardCode {
     const mod = await this.parts.module();
     if (this.closed) throw new Error("closed");
     const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => this.parts.worker(mod) }));
+    this.stopRunnerInfo = this.opts.observeRunner?.(kernel, mod);
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
     let next = 0;
@@ -629,6 +630,8 @@ export class BoardCode {
     this.nb?.destroy();
     this.nb = null;
     this.kernel?.close();
+    this.stopRunnerInfo?.();
+    this.stopRunnerInfo = undefined;
     this.kernel = null;
     this.analyzer?.terminate();
     this.analyzer = null;
@@ -640,6 +643,7 @@ export class BoardCode {
   private waits = new Set<() => void>();
   private asks = new Map<number, { w: Worker; settle: (d: any) => void }>();
   private kernel: any = null;
+  private stopRunnerInfo?: () => void;
   /** The completions of `before`, the code on the caret's line up to it, as
    * the notebook's Tab asks its interpreter ({ complete }, src/interactive.ts):
    * the names, and the prefix of `before` they complete; null before the
