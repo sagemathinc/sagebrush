@@ -508,6 +508,17 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
     copyFileSync(join(here, "dist", "shell", "preview-set.json"), join(siteDir, "public", "shell", "preview-set.json"));
   }
 }
+// the agents chat preview (web/agents): a full-page chat with artifacts, driven by a scripted agent. Flagged like the
+// questions preview: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_AGENTS=1
+rmSync(join(here, "dist", "agents"), { recursive: true, force: true });
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_AGENTS === "1") {
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "page.ts")], outdir: join(here, "dist", "agents"), naming: "agents.js", target: "browser", format: "esm", minify: true });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+  copyFileSync(join(here, "agents", "index.html"), join(here, "dist", "agents", "index.html"));
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });
 // the shared collection page, served for /s/<id> by the site's Worker
