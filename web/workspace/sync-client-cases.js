@@ -2642,6 +2642,38 @@ async function s5SidebarLine() {
   }
 }
 
+async function s5SidebarStale() {
+  // (sync-docs' N-SC-1: a read begun for an older state never paints over a newer line: a read started while offline,
+  // resolved after sync was turned off here, leaves "Sync off")
+  const w = await fresh();
+  await W.switchTo(w, nsFor(w, "e"));
+  const owner = W.SyncOwner.of(w), view = owner.view, stoppedDocs = owner.stoppedDocs;
+  let s = { state: "offline", waiting: 2 }, release = null, reads = 0;
+  owner.view = () => ({ from: "own", s });
+  owner.stoppedDocs = () => [];
+  const readUnacked = () => { reads++; return new Promise((ok) => { release = ok; }); };
+  const el = document.body.appendChild(document.createElement("div"));
+  let b = null;
+  try {
+    b = W.mountBrowser(el, { ws: w, open: () => {}, readUnacked });
+    const fsync = () => el.querySelector(".fsync")?.textContent ?? "";
+    const pending = await until(() => !!release && /^Offline/.test(fsync()), 3000);
+    // (sync turned off here meanwhile: the owner's view changes and the line is drawn again)
+    s = { state: "off", used: true };
+    owner.changed();
+    const off = await until(() => fsync() === "Sync off", 3000);
+    release({ ids: ["n1", "n2"], over: false });
+    await sleep(200);
+    check(pending && off && reads === 1 && fsync() === "Sync off", "sidebar line: a read begun while offline, resolved after sync went off, never paints over \"Sync off\": " + J({ pending, off, reads, line: fsync() }));
+  } finally {
+    release?.({ ids: [], over: false });
+    b?.destroy();
+    el.remove();
+    owner.view = view;
+    owner.stoppedDocs = stoppedDocs;
+  }
+}
+
 async function s5Notebooks() {
   // (follow-up 3, @sagebrush's (C): the foot counts notebooks with edits waiting while offline or syncing, says those
   // this page's document sync stopped as "can't sync", says "notebook edits" when they can't be counted, and nothing for
@@ -3891,7 +3923,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5SidebarLine, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
