@@ -243,11 +243,12 @@
   html.phone.typing .bar { display: none; }
   html.phone #writerbar { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
-  /* (over the early-alpha notice, web/alpha-banner.js, whose z-index is 2147483000) */
+  /* (over the early-alpha notice, whose z-index is 2147483000; its script's name isn't written here,
+     as scripts/build-cli.mjs takes the notice out of the CLI's page by that name) */
   html.phone .menu { position: fixed !important; top: auto !important; left: 8px !important; right: 8px !important; bottom: calc(var(--bar-h, 56px) + 8px) !important; max-height: 65vh !important; min-width: 0; z-index: 2147483001; }
   html.phone .menu button, html.phone .menu a { padding: 11px 12px; font-size: 16px; }
   html.phone #console { bottom: var(--bar-h, 56px); height: 45vh; }
-  html.phone #sb-alpha-banner { bottom: var(--bar-h, 56px) !important; }
+  html.phone [id^="sb-alpha"] { bottom: var(--bar-h, 56px) !important; }
   html.phone .sbnb { --gutter: 40px; }
   html.phone .sbnb .cell { padding-right: 2px; }
   html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }
