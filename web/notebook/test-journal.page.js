@@ -3,6 +3,8 @@
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
 import { W, N, H, R, B, S, P } from "./all.js";
+// (the same modules built without exact merges: a production build (the fail-closed case))
+import * as OFF from "./off.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -1966,6 +1968,40 @@ async function mergeModes() {
   await close(w);
   hdb.close();
 }
+// ---- the grader's G-P2b-5: a build without the exact reader (off.js, the production define) fails closed on a synced
+// history recorded exact-v1: its load refused before the history is opened, read, recovered or written (the whole
+// history database unchanged); the rows refuse to record exact-v1 for it; its codec throws rather than read legacy
+async function failClosed() {
+  const { w, hdb } = await active();
+  const OFFKIT = OFF.N.journalClasses({ IdbStore: OFF.W.IdbStore, IdbPatchStore: OFF.W.IdbPatchStore });
+  const offStore = (id, initial) => new OFFKIT.JournalStore(w.main, hdb, id, initial, OFF.H);
+  await synced(async () => {
+    // (a notebook started and recorded exact-v1 by this page's own build, then let go)
+    const one = await loadNew(w, hdb, [["a", "x = 1"]]);
+    const slot = (await jState(hdb, one.id)).slot;
+    const rec = await one.st.patches.queue(() => one.st.patches.journalTx(async (s) => ({ j: 0, out: await N.recordClaim(s, one.id, { gen: slot.gen, client: slot.client, epoch: 1, fgen: 0, merge: "exact-v1" }) })));
+    check(rec?.out === true && (await jState(hdb, one.id)).start.merge === "exact-v1", "fail closed: (a notebook recorded exact-v1 by the build with the reader)");
+    await close(one.st);
+    const before = await snapHistory(hdb), recBefore = J(await rawGet(w.main, "notebooks", one.id));
+    // (the build without it: its load refused, nothing touched)
+    const off = offStore(one.id, doc([["z", "never"]]));
+    const out = await off.load().then(() => "loaded", (e) => ({ message: e?.message, noExact: !!e?.noExact }));
+    check(out?.noExact === true && /exact merges/.test(out.message) && off.history.session === null && (await snapHistory(hdb)) === before && J(await rawGet(w.main, "notebooks", one.id)) === recBefore, "fail closed: a build without the exact reader refuses the exact-v1 notebook's load before its history is opened, and nothing is written: " + J({ out, session: !!off.history.session }));
+    await close(off);
+    // (its rows refuse to record exact-v1; its codec throws rather than read legacy)
+    const two = await loadNew(w, hdb, [["b", "1"]]);
+    const s2 = (await jState(hdb, two.id)).slot;
+    const b2 = await snapHistory(hdb);
+    const r2 = await two.st.patches.queue(() => two.st.patches.journalTx(async (s) => ({ j: 0, out: await OFF.N.recordClaim(s, two.id, { gen: s2.gen, client: s2.client, epoch: 1, fgen: 0, merge: "exact-v1", canExact: false }) }))).catch((e) => ({ refused: String(e?.message ?? e) }));
+    check(/can't read/.test(r2?.refused ?? "") && (await snapHistory(hdb)) === b2, "fail closed: recording exact-v1 for a build without the reader is refused, nothing written: " + J(r2));
+    let threw = null;
+    try { void OFF.H.codecFor({ docId: "x", id: "x:s1", mergeMode: "exact-v1" }).merge3; } catch (e) { threw = String(e?.message ?? e); }
+    check(/aren't in this build/.test(threw ?? "") && OFF.H.codecFor({ docId: "x", id: "x:s1", mergeMode: "legacy" }).merge3 === undefined, "fail closed: the codec without the reader throws for an exact-v1 history (never legacy), and is legacy for a legacy one: " + J(threw));
+    await close(two.st);
+  });
+  await close(w);
+  hdb.close();
+}
 // ---- astra3's A-SA-1 on #353: the root patch measured as doc-sync sends it, under the writer's lock.  Empty code cells:
 // what the history keeps (versionedOf) is under the bound, but the root patch's payload is over it, so the start is
 // refused as too large, the notebook kept and saved here; a small notebook still starts (the control).  The bound is
@@ -2037,7 +2073,7 @@ async function startTooLargeAt(real) {
 }
 const CASES = [arrivingSays, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted, startTooLarge, mergeModes];
+  arrivingStarted, startTooLarge, mergeModes, failClosed];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
