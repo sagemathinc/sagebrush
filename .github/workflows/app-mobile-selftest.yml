@@ -68,35 +68,16 @@ jobs:
           name: app-page
           path: app/dist
 
-  # (one job, one leg per system image: API 34, and a recent stable image,
-  # 36.1, which asks whether a CURRENT WebView makes the page cross-origin
-  # isolated (37.0, the newest, did not boot on this runner: #373, run 41064752177).
-  # 36.1 runs on the nightly cron, by hand and on pull requests, not
-  # on master pushes; app/selftest/android-image-info.sh records each leg's
-  # image and WebView, and "current|old against threshold 145")
   emulator:
     if: github.repository == 'sagemathinc/sagebrush'
     needs: page
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        # (keep in sync with LEGS in "the legs of this run" below)
-        api-level: ${{ fromJSON(github.event_name == 'push' && '["34"]' || '["34", "36.1"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: the legs of this run
-        env:
-          EVENT: ${{ github.event_name }}
-          # (keep in sync with the matrix's api-level list above)
-          LEGS: ${{ github.event_name == 'push' && '34' || '34, 36.1' }}
-          LEG: ${{ matrix.api-level }}
-        run: |
-          echo "event $EVENT: system images (api-level) $LEGS; this leg: $LEG" | tee -a "$GITHUB_STEP_SUMMARY"
       # (the report's judge on fixed reports, before anything slow)
       - name: the self-test report judge
         run: bash app/selftest/test-android-report.sh
@@ -156,44 +137,20 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # (the newer leg only, a diagnostic: 37.0 and 36.1 never brought up adbd
-      # with the action's defaults, #373 runs 41064752177 and 41071253869. It gets
-      # 4096M of RAM, a 900 s boot timeout, and -show-kernel with the emulator's
-      # console copied to /tmp/emu-console.log (emulator-options is placed inside
-      # the action's `sh -c "emulator ... &"`). The 34 leg keeps the action's
-      # defaults: each value below is the default when the leg is 34; `!= '34' &&
-      # X || default`, since `== '34' && '' || X` would always give X.)
       - name: the self-test on the emulator
-        id: selftest
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: ${{ matrix.api-level }}
+          api-level: 34
           target: google_apis
           arch: x86_64
           channel: stable
-          emulator-boot-timeout: ${{ matrix.api-level != '34' && '900' || '600' }}
-          ram-size: ${{ matrix.api-level != '34' && '4096M' || '' }}
-          emulator-options: ${{ matrix.api-level != '34' && '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -show-kernel 2>&1 | tee /tmp/emu-console.log' || '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim' }}
+          emulator-boot-timeout: 600
           disable-animations: true
-          # (one line: the action runs each line of `script` as its own shell;
-          # it runs only once the emulator has booted, hence the marker)
-          script: touch /tmp/leg-booted && bash app/selftest/android-image-info.sh "${{ matrix.api-level }}" "$GITHUB_STEP_SUMMARY" && bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
-      # (the diagnostic's closed answer for the newer leg: "booted", or "did not
-      # boot: <the console's last line>", whatever the step above did)
-      - name: did the newer image boot
-        if: always() && matrix.api-level != '34'
-        env:
-          LEG: ${{ matrix.api-level }}
-        run: |
-          if [ -f /tmp/leg-booted ]; then
-            line="booted"
-          else
-            echo "--- the emulator console's last 60 lines (-show-kernel)"
-            tail -n 60 /tmp/emu-console.log 2>/dev/null || echo "(no /tmp/emu-console.log)"
-            last=$(grep -v '^[[:space:]]*$' /tmp/emu-console.log 2>/dev/null | tail -n 1 || true)
-            line="did not boot: ${last:-no emulator console output}"
-          fi
-          echo "system image $LEG: $line" | tee -a "$GITHUB_STEP_SUMMARY"
+          # (one line: the action runs each line of `script` as its own shell)
+          # (android-image-info.sh first: the booted image must be API 34, and the
+          # summary records its revision and "WebView <ver>: current|old against
+          # threshold 145")
+          script: bash app/selftest/android-image-info.sh 34 "$GITHUB_STEP_SUMMARY" && bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
 
   # The RELEASE APK (x86_64, for the emulator) starts: R8 or LTO removing
   # something reached only through JNI or reflection crashes it, which the
