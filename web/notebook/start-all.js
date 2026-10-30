@@ -17,7 +17,8 @@
 // tab writes it (a read-only load: held, that tab or a later walk starts it); too large (its root patch, measured under
 // the writer's lock as doc-sync would send it, over the batch bound: never started, counted by name); refused for room
 // (the walk ends: the rest would be refused the same way); anything else (counted by name, the walk goes on).  Sync
-// turned off meanwhile ends the walk, said as nothing.  Every store loaded is let go.
+// turned off meanwhile ends the walk (nothing said of the rest; what was counted before may still be said).  Every
+// store loaded is let go.
 export async function startAll(s) {
   const out = { total: 0, started: 0, held: 0, tooLarge: [], noRoom: [], failed: [], stopped: false };
   const cur = s.current();
@@ -61,6 +62,10 @@ export async function startAll(s) {
   s.progress(todo.length, todo.length);
   return out;
 }
+
+/** The page's startOf seam over a journal read (readJournal(hdb, ref)): a read that fails rejects, so the walk counts
+ * the notebook as failed rather than passing over it (astra3's N-SA-1 on #353). */
+export const journalStartOf = (read) => async (ref) => (await read(ref)).start;
 
 /** What the person is told of a walk: null when there is nothing to say. */
 export function startAllSummary(r) {

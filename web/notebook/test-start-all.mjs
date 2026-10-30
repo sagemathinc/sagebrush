@@ -4,7 +4,7 @@
 // refusal or failure is counted and the walk goes on; sync turned off, or the page leaving, ends it; every store loaded
 // is let go.
 //   bun web/notebook/test-start-all.mjs
-import { startAll, startAllSummary } from "./start-all.js";
+import { startAll, startAllSummary, journalStartOf } from "./start-all.js";
 
 let checks = 0;
 const fails = [];
@@ -107,6 +107,22 @@ function world(spec, over = {}) {
   const { s } = world({ bad: { path: "/bad.ipynb", startThrows: true }, ok: { path: "/ok.ipynb" } });
   const r = await startAll(s);
   check(J(r.failed) === J(["/bad.ipynb"]) && r.started === 1, "a notebook whose start can't be read: failed, the others go on: " + J(r));
+}
+{
+  // (the page's own startOf seam, journalStartOf over a journal read (index.html): a read that fails is counted as
+  // failed, never passed over, whether it fails at the list's check or at the recheck before the load; astra3's N-SA-1
+  // on #353 r2)
+  for (const failOn of [1, 2]) {
+    const { s, nb, log } = world({ bad: { path: "/bad.ipynb" }, ok: { path: "/ok.ipynb" } });
+    let reads = 0;
+    s.startOf = journalStartOf(async (ref) => {
+      if (ref === "bad" && ++reads === failOn) throw new Error("IndexedDB: unreadable");
+      return { start: nb.get(ref).started ? { n: 1 } : null, slot: null };
+    });
+    const r = await startAll(s);
+    check(J(r.failed) === J(["/bad.ipynb"]) && r.started === 1 && log.loads.includes("ok"), `journalStartOf: a journal read failing at read ${failOn}: failed, the others go on: ` + J(r));
+  }
+  check(await journalStartOf(async () => ({ start: null }))("x") === null && (await journalStartOf(async () => ({ start: { n: 1 } }))("x")).n === 1, "journalStartOf: the read's start, as it is");
 }
 {
   // (a load that fails: counted, let go, the walk goes on)

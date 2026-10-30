@@ -480,7 +480,7 @@ import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle } from "./notebook/bundle.js";
-import { startAll, startAllSummary } from "./notebook/start-all.js";
+import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
 // shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
 import { answerPresence, TAB } from "./shell/presence.ts";
@@ -3135,7 +3135,7 @@ docSyncReady.then(async (on) => {
   if (!w || w.closed || !hdb || !db) return;
   const r = await startAll({
     list: async () => (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed).map((e) => ({ ref: e.ref, path: e.path })),
-    startOf: async (ref) => (await readJournal(hdb, ref).catch(() => ({ start: undefined }))).start,
+    startOf: journalStartOf((ref) => readJournal(hdb, ref)),
     syncOn: () => !!mod.DOC_SYNC?.on,
     storeFor: (ref) => storeFor(ref),
     current: () => (current.kind === "browser" ? current.id : null),

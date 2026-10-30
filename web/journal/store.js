@@ -251,18 +251,22 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     this.patches.id = key;
     useClient(this.history, client, null);
     await this.history.init();
-    const env = this.history.record(doc);
-    let r = { refused: "nothing to record" };
-    if (env && !env.pending) {
-      // (the root patch measured as doc-sync will send it, its payload without time and parents (doc-sync.ts send): one
-      // over the batch bound would be stopped there for good, so the history isn't started at all, nothing written; the
-      // value measured is the one recovered under the writer's lock (astra3's A-SA-1 on #353))
+    // (the root patch measured as doc-sync will send it, its payload without time and parents (doc-sync.ts send): one
+    // over the batch bound would be stopped there for good, so the history isn't started at all.  Measured on the
+    // session's preview, before anything is committed or appended, and the envelope committed is the one measured
+    // (history.admit, patch-history.js commit; astra3's A-SA-2 on #353); the value is the one recovered under the
+    // writer's lock (A-SA-1))
+    this.history.admit = (env) => {
       const { time: _t, parents: _p, ...payload } = env;
-      if (new TextEncoder().encode(JSON.stringify(payload)).length > LIMITS.batchBytes) r = { refused: this.T.TOO_LARGE_TO_SYNC, tooLarge: true };
-      else {
-        this.patches.start = { n, client, time: env.time };
-        try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
-      }
+      return new TextEncoder().encode(JSON.stringify(payload)).length > LIMITS.batchBytes ? { refused: this.T.TOO_LARGE_TO_SYNC, tooLarge: true } : null;
+    };
+    let env;
+    try { env = this.history.record(doc); } finally { this.history.admit = undefined; }
+    let r = { refused: "nothing to record" };
+    if (env?.notAdmitted) r = env.notAdmitted;
+    else if (env && !env.pending) {
+      this.patches.start = { n, client, time: env.time };
+      try { r = await this.patches.appended(env.time); } finally { this.patches.start = undefined; }
     }
     if (r.j !== undefined) { this.synced = { n, from_j: r.j }; this.watchRemote(client); this.toldSaved(); return true; }
     this.history.close();
