@@ -875,6 +875,7 @@ jobs:
               node web/test-png.mjs
               node web/test-pkgset.mjs
               node web/test-phone-layout.mjs
+              node web/notebook/test-anchor.mjs
               node web/test-kernel-start.mjs
               node web/test-pkgset-pin.mjs
               node web/test-pkgset-page.mjs
