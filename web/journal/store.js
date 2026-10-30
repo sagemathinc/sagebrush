@@ -65,6 +65,17 @@ function useClient(history, client, last) {
   history.sessionOptions = function () { return { codec: this.codec, patchStore: this.guarded, clientId: client }; };
 }
 
+// (the exact merged value of a set of a history's versions: its maximal ones, merged from their common ancestors as
+// patchflow merges heads (PatchGraph.exactValueOfSet); undefined for a codec without merge3 (a board's) or a history
+// that can't give it exactly (a version not held here), and the caller falls back to one version's value)
+function valueOfSet(session, times) {
+  const g = session?.graph;
+  if (!g?.codec?.merge3 || typeof g.exactValueOfSet !== "function") return undefined;
+  const set = new Set(times.filter((t) => g.patches?.has(t)));
+  for (const t of [...set]) for (const p of g.getParents?.(t) ?? []) set.delete(p);
+  return set.size ? g.exactValueOfSet([...set]) ?? undefined : undefined;
+}
+
 /** The one writer of a document on this device, for the milestone (William, Oct 27: "Yes, single writer per device for
  * the milestone"): the Web Lock (its kind's lockPrefix and the id) a journal store holds while it may write the
  * document.  Another tab's store waits for it, read-only; the browser frees it when its holder's tab closes or crashes.
@@ -233,8 +244,19 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (j <= (rec?.j ?? 0) && j > best) { best = j; baseTime = time; }
       if (j > (rec?.j ?? 0) && time.slice(12) !== js.slot?.client && time > theirsLast) theirsLast = time;
     }
+    // (a record not saved since this device started the synced history keeps its j from before (a version of its own
+    // key's history, below the synced root's): its base is the synced root, the record's value when it started.  With no
+    // base at all, the exact merge would read every cell as added on both sides and keep both texts; the clash merge
+    // before it kept the later side whole instead, losing this device's edits to other cells)
+    if (baseTime === null && Number.isSafeInteger(js.start?.from_j)) for (const [time, j] of js.jOf) if (j === js.start.from_j) baseTime = time;
     const session = this.history.session;
-    const base = baseTime ? this.kind.fromRecords(session.value({ time: baseTime })) : null;
+    // (with exact merges (a notebook's codec has merge3), the base is the history as the record had it: the merged value
+    // of every version at or below its j, not the one with the highest j.  A record stamped with a merge that made no new
+    // version (its value already the merged head) has the other device's version and its own both at or below its j;
+    // the highest alone would read its merge as an edit of its own and keep the other side's text twice)
+    const seen = [...js.jOf].filter(([, j]) => j <= (rec?.j ?? 0)).map(([time]) => time);
+    const merged = baseTime && seen.length > 1 ? valueOfSet(session, seen) : undefined;
+    const base = merged ? this.kind.fromRecords(merged) : baseTime ? this.kind.fromRecords(session.value({ time: baseTime })) : null;
     const head = this.kind.fromRecords(session.value());
     // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
     const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
