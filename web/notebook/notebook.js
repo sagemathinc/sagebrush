@@ -827,6 +827,17 @@ export function createNotebook(root, opts = {}) {
   function run(cell, gesture = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
+    // On a remote kernel a Run can be in flight for a round trip or more before the cell even shows it queued.
+    // A person's Run of a text whose Run is already requested and not yet settled (pending, queued or running)
+    // is a double click: nothing more.  A Run of any other text is their new run: it is queued behind the ones
+    // in flight, with their consent to the text as it is now.  (A local kernel keeps the rule below.)
+    if (kernel?.remote && gesture && reactive()) {
+      const text = cell.ta.value;
+      const asked = (cell.runsAsked ??= new Set());
+      if (asked.has(text)) return Promise.resolve();
+      asked.add(text);
+      return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text));
+    }
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
     // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
     if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});

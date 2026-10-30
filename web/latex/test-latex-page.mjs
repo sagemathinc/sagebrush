@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { boxClass } from "./boxclass.mjs";
+import * as C from "./comments-core.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 // the box class, an explicit input (never detected): the run packet's frozen BOXCLASS beside the trees
@@ -291,6 +292,265 @@ try {
       return out; })()`);
     check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  }
+  // ---- comments on a document, end to end (plan latex-comments r4.2 §5): a person comments in the preview and the
+  // source; an agent (this test, with the format's core, through the workspace: as the MCP tools will) lists them,
+  // rewrites one commented sentence, deletes the other paragraph, duplicates a third's paragraph, replies and resolves;
+  // the person opens the document again and sees each change: the resolved thread "rewritten" with the agent's labelled
+  // reply, the removed one listed, the duplicated one needing a place (both candidates, attached to neither) until one
+  // is chosen; a page write racing an agent's loses nothing; anchors follow the person's edits and are saved
+  {
+    const J = JSON.stringify;
+    const TEX = "\\documentclass{article}\n\\begin{document}\nThe first claim is obvious from the definitions, as we show below.\n\nThis whole paragraph will be deleted by the agent.\n\nA middle paragraph stays as it is.\n\nA unique phrase sits here.\n\n\\end{document}\n";
+    const ftex = await mk("/cm/paper.tex", enc(TEX)), SIDE = "/cm/paper.tex.comments.json";
+    const agentIo = {
+      read: async () => (await ev(`${W}.stat(${J(SIDE)}).then(async (e) => { if (!e || e.trashed) return null; const r = await ${W}.read(${J(SIDE)}); return { content: new TextDecoder().decode(r.content), base: r.entry.rev ?? 0 }; })`)) ?? { content: null, base: null },
+      write: async (content, b) => {
+        const res = await ev(`(async () => { try { const x = new TextEncoder().encode(${J(content)}); ${b === null ? `await ${W}.create(${J(SIDE)}, { content: x })` : `await ${W}.write(${J(SIDE)}, x, { base: ${J(b)} })`}; return "ok"; } catch (e) { return e?.code ?? String(e); } })()`);
+        if (res === "conflict" || res === "exists") throw Object.assign(new Error(res), { code: "conflict" });
+        if (res !== "ok") throw new Error(res);
+      },
+    };
+    const texNow = async () => new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/paper.tex")));
+    const sideDoc = async () => C.parse((await agentIo.read()).content, {});
+    const n0 = requests.length, e0 = errors.length;
+    // (bubbles in a wide preview, badges in a narrow one: this window's preview may be either)
+    const BUB = J(".sb-cm-bubble, .sb-cm-badge");
+    await open(ftex);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("A unique phrase")`, 20000);
+    await sleep(500);
+    check(!requests.slice(n0).some((u) => /sagebrush-latex-comments-doc/.test(u)), "comments: a document without a comments file doesn't fetch their chunk");
+    // (1) the person: a comment on a preview selection (the Comment button), one on a source selection (Ctrl+Alt+M)
+    const selectInPreview = (word) => ev(`(() => { const P = document.querySelector(".tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT);
+      for (let t = tw.nextNode(); t; t = tw.nextNode()) { const i = t.data.indexOf(${J(word)}); if (i >= 0) { const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + ${word.length}); const s = getSelection(); s.removeAllRanges(); s.addRange(r); P.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); return true; } } return false; })()`);
+    const post = (text) => ev(`(async () => { for (let i = 0; i < 100 && !document.querySelector(".sb-cm-compose textarea"); i++) await new Promise((r) => setTimeout(r, 50));
+      const ta = document.querySelector(".sb-cm-compose textarea"); if (!ta) return false; ta.value = ${J(text)}; document.querySelector(".sb-cm-compose .sb-cm-send").click(); return true; })()`);
+    // (the first comment loads the chunk: the button opens the list first)
+    await ev(`(document.querySelector(".tex-comments").click(), true)`);
+    await until(`!!document.querySelector(".sb-cm-list")`, 15000);
+    await ev(`(document.querySelector(".sb-cm-list button").click(), true)`);
+    await selectInPreview("is obvious");
+    const goShown = await until(`!!document.querySelector(".sb-cm-go")`, 5000);
+    await ev(`(document.querySelector(".sb-cm-go").click(), true)`);
+    const p1 = await post("Why is it obvious? Give the argument.");
+    const c1 = await until(`!!document.querySelector(${BUB})`, 15000);
+    await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("This whole paragraph"); t.focus(); t.setSelectionRange(i, i + "This whole paragraph will be deleted by the agent.".length); return true; })()`);
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 1 | 2, windowsVirtualKeyCode: 77 });
+    const p2 = await post("Do we need this paragraph?");
+    await until(`document.querySelectorAll(${BUB}).length === 2`, 15000);
+    await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("unique phrase"); t.focus(); t.setSelectionRange(i, i + "unique phrase".length); return true; })()`);
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 1 | 2, windowsVirtualKeyCode: 77 });
+    const p3 = await post("Is this phrase right?");
+    await until(`document.querySelectorAll(${BUB}).length === 3`, 15000);
+    await sleep(500);
+    const srcMarks = await ev(`(() => { const h = CSS.highlights.get("sb-comments"); return h ? h.size : 0; })()`);
+    await shot("cm-1-three-comments");
+    const d1 = await sideDoc();
+    check(goShown && p1 && c1 && p2 && p3 && d1.threads.length === 3 && d1.threads.every((t) => t.messages[0].author === "person:me") && srcMarks >= 6, "comments: the person comments on a preview selection and two source selections (Ctrl/Cmd+Alt+M): three threads in the comments file, bubbles, marks in the preview and the source", { goShown, p1, c1, p2, p3, threads: d1.threads.length, srcMarks });
+    // (2) the agent: list, then ordinary writes to the .tex, then a reply and resolve on the first
+    const L1 = C.list(await sideDoc(), await texNow());
+    const byQuote = (L, q) => L.threads.find((t) => t.quote.includes(q));
+    const t1 = byQuote(L1, "is obvious"), t2 = byQuote(L1, "This whole paragraph"), t3 = byQuote(L1, "unique phrase");
+    check(L1.threads.length === 3 && t1?.status === "exact" && t2?.status === "exact" && t3?.status === "exact" && t1.first.author === "person:me" && t1.range.start.line === 3, "comments: the agent lists the three threads, exact, with their lines and authors", L1.threads.map((t) => [t.status, t.quote, t.range?.start]));
+    const TEX2 = TEX.replace("is obvious", "follows from Lemma 2").replace("This whole paragraph will be deleted by the agent.\n\n", "").replace("A unique phrase sits here.", "A unique phrase sits here.\n\nA unique phrase sits here.");
+    await ev(`${W}.write("/cm/paper.tex", new TextEncoder().encode(${J(TEX2)})).then(() => true)`);
+    const L2 = C.list(await sideDoc(), TEX2);
+    const s1 = L2.threads.find((t) => t.id === t1.id), s2 = L2.threads.find((t) => t.id === t2.id), s3 = L2.threads.find((t) => t.id === t3.id);
+    check(s1?.status === "changed" && s2?.status === "orphaned" && s3?.status === "ambiguous" && s3.candidates?.length === 2, "comments: after the agent's edit, the core sees the first rewritten (changed), the second removed (orphaned), the third ambiguous with 2 candidates", [s1?.status, s2?.status, s3?.status, s3?.candidates?.length]);
+    await C.update(agentIo, (d) => C.reply(d, t1.id, { text: "Rewritten: it follows from Lemma 2.", author: "agent:claude" }));
+    await C.update(agentIo, (d) => C.setResolved(d, t1.id, true, { author: "agent:claude" }));
+    // (3) the person opens the document again
+    await open(ftex);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Lemma 2")`, 20000);
+    const loaded = await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 15000);
+    await ev(`(document.querySelector(".tex-comments").click(), true)`);
+    await until(`!!document.querySelector(".sb-cm-list h3")`, 10000);
+    const view = await ev(`(() => { const L = document.querySelector(".sb-cm-list"), sec = {}; let cur = null;
+      for (const n of L.children) { if (n.tagName === "H3") { cur = n.textContent.replace(/ \\(\\d+\\)$/, ""); sec[cur] = []; } else if (cur && n.classList.contains("sb-cm-item")) sec[cur].push({ id: n.dataset.thread, text: n.textContent, agent: n.classList.contains("agent"), label: !!n.querySelector(".sb-cm-agent"), cands: n.querySelectorAll(".sb-cm-cand").length }); }
+      return { sec, button: document.querySelector(".tex-comments").textContent, bubbles: document.querySelectorAll(${BUB}).length }; })()`);
+    await shot("cm-2-list-after-agent");
+    const R = view.sec["Resolved"]?.find((x) => x.id === t1.id), O = view.sec["Comments on text that was removed"]?.find((x) => x.id === t2.id), A = view.sec["Needs a place"]?.find((x) => x.id === t3.id);
+    check(loaded && R && R.agent && R.label && R.text.includes("Rewritten: it follows from Lemma 2.") && R.text.includes("the commented text was rewritten") && O && A && A.cands === 2 && view.bubbles === 0 && view.button === "Comments (2)",
+      "comments: the person sees the first resolved, rewritten, with the agent's labelled reply; the second under removed text; the third needing a place (2 candidates, no bubble for any)", view);
+    // (the third settled from the list: its second place)
+    await ev(`(() => { const it = [...document.querySelectorAll(".sb-cm-item")].find((x) => x.dataset.thread === ${J(t3.id)}); it.querySelectorAll(".sb-cm-cand")[1].click(); return true; })()`);
+    const settled = await until(`!document.querySelector(".sb-cm-cand") && document.querySelectorAll(${BUB}).length === 1`, 15000);
+    const L3 = C.list(await sideDoc(), TEX2), s3b = L3.threads.find((t) => t.id === t3.id);
+    check(settled && s3b?.status === "exact" && s3b.range.start.line === 9, "comments: choosing a place attaches the thread there (exact, the second occurrence's line), with its bubble", { settled, s3b: s3b && [s3b.status, s3b.range?.start] });
+    // (4) a reply and reopen from the page; then a page write racing an agent's: both survive
+    await ev(`(() => { [...document.querySelectorAll(".sb-cm-item")].find((x) => x.dataset.thread === ${J(t1.id)}).click(); return true; })()`);
+    await until(`!!document.querySelector(".sb-cm-thread textarea")`, 5000);
+    await shot("cm-3-thread");
+    await ev(`(async () => { const ta = document.querySelector(".sb-cm-thread textarea"); ta.value = "Thanks, looks right."; document.querySelector(".sb-cm-thread .sb-cm-send").click(); for (let i = 0; i < 100 && !document.querySelector(".sb-cm-thread")?.textContent.includes("Thanks, looks right."); i++) await new Promise((r) => setTimeout(r, 50));
+      document.querySelector(".sb-cm-thread .sb-cm-resolve").click(); return true; })()`);
+    await sleep(1500);
+    const d4 = await sideDoc(), th1 = d4.threads.find((t) => t.id === t1.id);
+    check(th1 && th1.messages.length === 3 && th1.messages[2].author === "person:me" && th1.resolved.value === false && th1.resolved.by === "person:me", "comments: the person replies and reopens the agent's resolved thread, in the comments file", th1 && { n: th1.messages.length, resolved: th1.resolved });
+    const raced = C.addThread(d4, { anchor: C.makeAnchor(TEX2, TEX2.indexOf("Lemma 2"), TEX2.indexOf("Lemma 2") + 7, undefined), text: "Agent: which Lemma 2?", author: "agent:claude" });
+    // (the agent's write lands between the page's read and its write: the test build's hook, once)
+    await ev(`(() => { window.__raced = 0; window.__sbTexCommentsWrite = async () => { if (window.__raced) return; window.__raced = 1;
+      const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, new TextEncoder().encode(${J(C.serialize(raced.doc))}), { base: r.entry.rev ?? 0 }); }; return true; })()`);
+    await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("definitions"); t.focus(); t.setSelectionRange(i, i + "definitions".length); return true; })()`);
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 1 | 2, windowsVirtualKeyCode: 77 });
+    await post("Which definitions?");
+    await sleep(2000);
+    const d5 = await sideDoc(), texts = d5.threads.filter((t) => !t.deleted.value).map((t) => t.messages[0].text.value);
+    const racedOnce = await ev(`window.__raced`);
+    check(racedOnce === 1 && texts.includes("Agent: which Lemma 2?") && texts.includes("Which definitions?") && d5.threads.length === 5, "comments: a page comment racing an agent's write: one conflict, merged, both kept", { racedOnce, texts });
+    // (5) the person's edits: anchors follow them, and Save writes them back for the saved text
+    const before = C.list(d5, TEX2, { all: true }).threads.find((t) => t.id === t3.id);
+    await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("\\\\begin{document}") + 17; t.setRangeText("Inserted line.\\n\\n", i, i, "end"); t.dispatchEvent(new Event("input")); return true; })()`);
+    await sleep(800);
+    await ctrlS(); await statusIs(/^Saved$/);
+    await sleep(1500);
+    const TEX3 = await texNow(), after = C.list(await sideDoc(), TEX3, { all: true }).threads.find((t) => t.id === t3.id);
+    const a3 = (await sideDoc()).threads.find((t) => t.id === t3.id).anchor.value;
+    check(before.status === "exact" && after?.status === "exact" && after.range.start.line === before.range.start.line + 2 && a3.textSha === C.sha256(TEX3) && TEX3.slice(a3.start, a3.end) === "unique phrase", "comments: an edit above moves the anchors with it, and Save writes them for the saved text (exact again)", { before: before?.range?.start, after: after?.range?.start, status: after?.status });
+    // (6) LC-T5: an invalid comments file is refused, end to end: shown as unreadable, a new comment not saved over it
+    {
+      const fbad = await mk("/cm/bad.tex", enc("\\documentclass{article}\n\\begin{document}\nSome words to comment on.\n\\end{document}\n"));
+      await mk("/cm/bad.tex.comments.json", enc("{ this is not json"));
+      await open(fbad);
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("Some words")`, 20000);
+      await ev(`(document.querySelector(".tex-comments").click(), true)`);
+      const shownErr = await until(`/can't be read/.test(document.querySelector(".sb-cm-list .sb-cm-err")?.textContent ?? "")`, 15000);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Some words"); t.focus(); t.setSelectionRange(i, i + 10); return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      await post("over a broken file");
+      const refused = await until(`/Not saved/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "over a broken file"`, 15000);
+      const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/bad.tex.comments.json")));
+      check(shownErr && refused && still === "{ this is not json", "comments: an invalid comments file is shown as unreadable, a comment over it refused with the draft kept, the file untouched", { shownErr, refused, still });
+    }
+    // (7) LC-T5 / LC-T2: retries exhausted end to end: another writer on every attempt; after 5 conflicts, "busy", the
+    // draft kept in the composer, nothing of it in the file
+    {
+      await open(ftex);
+      await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 20000);
+      await ev(`(() => { window.__writes = 0; window.__sbTexCommentsWrite = async () => { window.__writes++; const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, r.content, { base: r.entry.rev ?? 0 }); }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("A middle"); t.focus(); t.setSelectionRange(i, i + 8); return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      await post("never lands");
+      const busy = await until(`/kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "never lands"`, 20000);
+      const writes = await ev(`window.__writes`);
+      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const dx = await sideDoc();
+      check(busy && writes === 5 && !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")), "comments: on a conflict every attempt, five attempts then busy, the draft kept, nothing written", { busy, writes });
+    }
+    // (8) PR 316's bounds on re-finding and drawing, measured and printed: slices at most 8 ms up to 256 KiB and 32 ms
+    // up to 2 MiB (the source limit); drawing and the list bounded by what is near the view (300 and 2,000 threads);
+    // above 2 MiB comments refused, the comments file untouched
+    // (a .tex of exactly `units` UTF-16 units, numbered phrases in paragraphs; `n` threads on phrases, moved (an
+    // outside edit: their hash stale) or exact)
+    const sized = (units) => {
+      // (paragraphs of 20 numbered phrases, about 2 KB each: a 2 MiB document has about a thousand of the preview's groups,
+      // not tens of thousands, whose patching alone would take minutes on a loaded box)
+      const para = (i) => `Paragraph ${i}: ` + Array.from({ length: 20 }, (_, j) => `ordinary words for a long document, with a phrase numbered ${i * 20 + j}. `).join("") + "\n\n";
+      const head = "\\documentclass{article}\n\\begin{document}\n", tail = "\\end{document}\n";
+      let body = ""; for (let i = 0; head.length + body.length + para(i).length + tail.length < units - 2; i++) body += para(i);
+      const t = head + body + "%".repeat(units - head.length - body.length - tail.length - 1) + "\n" + tail;
+      if (t.length !== units) throw new Error("sized: " + t.length);
+      return t;
+    };
+    // (each thread made alone and gathered: adding 2,000 to one growing document would copy it 2,000 times)
+    const threadsOn = (text, n, stride, moved) => { const d = C.emptyDoc({}), sha = moved ? "stale" : C.sha256(text);
+      for (let i = 0; i < n; i++) { const q = `a phrase numbered ${i * stride}.`, s = text.indexOf(q); if (s < 0) throw new Error("no " + q); d.threads.push(C.addThread(C.emptyDoc({}), { anchor: { ...C.makeAnchor(text, s, s + q.length, undefined, sha), textSha: sha }, text: "t" + i, author: "agent:claude" }).doc.threads[0]); }
+      return d; };
+    const measure = async (name, text, doc) => {
+      const f = await mk(`/cm/${name}.tex`, enc(text)); await mk(`/cm/${name}.tex.comments.json`, enc(C.serialize(doc)));
+      await open(f);
+      // (placed, and drawn once the preview is rendered: a draw that found the preview's groups)
+      const tOpen = Date.now(), n = doc.threads.length, ok = await until(`performance.getEntriesByName("tex-comments-placed").some((m) => m.detail.threads === ${n}) && performance.getEntriesByName("tex-comments-drawn").some((m) => m.detail.threads === ${n} && m.detail.groups > 0)`, 300000);
+      const renderS = Math.round((Date.now() - tOpen) / 1000);
+      await sleep(300);
+      const r = await ev(`(() => { const p = performance.getEntriesByName("tex-comments-placed").filter((m) => m.detail.threads === ${n}).at(-1)?.detail, d = performance.getEntriesByName("tex-comments-drawn").filter((m) => m.detail.threads === ${n}).map((m) => m.detail);
+        const g = d.filter((x) => x.groups > 0);
+        const worst = d.reduce((m, x) => (x.ms > (m?.ms ?? -1) ? x : m), null);
+        return { placed: p, drawMaxMs: Math.max(...d.map((x) => x.ms)), drawMaxPhases: worst?.phases, drawn: g.at(-1)?.drawn, groups: g.at(-1)?.groups, draws: d.length }; })()`);
+      // (steady state: draws from scrolling the preview, the page laid out already; the first draw after a fresh render
+      // can be the one that makes the browser lay out the new preview, a layout the next frame would do anyway)
+      const before = await ev(`performance.getEntriesByName("tex-comments-drawn").length`);
+      for (const dy of [120, -120, 240, -240]) { await ev(`(document.querySelector(".tex-right").scrollBy(0, ${dy}), true)`); await sleep(250); }
+      r.steady = await ev(`(() => { const d = performance.getEntriesByName("tex-comments-drawn").slice(${before}).map((m) => m.detail); return { draws: d.length, maxMs: d.length ? Math.max(...d.map((x) => x.ms)) : null, drawn: d.at(-1)?.drawn }; })()`);
+      await ev(`(document.querySelector(".tex-comments").click(), true)`);
+      await until(`performance.getEntriesByName("tex-comments-list").some((m) => m.detail.threads === ${n})`, 15000);
+      r.list = await ev(`performance.getEntriesByName("tex-comments-list").filter((m) => m.detail.threads === ${n}).at(-1)?.detail`);
+      r.ok = ok; r.renderS = renderS;
+      console.log(`comments ${name} (${text.length} units, ${n} threads):`, JSON.stringify(r));
+      return r;
+    };
+    {
+      // the time bounds (PR 316): slices at most 8 ms up to 256 KiB and 32 ms up to 2 MiB; drawing within the same; checked
+      // on a timing box, reported on a build box (its load and GC pauses aren't the code's: a sanity bound only)
+      const timed = (r, ms, what) => {
+        const t = { slice: r.placed?.maxSliceMs, phase: r.placed?.maxSlicePhase, maxStep: r.placed?.maxStep, draw: Math.max(r.drawMaxMs, r.steady?.maxMs ?? 0), list: r.list?.ms };
+        if (BOX === "timing") check(t.slice <= ms && t.draw <= ms && t.list <= ms, `comments: ${what}: slices, drawing and the list each at most ${ms} ms (a timing box)`, t);
+        else { console.log(`timing, reported, not gated (a build box): ${what}, bound ${ms} ms:`, JSON.stringify(t)); check(t.slice < 200 && t.draw < 200 && t.list < 200, `comments: ${what}: no slice, draw or list over 200 ms (a build box's sanity bound)`, t); }
+      };
+      // up to 256 KiB: 300 moved anchors (the work budget re-finds most: each moved or unresolved, none guessed)
+      const t1 = sized(256 << 10), r1 = await measure("k256", t1, threadsOn(t1, 300, 8, true));
+      const s1 = r1.placed?.statuses ?? {};
+      check(r1.ok && (s1.moved ?? 0) > 0 && (s1.moved ?? 0) + (s1.unresolved ?? 0) === 300 && r1.placed.work <= C.LIMITS.workBudget && r1.drawn > 0 && r1.drawn < 200, "comments: 256 KiB, 300 moved anchors: placed in slices within the work budget (each moved or unresolved); drawn near the view", r1);
+      timed(r1, 8, "256 KiB, 300 moved anchors");
+      // exactly 2 MiB: works (300 moved anchors)
+      const t2 = sized(C.LIMITS.sourceUnits), r2 = await measure("m2", t2, threadsOn(t2, 300, 50, true));
+      const st = r2.placed?.statuses ?? {};
+      check(r2.ok && r2.placed.work <= C.LIMITS.workBudget && (st.moved ?? 0) > 0 && (st.moved ?? 0) + (st.unresolved ?? 0) === 300 && r2.drawn > 0 && r2.drawn < 200, "comments: exactly 2 MiB, 300 moved anchors: placed within the work budget (each moved or unresolved), drawn near the view", r2);
+      timed(r2, 32, "2 MiB, 300 moved anchors");
+      // the admitted 2,000 live threads (astra's fixture: small threads, short times, a file under 2 MiB, though a new one
+      // is refused past 1.75 MiB): on a document of 2,000 tokens, each thread re-found (moved) by its token, all placed;
+      // drawing only near the view, the list's first 100 a section
+      const toks = "\\documentclass{article}\n\\begin{document}\n" + Array.from({ length: 2000 }, (_, i) => `item w${i},\n\n`).join("") + "\n\\end{document}\n";
+      const d3 = C.emptyDoc({});
+      for (let i = 0; i < 2000; i++) { const q = `w${i},`, s0 = toks.indexOf("item " + q) + 5; d3.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-30T00:00Z" }).doc.threads[0]); }
+      const side3 = C.serialize(d3);
+      const r3 = await measure("t2000", toks, d3);
+      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
+      timed(r3, 8, "2,000 threads on a small document");
+      // one unit over 2 MiB: refused with the size, nothing drawn or written, the comments file untouched
+      const t4 = t2.replace("%", "%%"), d4 = threadsOn(t2, 3, 50, false), side4 = C.serialize(d4);
+      const f4 = await mk("/cm/over.tex", enc(t4)); await mk("/cm/over.tex.comments.json", enc(side4));
+      await open(f4);
+      const label = await until(`document.querySelector(".tex-comments")?.textContent === "Comments: over 2 MiB"`, 30000);
+      await ev(`(document.querySelector(".tex-comments").click(), true)`);
+      const msg = await until(`document.querySelector(".sb-cm-list .sb-cm-refused")?.textContent === "Comments are available for documents up to 2 MiB (this one is 2.0 MiB)"`, 10000);
+      const marks = await ev(`CSS.highlights.get("sb-comments")?.size ?? 0`), bub = await ev(`document.querySelectorAll(${BUB}).length`);
+      const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/over.tex.comments.json")));
+      check(t4.length === C.LIMITS.sourceUnits + 1 && label && msg && marks === 0 && bub === 0 && still === side4, "comments: one unit over 2 MiB: refused with the size on the Comments button and in its list, nothing shown, the comments file untouched", { label, msg, marks, bub, same: still === side4 });
+    }
+    // (9) LC316-A2: Save writes the anchors of the text it saved, from one snapshot: an edit while the .tex's write is
+    // held moves nothing in what is written (the comment keeps its subject); and an agent's reattachment landing while
+    // the anchors are written survives (the page skips a thread whose anchor changed since its snapshot)
+    {
+      const T = "\\documentclass{article}\n\\begin{document}\nAlpha words. Beta words here. Gamma words.\n\nA last line.\n\\end{document}\n";
+      const fs9 = await mk("/cm/snap.tex", enc(T)), S9 = "/cm/snap.tex.comments.json";
+      let d9 = C.emptyDoc({}); const ab = (q) => { const s = T.indexOf(q); return C.makeAnchor(T, s, s + q.length); };
+      const r9a = C.addThread(d9, { anchor: ab("Beta words"), text: "on beta", ...{ author: "person:me" } }); d9 = r9a.doc;
+      const r9b = C.addThread(d9, { anchor: ab("Gamma words"), text: "on gamma", author: "person:me" }); d9 = r9b.doc;
+      await mk(S9, enc(C.serialize(d9)));
+      await open(fs9);
+      await until(`document.querySelectorAll(${BUB}).length === 2`, 20000);
+      const side9 = async () => C.parse(new TextDecoder().decode(new Uint8Array(await bytesOf(S9))), {});
+      const tex9 = async () => new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/snap.tex")));
+      // (a) an edit above the anchors, saved; while the save's write is held, another edit before them
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Alpha"); t.setRangeText("Zero. ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__held = new Promise((r) => (window.__releaseSave = r)); window.__sbTexSaveWrite = () => window.__held; return true; })()`);
+      await ctrlS();
+      await sleep(400);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Zero"); t.setRangeText("MORE TEXT ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__releaseSave(); delete window.__sbTexSaveWrite; return true; })()`);
+      await statusIs(/^Saved$/); await sleep(1500);
+      const saved9 = await tex9(), a9 = (await side9()).threads.find((t) => t.id === r9a.id).anchor.value;
+      check(!saved9.includes("MORE TEXT") && saved9.includes("Zero. Alpha") && a9.textSha === C.sha256(saved9) && saved9.slice(a9.start, a9.end) === "Beta words" && a9.quote === "Beta words", "comments: an edit while the save's .tex write is held: the anchors written are the saved text's, each on its own words", { quote: a9.quote, at: saved9.slice(a9.start, a9.end) });
+      // (b) save again (the MORE TEXT edit); the agent reattaches the gamma thread just before the page's anchor write
+      const texAt = await ev(`document.querySelector(".tex-src").value`), gi = texAt.indexOf("A last line");
+      const cur9 = await side9(), agentDoc = C.reattach(cur9, r9b.id, C.makeAnchor(texAt, gi, gi + 11), { author: "agent:claude" }).doc;
+      await ev(`(() => { window.__raced9 = 0; window.__sbTexCommentsWrite = async () => { if (window.__raced9) return; window.__raced9 = 1;
+        const r = await ${W}.read(${J(S9)}); await ${W}.write(${J(S9)}, new TextEncoder().encode(${J(C.serialize(agentDoc))}), { base: r.entry.rev ?? 0 }); }; return true; })()`);
+      await ctrlS(); await statusIs(/^Saved$/); await sleep(2000);
+      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const saved9b = await tex9(), f9 = await side9(), g9 = f9.threads.find((t) => t.id === r9b.id).anchor.value, b9 = f9.threads.find((t) => t.id === r9a.id).anchor.value;
+      check(await ev(`window.__raced9`) === 1 && g9.quote === "A last line" && g9.by === undefined && f9.threads.find((t) => t.id === r9b.id).anchor.by === "agent:claude" && b9.textSha === C.sha256(saved9b) && saved9b.slice(b9.start, b9.end) === "Beta words", "comments: an agent's reattachment landing during the page's anchor write survives the retry (the page skips that thread), the other anchor written for the saved text", { g: g9.quote, by: f9.threads.find((t) => t.id === r9b.id).anchor.by, b: saved9b.slice(b9.start, b9.end) });
+    }
+    check(errors.length === e0, "comments: no page errors", errors.slice(e0, e0 + 3));
+    await ev(`(delete window.__sbTexCommentsWrite, true)`);
   }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
   // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
