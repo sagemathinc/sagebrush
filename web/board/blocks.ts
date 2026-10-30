@@ -251,10 +251,10 @@ export class BlockEditor {
 
   private paint() {
     this.pre.innerHTML = (this.o.highlight ?? ((s: string) => highlightMarkdown(s, false)))(this.ta.value);
-    fitHeight(this.ta);
-    // (its kind as it is typed: "# " makes it a heading)
+    // (its kind as it is typed: "# " makes it a heading; first, so the field is measured in the heading's font)
     const k = kindOf(this.ta.value), h = /^ {0,3}(#{1,6})/.exec(this.ta.value);
     this.box.className = `be-md mb-edit mb-${k}` + (k === "heading" ? ` mb-h${h![1].length}` : "");
+    fitHeight(this.ta);
   }
 
   private input() {
