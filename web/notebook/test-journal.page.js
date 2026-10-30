@@ -1843,6 +1843,28 @@ async function arrivingSays() {
   // (the page reads them from its history module, sagebrush-history.js)
   check(H.arrivingSay === N.arrivingSay && H.STILL_ARRIVING === N.STILL_ARRIVING, "…the page's history module gives the same arrivingSay and words");
 }
+// (the Sync panel's count of notebooks with edits waiting (2c-3, follow-up 3): from each slot's debt, in one
+// transaction, with the namespace's debt row; a notebook acknowledged up to its last patch isn't counted; more registered
+// than `max`: over, no ids)
+async function unackedCount() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const a = await loadNew(w, hdb, [["a", "A"]]), b = await loadNew(w, hdb, [["b", "B"]]);
+    const u1 = await N.unackedDocs(hdb), d1 = await N.readDebt(hdb);
+    check(u1.ids.includes(a.id) && u1.ids.includes(b.id) && !u1.over && d1.count >= 2 && J(u1.debt) === J(d1), "unacked: two notebooks started here, each with its root unacknowledged: both counted, with the debt row: " + J({ n: u1.ids.length, d1 }));
+    const slot = (await jState(hdb, a.id)).slot;
+    const jtx = (fn) => a.st.patches.queue(() => a.st.patches.journalTx(async (s) => ({ j: 0, out: await fn(s) })));
+    await jtx((s) => N.markSent(s, a.id, { gen: slot.gen, client: slot.client, upTo: 99, fgen: 1, epoch: 1, req: 7 }));
+    await jtx((s) => N.acked(s, a.id, { gen: slot.gen, client: slot.client, upTo: 99, epoch: 1, req: 7 }));
+    const u2 = await N.unackedDocs(hdb), d2 = await N.readDebt(hdb);
+    check(!u2.ids.includes(a.id) && u2.ids.includes(b.id) && d2.count === d1.count - slot.debt.count, "unacked: one acknowledged up to its last patch: not counted, the debt row lower by its debt: " + J({ d2, mine: slot.debt }));
+    const over = await N.unackedDocs(hdb, { max: 1 });
+    check(over.over && over.ids.length === 0, "unacked: more registered than max: over, no ids");
+    await close(a.st, b.st);
+  });
+  w.close();
+  hdb.close();
+}
 // ---- 2c-3 (sync-docs' N-2C3-1): a notebook started here with none of its synced history (a start, no rows, no record)
 // loads as "arriving": refused, and nothing written: no record, no l row, no intent, no row on its synced history
 async function arrivingStarted() {
@@ -1950,7 +1972,7 @@ async function startTooLargeAt(real) {
   await close(w);
   hdb.close();
 }
-const CASES = [arrivingSays, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge];
 export async function run() {
