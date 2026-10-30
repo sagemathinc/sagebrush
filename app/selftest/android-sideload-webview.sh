@@ -42,7 +42,7 @@ case "$mode" in
     timeout 600 adb install "$APK" > /tmp/webview-install.log 2>&1 || { cat /tmp/webview-install.log; fail "adb install of $PKG"; }
     grep -q Success /tmp/webview-install.log || { cat /tmp/webview-install.log; fail "adb install did not say Success"; }
     adb shell dumpsys package "$PKG" | tr -d '\r' > /tmp/webview-package.txt
-    got=$(sed -n 's/^ *versionName=//{p;q}' /tmp/webview-package.txt)
+    got=$(bash "$HERE/dumpsys-version-name.sh" /tmp/webview-package.txt)
     [ "$got" = "$VERSION" ] || fail "the installed $PKG is version '$got', not $VERSION"
     adb shell cmd webviewupdate set-webview-implementation "$PKG" | tr -d '\r' | tee /tmp/webview-set.log
     provider
