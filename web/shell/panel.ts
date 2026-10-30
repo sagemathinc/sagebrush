@@ -3,7 +3,7 @@
 // (text nodes and class names from a fixed table only); the output is rendered in slices (web/shell/panel-render.ts).
 // A preview: the page shows it on preview and DEV hosts only (web/index.html), until E5.5's timing gates are met.
 import css from "./panel.css" with { type: "text" };
-import { Render, SLICE, SCROLLBACK, dropMarker, evictCount, type Run } from "./panel-render.ts";
+import { Render, SLICE, FIRST, SCROLLBACK, dropMarker, evictCount, type Run } from "./panel-render.ts";
 import type { HostOutcome, ShellHost } from "./host.ts";
 
 export { SCROLLBACK };
@@ -31,9 +31,7 @@ export const wrap = (script: string) => `eval -- '${script.replace(/'/g, "'\\''"
 
 type Cmd = { el: HTMLElement; out: HTMLElement; units: number; lines: number; spans: number };
 
-// (the first slice small, so the command's first output paints within a frame: E5.5's first paint; then up to FRAME ms
-// of slices between frames)
-const FIRST = { bytes: 8192, spans: 200, ms: 4 };
+// (up to FRAME ms of slices between frames, after the first slice (panel-render.ts FIRST) and its frame)
 const FRAME = 12;
 const yieldNow = (): Promise<void> =>
   (globalThis as any).scheduler?.yield ? (globalThis as any).scheduler.yield() : new Promise((r) => setTimeout(r, 0));
@@ -681,6 +679,12 @@ export class TerminalPanel {
       const p0 = performance.now();
       const runs = r.next(first ? FIRST : SLICE);
       if (!runs) break;
+      // (a slice with no runs yet, stderr's reservation scanned in slices: nothing to paint, and the first output keeps
+      // the first slice's budget and its first-paint measure: DB2-LL-337-4)
+      if (!runs.length) {
+        await yieldNow();
+        continue;
+      }
       const p1 = performance.now();
       if (signal.aborted && this.running?.cmd !== cmd) return;
       const f = document.createDocumentFragment();

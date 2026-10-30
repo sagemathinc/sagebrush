@@ -2,7 +2,7 @@
 // escapes, and the per-command caps with the omission line charged.  A first set (the preview); E5.8's full list
 // follows in step 6's PR.
 //   bun web/shell/test-panel-render.mjs
-import { Render, CAPS, SCROLLBACK, PAGE, PAGE_BACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
+import { Render, CAPS, SCROLLBACK, FIRST, PAGE, PAGE_BACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
 
 let checks = 0;
 const fails = [];
@@ -396,6 +396,13 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
       check(shown === text && atStarts && chunks >= 10 && chunks <= bound && r.totals.spans === raw.length,
         `chunks, ${how}: ${chunks} chunk runs (bound ${bound}), each at a line start and charged (spans ${r.totals.spans} for ${raw.length} runs), the text unchanged`);
     }
+  }
+  // (output that fits in the first slice gets no chunk: board's R4-1)
+  for (const [what, out, err] of [["echo hello", "hello\n", ""], ["20 short lines", Array.from({ length: 20 }, (_, i) => `file-${i}.txt`).join("\n") + "\n", ""], ["stderr oops", "", "oops\n"], ["8 000 bytes of lines", "y".repeat(79).concat("\n").repeat(100), ""]]) {
+    const r = new Render(out, err, () => 0);
+    const raw = [];
+    for (let s; (s = r.next(FIRST)); ) raw.push(...s);
+    check(!raw.some((x) => x.chunk), `${what}: no chunk run (${raw.filter((x) => x.chunk).length})`);
   }
   // (a page holds at most PAGE_RUNS runs, so one on screen lays out quickly: a line of 2 000 one-unit style runs makes
   // pages of at most 512 runs, the text unchanged, every join at a cluster boundary, at four slicings)
