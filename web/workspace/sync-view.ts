@@ -32,8 +32,18 @@ const listedKey = (ns: string) => `sync:${ns}:listed`;
 /** Paths listed in the Sync panel's list (in a transaction with meta). */
 export async function noteListed(meta: IDBObjectStore, ns: string, listed: [string, ListedWhy][]) {
   if (!listed.length) return;
-  const was = ((await req(meta.get(listedKey(ns)))) as { count: number; paths: [string, ListedWhy][] } | undefined) ?? { count: 0, paths: [] };
-  meta.put({ count: was.count + listed.length, paths: [...listed, ...was.paths].slice(0, LISTED_MAX) }, listedKey(ns));
+  const was = ((await req(meta.get(listedKey(ns)))) as Listed | undefined) ?? { count: 0, paths: [] };
+  const renamed = (was.renamed ?? 0) + listed.filter(([, why]) => why === "renamed").length;
+  meta.put({ count: was.count + listed.length, renamed, paths: [...listed, ...was.paths].slice(0, LISTED_MAX) }, listedKey(ns));
+}
+/** The Sync panel's list as kept in meta: `count` every one listed, `renamed` how many of those were renamed by the
+ * server's index (said apart from those kept aside, sync-docs' N-AD-2). */
+export type Listed = { count: number; renamed?: number; paths: [string, ListedWhy][] };
+/** The list's summary line. */
+export function listedSummary(l: Listed): string {
+  const renamed = l.renamed ?? 0, kept = l.count - renamed, s = (n: number) => (n === 1 ? "" : "s");
+  const parts = [kept > 0 ? `${kept} item${s(kept)} sync kept aside` : "", renamed > 0 ? `${renamed} item${s(renamed)} renamed (another device has one with the name)` : ""];
+  return parts.filter(Boolean).join("; ");
 }
 /** Paths kept in the Sync panel's list, at most. */
 const LISTED_MAX = 100;
@@ -518,11 +528,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     } else list(cur.path, "kept");
   }
 
-  if (listed.length) {
-    const was = ((await req(meta.get(listedKey(ns)))) as { count: number; paths: [string, ListedWhy][] } | undefined) ?? { count: 0, paths: [] };
-    const paths = [...listed, ...was.paths].slice(0, LISTED_MAX);
-    meta.put({ count: was.count + listed.length, paths }, listedKey(ns));
-  }
+  await noteListed(meta, ns, listed);
   return { ops, gone, listed };
 }
 
