@@ -191,6 +191,26 @@ test("the WebKit job: its inputs on pull requests, never master pushes, always n
   assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
 });
 
+test("the engine's full tier: a pull request touching src/runtime/ selects it (and engine-wasm, its need); other paths don't; master, nightly and dispatch always", () => {
+  for (const f of ["src/runtime/ops.ts", "src/runtime/object.ts"]) {
+    const o = classify([f]);
+    assert.equal(o.engine_full, "true", f);
+    assert.equal(o.engine_smoke, "true", f);
+  }
+  for (const f of ["src/compile.ts", "web/x.ts", "lib/fractions.py", "engine/poly/src/lib.rs", "README.md"])
+    assert.equal(classify([f]).engine_full, "false", f);
+  const run = (event: string, ref: string, files: string) => {
+    const list = join(dir, "files.txt");
+    writeFileSync(list, files);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    assert.equal(r.status, 0, r.stderr);
+    return /^engine_full=(\w+)$/m.exec(r.stdout)?.[1];
+  };
+  assert.equal(run("push", "refs/heads/master", "README.md\n"), "true");
+  assert.equal(run("schedule", "refs/heads/master", ""), "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
+});
+
 test("the limits census runs on engine-only, lib and src changes even when the node suites are skipped (#155 -> #156)", () => {
   // #155's files: an engine-only change, whose node suites (which hold
   // test/limits.test.ts) were path-skipped; it merged and turned master red
