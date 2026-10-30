@@ -2,7 +2,7 @@
 // escapes, and the per-command caps with the omission line charged.  A first set (the preview); E5.8's full list
 // follows in step 6's PR.
 //   bun web/shell/test-panel-render.mjs
-import { Render, CAPS, SCROLLBACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
+import { Render, CAPS, SCROLLBACK, FIRST, PAGE, PAGE_BACK, classOf, applySgr, utf8Bytes, evictCount, dropMarker } from "./panel-render.ts";
 
 let checks = 0;
 const fails = [];
@@ -26,12 +26,13 @@ function apply(runs) {
   }
   return kept;
 }
+// (a chunk run, a box for a slice's lines, charged as a run: left out of `runs`, counted in `chunks`)
 function render(out, err = "", budget = ALL, now = () => 0) {
   const r = new Render(out, err, now);
   const raw = [];
   for (let s; (s = r.next(budget)); ) raw.push(...s);
-  const runs = apply(raw);
-  return { runs, text: runs.map((x) => x.text).join(""), totals: r.totals };
+  const runs = apply(raw.filter((x) => !x.chunk));
+  return { runs, chunks: raw.filter((x) => x.chunk).length, text: runs.map((x) => x.text).join(""), totals: r.totals };
 }
 const PLAIN = { fg: -1, bg: -1, b: false, i: false, u: false, rev: false };
 
@@ -259,6 +260,226 @@ check(CAPS.units + 2 * 256 + dropMarker(1e6).length <= SCROLLBACK.units && CAPS.
     const min = Math.min(...ratios);
     check(min >= 4.5 && Math.abs(min - minWant) < 0.005, `${name}: every colour >= 4.5:1 on the background (min ${min.toFixed(2)})`);
     check(Array.from({ length: 16 }, (_, i) => cr(t.bg, t["c" + i]) >= cr(t.fg, t["c" + i])).every(Boolean), `${name}: on each colour as a background, the theme's bg reads better than its fg (sb-fga-N)`);
+  }
+}
+
+// ---- long lines: pages of PAGE units (the long-line design: pages, not a cap; @sagebrush, board, daybreak2)
+{
+  // (the pages of each line: the text of each page, its first one the part before any page run)
+  const pagesOf = (runs) => {
+    const lines = [];
+    let cur = [""];
+    for (const x of runs) {
+      if (x.page) cur.push("");
+      else {
+        const parts = x.text.split("\n");
+        cur[cur.length - 1] += parts[0];
+        for (const q of parts.slice(1)) (lines.push(cur), (cur = [q]));
+      }
+    }
+    if (cur.join("")) lines.push(cur);
+    return lines;
+  };
+  const pageRuns = (runs) => runs.filter((x) => x.page).length;
+  // (every join at a grapheme-cluster boundary of the whole line, by its own Intl.Segmenter pass: B-LL-1)
+  const atBounds = (ps) => {
+    const b = new Set([...new Intl.Segmenter().segment(ps.join(""))].map((g) => g.index));
+    let at = 0;
+    return ps.slice(0, -1).every((p) => b.has((at += p.length)));
+  };
+  // (at 4 095, 4 096 and 4 097 units: no page, no page, one)
+  for (const [n, want] of [[PAGE - 1, 0], [PAGE, 0], [PAGE + 1, 1]]) {
+    const r = render("a".repeat(n) + "\n");
+    check(pageRuns(r.runs) === want && r.text === "a".repeat(n) + "\n", `a line of ${n} units: ${want} page run(s)`);
+  }
+  // (every page at most PAGE units; the text the same as without pages)
+  const big = render("x".repeat(3 * PAGE + 100) + "\n");
+  const pg = pagesOf(big.runs)[0];
+  check(pg.length === 4 && pg.every((p) => p.length <= PAGE) && pg.join("") === "x".repeat(3 * PAGE + 100), `a line of 3 pages and 100: pages ${pg.map((p) => p.length).join(", ")}`);
+  // (astral pairs and clusters never split at a join, and no page starts with a continuation: B-LL-1)
+  const cases = [
+    ["an astral pair across the edge", "a".repeat(PAGE - 1) + "\u{1d7d8}".repeat(10)],
+    ["a combining mark at the edge", "a".repeat(PAGE - 1) + "é" + "b".repeat(10)],
+    ["a ZWJ emoji at the edge", "a".repeat(PAGE - 3) + "\u{1f469}‍\u{1f4bb}" + "b".repeat(10)],
+    ["a variation selector at the edge", "a".repeat(PAGE - 1) + "❤️" + "b".repeat(10)],
+    ["a skin-tone modifier at the edge", "a".repeat(PAGE - 2) + "\u{1f44d}\u{1f3fd}" + "b".repeat(10)],
+    ["a flag (a regional-indicator pair) on the edge (BLL1-R1)", "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(10)],
+    ["a Hangul L+V+T syllable on the edge (BLL1-R1)", "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(10)],
+  ];
+  for (const [what, line] of cases) {
+    const r = render(line + "\n");
+    const ps = pagesOf(r.runs)[0];
+    const ok = ps.join("") === line && ps.every((p) => p.length <= PAGE) && atBounds(ps);
+    check(ok, `${what}: the cluster kept whole, no page over ${PAGE} (pages ${ps.map((p) => p.length).join(", ")})`);
+  }
+  // (the finite cluster policy, @sagebrush's ruling on DB2-LL-337-1 with board's CONCUR: a join moves back at most
+  // PAGE_BACK units to its cluster's start, on the logical line (across slice flushes and style runs); a longer
+  // cluster is split at a scalar boundary.  Each at three slicings)
+  {
+    let tick = 0;
+    const slicings = [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]];
+    const M = "\u0301";
+    const kept = (what, input, plain, firstLen, firstStart, whole = true) => {
+      for (const [how, b, now] of slicings) {
+        const r = render(input + "\n", "", b, now);
+        const ps = pagesOf(r.runs)[0];
+        const ok = ps.join("") === plain && ps.every((p) => p.length <= PAGE) && ps[0].length === firstLen && ps[1]?.startsWith(firstStart) &&
+          ps.slice(1).every((p) => !/^[\udc00-\udfff]/.test(p)) && (!whole || atBounds(ps)) && r.totals.spans === r.runs.length + r.chunks + 1;
+        check(ok, `${what}, ${how}: pages ${ps.map((p) => p.length).join(", ")}, page 2 starts ${JSON.stringify(ps[1]?.slice(0, 3))}, spans ${r.totals.spans} for ${r.runs.length} runs`);
+      }
+    };
+    // (a cluster across a slice flush: the base ends the tokenizer's 4 096-scalar run, its marks start the next;
+    // and an SGR that changes nothing between them, so the one-byte slicing flushes there)
+    kept("a cluster across a slice flush", "a".repeat(PAGE - 1) + "e" + M + M + "b".repeat(20), "a".repeat(PAGE - 1) + "e" + M + M + "b".repeat(20), PAGE - 1, "e" + M);
+    kept("a cluster across a flush at an SGR", "a".repeat(PAGE - 2) + "e" + "\x1b[0m" + M + M + M + "b".repeat(20), "a".repeat(PAGE - 2) + "e" + M + M + M + "b".repeat(20), PAGE - 2, "e" + M);
+    // (a cluster over two style runs, its base inside a run: that run splits, its classes on both parts)
+    {
+      const input = "a".repeat(PAGE - 4) + "\x1b[31mxe\x1b[32m" + M + M + M + M + "\x1b[0m" + "b".repeat(20);
+      kept("a cluster over two style runs", input, "a".repeat(PAGE - 4) + "xe" + M + M + M + M + "b".repeat(20), PAGE - 3, "e" + M);
+      const r = render(input + "\n");
+      const red = r.runs.filter((x) => x.cls === "sb-fg-1");
+      check(red.length === 2 && red[0].text === "x" && red[1].text === "e", `the base's run split at the join, its classes on both: ${JSON.stringify(red.map((x) => x.text))}`);
+    }
+    // (a base 33 and 64 units back: kept whole, the page that much shorter)
+    for (const back of [33, 40, PAGE_BACK]) {
+      const line = "a".repeat(PAGE - back) + "e" + M.repeat(back + 10) + "b".repeat(20);
+      kept(`a base ${back} units back`, line, line, PAGE - back, "e" + M);
+    }
+    // (BLL1-R1 at every slicing: a flag and a Hangul syllable across the edge move whole to the next page)
+    kept("a flag on the edge", "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u{1f1f8}\u{1f1ea}" + "b".repeat(20), PAGE - 2, "\u{1f1f8}\u{1f1ea}");
+    kept("a Hangul L+V+T syllable on the edge", "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), "a".repeat(PAGE - 2) + "\u1100\u1161\u11a8" + "b".repeat(20), PAGE - 2, "\u1100\u1161\u11a8");
+    // (flags in a long run of regional indicators that starts far outside the window: they pair from the run's start,
+    // so the join keeps each pair whole whatever the slicing or the style runs: DB2-LL-337-2)
+    {
+      const A = "\u{1f1e6}", B = "\u{1f1e7}";
+      const ab = (n) => Array.from({ length: n }, (_, i) => (i % 2 ? B : A)).join("");
+      kept("2 050 alternating RIs (daybreak2's case)", ab(2050) + "b", ab(2050) + "b", PAGE, A + B);
+      kept("a, then 2 050 RIs: pairs from unit 1", "a" + ab(2050) + "b", "a" + ab(2050) + "b", PAGE - 3, A + B);
+      kept("a, then 6 000 RIs over three joins", "a" + ab(6000) + "b", "a" + ab(6000) + "b", PAGE - 3, A + B);
+      // (style runs of 7 RIs each, so pairs straddle the runs; 300 runs, under a page's PAGE_RUNS)
+      const styled = Array.from({ length: 300 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + ab(7)).join("") + "\x1b[0mb";
+      const plainStyled = ab(7).repeat(300) + "b";
+      kept("2 100 RIs in style runs of 7", "a" + styled, "a" + plainStyled, PAGE - 3, ab(7).slice(0, 4));
+    }
+    // (a cluster over PAGE_BACK: split at the edge, the defined behaviour; with astral marks, at a scalar boundary)
+    {
+      const line = "a".repeat(PAGE - 100) + "e" + M.repeat(200) + "b".repeat(20);
+      kept("a cluster over PAGE_BACK, split at the edge", line, line, PAGE, M, false);
+      const astral = "a".repeat(PAGE - 100) + "e" + "\u{1d167}".repeat(100) + "b".repeat(20);
+      kept("a cluster of astral marks over PAGE_BACK, split at a scalar boundary", astral, astral, PAGE - 1, "\u{1d167}", false);
+    }
+    // (a cluster at the page's own start needs no move: a line of marks after one base, two pages over)
+    {
+      const line = "e" + M.repeat(3 * PAGE);
+      const r = render(line + "\n");
+      const ps = pagesOf(r.runs)[0];
+      check(ps.join("") === line && ps.every((p) => p.length === PAGE || p === ps.at(-1)) && ps.length === 4, `one cluster longer than the line's pages: split at each edge (pages ${ps.map((p) => p.length).join(", ")})`);
+    }
+  }
+  // (chunk runs, E5.5's batching: a slice's lines go in chunks of about 8 Ki units (a run counting 16), each at a line
+  // start, each charged as a run, at most one per slice more than that size asks; the text unchanged; at four slicings)
+  {
+    const text = Array.from({ length: 3000 }, (_, i) => `line ${i} ` + "x".repeat(i % 90)).join("\n") + "\n";
+    let tick = 0;
+    for (const [how, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = new Render(text, "", now);
+      const raw = [];
+      let slices = 0;
+      for (let s; (s = r.next(b)); slices++) raw.push(...s);
+      // (each chunk run right after a line end, or first)
+      const atStarts = raw.every((x, i) => !x.chunk || i === 0 || raw.slice(0, i).filter((y) => !y.chunk).map((y) => y.text).join("").endsWith("\n"));
+      const chunks = raw.filter((x) => x.chunk).length;
+      const shown = raw.filter((x) => !x.chunk).map((x) => x.text).join("");
+      const bound = Math.ceil((text.length + 16 * 3000) / 8192) + slices;
+      check(shown === text && atStarts && chunks >= 10 && chunks <= bound && r.totals.spans === raw.length,
+        `chunks, ${how}: ${chunks} chunk runs (bound ${bound}), each at a line start and charged (spans ${r.totals.spans} for ${raw.length} runs), the text unchanged`);
+    }
+  }
+  // (output that fits in the first slice gets no chunk: board's R4-1)
+  for (const [what, out, err] of [["echo hello", "hello\n", ""], ["20 short lines", Array.from({ length: 20 }, (_, i) => `file-${i}.txt`).join("\n") + "\n", ""], ["stderr oops", "", "oops\n"], ["8 000 bytes of lines", "y".repeat(79).concat("\n").repeat(100), ""]]) {
+    const r = new Render(out, err, () => 0);
+    const raw = [];
+    for (let s; (s = r.next(FIRST)); ) raw.push(...s);
+    check(!raw.some((x) => x.chunk), `${what}: no chunk run (${raw.filter((x) => x.chunk).length})`);
+  }
+  // (the boundary, DB2-LL-337-5: a chunk starts only at a line flushed after more than FIRST.bytes of input; so exactly
+  // FIRST.bytes stays plain, one byte of text past it gets a chunk, and a last line whose line end is that byte (the
+  // line is flushed before its line end is read) stays plain), at both slicings
+  for (const [what, out, want] of [["exactly 8 192 bytes (128 lines of 63 and a line end)", "w".repeat(63).concat("\n").repeat(128), false],
+    ["8 193 bytes, one past", "w".repeat(63).concat("\n").repeat(128) + "v", true], ["8 193 bytes, the byte past a line end", "w".repeat(63).concat("\n").repeat(127) + "w".repeat(64) + "\n", false]]) {
+    for (const [how, b] of [["FIRST slices", FIRST], ["one slice", ALL]]) {
+      const r = new Render(out, "", () => 0);
+      const raw = [];
+      for (let s; (s = r.next(b)); ) raw.push(...s);
+      check(raw.some((x) => x.chunk) === want && raw.filter((x) => !x.chunk).map((x) => x.text).join("") === out,
+        `${what}, ${how}: ${want ? "a chunk" : "no chunk"} (${raw.filter((x) => x.chunk).length})`);
+    }
+  }
+  // (a page holds at most PAGE_RUNS runs, so one on screen lays out quickly: a line of 2 000 one-unit style runs makes
+  // pages of at most 512 runs, the text unchanged, every join at a cluster boundary, at four slicings)
+  {
+    const line = Array.from({ length: 2000 }, (_, i) => `\x1b[3${1 + (i % 2)}m` + (i % 5 ? "x" : "e\u0301")).join("") + "\x1b[0m";
+    const plain = Array.from({ length: 2000 }, (_, i) => (i % 5 ? "x" : "e\u0301")).join("");
+    let tick = 0;
+    for (const [how, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = render(line + "\n", "", b, now);
+      const runsPer = [0];
+      for (const x of r.runs) x.page ? runsPer.push(0) : runsPer[runsPer.length - 1]++;
+      const ps = pagesOf(r.runs)[0];
+      check(ps.join("") === plain && runsPer.length >= 4 && runsPer.every((n) => n <= 512 + 1) && atBounds(ps) && r.totals.spans === r.runs.length + r.chunks + 1,
+        `a line of 2 000 style runs, ${how}: ${runsPer.length} pages of ${Math.max(...runsPer)} runs at most, joins at cluster boundaries`);
+    }
+  }
+  // (a styled run across a join: two runs with the same classes, each charged: B-LL-2)
+  {
+    const r = render("\x1b[31;1m" + "y".repeat(PAGE + 50) + "\x1b[0m\n");
+    const styled = r.runs.filter((x) => x.cls && !x.page);
+    check(styled.length === 2 && styled.every((x) => x.cls === "sb-fg-1 sb-b") && styled[0].text.length === PAGE && pageRuns(r.runs) === 1, `a styled run across a join: ${styled.length} runs of "${styled[0]?.cls}"`);
+    check(r.totals.spans === r.runs.length + r.chunks + 1, `each part and the join charged as runs, plus the line end after the last page (${r.totals.spans} for ${r.runs.length} runs)`);
+  }
+  // (escapes and controls at a join: the same text as without pages)
+  {
+    const line = "z".repeat(PAGE - 3) + "\x1b[2J\x01\x1b]0;t\x07" + "\x1b[32mgreen\x1b[0m" + "w".repeat(PAGE);
+    const r = render(line + "\n");
+    const want = "z".repeat(PAGE - 3) + "␛[2J␁␛]0;t␇green" + "w".repeat(PAGE) + "\n";
+    check(r.text === want && pagesOf(r.runs)[0].every((p) => p.length <= PAGE), "escapes and controls across a join: the same text, pages within PAGE");
+  }
+  // (TP-2's \r restart across joins and slices: the line shows its text after the last \r, at any slicing)
+  {
+    const line = Array.from({ length: 6 }, (_, i) => "\r" + String(i).repeat(PAGE + 300)).join("") + "\n";
+    const want = "5".repeat(PAGE + 300) + "\n";
+    let tick = 0;
+    for (const [what, b, now] of [["one slice", ALL, () => 0], ["one byte", { bytes: 1, spans: Infinity, ms: Infinity }, () => 0],
+      ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }, () => 0], ["an advancing clock", { bytes: Infinity, spans: Infinity, ms: 8 }, () => (tick += 0.37)]]) {
+      const r = render(line, "", b, now);
+      check(r.text === want && pageRuns(r.runs) === 1 && r.totals.units === want.length, `\\r over a paged line, ${what}: only the last text and its one join (units ${r.totals.units})`);
+    }
+  }
+  // (the caps hold with pages: one 1 MiB line of alternating styles: runs <= 20 000 with the joins, units <= 1 MiB)
+  {
+    const r = render("\x1b[31ma\x1b[32mb".repeat(100000) + "\n" + "q".repeat(2 * CAPS.inBytes));
+    const t = r.totals;
+    check(t.spans <= CAPS.spans && t.units <= CAPS.units && t.lines <= CAPS.lines, `the caps hold on paged lines (${JSON.stringify({ units: t.units, spans: t.spans, lines: t.lines })})`);
+    check(r.runs.at(-1).cls === "sb-omit", "and the omission line still ends a capped command");
+  }
+  // (a paged line cut by the caps: the omission line starts a line of its own, even when the slice before it ended on
+  // a join, or the marker's slice has no other run)
+  for (const [what, b] of [["one slice", ALL], ["the shipped slice", { bytes: 65536, spans: 1000, ms: Infinity }], ["4 Ki slices", { bytes: PAGE, spans: Infinity, ms: Infinity }]]) {
+    const r = render("q".repeat(2 * CAPS.inBytes), "", b);
+    const m = r.runs.at(-1);
+    const ps = pagesOf(r.runs);
+    check(m.cls === "sb-omit" && m.text.startsWith("\n") && ps.length === 2 && ps[0].every((p) => p.length <= PAGE) && r.totals.units <= CAPS.units,
+      `a paged line past the unit cap, ${what}: the omission line on its own line (${JSON.stringify(m.text.slice(0, 12))}, pages ${ps[0].length})`);
+  }
+  // (past the run cap, a join costs a run: no page run ever holds text, and no page grows past PAGE)
+  {
+    const r = render("\x1b[31ma\x1b[32mb".repeat(15000) + "\x1b[0m" + "p".repeat(3 * PAGE) + "\n");
+    const ps = pagesOf(r.runs);
+    check(r.runs.every((x) => !x.page || x.text === "") && ps.every((l) => l.every((p) => p.length <= PAGE)) && r.totals.spans <= CAPS.spans,
+      `past the run cap: page runs empty, pages within PAGE (max ${Math.max(...ps.flat().map((p) => p.length))}, spans ${r.totals.spans})`);
   }
 }
 
