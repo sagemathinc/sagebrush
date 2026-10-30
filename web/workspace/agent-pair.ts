@@ -13,7 +13,7 @@
 // Nothing the server sends is ever evaluated; the page sends it nothing but notifications after the hello.
 
 import { checkCall, AGENT_LIMITS } from "./agent-schema";
-import { authorize, grantFolders, type Grant } from "./agent-grant";
+import { authorize, grantFolders, grantProblem, type Grant, type TrashEntry } from "./agent-grant";
 
 /** What the hello's result says (the agent's own claims, shown as such). */
 export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string };
@@ -28,7 +28,7 @@ export type AgentVerbs = {
   rename(from: string, to: string): Promise<any>;
   duplicate(p: string, to?: string): Promise<any>;
   remove(p: string): Promise<any>;
-  restore(p: string): Promise<any>;
+  restore(p: string, expect?: any): Promise<any>;
   history(p: string): Promise<any[]>;
   version(p: string, i: number): Promise<Uint8Array>;
 };
@@ -90,20 +90,31 @@ function entryOut(e: any) {
 const b64 = (u: Uint8Array) => { let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-/** Contents on the wire: a document as {json}; a data file as {text} if it is UTF-8, else {base64}. */
-function contentOut(kind: string, c: unknown) {
-  if (kind === "notebook" || kind === "board") return { json: c };
-  if (typeof c === "string") return { text: c };
+/** Contents' size in bytes, the same in both directions: a document's JSON text in UTF-8, a text's UTF-8 bytes,
+ * a data file's bytes (base64's decoded length). */
+export function contentBytes(c: { json: unknown } | { text: string } | { bytes: Uint8Array }): number {
+  if ("json" in c) return enc.encode(JSON.stringify(c.json)).length;
+  if ("text" in c) return enc.encode(c.text).length;
+  return c.bytes.length;
+}
+const tooBig = (n: number, what: string) => new AgentError("limit", `${what}: ${n} bytes of contents, at most ${AGENT_LIMITS.maxContentBytes} in one call`);
+/** Contents on the wire: a document as {json}; a data file as {text} if it is UTF-8, else {base64}; over 8 MiB
+ * refused with their size (never cut). */
+function contentOut(kind: string, c: unknown, what: string) {
+  const MAX = AGENT_LIMITS.maxContentBytes;
+  if (kind === "notebook" || kind === "board") { const n = contentBytes({ json: c }); if (n > MAX) throw tooBig(n, what); return { json: c }; }
+  if (typeof c === "string") { const n = contentBytes({ text: c }); if (n > MAX) throw tooBig(n, what); return { text: c }; }
   const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null;
   if (!u) throw new AgentError("storage", "contents in an unknown form");
+  if (u.length > MAX) throw tooBig(u.length, what);
   try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(u) }; } catch { return { base64: b64(u) }; }
 }
-/** Contents from the wire, and their size in bytes (8 MiB at most, refused with its size, never cut). */
-function contentIn(c: any): { value: unknown; bytes: number } {
-  if ("json" in c) return { value: c.json, bytes: enc.encode(JSON.stringify(c.json)).length };
-  if ("text" in c) return { value: c.text, bytes: enc.encode(c.text).length };
-  const u = unb64(c.base64);
-  return { value: u, bytes: u.length };
+/** Contents from the wire (8 MiB at most, refused with their size, never cut). */
+function contentIn(c: any, what: string): unknown {
+  const v = "json" in c ? { json: c.json } : "text" in c ? { text: c.text as string } : { bytes: unb64(c.base64) };
+  const n = contentBytes(v);
+  if (n > AGENT_LIMITS.maxContentBytes) throw tooBig(n, what);
+  return "json" in v ? v.json : "text" in v ? v.text : v.bytes;
 }
 
 export class AgentError extends Error {
@@ -131,7 +142,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashedFrom: (p: string) => Promise<string | null>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -154,6 +165,7 @@ export class AgentPairing {
         reject(new AgentError("refused", why));
       };
       this.sock.onmessage = (e) => {
+        if (this.state === "closed") return; // (nothing after the end)
         if (typeof e.data !== "string") return this.close(1003, "only text frames");
         const max = this.state === "connecting" ? PRE_HELLO_MAX : AGENT_LIMITS.maxFrameBytes;
         if (frameBytes(e.data, max) > max) return this.close(1009, `a message over ${max} bytes`);
@@ -222,11 +234,18 @@ export class AgentPairing {
   }
 
   private send(m: unknown) { if (this.sock.readyState === 1) this.sock.send(JSON.stringify(m)); }
+  /** Close the socket for `why`, with the protocol's code `code` (1002 framing, 1003 not text, 1007 not strict JSON,
+   * 1009 too big).  A page's WebSocket may send only 1000 or 3000-4999, with a reason of at most 123 UTF-8 bytes, so
+   * the code goes as 4000 + code (1000 stays 1000); if the browser refuses even that, a plain close(), so the socket
+   * never stays open. */
   private close(code: number, why: string) {
     this.closeReason ||= why;
     this.grant = null;
     this.verbs = null;
-    try { this.sock.close(code, why.slice(0, 120)); } catch {}
+    const wire = code === 1000 ? 1000 : 4000 + (code % 1000);
+    let reason = why;
+    while (enc.encode(reason).length > 123) reason = reason.slice(0, -1);
+    try { this.sock.close(wire, reason); } catch { try { this.sock.close(); } catch {} }
     this.end(why);
   }
   private end(why: string) {
@@ -239,7 +258,13 @@ export class AgentPairing {
     this.emit();
   }
 
-  private reply(id: string, result: unknown) { this.send({ jsonrpc: "2.0", id, result }); }
+  /** An answer, never over the frame bound: one that would be is replaced by a limit error (nothing cut). */
+  private reply(id: string, result: unknown) {
+    const s = JSON.stringify({ jsonrpc: "2.0", id, result });
+    const n = frameBytes(s, AGENT_LIMITS.maxFrameBytes);
+    if (n > AGENT_LIMITS.maxFrameBytes) return this.fail(id, "limit", `the answer would be ${n} bytes as a message, over ${AGENT_LIMITS.maxFrameBytes}`);
+    if (this.sock.readyState === 1) this.sock.send(s);
+  }
   private fail(id: string, code: string, message: string, extra: Record<string, unknown> = {}) {
     this.send({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code, message, ...extra } } });
   }
@@ -256,12 +281,19 @@ export class AgentPairing {
     this.tokens -= 1;
     const bad = checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
-    const g = this.grant, verbs = this.verbs;
-    const no = await authorize(method, params, g, now, this.opts.trashedFrom);
-    if (no || !verbs) return this.fail(id, "invalid", no ?? "no grant");
+    // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
     this.inFlight++;
+    const g = this.grant, verbs = this.verbs;
     try {
-      const result = await this.run(verbs, method.slice("workspace.".length), params as any);
+      const auth: { expect?: TrashEntry } = {};
+      const no = await authorize(method, params, g, now, this.opts.trashEntry, auth);
+      if (no || !verbs) return this.fail(id, "invalid", no ?? "no grant");
+      // (while it was authorized, the grant may have been revoked or have expired: it must be the same one, and
+      // still in force now, before the workspace is touched)
+      if (this.grant !== g || this.verbs !== verbs) return this.fail(id, "invalid", "the grant changed while this was checked");
+      const late = grantProblem(this.grant, this.now());
+      if (late) return this.fail(id, "invalid", late);
+      const result = await this.run(verbs, method.slice("workspace.".length), params as any, auth.expect);
       if (this.grant !== g) return this.fail(id, "invalid", "the grant changed while this ran"); // (revoked meanwhile: say nothing of what it read)
       g!.lastUsed = this.now();
       this.reply(id, result);
@@ -269,8 +301,12 @@ export class AgentPairing {
       if (err instanceof AgentError) return this.fail(id, err.code, err.message, err.extra);
       const code = typeof err?.code === "string" && ["invalid", "exists", "missing", "conflict", "limit", "storage"].includes(err.code) ? err.code : "invalid";
       const extra: Record<string, unknown> = {};
+      // (an error after the grant changed says nothing more, and reads nothing more)
+      if (this.grant !== g || this.verbs !== verbs || grantProblem(this.grant, this.now())) return this.fail(id, "invalid", "the grant changed while this ran");
       if (code === "conflict" && method === "workspace.write") {
-        try { const r = await verbs.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content) }; } catch {}
+        // (the current contents, if within the content bound: else the conflict is said without them, and why)
+        try { const r = await verbs.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
+        catch (e2: any) { if (e2 instanceof AgentError && e2.code === "limit") extra.currentOmitted = e2.message; }
       }
       this.fail(id, code, String(err?.message ?? err).slice(0, 500), extra);
     } finally {
@@ -278,9 +314,8 @@ export class AgentPairing {
     }
   }
 
-  private async run(v: AgentVerbs, verb: string, p: any): Promise<unknown> {
-    const MAX = AGENT_LIMITS.maxContentBytes;
-    const sized = (c: any) => { const x = contentIn(c); if (x.bytes > MAX) throw new AgentError("limit", `contents of ${x.bytes} bytes: at most ${MAX} in one call`); return x.value; };
+  private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry): Promise<unknown> {
+    const sized = (c: any) => contentIn(c, p.path ?? "contents");
     const changed = <T,>(x: T) => { this.changes++; this.emit(); return x; };
     switch (verb) {
       case "list": {
@@ -294,10 +329,7 @@ export class AgentPairing {
       case "read": {
         const r = await v.read(p.path);
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
-        const content = contentOut(r.entry.kind, r.content);
-        const bytes = enc.encode(JSON.stringify(content)).length;
-        if (bytes > AGENT_LIMITS.maxFrameBytes - 4096) throw new AgentError("limit", `${p.path} is too big to send in one call (${bytes} bytes)`);
-        return { entry: entryOut(r.entry), rev: r.rev, content };
+        return { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path) };
       }
       case "write": { const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
       case "create": return changed({ entry: entryOut(await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) })) });
@@ -305,7 +337,8 @@ export class AgentPairing {
       case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to)) });
       case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to)) });
       case "remove": return changed({ entry: entryOut(await v.remove(p.path)) });
-      case "restore": return changed({ entry: entryOut(await v.restore(p.path)) });
+      // (only the very entry authorized: Workspace.restore checks it holding its lock, so one put in its place meanwhile isn't restored)
+      case "restore": if (!expect) throw new AgentError("invalid", "restore without its authorized entry"); return changed({ entry: entryOut(await v.restore(p.path, expect)) });
       case "history": {
         const all = await v.history(p.path);
         const from = p.cursor === undefined ? 0 : /^[0-9]{1,9}$/.test(p.cursor) ? Number(p.cursor) : NaN;
@@ -313,7 +346,7 @@ export class AgentPairing {
         const page = all.slice(from, from + AGENT_LIMITS.maxHistory).map((x: any) => ({ t: x.t, size: x.size, sha256: x.sha256, by: x.by }));
         return from + page.length < all.length ? { versions: page, more: true, cursor: String(from + page.length) } : { versions: page };
       }
-      case "version": return { content: contentOut("file", await v.version(p.path, p.index)) };
+      case "version": return { content: contentOut("file", await v.version(p.path, p.index), `${p.path} version ${p.index}`) };
     }
     throw new AgentError("invalid", `not a verb: ${verb}`);
   }

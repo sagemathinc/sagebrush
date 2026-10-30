@@ -30,7 +30,7 @@ const ws = await Workspace.open();
 const ui = mountAgentPairing(ws as any);
 // (a second page's attempt, made the same way the dialog makes one)
 const tryPair = async (code: string, port: number) => {
-  const p = new AgentPairing(port, { code }, { verbsFor: (a) => ws.forAgent(a) as any, store: ws as any, trashedFrom: async () => null, page: { origin: location.origin, path: "/" } });
+  const p = new AgentPairing(port, { code }, { verbsFor: (a) => ws.forAgent(a) as any, store: ws as any, trashEntry: async () => null, page: { origin: location.origin, path: "/" } });
   try { await p.paired(); await p.revoke("test"); return "paired"; } catch (e) { return "refused: " + (e as Error).message; }
 };
 (window as any).T = { ws, ui, tryPair };
@@ -110,7 +110,13 @@ try {
   const click = (sel) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!b) throw new Error("no ${sel}"); b.click(); return true; })()`);
 
   ok(await open(""), "the page opens its workspace");
-  await ev(`(async () => { await T.ws.mkdir("/A"); await T.ws.mkdir("/B"); await T.ws.create("/B/secret.txt", { content: "secret" }); return true; })()`);
+  // (the person's workspace: an old /A removed and a new /A made; a file in /A removed and a new one made at its name)
+  const trashed = await ev(`(async () => {
+    await T.ws.mkdir("/A"); const oldA = await T.ws.remove("/A"); await T.ws.mkdir("/A");
+    await T.ws.mkdir("/B"); await T.ws.create("/B/secret.txt", { content: "secret" });
+    await T.ws.create("/A/c.txt", { content: "one" }); const oldC = await T.ws.remove("/A/c.txt"); await T.ws.create("/A/c.txt", { content: "two" });
+    return { oldA: oldA.path, oldC: oldC.path };
+  })()`);
 
   // a wrong code: refused, said in the dialog, nothing paired
   ok(await open(`?pair=${"A".repeat(26)}&port=${PORT}`), "a ?pair= link opens the dialog");
@@ -146,9 +152,31 @@ try {
   ok(!!bad1.err, `an unknown verb is refused (${bad1.err?.code}: ${String(bad1.err?.message).slice(0, 80)})`);
   const bad2 = await drive({ op: "req", method: "workspace.read", params: { path: "/A/n.txt", follow: true } });
   ok(bad2.err?.code === "invalid" || bad2.err?.code === "ValueError", `params that break the schema are refused (${bad2.err?.code})`);
+  // restore: the actual destination stays in the grant (Workspace.restore renames on a collision, in the same folder)
+  const rc = await drive({ op: "req", method: "workspace.restore", params: { path: trashed.oldC } });
+  ok(rc.ok?.entry?.path?.startsWith("/A/") && rc.ok.entry.path !== "/A/c.txt", `a restore onto a taken name lands renamed, inside /A (${rc.ok?.entry?.path ?? JSON.stringify(rc)})`);
+  const ra = await drive({ op: "req", method: "workspace.restore", params: { path: trashed.oldA } });
+  ok(ra.err?.code === "invalid", `restoring an old /A (it would come back as "/A (2)", outside the grant) is refused (${ra.err?.message?.slice(0, 90)})`);
+  ok(await ev(`T.ws.list("/").then((l) => !l.some((e) => /^\\/A \\(/.test(e.path)))`), "and nothing outside the grant was made");
   // the same code again, from another page, while paired: refused
   const again = await ev(`T.tryPair(${JSON.stringify(CODE)}, ${PORT})`);
   ok(/^refused/.test(again), `the used code, again: ${again}`);
+
+  // malformed frames from a server, in this real browser: the page closes the socket (a browser may send only
+  // 1000 or 3000-4999: the protocol's code as 4000 + code), whatever the reason's length
+  for (const [what, send, want] of [
+    ["a repeated key (its reason long and not ASCII)", (ws) => ws.send(`{"jsonrpc":"2.0","id":"p1","${"é".repeat(200)}":1,"${"é".repeat(200)}":2}`), 4007],
+    ["over 8 KiB before the hello has paired", (ws) => ws.send("x".repeat(9000)), 4009],
+    ["a binary frame", (ws) => ws.send(new Uint8Array([1, 2, 3])), 4003],
+  ]) {
+    let closed = null;
+    const fake = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r, srv) => (srv.upgrade(r) ? undefined : new Response("", { status: 400 })),
+      websocket: { message(ws, d) { if (String(d).includes('"hello"')) send(ws); }, close(ws, code) { closed = code; } } });
+    const said = await ev(`T.tryPair("ABC", ${fake.port})`);
+    for (let i = 0; i < 50 && closed === null; i++) await sleep(100);
+    ok(closed === want, `${what}: Chromium closes the socket, ${closed} (${String(said).slice(0, 60)})`);
+    fake.stop(true);
+  }
 
   // Revoke: the agent cut off at once, the grant forgotten
   await click(".sbag-bar button");

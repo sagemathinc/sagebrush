@@ -15,6 +15,10 @@
   "files": [
     "web/test-port.mjs",
     "web/workspace/longtask-span.ts",
-    "web/sync-protocol/doc-protocol.ts"
+    "web/sync-protocol/doc-protocol.ts",
+    "web/workspace/agent-schema.ts",
+    "web/workspace/agent-grant.ts",
+    "web/workspace/agent-pair.ts",
+    "web/workspace/agent-ui.ts"
   ]
 }
