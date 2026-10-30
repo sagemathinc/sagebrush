@@ -458,12 +458,19 @@ async function busyOrder() {
   await stop(c);
 }
 
+// (a network for the client (P0 #3): online or not, and its return told to whoever listens)
+function fakeNet(on) {
+  const fs = new Set();
+  return { on, online() { return this.on; }, onBack(f) { fs.add(f); return () => fs.delete(f); }, back() { for (const f of [...fs]) f(); }, listeners: () => fs.size };
+}
+
 async function storm() {
   await account();
   const w = await fresh();
   await ctl("set", { set: { closeOnOpen: 6 } });
   const clock = fakeClock();
-  const c = client(w, { clock });
+  // (the browser offline: the backoff's whole range, uncapped (P0 #3 caps it while online: netWake))
+  const c = client(w, { clock, net: fakeNet(false) });
   const times = [];
   for (let k = 0; k < 7; k++) {
     if (!(await until(() => c.stats.connects === k + 1))) break;
@@ -479,6 +486,82 @@ async function storm() {
   check((await metaGet(w.ws, `sync:${nsOf(c)}:retry:connect`)) === undefined, "reconnect storm: the timer cleared by a welcome");
   // (the timer persisted while it ran: a reload would have honored it)
   await stop(c);
+}
+
+async function netWake() {
+  // (P0 #3, William's ~1 minute: the connection's own backoff, which grows to 60 s while the network is gone, ends when
+  // the network comes back (or the page is shown again); while the browser says it is online the backoff stops at 15
+  // s; a wait the server asked for (retry_after) is kept)
+  await account();
+  const w = await fresh();
+  await ctl("set", { set: { closeOnOpen: 4 } });
+  const clock = fakeClock(), net = fakeNet(false);
+  const c = client(w, { clock, net });
+  for (let k = 0; k < 4; k++) {
+    await until(() => c.stats.connects === k + 1);
+    await until(() => c.status.state === "offline" && clock.nextAt() !== null);
+    if (k < 3) await clock.advance(clock.nextAt() - clock.now());
+  }
+  const t0 = clock.now(), ns = nsOf(c), pending = await metaGet(w.ws, `sync:${ns}:retry:connect`);
+  net.on = true;
+  net.back();
+  const woke = await until(() => c.stats.connects === 5, 3000);
+  check(woke && clock.now() === t0 && pending?.n === 4 && pending.at - t0 >= 7000 && !pending.server, "net wake: offline, four drops (8 s to wait): the network back, a connection at once, no time passed: " + J({ woke, connects: c.stats.connects, pending, waited: clock.now() - t0 }));
+  // (the step kept across a wake (sync-docs' RW-1): its timer due now, not dropped, so a failed try would go on
+  // doubling; a welcome clears it)
+  const due = await metaGet(w.ws, `sync:${ns}:retry:connect`);
+  check(due === undefined || (due.n === 4 && due.at === t0), "net wake: the wake keeps the step (n 4), due now, until a welcome clears it: " + J(due));
+  check(await until(() => c.status.state === "synced") && (await until(async () => (await metaGet(w.ws, `sync:${ns}:retry:connect`)) === undefined)), "net wake: …then synced, its timer gone from meta");
+  await stop(c);
+  check(net.listeners() === 0, "net wake: stop() removes the network listener");
+  // (a server down, the page shown again and again: each wake ends the wait, and each failure goes on doubling from
+  // the step it was at, never from 1 s (sync-docs' RW-1))
+  await ctl("set", { set: { closeOnOpen: 5 } });
+  // (each part its own workspace: a client stopped mid-backoff leaves its timer in meta, which the next would honor)
+  const wR = await fresh();
+  const clockR = fakeClock(), netR = fakeNet(false), cR = client(wR, { clock: clockR, net: netR }), gapsR = [];
+  await until(() => cR.stats.connects === 1);
+  for (let k = 0; k < 4; k++) {
+    await until(() => cR.status.state === "offline" && clockR.nextAt() !== null);
+    const at = cR.stats.connects, t1 = clockR.now();
+    if (k === 1 || k === 2) netR.back();
+    else await clockR.advance(clockR.nextAt() - clockR.now());
+    await until(() => cR.stats.connects === at + 1, 3000);
+    gapsR.push(clockR.now() - t1);
+  }
+  await until(() => cR.status.state === "offline" && clockR.nextAt() !== null);
+  const stepR = await metaGet(wR.ws, `sync:${nsOf(cR)}:retry:connect`);
+  check(J(gapsR) === J([1000, 0, 0, 8000]) && stepR?.n === 5, "net wake: two wakes while the server keeps closing: the waits end at once, the step goes on (the 4th gap 8 s, then n 5), never back to 1 s: " + J({ gapsR, stepR }));
+  await stop(cR);
+  // (online: the backoff stops at 15 s)
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  await ctl("set", { set: { closeOnOpen: 6 } });
+  const w2 = await fresh();
+  const clock2 = fakeClock(), c2 = client(w2, { clock: clock2, net: fakeNet(true) }), times = [];
+  for (let k = 0; k < 7; k++) {
+    if (!(await until(() => c2.stats.connects === k + 1))) break;
+    times.push(clock2.now());
+    if (k < 6) {
+      await until(() => c2.status.state === "offline" && clock2.nextAt() !== null);
+      await clock2.advance(clock2.nextAt() - clock2.now());
+    }
+  }
+  const gaps = times.slice(1).map((t, i) => t - times[i]);
+  check(J(gaps) === J([1000, 2000, 4000, 8000, 15000, 15000]), "net wake: online, the connection's backoff stops at 15 s: " + J(gaps));
+  await stop(c2);
+  // (a wait the server asked for: kept when the network comes back, ended by its own time)
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  await ctl("set", { set: { fakeHttp: [{ method: "GET", path: "/api/sync/v1/status", status: 503, body: { error: "busy", retry_after: 30_000 }, times: 1 }] } });
+  const w3 = await fresh();
+  const clock3 = fakeClock(), net3 = fakeNet(true), c3 = client(w3, { clock: clock3, net: net3 });
+  await until(() => c3.status.state === "offline" && clock3.nextAt() !== null);
+  const before = c3.stats.connects;
+  net3.back();
+  await sleep(300);
+  const kept = c3.stats.connects === before && c3.status.state === "offline";
+  await clock3.advance(30_000);
+  check(kept && (await until(() => c3.status.state === "synced")), "net wake: the server's retry_after (30 s) kept when the network comes back, then connected at its time: " + J({ kept, before, status: c3.status }));
+  await stop(c3);
 }
 
 async function twoTabs() {
@@ -3717,7 +3800,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
