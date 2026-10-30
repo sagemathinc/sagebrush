@@ -354,16 +354,19 @@ export async function lifeMarkOf(meta: IDBObjectStore): Promise<LifeMark> {
 export function readLife(w: Workspace): Promise<LifeMark> {
   return inTx(w.ws, "meta", "readonly", (tx) => lifeMarkOf(tx.objectStore("meta")));
 }
+/** Why sync was turned off here, kept in the lease for the sidebar's line: "deleted" for this device's "Delete my
+ * synced data". */
+export type OffWhy = "deleted";
 /** syncOff, and with `expect` only as a compare-and-set: if this browser's lifecycle is still the one the action saw,
  * in the same transaction; otherwise nothing is written (a late answer never turns off a newer lifecycle).  Returns
  * whether it applied (true too when sync was already off and that was expected). */
-export async function syncOffIf(w: Workspace, expect?: LifeMark): Promise<boolean> {
+export async function syncOffIf(w: Workspace, expect?: LifeMark, why?: OffWhy): Promise<boolean> {
   const r = await inTx(w.ws, ["meta"], "readwrite", async (tx) => {
     const meta = tx.objectStore("meta");
     if (expect && !sameLife(await lifeMarkOf(meta), expect)) return { applied: false, ended: null };
     const cur = (await req(meta.get("sync:current"))) as Lease | undefined;
     if (!cur || cur.off) return { applied: true, ended: null };
-    metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true });
+    metaWrite(meta, "sync:current", { ns: cur.ns, gen: cur.gen + 1, off: true, ...(why ? { why } : {}) });
     const fromEpoch = await epochOf(meta);
     await newEpoch(meta);
     return { applied: true, ended: { ns: cur.ns, fromEpoch } };

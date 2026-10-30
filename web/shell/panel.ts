@@ -50,6 +50,8 @@ export interface TerminalOptions {
   label: string;
   /** the page's own commands (web/shell/panel-commands.ts: open, ps, top), run in the page when typed alone */
   commands?: Record<string, PanelCommand>;
+  /** a line above the prompt in a tab's first terminal (web/shell/terminal.ts: what commands do to your files) */
+  intro?: string;
 }
 
 /** A page command: its output through `io`, Stop through `io.signal`; resolves with its exit status. */
@@ -166,6 +168,8 @@ export class TerminalPanel {
     this.status.setAttribute("role", "status");
     this.status.setAttribute("aria-live", "polite");
 
+    // (the intro: a static line above the prompt, once per tab, named by the input; not live, not a dialog: T358-3)
+    const intro = this.opts.intro && !sessionStorage.getItem("sb-term-intro") && root.appendChild(el("div", "sb-term-intro", this.opts.intro));
     const form = root.appendChild(el("div", "sb-term-in"));
     this.inputLabel = form.appendChild(el("label", "sb-term-prompt"));
     this.input = el("textarea");
@@ -174,7 +178,8 @@ export class TerminalPanel {
     this.input.autocapitalize = "off";
     this.input.setAttribute("autocomplete", "off");
     this.input.id = "sb-term-input";
-    this.input.setAttribute("aria-describedby", "sb-term-note");
+    this.input.setAttribute("aria-describedby", intro ? "sb-term-intro sb-term-note" : "sb-term-note");
+    if (intro) (intro.id = "sb-term-intro"), sessionStorage.setItem("sb-term-intro", "1");
     this.inputLabel.htmlFor = this.input.id;
     form.appendChild(this.input);
     // (the note under the input: polite, apart from the log, which is never live; the input names it: TP-6)
