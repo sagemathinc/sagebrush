@@ -898,7 +898,10 @@ export function createNotebook(root, opts = {}) {
       stopped(message) {
         // (a running cell whose interpreter was ended, Stop's last resort:
         // how long it ran, and why it stopped, rather than no time at all)
-        const ran = cell.el.classList.contains("running") && cell.t0 != null ? performance.now() - cell.t0 : null;
+        // (less any wait for a person at input(), as for a finished run)
+        if (waitFrom !== null) waited += performance.now() - waitFrom;
+        waitFrom = null;
+        const ran = cell.el.classList.contains("running") && cell.t0 != null ? Math.max(0, performance.now() - cell.t0 - waited) : null;
         settle(cell);
         cell.n.textContent = "[ ]";
         cell.stoppedAfter = ran;

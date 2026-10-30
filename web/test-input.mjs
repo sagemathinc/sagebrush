@@ -45,6 +45,7 @@ const CELLS = [
   "print(total, name)",
   "try:\n    input('first: ')\nexcept KeyboardInterrupt:\n    print('caught')\nsecond = input('second: ')\nprint('got', second)",
   "slow = input('slow: ')",
+  "late = input('late: ')",
 ];
 try {
   await send("Page.navigate", { url: base });
@@ -134,6 +135,19 @@ try {
   const end = await ev(time(5));
   const ms = Number(/^([\d.]+) ms$/.exec(end)?.[1]);
   ok(w1 === "waiting for input" && w2 === w1 && ms < 1000, `the timer while input() waits: ${JSON.stringify([w1, w2])}, then ${JSON.stringify(end)} (the 1.5 s wait left out)`);
+
+  // a restart while input() waits: the field goes, the timer is not left at
+  // "waiting for input", and the time shown leaves the wait out
+  await ev("(() => { sagebrush.notebook.run(sagebrush.notebook.cells()[6]); return true; })()");
+  await until(`!!${field(6)}`);
+  await sleep(1500);
+  const before6 = await ev(time(6));
+  await ev("(() => { sagebrush.notebook.restart(); return true; })()");
+  await until(`!${running(6)}`);
+  const after6 = await ev(time(6));
+  const gone6 = await ev(`!${field(6)}`);
+  const m6 = /^stopped after (\d+) ms; the interpreter restarted$/.exec(after6);
+  ok(before6 === "waiting for input" && gone6 && m6 && Number(m6[1]) < 1000, `a restart while input() waits: ${JSON.stringify(before6)}, then ${JSON.stringify(after6)}, the field gone: ${gone6} (the 1.5 s wait left out)`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
