@@ -1534,16 +1534,13 @@ async function openArrived(id) {
   const e = await w.stat(at).catch(() => undefined);
   const st = await storeFor(id, { name: splitExt(nameOf(at))[0], mode: e?.mode ?? "python", cells: [] });
   if (!st.journaled) return arriving();
-  await open(st, id);
-  // (the load must have made the record from the history: anything else is a bug, said and logged, nothing deleted)
-  // (never expected: rows only grow between the check and the load's own read.  If it happens, a fresh record was made
-  // that would fork the notebook: shown read-only here, so nothing is typed into it, said, and logged; nothing deleted
-  // (the grader's N-ST-2))
-  if (st.recovered?.row === "new") {
-    console.warn("sync: a notebook that arrived by sync loaded as a new one, not from its history:", id);
-    nb.setReadOnly(true);
-    statusEl.textContent = STILL_ARRIVING + " (opened read-only: reload this page to try again)";
-    return true;
+  // (the store itself refuses a started notebook with no history: it answers "arriving" with nothing written (N-2C3-1),
+  // so the window between the check above and the load's own read (a remove's dropped rows) is said here, never a fork)
+  try {
+    await open(st, id);
+  } catch (e) {
+    if (e?.arriving) return arriving();
+    throw e;
   }
   savedEl.textContent = "opened";
   return true;

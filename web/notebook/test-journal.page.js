@@ -1829,7 +1829,30 @@ async function workspaceMade() {
   check(typeof plain === "string" && /journal/.test(plain), "a plain store's save stays refused under the journal: " + J(plain));
   w.close();
 }
-const CASES = [workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
+// ---- 2c-3 (sync-docs' N-2C3-1): a notebook started here with none of its synced history (a start, no rows, no record)
+// loads as "arriving": refused, and nothing written: no record, no l row, no intent, no row on its synced history
+async function arrivingStarted() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const helper = await loadNew(w, hdb, [["a", "A"]]);
+    const id = newId();
+    const t = await helper.st.patches.queue(() => helper.st.patches.journalTx((s) => N.t1Write(s, id, { start: { n: 1, client: "arrivingclient1" } }))).catch((e) => ({ refused: String(e?.message ?? e) }));
+    const js0 = await jState(hdb, id);
+    check(!t?.refused && js0.start?.n === 1 && js0.jOf.size === 0 && js0.intents.length === 0 && (await rawGet(w.main, "notebooks", id)) == null, "a started notebook with no rows and no record, set up: " + J({ t, start: js0.start, rows: js0.jOf.size }));
+    const st = store(w, hdb, id);
+    const out = await st.load().then(() => "loaded", (e) => ({ message: e?.message, arriving: !!e?.arriving }));
+    const js1 = await jState(hdb, id), rec = await rawGet(w.main, "notebooks", id), l = await lrows(hdb, id), synced1 = await keyRows(hdb, N.syncedKey(id, 1));
+    check(out?.arriving === true && /still arriving/.test(out.message) && st.recovered?.row === "arriving" && st.ready === false, "its load is refused as still arriving: " + J({ out, row: st.recovered?.row, ready: st.ready }));
+    check(rec == null && l.length === 0 && js1.intents.length === 0 && synced1.length === 0 && js1.J === js0.J && js1.slot?.cseq === js0.slot?.cseq, "…and nothing is written: no record, no l row, no intent, no synced row, J and the slot unchanged: " + J({ rec: !!rec, l: l.length, intents: js1.intents.length, synced: synced1.length, J: [js0.J, js1.J], cseq: [js0.slot?.cseq, js1.slot?.cseq] }));
+    // (a save through it is refused too: never ready)
+    const saved = await st.save({ name: "t", mode: "python", cells: [{ id: "x", code: "1" }] }).then((r) => (typeof r === "string" ? r : "saved"), (e) => "threw: " + e?.message);
+    check(saved !== "saved" && (await lrows(hdb, id)).length === 0 && (await rawGet(w.main, "notebooks", id)) == null, "…a save through it is refused, still nothing written: " + J(saved));
+    await close(st, helper.st);
+  });
+  await close(w);
+  hdb.close();
+}
+const CASES = [arrivingStarted, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
