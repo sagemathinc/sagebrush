@@ -22,7 +22,7 @@ import { openHistoryDb } from "../notebook/stores.js";
 import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
-import { OLD_SYNC_MESSAGE, OLD_SYNC_REASON, OldSyncError } from "./sync-old";
+import { OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -235,11 +235,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!st.available && st.reason === "not_allowlisted") return;
     sec.append(h("h4", { textContent: "Sync" }));
     if (note) sec.append(h("p", { className: "note", textContent: note }));
-    // (EXACT-ONLY: old sync state here: sync can't be turned on, and the page says what to do)
-    if (owner.view().s.reason === OLD_SYNC_REASON) {
+    // (EXACT-ONLY: old sync state here: sync can't be turned on, and the page says what to do; its sync data
+    // unreadable (R-DET-1): off the same, without advice to clear anything)
+    const why = owner.view().s.reason;
+    if (why === OLD_SYNC_REASON || why === UNREADABLE_REASON) {
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
-      sec.append(sw, h("p", { className: "note", textContent: OLD_SYNC_MESSAGE }));
+      sec.append(sw, h("p", { className: "note", textContent: why === OLD_SYNC_REASON ? OLD_SYNC_MESSAGE : UNREADABLE_MESSAGE }));
       return;
     }
     if (!st.available) {

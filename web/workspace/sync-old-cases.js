@@ -93,6 +93,8 @@ async function shown(w, srv = fakeServer({ available: true, state: "off" })) {
 }
 const isOld = (v) => v.s.state === "off" && v.s.reason === W.OLD_SYNC_REASON && !v.client && v.line === "Sync off: " + W.OLD_SYNC_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.OLD_SYNC_MESSAGE);
 const isClean = (v) => v.s.reason !== W.OLD_SYNC_REASON && J(v.buttons) === J(["Turn on sync…"]) && !v.text.includes(W.OLD_SYNC_MESSAGE);
+// (R-DET-1: a read that failed, or an unexpected schema: off and refused the same, said without any clear-data advice)
+const isUnreadable = (v) => v.s.state === "off" && v.s.reason === W.UNREADABLE_REASON && !v.client && v.line === "Sync off: " + W.UNREADABLE_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.UNREADABLE_MESSAGE) && !v.text.includes(W.OLD_SYNC_MESSAGE) && !/clear this site|site data|deletes/i.test(v.text);
 const brief = (v) => J({ s: v.s, client: v.client, line: v.line, buttons: v.buttons });
 // (the panel's enable, through its button, against `srv` (enable answers generation 1): whether a lease was written)
 async function enableVia(w, srv = fakeServer({ available: true, state: "off" })) {
@@ -103,9 +105,10 @@ async function enableVia(w, srv = fakeServer({ available: true, state: "off" }))
     await until(() => buttons(el).includes("Turn on sync…"), 3000);
     const b = [...el.querySelectorAll("button")].find((x) => x.textContent === "Turn on sync…" && !x.disabled);
     b?.click();
-    await until(async () => srv.posts.length > 0 || (await meta(w, "sync:current")) || el.textContent.includes(W.OLD_SYNC_MESSAGE), 3000);
-    await until(async () => !!(await meta(w, "sync:current")) || el.textContent.includes(W.OLD_SYNC_MESSAGE), 1500);
-    return { clicked: !!b, posts: [...srv.posts], lease: await meta(w, "sync:current"), proto: await meta(w, W.PROTO_KEY), said: el.textContent.includes(W.OLD_SYNC_MESSAGE) };
+    const saidAny = () => el.textContent.includes(W.OLD_SYNC_MESSAGE) || el.textContent.includes(W.UNREADABLE_MESSAGE);
+    await until(async () => srv.posts.length > 0 || (await meta(w, "sync:current")) || saidAny(), 3000);
+    await until(async () => !!(await meta(w, "sync:current")) || saidAny(), 1500);
+    return { clicked: !!b, posts: [...srv.posts], lease: await meta(w, "sync:current"), proto: await meta(w, W.PROTO_KEY), said: el.textContent.includes(W.OLD_SYNC_MESSAGE), saidUnreadable: el.textContent.includes(W.UNREADABLE_MESSAGE) };
   } finally {
     sec.dispose();
     el.remove();
@@ -259,7 +262,7 @@ async function old5() {
       W.OLD_SYNC_HOOK.fault = undefined;
     }
     const v2 = await shown(w);
-    check(d.old && /^unreadable/.test(d.why) && isOld(v) && !e.lease && !e.proto && isClean(v2), `OLD5 ${step}: a throw is old (${J(d)}), enable refused (${J(e)}), read again once readable: ${brief(v2)}`);
+    check(d.old && d.unreadable && /^unreadable/.test(d.why) && isUnreadable(v) && !e.lease && !e.proto && e.saidUnreadable && !e.said && isClean(v2), `OLD5 ${step}: a throw is unreadable (${J(d)}), said without clear-data advice: ${brief(v)}; enable refused (${J(e)}); read again once readable: ${brief(v2)}`);
   }
 }
 
@@ -338,7 +341,7 @@ async function schema() {
       await dropHistory();
       await make(name, store, keyPath);
       const d = await W.detectOldSync(w), v = await shown(w);
-      check(d.old && /schema:/.test(d.why) && isOld(v), `schema ${which} ${what}: old (${J(d)}): ${brief(v)}`);
+      check(d.old && d.unreadable && /^schema:/.test(d.why) && isUnreadable(v), `schema ${which} ${what}: unreadable, sync refused without clear-data advice (${J(d)}): ${brief(v)}`);
     }
     await dropHistory();
     const w = await fresh();
@@ -347,6 +350,16 @@ async function schema() {
     const d = await W.detectOldSync(w);
     check(!d.old, `schema ${which}: as stores.js makes it, empty: clean (${J(d)})`);
   }
+}
+
+/** N-DET-1 (accepted by @sagebrush, pinned): a never-synced notebook whose history key ends like a synced one
+ * ("file:/draft:s2") reads as old: a false positive that fails closed. */
+async function falsePositive() {
+  await dropHistory();
+  const w = await fresh();
+  await putRow("nb", { nb: "file:/draft:s2", time: "00000000001_loc", env: {} });
+  const d = await W.detectOldSync(w);
+  check(d.old && !d.unreadable && d.why === "sagebrush-history:synced:file:/draft:s2", "N-DET-1 pinned: a never-synced file named like a synced key reads old (accepted false positive): " + J(d));
 }
 
 /** OLD10: the marker's edges.  Malformed markers; a failed lease transaction; a stale one; an enable that committed and
@@ -522,7 +535,7 @@ async function old8() {
   }
 }
 
-const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, old10, large };
+const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, falsePositive, old10, large };
 export async function run(only = "") {
   const pick = only ? only.split(",").filter(Boolean) : Object.keys(CASES);
   for (const name of pick) {
