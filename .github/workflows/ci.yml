@@ -207,6 +207,7 @@ jobs:
           node web/test-ipynb.mjs
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
+          node scripts/test-site-asset-budget.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs
@@ -767,6 +768,9 @@ jobs:
       - name: detection, the production refusal and Stop in WebKit's worker
         timeout-minutes: 5
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/test-kedlaya-worker.mjs
+      - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
+        timeout-minutes: 3
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
 
   web-browser:
     needs: changes
@@ -848,6 +852,7 @@ jobs:
               # as a hosted preview has it)
               bun web/shell/test-panel-render.mjs
               bun web/shell/panel-size.mjs
+              node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
               bun web/shell/test-panel-page.mjs
               ;;
@@ -1279,6 +1284,7 @@ jobs:
           python3 engine/py/test_runs.py
           python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
+          python3 engine/py/test_latex_comments.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
