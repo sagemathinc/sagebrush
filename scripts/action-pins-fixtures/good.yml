@@ -1,0 +1,20 @@
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: node
+        uses: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020" # v4.4.0
+        with:
+          node-version: 24
+      - uses: ./local/action
+      - uses: docker://alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - run: |
+          echo "uses: actions/checkout@v4 in a script is text"
+          cat <<'X'
+          - uses: not/a@key
+          X
+      - run: 'echo uses: inline text'
+  reuse:
+    uses: owner/repo/.github/workflows/x.yml@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
