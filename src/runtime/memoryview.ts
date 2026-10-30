@@ -176,10 +176,14 @@ M("tobytes", (m: PyMemoryView, _order: any = null) => new PyBytes(m.bytes()));
 M("tolist", (m: PyMemoryView) => m.items());
 M("hex", (m: PyMemoryView, sep: any = undefined, bps: any = undefined) => Ty.bytesHex(m.bytes(), sep, bps));
 M("toreadonly", (m: PyMemoryView) => new PyMemoryView(m.obj, m.fmt, m.itemsize, m.start, m.n, m.step, true));
+// (a one-dimensional view is contiguous, C and Fortran alike, as CPython's
+// PyBuffer_IsContiguous: a stride of one item, or a single item whatever its
+// stride; an empty view with another stride is not)
+const cContiguous = (m: PyMemoryView): boolean => m.step === 1 || m.n === 1;
 M("cast", (m: PyMemoryView, fmt: any, shape: any = null) => {
   if (typeof fmt !== "string" || !(fmt in FORMATS)) raise(T.ValueError, "memoryview: destination format must be a native single character format prefixed with an optional '@'");
   if (shape !== null) raise(T.NotImplementedError, "memoryview.cast with shape is not supported");
-  if (m.step !== 1) raise(T.TypeError, "memoryview: casts are restricted to C-contiguous views");
+  if (!cContiguous(m)) raise(T.TypeError, "memoryview: casts are restricted to C-contiguous views");
   const nbytes = m.n * m.itemsize, size = FORMATS[fmt];
   if (nbytes % size !== 0) raise(T.TypeError, "memoryview: length is not a multiple of itemsize");
   return new PyMemoryView(m.obj, fmt, size, m.start, nbytes / size, 1, m.readonly);
@@ -192,9 +196,9 @@ Ty.getset(MV, "format", (m: PyMemoryView) => m.fmt);
 Ty.getset(MV, "ndim", () => 1);
 Ty.getset(MV, "shape", (m: PyMemoryView) => tuple([m.n]));
 Ty.getset(MV, "strides", (m: PyMemoryView) => tuple([m.step * m.itemsize]));
-Ty.getset(MV, "c_contiguous", (m: PyMemoryView) => m.step === 1);
-Ty.getset(MV, "f_contiguous", (m: PyMemoryView) => m.step === 1);
-Ty.getset(MV, "contiguous", (m: PyMemoryView) => m.step === 1);
+Ty.getset(MV, "c_contiguous", cContiguous);
+Ty.getset(MV, "f_contiguous", cContiguous);
+Ty.getset(MV, "contiguous", cContiguous);
 Ty.getset(MV, "released", (m: PyMemoryView) => m.released);
 MV.$dict.set("__class_getitem__", Ty.genericClassGetitem);
 builtins.memoryview = MV;
@@ -204,6 +208,6 @@ O.bufferHooks.push((x) => (x instanceof PyMemoryView ? x.bytes() : undefined));
 // released one: null, no bytes for int(), as CPython's TypeError)
 O.bufferViewHooks.push((x) => {
   if (!(x instanceof PyMemoryView)) return undefined;
-  if (x.released || !(x.step === 1 || x.n === 1)) return null;
+  if (x.released || !cContiguous(x)) return null;
   return x.raw().subarray(x.start, x.start + x.n * x.itemsize);
 });

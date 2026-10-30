@@ -57,3 +57,17 @@ for a, b in ((b"a", b"a"), (b"a", b"b"), (b"a", b"ab"), (b"ab", b"a"), (b"", b""
 show(lambda: _compare_digest(b"a"))
 show(lambda: _compare_digest(b"a", b"a", b"a"))
 show(lambda: _compare_digest(a=b"x", b=b"x"))
+
+# a single-item view is contiguous whatever its stride, as CPython's (H354-A1);
+# an empty or longer strided view is not
+views = {"ab[::2]": lambda: memoryview(b"ab")[::2], "a[::-1]": lambda: memoryview(b"a")[::-1], "a[::2]": lambda: memoryview(b"a")[::2],
+         "abcd[1:2:3]": lambda: memoryview(b"abcd")[1:2:3], "abc[::2]": lambda: memoryview(b"abc")[::2], "empty[::2]": lambda: memoryview(b"")[::2],
+         "ab[2:][::2]": lambda: memoryview(b"ab")[2:][::2], "abcd[::-1]": lambda: memoryview(b"abcd")[::-1], "abcd[0:0:-1]": lambda: memoryview(b"abcd")[0:0:-1]}
+for label, mk in views.items():
+    v = mk()
+    print(label, len(v), v.c_contiguous, v.f_contiguous, v.contiguous, v.strides)
+    show(lambda: hmac.compare_digest(v, v.tobytes()))
+    show(lambda: hmac.compare_digest(v.tobytes(), v))
+    show(lambda: hashlib.md5(v).hexdigest())
+    show(lambda: (lambda c: (c.tobytes(), c.strides))(v.cast("B")))
+    show(lambda: b"abcd".translate(None, v))
