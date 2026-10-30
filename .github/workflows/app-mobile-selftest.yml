@@ -68,16 +68,32 @@ jobs:
           name: app-page
           path: app/dist
 
+  # (one job, one leg per system image: API 34, and the newest stable image,
+  # 37.0, which asks whether a CURRENT WebView makes the page cross-origin
+  # isolated. 37.0 runs on the nightly cron, by hand and on pull requests, not
+  # on master pushes; app/selftest/android-image-info.sh records each leg's
+  # image and WebView, and "current|old against threshold 145")
   emulator:
     if: github.repository == 'sagemathinc/sagebrush'
     needs: page
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: ${{ fromJSON(github.event_name == 'push' && '["34"]' || '["34", "37.0"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: the legs of this run
+        env:
+          EVENT: ${{ github.event_name }}
+          LEGS: ${{ github.event_name == 'push' && '34' || '34, 37.0' }}
+          LEG: ${{ matrix.api-level }}
+        run: |
+          echo "event $EVENT: system images (api-level) $LEGS; this leg: $LEG" | tee -a "$GITHUB_STEP_SUMMARY"
       # (the report's judge on fixed reports, before anything slow)
       - name: the self-test report judge
         run: bash app/selftest/test-android-report.sh
@@ -140,14 +156,14 @@ jobs:
       - name: the self-test on the emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 34
+          api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           channel: stable
           emulator-boot-timeout: 600
           disable-animations: true
           # (one line: the action runs each line of `script` as its own shell)
-          script: bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
+          script: bash app/selftest/android-image-info.sh "${{ matrix.api-level }}" "$GITHUB_STEP_SUMMARY" && bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
 
   # The RELEASE APK (x86_64, for the emulator) starts: R8 or LTO removing
   # something reached only through JNI or reflection crashes it, which the
