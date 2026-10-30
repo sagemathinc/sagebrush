@@ -799,6 +799,12 @@ jobs:
               bun web/shell/test-bounded-json.mjs
               node web/test-worker-limits.mjs
               node web/test-kedlaya-worker.mjs
+              # (the terminal panel, plan-bash-shell r8c step 6: its renderer and caps, its size (E5.6), then the page
+              # with the bash set in dist, as a hosted preview has it: a flagged build, last, so no test above sees it)
+              bun web/shell/test-panel-render.mjs
+              bun web/shell/panel-size.mjs
+              SAGEBRUSH_TERMINAL=1 bun web/build.ts
+              bun web/shell/test-panel-page.mjs
               ;;
             board-a)
               node web/board/bench.mjs
