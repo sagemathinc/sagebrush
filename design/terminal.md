@@ -38,10 +38,11 @@ The output is painted in slices, and the browser lays out only what is new and o
 
 ### Size
 
-E5.6's limit for the panel's code is 9 600 B gzipped, measured with bun 1.4.4 (CI's pin). daybreak2 raised it twice:
+E5.6's limit for the panel's code is 9 728 B gzipped, measured with bun 1.4.4 (CI's pin). daybreak2 raised it three times:
 
 - **From 9 216 B to 9 344 B on #337 r3** (DB2-LL-337-3), for one reason: "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."
 - **To 9 600 B on #337 r4**, for the E5.5 batching: the first slice and frame pacing, chunk runs, PAGE_RUNS and content-visibility. bun 1.4.4 measured 9 585 B, +304 over r3b.
+- **To 9 728 B on #358** (DB2-T358-3), for the first-open notice: the static, non-live line, named by the input's `aria-describedby`, that says what commands do to your files. It is required safety context for the terminal on every host. bun 1.4.4 measured 9 667 B, +68; the notice's text is in `terminal.ts`, outside E5.6's inputs.
 
 ### Caps
 

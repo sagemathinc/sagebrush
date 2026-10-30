@@ -20,9 +20,12 @@ export interface OpenTerminal {
   tab: string;
 }
 
+// (above the prompt in a tab's first terminal: what commands do to the person's files; board's wording, T358-2)
+const INTRO = "Commands here change the files in your workspace right away, as the file browser does. Deleted files go to Trash, and a file you overwrite keeps its earlier versions for a while; there's no undo key. With sync on, the changes reach your other devices too.";
+
 /** A terminal panel on a new ShellHost; ✕ ends its shell too. */
 export function openTerminal(o: OpenTerminal): TerminalPanel {
   const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, "./", { signal })).shell);
-  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }) });
+  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }) });
   return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }
