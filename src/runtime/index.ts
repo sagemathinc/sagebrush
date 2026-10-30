@@ -724,6 +724,31 @@ B.builtins.__pyjs_host__ = Obj.builtin((op: any, ...args: any[]) => {
   B.stdout.flush();
   return f(...args) ?? null;
 }, "__pyjs_host__");
+// input([prompt]): a line from the host, when it can ask for one (a notebook
+// page: R.host.input(prompt) gives the line typed, without its newline; null
+// at the end of input; {interrupted: true} if a Stop came while it waited);
+// the prompt and the line are then written as output, as Jupyter shows them.
+// With no such host: the prompt written, then EOFError, as CPython's with no
+// stdin.
+B.builtins.input = Obj.builtin((...args: any[]) => {
+  if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
+  const prompt = args.length ? String(F.str(args[0])) : "";
+  const ask = R.host != null && Object.hasOwn(R.host, "input") ? R.host.input : null;
+  if (typeof ask !== "function") {
+    if (prompt) B.stdout.write(prompt);
+    B.stdout.flush();
+    return raise(T.EOFError, "EOF when reading a line");
+  }
+  B.stdout.flush();
+  const line = ask(prompt);
+  if (line !== null && typeof line === "object" && line.interrupted === true) {
+    consumeCtrlC();
+    return raise(T.KeyboardInterrupt);
+  }
+  if (typeof line !== "string") return raise(T.EOFError, "EOF when reading a line");
+  B.stdout.write(prompt + line + "\n");
+  return line;
+}, "input");
 B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => execIn(src, gl ?? null, lo, null, null), "exec");
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");

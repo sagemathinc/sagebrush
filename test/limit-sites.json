@@ -6082,13 +6082,13 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "notebook/kernel",
-  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation (the rest of the output is cut, said once); the line changed only by X1's test hooks"
+  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation (the rest of the output is cut, said once); the line changed only by X1's test hooks and input()'s stdin option"
  },
  "src/notebook-session.ts :: room :: const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity); #0": {
   "class": "1",
@@ -7233,6 +7233,16 @@
   "class": "1+2",
   "owner": "file formats/raster",
   "row": "src-13"
+ },
+ "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "input()'s answer buffer: its payload size and the answer's length clamped to it, the bounds of a buffer this worker allocated (64 KiB); refuses nothing"
+ },
+ "src/stdin-wait.ts :: stopped :: const n = Math.min(Math.max(0, Atomics.load(ctl, 1)), max); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "input()'s answer buffer: its payload size and the answer's length clamped to it, the bounds of a buffer this worker allocated (64 KiB); refuses nothing"
  },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",
