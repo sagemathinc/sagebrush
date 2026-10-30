@@ -1,7 +1,9 @@
 // The CLI bundle's notebook server (`sagebrush notebook`) serves every file
 // the page loads: the scripts it references (found in the page itself, so a
 // new one cannot be forgotten), KaTeX and the notices, at the top and under
-// /nb/<notebook>/.  No browser needed.
+// /nb/<notebook>/.  The app-only files the page names (APP_ONLY) are the
+// other way round: the CLI must answer 404 for them, so it can't start
+// serving one silently.  No browser needed.
 //   node web/test-cli-assets.mjs [bundle]      (default build/cli/pyjs.cjs)
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
@@ -18,6 +20,16 @@ server.stdout.on("data", (d) => (printed += d));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 for (let i = 0; i < 100 && !/token=/.test(printed); i++) await sleep(100);
 let fail = 0;
+// (named by the page but deliberately not served by the CLI: the app
+// self-test's COI diagnosis, loaded by selftest() only under
+// SAGEBRUSH_APP_SELFTEST, web/notebook/selftest-diagnose.js)
+const APP_ONLY = ["sagebrush-selftest.js"];
+const verdict = (name, status) => (APP_ONLY.includes(name) ? status === 404 : status === 200);
+// (the verdict's own control: an app-only file served, or a page file
+// missing, must fail)
+for (const [n, s, want] of [["sagebrush-selftest.js", 404, true], ["sagebrush-selftest.js", 200, false], ["sagebrush-history.js", 200, true], ["sagebrush-history.js", 404, false]]) {
+  if (verdict(n, s) !== want) { fail++; console.log(`FAIL the verdict's control: ${n} ${s}`); }
+}
 try {
   const token = /token=(\w+)/.exec(printed)?.[1];
   if (!token) throw new Error("the server printed no URL with a token: " + printed);
@@ -27,13 +39,19 @@ try {
   if (!/<html/i.test(page)) throw new Error("no notebook page: " + page.slice(0, 200));
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
   const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js\b/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
+  // (each app-only file must be one the page names: otherwise its 404 proves nothing)
+  for (const n of APP_ONLY) {
+    const named = names.includes(n);
+    if (!named) fail++;
+    console.log((named ? "ok   " : "FAIL ") + `the page names the app-only ${n}`);
+  }
   // (and the files it fetches: the documentation search index)
   for (const f of [...names, "katex/katex.min.css", "THIRD-PARTY-NOTICES.txt", ...new Set(page.match(/fetch\("([\w.-]+\.json)"\)/g)?.map((m) => /"(.+)"/.exec(m)[1]) ?? [])]) {
     for (const p of [`/${f}`, `/nb/probe.ipynb/${f}`]) {
       const r = await get(p);
-      const ok = r.status === 200;
+      const ok = verdict(f, r.status);
       if (!ok) fail++;
-      console.log((ok ? "ok   " : "FAIL ") + p + " " + r.status);
+      console.log((ok ? "ok   " : "FAIL ") + p + " " + r.status + (APP_ONLY.includes(f) ? " (app-only: must be 404)" : ""));
     }
   }
   // a directory named like a notebook gets an answer (not a pending request)
