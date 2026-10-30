@@ -19,6 +19,8 @@ export const CAPS = Object.freeze({
 
 /** A slice ends at whichever comes first (E5.5): consumed input bytes, runs, or elapsed ms. */
 export const SLICE = Object.freeze({ bytes: 64 * 1024, spans: 1000, ms: 8 });
+// (how often a scan looks at the clock: every this many scalars, at most 16 KiB of UTF-8)
+const CHECK = 4096;
 
 /** A run of one style; `restart`: a lone \r over runs of the open line already returned in an earlier slice:
  * the painter removes what it put in for this line since its start (TP-2: the same text whatever the slicing). */
@@ -115,6 +117,9 @@ export class Render {
   // what stdout actually consumed, when stdout ends)
   private budgets: [number, number] | null = null;
   private consumedOut = 0;
+  // (the stderr reservation's look, resumable: where it is, and the bytes seen)
+  private resPos = 0;
+  private resBytes = 0;
   // (the bytes scanned without being consumed: the stderr reservation's look, the omitted tail's count; charged
   // to the same slice budget as consumed input, so no slice does more than its budget of scanning: E5.5)
   private work = 0;
@@ -164,16 +169,23 @@ export class Render {
     const t0 = this.now();
     const b0 = this.consumed, s0 = this.spans, w0 = this.work;
     const spent = () => this.consumed - b0 + (this.work - w0);
+    // (every scan below checks the slice's clock each CHECK scalars, as well as its byte budget: E5.5's whichever
+    // comes first holds inside them too; DB2-TERM-326-1)
+    const over = () => spent() >= budget.bytes || this.now() - t0 >= budget.ms;
     if (!this.budgets) {
-      // (stderr's reservation needs only its first 64 KiB: scanned no further, and charged)
-      let eb = 0;
-      for (let j = 0; j < this.err.length && eb < CAPS.errReserve; ) {
+      // (stderr's reservation needs only its first 64 KiB: scanned no further, charged, and resumable)
+      let j = this.resPos, k = 0;
+      while (j < this.err.length && this.resBytes < CAPS.errReserve) {
+        if (++k % CHECK === 0 && over()) break;
         const c = this.err.codePointAt(j)!;
-        eb += utf8Len(c);
+        const u = utf8Len(c);
+        this.resBytes += u;
+        this.work += u;
         j += c > 0xffff ? 2 : 1;
       }
-      this.work += eb;
-      this.budgets = [CAPS.inBytes - Math.min(eb, CAPS.errReserve), 0];
+      this.resPos = j;
+      if (j < this.err.length && this.resBytes < CAPS.errReserve) return out;
+      this.budgets = [CAPS.inBytes - Math.min(this.resBytes, CAPS.errReserve), 0];
     }
     while (this.part < 2) {
       if (spent() >= budget.bytes || this.spans - s0 >= budget.spans || this.now() - t0 >= budget.ms) {
@@ -185,9 +197,10 @@ export class Render {
       if (this.stopped && this.pos < src.length) {
         // (the omitted tail, counted exactly in original bytes, in place and incrementally: as much as this slice's
         // budget has left, then the loop's top decides whether the slice ends)
-        let j = this.pos, n = 0;
+        let j = this.pos, n = 0, k = 0;
         const lim = budget.bytes - spent();
         while (j < src.length && n < lim) {
+          if (++k % CHECK === 0 && this.now() - t0 >= budget.ms) break;
           const c = src.codePointAt(j)!;
           n += utf8Len(c);
           j += c > 0xffff ? 2 : 1;
