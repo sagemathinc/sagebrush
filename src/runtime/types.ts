@@ -589,9 +589,14 @@ const fnType = builtinType("function", [object], () => raise(T.TypeError, "canno
 for (const a of ["__name__", "__qualname__", "__module__", "__doc__"]) getset(fnType, a, (f) => f[a] ?? null, (f, v) => void (f[a] = v));
 getset(fnType, "__globals__", (f) => {
   if (f.$globals === undefined) raise(T.AttributeError, "'function' object has no attribute '__globals__'");
-  const g = f.$globals[NS_GLOBALS] ?? f.$globals;
-  return g[NS_DICT] ?? globalsDict(g);
+  return globalsOf(f.$globals);
 });
+// The globals dict of code run in namespace `ns` (a function's $globals, a
+// script's $g): a frame's f_globals too, the same object (index.ts)
+export function globalsOf(ns: any): PyDict {
+  const g = ns[NS_GLOBALS] ?? ns;
+  return g[NS_DICT] ?? globalsDict(g);
+}
 // (the builtins' namespace, as CPython 3.10's functions have it: page-order
 // scoping's initialization line reads it, src/rename.ts initLine)
 getset(fnType, "__builtins__", () => getattr(hooks.importModule("builtins"), "__dict__"));
