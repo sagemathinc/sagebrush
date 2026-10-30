@@ -39,6 +39,7 @@ export function journalTexts(noun) {
     SAVED_TOO_LARGE: `This ${noun} is too large to sync. It's saved in this browser.`,
     NO_CLEAR_SYNCED: `TimeTravel's history can't be cleared while this ${noun} syncs (it will be, once conflicts are handled)`,
     BUSY: `the ${noun} kept changing while it was opened: reload this page`,
+    ARRIVING: `this ${noun} is still arriving from sync: try again in a moment`,
     STARTED: `this ${noun}'s synced history has already started`,
     PAUSED: `TimeTravel is paused for this ${noun}`,
   };
