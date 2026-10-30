@@ -46,7 +46,9 @@
   .file-path .saved { margin-left: auto; }
   .file-body .doc { padding: 12px 30px 30px; max-width: 820px; margin: 0 auto; }
   .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
-  .agent small { font-weight: 400; color: var(--muted); }
+  .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
+  .top .link, .top #connect { white-space: nowrap; }
+  .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
   .msg, .doc { overflow-wrap: anywhere; }
   .msg table { display: block; overflow-x: auto; max-width: 100%; }
@@ -155,7 +157,7 @@
 </style>
 </head>
 <body>
-<div class="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude. Nothing you type leaves this browser; chats are kept in this browser only.</div>
+<div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>
 <div class="app">
   <nav class="side">
     <div class="brand">🌿 Sagebrush agents</div>
