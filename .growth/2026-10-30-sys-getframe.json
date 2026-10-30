@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "sys._getframe and sys._getframemodulename (queued item 3, plan r3): the runtime's frame capture, entry marker, engine probe and frame type (the worker, the CLI); and the class statement making its namespace and class in the enclosing frame, as CPython's __build_class__, which changes every precompiled class body (sage.pre +2075, while core, magma and matlab shrink). Measured locally with CI's bun 1.4.4 tool: master 8ec3bb07 (and 40d026ec before it, the same rows) against this head; cli/pyjs.cjs +7733 marked 7775 (42 B for drift), the other rows exact.",
+  "bytes": {
+    "cli/pyjs.cjs": 7775,
+    "engine/lib/pkg-scipy-io.pre": 4,
+    "engine/lib/sage.pre": 2075,
+    "engine/lib/sci.pre": 106,
+    "engine/sagebrush-worker.js": 6481
+  }
+}
