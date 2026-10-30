@@ -180,10 +180,18 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   const setRegs = () => { regs.set(me, { all: [...pvAll, ...srcRanges], act: pvAct }); paint(); };
 
   // ---- the preview: highlights, and bubbles (wide) or badges (narrow), for the open placed threads
-  const rangeFor = (t: any, p: Place): { r: Range; top: number } | null => {
-    const groups = ed.previewRangesOf(p.s, Math.max(p.e, p.s));
+  // (the groups meeting [p.s, p.e): from the draw's one list of groups, by binary search; the text read once per draw)
+  type G = { el: HTMLElement; start: number; end: number };
+  const meeting = (all: G[], s: number, e: number): HTMLElement[] => {
+    let a = 0, b = all.length; while (a < b) { const m = (a + b) >> 1; if (all[m].end > s) b = m; else a = m + 1; }
+    const out: HTMLElement[] = [];
+    for (let k = a; k < all.length && (s === e ? all[k].start <= s : all[k].start < e) && out.length < 8; k++) out.push(all[k].el);
+    return out;
+  };
+  const rangeFor = (t: any, p: Place, all: G[], text: string): { r: Range; top: number } | null => {
+    const groups = meeting(all, p.s, Math.max(p.e, p.s));
     if (!groups.length) return null;
-    const a = t.anchor.value, text = ed.getText(), want = p.status === "changed" ? text.slice(p.s, Math.min(p.e, p.s + 300)) : a.shown ?? a.quote;
+    const a = t.anchor.value, want = p.status === "changed" ? text.slice(p.s, Math.min(p.e, p.s + 300)) : a.shown ?? a.quote;
     let r: Range | null = null;
     for (const g of groups) if ((r = rangeIn(g, want))) break;
     if (!r) { r = document.createRange(); r.selectNodeContents(groups[0]); }
@@ -206,19 +214,29 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     const wide = right.getBoundingClientRect().width >= MARGIN_MIN;
     // (the open placed threads in source order: their numbers; the preview's groups, once, by start)
     const items = refused ? [] : open.map((t: any) => ({ t, p: places.get(t.id)! })).filter((x: any) => placed(x.p)).sort((x: any, y: any) => x.p.s - y.p.s || (x.t.id < y.t.id ? -1 : 1));
-    const groups = items.length ? ed.groups() : [];
-    const groupAt = (off: number) => { let a = 0, b = groups.length - 1, k = -1; while (a <= b) { const m = (a + b) >> 1; if (groups[m].start <= off) { k = m; a = m + 1; } else b = m - 1; } return k >= 0 && off < groups[k].end ? groups[k] : groups.find((g) => g.start >= off) ?? null; };
-    // reads
+    const tA = performance.now();
+    const groups = items.length ? ed.groups() : [], text = items.length ? ed.getText() : "";
+    const tB = performance.now();
+    // reads: the groups near the view, by two binary searches over their boxes (in document order, so their tops
+    // grow), then the threads whose start is in those groups' source range, by two more over the threads' starts
     const b0 = right.getBoundingClientRect(), H = right.clientHeight;
     const near: any[] = [];
-    items.forEach((x: any, i: number) => {
-      const g = groupAt(x.p.s); if (!g) return;
-      const gr = g.el.getBoundingClientRect();
-      if (gr.bottom < b0.top - H || gr.top > b0.bottom + H) return;
-      const at = rangeFor(x.t, x.p); if (!at) return;
-      near.push({ ...x, n: i + 1, at, rect: wide ? null : at.r.getClientRects()[0] ?? at.r.getBoundingClientRect() });
-    });
+    if (groups.length && items.length) {
+      const firstWith = (ok: (k: number) => boolean) => { let a = 0, b = groups.length; while (a < b) { const m = (a + b) >> 1; if (ok(m)) b = m; else a = m + 1; } return a; };
+      const g0 = firstWith((k) => groups[k].el.getBoundingClientRect().bottom >= b0.top - H);
+      const g1 = firstWith((k) => groups[k].el.getBoundingClientRect().top > b0.bottom + H) - 1;
+      if (g0 <= g1 && g0 < groups.length) {
+        const lo = groups[g0].start, hi = groups[g1].end;
+        const firstItem = (ok: (x: any) => boolean) => { let a = 0, b = items.length; while (a < b) { const m = (a + b) >> 1; if (ok(items[m])) b = m; else a = m + 1; } return a; };
+        const i0 = firstItem((x) => x.p.s >= lo), i1 = firstItem((x) => x.p.s >= hi);
+        for (let i = i0; i < i1; i++) {
+          const x = items[i], at = rangeFor(x.t, x.p, groups, text); if (!at) continue;
+          near.push({ ...x, n: i + 1, at, rect: wide ? null : at.r.getClientRects()[0] ?? at.r.getBoundingClientRect() });
+        }
+      }
+    }
     near.sort((x, y) => x.at.top - y.at.top);
+    const tC = performance.now();
     // writes
     layer.replaceChildren();
     right.classList.toggle("sb-cm-margin", wide && items.length > 0);
@@ -250,8 +268,11 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       let below = -Infinity;
       made.forEach((b, i) => { const top = Math.max(near[i].at.top, below); b.style.top = top + "px"; below = top + hs[i] + 6; });
     }
+    const tD = performance.now();
     setRegs(); scheduleMarks();
-    mark("tex-comments-drawn", { ms: Math.round((performance.now() - t0) * 10) / 10, threads: open.length, placed: items.length, drawn: near.length, groups: groups.length, wide });
+    const r1 = (x: number) => Math.round(x * 10) / 10;
+    mark("tex-comments-drawn", { ms: r1(performance.now() - t0), threads: open.length, placed: items.length, drawn: near.length, groups: groups.length, wide,
+      phases: { items: r1(tA - t0), groups: r1(tB - tA), reads: r1(tC - tB), writes: r1(tD - tC), paint: r1(performance.now() - tD) } });
   };
   right.addEventListener("scroll", queueDraw, { passive: true, signal: life.signal });
   o.src.addEventListener("scroll", scheduleMarks, { passive: true, signal: life.signal });

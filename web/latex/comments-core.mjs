@@ -163,8 +163,11 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   sourceFits(text);
   // (the text's hash, the caller's when it hashed the text already in slices (the page), and its line index, built
   // when first needed: both charged here, the same either way)
-  let work = 2 * text.length;
-  const textSha = known ?? sha256(text);
+  // (the first pass over the text, its hash and its line index, is admitted against the budget like every step: a
+  // budget that can't pay for it leaves the text unread, and every anchor unresolved)
+  const first = 2 * text.length, starved = first > budget;
+  let work = starved ? 0 : first;
+  const textSha = starved ? null : known ?? sha256(text);
   let lineIdx = null;
   const lines = () => (lineIdx ??= lineIndex(text));
   const can = (n) => work + n <= budget;
@@ -219,6 +222,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   const ctxExact = (a, s, e) => { work += a.prefix.length + a.suffix.length; return copy(Math.max(0, s - a.prefix.length), s) === a.prefix && copy(e, Math.min(text.length, e + a.suffix.length)) === a.suffix; };
   const UNRESOLVED = { status: "unresolved", reason: "budget" };
   function* steps(a) {
+    if (starved) return UNRESOLVED;
     if (a.textSha === textSha && a.end <= text.length) return { status: "exact", start: a.start, end: a.end };
     // moved: one occurrence of the whole quote, or one whose prefix and suffix both still match; several: ambiguous
     if (a.quote) {
@@ -261,6 +265,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   const resolve = (a) => { const g = steps(a); for (;;) { const r = g.next(); if (r.done) return r.value; } };
   // a span's lines around it (the units copied charged; cut short, never over the budget)
   const context = (s, e) => {
+    if (starved) return "";
     const L = lines(), l0 = L.at(s).line, l1 = L.at(e).line, from = Math.max(1, l0 - LIMITS.contextLines), to = Math.min(L.lines, l1 + LIMITS.contextLines);
     const out = [];
     for (let l = from; l <= to; l++) {

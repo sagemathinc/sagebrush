@@ -464,7 +464,13 @@ try {
       await sleep(300);
       const r = await ev(`(() => { const p = performance.getEntriesByName("tex-comments-placed").filter((m) => m.detail.threads === ${n}).at(-1)?.detail, d = performance.getEntriesByName("tex-comments-drawn").filter((m) => m.detail.threads === ${n}).map((m) => m.detail);
         const g = d.filter((x) => x.groups > 0);
-        return { placed: p, drawMaxMs: Math.max(...d.map((x) => x.ms)), drawn: g.at(-1)?.drawn, groups: g.at(-1)?.groups, draws: d.length }; })()`);
+        const worst = d.reduce((m, x) => (x.ms > (m?.ms ?? -1) ? x : m), null);
+        return { placed: p, drawMaxMs: Math.max(...d.map((x) => x.ms)), drawMaxPhases: worst?.phases, drawn: g.at(-1)?.drawn, groups: g.at(-1)?.groups, draws: d.length }; })()`);
+      // (steady state: draws from scrolling the preview, the page laid out already; the first draw after a fresh render
+      // can be the one that makes the browser lay out the new preview, a layout the next frame would do anyway)
+      const before = await ev(`performance.getEntriesByName("tex-comments-drawn").length`);
+      for (const dy of [120, -120, 240, -240]) { await ev(`(document.querySelector(".tex-right").scrollBy(0, ${dy}), true)`); await sleep(250); }
+      r.steady = await ev(`(() => { const d = performance.getEntriesByName("tex-comments-drawn").slice(${before}).map((m) => m.detail); return { draws: d.length, maxMs: d.length ? Math.max(...d.map((x) => x.ms)) : null, drawn: d.at(-1)?.drawn }; })()`);
       await ev(`(document.querySelector(".tex-comments").click(), true)`);
       await until(`performance.getEntriesByName("tex-comments-list").some((m) => m.detail.threads === ${n})`, 15000);
       r.list = await ev(`performance.getEntriesByName("tex-comments-list").filter((m) => m.detail.threads === ${n}).at(-1)?.detail`);
@@ -476,7 +482,7 @@ try {
       // the time bounds (PR 316): slices at most 8 ms up to 256 KiB and 32 ms up to 2 MiB; drawing within the same; checked
       // on a timing box, reported on a build box (its load and GC pauses aren't the code's: a sanity bound only)
       const timed = (r, ms, what) => {
-        const t = { slice: r.placed?.maxSliceMs, phase: r.placed?.maxSlicePhase, draw: r.drawMaxMs, list: r.list?.ms };
+        const t = { slice: r.placed?.maxSliceMs, phase: r.placed?.maxSlicePhase, draw: Math.max(r.drawMaxMs, r.steady?.maxMs ?? 0), list: r.list?.ms };
         if (BOX === "timing") check(t.slice <= ms && t.draw <= ms && t.list <= ms, `comments: ${what}: slices, drawing and the list each at most ${ms} ms (a timing box)`, t);
         else { console.log(`timing, reported, not gated (a build box): ${what}, bound ${ms} ms:`, JSON.stringify(t)); check(t.slice < 200 && t.draw < 200 && t.list < 200, `comments: ${what}: no slice, draw or list over 200 ms (a build box's sanity bound)`, t); }
       };
@@ -490,11 +496,16 @@ try {
       const st = r2.placed?.statuses ?? {};
       check(r2.ok && r2.placed.work <= C.LIMITS.workBudget && (st.moved ?? 0) > 0 && (st.moved ?? 0) + (st.unresolved ?? 0) === 300 && r2.drawn > 0 && r2.drawn < 200, "comments: exactly 2 MiB, 300 moved anchors: placed within the work budget (each moved or unresolved), drawn near the view", r2);
       timed(r2, 32, "2 MiB, 300 moved anchors");
-      // the most threads a comments file takes (1.75 MiB for a new one: about 1,600 of these), exact, at 2 MiB: drawing
-      // only near the view, the list's first 100 a section
-      const r3 = await measure("m2x", t2, threadsOn(t2, 1600, 12, false));
-      check(r3.ok && r3.placed.statuses.exact === 1600 && r3.drawn > 0 && r3.drawn < 200 && r3.list.shown <= 100, "comments: 1,600 exact threads at 2 MiB: drawn only near the view (bounded), the list's first 100", r3);
-      timed(r3, 32, "2 MiB, 1,600 exact threads");
+      // the admitted 2,000 live threads (astra's fixture: small threads, short times, a file under 2 MiB, though a new one
+      // is refused past 1.75 MiB): on a document of 2,000 tokens, each thread re-found (moved) by its token, all placed;
+      // drawing only near the view, the list's first 100 a section
+      const toks = "\\documentclass{article}\n\\begin{document}\n" + Array.from({ length: 2000 }, (_, i) => `item w${i},\n\n`).join("") + "\n\\end{document}\n";
+      const d3 = C.emptyDoc({});
+      for (let i = 0; i < 2000; i++) { const q = `w${i},`, s0 = toks.indexOf("item " + q) + 5; d3.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-30T00:00Z" }).doc.threads[0]); }
+      const side3 = C.serialize(d3);
+      const r3 = await measure("t2000", toks, d3);
+      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
+      timed(r3, 8, "2,000 threads on a small document");
       // one unit over 2 MiB: refused with the size, nothing drawn or written, the comments file untouched
       const t4 = t2.replace("%", "%%"), d4 = threadsOn(t2, 3, 50, false), side4 = C.serialize(d4);
       const f4 = await mk("/cm/over.tex", enc(t4)); await mk("/cm/over.tex.comments.json", enc(side4));
