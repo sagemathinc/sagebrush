@@ -58,7 +58,7 @@ adb logcat -c
 out=$(timeout 120 adb shell am start -W -n "$PKG/$ACT" | tr -d '\r') || fail "am start"
 echo "$out"
 echo "$out" | grep -q 'Status: ok' || fail "the activity did not start"
-pid=$(adb shell pidof "$PKG" | tr -d '\r')
+pid=$(adb shell pidof "$PKG" | tr -d '\r' || true)
 [[ "$pid" =~ ^[0-9]+$ ]] || fail "no single process for $PKG after start ('$pid')"
 sleep 30
 now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
