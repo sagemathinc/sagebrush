@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The pairing page's Connect dialog: a failed connection says what Chrome asks (its one-time permission to reach programs on this computer) and how to undo a block, and is no longer called the agent's refusal (web/workspace/agent-ui.ts, in the board page embedded in the CLI bundle). Measured locally with CI's bun 1.4.4: master 30746ca3 +256 B; marker with headroom for the engine wasm's base64 rounding.",
+  "reason": "The pairing page's Connect dialog: a failed connection says what Chrome asks (its one-time permission to reach programs on this computer) and how to undo a block, and is no longer called the agent's refusal (web/workspace/agent-ui.ts, in the board page embedded in the CLI bundle). Measured locally with CI's bun 1.4.4: master 30746ca3 +236 B (r2 head 968dbf90); marker with headroom for the engine wasm's base64 rounding.",
   "bytes": {
     "cli/pyjs.cjs": 300
   }
