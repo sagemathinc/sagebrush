@@ -30,7 +30,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       body_cut?: true;
       diff?: { path: string; before: string; after: string };
     }
-  | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string }
+  | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string }
   | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
@@ -65,6 +65,7 @@ export interface Attention {
   state: "open" | "approved" | "denied";
   title: string;
   summary?: string;
+  detail?: string; // all of the request's arguments, for the person to review
 }
 
 export interface Artifact {
@@ -191,7 +192,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     }
     case "attention":
       if (!turn.attention[e.id]) turn.parts.push({ kind: "attention", id: e.id });
-      turn.attention[e.id] = { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary };
+      turn.attention[e.id] = { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail };
       break;
     case "artifact": {
       const existing = thread.artifacts.find((a) => a.id === e.id);
