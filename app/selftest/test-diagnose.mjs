@@ -78,5 +78,14 @@ const oneLine = (lines) => lines.every((l) => !/[\r\n]/.test(l));
   await run({ fetchImpl: (url, { signal }) => { started++; return new Promise((_, reject) => signal.addEventListener("abort", () => { aborted++; reject(new DOMException("aborted", "AbortError")); })); } });
   check("no fetch is left running", started === 2 && aborted === 2, `${started} started, ${aborted} aborted`);
 }
+{
+  // (after the whole diagnosis runs out, no new fetch starts: the second probe
+  // must not begin once the 15 s deadline has passed; here the first fetch
+  // outlives it by ignoring its own 5 s abort)
+  let starts = 0;
+  const { info } = await run({ fetchImpl: (url, { signal }) => { starts++; return new Promise((_, reject) => setTimeout(() => reject(new DOMException("late", "AbortError")), 16000)); } });
+  await new Promise((r) => setTimeout(r, 1500));
+  check("no fetch starts after the deadline", starts === 1, `${starts} started; fetch-kernel-script ${info["fetch-kernel-script"]}`);
+}
 if (bad) { console.log("FAIL: diagnose()"); process.exit(1); }
 console.log("ok: diagnose() fills every key with one bounded line");
