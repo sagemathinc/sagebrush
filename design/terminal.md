@@ -23,6 +23,12 @@ This is @sagebrush's ruling on DB2-LL-337-1, with board's CONCUR; it replaces B-
 - A styled run that crosses a join becomes two runs with the same classes, each charged.
 - The line end after the last page box is charged too.
 
+### Size
+
+E5.6's limit for the panel's code is 9 472 B gzipped. daybreak2 raised it from 9 216 B on #337 r3 for one reason: "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."
+
+### Caps
+
 E5.4's caps are unchanged: at most 1 MiB shown per command and 4 MiB in the scrollback.
 
 ### Recorded limits (B-LL-5)
