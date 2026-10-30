@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The notebook page's TimeTravel anchor (restoreAnchor in web/index.html) also lets go on a scroll that moves the anchored cell from its place (a scrollbar drag, a script's scrollTo), not only on wheel/touch/key/click; the CLI embeds the page. Measured locally with CI's bun 1.4.4 (size-record.sh) on master 31cfaa3c and this branch's head: cli/pyjs.cjs 29561084 -> 29561320 = +236; no other bundle changes. Allowance 320 = +236 + 84 B margin (pyjs.cjs's few-byte wobble).",
+  "bytes": {
+    "cli/pyjs.cjs": 320
+  }
+}
