@@ -17,7 +17,8 @@
 #   (gradle/verification-metadata.xml); two negative controls show a tampered
 #   checksum fails.
 #
-# It runs only when this file changes, or by hand (workflow_dispatch), and is
+# It runs only when this file or the committed Android project changes, or by
+# hand (workflow_dispatch), and is
 # never a required check or a need of ci.yml's aggregate (@sagebrush's ruling
 # after #304); making it gate is a separate decision.
 name: app-mobile
@@ -25,9 +26,9 @@ name: app-mobile
 on:
   push:
     branches: [master]
-    paths: [".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
   pull_request:
-    paths: [".github/workflows/app-mobile.yml"]
+    paths: [".github/workflows/app-mobile.yml", "app/src-tauri/gen/android/**"]
   workflow_dispatch:
 
 permissions:
