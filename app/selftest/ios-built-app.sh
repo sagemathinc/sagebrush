@@ -13,7 +13,10 @@
 # 4. it is unsigned: no embedded.mobileprovision, and codesign shows either
 #    "not signed at all" alone or an ad hoc signature without a team or
 #    certificate (ios-judge.py codesign).
-# Writes the .app's path to OUT.
+# Writes the .app's path to OUT.  When step 1 fails, it prints what changed
+# (git diff --stat, and each changed file's diff, cut at 20000 bytes) and
+# leaves the whole diff in $DIFF_DIR/gen-apple-<mode>.diff (DIFF_DIR, default
+# $RUNNER_TEMP), which the workflow keeps as an artifact.
 #   bash app/selftest/ios-built-app.sh debug|release <start stamp file> <out>
 set -euo pipefail
 MODE=${1:?usage: ios-built-app.sh debug|release <start stamp> <out>}
@@ -33,7 +36,18 @@ cd "$ROOT"
 git status --porcelain --untracked-files=all -- "$GEN" > "$T/status.txt"
 echo "--- gen/apple after the build:"; cat "$T/status.txt"
 git show "HEAD:$GEN/sagebrush-app_iOS/Info.plist" > "$T/generated.plist"
-python3 -I "$HERE/ios-judge.py" tree "$T/status.txt" "$T/generated.plist" "$GEN/sagebrush-app_iOS/Info.plist" app/src-tauri/Info.ios.plist || fail "gen/apple after the build (above)"
+if ! python3 -I "$HERE/ios-judge.py" tree "$T/status.txt" "$T/generated.plist" "$GEN/sagebrush-app_iOS/Info.plist" app/src-tauri/Info.ios.plist; then
+  D=${DIFF_DIR:-${RUNNER_TEMP:-$T}}
+  mkdir -p "$D"
+  git diff -- "$GEN" > "$D/gen-apple-$MODE.diff" || true
+  echo "--- what the build changed under gen/apple (the whole diff: $D/gen-apple-$MODE.diff, $(wc -c < "$D/gen-apple-$MODE.diff") bytes)"
+  git diff --stat -- "$GEN" || true
+  while IFS= read -r f; do
+    echo "--- $f (at most 20000 bytes)"
+    git diff -- "$f" | head -c 20000 || true
+  done < <(git diff --name-only -- "$GEN")
+  fail "gen/apple after the build (above)"
+fi
 
 # 2. the .app and the library, for this configuration
 find "$GEN/build" "$HOME/Library/Developer/Xcode/DerivedData" -type d -name '*.app' -newer "$START" 2> /dev/null | LC_ALL=C sort > "$T/apps.txt" || true
