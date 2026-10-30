@@ -72,3 +72,32 @@ class O(str):
         return "O!"
 print("override kept", repr(O("a")), [O("a")], O.__repr__ is str.__repr__, str.__repr__(O("a")))
 print("format sees the box", str.format("{!r}|{}", O("a"), O("b")), "%r" % (O("c"),), str.__mod__("%r", O("d")))
+
+
+# arguments a str method reads through a protocol keep the subclass's own:
+# join iterates its argument, translate indexes its table
+class Q(str):
+    pass
+class P(str):
+    def __iter__(self):
+        return iter(["X", "Y"])
+    def __getitem__(self, k):
+        return "Z"
+for label, f in [
+    ("str.join", lambda: str.join("-", P("ab"))),
+    ("Q.join", lambda: Q.join(Q("-"), P("ab"))),
+    ("instance join", lambda: "-".join(P("ab"))),
+    ("str.translate", lambda: str.translate("a", P("ab"))),
+    ("Q.translate", lambda: Q.translate(Q("a"), P("ab"))),
+    ("instance translate", lambda: "a".translate(P("ab"))),
+    ("str.join list", lambda: str.join(Q("-"), [Q("a"), Q("b")])),
+    ("str.split", lambda: str.split(Q("a,b"), Q(","))),
+    ("str.replace", lambda: str.replace(Q("aXb"), Q("X"), Q("-"))),
+    ("str.__contains__", lambda: str.__contains__(Q("abc"), Q("b"))),
+    ("str.partition", lambda: str.partition(Q("a,b"), Q(","))),
+    ("str.strip", lambda: str.strip(Q("xax"), Q("x"))),
+]:
+    try:
+        print(label, repr(f()))
+    except Exception as e:
+        print(label, "ERR", type(e).__name__, e)
