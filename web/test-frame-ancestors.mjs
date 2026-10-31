@@ -173,7 +173,7 @@ try {
   const srcdoc = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(FILES_RUNNER)?.[1] ?? "";
   ok(srcdoc && scriptSrcProblems("srcdoc", srcdoc).length === 0, "the files-runner srcdoc's script-src exactly as allowed");
   const { SCRIPT_POLICY } = await import(join(here, "preview", "worker.mjs"));
-  ok(scriptSrcProblems("preview", SCRIPT_POLICY).length === 0, "the preview Worker's script policy exactly as allowed");
+  ok(typeof SCRIPT_POLICY === "string" && scriptSrcProblems("preview", SCRIPT_POLICY).length === 0, "the preview Worker's script policy (exported) exactly as allowed");
 
   // the mutation controls, each failing exactly what it should
   {
