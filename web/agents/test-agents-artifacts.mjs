@@ -1141,7 +1141,17 @@ try {
       ok(res.ok && same(a[ids[0]], b[ids[0]]) && same(a[ids[2]], b[ids[2]]) && after.cells.map((c) => c.id).join() === before.cells.map((c) => c.id).join() && same(a[ids[1]].outputs, b[ids[1]].outputs), "E1: an edit of one cell keeps every other cell byte-identical (whole JSON), in order, and that cell's outputs", { res, a, b });
       ok(a[ids[1]].code === "print(22)", "E2: the set cell's stored source is the new text (source -> code)", a[ids[1]]);
       ok(await ev(`/Changed by Claude/.test(${cellJs(1)}.querySelector('.nb-edit-mark')?.textContent ?? '')`), "E3: the changed cell is marked: its output is from before the change");
-      ok(after.rev === before.rev + 1, "E15: exactly one new version for the edit", { before: before.rev, after: after.rev });
+    }
+    // E15: one new version for a whole edit, of two cells (so a save per change would make two)
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 3" }, { id: ids[1], source: "print(3)" }] });
+      await sleep(800); // (past the component's save debounce: no late second save)
+      const after = await rec(path);
+      ok(res.ok && after.rev === before.rev + 1 && after.cells[0].code === "x = 3" && after.cells[1].code === "print(3)", "E15: exactly one new version for an edit of two cells", { res, before: before.rev, after: after.rev });
     }
     // E4: insert after an id, insert first, remove by id
     {
@@ -1232,6 +1242,11 @@ try {
       const before = await rec(path);
       const c = await call("workspace.create", { path, content: docFor(path, [{ code: "over" }]), mode: "python" }).then(() => "made", (e) => e.code);
       ok(c === "exists" && same(await rec(path), before), "E12: create on a taken notebook path is refused, the file byte-identical", c);
+    }
+    {
+      // (its own notebook: what E12 does to its one never reaches this case)
+      const { path } = await mk();
+      const before = await rec(path);
       const r = await call("workspace.read", { path });
       const w = await call("workspace.write", { path, content: docFor(path, [{ code: "over" }]), base: r.rev }).then(() => "written", (e) => e.message);
       ok(/workspace_edit_notebook/.test(w) && same(await rec(path), before), "E13: a whole write of a notebook from a notebook.edit helper is refused", w);
