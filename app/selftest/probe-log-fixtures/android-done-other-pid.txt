@@ -1,0 +1,5 @@
+10-31 01:20:00.000   520   600 I ActivityManager: Start proc 4242:space.sagebrush.notebook/u0a192
+10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: page 11111111-2222-4333-8444-555555555555
+10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: page-route:tauri-internals-invoke 11111111-2222-4333-8444-555555555555
+10-31 01:20:02.123  4242  4243 I RustStdout: [page] start isolated=false secure=true
+10-31 01:20:01.123  5151  5152 I RustStdout: [page] terminal bridge probe: done 11111111-2222-4333-8444-555555555555

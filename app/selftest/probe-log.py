@@ -11,6 +11,8 @@ frozen in the native-checks code packet (probe-grammar.md, r1): app_log logs
   terminal bridge probe: page <nonce>
   terminal bridge probe: page-route:<route> <nonce>
   terminal bridge probe: worker-route:<route> <nonce>
+  terminal bridge probe: done <nonce>   (the page's last probe line: after the
+      Terminal checks cleaned up their workers, before selftest_report)
 The route statuses come from the REPORT's check-2 line:
   ok   the page reaches the app's bridge: nonce=<nonce> routes=<route>:<status>,... (all 5, in order)
 
@@ -22,7 +24,10 @@ The rules (each violation printed; every one is a FAIL):
  5. no page-route marker for NONCE for any other route;
  6. no line anywhere contains "terminal bridge probe: worker" (any nonce, any pid);
  7. other nonces are ignored for 3-5 (rule 6 still applies);
- 8. Android: other pids are ignored for 3-5 (rule 6 still applies).
+ 8. Android: other pids are ignored for 3-5 and 9 (rule 6 still applies);
+ 9. the done sentinel for NONCE exactly once, and no probe marker for NONCE
+    after it (in the pid's lines on Android).  It shows the capture reached
+    the end of the probe; it is not an ordering barrier for other senders.
 Exit 0: all hold; 1: a FAIL; 2: bad arguments or an unreadable file; 3: this
 script failed.  app/selftest/test-probe-log.sh runs it on fixed inputs."""
 import re
@@ -104,6 +109,14 @@ def judge(log, pid, nonce, report):
     for raw in log:
         if WORKER in raw:
             fails.append(f"rule 6: a worker line: {raw[:200]}")
+    done = f"terminal bridge probe: done {nonce}"
+    at = [i for i, m in enumerate(msgs) if m == done]
+    if len(at) != 1:
+        fails.append(f"rule 9: the done sentinel for {nonce} appears {len(at)} times, need 1")
+    else:
+        later = [m for m in msgs[at[0] + 1:] if m.startswith("terminal bridge probe: ") and m.endswith(" " + nonce)]
+        for m in later:
+            fails.append(f"rule 9: a probe marker after the done sentinel: {m[:200]}")
     return fails
 
 
@@ -125,7 +138,7 @@ def main(argv):
         print("FAIL " + f)
     if fails:
         return 1
-    print(f"ok   the probe's native log: the page and its ok routes once each, no worker line (nonce {nonce})")
+    print(f"ok   the probe's native log: the page and its ok routes once each, no worker line, the done sentinel last (nonce {nonce})")
     return 0
 
 

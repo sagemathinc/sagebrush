@@ -9,7 +9,7 @@ ok   Stop interrupts a loop: "KeyboardInterrupt" (the worker shares its interrup
 ok   ...and keeps the variables
 ok   the shell worker's policy (lib.rs): "default-src 'none'; script-src 'self' blob:; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'"
 ok   the page reaches the app's bridge: nonce=0b8c2a3e-1f2d-4e5f-8a9b-0c1d2e3f4a5b routes=tauri-internals-invoke:ok,tauri-core-invoke:ok,ipc-postmessage:unavailable,webkit-ipc-postmessage:no-native-effect,webview2-postmessage:unavailable
-ok   the shell worker can't reach the app's bridge: engine=chromium mode=all-events violations=3 differential=own-origin:refused,control:fetched-ok routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused
+ok   the shell worker can't reach the app's bridge: engine=chromium mode=all-events violations=3 events=ipc-scheme:1,ipc-localhost:1,own-origin:1 unmatched=0 differential=own-origin:refused,control:fetched-ok routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused
 info origin: "http://127.0.0.1:41234"
 info secure-context: true
 info top-level: true

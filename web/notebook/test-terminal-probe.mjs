@@ -3,11 +3,13 @@
 // verdict FAIL; an empty scope is "unavailable" everywhere), and selftest-terminal.js's policyVerdict
 // (check 1: the policy missing, changed, extra, reordered or doubled, a status other than 200, a redirect,
 // another URL or content type all FAIL) and workerVerdict (check 3: no report, another nonce, a fetch fetched,
-// timed out or refused without its connect-src violation all FAIL).  The probe's text, as the page and the
-// worker get it, is the file itself.
+// timed out or refused without its connect-src violation all FAIL; the events matched to the requests one to one,
+// astra's NC-R1-A1: duplicates, a wrong or unrelated URI in a request's place, report-only, another directive,
+// an extra event, webkit's partial or unmatched sets all FAIL).  The probe's text, as the page and the worker get
+// it, is the file itself.
 //   bun web/notebook/test-terminal-probe.mjs
 import { probe, ROUTES } from "./terminal-probe.js";
-import { policyVerdict, workerVerdict, engineOf, TERMINAL_CHECKS } from "./selftest-terminal.js";
+import { policyVerdict, workerVerdict, engineOf, reportForms, matchEvents, requestUrls, TERMINAL_CHECKS } from "./selftest-terminal.js";
 import { shellWorkerPolicy } from "../csp-policy.mts";
 
 let checks = 0;
@@ -16,9 +18,15 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); console.log(`
 const nonce = "0b8c2a3e-1f2d-4e5f-8a9b-0c1d2e3f4a5b";
 const marker = (route) => "terminal bridge probe: worker-route:" + route + " " + nonce;
 const goodFetches = { "ipc-scheme": "refused", "ipc-localhost": "refused", "own-origin": "refused" };
-const report = (routes) => ({ done: true, nonce, routes, fetches: goodFetches, violations: ["connect-src", "connect-src", "connect-src"] });
-// (the differential's context: the engine fixed by the UA table, the control's own-origin result, the page's policy)
-const CHROMIUM = { engine: "chromium", control: "fetched-ok", pageCsp: null }, WEBKIT = { engine: "webkit", control: "fetched-ok", pageCsp: null };
+// (the violation events as the worker records them; the three requests' own: the IPC scheme's as CSP 3 reports a
+// URL of a non-HTTP(S) scheme, its scheme alone)
+const ORIGIN = "http://127.0.0.1:1430", OWN = ORIGIN + "/shell/preview-set.json";
+const ev = (uri, directive = "connect-src", disposition = "enforce") => ({ uri, directive, disposition });
+const GOOD_EVENTS = [ev("ipc"), ev("http://ipc.localhost/app_log"), ev(OWN)];
+const report = (routes) => ({ done: true, nonce, routes, fetches: goodFetches, violations: GOOD_EVENTS });
+// (the differential's context: the engine fixed by the UA table, the control's own-origin result, the page's policy;
+// and what the events are matched against: the own-origin URL and the worker's origin)
+const CHROMIUM = { engine: "chromium", control: "fetched-ok", pageCsp: null, ownUrl: OWN, origin: ORIGIN }, WEBKIT = { ...CHROMIUM, engine: "webkit" };
 
 // --- AM-2: a scope with a route: attempted (the stub records the call, with the worker's marker), and the verdict FAILs
 {
@@ -70,6 +78,9 @@ const CHROMIUM = { engine: "chromium", control: "fetched-ok", pageCsp: null }, W
     ["chromium, 3 of 3 events and the differential", base, CHROMIUM],
     ["webkit, 0 events and the differential (its IPC fetches information)", zero, WEBKIT],
     ["webkit, 3 of 3 events and the differential (reported)", base, WEBKIT],
+    ["chromium, the three events in another order", { ...base, violations: [...GOOD_EVENTS].reverse() }, CHROMIUM],
+    ["chromium, the IPC scheme's as its whole URL, the IPC host's as its origin (CSP 2's cross-origin form)",
+      { ...base, violations: [ev("ipc://localhost/app_log"), ev("http://ipc.localhost"), ev(OWN)] }, CHROMIUM],
   ];
   for (const [what, rep, ctx] of pass) check(workerVerdict(rep, nonce, ctx)[0], `check 3 passes: ${what}: ${workerVerdict(rep, nonce, ctx)[1].slice(0, 200)}`);
   const fail = [
@@ -77,9 +88,20 @@ const CHROMIUM = { engine: "chromium", control: "fetched-ok", pageCsp: null }, W
     ["a report that isn't done", { ...base, done: false, error: "boot failed" }, CHROMIUM],
     ["another nonce", { ...base, nonce: "11111111-2222-4333-8444-555555555555" }, CHROMIUM],
     ["chromium with 0 events (never downgraded)", { ...base, violations: [] }, CHROMIUM],
-    ["chromium with 1 of 3", { ...base, violations: ["connect-src"] }, CHROMIUM],
-    ["webkit with 2 of 3 (inconsistent)", { ...base, violations: ["connect-src", "connect-src"] }, WEBKIT],
-    ["violations of another directive (1 connect-src)", { ...base, violations: ["script-src-elem", "worker-src", "connect-src"] }, CHROMIUM],
+    ["chromium with 1 of 3", { ...base, violations: [ev(OWN)] }, CHROMIUM],
+    ["webkit with 2 of 3 (partial)", { ...base, violations: [ev("ipc"), ev(OWN)] }, WEBKIT],
+    // (astra's NC-R1-A1: each request needs ITS event, one to one; a count of three is not enough)
+    ["chromium, three events, all the own-origin's (duplicates only)", { ...base, violations: [ev(OWN), ev(OWN), ev(OWN)] }, CHROMIUM],
+    ["chromium, the IPC localhost's missing, replaced by a duplicate", { ...base, violations: [ev("ipc"), ev("ipc"), ev(OWN)] }, CHROMIUM],
+    ["chromium, the IPC localhost's missing, replaced by an unrelated URI", { ...base, violations: [ev("ipc"), ev("https://example.com/x"), ev(OWN)] }, CHROMIUM],
+    ["chromium, a wrong URI on the IPC host", { ...base, violations: [ev("ipc"), ev("http://ipc.localhost/other"), ev(OWN)] }, CHROMIUM],
+    ["chromium, one report-only (not enforced)", { ...base, violations: [ev("ipc"), ev("http://ipc.localhost/app_log", "connect-src", "report"), ev(OWN)] }, CHROMIUM],
+    ["chromium, one of another directive", { ...base, violations: [ev("ipc"), ev("http://ipc.localhost/app_log", "script-src-elem"), ev(OWN)] }, CHROMIUM],
+    ["chromium, the three and an unrelated fourth", { ...base, violations: [...GOOD_EVENTS, ev("https://example.com/x")] }, CHROMIUM],
+    ["chromium, the own-origin reported as its origin only (same origin: the URL only)", { ...base, violations: [ev("ipc"), ev("http://ipc.localhost/app_log"), ev(ORIGIN)] }, CHROMIUM],
+    ["webkit, three unrelated events", { ...base, violations: [ev("https://example.com/a"), ev("https://example.com/b"), ev("https://example.com/c")] }, WEBKIT],
+    ["webkit, one report-only event alone", { ...base, violations: [ev(OWN, "connect-src", "report")] }, WEBKIT],
+    ["webkit, the three and a duplicate", { ...base, violations: [...GOOD_EVENTS, ev(OWN)] }, WEBKIT],
     ["chromium with an IPC fetch timed out", { ...base, fetches: { ...goodFetches, "ipc-scheme": "timeout" } }, CHROMIUM],
     ["the own-origin fetch fetched", { ...base, fetches: { ...goodFetches, "own-origin": "fetched-ok" } }, WEBKIT],
     ["the control failed (inconclusive)", zero, { ...WEBKIT, control: "fetched-404" }],
@@ -150,6 +172,17 @@ const CHROMIUM = { engine: "chromium", control: "fetched-ok", pageCsp: null }, W
   for (const [what, change] of cases) check(!policyVerdict({ ...base, ...change }, url)[0], `check 1 FAILS on the policy ${what}: ${policyVerdict({ ...base, ...change }, url)[1].slice(0, 120)}`);
 }
 check(TERMINAL_CHECKS.length === 3 && new Set(TERMINAL_CHECKS).size === 3, "three check names, distinct");
+
+// --- the blockedURI forms (explicit, nothing looser)
+{
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  check(eq(reportForms("ipc://localhost/app_log", ORIGIN), ["ipc", "ipc://localhost/app_log"]), "a non-HTTP(S) URL: its scheme, or the URL");
+  check(eq(reportForms("http://ipc.localhost/app_log", ORIGIN), ["http://ipc.localhost/app_log", "http://ipc.localhost"]), "another origin: the URL, or the origin");
+  check(eq(reportForms("http://u:p@127.0.0.1:1430/shell/preview-set.json#x", ORIGIN), [OWN]), "the same origin: the URL only, without credentials or fragment");
+  check(eq(reportForms("not a url", ORIGIN), []), "no URL: no form");
+  const m = matchEvents([ev(OWN), ev(OWN), ev("ipc", "connect-src", "report")], requestUrls(OWN), ORIGIN);
+  check(m.per["own-origin"] === 1 && m.per["ipc-scheme"] === 0 && m.unmatched === 2 && m.total === 3, `a duplicate and a report-only event are unmatched: ${JSON.stringify(m)}`);
+}
 
 if (fails.length) { console.log(`test-terminal-probe: ${fails.length} of ${checks} FAILED`); process.exit(1); }
 console.log(`test-terminal-probe: all ${checks} checks pass`);

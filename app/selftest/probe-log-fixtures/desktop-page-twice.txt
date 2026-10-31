@@ -3,3 +3,4 @@
 [page] terminal bridge probe: page 11111111-2222-4333-8444-555555555555
 [page] terminal bridge probe: page 11111111-2222-4333-8444-555555555555
 [page] terminal bridge probe: page-route:tauri-internals-invoke 11111111-2222-4333-8444-555555555555
+[page] terminal bridge probe: done 11111111-2222-4333-8444-555555555555

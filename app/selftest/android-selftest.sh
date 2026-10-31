@@ -70,7 +70,6 @@ done
 tr -d '\r' < "$REPORT" > "$REPORT.clean" && mv "$REPORT.clean" "$REPORT"
 now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
 [ "$now" = "$pid" ] || fail "the app's process changed during the self-test (pid $pid, now '$now'): its log can't be read as one run"
-adb logcat -d -v threadtime > "$PLOG" 2>/dev/null || fail "logcat -d"
 echo "--- report"
 cat "$REPORT"
 echo "---"
@@ -90,5 +89,9 @@ python3 -I "$HERE/android-report.py" --engine chromium "$REPORT" ${SUMMARY:+"$SU
 # (the nonce is the page's, from its check-2 line; probe-log.py checks that line itself)
 nonce=$(sed -n "s/^ok   the page reaches the app's bridge: nonce=\([0-9a-f-]*\) routes=.*/\1/p" "$REPORT" | head -1)
 [ -n "$nonce" ] || fail "no ok check-2 line with a nonce in the report, so the probe's native log can't be read"
+# (the page logs the done sentinel after the Terminal checks cleaned up and
+# before the report, so it should already be there: wait for it, bounded,
+# re-checking the process; the last capture is the one judged)
+bash "$HERE/wait-log-sentinel.sh" 20 "$PKG" "$pid" "$nonce" "$PLOG" || fail "the app's log never showed the probe's done sentinel (above)"
 python3 -I "$HERE/probe-log.py" --android "$PLOG" "$pid" "$nonce" "$REPORT" || fail "the terminal bridge probe's native log (above)"
 echo "ok: the Android self-test's required checks passed"
