@@ -224,6 +224,14 @@ export class PreviewGateway extends FakeGateway {
     // entry; a Stop latched with nothing running leaves no interrupt pending for whatever runs next)
     const run = b.busy && this.runs.get(b.busy);
     const running = !!run && !run.outcome && (run.wave ? run.current >= 0 : run.delivered);
+    // (a run, not a wave: it ends when the interpreter says it stopped, from runLocal, as a real kernel's run does;
+    // ended here, at the Stop, the binding would take the next Run while this one still stops, and the
+    // interpreter's fallback (a restart: every run pending told stopped) would stop that one too)
+    if (running && !run.wave && body?.epoch === b.epoch) {
+      this.acknowledge(b, body);
+      this.local.interrupt();
+      return this.json(200, { ok: true });
+    }
     const res = super.post_interrupt(b, body);
     if (body?.epoch === b.epoch && running) this.local.interrupt();
     return res;

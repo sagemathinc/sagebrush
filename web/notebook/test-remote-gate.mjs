@@ -33,8 +33,9 @@ const NS = "5eed".repeat(16);
 // scheduler's host over the kernel.  Pauses: the next analyze, seed, hash,
 // token or proof waits until released.
 // (`waves`: the page sends waves, as notebook.js does for a remote kernel: its host has executeWave)
-export async function page(codes, { scoping = false, keepBodies = true, waves = false, net = null, timers = undefined } = {}) {
-  const fake = new FakeGateway();
+// (`gateway`: another gateway than the fake, e.g. the preview's, test-remote-preview-stop.mjs)
+export async function page(codes, { scoping = false, keepBodies = true, waves = false, net = null, timers = undefined, gateway = null } = {}) {
+  const fake = gateway ?? new FakeGateway();
   const fetches = [];
   const gates = { token: null, proof: null, analyze: null, seed: null, hash: null };
   const wait = async (k, ...a) => {
