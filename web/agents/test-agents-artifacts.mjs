@@ -1409,7 +1409,8 @@ try {
       await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
       await artifactTurn(draft, { finish: false, turn });
       await until(`!!document.querySelector('${PANE} textarea')`);
-      const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.focus(); t.setSelectionRange(3, 3); return true; })()`);
+      // (A, the draft's textarea, tagged when focused: E28's person moves A's caret in A itself, wherever the pane is)
+      const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.dataset.sbA = "1"; t.focus(); t.setSelectionRange(3, 3); return true; })()`);
       const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
       const results = [];
       for (const hidden of [false, true]) {
@@ -1443,7 +1444,7 @@ try {
           await holdDb("sagebrush-workspace", "entries", 3000);
           const pending = edit(path, r, { set: [{ id: ids[1], source: `print(${name})` }] });
           await sleep(700);
-          if (name === "E28") await ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.focus(); t.setSelectionRange(5, 5); return true; })()`);
+          if (name === "E28") await ev(`(() => { const t = document.querySelector('textarea[data-sb-a]'); t.focus(); t.setSelectionRange(5, 5); return true; })()`);
           else await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
           if (refuse) await lose("a");
           const res = await pending;
