@@ -4,7 +4,7 @@
 // listing is ShellHost.complete, the shell's own checks, read-only, never an invocation.
 import type { ShellHost } from "./host.ts";
 import { words, type PanelTab, type TabState } from "./panel.ts";
-import { tabAction, wordAt, complete, matches, splitPath, candidateBlock, commandNames, compgen, lsColourable, colourLs, SHELL_COMMANDS, BUILTINS, PANEL_COMMANDS, type Cand } from "./complete.ts";
+import { tabAction, tabWord, complete, matches, splitPath, candidateBlock, commandNames, compgen, lsColourable, colourLs, SHELL_COMMANDS, BUILTINS, PANEL_COMMANDS, type Cand } from "./complete.ts";
 import { absPath } from "./panel-commands.ts";
 
 const PERSON = { kind: "person" } as const;
@@ -16,11 +16,17 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
   let gen = 0;
   let block: HTMLElement | null = null;
   let lastTab: string | null = null;
+  let root0: HTMLElement | null = null;
+  // (the inputs whose other keys are watched: any key but Tab (history's Up/Down, Ctrl-C, Enter, an edit) supersedes
+  // what a Tab has in flight, so an Up then Down back to the same text can't revive it: astra TH-C3)
+  const watched = new WeakSet<HTMLTextAreaElement>();
   const self = {
     /** the listings asked of the host (the tests' counter, E5) */
     requests: 0,
     reset() {
       gen++;
+      // (the tests read the aborts on the panel's root, kept by reference after a close)
+      if (ctl && !ctl.signal.aborted && root0) root0.dataset.tabAborts = String(Number(root0.dataset.tabAborts ?? 0) + 1);
       ctl?.abort();
       ctl = null;
       block?.remove();
@@ -30,9 +36,14 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
       const st = state();
       // (completion only at a word's end, nothing selected, nothing running, and a literal word: otherwise the
       // browser's own Tab, which moves focus; Shift-Tab never reaches here: no keyboard trap)
+      root0 = root;
+      if (!watched.has(input)) {
+        watched.add(input);
+        input.addEventListener("keydown", (e) => { if (e.key !== "Tab") self.reset(); }, true);
+      }
       if (tabAction(input.value, input.selectionStart, input.selectionEnd, st.busy) !== "complete") return false;
-      const w = wordAt(input.value, input.selectionStart);
-      if (!w || w.literal === null) return false;
+      const w = tabWord(input.value, input.selectionStart);
+      if (!w) return false;
       ctl?.abort();
       const mine = (ctl = new AbortController());
       const g = gen;

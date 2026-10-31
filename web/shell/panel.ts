@@ -280,6 +280,7 @@ export class TerminalPanel {
   /** ✕ ends the session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
+    this.opts.tab?.reset();
     this.ended = true;
     this.hide();
     removeEventListener("resize", this.place);
