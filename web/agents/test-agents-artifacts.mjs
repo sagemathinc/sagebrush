@@ -20,7 +20,8 @@ const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 const want = (s) => !ONLY || ONLY.has(s);
 let failures = 0;
 const ok = (c, msg, detail) => {
-  console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 400) : ""));
+  // (a check's detail: on a failure, or always with DETAIL=1)
+  console.log((c ? "ok   " : "FAIL ") + msg + ((!c || process.env.DETAIL) && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : ""));
   if (!c) failures++;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
