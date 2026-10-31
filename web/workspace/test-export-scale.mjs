@@ -211,9 +211,9 @@ try {
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
       // (in the page: long tasks from now, and when the progress line changes while the archive is written)
       await c.ev(`(() => {
-        window.__long = 0; window.__marks = [];
+        window.__long = 0; window.__marks = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20);
         new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long = Math.max(window.__long, e.duration); }).observe({ type: "longtask", buffered: false });
-        new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; const m = / written/.test(t); if (m && t !== window.__lastText) { window.__lastText = t; window.__marks.push(performance.now()); (window.__texts ??= []).push(t.match(/[^.]*written/)?.[0] ?? ""); } if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true });
+        new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; const m = / written/.test(t); if (m) (window.__raw ??= []).push(performance.now()); if (m && t !== window.__lastText) { window.__lastText = t; window.__marks.push(performance.now()); (window.__texts ??= []).push(t.match(/[^.]*written/)?.[0] ?? ""); } if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true });
         return 1;
       })()`);
       await c.ev(btn("/^Export all current files/"));
@@ -222,9 +222,17 @@ try {
       check(await c.until(`!!window.__exp`, 1200000), "resp: the export ends");
       const longest = await c.ev(`window.__long`);
       check(longest <= 50, `resp: the longest main-thread task from the click ${Math.round(longest)} ms (at most 50 ms)`);
-      const gap = await c.ev(`(() => { const m = window.__marks; let g = 0, at = 0; for (let i = 1; i < m.length; i++) if (m[i] - m[i - 1] > g) { g = m[i] - m[i - 1]; at = i; } return [m.length, Math.round(g), window.__texts[at - 1], window.__texts[at]]; })()`);
+      // (the values must move at least every 250 ms once the first member is written: before it, nothing moves (the
+      // first reads, the workspace's lock), and that wait is reported, not bounded; throughout, the line itself must be
+      // written at least every 250 ms, its text unchanged or not, so the page never looks stopped)
+      const gap = await c.ev(`(() => { const m = window.__marks, x = window.__texts; let k = x.findIndex((t) => !/^\\D*0 of /.test(t)); if (k < 0) k = m.length; let g = 0, at = k; for (let i = k + 1; i < m.length; i++) if (m[i] - m[i - 1] > g) { g = m[i] - m[i - 1]; at = i; } return [m.length, Math.round(g), x[at - 1], x[at], k > 0 && k < m.length ? Math.round(m[k] - m[0]) : -1]; })()`);
       console.log("(the longest progress gap: between " + JSON.stringify(gap[2]) + " and " + JSON.stringify(gap[3]) + ")");
-      check(gap[0] > 10 && gap[1] <= 250, `resp: progress at least every 250 ms while the archive is written (${gap[0]} updates, the longest gap ${gap[1]} ms)`);
+      // (diagnostics, information only: the longest gap between any two writes of the progress line, the same text
+      // included, and the longest gap of a 20 ms page heartbeat between the first and the last progress change)
+      const diag = await c.ev(`(() => { clearInterval(window.__hbt); const gapOf = (m) => { let g = 0, at = 0; for (let i = 1; i < m.length; i++) if (m[i] - m[i - 1] > g) { g = m[i] - m[i - 1]; at = m[i - 1]; } return [Math.round(g), Math.round(at)]; }; const a = window.__marks[0], b = window.__marks[window.__marks.length - 1]; return { writes: (window.__raw ?? []).length, writeGap: gapOf(window.__raw ?? []), heartbeatGap: gapOf(window.__hb.filter((t) => t >= a && t <= b)), changes: [Math.round(a), Math.round(b)] }; })()`);
+      console.log("(progress diagnostics: " + JSON.stringify(diag) + ")");
+      check(gap[0] > 10 && gap[4] >= 0 && gap[1] <= 250, `resp: once the first member is written, progress moves at least every 250 ms (${gap[0]} updates, the longest gap ${gap[1]} ms; the wait before the first member ${gap[4]} ms)`);
+      check(diag.writes > 10 && diag.writeGap[0] <= 250, `resp: the progress line is written at least every 250 ms throughout (${diag.writes} writes, the longest gap ${diag.writeGap[0]} ms)`);
       check(c.errors.length === 0, "resp: no page errors: " + c.errors.slice(0, 3).join(" | "));
     } finally { await c.close(); }
   }
