@@ -268,9 +268,12 @@ try {
     await sleep(2500);
     const o2 = await outs();
     ok((await shown()).some((v) => v.includes("AGENT-RAN")) && !/AGENT-RAN/.test(o2), "the agent's change is shown, and runs nothing (no applyEdits, no autorun)", { o2, cells: await shown() });
-    // ---- a Run runs that cell only. The person runs the agent's cell (it reads x: AGENT-RAN 1), then changes x and runs
+    // ---- a Run runs that cell only. The person runs x = 1 and the agent's cell (it reads x: AGENT-RAN 1), then changes x and runs
     // that cell alone: the agent's cell isn't rerun with it (the reactive notebook's autorun would rerun it, a stale
     // descendant: notebook.js 843; a cell changed and not yet run is never autorun, so this is the case it would run)
+    const nA = await ev(`${cellJs(0)}.querySelector('.n').textContent`);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`${cellJs(0)}.querySelector('.n').textContent !== ${JSON.stringify(nA)}`, 60000);
     await ev(`${cellJs(1)}.querySelector('.runb').click()`);
     await until(`/AGENT-RAN 1/.test(${cellJs(1)}.querySelector('.out').textContent)`, 60000);
     await ev(`(() => { const t = ${cellJs(0)}.querySelector('textarea'); t.focus(); t.select(); })()`);
