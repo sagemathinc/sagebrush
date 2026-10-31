@@ -377,8 +377,9 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
 {
   const BIG = 2 ** 40, Q = C.LIMITS.passQuota;
   const drain = (g) => { for (;;) { const r = g.next(); if (r.done) return r.value; } };
-  // (stepped: the most work any one step did)
-  const stepped = (R, g) => { let w = R.work(), most = 0; for (;;) { const r = g.next(), d = R.work() - w; w = R.work(); most = Math.max(most, d); if (r.done) return most; } };
+  // (stepped: the most work any one step did, allocations apart: each typed array is a step of its own, charged its
+  //  size, at most 2^16; every other step does at most the quota, plus what one unit's walk adds)
+  const stepped = (R, g) => { let w = R.work(), most = 0; for (;;) { const r = g.next(), d = R.work() - w; w = R.work(); if (r.done) return most; if (R.lastStep()?.kind === "alloc") { if (d > 1 << 16) return Infinity; } else most = Math.max(most, d); } };
   const same = (u, as, budget = BIG) => { const A = C.resolver(u, budget), B = C.resolver(u, budget, { pass: true }); const most = stepped(B, B.prepare(as)); return { eq: as.every((a) => JSON.stringify(A.resolve(a)) === JSON.stringify(B.resolve(a))), most, stats: B.passStats() }; };
   let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   const alph = ["a", "b", "ab", "word ", "\n", " ", "x", "\u{1D4AA}", "é", "% c", "\\item ", "aaaa"];
@@ -426,6 +427,25 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   const R = C.resolver(bu, budget, { pass: true }); drain(R.prepare(bas));
   const w0 = R.work(), rs = bas.map((a) => R.resolve(a));
   check("shared pass: out of budget in the pass: unresolved, no further search, never over the budget", rs.every((r) => r.status === "unresolved") && R.work() === w0 && R.work() <= budget, { work: R.work(), budget, statuses: [...new Set(rs.map((r) => r.status))] });
+}
+
+// ---- the shared pass's vectors (comments-vectors.json): "semantic", made once from the core before the pass, and
+// "budget", the pass's finite-budget contract; the Python port checks the same
+{
+  const { readFileSync } = await import("node:fs");
+  const V = JSON.parse(readFileSync(new URL("./comments-vectors.json", import.meta.url), "utf8"));
+  const drain = (g) => { for (;;) { const r = g.next(); if (r.done) return r.value; } };
+  let sem = V.semantic?.length > 0, bud = V.budget?.length > 0;
+  for (const c of V.semantic ?? []) for (const force of [false, true]) {
+    const R = C.resolver(c.text, 2 ** 40, { pass: force }); drain(R.prepare(c.anchors));
+    if (JSON.stringify(c.anchors.map((a) => R.resolve(a))) !== JSON.stringify(c.out)) sem = false;
+  }
+  for (const c of V.budget ?? []) {
+    const R = C.resolver(c.text, c.budget, { pass: c.force }); drain(R.prepare(c.anchors));
+    if (JSON.stringify([c.anchors.map((a) => R.resolve(a)), R.work(), R.passStats()]) !== JSON.stringify([c.out, c.work, c.stats])) bud = false;
+  }
+  check("shared pass vectors: the semantic cases (the core before the pass), on both paths", sem, { n: V.semantic?.length });
+  check("shared pass vectors: the budget cases, results, work and path", bud, { n: V.budget?.length });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
