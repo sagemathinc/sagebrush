@@ -533,6 +533,53 @@ try {
     await until(`/after reconnect/.test(sagebrush.notebook.cells()[${Y}].el.querySelector('.out')?.textContent ?? '')`, 30000);
     ok(/False after reconnect/.test(await out(Y)), `Reconnect: a fresh kernel, its variables gone, and it runs (${JSON.stringify((await out(Y)).trim())})`);
   }
+  // 16. an import interrupted by Stop leaves no half-made module (Oct 31, found as 14(c)'s intermittent failure: a Stop
+  // during the interpreter's first `import time` left an empty `time` in sys.modules, so a later `time.sleep` raised
+  // AttributeError).  Deterministic here: a finder's module waits in its exec_module the first time it is loaded, and
+  // Stop interrupts it there; the next import must run it again and get a whole module (src/runtime/modules.ts
+  // dropFailed; the builtin path, and the Python-file loader's: test/import-failed.test.ts)
+  {
+    const lat = 400;
+    await goto(base + `?remote=1&latency=${lat}`);
+    const A = await newCell(), B = await newCell(), C = await newCell();
+    await connect(lat);
+    await setCode(A, [
+      "import sys, time, types",
+      "class SlowFinder:",
+      "    loads = 0",
+      "    def find_spec(self, name, path=None, target=None):",
+      "        if name != 'slowmod':",
+      "            return None",
+      "        try:",
+      "            from importlib.machinery import ModuleSpec",
+      "        except ImportError:",
+      "            return types.SimpleNamespace(name=name, loader=self)",
+      "        return ModuleSpec(name, self)",
+      "    def create_module(self, spec):",
+      "        return None",
+      "    def exec_module(self, m):",
+      "        SlowFinder.loads += 1",
+      "        m.started = True",
+      "        if SlowFinder.loads == 1:",
+      "            time.sleep(30)",
+      "        m.done = True",
+      "sys.meta_path.insert(0, SlowFinder())",
+      "print('finder ready')",
+    ].join("\n"));
+    await clickRun(A);
+    await until(`/finder ready/.test(sagebrush.notebook.cells()[${A}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    await setCode(B, "import slowmod as s1\nprint('B', s1.done)");
+    await clickRun(B);
+    await until(`sagebrush.notebook.kernel.gateway.executions.some((x) => x.code.includes('import slowmod as s1'))`, 30000);
+    await sleep(1500);
+    await ev("document.querySelector('#stop').click(); true");
+    await until(`/KeyboardInterrupt/.test(sagebrush.notebook.cells()[${B}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    await setCode(C, "import sys\nimport slowmod as s2\nprint('C', hasattr(s2, 'done'), sys.modules['slowmod'] is s2)");
+    await clickRun(C);
+    await until(`/C (True|False)/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 30000);
+    ok(/KeyboardInterrupt/.test(await out(B)) && /C True True/.test(await out(C)),
+      `16: an import Stop interrupted leaves no half-made module: the next import runs it again, whole (${JSON.stringify((await out(B)).trim().slice(-40))}; ${JSON.stringify((await out(C)).trim())})`);
+  }
 } catch (e) {
   ok(false, `the test ran to its end: ${e?.message ?? e}`);
   try {

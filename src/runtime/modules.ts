@@ -2,7 +2,7 @@
 
 import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
-import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, typeName, callKw, callObj, positionalArray } from "./object";
+import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, dictDelete, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
 import { INTR } from "./interrupt";
 import { fullGc } from "./gc";
@@ -143,7 +143,14 @@ export function importModule(name: string): any {
       let mod = callObj(getattr(ld, "create_module"), [spec]);
       if (mod === null || mod === undefined) mod = Ty.newModule(name);
       dictSet(sysModules, name, mod);
-      callObj(getattr(ld, "exec_module"), [mod]);
+      try {
+        callObj(getattr(ld, "exec_module"), [mod]);
+      } catch (e) {
+        // (a module whose exec raised, a Stop's KeyboardInterrupt included, leaves sys.modules, as CPython's
+        // _load_unlocked deletes the entry, whatever it holds by then: else the next import returns it half-made)
+        dictDelete(sysModules, name);
+        throw e;
+      }
       if (dot > 0) bindChild(name, dot, mod);
       return mod;
     }
@@ -153,7 +160,14 @@ export function importModule(name: string): any {
   if (f !== undefined) {
     m = Ty.newModule(name);
     dictSet(sysModules, name, m);
-    f(m);
+    try {
+      f(m);
+    } catch (e) {
+      // (likewise a builtin whose filling raised: a Stop during the first `import time`, whose factory imports
+      // lib/_pytime.py, left a `time` with no sleep for every later import)
+      dictDelete(sysModules, name);
+      throw e;
+    }
     checkModuleArity(m);
   } else {
     m = loader.load(name);
