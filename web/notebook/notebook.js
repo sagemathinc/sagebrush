@@ -848,22 +848,37 @@ export function createNotebook(root, opts = {}) {
   // Run a cell's code (`forget`: global names to delete first); resolves to
   // {ok, ms, stopped} when it is done.
   // (`extra`: more for the kernel, a remote run's gate)
-  function execCell(cell, code, forget = [], scoped = null, extra = null) {
-    forgetInteracts(cell.out);
-    cell.out.textContent = "";
-    cell.time.textContent = "";
-    cell.stoppedAfter = null;
-    freshen(cell);
-    cell.el.classList.remove("cancelled", "error");
-    if (!kernel) { appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true); return Promise.resolve({ ok: false, ms: 0, stopped: true }); }
+  // (`viaWave`: a remote kernel's wave sends it (remote-kernel.js executeWave): called with the code, the options
+  // and the sink instead of the kernel's execute; the cell's old output is cleared only when its run starts, or
+  // when it is told something, so that one the wave doesn't run keeps it, as one the scheduler doesn't run does)
+  function execCell(cell, code, forget = [], scoped = null, extra = null, viaWave = null) {
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      forgetInteracts(cell.out);
+      cell.out.textContent = "";
+      cell.time.textContent = "";
+      cell.stoppedAfter = null;
+      freshen(cell);
+      cell.el.classList.remove("cancelled", "error");
+    };
+    if (!viaWave) clear();
+    if (!kernel) {
+      clear();
+      appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true);
+      return Promise.resolve({ ok: false, ms: 0, stopped: true });
+    }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
     armStop(cell);
     let failed = false;
     let waited = 0, waitFrom = null;
     const k = kernel;
-    return cellSeed(cell).then((seed) => new Promise((resolve) => k.execute(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
+        clear();
         cell.el.classList.replace("queued", "running");
         const t0 = (cell.t0 = performance.now());
         cell.timer = setInterval(() => {
@@ -914,6 +929,7 @@ export function createNotebook(root, opts = {}) {
         if (waitFrom !== null) waited += performance.now() - waitFrom;
         waitFrom = null;
         const ran = cell.el.classList.contains("running") && cell.t0 != null ? Math.max(0, performance.now() - cell.t0 - waited) : null;
+        if (message) clear();
         settle(cell);
         cell.n.textContent = "[ ]";
         cell.stoppedAfter = ran;
@@ -927,7 +943,10 @@ export function createNotebook(root, opts = {}) {
         cell.n.textContent = "[ ]";
         // (not sent at all: a remote run that wasn't approved, or changed; the scheduler marks it stale)
         if (info?.notRun) {
-          if (info.note) appendText(cell.out, info.note, true);
+          if (info.note) {
+            clear();
+            appendText(cell.out, info.note, true);
+          }
           return resolve({ ok: false, ms: 0, notRun: info.notRun, ...(info.note ? { note: info.note } : {}) });
         }
         resolve({ ok: false, ms: 0, stopped: true });
@@ -991,6 +1010,35 @@ export function createNotebook(root, opts = {}) {
           return cell ? execCell(cell, code, forget, scoped, extra).then((x) => { markEdited(cell); return x; }) : Promise.resolve({ ok: false, ms: 0, stopped: true });
         },
         forget: (names, _cells, extra) => new Promise((resolve) => k.execute("", { mode, forget: names, ...(extra ?? {}) }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: resolve, stopped: resolve, skipped: resolve })),
+        // one wave (a remote kernel that sends them: remote-kernel.js executeWave; the gate's host checks it): each
+        // entry that runs gets its cell's sink (execCell, its output cleared only when it starts); the others are
+        // placeholders.  null if a cell to run is gone (nothing was sent): the scheduler runs cell by cell.
+        ...(k.executeWave ? {
+          async executeWave(plan, extra) {
+            if (!shown()) return null;
+            const cells = plan.entries.map((e) => (e.run ? cellById(e.cell) : null));
+            if (plan.entries.some((e, i) => e.run && !cells[i])) return null;
+            const regs = plan.entries.map(() => null);
+            let registered;
+            const all = new Promise((r) => (registered = r));
+            let pending = plan.entries.filter((e) => e.run).length;
+            if (!pending) registered();
+            const results = plan.entries.map((e, i) => (e.run ? execCell(cells[i], e.run.code, e.run.forget, e.run.scoped, extra, (code, opts, sink) => {
+              regs[i] = { code, opts, sink };
+              if (--pending === 0) registered();
+            }) : Promise.resolve(undefined)));
+            await all;
+            const policy = (e) => ({ cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs });
+            const r = await k.executeWave({
+              entries: plan.entries.map((e, i) => (e.run ? { ...policy(e), ...regs[i] } : { ...policy(e), place: e.place, ...(e.note ? { note: e.note } : {}) })),
+              policy: plan.policy, forget: plan.forget, mode,
+            }, extra?.gate);
+            const res = await Promise.all(results);
+            cells.forEach((c) => c && markEdited(c));
+            if (r.refused) return { refused: r.refused };
+            return { decisions: r.decisions, results: res.map((x, i) => (r.decisions[i]?.kind === "run" ? x : undefined)) };
+          },
+        } : {}),
         // page-order scoping (src/rename.ts in the analyzer's worker)
         ...(opts.analyzer?.rename ? { rename: (q) => opts.analyzer.rename({ ...q, mode, sep: SCOPE_SEP }) } : {}),
         status(id, st) {

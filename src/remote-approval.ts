@@ -321,6 +321,9 @@ export const BUDGET = Object.freeze({
 export type BudgetKind = keyof typeof BUDGET;
 const KINDS = Object.keys(BUDGET) as BudgetKind[];
 
+// (no cells)
+const NONE: ReadonlySet<string> = new Set();
+
 /** The note for anything over a cap or a budget. */
 export const TOO_LARGE = "too large for one remote action; run a smaller selection";
 
@@ -1095,17 +1098,18 @@ export class Approvals {
   // Provenance validity in a snapshot (the plan's §3.2): a record in its
   // binding and incarnation, for the cell's eid there, approved, with the
   // parents it has there, each of them valid with the vid the record names.
-  private validIn(s: Snapshot, eids: Map<string, string | undefined>): (id: string) => boolean {
+  // (`gone`: cells whose records are taken as absent: a wave's initial forget, about to delete their names)
+  private validIn(s: Snapshot, eids: Map<string, string | undefined>, gone: ReadonlySet<string> = NONE): (id: string) => boolean {
     const memo = new Map<string, boolean>();
     const valid = (id: string): boolean => {
       const m = memo.get(id);
       if (m !== undefined) return m;
       memo.set(id, false); // (a cycle is never valid)
       const c = s.cells.get(id);
-      const r = c?.record;
+      const r = gone.has(id) ? undefined : c?.record;
       const e = eids.get(id);
       let ok = !!c && !!r && r.xi.binding === s.ctx.binding && r.xi.incarnation === s.ctx.incarnation && r.eid === e && this.isApproved(e);
-      if (ok) ok = sameSet(c!.parents, r!.pi.map(([p]) => p)) && r!.pi.every(([p, v]) => valid(p) && s.cells.get(p)?.record?.vid === v);
+      if (ok) ok = sameSet(c!.parents, r!.pi.map(([p]) => p)) && r!.pi.every(([p, v]) => valid(p) && !gone.has(p) && s.cells.get(p)?.record?.vid === v);
       memo.set(id, ok);
       return ok;
     };
@@ -1119,7 +1123,9 @@ export class Approvals {
    * verdict is stale: skip (never send, nor wait).  A send verdict is then
    * admitted (admit) synchronously right before the fetch that sends it.
    */
-  async check(frozen: Frozen, request: string): Promise<Verdict> {
+  async check(frozen: Frozen, request: string, opts: { forgotten?: Iterable<string> } = {}): Promise<Verdict> {
+    // (a wave's initial forget: the cells whose names it deletes first, their records taken as absent; nothing is changed)
+    const gone: ReadonlySet<string> = opts.forgotten ? new Set(opts.forgotten) : NONE;
     let s: Snapshot;
     try {
       s = this.snap(frozen.cells);
@@ -1129,7 +1135,7 @@ export class Approvals {
     }
     let v: { send: true; plan: Planned[] } | { send: false; wait: string } | { send: false; skip: string };
     try {
-      v = await this.verdictIn(s, frozen, request);
+      v = await this.verdictIn(s, frozen, request, gone);
     } catch (e) {
       if (e instanceof TooLarge) return { send: false, skip: TOO_LARGE };
       throw e;
@@ -1147,7 +1153,7 @@ export class Approvals {
   }
 
   // The submit check's verdict on a snapshot (a send verdict without its token: check() adds it).
-  private async verdictIn(s: Snapshot, frozen: Frozen, request: string): Promise<{ send: true; plan: Planned[] } | { send: false; wait: string } | { send: false; skip: string }> {
+  private async verdictIn(s: Snapshot, frozen: Frozen, request: string, gone: ReadonlySet<string> = NONE): Promise<{ send: true; plan: Planned[] } | { send: false; wait: string } | { send: false; skip: string }> {
     // 1. the approvals and the document it was queued under
     if (s.approvalEpoch !== frozen.approvalEpoch || s.doc !== frozen.doc) return { send: false, skip: "approvals were reset or the notebook was replaced" };
     // 5. the kernel it was queued for, still bound and ready
@@ -1175,7 +1181,7 @@ export class Approvals {
         if (j !== undefined && j >= i) return { send: false, skip: "the batch is not in dependency order" };
       }
     }
-    const valid = this.validIn(s, eids);
+    const valid = this.validIn(s, eids, gone);
     for (const a of [...s.cells.keys()].filter((id) => !inBatch.has(id)).sort()) {
       if (!valid(a)) return { send: false, wait: `an ancestor has to run first (${a})` };
     }
@@ -1187,7 +1193,7 @@ export class Approvals {
       const cell = frozen.cells[i];
       const c = s.cells.get(cell)!;
       const xi: ExecutionIdentity = { binding, incarnation: ctx.incarnation, request, cell, batch: i };
-      const pi = c.parents.map((p) => [p, planned.get(p) ?? s.cells.get(p)!.record!.vid] as [string, string]).sort(byId);
+      const pi = c.parents.map((p) => [p, planned.get(p) ?? (gone.has(p) ? "" : s.cells.get(p)!.record!.vid)] as [string, string]).sort(byId);
       const eid = eids.get(cell)!;
       this.budget.charge("vids", 1);
       const vid = await this.hash(jcs(["vid", 2, xi, eid, pi]));
@@ -1231,6 +1237,71 @@ export class Approvals {
     }
     v.token.admittedSnapshot = Object.freeze({ ...now, cells });
     return true;
+  }
+
+  /**
+   * A wave's admission, the one transition (waves design r3, §3.6), synchronously right before the fetch that
+   * sends it, all or nothing:
+   *   (a) refused, with nothing changed, unless it is a send verdict whose token is unconsumed, nothing it was
+   *       checked on changed (the state before any invalidation: what check saw), and the latest map has room;
+   *   (b) the initial forget's cells (`forgetCells`): their records go, and a pending attempt of theirs is fenced
+   *       (a fresh latest number no admitted job holds), as forgotten() does;
+   *   (c) THEN this batch's attempts are numbered, each planned cell's latest is its attempt and its record goes
+   *       (a cell in both ends with this batch's attempt);
+   *   (d) the token is consumed, and the state after (b) and (c) captured: what a retry must still find.
+   * Nothing calls forgotten() after it: stillAdmitted holds, and the batch's terminals apply, until something
+   * outside changes (a delete, a reset, clearRecords, a restart, a later forgotten()).
+   */
+  admitWave(v: Verdict, forgetCells: Iterable<string>): boolean {
+    if (!v.send || v.token.consumed) return false;
+    let now: Snapshot;
+    try {
+      now = this.snap(v.token.cells);
+    } catch (e) {
+      if (e instanceof TooLarge) return false;
+      throw e;
+    }
+    if (!this.same(v.token.snapshot, now)) return false;
+    const fresh = v.plan.filter((p) => !this.latest.has(p.cell)).length;
+    if (this.latest.size + fresh > CAPS.maps) return false;
+    // (everything that can fail is built first: the admitted snapshot, the post-state, from the snapshot just
+    // compared; the commit below only sets and deletes map entries)
+    const forget = [...forgetCells];
+    const cells = new Map(now.cells);
+    for (const id of [...forget, ...v.plan.map((p) => p.cell)]) {
+      const c = cells.get(id);
+      if (c) cells.set(id, Object.freeze({ spec: c.spec, parents: c.parents, record: undefined }));
+    }
+    const admitted = Object.freeze({ ...now, cells });
+    for (const id of forget) {
+      this.records.delete(id);
+      if (this.latest.has(id)) this.latest.set(id, ++this.attempts);
+    }
+    v.token.consumed = true;
+    for (const p of v.plan) {
+      p.attempt = ++this.attempts;
+      this.latest.set(p.cell, p.attempt);
+      this.records.delete(p.cell);
+    }
+    v.token.admittedSnapshot = admitted;
+    return true;
+  }
+
+  /**
+   * Whether a wave of these cells may be formed, with no effect at all (nothing hashed, built or charged; the
+   * budget only read): each has a spec whose eid is already known and approved, and their sendUnits together fit
+   * in what is left of the action's budget.  If not, the action runs cell by cell (where a cell that isn't
+   * approved is left stale on its own, rather than refusing the whole wave).
+   */
+  predictSendable(ids: readonly string[]): boolean {
+    let units = 0;
+    for (const id of ids) {
+      const spec = this.graph.spec(id);
+      const eid = spec ? this.memo.get(spec)?.eid : undefined;
+      if (eid === undefined || !this.approved.has(eid)) return false;
+      units += sendUnits(spec!);
+    }
+    return this.budget.fits("sendUnits", units);
   }
 
   /**
