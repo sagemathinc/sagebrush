@@ -164,8 +164,12 @@ const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [joi
 // the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
 const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult]];
-for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult]) {
+// The Storage panel's "Export all current files (.zip)" (web/workspace/export, export plan E1 r2c): a chunk of its
+// own and its worker, fetched only when the button is clicked, so the page's start doesn't carry them
+const exportResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "entry.ts")], outdir: join(here, "dist"), naming: "sagebrush-export.js", target: "browser", format: "esm", minify: true, define: MERGE_DEFINE });
+const exportWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-export-worker.js", target: "browser", format: "esm", minify: true });
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the export", exportResult], ["the export's worker", exportWorkerResult]];
+for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, exportResult, exportWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);

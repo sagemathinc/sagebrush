@@ -580,6 +580,20 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
 ### 7.11 Export and import (William, Oct 19)
 
+**Built so far: the browser's Files-mode export (E1, Oct 30).** It follows the reviewed export plan
+(E1 r2c, Oct 30), which rules where it is narrower or stricter than this section:
+- it is in the Storage panel only, as "Export all current files (.zip)", not in the File menu (William, Oct 30);
+- the file is named `sagebrush-YYYY-MM-DD.zip` (`-partial` for an explicit partial export), and the importer
+  recognizes a bundle by its `manifest.json`, never by its name;
+- `manifest.json` is the bundle's last member, written from what was written, so its sizes and hashes are those of
+  the bundle's bytes; each entry also records `captured`, when its member was read;
+- the caps below are checked in preflight and again on the actual output, so a file that grows during an export
+  stops it cleanly: unlike the sentence below about never stopping partway, an export can stop at a cap, but it
+  never produces a bundle the importer would refuse;
+- files that aren't on this device are listed, and an export leaves them out only when asked to, recording them in
+  `manifest.omitted`.
+
+
 **One click exports the whole workspace as one file, and Import takes such a file back.** This is how a person keeps a copy off Sagebrush, and how they move from one Sagebrush site to another.
 
 **Two modes:**

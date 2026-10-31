@@ -1228,6 +1228,38 @@ export class Workspace {
     });
   }
 
+  // ------------------------------------------------------------ for "Export all current files" (export plan E1 r2c §2)
+  /** Up to `limit` rows of `entries` after path `after` (null: from the first), in path order, Trash's and the root's
+   * included (the caller leaves them out).  Refused `busy` while a large move is being applied: the export pages the
+   * physical rows, which are the logical tree only when no move record is active. */
+  async entriesPage(after: string | null, limit: number): Promise<Entry[]> {
+    this.open();
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      if ((await entriesOf(tx)).active) throw busyError();
+      return (await req(tx.objectStore("entries").getAll(after === null ? undefined : IDBKeyRange.lowerBound(after, true), limit))) as Entry[];
+    });
+  }
+  /** Up to `limit` op records after seq `after`, in order. */
+  async opsPage(after: number, limit: number): Promise<Op[]> {
+    return inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(after, true), limit)));
+  }
+  /** The highest seq of op records deleted (dropOps): ops after a seq below it may be gone. */
+  async opsFloor(): Promise<number> {
+    return ((await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("opsFloor")))) as number | undefined) ?? 0;
+  }
+  /** An entry and its contents read together, holding the workspace's lock (exclusive across tabs): what is returned
+   * is one state of that entry (the export's capture). */
+  async readLocked(p: string): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
+    return this.locked(() => this.readNow(p));
+  }
+  /** The last export prepared on this device, of this workspace (meta "export:last"), or undefined. */
+  async lastExport(): Promise<{ at: number; partial: boolean; members: number; bytes: number } | undefined> {
+    return (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("export:last")))) as any;
+  }
+  async setLastExport(r: { at: number; partial: boolean; members: number; bytes: number }): Promise<void> {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(r, "export:last"); });
+  }
+
   /** One entry, or undefined.  `opts.admit` (the host's, AdmitCheck): asked in the same read, before it answers. */
   async stat(p: string, opts: Admitted = {}): Promise<Entry | undefined> {
     const q = path(p), admit = admitOf(opts.admit);
