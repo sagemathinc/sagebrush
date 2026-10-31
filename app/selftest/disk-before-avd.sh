@@ -18,12 +18,14 @@ avail_mb() {  # free MB on the file system holding $1 (df -P: one line, column 4
 }
 echo "disk before the AVD (runner image ${ImageVersion:-unknown}):"
 df -h "$HOME" / || true
+t0=$SECONDS
 for d in "${UNUSED[@]}"; do
   if [ -d "$d" ]; then
     echo "removing $d (unused by this job)"
     sudo rm -rf -- "$d"
   fi
 done
+echo "removal took $((SECONDS - t0)) s"
 echo "after removing the unused toolchains:"
 df -h "$HOME" / || true
 have=$(avail_mb "$HOME") || { echo "FAIL: can't read the free space of $HOME from df"; exit 1; }
