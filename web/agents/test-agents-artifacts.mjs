@@ -262,7 +262,7 @@ try {
 
     // ---- an incoming change runs nothing
     await sleep(500);
-    await write("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('AGENT-RAN', x)" }, { type: "markdown", code: "Some *text*" }]);
+    await write("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('AGENT-RAN', x)" }, { type: "markdown", code: "Some *text*" }], { autorun: "always" });
     await until(`[...document.querySelectorAll('${PANE} .cell textarea')].some((t) => t.value.includes('AGENT-RAN'))`, 10000).catch(() => {});
     await sleep(2500);
     const o2 = await outs();
