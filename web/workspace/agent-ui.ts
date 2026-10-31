@@ -5,6 +5,7 @@
 //   mountAgentPairing(ws, { button })   wires a page's button (or none: then only a ?pair=CODE&port=N link opens
 //                                       it), and offers to reconnect a remembered agent.
 
+import { pairLink } from "./pair-link";
 import { AgentPairing, type GrantStore, type Kept } from "./agent-pair";
 import { TRASH } from "./paths";
 
@@ -57,7 +58,7 @@ export function floatingButton(): HTMLElement {
 }
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
@@ -127,6 +128,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   function watch(p: AgentPairing) {
     pairing = p;
+    o.onPairing?.(p);
     let was = false;
     p.onChange(() => {
       showBar();
@@ -162,13 +164,33 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         if (!Number.isInteger(n) || n < 1 || n > 65535) { err.textContent = "The port is the number the agent gave with the code."; return; }
         if (!c.value.trim()) { err.textContent = "Enter the code the agent gave."; return; }
         go.disabled = true;
+        // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
+        // may never say so: the connection gets 8 s, and a policy violation is said at once)
+        let blocked = "";
+        const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
+        document.addEventListener("securitypolicyviolation", onViolation);
         try {
           const p = make(n, { code: c.value });
           watch(p);
-          await p.paired();
+          await Promise.race([
+            p.paired(),
+            new Promise((_, reject) => {
+              const t0 = Date.now();
+              const tick = () => {
+                if (p.state !== "connecting") return;
+                if (blocked || Date.now() - t0 > 8000) {
+                  void p.revoke(blocked || "no answer from the agent");
+                  reject(new Error(blocked ? `Couldn't connect: ${blocked}.` : "Couldn't reach the agent: is it still running, and did this browser allow the page to reach apps on this device?"));
+                } else setTimeout(tick, 200);
+              };
+              tick();
+            }),
+          ]);
+          document.removeEventListener("securitypolicyviolation", onViolation);
           close();
           await grantDialog(p);
         } catch (e) {
+          document.removeEventListener("securitypolicyviolation", onViolation);
           go.disabled = false;
           const m = String((e as Error).message ?? e);
           const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
@@ -198,8 +220,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   }
 
   if (o.button) o.button.addEventListener("click", () => connect());
-  const q = new URLSearchParams(location.search);
-  if (q.has("pair")) connect(q.get("pair") ?? "", q.get("port") ?? "");
+  const link = pairLink();
+  if (link) connect(link.code, link.port);
   else void reconnect();
   return { connect, get pairing() { return pairing; } };
 }
