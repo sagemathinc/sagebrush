@@ -560,11 +560,11 @@ function renderHeader() {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
-  $("#connect").textContent = live() ? "Connected" : "Connect your agent";
+  $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
-    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own Claude or Codex (\"Use your own agent\"). Chats are kept in this browser only.";
+    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
 }
 
 renderHeader();
