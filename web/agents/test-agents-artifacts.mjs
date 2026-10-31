@@ -1094,8 +1094,10 @@ try {
     await pair();
     ok(notes.some((m) => m.method === "page.features" && m.params?.features?.includes("notebook.edit")), "with a helper that says notebook.edit, the page offers it once granted (page.features)");
     await converse();
-    const turn = `t${++turnN}`;
+    let turn = `t${++turnN}`;
     event(turn, { type: "turn_started" });
+    // (a new running turn, after one finished: what the following cases' edits come from)
+    const newTurn = () => { turn = `t${++turnN}`; event(turn, { type: "turn_started" }); };
     // a notebook with outputs: c0 and c1 code (each its output), c2 markdown; ids tagged so its record is found
     let made = 0;
     const refs = new Map();
@@ -1113,6 +1115,9 @@ try {
       return { path, ids: cells.map((c) => c.id) };
     };
     const open = (path) => openNotebook(path, { finish: false, turn });
+    // (another tab's long readwrite on a store, holding the page's reads and writes of it for ms: "notebooks" in
+    // "sagebrush", or "entries" in "sagebrush-workspace", the index a stat reads)
+    const holdDb = (db, store, ms) => ev(`(() => { const r = indexedDB.open(${JSON.stringify(db)}); r.onsuccess = () => { const d = r.result, t = d.transaction(${JSON.stringify(store)}, "readwrite"), st = t.objectStore(${JSON.stringify(store)}), end = Date.now() + ${ms}; const spin = () => { if (Date.now() < end) st.get("__hold__").onsuccess = spin; }; spin(); t.oncomplete = () => d.close(); }; return true; })()`);
     const readOf = async (path) => {
       const r = await call("workspace.read", { path });
       return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
@@ -1299,6 +1304,108 @@ try {
       } finally {
         if (fence0) await putRecord(fence0);
       }
+    }
+    // E21 (astra's C1): the authority lost while the edit waits, at each of its waits W1-W4 (r2.6), by the turn
+    // finishing (a) or the person revoking the grant (b); E21c: another turn started meanwhile. Refused, nothing changed.
+    const lose = async (how) => {
+      if (how === "a") event(turn, { type: "turn_finished", outcome: "completed" });
+      else if (how === "c") { event(turn, { type: "turn_finished", outcome: "completed" }); newTurn(); }
+      else await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Revoke')?.click()`);
+    };
+    // (after a revoke: paired again, a new chat and turn, as before this section's first case)
+    const regain = async (how) => {
+      if (how === "b") { await ev(`document.querySelector('#new')?.click()`); await sleep(700); await pair(); await converse(); turn = `t${++turnN}`; event(turn, { type: "turn_started" }); }
+      else if (how === "a") newTurn();
+    };
+    for (const w of ["W1", "W2", "W3", "W4"]) for (const how of w === "W3" ? ["a", "b", "c"] : ["a", "b"]) {
+      const { path, ids } = await mk();
+      if (w !== "W1") await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      if (w === "W1") await holdDb("sagebrush-workspace", "entries", 3000); // (its mount's stat waits)
+      if (w === "W2") { await lockWorkspace(); await typeInto(0, " # mine"); } // (its preliminary save waits for the lock)
+      if (w === "W3") await holdDb("sagebrush", "notebooks", 3000); // (the record read waits)
+      if (w === "W4") await holdDb("sagebrush-workspace", "entries", 3000); // (the document's stat waits; the record read doesn't)
+      const pending = edit(path, r, { set: [{ id: ids[1], source: "print('AGENT')" }] });
+      await sleep(700);
+      await lose(how);
+      if (w === "W2") await ev(`window.__release()`);
+      const res = await pending;
+      await sleep(900);
+      const after = await rec(path);
+      const agentNone = !after.cells.some((c) => /AGENT/.test(c.code ?? ""));
+      const name = how === "c" ? "E21c" : `E21-${w}${how}`;
+      const what = how === "a" ? "the turn finished" : how === "b" ? "the grant was revoked" : "another turn started";
+      ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
+      await regain(how === "c" ? "none" : how);
+    }
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
+    // resolves: never answered ok, nothing applied or written
+    const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      await refuseNone();
+      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await typeInto(0, " # p");
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(23)" }] });
+      await refuseNone();
+      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(await rec(path), before) && /# p/.test((await shown())[0]) && (await shown())[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
+    }
+    // E23, E23b (C3): the rollback keeps the revision it was saved at, so the person's next save conflicts with another
+    // tab's change and merges it: E23 with that change made after the rollback, E23b with it made during the apply
+    const otherTab = (ref, i, text) => ev(`(async () => { const r = await ${IDB}.get(${JSON.stringify(ref)}); r.cells[${i}].code = ${JSON.stringify(text)}; r.rev = (r.rev ?? 0) + 1; await ${IDB}.put(r); return r.rev; })()`);
+    for (const during of [false, true]) {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const ref = refs.get(path);
+      // (during: the hook writes the other tab's change, as that tab would, before it throws)
+      const inPage = `const x = await ${IDB}.get(${JSON.stringify(ref)}); x.cells[2].code = "# other tab"; x.rev = (x.rev ?? 0) + 1; await ${IDB}.put(x);`;
+      await ev(`(window.__sbTestApplyEdits = (comp, e) => { comp.applyEdits({ set: e.set.slice(0, 1), insert: [], remove: [] }, { run: false }); ${during ? `return (async () => { ${inPage} throw new Error("injected"); })();` : `throw new Error("injected");`} }, true)`);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 8" }, { id: ids[1], source: "print(8)" }] });
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      if (!during) await otherTab(ref, 2, "# other tab");
+      await typeInto(1, " # mine");
+      await sleep(2500); // (its save, its conflict with the other tab's write, the merge and its save)
+      const cs = (await rec(path)).cells;
+      ok(!res.ok && cs[2].code === "# other tab" && /# mine/.test(cs[1].code) && cs[0].code === "x = 1", `${during ? "E23b" : "E23"}: after a rollback, another tab's change (made ${during ? "during the apply" : "after it"}) and the person's next edit both survive`, { res, cs: cs.map((c) => c.code) });
+    }
+    // E24 (board's BA12-1): the person types in another artifact while the agent edits a notebook, first one not open,
+    // then one open in a hidden tab: the pane stays, the focus and the caret too, and the notebook's tab says it changed
+    {
+      const draft = "/notes/draft.txt";
+      await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
+      await artifactTurn(draft, { finish: false, turn });
+      await until(`!!document.querySelector('${PANE} textarea')`);
+      const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.focus(); t.setSelectionRange(3, 3); return true; })()`);
+      const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      const results = [];
+      for (const hidden of [false, true]) {
+        const { path, ids } = await mk();
+        if (hidden) { await open(path); await ev(`${tabJs(draft)}.click()`); await sleep(300); }
+        await focusDraft();
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: ids[1], source: "print(24)" }] });
+        await sleep(300);
+        const st = await state();
+        const changedTab = await ev(`/changed/.test(${tabJs(path)}?.textContent ?? '')`);
+        const stored = (await rec(path)).cells[1].code === "print(24)";
+        results.push({ hidden, res: res.ok, st, changedTab, stored });
+      }
+      ok(results.every((x) => x.res && x.st.tab === draft && x.st.inDraft && x.st.caret === 3 && x.changedTab && x.stored), "E24: the agent's edit of a notebook (not open, then in a hidden tab) leaves the shown tab, the focus and the caret as they were; its tab says it changed; the edit is stored", results);
     }
     event(turn, { type: "turn_finished", outcome: "completed" });
   }

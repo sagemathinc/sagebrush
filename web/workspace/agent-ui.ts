@@ -59,7 +59,7 @@ export function floatingButton(): HTMLElement {
 }
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit) => Promise<unknown> } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
