@@ -71,9 +71,14 @@ function normalizers() {
     // (the one copy, inside the shell's "Content-Security-Policy" header value; VERSION; and the docs index's
     //  SHA-256, only where each side's is that side's file's)
     "sw.js": (a, b, baseFile, prodFile) => {
-      const at = b.indexOf(PAGE + LOOPBACK + ";"), key = b.lastIndexOf('"Content-Security-Policy":"', at);
-      if (at < 0 || key < 0 || b.slice(key + 27, at).includes('"')) return false;
-      let u = once(b, PAGE + LOOPBACK + ";", PAGE + ";");
+      // (the loopback addition undone only where PROD adds it to a base without it; a base that has it already, from
+      //  the PR that added it, compares as it is: then only VERSION and the docs index's SHA-256 may differ)
+      let u = b;
+      if (b.includes(PAGE + LOOPBACK + ";") && !a.includes(PAGE + LOOPBACK + ";")) {
+        const at = b.indexOf(PAGE + LOOPBACK + ";"), key = b.lastIndexOf('"Content-Security-Policy":"', at);
+        if (key < 0 || b.slice(key + 27, at).includes('"')) return false;
+        u = once(b, PAGE + LOOPBACK + ";", PAGE + ";");
+      }
       const docs = (s) => [...s.matchAll(/"docs-index-python\.json":\{"sha256":"([0-9a-f]{64})"/g)];
       const da = docs(a), db = docs(u ?? "");
       if (da.length !== db.length || da.length > 1) return false;
