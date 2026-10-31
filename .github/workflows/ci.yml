@@ -907,6 +907,8 @@ jobs:
               # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,
               # as a hosted preview has it)
               bun web/shell/test-panel-render.mjs
+              # (Tab completion, help, compgen and ls colours, the pure functions: plan-term-help-tab)
+              bun web/shell/test-panel-complete.mjs
               bun web/shell/panel-size.mjs
               node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
