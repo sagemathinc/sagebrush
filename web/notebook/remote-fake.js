@@ -17,6 +17,7 @@
 // fake.raw(method, re, () => Response).
 
 import { b64url, jwkThumbprint } from "./remote-client.js";
+import { newWaveState, waveDecide, waveRecord, waveRunResult, waveStop, waveEnvelopeInvalid } from "../../src/wave-policy.ts";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -60,11 +61,14 @@ export class FakeGateway {
     this.fetches = []; // every URL fetch was called with (before any check)
     this.insecure = []; // credential-bearing requests that followed a redirect (must stay empty)
     this.proofs = []; // the decoded {header, claims} of each proof seen
-    this.executions = []; // user phases that reached the kernel: {request, incarnation, code}
+    this.executions = []; // user phases that reached the kernel: {request, incarnation, code} (and a wave entry's index)
+    this.forgets = []; // the names each forget of a wave deleted, in order: {request, names, when: "before" | "after"}
+    // (what a wave's forget does in the kernel: the test's, or the preview's interpreter)
+    this.forget = async () => {};
     this.prep = () => "ok";
     this.kernel = async (code) => ({ events: [{ type: "stream", name: "stdout", text: `ran: ${code}\n` }], outcome: { status: "ok", ms: 1 } });
     this.complete = (code) => ({ matches: [code + "_x"], prefix: code });
-    this.faults = { loseReply: 0, oversizeAck: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null, silentStream: false, redirectTo: null };
+    this.faults = { loseReply: 0, oversizeAck: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null, silentStream: false, redirectTo: null, noStopLatch: false };
     this.pauses = new Map();
     this.intercepts = [];
     this.raws = [];
@@ -221,7 +225,7 @@ export class FakeGateway {
       const run = this.runs.get(id);
       if (!run || run.binding !== m[1]) return this.json(404, { error: "not-found" });
       if (m[3]) return this.stream(run, Number(u.searchParams.get("after")) || 0, signal);
-      return this.json(200, { request: run.request, state: run.outcome ? "done" : "running", ...(run.outcome ? { outcome: run.outcome } : {}) });
+      return this.json(200, { request: run.request, state: run.outcome ? "done" : "running", ...(run.outcome ? { outcome: run.outcome } : {}), ...(run.wave ? { entries: run.ends, stop: run.stop } : {}) });
     }
     return this.json(404, { error: "not-found" });
   }
@@ -243,6 +247,7 @@ export class FakeGateway {
       return this.ack(had, had.outcome ? "done" : "running");
     }
     if (b.busy) return this.json(409, { error: "busy" });
+    if (body.kind === "wave") return this.post_wave(b, body, digest);
     let killed;
     const run = {
       request: body.request, binding: b.binding, digest, code: body.payload.code, events: [], outcome: null, listeners: new Set(),
@@ -297,6 +302,88 @@ export class FakeGateway {
     this.terminal(b, run, r.outcome ?? { status: "ok", ms: 0 });
   }
 
+  // A wave (the waves design r3): validated before anything runs (refused as malformed, never admitted), then its
+  // initial forget, its entries in order under src/wave-policy.ts, each entry's terminal (an "end" event with its
+  // decision and, for a run, its outcome), the names of the entries it cancelled, and the wave's terminal.
+  post_wave(b, body, digest) {
+    const w = body.payload;
+    const bad = waveEnvelopeInvalid(w); // (the whole envelope, before any effect)
+    if (bad) return this.json(400, { error: "malformed", detail: bad });
+    let killed;
+    const run = {
+      request: body.request, binding: b.binding, digest, wave: w, code: null, events: [], outcome: null, listeners: new Set(),
+      ends: w.entries.map(() => null), current: -1, killEntry: null, stopLatched: false, stop: null,
+      pinnedRestartVersion: b.restartVersion, pinnedIncarnation: b.incarnation, userSending: false, delivered: false,
+      killed: new Promise((r) => (killed = r)),
+    };
+    run.kill = killed;
+    this.runs.set(run.request, run);
+    b.busy = run.request;
+    this.processWave(b, run);
+    return this.ack(run, "admitted");
+  }
+  async processWave(b, run) {
+    const w = run.wave;
+    await Promise.resolve();
+    await this.gate("before-prep", run);
+    if (run.outcome) return;
+    const prep = this.prep(run);
+    if (prep !== "ok") return this.terminal(b, run, (PREP[prep] ?? PREP.malformed)(b));
+    if (run.pinnedRestartVersion !== b.restartVersion) return this.terminal(b, run, { status: "stopped", reason: "kernel restarted" });
+    if (run.pinnedIncarnation !== b.incarnation) return this.terminal(b, run, { status: "setup-failed", detail: "kernel changed" });
+    run.userSending = true;
+    run.delivered = true;
+    if (w.forget.length) {
+      this.forgets.push({ request: run.request, names: [...w.forget], when: "before" });
+      await this.forget(w.forget, run);
+    }
+    await this.gate("after-forget", run);
+    const st = newWaveState();
+    const cancelled = [];
+    for (let k = 0; k < w.entries.length; k++) {
+      if (run.outcome) return; // (a restart settled it)
+      // (a latched Stop, before this entry: sent as an event, recorded, and replayed by the page here)
+      if (run.stopLatched && !st.stopped) {
+        waveStop(st);
+        run.stop = k;
+        this.emitEvent(run, { type: "stop", before: k });
+      }
+      const e = w.entries[k];
+      const d = waveDecide(w.policy, st, k, e);
+      if (d.kind !== "run") {
+        waveRecord(st, k, e, d);
+        if (d.kind === "cancelled") cancelled.push(...(e.defs ?? []));
+        this.entryEnd(run, k, d);
+        continue;
+      }
+      this.executions.push({ request: run.request, incarnation: b.incarnation, code: e.code, entry: k });
+      this.emitEvent(run, { type: "start", entry: k });
+      run.current = k;
+      const stop = new Promise((r) => (run.killEntry = r));
+      const r = await Promise.race([Promise.resolve(this.kernel(e.code, run, e, k)), stop.then((o) => ({ events: [], outcome: o, late: true })), run.killed.then(() => null)]);
+      run.current = -1;
+      run.killEntry = null;
+      if (!r || run.outcome) return;
+      if (!r.late) for (const ev of r.events ?? []) this.emitEvent(run, { ...ev, entry: k });
+      const outcome = r.outcome ?? { status: "ok", ms: 0 };
+      waveRecord(st, k, e, d, waveRunResult(outcome));
+      this.entryEnd(run, k, d, outcome);
+      await this.gate("between-entries", run);
+    }
+    if (run.outcome) return;
+    if (cancelled.length) {
+      this.forgets.push({ request: run.request, names: cancelled, when: "after" });
+      await this.forget(cancelled, run);
+    }
+    await this.gate("before-terminal", run);
+    this.terminal(b, run, { status: "done" });
+  }
+  entryEnd(run, k, decision, outcome) {
+    if (run.ends[k]) return;
+    run.ends[k] = { decision, ...(outcome ? { outcome } : {}) };
+    this.emitEvent(run, { type: "end", entry: k, decision, ...(outcome ? { outcome } : {}) });
+  }
+
   emitEvent(run, ev) {
     const e = { seq: run.events.length + 1, ...ev };
     run.events.push(e);
@@ -349,7 +436,13 @@ export class FakeGateway {
   post_interrupt(b, body) {
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
     const run = b.busy && this.runs.get(b.busy);
-    if (run?.delivered && !run.outcome) this.terminal(b, run, { status: "error", ename: "KeyboardInterrupt", ms: 1 });
+    // (a wave: the entry running now is interrupted, and the policy stops the rest; with none running (before the
+    // first, between two, during its preparation or initial forget), the Stop is latched: no later entry runs)
+    if (run?.wave) {
+      if (run.killEntry) run.killEntry({ status: "error", ename: "KeyboardInterrupt", ms: 1 });
+      else if (!run.outcome && !this.faults.noStopLatch) run.stopLatched = true;
+    }
+    else if (run?.delivered && !run.outcome) this.terminal(b, run, { status: "error", ename: "KeyboardInterrupt", ms: 1 });
     return this.json(200, { ok: true });
   }
 

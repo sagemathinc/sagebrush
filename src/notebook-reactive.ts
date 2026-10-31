@@ -44,6 +44,7 @@
 //     and the graph stays exact; the page shows the code as written.
 import { NotebookGraph, MapView, analysisView, frozenError, type AnalysisView, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
+import type { WaveDecision, WaveEntryPolicy, WavePolicy, WaveParent } from "./wave-policy";
 
 export type Analysis = CellAnalysis | { error: CellError };
 
@@ -109,7 +110,32 @@ export interface ReactiveHost {
    * output is made anew instead (runOutput).
    */
   rekey?(units: number): boolean;
+  /**
+   * One wave (optional; a remote kernel's: web/notebook/remote-gate.js): the
+   * whole action sent at once, its in-run decisions made by the gateway with
+   * src/wave-policy.ts.  Resolves to null if the wave isn't formed (then
+   * nothing was built, sent or charged for it, and the action runs cell by
+   * cell); to {refused} if it was checked and not sent (nothing ran); else to
+   * each entry's decision and, for a run, its result, in order.
+   */
+  executeWave?(w: WavePlan): Promise<WaveResult | null>;
 }
+
+/** One wave, as the scheduler hands it to the host: its entries in run order. */
+export interface WavePlan {
+  entries: WaveEntry[];
+  policy: WavePolicy;
+  /** the names deleted before the first entry (a changed or removed cell's old names), and the cells that defined them */
+  forget: { names: string[]; cells: string[] } | null;
+}
+/** One entry: its cell, what the policy reads, and (unless a placeholder) the code it runs. */
+export interface WaveEntry extends WaveEntryPolicy {
+  cell: string;
+  run?: { code: string; forget: string[]; scoped: Record<string, string> };
+  /** its names, deleted after the wave if it is cancelled */
+  defs: string[];
+}
+export type WaveResult = { refused: string } | { decisions: WaveDecision[]; results: (ExecResult | undefined)[] };
 
 /** One cell's run output: what execute passes the host, frozen (runOutput). */
 export type RunOutput = Readonly<{ code: string; forget: readonly string[]; scoped: Readonly<Record<string, string>> }>;
@@ -699,7 +725,9 @@ export class Reactive {
     }
     // names another valid cell still defines, as it last ran (#1477's write-only names), stay
     for (const n of [...forgetNow]) if ((this.graph.definers.get(n) ?? []).some((d) => !changed.has(d) && !errors.has(d))) forgetNow.delete(n);
-    if (forgetNow.size) await this.host.forget([...forgetNow], [...forgetCells]);
+    // (with a host that sends waves, they go in the wave, before its first entry: execute)
+    const initialForget = forgetNow.size ? { names: [...forgetNow], cells: [...forgetCells] } : null;
+    if (initialForget && !this.host.executeWave) await this.host.forget(initialForget.names, initialForget.cells);
 
     const noLongerErrors = [...errorsBefore].filter((id) => !errors.has(id) && inGraph.has(id));
     const transitioned = [...errors.keys()].filter((id) => !errorsBefore.has(id) && before.has(id));
@@ -743,10 +771,18 @@ export class Reactive {
     }
     const downstreamAll = this.graph.closure([...required, ...auto]);
     const optional = [...downstreamAll].filter((id) => !required.has(id) && !errors.has(id));
-    return this.execute(required, optional, budget, all);
+    return this.execute(required, optional, budget, all, false, this.host.executeWave ? initialForget : null);
   }
 
-  private async execute(required: Set<string>, optional: string[], budget: number, all: boolean, followAgain = false): Promise<RunReport> {
+  // `initialForget` (a host that sends waves only): the names to delete before anything runs, deferred to here so
+  // that a wave can carry them; whatever happens, they are deleted before any cell runs.
+  private async execute(required: Set<string>, optional: string[], budget: number, all: boolean, followAgain = false, initialForget: { names: string[]; cells: string[] } | null = null): Promise<RunReport> {
+    const forgetFirst = async () => {
+      if (!initialForget) return;
+      const f = initialForget;
+      initialForget = null;
+      await this.host.forget(f.names, f.cells);
+    };
     optional = this.withFamilies(required, optional);
     const manual = new Set(this.host.cells().filter((c) => c.manual).map((c) => c.id));
     // optional cells not run: manual ones, and everything downstream of them
@@ -767,6 +803,7 @@ export class Reactive {
       const p = await this.host.prepare({ order, consent: this.consent, followUp: followAgain });
       this.consent = undefined; // (used once)
       if (p?.refuse) {
+        await forgetFirst();
         for (const id of order) {
           stale.add(id);
           this.markStale(id, "approval", p.refuse);
@@ -775,6 +812,23 @@ export class Reactive {
       }
       if (p?.skip) notSent = p.skip;
     }
+    // one wave: the whole action in one request (a remote kernel); the decisions the loop below makes as it goes
+    // are the gateway's (src/wave-policy.ts), applied here in the same order and at the same points
+    if (this.host.executeWave && (order.length || initialForget)) {
+      const w = await this.wave(order, required, stale, notSent, budget, all, initialForget);
+      if (w && "refused" in w) {
+        // (checked and not sent, all of it: nothing ran; the names still go, as they would have)
+        await forgetFirst();
+        for (const id of order) {
+          stale.add(id);
+          this.markStale(id, "approval", w.refused);
+        }
+        return this.report([], [...stale], [], []);
+      }
+      if (w) return this.afterWave(w, order, required, stale, budget, all, followAgain);
+      // (not formed: nothing was built, sent or charged for it; cell by cell, below)
+    }
+    await forgetFirst();
     const blockedBy = new Map<string, { by: string; why: "exception" | "error" | "interrupted" }>();
     // the budget: in graph order, each automatic cell runs if its last time
     // still fits in what is left (a cell never run counts as 0); one that does
@@ -883,6 +937,126 @@ export class Reactive {
     // readers of files written in this run (once: a writer they lead back to is not rerun)
     if (followUp.size && !stopped && !followAgain) {
       // (one round: what it writes in turn is not followed again)
+      const more = [...this.graph.closure(followUp)].filter((id) => !this.errors.has(id));
+      const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true);
+      return this.report([...ran, ...r2.ran], [...new Set([...stale, ...r2.stale])], [...failed, ...r2.failed], [...cancelled, ...r2.cancelled]);
+    }
+    return this.report(ran, [...stale], failed, cancelled);
+  }
+
+  // The action as one wave (the host sends it, or answers null: then nothing was built, sent or charged).  Each cell
+  // of `order` is an entry: its parents as the loop would see them (in the wave, or outside it: blocking it, or
+  // stale), the entries a failure of it cancels (its descendants: the graph's closure, in the wave), and its code;
+  // or a placeholder, never sent: gone, not approved (`notSent`), or kept from running by an ancestor outside the
+  // wave (or a placeholder before it), so that only cells that may run are checked and sent.
+  private async wave(order: string[], required: Set<string>, held: Set<string>, notSent: Map<string, string>, budget: number, all: boolean,
+    forget: { names: string[]; cells: string[] } | null): Promise<WaveResult | null> {
+    const index = new Map(order.map((id, k) => [id, k]));
+    const certain = new Set<number>();
+    const entries: WaveEntry[] = [];
+    for (let k = 0; k < order.length; k++) {
+      const id = order[k];
+      const parents: WaveParent[] = [];
+      let never = false;
+      for (const p of this.graph.parents(id)) {
+        const j = index.get(p);
+        if (j !== undefined) {
+          parents.push({ in: j });
+          if (certain.has(j) && entries[j].place !== "gone") never = true;
+          continue;
+        }
+        // (the loop's checks of a parent outside the action, in its order)
+        let block: { by: string; why: "exception" | "error" | "interrupted" } | undefined;
+        if (this.errors.has(p) && this.suppliesOnly(p, id)) block = { by: p, why: "error" };
+        else if (this.outcome.get(p) === "exception") block = { by: p, why: "exception" };
+        else if (this.outcome.get(p) === "stopped") block = { by: p, why: "interrupted" };
+        else if (this.outcome.get(p) === "cancelled" && this.cancelledBy.has(p)) block = this.cancelledBy.get(p);
+        if (block) {
+          parents.push({ block });
+          never = true;
+        } else if (held.has(p)) {
+          parents.push({ stale: true });
+          never = true;
+        }
+      }
+      const desc: number[] = [];
+      for (const d of this.graph.closure([id], { inclusive: false })) {
+        const j = index.get(d);
+        if (j !== undefined) desc.push(j);
+      }
+      desc.sort((a, b) => a - b);
+      if (desc.some((j) => j <= k)) return null; // (not in dependency order: cell by cell)
+      const base = { cell: id, auto: !required.has(id), est: this.times.get(id) ?? 0, parents, desc, defs: this.defsOf(id) };
+      const spec = this.registered.has(id) ? this.runSpec(id) : undefined;
+      if (!spec) entries.push({ ...base, place: "gone" });
+      else if (notSent.has(id)) entries.push({ ...base, place: "approval", note: notSent.get(id) });
+      else if (never) entries.push({ ...base, place: "never" });
+      else {
+        entries.push({ ...base, run: spec });
+        continue;
+      }
+      certain.add(k);
+    }
+    // (an unlimited budget is null: the wave goes as JSON)
+    return this.host.executeWave!({ entries, policy: { budget: Number.isFinite(budget) ? budget : null, all }, forget });
+  }
+
+  // A wave's decisions and results, applied as the loop in execute applies its own, entry by entry; then, as there,
+  // the readers of files it wrote (a second action: a follow-up wave, or cell by cell).
+  private async afterWave(w: { decisions: WaveDecision[]; results: (ExecResult | undefined)[] }, order: string[], required: Set<string>, stale: Set<string>,
+    budget: number, all: boolean, followAgain: boolean): Promise<RunReport> {
+    const ran: string[] = [], failed: string[] = [], cancelled: string[] = [];
+    const followUp = new Set<string>();
+    let autoMs = 0, stopped = false;
+    for (let k = 0; k < order.length; k++) {
+      const id = order[k];
+      const isAuto = !required.has(id);
+      const d = w.decisions[k] ?? ({ kind: "stale", why: "interrupted" } as const);
+      if (d.kind === "gone") continue;
+      if (d.kind === "stale") {
+        stale.add(id);
+        this.markStale(id, d.why, d.note);
+        continue;
+      }
+      if (d.kind === "cancelled") {
+        const block = { by: typeof d.by === "number" ? order[d.by] : d.by, why: d.why };
+        cancelled.push(id);
+        this.outcome.set(id, "cancelled");
+        this.cancelledBy.set(id, block);
+        this.host.status(id, { state: "cancelled", ...block });
+        continue;
+      }
+      const r = w.results[k] ?? { ok: false, ms: 0, stopped: true };
+      ran.push(id);
+      this.stale.delete(id);
+      const io = r.files ?? { reads: [], writes: [] };
+      const prevIo = this.files.get(id);
+      if (io.reads.length || io.writes.length || prevIo) {
+        if (io.reads.length || io.writes.length) this.files.set(id, io);
+        else this.files.delete(id);
+        this.graph.setFiles(this.files);
+        for (const f of io.writes) for (const reader of this.graph.readersOf(f)) {
+          if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
+        }
+      }
+      this.times.set(id, r.ms);
+      if (isAuto) autoMs += r.ms;
+      if (r.stopped) {
+        this.outcome.set(id, "stopped");
+        stopped = true;
+        this.host.status(id, { state: "done", ok: false, ms: r.ms });
+        if (!r.interrupted) {
+          stale.add(id);
+          this.markStale(id, "interrupted");
+        }
+        continue;
+      }
+      this.outcome.set(id, r.ok ? "ok" : "exception");
+      this.host.status(id, { state: "done", ok: r.ok, ms: r.ms });
+      if (!r.ok) failed.push(id);
+    }
+    // (the names of the entries it cancelled were deleted by the gateway at the wave's end: nothing to send)
+    if (followUp.size && !stopped && !followAgain) {
       const more = [...this.graph.closure(followUp)].filter((id) => !this.errors.has(id));
       const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true);
       return this.report([...ran, ...r2.ran], [...new Set([...stale, ...r2.stale])], [...failed, ...r2.failed], [...cancelled, ...r2.cancelled]);

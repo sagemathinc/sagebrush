@@ -533,6 +533,132 @@ try {
     await until(`/after reconnect/.test(sagebrush.notebook.cells()[${Y}].el.querySelector('.out')?.textContent ?? '')`, 30000);
     ok(/False after reconnect/.test(await out(Y)), `Reconnect: a fresh kernel, its variables gone, and it runs (${JSON.stringify((await out(Y)).trim())})`);
   }
+  // 15. waves (William, Oct 30: "batching each reactive update into one request"): one reactive action is one
+  // request, its cells' output in order; a failure in the middle; Stop and an edit while a wave runs; a cell
+  // removed (a forget-only wave); and the cap, 256 entries (more: cell by cell, as before)
+  {
+    const lat = 400;
+    await goto(base + `?remote=1&latency=${lat}`);
+    const add = (code) => ev(`(() => { const nb = sagebrush.notebook; nb.addCell(${JSON.stringify(code)}, null, false, 'code'); return nb.cells().length - 1; })()`);
+    const outs = (is) => ev(`${JSON.stringify(is)}.map((i) => (sagebrush.notebook.cells()[i].el.querySelector('.out')?.textContent ?? '').trim())`);
+    const allIdle = (is, ms = 60000) => until(`${JSON.stringify(is)}.every((i) => { const el = sagebrush.notebook.cells()[i].el; return !el.classList.contains('running') && !el.classList.contains('queued'); })`, ms);
+    const runWaited = async (i) => { await clickRun(i); await sleep(150); await idle(i); };
+    const execs = () => ev("sagebrush.notebook.kernel.gateway.executions.length");
+    const ranSince = (n) => ev(`sagebrush.notebook.kernel.gateway.executions.slice(${n}).map((x) => x.code)`);
+    // (the page's remote client's requests from here on: method, path, the submit's kind)
+    const watch = () => ev(`(() => { window.__rq = []; const cl = sagebrush.notebook.kernel.client; cl.__f ??= cl.fetch; const f = cl.__f;
+      cl.fetch = (u, i) => { let kind = null; try { kind = JSON.parse(i.body).kind; } catch {} __rq.push({ m: i?.method ?? 'GET', u: String(u).replace(/^.*\\/v1/, '').replace(/rq\\.[^/?]+/, 'RQ'), kind }); return f(u, i); }; return true; })()`);
+    const requests = () => ev("__rq.map((e) => `${e.m} ${e.u}${e.kind ? ' ' + e.kind : ''}`)");
+    const W = [];
+    for (const code of ["a = 10", "b = 20", "a+b", "a*b"]) W.push(await add(code));
+    await connect(lat);
+    for (const i of W) await runWaited(i);
+    // (a) William's cells: a changed; a, a+b and a*b in one wave: one submit, one events stream
+    await watch();
+    let n = await execs();
+    await setCode(W[0], "a = 11");
+    const t = Date.now();
+    await clickRun(W[0]);
+    await until(`/220/.test(sagebrush.notebook.cells()[${W[3]}].el.querySelector('.out')?.textContent ?? '')`, 60000);
+    const wall = Date.now() - t;
+    await allIdle(W);
+    await sleep(300);
+    const rq = await requests();
+    console.log(`info waves, 400 ms: a changed in William's cells: requests ${JSON.stringify(rq)}; Run to a*b's 220: ${wall} ms; ${JSON.stringify(await status())}`);
+    ok(rq.length === 2 && /^POST \/bindings\/[^/]+\/runs wave$/.test(rq[0]) && /^GET \/bindings\/[^/]+\/runs\/RQ\/events/.test(rq[1]), `William's cells: one wave submit and its events, nothing else (${JSON.stringify(rq)})`);
+    ok(JSON.stringify(await ranSince(n)) === JSON.stringify(["a = 11", "a+b", "a*b"]) && JSON.stringify((await outs(W)).slice(2)) === JSON.stringify(["31", "220"]), `the gateway ran a, a+b, a*b once each, in order; their outputs 31, 220 (${JSON.stringify(await outs(W))})`);
+    ok(/3 cells, 1 submit, 2 round trips/.test(await status()), `the status line says what the wave cost (${JSON.stringify(await status())})`);
+    const g = await ev("JSON.parse(JSON.stringify(sagebrush.notebook.kernel.remoteGate.audit().at(-1) ?? null))");
+    ok(g && g.admitted && g.entries === 3 && g.records.every((r) => r.match && r.checked === r.sent), `the audit: the wave's group, admitted, each entry's checked and sent bytes the same (${JSON.stringify(g).slice(0, 200)})`);
+    ok(wall <= 3 * lat + 800, `the whole reactive update shows in about two round trips (${wall} ms, at most ${3 * lat + 800})`);
+    // (b) a failure in the middle: its dependent isn't run and says why; an independent cell still runs
+    const F = [];
+    for (const code of ["p = 1", "f = p / 0", "f + 1", "p + 1"]) F.push(await add(code));
+    for (const i of F) await runWaited(i);
+    await watch();
+    n = await execs();
+    await setCode(F[0], "p = 2");
+    await clickRun(F[0]);
+    await until(`/3/.test(sagebrush.notebook.cells()[${F[3]}].el.querySelector('.out')?.textContent ?? '')`, 60000);
+    await allIdle(F);
+    const fo = await outs(F);
+    ok(JSON.stringify(await ranSince(n)) === JSON.stringify(["p = 2", "f = p / 0", "p + 1"]) && /ZeroDivisionError/.test(fo[1]) && /^Not run: .* raised an error\.$/.test(fo[2]) && fo[3] === "3",
+      `a failure in the middle: f raises, f + 1 not run (it says why), p + 1 runs (${JSON.stringify(fo)})`);
+    ok((await requests()).filter((x) => / wave$/.test(x)).length === 1 && (await requests()).filter((x) => /^POST/.test(x)).length === 1, `in one wave (${JSON.stringify(await requests())})`);
+    // (c) Stop while a wave runs: the running entry is interrupted and says so; the rest are not run (stale), and
+    // a Run afterwards runs them.  (The slow cell's own Run: its wave is it and the cell after it; a change of t
+    // wouldn't rerun it automatically, as it takes longer than the reactive budget.)
+    const S = [];
+    for (const code of ["t = 1", "import time\ntime.sleep(3)\nu = t", "print('u', u)"]) S.push(await add(code));
+    for (const i of S) await runWaited(i);
+    n = await execs();
+    await clickRun(S[1]);
+    await until(`sagebrush.notebook.kernel.gateway.executions.slice(${n}).some((x) => x.code.includes('time.sleep(3)'))`, 30000);
+    await sleep(400);
+    await ev("document.querySelector('#stop').click(); true");
+    await allIdle(S);
+    const so = await outs(S);
+    // (the cells settle as the wave's result is applied: the one after the Stop marked stale then)
+    const stale2 = await until(`sagebrush.notebook.cells()[${S[2]}].el.classList.contains('stale')`, 10000).catch(() => false);
+    ok(/KeyboardInterrupt/.test(so[1]) && !(await ranSince(n)).includes("print('u', u)") && stale2, `Stop in a wave: the running cell says KeyboardInterrupt; the one after it isn't run, stale (${JSON.stringify(so)}; ran ${JSON.stringify(await ranSince(n))}; stale ${stale2}; ${await ev(`sagebrush.notebook.cells()[${S[2]}].el.className + ' | ' + sagebrush.notebook.cells()[${S[2]}].time.textContent`)})`);
+    await clickRun(S[2]);
+    await until(`/u 1/.test(sagebrush.notebook.cells()[${S[2]}].el.querySelector('.out')?.textContent ?? '')`, 60000);
+    ok(true, "and a Run afterwards runs what the Stop left: u 1");
+    // (d) an edit while a wave runs: the run's own output arrives; the edited text is what runs next
+    await allIdle(S);
+    n = await execs();
+    await clickRun(S[1]);
+    await until(`sagebrush.notebook.kernel.gateway.executions.slice(${n}).some((x) => x.code.includes('time.sleep(3)'))`, 30000);
+    await setCode(S[2], "print('v', u)");
+    await allIdle(S);
+    await sleep(300);
+    const once = (await ranSince(n)).filter((c) => c === "print('u', u)").length;
+    await clickRun(S[2]);
+    await until(`/v 1/.test(sagebrush.notebook.cells()[${S[2]}].el.querySelector('.out')?.textContent ?? '')`, 60000);
+    ok(once <= 1 && !(await ranSince(n)).slice(0, -1).includes("print('v', u)"), `an edit mid-wave: the wave's checked text runs at most once (${once}), the edited text only on the next Run: v 1`);
+    // (e) a cell removed: one forget-only wave, and its name is gone from the remote kernel
+    const Z = await add("z = 5");
+    await runWaited(Z);
+    await watch();
+    const zid = await ev(`sagebrush.notebook.cells()[${Z}].id`);
+    await ev(`sagebrush.notebook.applyEdits({ remove: [${JSON.stringify(zid)}] }).then(() => true)`);
+    await sleep(1500);
+    const zr = await requests();
+    ok(zr.filter((x) => /^POST/.test(x)).length === 1 && / wave$/.test(zr.find((x) => /^POST/.test(x)) ?? ""), `a cell removed: one forget-only wave (${JSON.stringify(zr)})`);
+    const Q = await add("");
+    ok((await runCode(Q, "print('z' in globals())")) === "False", "and its name is gone from the remote kernel");
+  }
+  // (f) the cap: a wave of 256 entries is one request; 257 go cell by cell (no simulated latency: 257 runs)
+  {
+    await goto(base + "?remote=1");
+    const add = (code) => ev(`(() => { const nb = sagebrush.notebook; nb.addCell(${JSON.stringify(code)}, null, false, 'code'); return nb.cells().length - 1; })()`);
+    const R = await add("r = 1");
+    const D = [];
+    for (let i = 0; i < 255; i++) D.push(await add(`x${i} = r + ${i}`));
+    await pick("gpu");
+    await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
+    await ev("document.querySelector('#remoteallow').click(); true");
+    await until("/· ready/.test(document.querySelector('#status').textContent)", 60000);
+    const runWaited = async (i) => { await clickRun(i); await sleep(20); await idle(i); };
+    for (const i of [R, ...D]) await runWaited(i);
+    const posts = () => ev("sagebrush.notebook.kernel.gateway.executions.length");
+    const kinds = async (code) => {
+      await ev(`(() => { window.__k = []; const cl = sagebrush.notebook.kernel.client; cl.__f ??= cl.fetch; const f = cl.__f;
+        cl.fetch = (u, i) => { if ((i?.method ?? 'GET') === 'POST' && /\\/runs$/.test(String(u))) { try { const b = JSON.parse(i.body); __k.push(b.kind === 'wave' ? 'wave:' + b.payload.entries.length : 'run'); } catch {} } return f(u, i); }; return true; })()`);
+      const n = await posts();
+      await setCode(R, code);
+      await clickRun(R);
+      await until(`(sagebrush.notebook.kernel.gateway.executions.length - ${n}) >= ${D.length + 1} && sagebrush.notebook.cells().slice(${R}).every((c) => !c.el.classList.contains('running') && !c.el.classList.contains('queued'))`, 300000);
+      return ev("__k");
+    };
+    const k256 = await kinds("r = 2");
+    const g = await ev("JSON.parse(JSON.stringify(sagebrush.notebook.kernel.remoteGate.audit().at(-1) ?? null))");
+    ok(JSON.stringify(k256) === JSON.stringify(["wave:256"]) && g?.admitted && g.entries === 256, `256 entries: one wave, its audit group of 256 (${JSON.stringify(k256)}; ${g?.entries})`);
+    D.push(await add("x255 = r + 255"));
+    await runWaited(D.at(-1));
+    const k257 = await kinds("r = 3");
+    ok(!k257.some((x) => x.startsWith("wave")) && k257.filter((x) => x === "run").length >= 257, `257 entries, over the cap: no wave, cell by cell as before (${k257.length} runs)`);
+  }
   // 16. an import interrupted by Stop leaves no half-made module (Oct 31, found as 14(c)'s intermittent failure: a Stop
   // during the interpreter's first `import time` left an empty `time` in sys.modules, so a later `time.sleep` raised
   // AttributeError).  Deterministic here: a finder's module waits in its exec_module the first time it is loaded, and

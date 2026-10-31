@@ -89,7 +89,12 @@ export class PreviewGateway extends FakeGateway {
     super({ base: PREVIEW_BASE, ...opts });
     this.local = local;
     this.payloads = new Map(); // request -> its payload, until its run starts
-    this.kernel = (code, run) => this.runLocal(code, run);
+    this.kernel = (code, run, entry, k) => this.runLocal(code, run, entry, k);
+    // (a wave's forgets: the names deleted in the interpreter, as a forget request does)
+    this.forget = (names, run) => new Promise((resolve) => {
+      const done = () => resolve();
+      this.local.execute("", { mode: typeof run?.wave?.mode === "string" ? run.wave.mode : "python", forget: [...names] }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done, stopped: done, skipped: done });
+    });
     this.net = network;
     this.random = random;
     this.lost = 0; // (replies and stream events the simulated network lost)
@@ -179,9 +184,10 @@ export class PreviewGateway extends FakeGateway {
     return res;
   }
 
-  runLocal(code, run) {
-    const p = this.payloads.get(run.request) ?? {};
-    this.payloads.delete(run.request);
+  // (`entry`, `k`: a wave's entry and its index: its own options; its output goes to it, and nowhere once it ended)
+  runLocal(code, run, entry, k) {
+    const p = entry ?? this.payloads.get(run.request) ?? {};
+    if (!entry) this.payloads.delete(run.request);
     const opts = {
       mode: typeof p.mode === "string" ? p.mode : "python",
       ...(p.cell ? { cell: String(p.cell) } : {}),
@@ -191,7 +197,12 @@ export class PreviewGateway extends FakeGateway {
       ...(p.scoped && typeof p.scoped === "object" ? { scoped: { ...p.scoped } } : {}),
     };
     // (output after the run's terminal, e.g. once a restart settled it, goes nowhere)
-    const emit = (ev) => { if (!run.outcome) this.emitEvent(run, ev); };
+    const emit = (ev) => {
+      if (run.outcome) return;
+      if (entry) {
+        if (!run.ends[k]) this.emitEvent(run, { ...ev, entry: k });
+      } else this.emitEvent(run, ev);
+    };
     return new Promise((resolve) => {
       let ended = false;
       const end = (outcome) => { if (!ended) { ended = true; resolve({ events: [], outcome }); } };
@@ -209,8 +220,12 @@ export class PreviewGateway extends FakeGateway {
   }
 
   post_interrupt(b, body) {
+    // (the interpreter is interrupted only while it runs something: a run delivered and not ended, or a wave's
+    // entry; a Stop latched with nothing running leaves no interrupt pending for whatever runs next)
+    const run = b.busy && this.runs.get(b.busy);
+    const running = !!run && !run.outcome && (run.wave ? run.current >= 0 : run.delivered);
     const res = super.post_interrupt(b, body);
-    if (body?.epoch === b.epoch) this.local.interrupt();
+    if (body?.epoch === b.epoch && running) this.local.interrupt();
     return res;
   }
 

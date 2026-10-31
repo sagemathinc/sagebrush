@@ -669,6 +669,15 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome bun web/notebook/test-journal.mjs
           CHROME=google-chrome bun web/workspace/test-doc-sync.mjs
+      # (the agents chat's notebook and LaTeX artifacts, web/agents (the artifacts plan r2 + r2.1): the agents page built
+      # (SAGEBRUSH_AGENTS=1) without the LaTeX editor and tested, then with it (SAGEBRUSH_LATEX_PREVIEW=test) and tested
+      # again. Last in this job: the second build changes every bundle. The test serves web/dist itself (serve.py, port 0))
+      - name: the agents chat's artifacts
+        run: |
+          SAGEBRUSH_AGENTS=1 bun web/build.ts
+          CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
+          SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts
+          CHROME=google-chrome AGENTS_LATEX=1 bun web/agents/test-agents-artifacts.mjs
 
   # The interrupt matrix's CI set (plan-interrupt-harness r5 section 8): Ctrl-C on the CLI, the
   # interactive prompt and the notebook page's Stop, with the signal trials S1-S4 and the
