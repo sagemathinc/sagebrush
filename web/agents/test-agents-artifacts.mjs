@@ -262,11 +262,18 @@ try {
 
     // ---- an incoming change runs nothing
     await sleep(500);
-    await write("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('AGENT-RAN')" }, { type: "markdown", code: "Some *text*" }]);
+    await write("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('AGENT-RAN', x)" }, { type: "markdown", code: "Some *text*" }]);
     await until(`[...document.querySelectorAll('${PANE} .cell textarea')].some((t) => t.value.includes('AGENT-RAN'))`, 10000).catch(() => {});
     await sleep(2500);
     const o2 = await outs();
     ok((await shown()).some((v) => v.includes("AGENT-RAN")) && !/AGENT-RAN/.test(o2), "the agent's change is shown, and runs nothing (no applyEdits, no autorun)", { o2, cells: await shown() });
+    // ---- a Run runs that cell only: the agent's cell, which reads x, doesn't run with the cell that sets x (the
+    // reactive notebook's autorun would run it: its stale descendants, notebook.js 843)
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/\\[\\d+\\]/.test(${cellJs(0)}.querySelector('.n').textContent)`, 60000);
+    await sleep(2500);
+    const o3 = await outs();
+    ok(!/AGENT-RAN/.test(o3), "the person's Run runs that cell only: the agent's cell that depends on it doesn't run with it (no autorun)", { o3 });
   }
 
   // ======================================================================== saved, with its base; reopened
