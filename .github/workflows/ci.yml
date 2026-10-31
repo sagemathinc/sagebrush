@@ -204,6 +204,7 @@ jobs:
           node web/test-cli-limits.mjs
           node scripts/bench-ff-limits.mjs
           bun web/build.ts
+          bun web/test-frame-ancestors.mjs
           git diff --exit-code web/js-dependencies.json
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"

@@ -8,7 +8,7 @@
 import { type Orbit, type Space, derive, parseLabel, spaceLabel } from "./model.ts";
 import { type IndexRow, type Query, esc, href, orbitBody, orbitTitle, page, pendingBody, search, searchBody, spaceBody, spaceCrumbs, spaceTitle } from "./render.ts";
 import { type CostModel, type Stats, aboutBody, homeBody } from "./pages.ts";
-import { pagePolicy } from "../csp-policy.mts";
+import { frameOptions, pagePolicy } from "../csp-policy.mts";
 
 type Asset = (path: string) => Promise<Response>;
 
@@ -31,6 +31,7 @@ const html = (body: string, status = 200, cache = "public, max-age=600") =>
       "content-type": "text/html; charset=utf-8",
       "cache-control": cache,
       "content-security-policy": CSP,
+      "x-frame-options": frameOptions(CSP)!,
       "cross-origin-opener-policy": "same-origin",
       "cross-origin-embedder-policy": "require-corp",
     },

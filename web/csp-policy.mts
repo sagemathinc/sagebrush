@@ -2,16 +2,21 @@
 // defense (design/security.md).  Were something ever to slip markup past
 // web/safe-html.ts and the other checks, no script it brought could run:
 // scripts only from this site, and a page's own inline scripts by their
-// hashes; no plugins, no <base>, no forms; and Cloudflare's Web Analytics
-// beacon, which the site's host adds to its pages.  (Images and fetches may
+// hashes, and no other site's (security audit G-2: no analytics beacon); no
+// plugins, no <base>, no forms.  (Images and fetches may
 // come from elsewhere: Markdown's images, ?doc= boards.  The Python worker,
 // which compiles to JavaScript, has its own response and so its own policy:
 // none.)  Static pages get it from _headers (web/csp.ts writes them), the
 // atlas's pages, which its Worker renders, from web/atlas/server.ts.
-export function pagePolicy(scriptHashes: string[] = []): string {
+// Framing (security audit G-1): a page may be framed by this site's own pages
+// only, and the agents page (frameAncestors 'none') by none at all, so no
+// other site can show it in a frame and steer its clicks (its Allow, and
+// "Remember this agent").  The pages made to be embedded have policies of
+// their own: framePolicy below, and the cloud's LTI pages.
+export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'" | "'none'" = "'self'"): string {
   return [
     "default-src 'self'",
-    ["script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com", ...scriptHashes].join(" "),
+    ["script-src 'self' 'wasm-unsafe-eval'", ...scriptHashes].join(" "),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http:",
     "font-src 'self' data:",
@@ -25,7 +30,16 @@ export function pagePolicy(scriptHashes: string[] = []): string {
     "base-uri 'none'",
     "form-action 'none'",
     "manifest-src 'self'",
+    `frame-ancestors ${frameAncestors}`,
   ].join("; ");
+}
+
+// The X-Frame-Options a policy's frame-ancestors means, for browsers without
+// frame-ancestors: DENY for 'none', SAMEORIGIN for 'self', and none for any
+// other (the embeddable frame's *), whose header would forbid what it allows.
+export function frameOptions(policy: string): string | null {
+  const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*?)\s*(?:;|$)/.exec(policy)?.[1];
+  return fa === "'none'" ? "DENY" : fa === "'self'" ? "SAMEORIGIN" : null;
 }
 
 // The shell worker's (web/shell/worker-boot.js; plan-bash-shell r3 §6): a
