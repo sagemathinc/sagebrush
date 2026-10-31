@@ -68,8 +68,12 @@ for _ in $(seq 1 300); do
 done
 [ -s "$REPORT" ] || fail "no self-test report after 300 s"
 tr -d '\r' < "$REPORT" > "$REPORT.clean" && mv "$REPORT.clean" "$REPORT"
+# (selftest_report ends with app.exit (lib.rs), so the app may already be gone:
+# empty is the designed exit; any OTHER pid is a restart, so its log can't be
+# read as one run.  The report above and, below, the sentinel and every marker
+# must come from the start pid's own lines, so an early crash still fails.)
 now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
-[ "$now" = "$pid" ] || fail "the app's process changed during the self-test (pid $pid, now '$now'): its log can't be read as one run"
+[ "$now" = "$pid" ] || [ -z "$now" ] || fail "the app's process changed during the self-test (pid $pid, now '$now'): its log can't be read as one run"
 echo "--- report"
 cat "$REPORT"
 echo "---"

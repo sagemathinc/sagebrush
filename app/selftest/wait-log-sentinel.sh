@@ -9,7 +9,8 @@
 # child could hold open), so a hung adb fails the wait instead of blocking it.
 #   bash app/selftest/wait-log-sentinel.sh SECONDS PACKAGE PID NONCE OUT
 # Exit 0: found; 1: the deadline passed, an adb call timed out or failed, or
-# the process changed; 2: bad arguments.
+# the process changed (another pid; no process at all is the app's designed
+# exit after its report, and passes the re-check); 2: bad arguments.
 set -euo pipefail
 [ $# = 5 ] || { echo "usage: wait-log-sentinel.sh SECONDS PACKAGE PID NONCE OUT"; exit 2; }
 LIMIT=$1 PKG=$2 PID=$3 NONCE=$4 OUT=$5
@@ -31,7 +32,9 @@ bounded() {  # what, then the command: run it under the time that remains; 0, or
 while :; do
   rc=0; bounded "adb shell pidof" adb shell pidof "$PKG" > "$T" 2>/dev/null || rc=$?
   now=$(tr -d '\r\n' < "$T")
-  [ "$rc" = 0 ] && [ "$now" = "$PID" ] || { echo "FAIL: the app's process changed while waiting for the done sentinel (pid $PID, now '$now', pidof exit $rc)"; exit 1; }
+  # (the app exits by design after its report (lib.rs selftest_report): no
+  # process is fine, the log outlives it; another pid is a restart and FAILs)
+  [ "$now" = "$PID" ] || [ -z "$now" ] || { echo "FAIL: the app's process changed while waiting for the done sentinel (pid $PID, now '$now', pidof exit $rc)"; exit 1; }
   bounded "adb logcat -d" adb logcat -d -v threadtime > "$OUT" 2>/dev/null || { echo "FAIL: logcat -d failed while waiting for the done sentinel"; exit 1; }
   # (the threadtime pid column is the 3rd field; the message is the line's tail)
   if awk -v p="$PID" -v w="$want" '$3 == p && index($0, ": " w) > 0 && substr($0, length($0) - length(w) + 1) == w { f = 1 } END { exit !f }' "$OUT"; then
