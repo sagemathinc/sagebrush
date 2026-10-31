@@ -61,7 +61,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, actors, boundary, oldShell, frozen, census, limits, upstream, output };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, completion, actors, boundary, oldShell, frozen, census, limits, upstream, output };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -742,6 +742,79 @@ async function listing(check) {
   r = await host.exec(g, "cp -r /A/sub /A/sub3");
   fault = false;
   check(r.kind === "unavailable" && r.row === 5 && !(await ws.stat("/A/sub3")), `a fault during cp -r's walk: row 5, nothing made (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- Tab's listing (plan-term-help-tab r3.1 §3, §5 H1-H6, H4b)
+// ShellHost.complete: `ls`'s own checks, no invocation, no worker, nothing written, nothing carried across calls.
+// Each case's line starts with its id ("H1: ..."), which the control runs (K*) compare.
+async function completion(check) {
+  const hooks = {};
+  let starts = 0;
+  const mutated = [];
+  const spy = (ws) => {
+    const v = hookable(hooks)(ws);
+    for (const verb of ["write", "create", "mkdir", "rename", "duplicate", "remove"]) {
+      const orig = v[verb];
+      v[verb] = async function (...args) { mutated.push(verb); return orig.apply(this, args); };
+    }
+    return v;
+  };
+  const { ws, host } = await fresh("completion", { wrap: spy, start: (signal) => { starts++; return startShell(D.S, "/", { signal }).then((x) => x.shell); } });
+  const A = await ws.mkdir("/A");
+  await ws.create("/A/one", { content: enc("1") });
+  await ws.mkdir("/A/sub");
+  await ws.create("/A/nb.ipynb", { content: { cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 } });
+  await ws.mkdir("/B");
+  await ws.create("/B/secret", { content: enc("s") });
+  let live = "ok";
+  const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => live };
+  const names = (r) => (r.entries ? r.entries.map((e) => e.name).sort().join(",") : JSON.stringify(r));
+  mutated.length = 0;
+  starts = 0;
+  // H1: exactly what the shell's own ls lists, for the same principal and folders
+  const lsOf = async (p) => { const r = await host.exec(g, `ls -1 ${p}`); return r.code === 0 ? r.stdout.trim().split("\n").filter(Boolean).sort().join(",") : `exit ${r.code}`; };
+  const c1 = await host.complete(g, "/"), c2 = await host.complete(g, "/A"), c3 = await host.complete(g, "/B");
+  const l1 = await lsOf("/"), l2 = await lsOf("/A"), l3 = await lsOf("/B");
+  check(names(c1) === "A" && names(c1) === l1 && names(c2) === l2 && names(c2) === "nb.ipynb,one,sub" && !!c3.refused && l3.startsWith("exit"),
+    `H1: complete() lists what ls lists (/ ${names(c1)} vs ${l1}; /A ${names(c2)} vs ${l2}; /B ${JSON.stringify(c3)} vs ${l3})`);
+  check(JSON.stringify(c2.entries?.find((e) => e.name === "nb.ipynb")) === JSON.stringify({ name: "nb.ipynb", kind: "notebook" }) && c2.entries?.find((e) => e.name === "sub")?.kind === "folder",
+    `H1k: the workspace's kinds kept for the colours (${JSON.stringify(c2.entries)})`);
+  // H3: Tab's calls start no worker and change nothing (the ls runs above started one: counted from here)
+  starts = 0;
+  mutated.length = 0;
+  for (let i = 0; i < 5; i++) { await host.complete(g, "/A"); await host.complete(PERSON, "/"); }
+  check(starts === 0 && mutated.length === 0 && host.endings.length === 0, `H3: ten complete() calls: no worker started (${starts}), no mutating verb (${mutated.join(",")}), no ending`);
+  // H2: past bash.list_entries (its floor, 100): "too many", never a partial list
+  const { ws: ws2, host: host2 } = await fresh("completion-many", { bash: { list_entries: 100 } });
+  await ws2.mkdir("/M");
+  for (let i = 0; i < 101; i++) await ws2.create(`/M/f${i}`, { content: enc("") });
+  const many = await host2.complete(PERSON, "/M");
+  await ws2.remove("/M/f0");
+  const enough = await host2.complete(PERSON, "/M");
+  check(many.tooMany === true && enough.entries?.length === 100, `H2: 101 entries past list_entries 100: too many (${JSON.stringify(many).slice(0, 80)}); 100: listed (${enough.entries?.length})`);
+  // H4: revoked during one call, after the folder's own admit, while its entries are checked (each under the
+  // workspace's transaction): refused, never a shorter listing
+  hooks.list = (p, o) => { if (p === "/A") { delete hooks.list; afterAdmit(o, (c) => { if (c.role === "target") live = "revoked"; }); } };
+  const h4 = await host.complete(g, "/A");
+  delete hooks.list;
+  live = "ok";
+  check(!!h4.refused && !h4.entries, `H4: revoked during the call's entry checks: refused (${JSON.stringify(h4)})`);
+  // H4b: revoked between two calls: the second is refused (nothing carried across calls)
+  const first = await host.complete(g, "/A");
+  live = "revoked";
+  const second = await host.complete(g, "/A");
+  live = "ok";
+  check(!!first.entries && !!second.refused && !second.entries, `H4b: a call, a revocation, a call: the second refused (${JSON.stringify(second)})`);
+  // H5: the folder replaced (same path, a new folder) before the call reaches it: refused
+  hooks.stat = async (p) => { if (p === "/A") { delete hooks.stat; await ws.rename("/A", "/A-old"); await ws.mkdir("/A"); await ws.create("/A/new", { content: enc("n") }); } };
+  const h5 = await host.complete(g, "/A");
+  delete hooks.stat;
+  check(!!h5.refused && !h5.entries, `H5: /A replaced by another folder: refused, never its names (${JSON.stringify(h5)})`);
+  // H6: Trash: refused at and inside it, whatever the principal; the top may list it
+  await ws.create("/gone", { content: enc("g") });
+  await ws.remove("/gone");
+  const t1 = await host.complete(PERSON, "/Trash"), t2 = await host.complete(PERSON, "/Trash/x"), top = await host.complete(PERSON, "/");
+  check(!!t1.refused && !!t2.refused && !!top.entries, `H6: /Trash and inside it refused (${JSON.stringify(t1)}, ${JSON.stringify(t2)}); the top listed (${names(top)})`);
 }
 
 // ---------------------------------------------------------------- r2: attribution is explicit (ID-BASH-STEP2-D3-1)

@@ -580,13 +580,24 @@ export class ShellRun {
     return { kind: e.kind === "folder" ? "folder" : "file", size: e.size ?? 0, mtime: e.updated, identity: identOf(e) ?? "path:" + e.path };
   }
   private async list(p: string): Promise<{ name: string; kind: string }[]> {
+    return (await this.entries(p)).map((x) => ({ name: x.name, kind: x.kind === "folder" ? "folder" : "file" }));
+  }
+  /**
+   * Tab's listing (plan-term-help-tab §3): `ls`'s own path, with the workspace's kinds (a notebook, a board) kept for
+   * the colours: the same canon (Trash refused), the same checks under the lock, the same bound.  Read-only, and no
+   * invocation: no worker, nothing charged.
+   */
+  completionList(p: unknown): Promise<{ name: string; kind: string }[]> {
+    return this.entries(this.canon(p));
+  }
+  private async entries(p: string): Promise<{ name: string; kind: string }[]> {
     this.gate();
     const e = p === "/" ? undefined : await this.ws.stat(p, { admit: this.check });
     if (p !== "/" && !e) throw refuse("ENOENT", p);
     if (e && e.kind !== "folder") throw refuse("ENOTDIR", p);
     // (the top itself, which no grant names, may be listed: what it shows is only what the grant covers)
     const top = (c: AdmitCheck) => (c.role === "target" && c.path === "/" ? this.gate() : this.check(c));
-    const out = (await this.ws.list(p, { admit: top })).map((x) => ({ name: nameOf(x.path), kind: x.kind === "folder" ? "folder" : "file" }));
+    const out = (await this.ws.list(p, { admit: top })).map((x) => ({ name: nameOf(x.path), kind: x.kind as string }));
     const have = new Set(out.map((x) => x.name));
     for (const q of this.pending.keys()) if (parentOf(q) === p && !have.has(nameOf(q))) out.push({ name: nameOf(q), kind: "file" });
     // (bash.list_entries: a listing longer than it is a limit)
@@ -942,6 +953,34 @@ export class ShellHost {
   /** A run of the principal's; a grant without a valid actor is refused here, before any work. */
   run(principal: Principal): ShellRun {
     return new ShellRun(this, principal);
+  }
+  /**
+   * Tab's listing of `folder` (plan-term-help-tab §3) for `principal`, the session's CURRENT one: a fresh run each
+   * call (nothing carried across calls), never invoked (no worker started, nothing charged), its checks those of `ls`
+   * (ShellRun.completionList).  `signal` is the panel's fence (a newer key, a cd, close): it latches the run, and a
+   * check after that refuses.  Never throws: the entries, "too many" (past bash.list_entries), or a refusal.
+   */
+  async complete(principal: Principal, folder: string, signal?: AbortSignal): Promise<{ entries: { name: string; kind: string }[] } | { tooMany: true } | { refused: string }> {
+    if (signal?.aborted) return { refused: "superseded" };
+    let r: ShellRun;
+    try {
+      r = this.run(principal);
+    } catch (err) {
+      return { refused: why(err) };
+    }
+    const onAbort = () => r.latch({ row: 1 });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      const entries = await r.completionList(folder);
+      // (a fence latched while the listing ran: its answer is stale, whatever it holds)
+      if (r.terminal) return { refused: "superseded" };
+      return { entries };
+    } catch (err) {
+      if (err instanceof LimitHit && err.key === "list_entries") return { tooMany: true };
+      return { refused: why(err) || ((err as Error)?.constructor?.name ?? "refused") };
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
   /** One run of one invocation; `signal` is Stop. */
   async exec(principal: Principal, script: string, opts: { stdin?: string; cwd?: string; signal?: AbortSignal } = {}): Promise<HostOutcome> {
