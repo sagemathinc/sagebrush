@@ -721,7 +721,8 @@ export class RemoteKernel {
     // included, ends the asking early)
     for (let i = 0; i <= RECOVERY.reconcileWaits.length; i++) {
       if (i) {
-        await this.wait(RECOVERY.reconcileWaits[i - 1], signal);
+        // (each wait clipped to the window, so nothing waits past it: the bound holds by construction)
+        await this.wait(Math.min(RECOVERY.reconcileWaits[i - 1], Math.max(0, windowEnd - this.timers.now())), signal);
         if (this.current !== job || signal.aborted) return false;
       }
       const left = windowEnd - this.timers.now();
