@@ -6143,6 +6143,61 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
  },
+ "src/notebook-reactive.ts :: families :: private async execute(required: Set<string>, optional: string[], budget: number, all: boolean, followAgain = false, initialForget: { names: string[]; cells: string[] } | null = null): Promise<RunReport> { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: families :: return this.execute(required, optional, budget, all, false, this.host.executeWave ? initialForget : null); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: budget: number, all: boolean, followAgain: boolean): Promise<RunReport> { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: const r2 = await this.execute(new Set(), more, all ? Infinity : Math.max(0, budget - autoMs), all, true); #1": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: const w = await this.wave(order, required, stale, notSent, budget, all, initialForget); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: if (isAuto && !all && (budget <= 0 || autoMs + (this.times.get(id) ?? 0) > budget) && ![...this.graph.parents(id)].some((p) => stale.has(p))) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: if (w) return this.afterWave(w, order, required, stale, budget, all, followAgain); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: private async wave(order: string[], required: Set<string>, held: Set<string>, notSent: Map<string, string>, budget: number, all: boolean, #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: return this.host.executeWave!({ entries, policy: { budget: Number.isFinite(budget) ? budget : null, all }, forget }); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/notebook-reactive.ts :: forgetFirst :: this.markStale(id, \"budget\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
+ },
  "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
@@ -6679,6 +6734,11 @@
   "class": "none",
   "owner": "sagebrush-remote-compute",
   "reason": "A declaration, parameter, constant or bookkeeping line of the remote-approval budget; it limits and refuses nothing by itself."
+ },
+ "src/remote-approval.ts :: predictSendable :: return this.budget.fits(\"sendUnits\", units); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The remote-approval per-action budget's fit, predicted without charging (the waves' no-effect eligibility): a wave that wouldn't fit isn't formed and the action goes cell by cell, where the budget applies as before; it refuses nothing by itself."
  },
  "src/remote-approval.ts :: rekey :: if (!this.budget.fits(\"rekeyUnits\", units)) return false; #0": {
   "class": "1",
@@ -7413,6 +7473,31 @@
   "class": "none",
   "owner": "notebook/kernel",
   "reason": "input()'s answer buffer: its payload size and the answer's length clamped to it, the bounds of a buffer this worker allocated (64 KiB); refuses nothing"
+ },
+ "src/wave-policy.ts ::  :: budget: number | null; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The scheduler's existing automatic-run time budget, passed through the wave plan's signatures and policy (the waves design r3); it refuses nothing."
+ },
+ "src/wave-policy.ts ::  :: | { kind: \"stale\"; why: \"interrupted\" | \"budget\" | \"ancestor\" | \"approval\"; note?: string } #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
+ },
+ "src/wave-policy.ts :: waveDecide :: if (e.auto && !policy.all && policy.budget !== null && (policy.budget <= 0 || st.autoMs + e.est > policy.budget) && !e.parents.some((p) => staleParent(st, p))) { #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
+ },
+ "src/wave-policy.ts :: waveDecide :: return { kind: \"stale\", why: \"budget\" }; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
+ },
+ "src/wave-policy.ts :: waveEnvelopeInvalid :: if (!isPlain(p) || typeof p.all !== \"boolean\" || !(p.budget === null || (typeof p.budget === \"number\" && Number.isFinite(p.budget)))) return \"the wave's policy\"; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "The wave envelope's validation of the scheduler's automatic-run time budget field (null or a finite number), before anything is admitted; it limits nothing, it refuses a malformed wave."
  },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",

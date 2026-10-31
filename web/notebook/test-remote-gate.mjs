@@ -32,7 +32,8 @@ const NS = "5eed".repeat(16);
 // settings object (gateCfg) and the page's own values, seeds, and the
 // scheduler's host over the kernel.  Pauses: the next analyze, seed, hash,
 // token or proof waits until released.
-async function page(codes, { scoping = false, keepBodies = true } = {}) {
+// (`waves`: the page sends waves, as notebook.js does for a remote kernel: its host has executeWave)
+export async function page(codes, { scoping = false, keepBodies = true, waves = false } = {}) {
   const fake = new FakeGateway();
   const fetches = [];
   const gates = { token: null, proof: null, analyze: null, seed: null, hash: null };
@@ -87,6 +88,8 @@ async function page(codes, { scoping = false, keepBodies = true } = {}) {
   kernel.remoteGate = gate;
   const states = new Map();
   const results = new Map();
+  const outputs = new Map(); // (waves: each cell's output)
+  const waveLog = []; // (waves: what each executeWave resolved to)
   const sinkFor = (resolve) => ({
     start() {}, out() {}, display() {}, interact() {}, clear() {},
     done: (ms, info) => resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}) }),
@@ -110,6 +113,32 @@ async function page(codes, { scoping = false, keepBodies = true } = {}) {
       return r;
     },
     forget: (names, _cells, extra) => new Promise((resolve) => kernel.execute("", { mode: live.mode, forget: names, ...(extra ?? {}) }, sinkFor(resolve))),
+    // (as notebook.js: each entry that runs gets its cell's sink, with the options execCell gives the kernel)
+    ...(waves ? {
+      executeWave: async (plan, extra) => {
+        const regs = await Promise.all(plan.entries.map(async (e) => {
+          if (!e.run) return null;
+          const seed = await sha(`${live.seedNamespace}:${e.cell}`);
+          const opts = { mode: live.mode, cell: e.cell, forget: e.run.forget, mangle: live.reactive, seed, ...(e.run.scoped && Object.keys(e.run.scoped).length ? { scoped: e.run.scoped } : {}), ...(extra ?? {}) };
+          let resolve;
+          const done = new Promise((r) => (resolve = r));
+          const sink = sinkFor(resolve);
+          const out = sink.out;
+          sink.out = (t, err) => { outputs.set(e.cell, (outputs.get(e.cell) ?? "") + t); out?.(t, err); };
+          return { code: e.run.code, opts, sink, done };
+        }));
+        const policy = (e) => ({ cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs });
+        const r = await kernel.executeWave({
+          entries: plan.entries.map((e, i) => (e.run ? { ...policy(e), code: regs[i].code, opts: regs[i].opts, sink: regs[i].sink } : { ...policy(e), place: e.place, ...(e.note ? { note: e.note } : {}) })),
+          policy: plan.policy, forget: plan.forget, mode: live.mode,
+        }, extra?.gate);
+        const res = await Promise.all(regs.map((x) => x?.done));
+        waveLog.push(r);
+        if (r.refused) return { refused: r.refused };
+        res.forEach((x, i) => { if (x) results.set(plan.entries[i].cell, x); });
+        return { decisions: r.decisions, results: res.map((x, i) => (r.decisions[i]?.kind === "run" ? x : undefined)) };
+      },
+    } : {}),
     status: (id, s) => states.set(id, s),
     ...(scoping ? { rename: async (q) => { const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), "python", SCOPE_SEP); return r ? [...r] : null; } } : {}),
   };
@@ -128,7 +157,7 @@ async function page(codes, { scoping = false, keepBodies = true } = {}) {
   const sentCodes = () => payloads().filter((x) => x.cell !== undefined).map((x) => x.code);
   const pause = (k, match) => { const l = latch(); gates[k] = { match, ...l }; return l; };
   const p = {
-    fake, client, kernel, gate, shown, versions, states, results, fetches, runPosts, payloads, sentCodes, seeding,
+    fake, client, kernel, gate, shown, versions, states, results, fetches, runPosts, payloads, sentCodes, seeding, outputs, waveLog,
     a: gate.approvals,
     r: () => kernel.reactive,
     last: () => last,
