@@ -15,14 +15,18 @@ N=11111111-2222-4333-8444-555555555555
 ALLOW=4      # the cleanup allowance past the deadline: timeout's -k 2, plus startup and the last poll
 GUARD=20     # the outer watchdog, only a guard
 mkdir "$T/bin"
-# the stub: `adb shell pidof` prints $PIDOF; `adb logcat -d ...` counts its calls and,
+# the stub: `adb shell pidof` prints $PIDOF (from its call $GONE_AFTER+1 on: nothing,
+# exit 1, as after the app's designed exit); `adb logcat -d ...` counts its calls and,
 # from call $APPEAR on, includes the sentinel under pid $SPID ($LOGCAT_FAIL=1: exits 1).
 # BLOCK=pidof|logcat: that call sleeps 60 s instead; BLOCK_TERM=1: it ignores TERM too.
 cat > "$T/bin/adb" <<'EOF'
 #!/usr/bin/env bash
 block() { [ "${BLOCK_TERM:-0}" = 1 ] && trap '' TERM; sleep 60; }
 case "$1 $2" in
-  "shell pidof") [ "${BLOCK:-}" = pidof ] && block; echo "$PIDOF" ;;
+  "shell pidof") [ "${BLOCK:-}" = pidof ] && block
+    k=$(( $(cat "$STATE.pidof" 2>/dev/null || echo 0) + 1 )); echo $k > "$STATE.pidof"
+    [ "$k" -gt "${GONE_AFTER:-999}" ] && exit 1
+    echo "$PIDOF" ;;
   "logcat -d")
     [ "${BLOCK:-}" = logcat ] && block
     [ "${LOGCAT_FAIL:-0}" = 1 ] && exit 1
@@ -36,8 +40,8 @@ EOF
 chmod +x "$T/bin/adb"
 bad=0
 run() {  # want, label, SECONDS, PIDOF, APPEAR, SPID, LOGCAT_FAIL, BLOCK, BLOCK_TERM, [PID]; $TEXT: the verdict must contain it
-  local want=$1 label=$2 limit=$3 rc=0 t0=$SECONDS el; rm -f "$T/state"
-  PATH="$T/bin:$PATH" STATE="$T/state" NONCE=$N PIDOF=$4 APPEAR=$5 SPID=$6 LOGCAT_FAIL=$7 BLOCK=$8 BLOCK_TERM=$9 \
+  local want=$1 label=$2 limit=$3 rc=0 t0=$SECONDS el; rm -f "$T/state" "$T/state.pidof"
+  PATH="$T/bin:$PATH" STATE="$T/state" NONCE=$N PIDOF=$4 APPEAR=$5 SPID=$6 LOGCAT_FAIL=$7 BLOCK=$8 BLOCK_TERM=$9 GONE_AFTER=${GONE_AFTER:-999} \
     timeout -k 2 "$GUARD" bash "$SCRIPT" "$limit" space.sagebrush.notebook "${10:-4242}" "$N" "$T/out" > "$T/msg" 2>&1 || rc=$?
   el=$((SECONDS - t0))
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "FAIL $label: the test's watchdog fired after ${el} s (the script did not bound itself)"; bad=1; return; fi
@@ -57,6 +61,11 @@ TEXT="adb shell pidof did not finish" run 1 "adb pidof blocks"                  
 TEXT="adb shell pidof did not finish" run 1 "adb pidof blocks, ignoring TERM"     3  4242  1      4242 0          pidof  1
 TEXT="adb logcat -d did not finish" run 1 "adb logcat -d blocks"                3  4242  1      4242 0          logcat 0
 TEXT="adb logcat -d did not finish" run 1 "adb logcat -d blocks, ignoring TERM" 3  4242  1      4242 0          logcat 1
+# (the app exits by design after its report: no process passes the re-check,
+# the log outlives it; another pid still FAILs, above "the process changed")
+GONE_AFTER=1 run 0 "the app exits after the 1st poll; the sentinel on the 3rd" 5  4242  3      4242 0          ""     0
+GONE_AFTER=0 run 0 "the app already gone; the sentinel in the log"            5  4242  1      4242 0          ""     0
+GONE_AFTER=1 run 1 "the app gone and no sentinel: the deadline"               2  4242  99     4242 0          ""     0
 # (the capture the reader gets is the last one, with the sentinel)
 run 0 "the sentinel at once"                0  4242  1      4242 0          ""     0
 grep -q -F "terminal bridge probe: done $N" "$T/out" || { echo "FAIL: OUT is not the capture with the sentinel"; bad=1; }
