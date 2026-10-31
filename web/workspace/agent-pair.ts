@@ -138,6 +138,7 @@ export class AgentPairing {
   private refill: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
+  private notified = new Set<(method: string, params: unknown) => void>();
   private pairingId = "";
   private remember = false;
   private helloSent: Promise<Hello>;
@@ -190,7 +191,11 @@ export class AgentPairing {
           this.emit();
           return resolve(this.hello);
         }
-        if (typeof msg.method === "string" && msg.id === undefined) return; // (a notification: chat comes in a later step)
+        if (typeof msg.method === "string" && msg.id === undefined) {
+          // (a notification: the chat on the same connection, §4; only once paired, given to the page's listeners)
+          for (const cb of this.notified) cb(msg.method, msg.params);
+          return;
+        }
         if (typeof msg.method === "string" && typeof msg.id === "string") return void this.call(msg.id, msg.method, msg.params);
         // (an answer: the page sends no requests after the hello)
       };
@@ -202,6 +207,13 @@ export class AgentPairing {
   paired(): Promise<Hello> { return this.helloSent; }
   get id() { return this.pairingId; }
   onChange(cb: () => void) { this.listeners.add(cb); return () => void this.listeners.delete(cb); }
+  /** The server's notifications (the chat, §4): what it says is data for the page to show, never run. */
+  onNotification(cb: (method: string, params: unknown) => void) { this.notified.add(cb); return () => void this.notified.delete(cb); }
+  /** A notification to the server (the chat, §4): only while granted, and within the frame bound (else false). */
+  notify(method: string, params: unknown): boolean {
+    if (this.state !== "granted") return false;
+    return this.sendBounded({ jsonrpc: "2.0", method, params });
+  }
   private emit() { for (const cb of this.listeners) cb(); }
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now. */

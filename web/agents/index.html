@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sagebrush agents (preview)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
+<meta name="description" content="A preview of Sagebrush's agents chat: a full-page chat with artifacts, driven by a scripted agent.">
+<style>
+  :root { --ink: #24231f; --muted: #6b6a63; --line: #e3e0d6; --bg: #faf9f5; --side: #f2f0e8; --card: #fff; --accent: #c2410c; --accent2: #4a6b49; --ok: #2f7d3a; --bad: #b3412f; --code: #f4f2ec; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; }
+  button { font: inherit; color: inherit; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .banner { background: #fff7d6; border-bottom: 1px solid #e8dca0; font-size: 13px; padding: 5px 14px; color: #5a4b10; flex: none; }
+  .app { flex: 1; display: flex; min-height: 0; }
+
+  /* the list of chats */
+  nav.side { width: 250px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 10px; gap: 8px; }
+  nav.side .brand { font-weight: 650; padding: 4px 6px 8px; display: flex; align-items: center; gap: 8px; }
+  nav.side #new { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
+  nav.side #new:hover { border-color: #c9c5b8; }
+  #threads { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+  .thread { border: 0; background: none; text-align: left; padding: 7px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+  .thread:hover { background: #e8e5db; }
+  .thread.on { background: #e2ded2; font-weight: 550; }
+  .thread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
+  nav.side .foot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 6px; }
+
+  /* the chat: primary, full height */
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
+  .top #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
+  .agent .conn.on { background: var(--ok); }
+  .agent .conn.wait { background: #e5b567; }
+  .top .spacer { flex: 1; }
+  .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  .top button:disabled { opacity: .6; cursor: default; }
+  #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
+  #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
+  .file-path { font: 12px ui-monospace, monospace; color: var(--muted); padding: 8px 18px 0; display: flex; gap: 10px; }
+  .file-path .saved { margin-left: auto; }
+  .file-body .doc { padding: 12px 30px 30px; max-width: 820px; margin: 0 auto; }
+  .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
+  .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
+  .top .link, .top #connect { white-space: nowrap; }
+  .demo.live { color: var(--ok); border-color: #b9d7b5; }
+  #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
+  .msg, .doc { overflow-wrap: anywhere; }
+  .msg table { display: block; overflow-x: auto; max-width: 100%; }
+  #log > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+  #empty { max-width: 640px; margin: 10vh auto 0; text-align: center; color: var(--muted); }
+  #empty h1 { color: var(--ink); font-size: 28px; font-weight: 600; margin: 0 0 6px; }
+  #empty .tries { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; }
+  #empty .tries button { border: 1px solid var(--line); background: var(--card); border-radius: 18px; padding: 7px 14px; cursor: pointer; }
+  #empty .tries button:hover { border-color: #c9c5b8; background: #fffdf8; }
+
+  .user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 18px; }
+  .user .bubble { background: #ece9e0; border-radius: 14px; padding: 8px 14px; max-width: 85%; }
+  .user.note .bubble { background: transparent; border: 1px dashed #c9c5b8; }
+  .user.queued .bubble { opacity: .75; }
+  .user .bubble > :first-child, .msg > :first-child { margin-top: 0; }
+  .user .bubble > :last-child, .msg > :last-child { margin-bottom: 0; }
+  .tag { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+  .turn { margin-bottom: 26px; }
+  .who { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .avatar { color: var(--accent); font-size: 16px; }
+  .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
+  .msg { margin: 6px 0 10px; }
+  .msg table, .doc table { border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+  .msg th, .msg td, .doc th, .doc td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+  .msg code, .doc code, .user code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
+  .msg pre, .doc pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+  .msg pre code, .doc pre code { background: none; padding: 0; }
+  .math.display { display: block; overflow-x: auto; margin: 8px 0; }
+
+  details.thinking { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
+  details.thinking summary { cursor: pointer; font-style: italic; }
+  details.thinking div { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin-top: 4px; white-space: pre-wrap; }
+
+  details.tool { border: 1px solid var(--line); background: var(--card); border-radius: 8px; margin: 6px 0; font-size: 14px; }
+  details.tool summary { cursor: pointer; padding: 6px 10px; display: flex; align-items: center; gap: 8px; list-style: none; }
+  details.tool summary::-webkit-details-marker { display: none; }
+  details.tool summary code { background: var(--code); padding: 1px 5px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px; }
+  details.tool .meta { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  details.tool .ti { width: 16px; text-align: center; color: var(--muted); }
+  details.tool pre.out { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); background: #1f2421; color: #e6e3d8; border-radius: 0 0 8px 8px; max-height: 280px; overflow: auto; white-space: pre-wrap; }
+  details.tool .diff { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
+  .ok { color: var(--ok); font-weight: 700; } .bad { color: var(--bad); font-weight: 700; }
+
+  .diff { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; background: #fff; }
+  .diff .dl { white-space: pre; padding: 0 10px; }
+  .diff .add { background: #e6f4e4; color: #1d5a24; }
+  .diff .del { background: #fbe7e3; color: #8a2a1a; }
+
+  .attention { border: 1px solid #e5b567; background: #fff8ea; border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+  .attention.approved { border-color: #b9d7b5; background: #f2f8f0; }
+  .attention.denied { border-color: #e2b9b0; background: #fbf1ee; }
+  .att-title { font-weight: 600; }
+  .att-summary { font-size: 14px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .att-detail { margin-top: 6px; font-size: 13px; }
+  .att-detail > summary { cursor: pointer; color: var(--muted); }
+  .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
+  .att-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .att-state { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .artifact-card { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 420px; text-align: left; border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 10px 12px; margin: 8px 0; cursor: pointer; }
+  .artifact-card:hover { border-color: #c9c5b8; box-shadow: 0 1px 4px #0000000f; }
+  .artifact-card .ai { font-size: 22px; width: 34px; height: 34px; display: grid; place-items: center; background: var(--side); border-radius: 8px; flex: none; }
+  .artifact-card small { display: block; color: var(--muted); font-size: 12px; }
+
+  .status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+  .turn-error { color: var(--bad); font-size: 14px; }
+  .spinner { width: 12px; height: 12px; border: 2px solid #d8d4c8; border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  /* the composer */
+  .composer-wrap { flex: none; padding: 8px 16px 14px; }
+  .composer { max-width: 760px; margin: 0 auto; border: 1px solid #d5d1c4; background: var(--card); border-radius: 14px; box-shadow: 0 1px 6px #0000000d; padding: 8px 10px 8px 12px; }
+  .composer:focus-within { border-color: #b5b0a0; }
+  #editor { max-height: 40vh; overflow-y: auto; min-height: 28px; }
+  .composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .composer .hint { font-size: 12px; color: var(--muted); margin-right: auto; }
+  .composer .hint kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--side); }
+  #queued { font-size: 12px; color: var(--accent); }
+  #send { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  /* artifacts: floating to the right of the chat, or full screen */
+  #artifacts { display: none; }
+  body.has-artifact #artifacts { display: flex; flex-direction: column; width: min(46vw, 760px); flex: none; border-left: 1px solid var(--line); background: var(--card); }
+  body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
+  /* (a notebook's pane: wider, but the chat keeps at least 420 px beside the 250 px sidebar; only where the pane is a
+     column (over 900 px), and not in full screen; BAC-2, BAC-3) */
+  @media (min-width: 901px) {
+    body.has-artifact.wide-artifact:not(.fullscreen) #artifacts { width: max(360px, min(60vw, 960px, calc(100vw - 250px - 420px))); }
+  }
+  /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
+  body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
+  .pane-host { flex: 1; overflow: auto; }
+  .pane-host[hidden] { display: none; }
+  .pane-bar[hidden] { display: none; } /* (else display: flex below beats [hidden]: an empty strip, BAC-7) */
+  .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
+  .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
+  .pane-bar button { font-size: 12px; }
+  .open-full { margin-left: 8px; font-size: 12px; }
+  .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
+  /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
+  .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
+  /* (the notebook's compact layout by the pane's width: notebook.css's @media (max-width: 640px) declarations, for the
+     notebook in this page's pane; kept here, in the agents page, so the notebook bundle and the CLI don't grow) */
+  @container sbnb-pane (max-width: 640px) {
+    .nb-artifact .sbnb { --gutter: 44px; }
+    .nb-artifact .sbnb .cell .gutter { padding-right: 6px; }
+    .nb-artifact .sbnb .cell .n { font-size: 11.5px; }
+    .nb-artifact .sbnb .cell .runb { width: 26px; height: 26px; top: 5px; right: 5px; }
+    .nb-artifact .sbnb .cell .adder { left: var(--gutter); transform: none; }
+    .nb-artifact .sbnb .cell .head .drag { display: none; }
+    .nb-artifact .sbnb .cell .head { right: 6px; }
+    .nb-artifact .sbnb .cell .head button, .nb-artifact .sbnb .cell .head select { padding: 1px 5px; }
+    .nb-artifact .sbnb .cell .adder button { padding: 1px 8px; }
+  }
+  /* (the label spans the cell's grid, the gutter and the code: in the gutter column alone it squeezed the code, BAC-1) */
+  .nb-agent-mark { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); margin: 0 0 2px var(--gutter, 44px); }
+  .tab-running { color: var(--accent); }
+  #close-running { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
+  #close-running menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
+  .pane-head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
+  .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
+  .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
+  .icon { border: 0; background: none; width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--muted); }
+  .icon:hover { background: var(--side); color: var(--ink); }
+  .pane-body { flex: 1; overflow: auto; }
+  .pane-body .doc { padding: 22px 30px; max-width: 820px; margin: 0 auto; }
+  body.fullscreen .pane-body .doc { font-size: 16px; padding-top: 40px; }
+  .pane-body pre.code { margin: 0; padding: 16px 18px; white-space: pre; line-height: 1.5; }
+  .pane-body .diff { padding: 8px 0; }
+
+  #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 6px 14px; border-radius: 8px; font-size: 13px; z-index: 30; }
+
+  @media (max-width: 900px) {
+    nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
+    body.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
+    .top #menu { display: block; }
+    body.has-artifact #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; }
+  }
+</style>
+</head>
+<body class="agents-host">
+<div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>
+<div class="app">
+  <nav class="side">
+    <div class="brand">🌿 Sagebrush agents</div>
+    <button id="new">＋ New chat</button>
+    <div id="threads"></div>
+    <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
+  </nav>
+  <main>
+    <div class="top">
+      <button id="menu" aria-label="Chats">☰</button>
+      <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
+      <span class="spacer"></span>
+      <button id="howto" class="link">Use your own Claude</button>
+      <button id="connect" hidden>Connect Claude</button>
+    </div>
+    <div id="help" hidden>
+      <b>Chat with Claude on your own computer.</b> In a terminal (Node 20 or later, and Claude Code logged in once with your Claude account):
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.3.0.tgz</pre>
+      <small>(sha256 of that file: <code>c01424e5c70051e5ca9ec5b1afc5dc1d6185d4e372a0fef3667f50f3634ade8c</code>)</small><br>
+      It prints a link: open it in Chrome or Firefox (Safari can't reach a program on your computer), then allow the folders Claude may use. Press Ctrl+C in the terminal to stop it.
+      Claude runs on your computer with your own Claude login; it sees only the files you allow here, in this browser's workspace, and nothing else on your computer.
+    </div>
+    <div id="log">
+      <div id="empty">
+        <h1>What should we work on?</h1>
+        <div>Ask anything, or try one of these:</div>
+        <div class="tries">
+          <button data-try="Please fix the failing tests in src/stats.py">Fix the failing tests</button>
+          <button data-try="Plot the first partial sums of a Fourier series">Plot a Fourier series</button>
+          <button data-try="Write notes on the eigenvalues of a 2x2 matrix">Write notes on eigenvalues</button>
+          <button data-try="What can you do?">What can you do?</button>
+        </div>
+      </div>
+    </div>
+    <div class="composer-wrap">
+      <div class="composer">
+        <div id="editor"></div>
+        <div class="row">
+          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
+          <span id="queued"></span>
+          <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
+          <button id="queue" title="Send after the current turn (Alt+Enter)" hidden>Queue</button>
+          <button id="stop" title="Stop the agent (Esc)" hidden>Stop</button>
+          <button id="send" title="Send (Shift+Enter)">Send</button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <aside id="artifacts" aria-label="Artifacts"></aside>
+</div>
+<div id="toast" hidden></div>
+<dialog id="close-running" aria-labelledby="close-running-t">
+  <form method="dialog">
+    <p id="close-running-t">A notebook cell is running here. Stop it and close?</p>
+    <menu><button value="cancel" autofocus>Cancel</button> <button value="stop" class="primary">Stop and close</button></menu>
+  </form>
+</dialog>
+<script type="module" src="/agents/agents.js"></script>
+</body>
+</html>
