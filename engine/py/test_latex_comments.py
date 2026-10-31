@@ -87,6 +87,31 @@ def test_vectors():
     for i, c in enumerate(V["literal"]):
         g, w = err(lambda: lit(c["in"])), c["out"]
         assert g.get("error") == w.get("error") and g.get("ok") == w.get("ok"), "literal %d %r:\n got  %r\n want %r" % (i, c["in"][:60], g, w)
+    # (the shared pass: "semantic", made once from the JS core before the pass, on both paths; "budget", its
+    #  finite-budget contract: results, work and the path taken)
+    for i, c in enumerate(V["semantic"]):
+        for force in (False, True):
+            R = LC.resolver(c["text"], 2 ** 40, force_pass=force)
+            R.prepare(c["anchors"])
+            same([R.resolve(a) for a in c["anchors"]], c["out"], "semantic %d (pass %s)" % (i, force))
+    for i, c in enumerate(V["budget"]):
+        R = LC.resolver(c["text"], c["budget"], force_pass=c["force"])
+        R.prepare(c["anchors"])
+        g = LC.js_json([[R.resolve(a) for a in c["anchors"]], R.work, R.stats])
+        w = LC.js_json([c["out"], c["work"], c["stats"]])
+        assert g == w, "budget %d:\n got  %s\n want %s" % (i, g[:300], w[:300])
+    # (as the JS core's test: the budget running out while the scan stays at the root, no unit of the text starting a
+    #  key: never over the budget, every anchor unresolved and never searched again)
+    root_t = "abc def " * 5000
+    root_as = [{"start": 0, "end": len("Qneedle%d" % k), "textSha": "stale", "quote": "Qneedle%d" % k, "prefix": "", "suffix": ""} for k in range(20)]
+    R0 = LC.resolver(root_t, 2 ** 40, force_pass=True)
+    R0.prepare(root_as)
+    root_budget = R0.work - 2 * len(root_t) + len(root_t) + 1
+    R = LC.resolver(root_t, root_budget, force_pass=True)
+    R.prepare(root_as)
+    wr = R.work
+    rr = [R.resolve(a) for a in root_as]
+    assert wr <= root_budget and all(r["status"] == "unresolved" for r in rr) and R.work == wr, "root budget: work %d budget %d %r" % (wr, root_budget, {r["status"] for r in rr})
     for i, c in enumerate(V["literalMerge"]):
         g = LC.js_json(LC.merge(LC.parse(c["a"]), LC.parse(c["b"])))
         assert g == c["out"], "literalMerge %d:\n got  %s\n want %s" % (i, g[:300], c["out"][:300])
