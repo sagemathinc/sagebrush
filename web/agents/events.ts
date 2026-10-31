@@ -31,7 +31,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       diff?: { path: string; before: string; after: string };
     }
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string }
-  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff"; title: string; lang?: string; body: string; path?: string }
+  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
@@ -70,7 +70,7 @@ export interface Attention {
 
 export interface Artifact {
   id: string;
-  kind: "markdown" | "code" | "diff";
+  kind: "markdown" | "code" | "diff" | "notebook";
   title: string;
   lang?: string;
   body: string;

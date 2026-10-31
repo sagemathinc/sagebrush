@@ -139,6 +139,21 @@
   #artifacts { display: none; }
   body.has-artifact #artifacts { display: flex; flex-direction: column; width: min(46vw, 760px); flex: none; border-left: 1px solid var(--line); background: var(--card); }
   body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
+  body.has-artifact.wide-artifact #artifacts { width: min(60vw, 960px); }
+  /* (the notebook's popups are on the document body: above the pane, full screen included; BAP-7) */
+  body .sbnb-menu, body .sbnb-completer, body .sbnb-dropline, body .sbnb-tip { z-index: 40; }
+  .pane-host { flex: 1; overflow: auto; }
+  .pane-host[hidden] { display: none; }
+  .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
+  .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
+  .pane-bar button { font-size: 12px; }
+  .open-full { margin-left: 8px; font-size: 12px; }
+  .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
+  .nb-root { container-type: inline-size; container-name: sbnb-pane; }
+  .nb-agent-mark { font-size: 11.5px; color: var(--muted); margin: 0 0 2px 44px; }
+  .tab-running { color: var(--accent); }
+  #close-running { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
+  #close-running menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
   .pane-head { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); }
   .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
   .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
@@ -214,6 +229,12 @@
   <aside id="artifacts" aria-label="Artifacts"></aside>
 </div>
 <div id="toast" hidden></div>
+<dialog id="close-running" aria-labelledby="close-running-t">
+  <form method="dialog">
+    <p id="close-running-t">A notebook cell is running here. Stop it and close?</p>
+    <menu><button value="cancel" autofocus>Cancel</button> <button value="stop" class="primary">Stop and close</button></menu>
+  </form>
+</dialog>
 <script type="module" src="/agents/agents.js"></script>
 </body>
 </html>
