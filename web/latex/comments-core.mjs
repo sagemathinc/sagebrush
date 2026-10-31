@@ -565,6 +565,9 @@ export function list(doc, text, { all = false, cursor = null, budget } = {}) {
   if (cursor && cursor.snapshot !== snapshot) fail("stale", "the comments or the file changed: list again from the start");
   const R = resolver(text, budget);
   const ts = doc.threads.filter((t) => live(t) && (all || !t.resolved.value)).sort((p, q) => (p.id < q.id ? -1 : 1)).filter((t) => !cursor || t.id > cursor.after);
+  // (the page's threads, at most listThreads of them, chosen first, then prepared together: the shared pass when they
+  //  call for it)
+  for (const _ of R.prepare(ts.slice(0, LIMITS.listThreads).map((t) => t.anchor.value)));
   const out = []; let bytes = 0, i = 0;
   for (; i < ts.length && out.length < LIMITS.listThreads; i++) {
     const t = ts[i], ms = t.messages.filter((m) => !m.deleted.value), a = t.anchor.value;
