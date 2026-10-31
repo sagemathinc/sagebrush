@@ -182,14 +182,17 @@ export class TerminalPanel {
     this.input.id = "sb-term-input";
     this.input.setAttribute("aria-describedby", intro ? "sb-term-intro sb-term-note" : "sb-term-note");
     if (intro) {
-      // (the text alone names the input; the button beside it)
+      // (the text alone names the input; the button beside it, described by the text too: board's N386-1)
       intro.appendChild(el("span", "", this.opts.intro)).id = "sb-term-intro";
       sessionStorage.setItem("sb-term-intro", "1");
-      intro.appendChild(el("button", "", "Got it")).onclick = () => {
-        localStorage.setItem("sagebrush-term-intro", "1");
+      const ok = intro.appendChild(el("button", "", "Got it"));
+      ok.setAttribute("aria-describedby", "sb-term-intro");
+      // (put away first, kept after: a storage that refuses the write still lets the intro go, N386-2)
+      ok.onclick = () => {
         intro.remove();
         this.input.setAttribute("aria-describedby", "sb-term-note");
         this.input.focus();
+        localStorage.setItem("sagebrush-term-intro", "1");
       };
     }
     this.inputLabel.htmlFor = this.input.id;

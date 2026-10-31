@@ -188,6 +188,12 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # (the disk for the AVD: its userdata needs 7372.80 MB under
+      # $HOME/.android/avd, which runner image 20261018.96.1 didn't have, twice:
+      # #384 run 41124748735, #380 run 41154237915; df printed, unused
+      # preinstalled toolchains removed, then a clear failure below 8192 MB)
+      - name: the disk for the AVD
+        run: bash app/selftest/test-disk-before-avd.sh && bash app/selftest/disk-before-avd.sh 8192
       - name: the self-test on the emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -292,6 +298,12 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # (the disk for the AVD: its userdata needs 7372.80 MB under
+      # $HOME/.android/avd, which runner image 20261018.96.1 didn't have, twice:
+      # #384 run 41124748735, #380 run 41154237915; df printed, unused
+      # preinstalled toolchains removed, then a clear failure below 8192 MB)
+      - name: the disk for the AVD
+        run: bash app/selftest/test-disk-before-avd.sh && bash app/selftest/disk-before-avd.sh 8192
       - name: the release APK starts on the emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:

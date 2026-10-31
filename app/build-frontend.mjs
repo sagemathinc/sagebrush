@@ -31,6 +31,10 @@ if (!checkOnly) {
   mkdirSync(out, { recursive: true });
   for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"])
     cpSync(join(src, f), join(out, f), { recursive: true });
+  // the Terminal (⋯ ▸ Terminal, web/shell/): its page module and worker, and the bash package set web/build.ts
+  // builds (shell/preview-set.json names it; pkgset/<S>.json pins its package in pkg/), served from the app's own
+  // origin as the site serves them (William, Oct 30: the Terminal in the desktop and Android apps)
+  for (const f of ["shell", "pkg", "pkgset", "pkgmeta"]) cpSync(join(src, f), join(out, f), { recursive: true });
   // (the other modes' documentation indexes, for the notebook's search box, where built)
   for (const f of ["docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json"]) if (existsSync(join(src, f))) cpSync(join(src, f), join(out, f));
   // the app's native code's notices (scripts/third-party-notices.mjs), beside the page's
@@ -91,8 +95,38 @@ const pageFiles = readdirSync(out).filter((f) => /\.(html|m?js)$/.test(f));
 const refs = new Set();
 for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/\b(sagebrush-[a-z0-9-]+\.(?:m?js|wasm)|docs-index(?:-[a-z]+)?\.json)\b/g)) refs.add(m[1]);
 for (const r of [...refs].sort()) if (!existsSync(join(out, r))) bad.push(`${r}: the page names it, but app/dist has no ${r}`);
+// ...and every module or wasm the page names by a path from its own directory
+// ("./shell/terminal.js", the Terminal's dynamic import): the Terminal's
+// shipped in the apps' menu once without shell/ (#358), the item there and
+// its import failing at the first click
+const relRefs = new Set();
+for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/["'`]\.\/([a-z0-9][a-z0-9/_.-]*\.(?:m?js|wasm))["'`]/gi)) relRefs.add(m[1]);
+for (const r of [...relRefs].sort()) if (!existsSync(join(out, r))) bad.push(`./${r}: the page names it, but app/dist has no ${r}`);
+// The Terminal's shell (web/shell/loader.ts): its worker, and the package set
+// shell/preview-set.json names, pkgset/<S>.json, with each package it pins in
+// pkg/<sha256>.json by that SHA-256 and size (the loader refuses any other)
+let shellPkgs = 0;
+const shellRead = (f) => { try { return JSON.parse(readFileSync(join(out, f), "utf8")); } catch { bad.push(`${f}: missing from app/dist, or not JSON`); return null; } };
+if (!existsSync(join(out, "shell", "worker-boot.js"))) bad.push("shell/worker-boot.js: missing from app/dist (the Terminal's worker)");
+const S = shellRead("shell/preview-set.json")?.S;
+if (S !== undefined && !/^[0-9a-f]{64}$/.test(String(S))) bad.push(`shell/preview-set.json: S is not a set id (${String(S).slice(0, 80)})`);
+const set = S && /^[0-9a-f]{64}$/.test(S) ? shellRead(`pkgset/${S}.json`) : null;
+if (set) {
+  for (const [name, p] of Object.entries(set.packages ?? {})) {
+    const js = p?.js;
+    if (!js || !/^[0-9a-f]{64}$/.test(js.sha256 ?? "")) { bad.push(`pkgset/${S}.json: ${name} pins no module`); continue; }
+    shellPkgs++;
+    const f = `pkg/${js.sha256}.json`;
+    if (!existsSync(join(out, f))) bad.push(`${f} (${name}): missing from app/dist`);
+    else {
+      const b = readFileSync(join(out, f));
+      if (b.length !== js.size || sha256(b) !== js.sha256) bad.push(`${f} (${name}): not the bytes its set pins (${b.length} bytes)`);
+    }
+  }
+  if (!shellPkgs) bad.push(`pkgset/${S}.json: the Terminal's set names no package`);
+}
 if (bad.length) {
   console.error(`${checkOnly ? out : "app/dist"}: the worker and its library chunks do not match:\n  ` + bad.join("\n  "));
   process.exit(1);
 }
-console.log(`${checkOnly ? out : "app/dist"}: the notebook page for the app (the worker's ${named.size} library chunks, ${tzRef ? `its zone data's index and ${tzFiles.size - 1} zone files for ${zones} zones` : "no zone data"}, and the ${refs.size} files the page names checked)`);
+console.log(`${checkOnly ? out : "app/dist"}: the notebook page for the app (the worker's ${named.size} library chunks, ${tzRef ? `its zone data's index and ${tzFiles.size - 1} zone files for ${zones} zones` : "no zone data"}, and the ${refs.size} files the page names checked, ${relRefs.size} by a relative path; the Terminal's set with ${shellPkgs} package${shellPkgs === 1 ? "" : "s"})`);

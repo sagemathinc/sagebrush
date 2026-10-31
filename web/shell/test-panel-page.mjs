@@ -455,9 +455,10 @@ try {
   };
   await reopen();
   const got = await evaluate(`(() => { const b = document.querySelector(".sb-term-intro button"); return { text: b?.textContent, described: ${ta}.getAttribute("aria-describedby"),
-    kept: localStorage.getItem("sagebrush-term-intro"), named: document.getElementById("sb-term-intro")?.textContent.includes("Got it") }; })()`);
-  check(got.text === "Got it" && got.described === "sb-term-intro sb-term-note" && got.kept === null && got.named === false,
-    `the intro, not yet put away, in a new tab's first terminal, with its "Got it" (not part of the input's description): ${JSON.stringify(got)}`);
+    kept: localStorage.getItem("sagebrush-term-intro"), named: document.getElementById("sb-term-intro")?.textContent.includes("Got it"),
+    button: b?.getAttribute("aria-describedby") }; })()`);
+  check(got.text === "Got it" && got.described === "sb-term-intro sb-term-note" && got.kept === null && got.named === false && got.button === "sb-term-intro",
+    `the intro, not yet put away, in a new tab's first terminal, with its "Got it" (not part of the input's description; the button described by the intro, N386-1): ${JSON.stringify(got)}`);
   await evaluate(`document.querySelector(".sb-term-intro button").click()`);
   const gone = await evaluate(`({ intro: document.querySelectorAll(".sb-term-intro, #sb-term-intro").length, described: ${ta}.getAttribute("aria-describedby"),
     focus: document.activeElement === ${ta}, kept: localStorage.getItem("sagebrush-term-intro") })`);
@@ -466,12 +467,66 @@ try {
   const later = await evaluate(`({ intro: document.querySelectorAll(".sb-term-intro").length, described: ${ta}.getAttribute("aria-describedby") })`);
   check(later.intro === 0 && later.described === "sb-term-note", `put away, a new tab's first terminal on this device has no intro: ${JSON.stringify(later)}`);
   await evaluate(`localStorage.removeItem("sagebrush-term-intro")`);
+  // (a storage that refuses the write, full or blocked: Got it still puts the intro away and gives the input the
+  // focus, nothing kept, so the next tab shows it again; board's N386-2)
+  await reopen();
+  const refused = await evaluate(`(() => {
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-term-intro") throw new DOMException("refused", "QuotaExceededError"); return set.call(this, k, v); };
+    const swallow = (e) => e.preventDefault();
+    addEventListener("error", swallow);
+    try { document.querySelector(".sb-term-intro button").click(); } finally { Storage.prototype.setItem = set; removeEventListener("error", swallow); }
+    return { intro: document.querySelectorAll(".sb-term-intro, #sb-term-intro").length, described: ${ta}.getAttribute("aria-describedby"),
+      focus: document.activeElement === ${ta}, kept: localStorage.getItem("sagebrush-term-intro") };
+  })()`);
+  check(refused.intro === 0 && refused.described === "sb-term-note" && refused.focus && refused.kept === null,
+    `a storage that refuses the write: Got it still puts the intro away and the input keeps the focus (N386-2): ${JSON.stringify(refused)}`);
   // (under 700 px: a full-height sheet)
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await new Promise((res) => setTimeout(res, 300));
   const sheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
   check(sheet && sheet.top <= 1 && sheet.h >= sheet.ih * 0.85, `under 700 px the dock is a full-height sheet: ${JSON.stringify(sheet)}`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // ---- the ⋯ and File menus' last entries, pressable by a real hit test (board's B380-1..3): above the dock (the
+  // menus' z-index over the dock's), clear of what is fixed at the window's foot above them (the alpha notice and
+  // the preview gutter laid out at the start), and not shortened by what is below them (the console)
+  const MENUS = [["#morebtn", "#moremenu"], ["#filebtn", "#filemenu"]];
+  const lastEntry = async (btn, menu) => {
+    await evaluate(`scrollTo(0, 0), document.querySelector("${menu}").hidden && document.querySelector("${btn}").click(), 1`);
+    await new Promise((res) => setTimeout(res, 200));
+    const m = await evaluate(`(() => {
+      const m = document.querySelector("${menu}"), items = [...m.querySelectorAll("button:not([hidden]), a:not([hidden])")], l = items.at(-1);
+      l.scrollIntoView({ block: "nearest" });
+      const r = l.getBoundingClientRect(), at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return { open: !m.hidden, pressable: !!at && (at === l || l.contains(at)), at: at && (at.id || at.className || at.tagName), scrolls: m.scrollHeight > m.clientHeight + 1,
+        bottom: Math.round(m.getBoundingClientRect().bottom), h: innerHeight, dock: Math.round(document.querySelector(".sb-term:not([hidden])")?.getBoundingClientRect().top ?? -1) };
+    })()`);
+    await evaluate(`document.querySelector("${menu}").hidden || document.querySelector("${btn}").click(), 1`);
+    return m;
+  };
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    // (above the dock, not shortened by it: whole, or reaching over the dock's top)
+    check(m?.open && m.pressable && m.dock > 0 && (!m.scrolls || m.bottom > m.dock),
+      `B380-2: the dock open, ${menu} is above it, not shortened by it, its last entry pressable: ${JSON.stringify(m)}`);
+  }
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 420, deviceScaleFactor: 1, mobile: false });
+  await new Promise((res) => setTimeout(res, 300));
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    check(m?.open && m.pressable && m.bottom <= m.h, `B380-3: in a 420 px window, ${menu}'s last entry is clear of the foot's notices, pressable: ${JSON.stringify(m)}`);
+  }
+  await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  await until(`!document.querySelector("#console").hidden`, 5000);
+  for (const [btn, menu] of MENUS) {
+    const m = await lastEntry(btn, menu);
+    check(m?.open && m.pressable && !m.scrolls, `B380-1: at 800 px with the console open, ${menu} fits whole (the console is below it), its last entry pressable: ${JSON.stringify(m)}`);
+  }
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await evaluate(`document.querySelector("#termbtn").click()`);
   // ---- the board page's dock (TP-5, #326's deferral; plan E5.1: "the notebook page and the board page"): ⋯ ▸ Terminal
   // there too, placed as on the notebook page (above the bottom overlays, the board ending above it, hide and ✕, the
   // sheet under 700 px), with ps listing the board
