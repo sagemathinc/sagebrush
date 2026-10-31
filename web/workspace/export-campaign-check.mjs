@@ -32,22 +32,34 @@ export function maxGap(times) {
   return g;
 }
 
+/** The progress series (r3, daybreak2's and grader's V-2): the progress line's rewrites from the first writing rewrite
+ * on (preflight's "Checking…" line and the wait before the first member aren't in it: the head is excluded), with the
+ * archive's handoff appended as its last point, so that a stall between the last rewrite and the handoff (the
+ * finishing work) is a gap like any other.  `handoff` null: the series as observed. */
+export function progressSeries(rewrites, handoff) {
+  const s = [...rewrites];
+  if (handoff !== null && handoff !== undefined && s.length && handoff > s[s.length - 1]) s.push(handoff);
+  return s;
+}
+
 /** The hard bounds (daybreak2's ruling): strictly over each is a failure.  The progress measure counts as activated
  * with more than MIN_PROGRESS_WRITES rewrites observed (the resp pass's established requirement). */
 export const BOUNDS = { longTaskMs: 50, majorGcMs: 50, progressGapMs: 250 };
 export const MIN_PROGRESS_WRITES = 10;
 
 /**
- * The page-side progress observer (r2, daybreak2's R3): the time of every rewrite of the progress line itself.  A
- * mutation counts only if its target is the progress line (a <p> in .sbfprev saying "files and folders · … written"),
- * or a text node in it; a mutation anywhere else, inside the panel or out, is not a rewrite of the line.  One
- * timestamp per observer callback that has such a record.  Source text, evaluated in the page; it pushes to `sink`.
+ * The page-side progress observer (r2, daybreak2's R3; r3, V-2): the time of every rewrite of the progress line
+ * itself while the archive is written and finished.  A mutation counts only if its target is the progress line (a <p>
+ * in .sbfprev whose text is "N of M files and folders · … written" or "Finishing the archive's index… … written"), or
+ * a text node in it; a mutation anywhere else, inside the panel or out, is not a rewrite of the line, nor is
+ * preflight's "Checking…" line (the head, excluded).  One timestamp per observer callback that has such a record.
+ * Source text, evaluated in the page; it pushes to `sink`.
  */
 export const PROGRESS_OBSERVER = (sink) => `new MutationObserver((recs) => {
   const now = performance.now();
   for (const r of recs) {
     const t = r.target.nodeType === 3 ? r.target.parentNode : r.target;
-    if (t && t.nodeType === 1 && t.tagName === "P" && t.closest(".sbfprev") && / files and folders .* written$/.test(t.textContent)) { ${sink}.push(now); break; }
+    if (t && t.nodeType === 1 && t.tagName === "P" && t.closest(".sbfprev") && /^([0-9][0-9,]* of [0-9][0-9,]* files and folders · .+ written|Finishing the archive's index… .+ written)$/.test(t.textContent)) { ${sink}.push(now); break; }
   }
 }).observe(document.body, { subtree: true, childList: true, characterData: true })`;
 
