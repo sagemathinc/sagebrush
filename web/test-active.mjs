@@ -250,14 +250,17 @@ const heldArrival = () => Promise.race([new Promise((r) => (stub.holdArrived = r
 const DAY = 86400;
 async function fresh(pre = "") { const b = new Browser(); await b.start(); const t = await b.tab(pre); return { b, t }; }
 /** a page load with idle held, then released; waits for its ping (or for quiet) */
-async function load(t, { skew = 0, before = "", wait = 1500 } = {}) {
+// (the page's run has ended: every IndexedDB connection it opened is closed, run()'s and removeNotes()' alike)
+const RUN_ENDED = `(() => { const i = window.__c.idb; return (i.open ?? 0) >= 1 && (i.close ?? 0) >= (i.open ?? 0); })()`;
+async function load(t, { skew = 0, before = "", wait = 5000 } = {}) {
   await t.open();
   if (skew) await t.ev(`window.__skew = ${skew}`);
   if (before) await t.ev(before);
   const n = posts().length;
   await t.ev("window.__releaseIdle()");
+  // (until a POST arrives or the run has ended, at most `wait`: not a fixed pause, which a loaded host outran)
   const until = Date.now() + wait;
-  while (Date.now() < until && posts().length === n) await sleep(25);
+  while (Date.now() < until && posts().length === n) { if (await t.ev(RUN_ENDED).catch(() => false)) break; await sleep(25); }
   // (a POST arrived: wait until the page is done with it, its lock released and the answer persisted, before
   // anything navigates; a fixed pause lost the persist on a loaded machine)
   if (posts().length > n) await t.until(`navigator.locks.query().then((q) => !q.held.some((h) => h.name === "sb-active") && !q.pending.some((h) => h.name === "sb-active"))`, 5000);
@@ -428,7 +431,7 @@ async function cases() {
     await t.open(); await t2.open();
     await t2.ev("__sbHarness.setMeasure(false)"); const t0 = Date.now();
     const seen = await t.until(sees("no"), 6000); const lag = Date.now() - t0;
-    await t.ev("window.__releaseIdle()"); await sleep(1200);
+    await t.ev("window.__releaseIdle()"); await t.until(RUN_ENDED, 8000); await sleep(300);
     c("C-2c.lag", seen && posts().length === 0, `(i) A saw "no" after ${lag} ms; posts ${posts().length}`);
     console.log(`  (info) C-2c.lag (i): A observed the withdrawal ${lag} ms after B's setMeasure(false)`);
     await b.stop(); }
@@ -448,7 +451,7 @@ async function cases() {
     await t2.ev("__sbHarness.setMeasure(true)");
     // (another process's localStorage write reaches this tab later, not at once: wait until it has)
     await t.until(`localStorage.getItem("sb-consent") === "yes"`, 5000);
-    await t.ev("window.__releaseIdle()"); await sleep(1200);
+    await t.ev("window.__releaseIdle()"); await t.until(RUN_ENDED, 8000); await t.until(LOCK_FREE, 8000); await sleep(150);
     const s = await t.state();
     c("C-2c.regrant", posts().length === 1 && s.b !== null, `after a re-grant: ${posts().length} posts ${J(s)}`);
     await b.stop(); }
@@ -479,21 +482,24 @@ async function cases() {
     await t.open(); await sleep(400);
     const k0 = await t.counts();
     c("C-6.pre", Object.keys(k0.get).length === 0 && Object.keys(k0.set).length === 0 && Object.keys(k0.idb).length === 0 && k0.locks === 0 && k0.fetch === 0 && k0.timers === 0 && k0.idle.length === 1, "before idle: " + J(k0));
+    // (each path is waited for until it has ended (its connection closed by run()'s finally, and on the due path its POST
+    // sent and the lock free), not for a fixed time: a cold profile's first open can take over a second on a loaded host)
+    const ended = (tab, post) => tab.until(`window.__c.idb.close >= 1${post ? " && window.__c.fetch >= 1" : ""}`, 8000).then(() => tab.until(LOCK_FREE, 8000));
     // due (signed out)
-    await t.ev("window.__releaseIdle()"); await sleep(1200);
+    await t.ev("window.__releaseIdle()"); await ended(t, true); await sleep(150);
     const k1 = await t.counts();
     const reads = (k, key) => (k.get[key] ?? 0);
     // (due: ≤ 5 consent reads, 1 open, ≤ 3 transactions, ≤ 4 gets, the probe and ≤ 2 note puts, ≤ 1 lock, 1 POST)
     const dueOk = (k) => reads(k, "sb-consent") <= 5 && (k.idb.open ?? 0) === 1 && txs(k) <= 3 && getsAB(k) <= 4 && (k.idb["put:w"] ?? 0) <= 1 && putsAB(k) <= 2 && k.locks <= 1 && k.fetch === 1;
     c("C-6.due-out", dueOk(k1) && posts().length === 1 && posts()[0].body.length <= 64, "due: " + J(k1));
     // counted
-    await t.open(); await t.ev("window.__releaseIdle()"); await sleep(600);
+    await t.open(); await t.ev("window.__releaseIdle()"); await ended(t, false); await sleep(150);
     const k2 = await t.counts();
     c("C-6.counted", reads(k2, "sb-consent") <= 1 && (k2.idb.open ?? 0) === 1 && (k2.idb["tx:readonly"] ?? 0) === 1 && !k2.idb["tx:readwrite"] && getsAB(k2) <= 2 && k2.locks === 0 && k2.fetch === 0, "counted: " + J(k2));
     // due, with a live session (the stub answers "a"): the same counts
     reset(); await t.ev(`localStorage.clear(); document.cookie = "__Host-sb_session=x; Secure; Path=/"`); await t.wipe();
     stub.mode = { status: 200, as: "a" };
-    await t.open(); await t.ev("window.__releaseIdle()"); await sleep(1200);
+    await t.open(); await t.ev("window.__releaseIdle()"); await ended(t, true); await sleep(150);
     const k3 = await t.counts();
     c("C-6.due-in", dueOk(k3) && posts().length === 1 && !!posts()[0].headers.cookie, "due, signed in: " + J(k3));
     // off
