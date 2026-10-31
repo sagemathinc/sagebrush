@@ -398,6 +398,21 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   for (let k = 0; k < 400; k++) { const q = head + "tail" + k + "!".repeat(20); advAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
   const a1 = same(adv, advAs);
   check("shared pass: 400 needles sharing a 32-unit key, never found: same results, no step over the quota", a1.eq && a1.most <= Q + 64, { most: a1.most, Q });
+  // (more outputs at one scan position than the quota, none verified: 20,000 needles sharing a key that ends the text,
+  //  each longer than what's left of it, so only the output loop's own yield keeps a step within the quota)
+  const endKey = "z".repeat(100) + head, endAs = [];
+  for (let k = 0; k < 20000; k++) { const q = head + "T" + k + "!"; endAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
+  const a5 = same(endKey, endAs);
+  check("shared pass: 20,000 outputs at one scan position, none verified: same results, no step over the quota", endAs.length > Q && a5.eq && a5.most <= Q + 64, { most: a5.most, Q });
+  // (the budget running out while the scan stays at the root: no unit of the text starts a key; the work never over
+  //  the budget, every anchor unresolved and never searched again)
+  const rootT = "abc def ".repeat(5000), rootAs = [];
+  for (let k = 0; k < 20; k++) { const q = "Qneedle" + k; rootAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
+  const R0 = C.resolver(rootT, BIG, { pass: true }); drain(R0.prepare(rootAs));
+  const rootBudget = R0.work() - 2 * rootT.length + rootT.length + 1;
+  const Rr = C.resolver(rootT, rootBudget, { pass: true }); drain(Rr.prepare(rootAs));
+  const wr = Rr.work(), rr = rootAs.map((a) => Rr.resolve(a));
+  check("shared pass: out of budget at the root of the scan: never over the budget, unresolved, no further search", wr <= rootBudget && rr.every((r) => r.status === "unresolved") && Rr.work() === wr, { work: wr, budget: rootBudget, statuses: [...new Set(rr.map((r) => r.status))] });
   const rep = "word ".repeat(20000), repAs = []; for (let k = 0; k < 50; k++) repAs.push(C.makeAnchor(rep, k * 100, k * 100 + 10));
   const a2 = same("x" + rep, repAs);
   check("shared pass: a repetitive text past the candidate cap: same results", a2.eq);

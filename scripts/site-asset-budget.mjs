@@ -167,7 +167,7 @@ if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the L
 //     40 KiB minified, 14 KiB gzip, fetched only to connect an agent (the Agent button, a ?pair= link, a remembered one)
 if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX agent pairing's chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (16 KiB gzip, was 14: @sagebrush's ruling, Oct 31, for the shared pass in the comments' core, measured 35,707 / 14,289
-//  -> 39,564 / 15,774 at its head against master 8ce42493; it holds only with the pass's measured benefit on VM3)
+//  at master 7ff6d103 -> 39,564 / 15,774 at its head; it holds only with the pass's measured benefit on VM3)
 if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 16 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 16 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));
