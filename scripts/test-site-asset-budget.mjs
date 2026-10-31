@@ -76,6 +76,13 @@ expect("sw.js: the loopback string outside the header value too", false, { "dist
 expect("sw.js: the loopback string outside the header value only", false, { "dist/sw.js": sw({ extra: `\n// ${PAGE + LOOP};` }) });
 expect("sw.js: the docs index's SHA-256 not its file's", false, { ...REVIEWED, "dist/sw.js": sw({ csp: policy(PAGE + LOOP), docsSha: sha(docs({ ref: C })) }) });
 expect("sw.js: the docs index's SHA-256 changed, the file not", false, { "dist/sw.js": sw({ csp: policy(PAGE + LOOP), docsSha: sha(docs({ ref: B })) }) });
+// (a base that has the loopback addition already, from the PR that added it: sw.js may differ by VERSION and the docs
+//  index's SHA-256 (the file's own) only)
+const LBASE = { "dist/_headers": headers({ page: PAGE + LOOP }), "dist/sw.js": sw({ csp: policy(PAGE + LOOP) }), "dist/docs-index-python.json": docs(), "dist/other.js": "1;" };
+const gateOn = (base, prod) => { const save = { ...BASE }; Object.keys(BASE).forEach((k) => delete BASE[k]); Object.assign(BASE, base); try { return gate(prod); } finally { Object.keys(BASE).forEach((k) => delete BASE[k]); Object.assign(BASE, save); } };
+{ n++; const got = gateOn(LBASE, { "dist/sw.js": sw({ version: "fedcba9876543210", csp: policy(PAGE + LOOP), docsSha: sha(docs({ ref: B })) }), "dist/docs-index-python.json": docs({ ref: B }) }); if (!got) failed++; console.log(`${got ? "ok  " : "FAIL"} accepts: a base with the loopback already: sw.js's VERSION and the docs SHA-256 only`); }
+{ n++; const got = gateOn(LBASE, { "dist/sw.js": sw({ version: "fedcba9876543210", csp: policy(PAGE) }) }); if (got) failed++; console.log(`${!got ? "ok  " : "FAIL"} refuses: a base with the loopback already: sw.js dropping it`); }
+{ n++; const got = gateOn(LBASE, { "dist/sw.js": sw({ version: "fedcba9876543210", csp: policy(PAGE + LOOP), lazy: '["x.js"]' }) }); if (got) failed++; console.log(`${!got ? "ok  " : "FAIL"} refuses: a base with the loopback already: another sw.js byte changed`); }
 expect("sw.js: a broader source", false, { "dist/sw.js": sw({ csp: policy(PAGE + " ws:") }) });
 // docs-index-python.json
 expect("docs: a commit in a doc text", false, { "dist/docs-index-python.json": docs({ ref: B, doc: ` https://github.com/sagemathinc/sagebrush/blob/${B}/x` }) });
