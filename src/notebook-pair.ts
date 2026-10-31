@@ -13,9 +13,19 @@
 //     a session secret, kept here only as its SHA-256, in memory;
 //   - one paired page at a time; at most 8 sockets in their handshake or hello; 8 KiB before the hello; the hello
 //     within 30 s; RFC 6455 framing, strict, as a server must read a client's.
+//
+// Output is bounded (r2): every frame after the upgrade goes through one gate, the Conn's write method, which
+// admits a frame only if the socket's buffered bytes plus the whole frame stay within 7 MiB (data) or 8 MiB
+// (control: pongs, closes); a refused frame is never appended (a refused answer closes 1013, a refused control frame destroys the socket).
+// At most 8 sockets are closing at once (more are destroyed at once), each destroyed within 5 s.  So at most 8
+// unpaired, 1 paired and 8 closing sockets, 17, hold upgraded output: at most 17 x 8 MiB = 136 MiB of it, by the
+// code (the logical output buffered for the sockets; not the process's memory).  Nothing is queued in phase 2: a
+// request is answered (not-yet) before its frame's feed() returns; the page's limits carry no inFlight until
+// phase 3 enforces one.
 import * as http from "http";
 import type { Duplex } from "stream";
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { isUtf8 } from "buffer";
+import { createHash, createPublicKey, randomBytes, timingSafeEqual } from "crypto";
 
 export const PAIR_PATH = "/sagebrush-kernel";
 export const PAGE_ORIGIN = "https://sagebrush.space";
@@ -26,6 +36,11 @@ export const PAIR_LIMITS = Object.freeze({
   unpaired: 8, // sockets in their handshake or hello at once
   preHello: 8 * 1024, // a frame (a message) before the hello
   frame: 2.25 * 1024 * 1024 + 64 * 1024, // a message after it: a run's body (BODY_MAX.run, remote-client.js) and its envelope
+  outData: 7 * 1024 * 1024, // a socket's buffered output plus an answer's whole frame
+  outTotal: 8 * 1024 * 1024, // ... plus a control frame's (1 MiB above data: room for the 1013 close)
+  closing: 8, // sockets closing at once (more are destroyed at once)
+  closingMs: 5_000, // a closing socket's life before it is destroyed
+  keyChars: 64, // jkt and the key's x and y, before any other check of them
 });
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -37,6 +52,7 @@ export type PairOptions = {
   port?: number; // 0 (the default): the system's choice
   devOrigin?: string | null; // SAGEBRUSH_KERNEL_DEV_ORIGIN
   timers?: Timers;
+  outCaps?: { data: number; total: number }; // (tests: the gate's caps; PAIR_LIMITS.outData and outTotal otherwise)
   out?: (s: string) => void; // the link (stdout)
   err?: (s: string) => void; // the code and notes (stderr)
 };
@@ -62,13 +78,19 @@ const sameText = (a: string, b: string) => {
 export function jwkThumbprint(jwk: { crv: string; kty: string; x: string; y: string }) {
   return b64url(sha256(JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y })));
 }
-const B64URL = /^[A-Za-z0-9_-]+$/;
-/** Exactly {kty:"EC", crv:"P-256", x, y}, each coordinate 32 bytes as base64url. */
+/** Exactly {kty:"EC", crv:"P-256", x, y}, the coordinates strings. */
 function jwkShape(j: any) {
   if (!j || typeof j !== "object" || Array.isArray(j)) return false;
   const keys = Object.keys(j).sort();
   if (keys.join() !== "crv,kty,x,y") return false;
-  return j.kty === "EC" && j.crv === "P-256" && [j.x, j.y].every((c) => typeof c === "string" && B64URL.test(c) && Buffer.from(c, "base64url").length === 32);
+  return j.kty === "EC" && j.crv === "P-256" && typeof j.x === "string" && typeof j.y === "string";
+}
+const B64URL43 = /^[A-Za-z0-9_-]{43}$/;
+/** 32 bytes as canonical base64url: 43 characters, the last one's 2 unused bits zero (it encodes back the same). */
+const canonical32 = (c: string) => B64URL43.test(c) && b64url(Buffer.from(c, "base64url")) === c;
+/** The key is a point on P-256 (node's import checks the curve equation). */
+function onCurve(j: any) {
+  try { createPublicKey({ key: { kty: j.kty, crv: j.crv, x: j.x, y: j.y }, format: "jwk" }); return true; } catch { return false; }
 }
 
 /**
@@ -141,7 +163,15 @@ export function strictJson(text: string): any {
 
 // ---- one socket's frames (RFC 6455 §5, read as a server reads a client: masked, no reserved bits or opcodes)
 
-class Conn {
+/** A Close status a peer may send (RFC 6455 §7.4): not 1004-1006 or 1015, nor outside 1000-1014 and 3000-4999. */
+const closeStatusOk = (s: number) => (s >= 1000 && s <= 1014 && s !== 1004 && s !== 1005 && s !== 1006) || (s >= 3000 && s <= 4999);
+function frameOf(b0: number, payload: Buffer) {
+  const n = payload.length;
+  const head = n < 126 ? Buffer.from([b0, n]) : n < 65536 ? Buffer.from([b0, 126, n >> 8, n & 255]) : Buffer.concat([Buffer.from([b0, 127]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return b; })()]);
+  return Buffer.concat([head, payload]);
+}
+
+export class Conn {
   buf: Buffer = Buffer.alloc(0);
   parts: Buffer[] = [];
   partsLen = 0;
@@ -150,23 +180,49 @@ class Conn {
   token: string | null = null;
   jkt: string | null = null;
   helloTimer: any = null;
+  closingTimer: any = null;
   constructor(readonly sock: Duplex, readonly server: PairServer) {}
 
+  /**
+   * The gate: the only writer of frames.  A frame is admitted iff the socket's buffered bytes plus the whole frame
+   * stay within the cap of its kind; one not admitted is not appended: a refused answer closes the socket (1013, a
+   * control frame, through this gate again), a refused control frame destroys it.
+   */
+  write(frame: Buffer, kind: "data" | "control") {
+    if (this.closed) return false;
+    const caps = this.server.outCaps, buffered = this.sock.writableLength;
+    const fits = kind === "data" ? buffered + frame.length <= caps.data : buffered + frame.length <= caps.total;
+    if (fits) {
+      this.sock.write(frame);
+      this.server.stats.maxBuffered = Math.max(this.server.stats.maxBuffered, buffered + frame.length);
+      return true;
+    }
+    this.server.stats.overflows++;
+    if (kind === "data") this.close(1013, "the page isn't reading its answers");
+    else this.destroy();
+    return false;
+  }
   send(obj: unknown) {
-    if (this.closed) return;
-    const payload = Buffer.from(JSON.stringify(obj));
-    const n = payload.length;
-    const head = n < 126 ? Buffer.from([0x81, n]) : n < 65536 ? Buffer.from([0x81, 126, n >> 8, n & 255]) : Buffer.concat([Buffer.from([0x81, 127]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return b; })()]);
-    this.sock.write(Buffer.concat([head, payload]));
+    this.write(frameOf(0x81, Buffer.from(JSON.stringify(obj))), "data");
   }
   close(code: number, reason = "") {
     if (this.closed) return;
-    const r = Buffer.from(reason.slice(0, 120));
-    const body = Buffer.concat([Buffer.from([code >> 8, code & 255]), r]);
-    this.sock.write(Buffer.concat([Buffer.from([0x88, body.length]), body]));
+    const body = Buffer.concat([Buffer.from([code >> 8, code & 255]), Buffer.from(reason.slice(0, 120))]);
+    if (!this.write(frameOf(0x88, body), "control")) return; // (refused: destroyed)
+    this.ended();
+  }
+  /** Our side done (our close sent, or the page's FIN): closing, until the socket closes or closingMs. */
+  ended() {
     this.closed = true;
     this.sock.end();
     this.server.dropped(this);
+    this.server.closingAdd(this);
+  }
+  destroy() {
+    this.closed = true;
+    this.sock.destroy();
+    this.server.dropped(this);
+    this.server.closingDone(this);
   }
   cap() { return this.paired ? PAIR_LIMITS.frame : PAIR_LIMITS.preHello; }
 
@@ -180,10 +236,14 @@ class Conn {
       if (rsv) return this.close(1002, "reserved bits");
       if (!masked) return this.close(1002, "a client frame must be masked");
       let len = b1 & 0x7f, at = 2;
-      if (len === 126) { if (this.buf.length < 4) return; len = this.buf.readUInt16BE(2); at = 4; }
-      else if (len === 127) {
+      if (len === 126) {
+        if (this.buf.length < 4) return;
+        len = this.buf.readUInt16BE(2); at = 4;
+        if (len < 126) return this.close(1002, "a length not in its shortest form");
+      } else if (len === 127) {
         if (this.buf.length < 10) return;
         const big = this.buf.readBigUInt64BE(2);
+        if (big < 65536n) return this.close(1002, "a length not in its shortest form");
         if (big > BigInt(PAIR_LIMITS.frame) * 2n) return this.close(1009, "too big");
         len = Number(big); at = 10;
       }
@@ -196,8 +256,13 @@ class Conn {
       const payload = Buffer.from(this.buf.subarray(at + 4, at + 4 + len));
       for (let k = 0; k < payload.length; k++) payload[k] ^= mask[k & 3];
       this.buf = this.buf.subarray(at + 4 + len);
-      if (op === 0x8) return this.close(1000);
-      if (op === 0x9) { this.sock.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload])); continue; }
+      if (op === 0x8) {
+        if (payload.length === 1) return this.close(1002, "a close status is two bytes");
+        if (payload.length >= 2 && !closeStatusOk(payload.readUInt16BE(0))) return this.close(1002, "a close status a peer may not send");
+        if (payload.length > 2 && !isUtf8(payload.subarray(2))) return this.close(1007, "a close reason not UTF-8");
+        return this.close(1000);
+      }
+      if (op === 0x9) { this.write(frameOf(0x8a, payload), "control"); continue; }
       if (op === 0xa) continue;
       if (op === 0x2) return this.close(1003, "text frames only");
       if (op === 0x1) { if (this.parts.length) return this.close(1002, "a new message inside a fragmented one"); }
@@ -233,11 +298,17 @@ export class PairServer {
   pairedConn: Conn | null = null;
   unpairedCount = 0;
   conns = new Set<Conn>();
+  closing = new Set<Conn>(); // (closed by us or by the page, until the socket closes: at most PAIR_LIMITS.closing)
   nonce = b64url(randomBytes(16));
   workersStarted = 0; // (phase 3 starts the session's worker for the first run; until then, never)
+  pending = 0; // requests not yet answered (phase 2 answers each before its feed() returns: always 0 between frames)
+  readonly queue: unknown[] = []; // (phase 3's runs waiting for the kernel; phase 2 never adds one)
+  readonly outCaps: { data: number; total: number };
+  stats = { maxBuffered: 0, overflows: 0, thumbprints: 0, destroyedAtCap: 0 };
 
   constructor(opts: PairOptions = {}) {
     this.timers = opts.timers ?? REAL;
+    this.outCaps = opts.outCaps ?? { data: PAIR_LIMITS.outData, total: PAIR_LIMITS.outTotal };
     this.devOrigin = opts.devOrigin ?? null;
     this.err = opts.err ?? ((s: string) => process.stderr.write(s));
     this.code = base32(randomBytes(16)); // (128 bits, 26 letters and digits)
@@ -258,8 +329,14 @@ export class PairServer {
   link() { return `${this.devOrigin ?? PAGE_ORIGIN}/?kpair=${this.code}&kport=${this.port}`; }
 
   close() {
-    for (const c of this.conns) { c.closed = true; c.sock.destroy(); }
+    for (const c of [...this.conns, ...this.closing]) {
+      this.timers.clearTimeout(c.helloTimer);
+      this.timers.clearTimeout(c.closingTimer);
+      c.closed = true;
+      c.sock.destroy();
+    }
     this.conns.clear();
+    this.closing.clear();
     return new Promise<void>((r) => this.http.close(() => r()));
   }
 
@@ -284,17 +361,22 @@ export class PairServer {
     if (this.unpairedCount >= PAIR_LIMITS.unpaired) return this.refuseHttp(sock, 503, "Service Unavailable");
     const accept = createHash("sha1").update(key + GUID).digest("base64");
     sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    this.attach(sock, head);
+  }
+
+  /** An upgraded socket, from its first frame on (the tests attach a stub socket here). */
+  attach(sock: Duplex, head?: Buffer) {
     const c = new Conn(sock, this);
     this.conns.add(c);
     this.unpairedCount++;
     c.helloTimer = this.timers.setTimeout(() => { if (!c.paired) c.close(1008, "no hello in time"); }, PAIR_LIMITS.helloMs);
     sock.on("data", (d: Buffer) => c.feed(d));
-    // (the page gone: its FIN ("end"; an upgraded socket is half-open, so "close" alone would wait for ours) or
-    // the socket's close; either ends the pairing it held)
-    const gone = () => { if (!c.closed) { c.closed = true; sock.end(); this.dropped(c); } };
-    sock.on("end", gone);
-    sock.on("close", gone);
+    // (the page gone: its FIN ("end"; an upgraded socket is half-open, so "close" alone would wait for ours) ends
+    // the pairing it held, and the socket is closing; the socket's close ends both)
+    sock.on("end", () => { if (!c.closed) c.ended(); });
+    sock.on("close", () => { if (!c.closed) { c.closed = true; this.dropped(c); } this.closingDone(c); });
     if (head?.length) c.feed(head);
+    return c;
   }
 
   /** A socket gone: its hello timer, its place among the unpaired, or the pairing it held (and its token). */
@@ -303,6 +385,18 @@ export class PairServer {
     if (!this.conns.delete(c)) return;
     if (c.paired) { if (this.pairedConn === c) this.pairedConn = null; c.token = null; }
     else this.unpairedCount--;
+  }
+
+  /** A socket closing: counted until it closes, destroyed after closingMs; past the cap, destroyed at once. */
+  closingAdd(c: Conn) {
+    if (this.closing.size >= PAIR_LIMITS.closing) { this.stats.destroyedAtCap++; c.sock.destroy(); return; }
+    this.closing.add(c);
+    c.closingTimer = this.timers.setTimeout(() => { c.closingTimer = null; this.closing.delete(c); c.sock.destroy(); }, PAIR_LIMITS.closingMs);
+  }
+  closingDone(c: Conn) {
+    this.timers.clearTimeout(c.closingTimer);
+    c.closingTimer = null;
+    this.closing.delete(c);
   }
 
   private refuse(c: Conn, id: unknown, kind: "refused" | "protocol", message: string) {
@@ -323,9 +417,15 @@ export class PairServer {
       return c.close(1000, "unpaired");
     }
     if (msg && typeof msg === "object" && typeof msg.id === "string" && /^t\d{1,15}$/.test(msg.id)) {
-      return c.send({ id: msg.id, status: 503, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "not-yet", message: "this computer's kernel isn't available in this version" }) });
+      this.pending++;
+      return this.notYet(c, msg.id);
     }
     return c.close(1002, "not a message of this protocol");
+  }
+  /** A request's answer in phase 2, written at once (so nothing waits: no queue, no timer, no worker). */
+  private notYet(c: Conn, id: string) {
+    c.send({ id, status: 503, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "not-yet", message: "this computer's kernel isn't available in this version" }) });
+    this.pending--;
   }
 
   private hello(c: Conn, msg: any) {
@@ -335,8 +435,14 @@ export class PairServer {
     if (p.protocol !== 1) return this.refuse(c, msg.id, "protocol", "protocol 1 only");
     const hasCode = typeof p.code === "string", hasSession = typeof p.session === "string";
     if (hasCode === hasSession) return this.refuse(c, msg.id, "refused", "a hello carries exactly one of code and session");
+    // (the key, cheapest first: sizes, shape, canonical encoding, the curve; only then its thumbprint, then the code)
+    const tooLong = (v: unknown) => typeof v === "string" && v.length > PAIR_LIMITS.keyChars;
+    if (tooLong(p.jkt) || tooLong(p.jwk?.x) || tooLong(p.jwk?.y)) return this.refuse(c, msg.id, "refused", "the page's key is too long");
     if (!jwkShape(p.jwk)) return this.refuse(c, msg.id, "refused", "the page's key must be an EC P-256 public key");
-    if (typeof p.jkt !== "string" || p.jkt !== jwkThumbprint(p.jwk)) return this.refuse(c, msg.id, "refused", "the key's thumbprint doesn't match");
+    if (typeof p.jkt !== "string" || !B64URL43.test(p.jkt) || !canonical32(p.jwk.x) || !canonical32(p.jwk.y)) return this.refuse(c, msg.id, "refused", "the page's key is not canonical base64url");
+    if (!onCurve(p.jwk)) return this.refuse(c, msg.id, "refused", "the page's key isn't a point on P-256");
+    this.stats.thumbprints++;
+    if (p.jkt !== jwkThumbprint(p.jwk)) return this.refuse(c, msg.id, "refused", "the key's thumbprint doesn't match");
     if (hasCode) {
       if (this.codeUsed) return this.refuse(c, msg.id, "refused", "this code was used: run the command again for a new one");
       if (this.codeRetired) return this.refuse(c, msg.id, "refused", "too many wrong attempts: run the command again for a new code");
@@ -380,7 +486,7 @@ export class PairServer {
     this.unpairedCount--;
     this.pairedConn = c;
     this.err("A page is paired.\n");
-    c.send({ jsonrpc: "2.0", id, result: { protocol: 1, purpose: "kernel", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame, inFlight: 8 }, ...(session ? { session } : {}) } });
+    c.send({ jsonrpc: "2.0", id, result: { protocol: 1, purpose: "kernel", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } });
   }
 }
 
