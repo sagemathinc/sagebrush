@@ -1028,3 +1028,164 @@ test("K36 at most 8 closing at once: 20 refused hellos with paused readers; past
     assert.ok(conns.every((c) => c.sock.destroyed), "every transport destroyed");
   } finally { for (const c of clients) c.end(); await s.close(); }
 });
+
+// ---- r3: the fragment bound (local-kernel-p2-r3-canonical, frozen jointly before the run)
+const lastClose = (st: any) => {
+  const f = serverFrame(st.writes[st.writes.length - 1]);
+  return f.op === 0x8 ? { code: f.payload.readUInt16BE(0), reason: f.payload.subarray(2).toString() } : null;
+};
+const pairedOn = (st: any) => st.writes.some((w: Buffer) => {
+  const f = serverFrame(w);
+  if (f.op !== 0x1) return false;
+  try { return typeof JSON.parse(f.payload.toString()).result?.token === "string"; } catch { return false; }
+});
+const pongs = (st: any) => st.writes.map((w: Buffer) => serverFrame(w)).filter((f: any) => f.op === 0xa).map((f: any) => f.payload.toString());
+/** `buf` cut into `n` non-empty pieces, as even as possible. */
+function cut(buf: Buffer, n: number) {
+  const out: Buffer[] = [];
+  for (let i = 0, at = 0; i < n; i++) {
+    const size = Math.floor(buf.length / n) + (i < buf.length % n ? 1 : 0);
+    out.push(buf.subarray(at, at + size));
+    at += size;
+  }
+  return out;
+}
+/** Text fragments: the first a text frame, the rest continuations; the last one final unless `open`. */
+const fragmentsOf = (pieces: Buffer[], open = false) => pieces.map((p, i) => masked(i === 0 ? 0x1 : 0x0, p, !open && i === pieces.length - 1));
+const padded = (s: PairServer, size = 1100) => { const t = JSON.stringify(codeHello(s)); return Buffer.from(t + " ".repeat(size - t.length)); };
+const unpaired = (s: PairServer) => { const st = stubSock(); return { st, c: s.attach(st) }; };
+
+test("K37 empty storm: one byte, then 1100 empty continuations: closed 1009 (too many fragments), maxFragments === 1024", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    c.feed(masked(0x1, Buffer.from("{"), false));
+    for (let i = 0; i < 1100 && !st.ended; i++) c.feed(masked(0x0, Buffer.alloc(0), false));
+    assert.deepEqual(lastClose(st), { code: 1009, reason: "too many fragments" });
+    assert.equal(s.stats.maxFragments, 1024);
+  } finally { await s.close(); }
+});
+
+test("K37s one-byte storm: 1100 one-byte continuations (under 8 KiB): closed 1009 (too many fragments), maxFragments === 1024", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    c.feed(masked(0x1, Buffer.from("{"), false));
+    for (let i = 0; i < 1100 && !st.ended; i++) c.feed(masked(0x0, Buffer.from(" "), false));
+    assert.deepEqual(lastClose(st), { code: 1009, reason: "too many fragments" });
+    assert.equal(s.stats.maxFragments, 1024);
+  } finally { await s.close(); }
+});
+
+test("K37a at the cap: a padded hello in exactly 1024 non-empty fragments pairs, maxFragments === 1024", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    for (const f of fragmentsOf(cut(padded(s), 1024))) c.feed(f);
+    assert.ok(pairedOn(st), "paired (result.token)");
+    assert.equal(s.stats.maxFragments, 1024);
+  } finally { await s.close(); }
+});
+
+test("K37b cap + 1: the same hello in 1025 fragments: closed 1009 (too many fragments), maxFragments === 1024, not paired, the code not spent", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    for (const f of fragmentsOf(cut(padded(s), 1025))) { if (st.ended) break; c.feed(f); }
+    assert.deepEqual(lastClose(st), { code: 1009, reason: "too many fragments" });
+    assert.equal(s.stats.maxFragments, 1024);
+    assert.ok(!pairedOn(st), "not paired");
+    const b = unpaired(s);
+    b.c.feed(maskedText(codeHello(s)));
+    assert.ok(pairedOn(b.st), "a following hello pairs");
+  } finally { await s.close(); }
+});
+
+test("K37e empty first: an empty non-final text frame, then the hello in 2 continuations, pairs", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    const t = Buffer.from(JSON.stringify(codeHello(s)));
+    c.feed(masked(0x1, Buffer.alloc(0), false));
+    c.feed(masked(0x0, t.subarray(0, 50), false));
+    c.feed(masked(0x0, t.subarray(50), true));
+    assert.ok(pairedOn(st), "paired");
+  } finally { await s.close(); }
+});
+
+test("K37p ping inside: text, empty, ping, empty, the rest (non-empty, final): the pong comes back and it pairs", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    const t = Buffer.from(JSON.stringify(codeHello(s)));
+    c.feed(masked(0x1, t.subarray(0, 50), false));
+    c.feed(masked(0x0, Buffer.alloc(0), false));
+    c.feed(masked(0x9, Buffer.from("hi")));
+    c.feed(masked(0x0, Buffer.alloc(0), false));
+    c.feed(masked(0x0, t.subarray(50), true));
+    assert.deepEqual(pongs(st), ["hi"]);
+    assert.ok(pairedOn(st), "paired");
+  } finally { await s.close(); }
+});
+
+test("K37q near-cap ping: 1000 fragments, a ping, 25 more (1025): the pong, then closed 1009 (too many fragments), maxFragments === 1024, not paired", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    const frames = fragmentsOf(cut(padded(s), 1025));
+    for (const f of frames.slice(0, 1000)) c.feed(f);
+    c.feed(masked(0x9, Buffer.from("q")));
+    for (const f of frames.slice(1000)) { if (st.ended) break; c.feed(f); }
+    assert.deepEqual(pongs(st), ["q"]);
+    assert.deepEqual(lastClose(st), { code: 1009, reason: "too many fragments" });
+    assert.equal(s.stats.maxFragments, 1024);
+    assert.ok(!pairedOn(st), "not paired");
+  } finally { await s.close(); }
+});
+
+test("K37c byte vs count on one frame: 1024 one-byte fragments, then an 8 KiB 1025th: closed 1009 by the byte cap (message too big)", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    c.feed(masked(0x1, Buffer.from("{"), false));
+    for (let i = 0; i < 1023; i++) c.feed(masked(0x0, Buffer.from(" "), false));
+    assert.equal(st.ended, 0, "1024 fragments: still open");
+    c.feed(masked(0x0, Buffer.alloc(8192, 0x20), false));
+    assert.deepEqual(lastClose(st), { code: 1009, reason: "message too big" });
+  } finally { await s.close(); }
+});
+
+test("K38 a 64-bit length with its top bit set closes 1002", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    const h = Buffer.alloc(14);
+    h[0] = 0x81; h[1] = 0x80 | 127; h.writeBigUInt64BE((1n << 63n) + 1n, 2); randomBytes(4).copy(h, 10);
+    c.feed(h);
+    assert.deepEqual(lastClose(st), { code: 1002, reason: "a 64-bit length's top bit must be 0" });
+  } finally { await s.close(); }
+});
+
+test("K39e ended() releases: one write (a fragment, a reserved opcode, 3 trailing bytes): closing with no input kept", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = unpaired(s);
+    c.feed(Buffer.concat([masked(0x1, Buffer.from("{"), false), masked(0x3, Buffer.alloc(0)), Buffer.from([0x81, 0x85, 0x01])]));
+    assert.equal(lastClose(st)?.code, 1002);
+    assert.ok(s.closing.has(c), "closing");
+    assert.deepEqual([c.buf.length, c.parts.length, c.partsLen, c.inMsg, c.fragments], [0, 0, 0, false, 0]);
+  } finally { await s.close(); }
+});
+
+test("K39d destroy() releases: a half-read message, then a refused pong past the total cap: destroyed with no input kept", async () => {
+  const { s } = await server();
+  try {
+    const { st, c } = stubPaired(s);
+    st.writableLength = 8 * MiB - 126;
+    c.feed(masked(0x1, Buffer.from("{"), false));
+    assert.equal(c.inMsg, true, "a message half read");
+    c.feed(Buffer.concat([masked(0x9, Buffer.alloc(125, 0x61)), Buffer.from([0x81, 0x85, 0x01])]));
+    assert.ok(st.destroyed, "destroyed (the pong refused)");
+    assert.deepEqual([c.buf.length, c.parts.length, c.partsLen, c.inMsg, c.fragments], [0, 0, 0, false, 0]);
+  } finally { await s.close(); }
+});
