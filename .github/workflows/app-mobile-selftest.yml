@@ -14,8 +14,8 @@
 # 40 min, the emulator's 600 s boot timeout and the script's 300 s wait for
 # the report.  The emulator job has two legs on API 34: "image" (the image's
 # own WebView, every run) and "current" (a pinned current WebView build
-# sideloaded and selected; the nightly cron, by hand and pull requests, never
-# master pushes).  A second job, release-starts, checks that the RELEASE build
+# sideloaded and selected; the nightly cron and by hand only, never pull
+# requests or master pushes: retired to the cron once its evidence was in).  A second job, release-starts, checks that the RELEASE build
 # starts (see it below); its own 40 min, in parallel.
 #
 # Pinned: the runner image's Android SDK, NDK 27.3.13750724 and JDK 17 (no
@@ -78,8 +78,10 @@ jobs:
 
   # (two legs on API 34: "image", the image's own WebView, every run; and
   # "current", a pinned current WebView build sideloaded and selected
-  # (COI Stage B), on the nightly cron, by hand and on pull requests, never on
-  # master pushes: it downloads about 500 MB. The build: Chromium's official
+  # (COI Stage B), on the nightly cron and by hand only, never on pull
+  # requests or master pushes: it downloads about 500 MB, and its question
+  # (does a current WebView isolate the page?) is answered, NOT isolated,
+  # sagebrush/android-coi-decision, Oct 30; the cron keeps watching for a change. The build: Chromium's official
   # snapshot AndroidDesktop_x64/1727419 (the newest at or below the M158 branch
   # point; a trunk snapshot, not a stable-channel build), its zip and APK each
   # pinned by sha256 and checked by app/selftest/verify-then.sh before use)
@@ -91,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        webview: ${{ fromJSON(github.event_name == 'push' && '["image"]' || '["image", "current"]') }}
+        webview: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["image", "current"]' || '["image"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4

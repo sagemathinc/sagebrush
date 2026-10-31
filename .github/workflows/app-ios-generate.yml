@@ -170,8 +170,10 @@ jobs:
         run: |
           set -euo pipefail
           o="$RUNNER_TEMP/out"; mkdir -p "$o"
-          # (a tar keeps modes and symlinks, which the artifact's zip doesn't)
-          tar -C app/src-tauri/gen -cf "$o/apple.tar" apple
+          # (a tar keeps modes and symlinks, which the artifact's zip doesn't;
+          # COPYFILE_DISABLE keeps macOS's tar from adding AppleDouble "._*"
+          # entries for files with extended attributes)
+          COPYFILE_DISABLE=1 tar -C app/src-tauri/gen -cf "$o/apple.tar" apple
           # (one line per entry: "file <mode> <sha256> <path>" or "link <path> -> <target>")
           (cd app/src-tauri/gen/apple && find . \( -type f -o -type l \) | LC_ALL=C sort | while IFS= read -r f; do
             if [ -L "$f" ]; then echo "link $f -> $(readlink "$f")"
