@@ -84,8 +84,9 @@ export function prepare(dir, host, mocks, source = { branch: 'unknown', commit: 
     if (policies.length !== 1) throw new Error('Preview HTML/script lacks exactly one built CSP');
     const csp = policies[0].csp.replace(/connect-src [^;]+/, directive =>
       // (a preview page reaches only its own origin, and the agent pairing's loopback socket to sagebrush-mcp: no other)
-      directive.includes("'none'") ? directive : "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*")
-      .replace(' https://static.cloudflareinsights.com', '');
+      directive.includes("'none'") ? directive : "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*");
+    // (a page says who may frame it, security audit G-1: the Worker's X-Frame-Options follows from it)
+    if (path.endsWith('.html') && !/(^|;)\s*frame-ancestors\s/.test(csp)) throw new Error('Preview HTML policy lacks frame-ancestors');
     const bytes = Buffer.from(JSON.stringify({ csp }));
     if (bytes.length > 32768) throw new Error('Preview policy exceeds 32 KiB');
     add(`.preview/headers/${path}.json`, bytes, MIME.json);
