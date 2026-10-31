@@ -27,6 +27,17 @@ on_exit() {
 }
 trap on_exit EXIT
 say() { echo "$*" | tee -a "$SUMMARY"; }
+# The app's process is gone: still a failure (the evidence is gone with it),
+# but named when ActivityManager killed it for a dying dependency (Google Play
+# services' FontsProvider on the emulator: logcat-kill.py), not a crash.
+gone() {
+  local why rc=0
+  adb logcat -d -v threadtime > "$LOG" 2>/dev/null || true
+  why=$(python3 -I "$HERE/logcat-kill.py" "$LOG" "$PKG" "$pid" 2>&1) || rc=$?
+  [ "$rc" = 0 ] && fail "$1: $why"
+  [ "$rc" = 1 ] || echo "$why"
+  fail "$1"
+}
 
 [ -s "$APK" ] || fail "no APK at $APK"
 # (the activity this script starts is the APK's own launchable activity)
@@ -62,13 +73,13 @@ pid=$(adb shell pidof "$PKG" | tr -d '\r' || true)
 [[ "$pid" =~ ^[0-9]+$ ]] || fail "no single process for $PKG after start ('$pid')"
 sleep 30
 now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
-[ "$now" = "$pid" ] || fail "$PKG is not the same process 30 s later (pid $pid, now '$now')"
+[ "$now" = "$pid" ] || gone "$PKG is not the same process 30 s later (pid $pid, now '$now')"
 # (a WebView renderer: Chromium starts one only when a page loads; the name
 # may have a suffix, so a prefix)
 renderers=$(adb shell ps -A -o NAME | tr -d '\r' | grep -c "^$provider:sandboxed_process") || [ $? = 1 ]
 [ "$renderers" -gt 0 ] || { adb shell ps -A -o PID,NAME | grep -E "$provider|$PKG" || true; fail "no $provider:sandboxed_process renderer while $PKG runs"; }
 now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
-[ "$now" = "$pid" ] || fail "$PKG died while looking for its renderer (pid $pid, now '$now')"
+[ "$now" = "$pid" ] || gone "$PKG died while looking for its renderer (pid $pid, now '$now')"
 
 adb logcat -d -v threadtime > "$LOG"
 grep -q "ActivityTaskManager: Displayed $PKG/$ACT" "$LOG" || fail "no 'Displayed $PKG/$ACT' in the log"

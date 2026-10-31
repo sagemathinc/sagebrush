@@ -8,8 +8,11 @@ diagnose()): the check lines and the "info <key>: <value>" lines, whose
 grammar android-report.py has already judged.  --logcat FILE is the app's
 log on Android (adb logcat), for the debug build's "[localhost]" server lines
 and the "[page] start" line that reaches the log the same way; --no-logcat
-says there is none (desktop), and the readings that need it say "not
-applicable".
+says there is none (the desktop and iOS self-tests: run.mjs, ios-selftest.sh),
+and the readings that need it say "not applicable".  The "info user-agent:"
+line is information only: never derive the platform or its version from it
+(WebKit on the iOS 26.2 simulator says "iPhone OS 18_7"); the jobs record the
+runtime and device themselves.
 
 Every reading that applies is printed, one line each, "reading <tag>: <text>"
 (the tags: incomplete, contradictory, logcat-unknown, logcat-na,
@@ -119,7 +122,7 @@ def main():
     # the server's log (Android)
     log_ok, page_logged = False, None
     if mode == "none":
-        say("logcat-na", "no app log here (desktop): the server-log readings are not applicable")
+        say("logcat-na", "no Android app log on this platform: the server-log readings are not applicable")
     else:
         log = open(logcat_path, encoding="utf-8", errors="replace").read().splitlines()
         sentinel = any("[localhost] logger start" in l for l in log)

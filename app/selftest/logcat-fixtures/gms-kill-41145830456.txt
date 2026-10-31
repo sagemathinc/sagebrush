@@ -1,0 +1,180 @@
+10-30 23:47:06.343   520  1636 W ActivityTaskManager: callingPackage for (uid=2000, pid=2645) has no WPC
+10-30 23:47:06.623   832   863 V WindowManagerShell: Transition requested: android.os.BinderProxy@6335f7d TransitionRequestInfo { type = OPEN, triggerTask = TaskInfo{userId=0 taskId=8 displayId=0 isRunning=true baseIntent=Intent { flg=0x10000000 cmp=space.sagebrush.notebook/.MainActivity } baseActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} topActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} origActivity=null realActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} numActivities=1 lastActiveTime=33936 supportsMultiWindow=true resizeMode=1 isResizeable=true minWidth=-1 minHeight=-1 defaultMinSize=220 token=WCT{android.window.IWindowContainerToken$Stub$Proxy@2a5ee72} topActivityType=1 pictureInPictureParams=null shouldDockBigOverlays=false launchIntoPipHostTaskId=-1 lastParentTaskIdBeforePip=-1 displayCutoutSafeInsets=null topActivityInfo=ActivityInfo{d7972c3 space.sagebrush.notebook.MainActivity} launchCookies=[] positionInParent=Point(0, 0) parentTaskId=-1 isFocused=false isVisible=false isVisibleRequested=false isSleeping=false topActivityInSizeCompat=false topActivityEligibleForLetterboxEducation= false topActivityLetterboxed= false isFromDoubleTap= false topActivityLetterboxVerticalPosition= -1 topActivityLetterboxHorizontalPosition= -1 topActivityLetterboxWidth=-1 topActivityLetterboxHeight=-1 locusId=null displayAreaFeatureId=1 cameraCompatControlState=hidden}, remoteTransition = null, displayChange = null }
+10-30 23:47:06.633   520  1636 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=space.sagebrush.notebook/.MainActivity} with LAUNCH_SINGLE_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-30 23:47:06.737   520  2125 W system_server: Long monitor contention with owner binder:520_E (1636) at android.content.res.Configuration com.android.server.wm.ActivityTaskManagerService.getGlobalConfigurationForPid(int)(ActivityTaskManagerService.java:1133) waiters=4 in void com.android.server.wm.ActivityClientController.activityTopResumedStateLost() for 198ms
+10-30 23:47:06.813   520   904 D CoreBackPreview: Window{b319822 u0 Splash Screen space.sagebrush.notebook}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@ea7670f, mPriority=0, mIsAnimationCallback=false}
+10-30 23:47:06.907   520   550 I ActivityManager: Start proc 2688:space.sagebrush.notebook/u0a192 for next-top-activity {space.sagebrush.notebook/space.sagebrush.notebook.MainActivity}
+10-30 23:47:06.953   520   539 V WindowManager: Sent Transition #6 createdAt=10-30 23:47:06.366 via request=TransitionRequestInfo { type = OPEN, triggerTask = TaskInfo{userId=0 taskId=8 displayId=0 isRunning=true baseIntent=Intent { flg=0x10000000 cmp=space.sagebrush.notebook/.MainActivity } baseActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} topActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} origActivity=null realActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} numActivities=1 lastActiveTime=33936 supportsMultiWindow=true resizeMode=1 isResizeable=true minWidth=-1 minHeight=-1 defaultMinSize=220 token=WCT{RemoteToken{1168439 Task{6e09e6a #8 type=standard A=10192:space.sagebrush.notebook}}} topActivityType=1 pictureInPictureParams=null shouldDockBigOverlays=false launchIntoPipHostTaskId=-1 lastParentTaskIdBeforePip=-1 displayCutoutSafeInsets=null topActivityInfo=ActivityInfo{ff5da7e space.sagebrush.notebook.MainActivity} launchCookies=[] positionInParent=Point(0, 0) parentTaskId=-1 isFocused=false isVisible=false isVisibleRequested=false isSleeping=false topActivityInSizeCompat=false topActivityEligibleForLetterboxEducation= false topActivityLetterboxed= false isFromDoubleTap= false topActivityLetterboxVerticalPosition= -1 topActivityLetterboxHorizontalPosition= -1 topActivityLetterboxWidth=-1 topActivityLetterboxHeight=-1 locusId=null displayAreaFeatureId=1 cameraCompatControlState=hidden}, remoteTransition = null, displayChange = null }
+10-30 23:47:06.953   520   539 V WindowManager:     info={id=6 t=OPEN f=0x0 trk=0 r=[0@Point(0, 0)] c=[{WCT{RemoteToken{1168439 Task{6e09e6a #8 type=standard A=10192:space.sagebrush.notebook}}} m=OPEN f=NONE leash=Surface(name=Task=8)/@0x748da83 sb=Rect(0, 0 - 320, 640) eb=Rect(0, 0 - 320, 640) d=0},{WCT{RemoteToken{bd22af5 Task{2ce2768 #1 type=home}}} m=TO_BACK f=SHOW_WALLPAPER leash=Surface(name=Task=1)/@0x89b2665 sb=Rect(0, 0 - 320, 640) eb=Rect(0, 0 - 320, 640) d=0}]}
+10-30 23:47:07.099   520   549 D SystemServerTimingAsync: ssm.onUnlockedUser-0_com.android.server.wm.ActivityTaskManagerService$Lifecycle
+10-30 23:47:07.154   520   549 W SystemServiceManager: Service com.android.server.wm.ActivityTaskManagerService$Lifecycle took 55 ms in onUnlockedUser-0
+10-30 23:47:07.154   520   549 V SystemServerTimingAsync: ssm.onUnlockedUser-0_com.android.server.wm.ActivityTaskManagerService$Lifecycle took to complete: 55ms
+10-30 23:47:07.177   520   549 D SystemServerTimingAsync: ssm.onUnlockedUser-0_com.android.server.webkit.WebViewUpdateService
+10-30 23:47:07.177   520   549 V SystemServerTimingAsync: ssm.onUnlockedUser-0_com.android.server.webkit.WebViewUpdateService took to complete: 0ms
+10-30 23:47:07.753   520   550 I ActivityManager: Start proc 2788:com.android.chrome/u0a150 for service {com.android.chrome/org.chromium.chrome.browser.customtabs.CustomTabsConnectionService}
+10-30 23:47:07.927  2688  2688 W ziparchive: Unable to open '/data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/base.dm': No such file or directory
+10-30 23:47:07.927  2688  2688 W ziparchive: Unable to open '/data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/base.dm': No such file or directory
+10-30 23:47:07.980  2688  2688 D nativeloader: Configuring clns-6 for other apk /data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/base.apk. target_sdk_version=37, uses_libraries=, library_path=/data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/lib/x86_64:/data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/base.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/space.sagebrush.notebook
+10-30 23:47:07.986  2688  2688 V GraphicsEnvironment: ANGLE GameManagerService for space.sagebrush.notebook: false
+10-30 23:47:07.986  2688  2688 V GraphicsEnvironment: space.sagebrush.notebook is not listed in per-application setting
+10-30 23:47:08.112  1048  1048 D CarrierSvcBindHelper: onPackageAdded: space.sagebrush.notebook
+10-30 23:47:08.197  1840  2342 I WebViewFactory: Loading com.google.android.webview version 113.0.5672.136 (code 567263637)
+10-30 23:47:08.313  1840  2342 D nativeloader: Configuring clns-8 for other apk /data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-30 23:47:08.329  1048  1356 D ImsResolver: maybeAddedImsService, packageName: space.sagebrush.notebook
+10-30 23:47:08.336  2788  2788 I cr_SplitCompatApp: Launched version=113.0.5672.136 minSdkVersion=29 isBundle=true processName=com.android.chrome isIsolated=false
+10-30 23:47:08.428  2788  2883 I cr_LibraryLoader: Loading monochrome_64 from within /data/app/~~AkmWPRW8zCidM-BUSHiXcw==/com.android.chrome-xrTCDR0UhNW6OKreisz7Jg==/Chrome.apk
+10-30 23:47:08.431  2788  2883 I cr_Linker: loadLibraryImplLocked: monochrome_64, relroMode=1
+10-30 23:47:08.457  1840  2342 D nativeloader: Configuring clns-9 for other apk /data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-30 23:47:08.636  2788  2883 I cr_LibraryLoader: Successfully loaded native library
+10-30 23:47:08.637  2788  2883 I cr_CachingUmaRecorder: Flushed 22 samples from 21 histograms.
+10-30 23:47:08.657  1840  2342 I cr_WVCFactoryProvider: Loaded version=113.0.5672.136 minSdkVersion=29 isBundle=false multiprocess=true packageId=2
+10-30 23:47:08.889  1840  2939 I cr_VariationsUtils: Failed reading seed file "/data/user/0/com.google.android.googlequicksearchbox/app_webview/variations_seed_new"
+10-30 23:47:08.889  1840  2939 I cr_VariationsUtils: Failed reading seed file "/data/user/0/com.google.android.googlequicksearchbox/app_webview/variations_seed"
+10-30 23:47:08.893  1840  2342 I cr_LibraryLoader: Successfully loaded native library
+10-30 23:47:08.893  1840  2342 I cr_CachingUmaRecorder: Flushed 8 samples from 8 histograms.
+10-30 23:47:08.893  1840  2939 I cr_VariationsUtils: Requesting new seed from IVariationsSeedServer
+10-30 23:47:09.040   520   550 I ActivityManager: Start proc 2955:com.google.android.webview:webview_service/u0a133 for service {com.google.android.webview/org.chromium.android_webview.services.VariationsSeedServer}
+10-30 23:47:09.544   520  1766 D CoreBackPreview: Window{458b711 u0 space.sagebrush.notebook/space.sagebrush.notebook.MainActivity}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@10441d6, mPriority=0, mIsAnimationCallback=false}
+10-30 23:47:09.781  1048  1048 D CarrierSvcBindHelper: onPackageModified: space.sagebrush.notebook
+10-30 23:47:09.899  1048  1356 D ImsResolver: maybeAddedImsService, packageName: space.sagebrush.notebook
+10-30 23:47:09.934   520   980 I ImeTracker: space.sagebrush.notebook:f9a99b87: onRequestHide at ORIGIN_SERVER_HIDE_INPUT reason HIDE_UNSPECIFIED_WINDOW
+10-30 23:47:09.934   520   980 I ImeTracker: space.sagebrush.notebook:f9a99b87: onCancelled at PHASE_SERVER_SHOULD_HIDE
+10-30 23:47:09.962   520  2946 W InputManager-JNI: Input channel object 'b319822 Splash Screen space.sagebrush.notebook (client)' was disposed without first being removed with the input manager!
+10-30 23:47:09.981  1554  1554 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1877 onStartInput(EditorInfo{inputType=0x0(NULL) imeOptions=0x0 privateImeOptions=null actionName=UNSPECIFIED actionLabel=null actionId=0 initialSelStart=-1 initialSelEnd=-1 initialCapsMode=0x0 hintText=null label=null packageName=space.sagebrush.notebook fieldId=0 fieldName=null extras=null}, false)
+10-30 23:47:09.996   520   539 W ziparchive: Unable to open '/data/app/~~TTlRdBOfD2a7-vjYkwCAOw==/space.sagebrush.notebook-j24MeRXjZ_D-3p4C1O6NXA==/base.dm': No such file or directory
+10-30 23:47:09.998   520   539 I ActivityTaskManager: Displayed space.sagebrush.notebook/.MainActivity for user 0: +3s557ms
+10-30 23:47:10.050  2955  2955 D nativeloader: Configuring clns-6 for other apk /data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-30 23:47:10.052  2955  2955 D nativeloader: Configuring clns-7 for other apk /data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-30 23:47:10.152  2688  2688 I WebViewFactory: Loading com.google.android.webview version 113.0.5672.136 (code 567263637)
+10-30 23:47:10.191  2688  2688 D nativeloader: Configuring clns-7 for other apk /data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-30 23:47:10.194  2688  2688 D nativeloader: Configuring clns-8 for other apk /data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+10-30 23:47:10.215  2955  2955 I cr_WebViewApkApp: Launched version=113.0.5672.136 minSdkVersion=29 isBundle=false processName=com.google.android.webview:webview_service
+10-30 23:47:10.246  2688  2688 I cr_WVCFactoryProvider: Loaded version=113.0.5672.136 minSdkVersion=29 isBundle=false multiprocess=true packageId=2
+10-30 23:47:10.278  2688  3075 I cr_VariationsUtils: Failed reading seed file "/data/user/0/space.sagebrush.notebook/app_webview/variations_seed_new"
+10-30 23:47:10.286  2688  2688 I cr_LibraryLoader: Successfully loaded native library
+10-30 23:47:10.286  2688  2688 I cr_CachingUmaRecorder: Flushed 8 samples from 8 histograms.
+10-30 23:47:10.287  2688  3075 I cr_VariationsUtils: Failed reading seed file "/data/user/0/space.sagebrush.notebook/app_webview/variations_seed"
+10-30 23:47:10.287  2688  3075 I cr_VariationsUtils: Requesting new seed from IVariationsSeedServer
+10-30 23:47:10.725  1840  2342 I cr_CronetLibraryLoader: Cronet version: 113.0.5672.51, arch: x86_64
+10-30 23:47:10.750   520   550 I ActivityManager: Start proc 3099:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0ai9000 for  {space.sagebrush.notebook/org.chromium.content.app.SandboxedProcessService0:0}
+10-30 23:47:10.790  2955  3120 I cr_VariationsUtils: Scheduling seed download job
+10-30 23:47:10.911  2955  3080 I cr_VariationsUtils: Downloading new seed
+10-30 23:47:10.920  3099  3099 I cr_WebViewApkApp: Launched version=113.0.5672.136 minSdkVersion=29 isBundle=false processName=com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+10-30 23:47:10.991  3099  3099 I cr_ChildProcessService: Creating new ChildProcessService pid=3099
+10-30 23:47:11.092  2688  3162 W chromium: [WARNING:dns_config_service_android.cc(115)] Failed to read DnsConfig.
+10-30 23:47:11.317  2955  3080 I cr_VariationsSeedFetch: Fetched first run seed in 405 ms
+10-30 23:47:11.381   520   550 I ActivityManager: Start proc 3245:com.google.android.webview:webview_apk/u0a133 for service {com.google.android.webview/org.chromium.android_webview.nonembedded.AwComponentUpdateService}
+10-30 23:47:11.821  3245  3245 D nativeloader: Configuring clns-6 for other apk /data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-30 23:47:11.842  3245  3245 D nativeloader: Configuring clns-7 for other apk /data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/lib/x86_64:/data/app/~~Oew-fX6t6qL-IDIvC8qcnw==/com.google.android.webview-dT6HubNRDKRkezwlwWK0Vw==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~13C0msHxxTA4EB-6zCQe3Q==/com.google.android.trichromelibrary_567263637-DzZJSvy50znUEhvpn7d5dg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-30 23:47:11.882  2955  3120 I cr_VariationsUtils: Throttling seed download job
+10-30 23:47:11.882  2955  3120 I cr_VariationsUtils: Writing new seed to app's data directory
+10-30 23:47:11.944  2688  3211 W cr_media: BLUETOOTH_CONNECT permission is missing.
+10-30 23:47:11.951  3099  3203 I cr_LibraryLoader: Successfully loaded native library
+10-30 23:47:11.951  3099  3203 I cr_CachingUmaRecorder: Flushed 2 samples from 2 histograms.
+10-30 23:47:11.952  2688  3211 W cr_media: registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+10-30 23:47:11.975  3245  3245 I cr_WebViewApkApp: Launched version=113.0.5672.136 minSdkVersion=29 isBundle=false processName=com.google.android.webview:webview_apk
+10-30 23:47:12.250  1673  1673 I AiAiEcho: AppFetcherImplV2 updateApps package:[space.sagebrush.notebook], userId:[0], reason:[package is added.].
+10-30 23:47:12.302  3245  3245 I cr_LibraryLoader: Successfully loaded native library
+10-30 23:47:12.373   520  3358 D SystemServerTimingAsync: ssm.onCompletedEventUser-0_{|Unlocked|}_com.android.server.wm.ActivityTaskManagerService$Lifecycle
+10-30 23:47:12.373   520  3358 V SystemServerTimingAsync: ssm.onCompletedEventUser-0_{|Unlocked|}_com.android.server.wm.ActivityTaskManagerService$Lifecycle took to complete: 0ms
+10-30 23:47:12.373   520  3358 D SystemServerTimingAsync: ssm.onCompletedEventUser-0_{|Unlocked|}_com.android.server.webkit.WebViewUpdateService
+10-30 23:47:12.373   520  3358 V SystemServerTimingAsync: ssm.onCompletedEventUser-0_{|Unlocked|}_com.android.server.webkit.WebViewUpdateService took to complete: 0ms
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: IOException during downloadToFile.
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: java.io.IOException: Cleartext HTTP traffic to edgedl.me.gvt1.com not permitted
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: 	at com.android.okhttp.HttpHandler$CleartextURLFilter.checkURLPermitted(HttpHandler.java:127)
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: 	at com.android.okhttp.internal.huc.HttpURLConnectionImpl.execute(HttpURLConnectionImpl.java:462)
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: 	at com.android.okhttp.internal.huc.HttpURLConnectionImpl.getResponse(HttpURLConnectionImpl.java:411)
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: 	at com.android.okhttp.internal.huc.HttpURLConnectionImpl.getResponseCode(HttpURLConnectionImpl.java:542)
+10-30 23:47:12.716  3245  3373 W cr_AWNetworkFetcherTask: 	at org.chromium.android_webview.nonembedded.NetworkFetcherTask.download(chromium-TrichromeWebViewGoogle6432.apk-stable-567263637:48)
+10-30 23:47:12.969  3099  3340 E chromium: [ERROR:tile_manager.cc(835)] WARNING: tile memory limits exceeded, some content may not draw
+10-30 23:47:12.992  3099  3340 E chromium: [ERROR:tile_manager.cc(835)] WARNING: tile memory limits exceeded, some content may not draw
+10-30 23:47:14.123  1673  1673 I AiAiEcho: AppFetcherImpl onPackageChanged space.sagebrush.notebook.
+10-30 23:47:14.124  1673  2728 I AiAiEcho: AppIndexer Package:[space.sagebrush.notebook] UserProfile:[0] Enabled:[true].
+10-30 23:47:14.124  1673  2728 I AiAiEcho: AppFetcherImplV2 updateApps package:[space.sagebrush.notebook], userId:[0], reason:[package is updated.].
+10-30 23:47:14.654  2688  3659 D ProfileInstaller: Installing profile for space.sagebrush.notebook
+10-30 23:47:15.287  3324  3390 I cr_CronetLibraryLoader: Cronet version: 113.0.5672.51, arch: x86_64
+10-30 23:47:16.733  3507  3596 I cr_CronetLibraryLoader: Cronet version: 113.0.5672.51, arch: x86_64
+10-30 23:47:19.497  1050  1075 D PrefCtrlListHelper: Could not find Context-only controller for pref: com.android.settings.deviceinfo.legal.WebViewLicensePreferenceController
+10-30 23:47:20.859  1840  2351 I cr_CronetLibraryLoader: Cronet version: 102.0.4973.2, arch: x86_64
+10-30 23:47:30.642  3507  3760 I HeterodyneSyncScheduler: Scheduling Phenotype for a PhenotypeSyncImmediately(6, org.chromium.net.cronet) one off with window [1, 2] in seconds [CONTEXT service_id=51 ]
+10-30 23:47:33.349   520  2831 I ActivityManager: Killing 2688:space.sagebrush.notebook/u0a192 (adj 0): depends on provider com.google.android.gms/.fonts.provider.FontsProvider in dying proc com.google.android.gms.persistent (adj -10000)
+10-30 23:47:33.372   520   908 I ActivityManager: Killing 3099:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0a192i0 (adj 0): isolated not needed
+10-30 23:47:33.381   520  1766 I ImeTracker: space.sagebrush.notebook:d538ef41: onRequestHide at ORIGIN_SERVER_HIDE_INPUT reason HIDE_REMOVE_CLIENT
+10-30 23:47:33.381   520  1766 I ImeTracker: space.sagebrush.notebook:d538ef41: onCancelled at PHASE_SERVER_SHOULD_HIDE
+10-30 23:47:33.381   520  2869 I WindowManager: WIN DEATH: Window{458b711 u0 space.sagebrush.notebook/space.sagebrush.notebook.MainActivity}
+10-30 23:47:33.386   520  2869 W InputManager-JNI: Input channel object '458b711 space.sagebrush.notebook/space.sagebrush.notebook.MainActivity (client)' was disposed without first being removed with the input manager!
+10-30 23:47:33.400   520   908 W ActivityTaskManager: Force removing ActivityRecord{f1fa8b9 u0 space.sagebrush.notebook/.MainActivity t8}: app died, no saved state
+10-30 23:47:33.403   832   863 V WindowManagerShell: Transition requested: android.os.BinderProxy@704a12b TransitionRequestInfo { type = CLOSE, triggerTask = TaskInfo{userId=0 taskId=8 displayId=0 isRunning=true baseIntent=Intent { flg=0x10000000 cmp=space.sagebrush.notebook/.MainActivity } baseActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} topActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} origActivity=null realActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} numActivities=1 lastActiveTime=34637 supportsMultiWindow=true resizeMode=1 isResizeable=true minWidth=-1 minHeight=-1 defaultMinSize=220 token=WCT{android.window.IWindowContainerToken$Stub$Proxy@855e988} topActivityType=1 pictureInPictureParams=null shouldDockBigOverlays=false launchIntoPipHostTaskId=-1 lastParentTaskIdBeforePip=-1 displayCutoutSafeInsets=null topActivityInfo=ActivityInfo{ec0f21 space.sagebrush.notebook.MainActivity} launchCookies=[] positionInParent=Point(0, 0) parentTaskId=-1 isFocused=true isVisible=true isVisibleRequested=true isSleeping=false topActivityInSizeCompat=false topActivityEligibleForLetterboxEducation= false topActivityLetterboxed= false isFromDoubleTap= false topActivityLetterboxVerticalPosition= -1 topActivityLetterboxHorizontalPosition= -1 topActivityLetterboxWidth=-1 topActivityLetterboxHeight=-1 locusId=null displayAreaFeatureId=1 cameraCompatControlState=hidden}, remoteTransition = null, displayChange = null }
+10-30 23:47:34.411   520   539 V WindowManager: Sent Transition #7 createdAt=10-30 23:47:33.400 via request=TransitionRequestInfo { type = CLOSE, triggerTask = TaskInfo{userId=0 taskId=8 displayId=0 isRunning=true baseIntent=Intent { flg=0x10000000 cmp=space.sagebrush.notebook/.MainActivity } baseActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} topActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} origActivity=null realActivity=ComponentInfo{space.sagebrush.notebook/space.sagebrush.notebook.MainActivity} numActivities=1 lastActiveTime=34637 supportsMultiWindow=true resizeMode=1 isResizeable=true minWidth=-1 minHeight=-1 defaultMinSize=220 token=WCT{RemoteToken{1168439 Task{6e09e6a #8 type=standard A=10192:space.sagebrush.notebook}}} topActivityType=1 pictureInPictureParams=null shouldDockBigOverlays=false launchIntoPipHostTaskId=-1 lastParentTaskIdBeforePip=-1 displayCutoutSafeInsets=null topActivityInfo=ActivityInfo{ff5da7e space.sagebrush.notebook.MainActivity} launchCookies=[] positionInParent=Point(0, 0) parentTaskId=-1 isFocused=true isVisible=true isVisibleRequested=true isSleeping=false topActivityInSizeCompat=false topActivityEligibleForLetterboxEducation= false topActivityLetterboxed= false isFromDoubleTap= false topActivityLetterboxVerticalPosition= -1 topActivityLetterboxHorizontalPosition= -1 topActivityLetterboxWidth=-1 topActivityLetterboxHeight=-1 locusId=null displayAreaFeatureId=1 cameraCompatControlState=hidden}, remoteTransition = null, displayChange = null }
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: Exception in upload method
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: com.google.android.apps.gsa.shared.r.d: Error code: 262182
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.ab.bk.d(PG:5)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.libraries.gsa.c.a.ar.d(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.libraries.gsa.c.a.bo.b(PG:5)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.libraries.gsa.c.a.e.a(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.libraries.gsa.c.a.a.run(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.bf.execute(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.i(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:12)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.j.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.j.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.j.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.j.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.c.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.bu.cancel(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:17)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.staticplugins.bk.b.h.run(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.bf.execute(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.i(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:12)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.j.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.util.c.aj.a(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.m(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.c.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.l(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.common.util.concurrent.d.cancel(PG:8)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.s3.o.c(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.s3.r.a(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.staticplugins.dc.a.c.e(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.staticplugins.dc.a.c.c(PG:3)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.staticplugins.dc.a.e.a(PG:5)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.s3.n.hh(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.cd.g.a.f.e(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.speech.k.a.g.d(PG:22)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.speech.k.a.g.ks(PG:6)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.s3.o.e(PG:14)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.s3.p.run(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:487)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at java.util.concurrent.FutureTask.run(FutureTask.java:264)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.util.c.a.e.run(PG:2)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.util.c.a.bi.run(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.util.c.a.bi.run(PG:1)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:644)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at java.lang.Thread.run(Thread.java:1012)
+10-30 23:47:37.092  1840  2377 E cr_CronetUrlRequestContext: 	at com.google.android.apps.gsa.shared.util.c.a.l.run(PG:5)
+10-30 23:47:37.541  4883  4975 I cr_CronetLibraryLoader: Cronet version: 113.0.5672.51, arch: x86_64
+10-30 23:47:38.783  4261  4399 I cr_CronetLibraryLoader: Cronet version: 113.0.5672.51, arch: x86_64
+10-30 23:47:39.163  4261  5277 I cr_CronetUrlRequestContext: destroyNativeStreamLocked org.chromium.net.impl.CronetBidirectionalStream@d82ba66
