@@ -8,6 +8,8 @@
 // files (this browser's workspace), shown and edited beside the chat.
 // Threads are kept in this browser's localStorage.
 
+// (first: the pairing code leaves the address bar before anything else runs)
+import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
