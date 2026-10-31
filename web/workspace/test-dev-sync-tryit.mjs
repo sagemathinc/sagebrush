@@ -313,11 +313,11 @@ try {
   check(both, `different cells edited at once: both kept on both (A ${J(await A.codes())}, B ${J(await B.codes())})`);
   await A.type(0, "x = 100"); await sleep(300); await B.type(0, "x = 200");
   let same = false;
-  for (let i = 0; i < 100 && !same; i++) { const [a, b] = [await A.codes(), await B.codes()]; same = J(a) === J(b) && ["x = 100", "x = 200"].includes(a[0]); if (!same) await sleep(250); }
+  for (let i = 0; i < 100 && !same; i++) { const [a, b] = [await A.codes(), await B.codes()]; same = J(a) === J(b) && J(a) === J(["x = 2000", "y = 20"]); if (!same) await sleep(250); }
   const [a4, b4] = [await A.codes(), await B.codes()];
   check(same, `the same cell edited in both: the two converge (A ${J(a4)}, B ${J(b4)})`);
-  // (what the merge kept, said whole: on DEV's early 2c-3 both edits may stay, as two cells, where the Sync panel's note
-  // says the later is kept)
+  // (exact merges (#388) keep both edits: from x = 10, A's x = 100 and B's x = 200 merge to x = 2000 on both, the
+  // other cell untouched; what the merge kept is also said whole)
   obs("the same cell edited in both: the cells both have", a4);
   // ---- 5. a data file made, renamed and moved to Trash in A; followed in B
   await A.ev(`${W}.create("/data.csv", { content: "1,2,3\\n" })`);
