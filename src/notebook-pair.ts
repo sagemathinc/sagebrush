@@ -22,6 +22,11 @@
 // code (the logical output buffered for the sockets; not the process's memory).  Nothing is queued in phase 2: a
 // request is answered (not-yet) before its frame's feed() returns; the page's limits carry no inFlight until
 // phase 3 enforces one.
+// Input is bounded too (r3): only an open socket reads (at most 8 unpaired and 1 paired; a closing or destroyed one
+// keeps nothing, release()), and an open socket holds at most one message being read: its bytes within the cap
+// (8 KiB before the hello, PAIR_LIMITS.frame after) and at most PAIR_LIMITS.fragments fragments, each counted, an empty
+// or one-byte fragment as much as any.  So at most 9 half-read messages: 8 x 8 KiB + 1 x frame bytes, and 9 x 1024
+// fragment records, by the code.
 import * as http from "http";
 import type { Duplex } from "stream";
 import { isUtf8 } from "buffer";
@@ -36,6 +41,7 @@ export const PAIR_LIMITS = Object.freeze({
   unpaired: 8, // sockets in their handshake or hello at once
   preHello: 8 * 1024, // a frame (a message) before the hello
   frame: 2.25 * 1024 * 1024 + 64 * 1024, // a message after it: a run's body (BODY_MAX.run, remote-client.js) and its envelope
+  fragments: 1024, // a message's fragments, empty or one byte as much as any: the bound on its retained state
   outData: 7 * 1024 * 1024, // a socket's buffered output plus an answer's whole frame
   outTotal: 8 * 1024 * 1024, // ... plus a control frame's (1 MiB above data: room for the 1013 close)
   closing: 8, // sockets closing at once (more are destroyed at once)
@@ -173,8 +179,10 @@ function frameOf(b0: number, payload: Buffer) {
 
 export class Conn {
   buf: Buffer = Buffer.alloc(0);
-  parts: Buffer[] = [];
+  parts: Buffer[] = []; // (a fragmented message's non-empty fragments)
   partsLen = 0;
+  inMsg = false; // (a fragmented text message is being read: the state, kept apart from what it holds)
+  fragments = 0; // (its fragments so far, empty ones included: at most PAIR_LIMITS.fragments)
   closed = false;
   paired = false;
   token: string | null = null;
@@ -211,15 +219,25 @@ export class Conn {
     if (!this.write(frameOf(0x88, body), "control")) return; // (refused: destroyed)
     this.ended();
   }
+  /** A socket done reading (closing or destroyed) keeps no input: its buffer and any half-read message go. */
+  release() {
+    this.buf = Buffer.alloc(0);
+    this.parts = [];
+    this.partsLen = 0;
+    this.inMsg = false;
+    this.fragments = 0;
+  }
   /** Our side done (our close sent, or the page's FIN): closing, until the socket closes or closingMs. */
   ended() {
     this.closed = true;
+    this.release();
     this.sock.end();
     this.server.dropped(this);
     this.server.closingAdd(this);
   }
   destroy() {
     this.closed = true;
+    this.release();
     this.sock.destroy();
     this.server.dropped(this);
     this.server.closingDone(this);
@@ -243,6 +261,7 @@ export class Conn {
       } else if (len === 127) {
         if (this.buf.length < 10) return;
         const big = this.buf.readBigUInt64BE(2);
+        if (big >> 63n) return this.close(1002, "a 64-bit length's top bit must be 0");
         if (big < 65536n) return this.close(1002, "a length not in its shortest form");
         if (big > BigInt(PAIR_LIMITS.frame) * 2n) return this.close(1009, "too big");
         len = Number(big); at = 10;
@@ -265,15 +284,26 @@ export class Conn {
       if (op === 0x9) { this.write(frameOf(0x8a, payload), "control"); continue; }
       if (op === 0xa) continue;
       if (op === 0x2) return this.close(1003, "text frames only");
-      if (op === 0x1) { if (this.parts.length) return this.close(1002, "a new message inside a fragmented one"); }
-      else if (op === 0x0) { if (!this.parts.length) return this.close(1002, "a continuation with nothing to continue"); }
-      else return this.close(1002, "reserved opcode");
-      this.parts.push(payload);
-      this.partsLen += payload.length;
+      if (op === 0x1) {
+        if (this.inMsg) return this.close(1002, "a new message inside a fragmented one");
+        this.inMsg = true;
+        this.fragments = 0;
+      } else if (op === 0x0) {
+        if (!this.inMsg) return this.close(1002, "a continuation with nothing to continue");
+      } else return this.close(1002, "reserved opcode");
+      // (every fragment counts, an empty one too: empty continuations can't grow a message's state without a bound)
+      if (++this.fragments > PAIR_LIMITS.fragments) return this.close(1009, "too many fragments");
+      this.server.stats.maxFragments = Math.max(this.server.stats.maxFragments, this.fragments);
+      if (payload.length) {
+        this.parts.push(payload);
+        this.partsLen += payload.length;
+      }
       if (!fin) continue;
       const whole = Buffer.concat(this.parts);
       this.parts = [];
       this.partsLen = 0;
+      this.inMsg = false;
+      this.fragments = 0;
       let text: string, msg: any;
       try { text = new TextDecoder("utf-8", { fatal: true }).decode(whole); } catch { return this.close(1007, "not UTF-8"); }
       try { msg = strictJson(text); } catch { return this.close(1007, "malformed JSON"); }
@@ -304,7 +334,7 @@ export class PairServer {
   pending = 0; // requests not yet answered (phase 2 answers each before its feed() returns: always 0 between frames)
   readonly queue: unknown[] = []; // (phase 3's runs waiting for the kernel; phase 2 never adds one)
   readonly outCaps: { data: number; total: number };
-  stats = { maxBuffered: 0, overflows: 0, thumbprints: 0, destroyedAtCap: 0 };
+  stats = { maxBuffered: 0, overflows: 0, thumbprints: 0, destroyedAtCap: 0, maxFragments: 0 };
 
   constructor(opts: PairOptions = {}) {
     this.timers = opts.timers ?? REAL;
