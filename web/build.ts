@@ -446,7 +446,7 @@ shellHash.update(engineHash + libManifestHash);
 // worker serves a kept copy only if it still has those bytes, and then as a
 // response it makes, with this status and these headers, never the kept
 // response's own; design/security.md, SEC-8D6-1, SEC-522-1)
-const { pagePolicy } = await import("./csp-policy.mts");
+const { pagePolicy, frameOptions } = await import("./csp-policy.mts");
 const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   const file = p === "./" ? "index.html" : p.split("?")[0];
   const bytes = readFileSync(join(here, "dist", file));
@@ -454,7 +454,7 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   if (!mime) throw new Error(`sw.js: no type for ${file}`);
   // (as web/_headers and web/csp.ts give it: every file cross-origin isolated, a page its policy)
   const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
-  if (file.endsWith(".html")) headers["Content-Security-Policy"] = pagePolicy(scriptHashes(bytes.toString("utf8")));
+  if (file.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": pagePolicy(scriptHashes(bytes.toString("utf8"))), "X-Frame-Options": frameOptions(pagePolicy())! });
   return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));

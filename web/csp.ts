@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { framePolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
+import { frameOptions, framePolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -57,7 +57,7 @@ export function headersFor(dir: string): string {
   }
   const rules: [string, string][] = [];
   for (const g of [...groups.values()].sort((a, b) => a.patterns[0].localeCompare(b.patterns[0])))
-    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : pagePolicy)([...g.hashes].sort())]);
+    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : g.patterns[0] === "/agents/*" ? (h: string[]) => pagePolicy(h, "'none'") : pagePolicy)([...g.hashes].sort())]);
   // every page: exactly one policy, allowing each of its scripts
   for (const p of pages(dir)) {
     const need = scriptHashes(readFileSync(join(dir, p), "utf8"));
@@ -91,7 +91,10 @@ export function headersFor(dir: string): string {
     } else into = null;
     base.push(line);
   }
-  const text = `${base.join("\n")}\n# every page's Content-Security-Policy (written by web/csp.ts)\n${rules.map(([pattern, csp]) => `${pattern}\n${(own.get(pattern) ?? []).map((l) => l + "\n").join("")}  Content-Security-Policy: ${csp}${extra(pattern)}`).join("\n")}\n`;
+  // (each rule its policy's X-Frame-Options, for browsers without frame-ancestors: in the rule, never in /*,
+  // as Cloudflare adds every matching rule's headers and the embeddable frame must have none)
+  const xfo = (csp: string) => (frameOptions(csp) ? `\n  X-Frame-Options: ${frameOptions(csp)}` : "");
+  const text = `${base.join("\n")}\n# every page's Content-Security-Policy (written by web/csp.ts)\n${rules.map(([pattern, csp]) => `${pattern}\n${(own.get(pattern) ?? []).map((l) => l + "\n").join("")}  Content-Security-Policy: ${csp}${xfo(csp)}${extra(pattern)}`).join("\n")}\n`;
   const paths = text.split("\n").filter((l) => l && !/^\s|^#/.test(l));
   const twice = paths.filter((p, i) => paths.indexOf(p) !== i);
   if (twice.length) throw new Error(`csp: _headers gives ${twice.join(", ")} more than one rule`);
