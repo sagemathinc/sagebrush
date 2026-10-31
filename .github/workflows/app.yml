@@ -103,7 +103,7 @@ jobs:
             '36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62  linuxdeploy-07333c6-x86_64.AppImage' \
             '992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3  linuxdeploy-plugin-appimage.AppImage' \
             > /tmp/appimage-tools.sha256
-          sha256sum -c /tmp/appimage-tools.sha256
+          sha256sum -c --strict /tmp/appimage-tools.sha256
           chmod 0755 AppRun-x86_64 linuxdeploy-07333c6-x86_64.AppImage linuxdeploy-plugin-appimage.AppImage
           # The bundler patches linuxdeploy in place on every build: its
           # prepare_tools ends with `dd if=/dev/zero bs=1 count=3 seek=8
@@ -118,6 +118,9 @@ jobs:
           echo "$(sha256sum < /tmp/linuxdeploy-patched | cut -d' ' -f1)  linuxdeploy-07333c6-x86_64.AppImage" >> /tmp/appimage-tools-after.sha256
           rm /tmp/linuxdeploy-patched
           cat /tmp/appimage-tools-after.sha256
+          # (exactly three well-formed lines: an empty hash from a failed
+          # sha256sum above must not leave a list that checks fewer files)
+          [ "$(grep -c -E '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' /tmp/appimage-tools-after.sha256)" = 3 ] && [ "$(wc -l < /tmp/appimage-tools-after.sha256)" = 3 ] || { echo "FAIL: the expected-after list is not three well-formed lines"; exit 1; }
       - name: build
         if: runner.os != 'Linux'
         working-directory: app/src-tauri
@@ -137,7 +140,7 @@ jobs:
           if grep -n 'Downloading http' /tmp/tauri-build.log; then echo "FAIL: the bundler downloaded a tool (above), so a pin's file name no longer matches"; exit 1; fi
           grep -q 'Bundling .*\.AppImage' /tmp/tauri-build.log || { echo "FAIL: no AppImage bundled"; exit 1; }
           cd "${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
-          sha256sum -c /tmp/appimage-tools-after.sha256
+          sha256sum -c --strict /tmp/appimage-tools-after.sha256
       - name: self-test (Linux, in a virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
