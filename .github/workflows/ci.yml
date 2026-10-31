@@ -588,6 +588,8 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
+          # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-old.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
@@ -605,10 +607,11 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-529.mjs
           bun web/notebook/test-json-text.mjs
           bun web/notebook/test-text-overlap.mjs
-          bun web/notebook/test-merge3.mjs
           bun web/notebook/test-db-merge3.mjs
           bun web/notebook/test-merge-mode-chain.mjs
-          bun web/workspace/test-merge-client-off.mjs
+          bun web/notebook/test-p2c-merge.mjs
+          bun web/notebook/test-exact-lazy.mjs
+          bun web/journal/test-merge-base.mjs
           bun web/notebook/test-sync-rows.mjs
           bun web/notebook/test-start-all.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs

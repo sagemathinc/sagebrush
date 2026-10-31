@@ -330,7 +330,7 @@ const probe = (body, own = {}) => frontOp("probe", async () => {
         await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
       }
     };
-    ws.send(JSON.stringify({ t: "hello", v: 1, device, name: "probe", index_after: 0 }));
+    ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "probe", index_after: 0 }));
     const welcome = await next((m) => m.t === "welcome");
     const index = [];
     let page = await next((m) => m.t === "index");
@@ -1023,7 +1023,7 @@ async function resourceControls() {
         for (const text of c.buf.splice(0)) ws.onmessage(text);
         const next = async (f, ms = 1000) => { const t = performance.now(); for (;;) { const m = got.find(f); if (m) return m; if (performance.now() - t > ms) return null; await sleep(10); } };
         const doc = crypto.randomUUID(), client = "ctlmsg1", id = "1".padStart(11, "0") + "_" + client;
-        ws.send(J({ t: "hello", v: 1, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
+        ws.send(J({ t: "hello", v: 2, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
         const welcome = await next((m) => m.t === "welcome" || m.t === "error");
         steps.push(["welcome", welcome?.t === "welcome" && welcome.state === "active" && welcome.generation === 1]);
         ws.send(J({ t: "doc_claim", req: 1, epoch: 1, doc, client }));

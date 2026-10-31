@@ -38,11 +38,9 @@ writeFileSync(join(src, "entry.js"), [
   `export * as DS from ${J(join(here, "doc-sync.ts"))};`,
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
-  `export * as MC from ${J(join(here, "merge-client.ts"))};`,
+  `export * as ST from ${J(join(here, "../notebook/stores.js"))};`,
 ].join("\n"));
-// (built with exact merges on (web/workspace/merge-client.ts): the devices' hellos say merge and their claims ask
-// exact-v1; a server whose switch is off makes every document legacy, as before, so every case but M is unchanged)
-const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm", define: { __SB_EXACT_MERGE__: "true" } });
+const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
 if (!b.success) { emit.buildFail(b.logs); process.exit(1); }
 copyFileSync(join(here, "test-doc-sync.page.js"), join(site, "device.js"));
@@ -194,17 +192,6 @@ const front = Bun.serve({
         if (f) {
           delete ws.data.faked[m.req];
           text = J({ t: "error", req: m.req, code: f.error.code, detail: { message: "faked", ...f.error.detail } });
-        } else if (t && typeof t === "object") {
-          // (case M: one document's next page made empty and saying `merge`; or the next claim's ack without its merge)
-          if (t.kind === "emptyPage" && m.t === "batches" && m.doc === t.doc) {
-            tamper[ws.data.dev] = null;
-            Object.assign(m, { items: [], more: false, merge: t.merge });
-            text = J(m);
-          } else if (t.kind === "claimNoMerge" && m.t === "ack" && m.claim) {
-            tamper[ws.data.dev] = null;
-            delete m.claim.merge;
-            text = J(m);
-          }
         } else if (t) {
           if (m.t === "batches" && m.items?.length) {
             tamper[ws.data.dev] = null;
@@ -240,7 +227,7 @@ async function cloudHead(id) {
     const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie: sessions.A, origin: cloud.url } });
     const done = (v) => { clearTimeout(t); try { w.close(); } catch {} ok(v); };
     const t = setTimeout(() => done(null), 10_000);
-    w.onopen = () => w.send(J({ t: "hello", v: 1, device: "probe-node-0000", name: "probe", index_after: 0 }));
+    w.onopen = () => w.send(J({ t: "hello", v: 2, device: "probe-node-0000", name: "probe", index_after: 0 }));
     w.onmessage = (e) => {
       const m = JSON.parse(String(e.data));
       if (m.t === "welcome") w.send(J({ t: "pull", req: 1, owner, doc: id, epoch: 1, after: 0, limit: 1 }));
@@ -420,7 +407,8 @@ try {
   check(ar3.codes === J([["a", "A3"], ["b", "B3"]]) && br3.codes === ar3.codes, "3: edits of separate cells made apart: both kept, the two devices the same: " + J({ A: ar3.codes, B: br3.codes }));
 
   progress("case 4");
-  // 4. A clash (the same cell, apart): the later patch is kept on both devices
+  // 4. The same cell changed apart: both edits kept, merged as CoCalc's Jupyter merges them (plan-exact-only r1), the
+  // same on both devices
   await B.call("disconnect");
   await A.call("edit", N1, [["a", "X"], ["b", "B3"]]);
   await sleep(20);
@@ -430,7 +418,8 @@ try {
   await settle();
   await settle();
   const [ar4, br4] = [await A.call("record", N1), await B.call("record", N1)];
-  check(ar4.codes === J([["a", "Y"], ["b", "B3"]]) && br4.codes === ar4.codes, "4: the same cell changed apart: the later patch kept, the same on both devices: " + J({ A: ar4.codes, B: br4.codes }));
+  const a4 = JSON.parse(ar4.codes).find(([id]) => id === "a")?.[1] ?? "";
+  check(a4.includes("X") && a4.includes("Y") && br4.codes === ar4.codes && JSON.parse(ar4.codes).length === 2, "4: the same cell changed apart: both edits kept, the same on both devices: " + J({ A: ar4.codes, B: br4.codes }));
 
   progress("case 5");
   // 5. order with next_cseq: the rows below it acknowledged, the rest sent again; then unknown_client: claimed again
@@ -635,8 +624,8 @@ try {
 
   progress("case 10");
   // 10. A marked value (saved with no room for its version, so in no version) is never replaced by
-  // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's whole value
-  // (an unrelated cell too), still marked; and so after a reload
+  // a later remote change: B's edit marked, A's later change to the same cell arrives: B's record keeps B's edits, merged
+  // with A's (plan-exact-only r1: both kept), its unrelated cell its own, still marked; and so after a reload
   const N10 = "aaaaaaaa-1111-4222-8333-444444444444";
   await A.call("open", N10, [["a", "a0"], ["u", "u0"]]);
   await A.call("kick", N10);
@@ -656,8 +645,8 @@ try {
   await B.call("open", N10);
   const b10r = await B.call("record", N10);
   await B.call("resetDebt");
-  const want10 = J([["a", "B"], ["u", "Bu"]]);
-  check(bm10.mark === true && b10.codes === want10 && b10.mark === true && b10r.codes === want10, "10: a marked value meets a later remote change of the same cell: kept whole, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+  const a10 = JSON.parse(b10.codes).find(([id]) => id === "a")?.[1] ?? "", u10 = JSON.parse(b10.codes).find(([id]) => id === "u")?.[1];
+  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
 
   progress("case 11");
   // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
@@ -783,92 +772,202 @@ try {
   const r13 = await case13().then(() => ({ ok: true }), (e) => ({ ok: false, e }));
   if (!r13.ok && r13.e !== STOP13) check(false, "13: the case stopped: " + String(r13.e?.message ?? r13.e).slice(0, 300));
 
-  progress("case M");
-  // M. Exact merges (plan-merge-align r3.2, P2b), on the reference server with its switch on for this case only: a new
-  // notebook's claim asks exact-v1 and the document is made so, recorded on A with the claim's answer and on B with its
-  // first page; a cell deleted on A and edited on B apart reads, in both histories, as the exact merge (the cell kept
-  // whole, with B's text); a document made with the switch off (case 1's) is legacy, recorded so.  Reference only (the
-  // switch is the reference server's test control): under cloud the same number of checks, each said as not run there
+  progress("case X");
+  // X. Exact-only merges (plan-exact-only r1, P2c's merges): the store's merge (S1) and the editor's (S2) are CoCalc's,
+  // on the notebook page itself (notebook.js on each device's journal store).  X1: William's case, one cell typed on both devices before either syncs: both pages
+  // show the same text, with both edits, no copy cell, no notice, and equal histories.  X2: an unsaved edit (typed, its
+  // save not yet due) meets the other device's change to the same cell: merged in the textarea, the caret moved with
+  // the text before it, no copy, then saved and on both.  X3: a marked value (saved with no room for its version) meets
+  // a later change of the same cell: both kept, still marked, and after a reload.  X4-X9: the editor alone (applyRemote
+  // on a memory store with the journal store's merge, or, as a page's local store before the journal or the embed's,
+  // without one: the older rule kept there, no sync)
   {
-    const MCHECKS = 7;
-    if (CLOUD) for (let i = 0; i < MCHECKS; i++) check(true, `M${i + 1}: (exact merges: the reference server's case; not run under cloud)`);
-    else {
+    const XCHECKS = 12;
+    {
       const before = results.length;
-      ref.controls.exactMerge(true);
-      try {
-        const NM = "33333333-2222-4333-8444-555555555555";
-        await A.call("open", NM, [["a", "x = 1"], ["b", "keep"]]);
-        await A.call("kick", NM);
-        await settle();
-        const am = await A.call("journal", NM), sdm = ref.controls.doc(ACCOUNT, NM);
-        check(sdm?.merge === "exact-v1" && am.start?.merge === "exact-v1", "M1: a new notebook, its claim asking exact-v1, the switch on: made exact-v1, and A records so: " + J({ server: sdm?.merge, start: am.start }));
-        await B.call("open", NM);
-        await settle();
-        const bm = await B.call("journal", NM);
-        check(bm.start?.merge === "exact-v1", "M2: …B pulls it and records exact-v1 with its first page: " + J(bm.start));
-        await B.call("disconnect");
-        await A.call("edit", NM, [["b", "keep"]]);
-        await sleep(20);
-        await B.call("edit", NM, [["a", "x = 2"], ["b", "keep"]]);
-        await settle();
-        await B.call("connect", "B", ACCOUNT);
-        await settle();
-        await settle();
-        const head = (d) => d.ev(`(() => { const s = T.stores.get(${J(NM)})?.history?.session; return s ? JSON.stringify(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; })()`);
-        const [ha, hb] = [await head(A), await head(B)];
-        check(ha === J([["a", "x = 2"], ["b", "keep"]]) && hb === ha, "M3: a cell deleted on A and edited on B apart: both histories read the exact merge, the cell kept whole with B's text: " + J({ A: ha, B: hb }));
-      } catch (e) {
-        check(false, "M: the case stopped: " + String(e?.message ?? e).slice(0, 300));
-      } finally {
-        ref.controls.exactMerge(false);
-      }
-      // (astra3's R-MC-2, through DocSync's own flight: a page with no rows still says the mode.  With this device's
-      // edits unsent, an empty page saying the other mode (each way) stops the notebook: nothing sent (the server's head
-      // as it was) and nothing written (A's whole history database as it was); and a first answer that is an empty page
-      // records its mode)
-      // (this document's every row in A's history database: its history keys (its own id and its synced key) and its
-      // journal rows (under its registry handle); A's other notebooks sync on the same reconnect, so their rows move)
-      const snapA = (id) => A.ev(`(async () => { const r = await new Promise((ok, no) => { const q = T.hdb.transaction("history").objectStore("history").getAll(); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); }); const reg = r.find((x) => x.nb === "\\u0001s:" && x.time === "d:local:" + ${J(id)}); const h = reg?.v?.h; return JSON.stringify(r.filter((x) => x.nb === ${J(id)} || String(x.nb).startsWith(${J(id)} + ":s") || (h && x.nb === "\\u0001s:" + h) || x === reg)); })()`);
-      const mismatch = async (id, made, other, label) => {
-        if (made) ref.controls.exactMerge(true);
-        try {
-          await A.call("open", id, [["a", "1"]]);
-          await A.call("kick", id);
-          await settle();
-        } finally {
-          ref.controls.exactMerge(false);
-        }
-        const rec = (await A.call("journal", id)).start?.merge;
-        await A.call("disconnect");
-        await A.call("edit", id, [["a", "2"]]);
-        const head0 = J(ref.controls.doc(ACCOUNT, id)), db0 = await snapA(id), j0 = await A.call("journal", id);
-        tamper.A = { kind: "emptyPage", doc: id, merge: other };
-        await A.call("connect", "A", ACCOUNT);
+      const ed = (d) => d.call("editor");
+      const notice = (e) => e.said.some(([k, m]) => k === "conflict" || /changed the same cells/.test(m));
+      // (a notebook made on A and synced, then opened on both devices' notebook pages)
+      const mountBoth = async (id, cells) => {
+        await A.call("open", id, cells);
         await A.call("kick", id);
         await settle();
-        const st = (await A.call("stopped"))[id], db1 = await snapA(id), j1 = await A.call("journal", id);
-        check(rec === (made ? "exact-v1" : "legacy") && st?.code === "invalid" && /merge mode/.test(st?.detail ?? "") && J(ref.controls.doc(ACCOUNT, id)) === head0 && db1 === db0 && j1.lrows === j0.lrows && j1.lrows >= 1 && j1.J === j0.J, `M${label}: an empty page saying ${other} for a ${rec} document, edits unsent: stopped (invalid), nothing sent, every row of it in A's history database unchanged: ` + J({ rec, stop: st, lrows: [j0.lrows, j1.lrows], J: [j0.J, j1.J], same: db1 === db0, rows: JSON.parse(db0).length }));
-        tamper.A = null;
+        await A.call("close", id);
+        await A.call("mount", id);
+        await A.call("mountWatch");
+        await B.call("kick", id, true);
+        await settle();
+        await B.call("mount", id);
+        await B.call("mountWatch");
       };
-      await mismatch("33333333-2222-4333-8444-5555555555e1", true, "legacy", "5");
-      await mismatch("33333333-2222-4333-8444-5555555555e2", false, "exact-v1", "6");
-      // (a first answer that is an empty page: B's claim's ack without its merge (nothing recorded then), its next pull an
-      // empty page saying legacy: recorded from it, the cursor not moved)
-      const NE = "33333333-2222-4333-8444-5555555555e3";
-      tamper.B = { kind: "claimNoMerge" };
-      await B.call("open", NE, [["a", "e"]]);
-      await B.call("kick", NE);
-      await settle();
-      const be0 = await B.call("journal", NE);
-      tamper.B = { kind: "emptyPage", doc: NE, merge: "legacy" };
-      await B.call("kick", NE, true);
-      await settle();
-      const be1 = await B.call("journal", NE);
-      check(be0.start && be0.start.merge === undefined && be1.start?.merge === "legacy" && J(be1.cursor) === J(be0.cursor), "M7: a first answer that is an empty page records its mode (legacy), the cursor unmoved: " + J({ before: be0.start, after: be1.start, cursor: [be0.cursor, be1.cursor] }));
-      tamper.B = null;
-      const lj = await A.call("journal", N1);
-      check(lj.start?.merge === "legacy" && ref.controls.doc(ACCOUNT, N1)?.merge === "legacy", "M4: a document made with the switch off (case 1's) is legacy, and A records so: " + J(lj.start));
-      while (results.length < before + MCHECKS) check(false, "M: not reached");
+      try {
+        // X1
+        const NX = "33333333-2222-4333-8444-5555555555f1";
+        await mountBoth(NX, [["xa", "x = 1\n"], ["xb", "keep"]]);
+        await A.call("disconnect");
+        await B.call("disconnect");
+        await A.call("type", "xa", "x = 1\nprint('here')\n");
+        await B.call("type", "xa", "x = 1\nprint('there')\n");
+        await sleep(900);
+        await A.call("connect", "A", ACCOUNT);
+        await B.call("connect", "B", ACCOUNT);
+        await A.call("kick", NX);
+        await B.call("kick", NX);
+        for (let i = 0; i < 3; i++) await settle();
+        const [ea, eb] = [await ed(A), await ed(B)];
+        const [ha, hb] = [await A.call("head", NX), await B.call("head", NX)];
+        const ta = ea.texts.find(([id]) => id === "xa")?.[1] ?? "";
+        const x1 = { A: ea.texts, B: eb.texts, copies: [ea.copies, eb.copies], said: [ea.said, eb.said], heads: [ha, hb] };
+        check(J(ea.texts) === J(eb.texts) && ta.includes("print('here')") && ta.includes("print('there')") && ea.texts.length === 2 && eb.texts.length === 2 && ea.copies === 0 && eb.copies === 0 && !notice(ea) && !notice(eb) && ha !== null && ha === hb && ha.includes("here") && ha.includes("there"),
+          "X1: one cell typed on both devices before either syncs: the same text on both pages, with both edits, no copy cell, no notice, equal histories: " + J(x1));
+        // X2
+        await A.call("disconnect");
+        await B.call("type", "xb", "B0\nkeep");
+        await sleep(900);
+        await B.call("kick", NX);
+        await settle();
+        await A.call("typeUnsaved", "xb", "keep!", 5, 5);
+        await A.call("connect", "A", ACCOUNT);
+        await A.call("kick", NX);
+        await settle();
+        const ea2 = await ed(A);
+        const tb = ea2.texts.find(([id]) => id === "xb")?.[1];
+        // (the merged text saved by the page's own save (its 500 ms), then sent: a kick, as T.edit's)
+        await sleep(900);
+        await A.call("kick", NX);
+        for (let i = 0; i < 4; i++) await settle();
+        const [ea3, eb3, ra3] = [await ed(A), await ed(B), await A.call("record", NX)];
+        const want2 = "B0\nkeep!";
+        check(tb === want2 && ea2.copies === 0 && !notice(ea2) && ea2.sel?.id === "xb" && ea2.sel.start === 8 && ea2.sel.end === 8 && JSON.parse(ra3.codes).find(([id]) => id === "xb")?.[1] === want2 && J(eb3.texts) === J(ea3.texts),
+          "X2: an unsaved edit meets the other device's change to the same cell: merged in the textarea, the caret moved with the text before it, no copy, no notice; then saved and on both: " + J({ shown: tb, sel: ea2.sel, copies: ea2.copies, said: ea2.said, record: ra3.codes, B: eb3.texts }));
+        // X3 (case 10's, with the exact merge: store-level, B's value marked)
+        const N3 = "33333333-2222-4333-8444-5555555555f3";
+        await A.call("open", N3, [["a", "a0"], ["u", "u0"]]);
+        await A.call("kick", N3);
+        await settle();
+        await B.call("kick", N3, true);
+        await settle();
+        await B.call("open", N3);
+        await B.call("setDebt", "docCount", 0);
+        await B.call("edit", N3, [["a", "B"], ["u", "Bu"]]);
+        const bm3 = await B.call("record", N3);
+        await sleep(20);
+        await A.call("edit", N3, [["a", "C"], ["u", "u0"]]);
+        await settle();
+        await settle();
+        const b3 = await B.call("record", N3);
+        await B.call("close", N3);
+        await B.call("open", N3);
+        const b3r = await B.call("record", N3);
+        await B.call("resetDebt");
+        const a3 = JSON.parse(b3.codes).find(([id]) => id === "a")?.[1] ?? "", u3 = JSON.parse(b3.codes).find(([id]) => id === "u")?.[1];
+        check(bm3.mark === true && a3.includes("B") && a3.includes("C") && u3 === "Bu" && b3.mark === true && b3r.codes === b3.codes,
+          "X3: a marked value meets a later change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm3.mark, after: b3.codes, mark: b3.mark, reloaded: b3r.codes }));
+        // X4-X9: the editor alone
+        const fake = async (exact, cells) => A.call("edFake", exact, cells);
+        const st = () => A.call("edState");
+        // X4: deleted here, only its outputs changed there: stays deleted; its input changed there: back
+        await fake(true, [["p", "1"], ["q", "2"], ["r", "3"]]);
+        await A.call("edDelete", "q");
+        await A.call("edDelete", "r");
+        await A.call("edPush", [["p", "1"], ["q", "2", [{ output_type: "stream", name: "stdout", text: "out" }]], ["r", "3!"]]);
+        const s5 = await st();
+        check(J(s5.texts) === J([["p", "1"], ["r", "3!"]]), "X4: the editor: a cell deleted here whose only change there is its outputs stays deleted; one whose input changed there comes back: " + J(s5));
+        // X5: a store without the merge (no sync): a cell deleted here whose outputs changed there comes back, as today
+        await fake(false, [["p", "1"], ["q", "2"]]);
+        await A.call("edDelete", "q");
+        await A.call("edPush", [["p", "1"], ["q", "2", [{ output_type: "stream", name: "stdout", text: "out" }]]]);
+        const s6 = await st();
+        check(J(s6.texts) === J([["p", "1"], ["q", "2"]]), "X5: the editor on a store without the merge (no sync): a cell deleted here whose outputs changed there comes back, as today: " + J(s6));
+        // X6: a store without the merge (no sync): the same cell changed on both sides: theirs, and a copy tagged conflict, as today
+        await fake(false, [["p", "a\nb\n"]]);
+        await A.call("edType", "p", "a!\nb\n", 2, 2);
+        await A.call("edPush", [["p", "a\nb!\n"]]);
+        const s7 = await st();
+        check(s7.copies === 1 && s7.texts[0][1] === "a\nb!\n" && s7.texts[1][1] === "a!\nb\n" && s7.said.length === 1, "X6: the editor on a store without the merge (no sync): the same cell changed on both sides: theirs, and this one in a copy tagged conflict, as today: " + J(s7));
+        // X7: merged in before the caret (it moves with its text) and after it (unmoved), no copy
+        await fake(true, [["p", "abc\ndef\n"]]);
+        await A.call("edType", "p", "abc\ndefX\n", 8, 8);
+        await A.call("edPush", [["p", "QQ\nabc\ndef\n"]]);
+        const s8a = await st();
+        await fake(true, [["p", "abc\ndef\n"]]);
+        await A.call("edType", "p", "abcX\ndef\n", 4, 4);
+        await A.call("edPush", [["p", "abc\ndef\nZZ\n"]]);
+        const s8b = await st();
+        check(s8a.texts[0][1] === "QQ\nabc\ndefX\n" && s8a.sel?.start === 11 && s8a.sel.end === 11 && s8a.copies === 0 && s8b.texts[0][1] === "abcX\ndef\nZZ\n" && s8b.sel?.start === 4 && s8b.copies === 0 && !s8a.said.length && !s8b.said.length,
+          "X7: the editor: text merged in before the caret moves it with its text, after it leaves it; no copy, nothing said: " + J({ before: s8a, after: s8b }));
+        // X8: a backward selection across merged-in text keeps its ends on its text and its direction; non-ASCII
+        await fake(true, [["p", "aa\nbb\ncc\n"]]);
+        await A.call("edType", "p", "aa\nbb\ncc!\n", 3, 9, "backward");
+        await A.call("edPush", [["p", "🙂Z\naa\nBB\ncc\n"]]);
+        const s9 = await st();
+        check(s9.texts[0][1] === "🙂Z\naa\nBB\ncc!\n" && s9.sel?.start === 7 && s9.sel.end === 13 && s9.sel.dir === "backward", "X8: the editor: a backward selection, text merged in before it (an emoji: two UTF-16 units) and inside it: its ends on its text, its direction kept: " + J(s9));
+        // X9: a revert replaces the text, never merged (keepLocal false)
+        await fake(true, [["p", "a\nb\n"]]);
+        await A.call("edType", "p", "a!\nb\n", 1, 1);
+        const s10 = await A.ev(`(() => { T.edNb.replace({ ...structuredClone(T.edStore.doc), cells: [{ id: "p", code: "OLD" }] }); return T.edState(); })()`);
+        check(s10.texts[0][1] === "OLD" && s10.copies === 0, "X9: the editor: a revert (TimeTravel) replaces the text, never merged with the unsaved edit: " + J(s10));
+        // X10: a merge whose base this device can't give completely (a version its journal records that its live history
+        // doesn't hold) waits: the real store's mergeRemote reaches mergeBaseOf's refusal and says so ("a change from
+        // elsewhere waits"); nothing written, nothing sent; once the version is here, the next arrival merges (BASE-1;
+        // the grader's R-XO-1: a phantom journal row stopped B's history before the merge, so this hides a held version
+        // from the graph for B's merges instead)
+        const ND = "33333333-2222-4333-8444-5555555555fa";
+        await A.call("open", ND, [["da", "D0"], ["db", "E0"]]);
+        await A.call("kick", ND);
+        await settle();
+        await B.call("kick", ND, true);
+        await settle();
+        await B.call("open", ND);
+        await B.call("hideVersion", ND, true);
+        const [brD0, bjD0] = [await B.call("record", ND), await B.call("journal", ND)];
+        const [bw0, bh0] = [await B.call("warnCount"), await B.call("hiddenCount")];
+        await A.call("edit", ND, [["da", "D1"], ["db", "E0"]]);
+        await settle();
+        const headD = CLOUD ? null : ref.controls.doc(ACCOUNT, ND)?.head;
+        await settle();
+        const [brD1, bjD1] = [await B.call("record", ND), await B.call("journal", ND)];
+        const headD1 = CLOUD ? null : ref.controls.doc(ACCOUNT, ND)?.head;
+        const [bwD, bhD] = [await B.call("warnsFrom", bw0), (await B.call("hiddenCount")) - bh0];
+        const waited = bwD.filter((w) => w.includes("sync: a change from elsewhere waits:")).length;
+        await B.call("hideVersion", ND, false);
+        await A.call("edit", ND, [["da", "D2"], ["db", "E0"]]);
+        await settle();
+        await settle();
+        const brD2 = await B.call("record", ND);
+        check(bhD >= 1 && waited >= 1 && bwD.every((w) => !w.includes("not merged") || w.includes("a change from elsewhere waits:")) && brD1.codes === brD0.codes && brD1.j === brD0.j && bjD1.lrows === bjD0.lrows && headD1 === headD && brD2.codes === J([["da", "D2"], ["db", "E0"]]), "X10: a merge whose base isn't all here waits: B's merge refused by mergeBaseOf, saying so, B's record and journal unchanged, nothing sent; once it is, the next arrival merges: " + J({ hidden: bhD, waited, warns: bwD, before: brD0.codes, waiting: brD1.codes, lrows: [bjD0.lrows, bjD1.lrows], head: [headD, headD1], after: brD2.codes }));
+        // X11: the notebook open in A's page when its synced history starts, an unsaved edit in that page, the other device's
+        // change to another cell: both kept, once each, on both.  (Starting on an open page stamps the record at the synced
+        // root (its j the root's), so this isn't fix (a)'s shape: that shape, a record whose j predates the root, comes from a
+        // store started with no page and no save since, and is case 2, which fails without the root as the base)
+        const NR = "33333333-2222-4333-8444-5555555555fb";
+        await A.call("open", NR, [["ra", "r0"], ["rb", "s0"]]);
+        await A.call("close", NR);
+        await A.call("mount", NR);
+        await A.call("mountWatch");
+        await A.call("typeUnsaved", "ra", "r0!", 3, 3);
+        await A.call("kick", NR);
+        await settle();
+        const rj = await A.call("journal", NR), rr = await A.call("record", NR);
+        await B.call("kick", NR, true);
+        await settle();
+        await B.call("open", NR);
+        await B.call("edit", NR, [["ra", "r0"], ["rb", "s1"]]);
+        for (let i = 0; i < 3; i++) await settle();
+        const er = await ed(A);
+        await sleep(900);
+        await A.call("kick", NR);
+        for (let i = 0; i < 4; i++) await settle();
+        const brR = await B.call("record", NR);
+        check(rj.start && J(er.texts) === J([["ra", "r0!"], ["rb", "s1"]]) && er.copies === 0 && brR.codes === J([["ra", "r0!"], ["rb", "s1"]]), "X11: a notebook open in A's page when its sync starts, an unsaved edit there and B's change to another cell: both kept, once each, on both: " + J({ recordJ: rr.j, from_j: rj.start?.from_j, A: er.texts, B: brR.codes }));
+        // X12: every journal store open on both devices has the editor's merge, so the conflict-copy fallback is never
+        // taken while a notebook syncs
+        const [ma, mb2] = [await A.call("everyJournalStoreMerges"), await B.call("everyJournalStoreMerges")];
+        check(ma.all && mb2.all, "X12: every journal store has the editor's merge (no conflict copy while syncing): " + J({ A: ma, B: mb2 }));
+      } catch (e) {
+        check(false, "X: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+      }
+      while (results.length < before + XCHECKS) check(false, "X: not reached");
     }
   }
 

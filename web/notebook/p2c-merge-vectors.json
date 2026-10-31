@@ -1,0 +1,937 @@
+{
+ "v": 1,
+ "producer": {
+  "cocalc_ai": "0b8b754708fdc8c393f4580eaeced4d0f9ebb4e5",
+  "cocalc_patchflow": "0.13.0",
+  "node": "v26.12.1",
+  "by": "web/notebook/gen-p2c-merge-vectors.mjs"
+ },
+ "records": [
+  {
+   "name": "keeps a cell whose input was edited while it was deleted (delete first)",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0.5,
+     "input": "print(12345)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0.5,
+     "input": "print(12345)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ]
+  },
+  {
+   "name": "deletes a cell whose output was written while it was deleted (delete first)",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)",
+     "output": {
+      "0": {
+       "text": "1"
+      }
+     }
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ]
+  },
+  {
+   "name": "keeps a cell whose input was edited while it was deleted (edit first)",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0.5,
+     "input": "print(12345)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0.5,
+     "input": "print(12345)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ]
+  },
+  {
+   "name": "deletes a cell whose output was written while it was deleted (edit first)",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)"
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "print(1)",
+     "output": {
+      "0": {
+       "text": "1"
+      }
+     }
+    },
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "b",
+     "pos": 1,
+     "input": "b"
+    }
+   ]
+  },
+  {
+   "name": "merges concurrent edits of one cell's input and other fields",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1\ny = 2\n"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 10\ny = 2\n",
+     "cell_type": "code"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 3,
+     "input": "x = 1\ny = 20\n"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 3,
+     "input": "x = 10\ny = 20\n",
+     "cell_type": "code"
+    }
+   ]
+  },
+  {
+   "name": "merges concurrent edits of one cell's input and other fields (sides swapped)",
+   "base": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1\ny = 2\n"
+    }
+   ],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 3,
+     "input": "x = 1\ny = 20\n"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 10\ny = 2\n",
+     "cell_type": "code"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 3,
+     "input": "x = 10\ny = 20\n",
+     "cell_type": "code"
+    }
+   ]
+  },
+  {
+   "name": "merges a cell both sides brought back without duplicating shared lines",
+   "base": [],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1 A\ny = 2\nz = 3\n"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1\ny = 2\nz = 3 B\n"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1 A\ny = 2\nz = 3 B\n"
+    }
+   ]
+  },
+  {
+   "name": "merges a cell both sides brought back without duplicating shared lines (sides swapped)",
+   "base": [],
+   "a": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1\ny = 2\nz = 3 B\n"
+    }
+   ],
+   "b": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1 A\ny = 2\nz = 3\n"
+    }
+   ],
+   "merged": [
+    {
+     "type": "cell",
+     "id": "a",
+     "pos": 0,
+     "input": "x = 1 A\ny = 2\nz = 3 B\n"
+    }
+   ]
+  },
+  {
+   "name": "the same spot typed on both sides: both kept",
+   "base": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "a": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('here')\n",
+     "cell_type": "code"
+    }
+   ],
+   "b": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('there')\n",
+     "cell_type": "code"
+    }
+   ],
+   "merged": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('here')\nprint('there')\n",
+     "cell_type": "code"
+    }
+   ]
+  },
+  {
+   "name": "the same spot typed on both sides: both kept (sides swapped)",
+   "base": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "a": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('there')\n",
+     "cell_type": "code"
+    }
+   ],
+   "b": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('here')\n",
+     "cell_type": "code"
+    }
+   ],
+   "merged": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\nprint('here')\nprint('there')\n",
+     "cell_type": "code"
+    }
+   ]
+  },
+  {
+   "name": "a field changed on both sides: the later side (b)",
+   "base": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "a": [
+    {
+     "type": "settings",
+     "kernel": "sagemath"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "b": [
+    {
+     "type": "settings",
+     "kernel": "magma"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "merged": [
+    {
+     "type": "settings",
+     "kernel": "magma"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ]
+  },
+  {
+   "name": "a field changed on both sides: the later side (b) (sides swapped)",
+   "base": [
+    {
+     "type": "settings",
+     "kernel": "python3"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "a": [
+    {
+     "type": "settings",
+     "kernel": "magma"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "b": [
+    {
+     "type": "settings",
+     "kernel": "sagemath"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ],
+   "merged": [
+    {
+     "type": "settings",
+     "kernel": "sagemath"
+    },
+    {
+     "type": "cell",
+     "id": "c",
+     "pos": 0,
+     "input": "x = 1\n",
+     "cell_type": "code"
+    }
+   ]
+  }
+ ],
+ "text": [
+  {
+   "name": "early return: local equals remote",
+   "base": "x",
+   "local": "y",
+   "remote": "y",
+   "merged": "y"
+  },
+  {
+   "name": "early return: remote unchanged",
+   "base": "x",
+   "local": "y",
+   "remote": "x",
+   "merged": "y"
+  },
+  {
+   "name": "early return: local unchanged",
+   "base": "x",
+   "local": "x",
+   "remote": "z",
+   "merged": "z"
+  },
+  {
+   "name": "the same spot typed on both sides (asymmetric: the order of the two insertions)",
+   "base": "x = 1\n",
+   "local": "x = 1\nL\n",
+   "remote": "x = 1\nR\n",
+   "merged": "x = 1\nL\nR\n"
+  },
+  {
+   "name": "the same spot typed on both sides, mid-line (asymmetric)",
+   "base": "print()",
+   "local": "print(1)",
+   "remote": "print(2)",
+   "merged": "print(1 2)"
+  },
+  {
+   "name": "separate lines",
+   "base": "a\nb\nc\n",
+   "local": "a\nB\nc\n",
+   "remote": "a\nb\nC\n",
+   "merged": "a\nB\nC\n"
+  },
+  {
+   "name": "an insertion before an edit",
+   "base": "one\ntwo\n",
+   "local": "zero\none\ntwo\n",
+   "remote": "one\nTWO\n",
+   "merged": "zero\none\nTWO\n"
+  },
+  {
+   "name": "a deletion against an edit of the same line",
+   "base": "a\nb\nc\n",
+   "local": "a\nc\n",
+   "remote": "a\nbb\nc\n",
+   "merged": "a\nbb\nc\n"
+  },
+  {
+   "name": "non-ASCII: accents and an emoji on both sides",
+   "base": "café = 1\n",
+   "local": "café = 1 # é\n",
+   "remote": "🙂café = 1\n",
+   "merged": "🙂café = 1 # é\n"
+  },
+  {
+   "name": "non-ASCII: astral characters typed at one spot (asymmetric)",
+   "base": "x",
+   "local": "x😀",
+   "remote": "x🚀",
+   "merged": "x😀 🚀"
+  },
+  {
+   "name": "both sides empty a text",
+   "base": "abc",
+   "local": "",
+   "remote": "",
+   "merged": ""
+  },
+  {
+   "name": "one side empties it, the other edits it",
+   "base": "abc\ndef\n",
+   "local": "",
+   "remote": "abc\nDEF\n",
+   "merged": "DEF"
+  },
+  {
+   "name": "random 0",
+   "base": "print(y)\nx = 1",
+   "local": "for i in range(3):\nx = 1",
+   "remote": "def f():\nx = 1",
+   "merged": "def f():\nfor i in range(3):\nx = 1"
+  },
+  {
+   "name": "random 1",
+   "base": "\nx = 1\nä = 'ü'\ny = x + 2",
+   "local": "\nx = 1\nä = 'ü' + 1\ny = x + 2",
+   "remote": "z = 🙂\n\nx = 1\nä = 'ü'\ny = x + 2",
+   "merged": "z = 🙂\n\nx = 1\nä = 'ü' + 1\ny = x + 2"
+  },
+  {
+   "name": "random 2",
+   "base": "    return 3\nfor i in range(3):\n# note",
+   "local": "    return 3\nfor i in range(3):\nfor i in range(3):\n# note",
+   "remote": "    return 3\nfor i in range(3):\nprint(y)",
+   "merged": "    return 3\nfor i in range(3):\nfor i in range(3):\nprint(y)"
+  },
+  {
+   "name": "random 3",
+   "base": "y = x + 2\nä = 'ü'",
+   "local": "y = x + 2",
+   "remote": "y = x + 2\n    pass\nä = 'ü'",
+   "merged": "y = x + 2\n    pass"
+  },
+  {
+   "name": "random 4",
+   "base": "    pass\nprint(y)",
+   "local": "def f():\nprint(y)",
+   "remote": "for i in range(3):\nprint(y)",
+   "merged": "def f():\nfor i in range(3):\nprint(y)"
+  },
+  {
+   "name": "random 5",
+   "base": "\nfor i in range(3):",
+   "local": "for i in range(3):",
+   "remote": "\nx = 1",
+   "merged": "x = 1"
+  },
+  {
+   "name": "random 6",
+   "base": "print(y)\nx = 1\n# note\nx = 1",
+   "local": "x = 1\n# note\nx = 1",
+   "remote": "print(y)\nx = 1\n# note\nfor i in range(3):",
+   "merged": "x = 1\n# note\nfor i in range(3):"
+  },
+  {
+   "name": "random 7",
+   "base": "print(y)",
+   "local": "print(y)!",
+   "remote": "# note",
+   "merged": "# note!"
+  },
+  {
+   "name": "random 8",
+   "base": "# note\n# note\n    return 3\nä = 'ü'\nz = 🙂",
+   "local": "# note\n    return 3\n    return 3\nä = 'ü'\nz = 🙂",
+   "remote": "# note\n# note\n    return 3\nä = 'ü'\n\nz = 🙂",
+   "merged": "# note\n    return 3\n    return 3\nä = 'ü'\n\nz = 🙂"
+  },
+  {
+   "name": "random 9",
+   "base": "z = 🙂\n    return 3",
+   "local": "z = 🙂\nx = 1\n    return 3",
+   "remote": "\n    return 3",
+   "merged": "\nx = 1\n    return 3"
+  },
+  {
+   "name": "random 10",
+   "base": "    return 3",
+   "local": "def f():",
+   "remote": "    return 3 + 1",
+   "merged": "def f(): + 1"
+  },
+  {
+   "name": "random 11",
+   "base": "y = x + 2\nprint(y)",
+   "local": "y = x + 2\n    return 3\nprint(y)",
+   "remote": "y = x + 2\nprint(y)!",
+   "merged": "y = x + 2\n    return 3\nprint(y)!"
+  },
+  {
+   "name": "random 12",
+   "base": "for i in range(3):\nprint(y)",
+   "local": "# note\nfor i in range(3):\nprint(y)",
+   "remote": "for i in range(3):",
+   "merged": "# note\nfor i in range(3):"
+  },
+  {
+   "name": "random 13",
+   "base": "def f():\n# note\nä = 'ü'\nfor i in range(3):\n    pass",
+   "local": "def f():\n# note\ndef f():\nä = 'ü'\nfor i in range(3):\n    pass",
+   "remote": "def f():\n# note\nä = 'ü'\nfor i in range(3): + 1\n    pass",
+   "merged": "def f():\n# note\ndef f():\nä = 'ü'\nfor i in range(3): + 1\n    pass"
+  },
+  {
+   "name": "random 14",
+   "base": "z = 🙂",
+   "local": "z = 🙂 + 1",
+   "remote": "z = 🙂 # é",
+   "merged": "z = 🙂 # é + 1"
+  },
+  {
+   "name": "random 15",
+   "base": "for i in range(3):",
+   "local": "# note",
+   "remote": "ä = 'ü'\nfor i in range(3):",
+   "merged": "ä = 'ü'\n# note"
+  },
+  {
+   "name": "random 16",
+   "base": "def f():\nz = 🙂",
+   "local": "def f(): # é\nz = 🙂",
+   "remote": "def f():\nz = 🙂_v",
+   "merged": "def f(): # é\nz = 🙂_v"
+  },
+  {
+   "name": "random 17",
+   "base": "z = 🙂\n    return 3",
+   "local": "    return 3\nz = 🙂\n    return 3",
+   "remote": "z = 🙂\n    pass",
+   "merged": "    return 3\nz = 🙂\n    pass"
+  },
+  {
+   "name": "random 18",
+   "base": "def f():\ndef f():\n\nä = 'ü'",
+   "local": "def f():\ndef f():\nx = 1\nä = 'ü'",
+   "remote": "def f():\ndef f():\n# note\nä = 'ü'",
+   "merged": "def f():\ndef f():\n# note x = 1\nä = 'ü'"
+  },
+  {
+   "name": "random 19",
+   "base": "for i in range(3):\n    pass\ny = x + 2\nz = 🙂",
+   "local": "z = 🙂\nfor i in range(3):\n    pass\ny = x + 2\nz = 🙂",
+   "remote": "z = 🙂\nfor i in range(3):\n    pass\ny = x + 2\nz = 🙂",
+   "merged": "z = 🙂\nfor i in range(3):\n    pass\ny = x + 2\nz = 🙂"
+  },
+  {
+   "name": "random 20",
+   "base": "z = 🙂\n# note\n    return 3\nz = 🙂\nfor i in range(3):",
+   "local": "z = 🙂\nfor i in range(3):\n    return 3\nz = 🙂\nfor i in range(3):",
+   "remote": "z = 🙂\n# note\n    return 3\nz = 🙂 + 1\nfor i in range(3):",
+   "merged": "z = 🙂\nfor i in range(3):\n    return 3\nz = 🙂 + 1\nfor i in range(3):"
+  },
+  {
+   "name": "random 21",
+   "base": "# note\n# note",
+   "local": "# note\n# note # é",
+   "remote": "# note\n# note",
+   "merged": "# note\n# note # é"
+  },
+  {
+   "name": "random 22",
+   "base": "def f():\n    return 3\ny = x + 2\nx = 1",
+   "local": "def f():\n    return 3\ny = x + 2",
+   "remote": "def f():\n    return 3\ny = x + 2\n# note",
+   "merged": "def f():\n    return 3\ny = x + 2\n# note"
+  },
+  {
+   "name": "random 23",
+   "base": "# note\n    return 3\nfor i in range(3):\ndef f():",
+   "local": "    return 3\nfor i in range(3):\ndef f():",
+   "remote": "# note\n    return 3\nfor i in range(3):",
+   "merged": "    return 3\nfor i in range(3):"
+  },
+  {
+   "name": "random 24",
+   "base": "",
+   "local": "z = 🙂",
+   "remote": "ä = 'ü'",
+   "merged": "z = 🙂\nä = 'ü'"
+  },
+  {
+   "name": "random 25",
+   "base": "z = 🙂\ndef f():\nx = 1",
+   "local": "    pass\ndef f():\nx = 1",
+   "remote": "z = 🙂\nx = 1\ndef f():\nx = 1",
+   "merged": "    pass\nx = 1\ndef f():\nx = 1"
+  },
+  {
+   "name": "random 26",
+   "base": "# note\nz = 🙂\n    pass\nprint(y)\nx = 1",
+   "local": "# note\nz = 🙂\n    pass\nprint(y)\nx = 1\nx = 1",
+   "remote": "z = 🙂\n    pass\nprint(y)\nx = 1",
+   "merged": "z = 🙂\n    pass\nprint(y)\nx = 1\nx = 1"
+  },
+  {
+   "name": "random 27",
+   "base": "",
+   "local": "for i in range(3):",
+   "remote": "print(y)\n",
+   "merged": "for i in range(3):\nprint(y)\n"
+  },
+  {
+   "name": "random 28",
+   "base": "x = 1\n    return 3\nx = 1\n    return 3",
+   "local": "x = 1\nx = 1\n    return 3",
+   "remote": "x = 1\n    return 3 # é\nx = 1\n    return 3",
+   "merged": "x = 1\n    return 3 # é\nx = 1\n    return 3"
+  },
+  {
+   "name": "random 29",
+   "base": "    pass\ny = x + 2\n    pass",
+   "local": "    pass\n    return 3\n    pass",
+   "remote": "    pass\ny = x + 2\ny = x + 2\n    pass",
+   "merged": "    pass\n    return 3\ny = x + 2\n    pass"
+  },
+  {
+   "name": "random 30",
+   "base": "y = x + 2\nfor i in range(3):",
+   "local": "    pass\ny = x + 2\nfor i in range(3):",
+   "remote": "y = x + 2\nfor i in range(3):",
+   "merged": "    pass\ny = x + 2\nfor i in range(3):"
+  },
+  {
+   "name": "random 31",
+   "base": "# note\ndef f():",
+   "local": "x = 1\n# note\ndef f():",
+   "remote": "# note\n    pass",
+   "merged": "x = 1\n# note\n    pass"
+  },
+  {
+   "name": "random 32",
+   "base": "    pass",
+   "local": "    pass + 1",
+   "remote": "ä = 'ü'",
+   "merged": "ä = 'ü' + 1"
+  },
+  {
+   "name": "random 33",
+   "base": "x = 1\nx = 1\nz = 🙂\nx = 1\nfor i in range(3):",
+   "local": "x = 1\nx = 1\nz = 🙂\nx = 1\nz = 🙂",
+   "remote": "x = 1\nx = 1\nz = 🙂\nx = 1\ny = x + 2",
+   "merged": "x = 1\nx = 1\nz = 🙂\nx = 1\ny = x + 2\nz = 🙂"
+  },
+  {
+   "name": "random 34",
+   "base": "x = 1",
+   "local": "x = 1",
+   "remote": "    return 3",
+   "merged": "    return 3"
+  },
+  {
+   "name": "random 35",
+   "base": "\n# note\n\nprint(y)\ny = x + 2",
+   "local": "\n\nprint(y)\ny = x + 2",
+   "remote": "\n# note\n\nz = 🙂\ny = x + 2",
+   "merged": "\n\nz = 🙂\ny = x + 2"
+  },
+  {
+   "name": "random 36",
+   "base": "def f():",
+   "local": "def f():\ndef f():",
+   "remote": "    pass\ndef f():",
+   "merged": "    pass\ndef f():\ndef f():"
+  },
+  {
+   "name": "random 37",
+   "base": "x = 1\nä = 'ü'\ndef f():\n# note\ny = x + 2",
+   "local": "x = 1\nä = 'ü'\ndef f():\n# note\ny = x + 2_v",
+   "remote": "x = 1\nä = 'ü'\ndef f():!\n# note\ny = x + 2",
+   "merged": "x = 1\nä = 'ü'\ndef f():!\n# note\ny = x + 2_v"
+  },
+  {
+   "name": "random 38",
+   "base": "    return 3\n# note\ny = x + 2\nä = 'ü'",
+   "local": "    return 3\n# note\ny = x + 2\nä = 'ü'",
+   "remote": "    return 3\n# note\nä = 'ü'",
+   "merged": "    return 3\n# note\nä = 'ü'"
+  },
+  {
+   "name": "random 39",
+   "base": "x = 1\ndef f():\n\nx = 1",
+   "local": "x = 1\ndef f():\n\nprint(y)\nx = 1",
+   "remote": "x = 1\ndef f():\nprint(y)\nx = 1",
+   "merged": "x = 1\ndef f():\nprint(y)\nx = 1"
+  }
+ ]
+}

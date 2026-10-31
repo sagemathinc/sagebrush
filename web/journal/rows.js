@@ -45,10 +45,10 @@ async function registry(st, id, make) {
   return { key, h, meta: 0, fresh: true };
 }
 
-// (the document's metadata rows, j (jseq), m (its sync start), s (its slot, 2c-2), k (its pull cursor, 2c-3) and a (the
-// merge mode its synced history asks for when it starts, plan-merge-align r3.2 §9), those in `changes` rewritten, and
-// its metadata recharged: the registry's and these rows', together within the document's 4 KiB and everything's 4 MiB)
-const META_ROWS = ["j", "m", "s", "k", "a"];
+// (the document's metadata rows, j (jseq), m (its sync start), s (its slot, 2c-2) and k (its pull cursor, 2c-3), those in
+// `changes` rewritten, and its metadata recharged: the registry's and these rows', together within the document's 4 KiB
+// and everything's 4 MiB)
+const META_ROWS = ["j", "m", "s", "k"];
 async function setMeta(st, reg, changes) {
   let rows = 0;
   for (const L of META_ROWS) {
@@ -119,10 +119,7 @@ export async function t1Write(st, id, { row, intent, start, local = true, noun =
   let m = (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null;
   if (start) {
     if (m) throw refusedWith(`this ${noun}'s synced history has already started`);
-    // (the mode asked for, if one was recorded before the start (a .sbreplay restore asks legacy: askMerge), kept with
-    // the start: what DocSync's creating claim asks)
-    const a = (await rq(st.get(rowKey(reg.h, "a"))))?.v;
-    m = changes.m = { n: start.n, from_j: j, ...(a?.asked ? { asked: a.asked } : {}) };
+    m = changes.m = { n: start.n, from_j: j };
     changes.s = { gen: 1, client: start.client, cseq: 1, last: null, fgen: 0, claimed: null, debt: { count: 0, bytes: 0 } };
   }
   if (row && m && local) {
@@ -217,70 +214,10 @@ export async function acked(st, id, { gen, client, upTo, epoch, req }) {
 
 /** A claim's answer (`doc_claim`, r9 §5.8), recorded in `st` only for the client it was sent for, its generation and
  * id: a delayed answer for an earlier client marks nothing.  Resolves whether it was recorded. */
-/** @param {{ gen: any, client: any, epoch: any, fgen: any, merge?: "legacy" | "exact-v1", noun?: string }} o (merge: the mode the
- * claim's answer says, recorded once, mergeRecorded) */
-export async function recordClaim(st, id, { gen, client, epoch, fgen, merge = undefined, canExact = true, noun = "notebook" }) {
+export async function recordClaim(st, id, { gen, client, epoch, fgen }) {
   const reg = await registered(st, id), slot = reg && (await rq(st.get(rowKey(reg.h, "s"))))?.v;
   if (!slot || slot.gen !== gen || slot.client !== client) return false;
-  const changes = { s: { ...slot, claimed: { epoch, client }, fgen } };
-  const m = (await rq(st.get(rowKey(reg.h, "m"))))?.v;
-  const mm = m ? await mergeRecorded(st, syncedKey(id, m.n), m, merge, noun, canExact) : null;
-  if (mm) changes.m = mm;
-  await setMeta(st, reg, changes);
-  return true;
-}
-
-// ---- merge modes (plan-merge-align r3.2 §5, §9): the server's word on a document's mode, recorded once
-
-const MERGE_CHANGED = (noun) => `the server says another merge mode for this ${noun} than it said before: this ${noun} stops syncing`;
-const NOT_ONE_CHAIN = (noun) => `this ${noun}'s synced history here isn't one line of this device's changes, so it can't be read with exact merges: this ${noun} stops syncing (nothing is lost)`;
-// (a history's rows are one chain: at most one parentless root, every other row one parent, one head (or none))
-function oneChain(rows) {
-  const times = new Set(rows.map((r) => r.time)), parents = new Set();
-  let roots = 0;
-  for (const r of rows) {
-    const ps = r.env?.parents ?? [];
-    if (ps.length > 1) return false;
-    if (ps.length === 0) roots++;
-    for (const p of ps) parents.add(p);
-  }
-  return roots <= 1 && [...times].filter((t) => !parents.has(t)).length <= 1;
-}
-/** The start row `m` with `merge` (the mode a server's answer says) recorded, or null when nothing changes: an answer
- * that says none (an older server), or the mode already recorded.  Another mode than the one recorded refuses (thrown,
- * nothing written).  Recording "exact-v1" first checks, in `st`, that the synced history (`key`) holds one chain:
- * before a mode is recorded only this device's own line is there, and both codecs read a line alike; anything else
- * refuses (thrown, nothing written, every row kept). */
-async function mergeRecorded(st, key, m, merge, noun, canExact = true) {
-  if (merge === undefined) return null;
-  if (merge !== "legacy" && merge !== "exact-v1") throw refusedWith(`a merge mode this build doesn't know: this ${noun} stops syncing`);
-  // (a build without the exact reader never records, nor keeps reading, an exact-v1 history (the grader's G-P2b-5))
-  if (merge === "exact-v1" && !canExact) throw refusedWith(`this ${noun} syncs with exact merges, which this page can't read: reload this page`);
-  if (m.merge !== undefined) {
-    if (m.merge !== merge) throw refusedWith(MERGE_CHANGED(noun));
-    return null;
-  }
-  if (merge === "exact-v1" && !oneChain(await rq(st.getAll(IDBKeyRange.bound([key, ""], [key, "\uffff"]))))) throw refusedWith(NOT_ONE_CHAIN(noun));
-  return { ...m, merge };
-}
-/** The mode an answer with no page of rows says (a pull's empty page: astra3's R-MC-2), recorded or checked as a page's
- * would be, in `st`: recorded once, another refused (thrown, nothing written).  A document whose synced history hasn't
- * started here records nothing: false. */
-export async function recordMerge(st, id, { merge, canExact = true, noun = "notebook" }) {
-  const reg = await registered(st, id), m = reg && (await rq(st.get(rowKey(reg.h, "m"))))?.v;
-  if (!m) return false;
-  const mm = await mergeRecorded(st, syncedKey(id, m.n), m, merge, noun, canExact);
-  if (mm) await setMeta(st, reg, { m: mm });
-  return true;
-}
-/** A document's synced history asks for `asked` when it starts (a .sbreplay restore: "legacy", so its server document
- * is made legacy, plan-merge-align r3.2 §9), recorded in `st`, the restore's own transaction.  A document whose synced
- * history has started already keeps what it asked (the server's mode is fixed): false. */
-export async function askMerge(st, id, asked) {
-  if (asked !== "legacy" && asked !== "exact-v1") throw new TypeError("askMerge: legacy or exact-v1");
-  const reg = await registry(st, id, true);
-  if ((await rq(st.get(rowKey(reg.h, "m"))))?.v) return false;
-  await setMeta(st, reg, { a: { asked } });
+  await setMeta(st, reg, { s: { ...slot, claimed: { epoch, client }, fgen } });
   return true;
 }
 
@@ -301,7 +238,7 @@ const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && 
  * one under the same id refuses the page; then the cursor is `next`.  A document not started here yet is started with
  * `start` ({client}), no root of its own: the server's patches are its history.  Resolves {j, applied}; refused
  * (thrown, with `refusal`), nothing of it is written. */
-export async function applyPage(st, id, { expect, next, rows, start, merge, canExact = true, noun = "notebook" }) {
+export async function applyPage(st, id, { expect, next, rows, start, noun = "notebook" }) {
   const reg = await registry(st, id, true);
   const changes = {};
   let m = (await rq(st.get(rowKey(reg.h, "m"))))?.v ?? null;
@@ -313,10 +250,6 @@ export async function applyPage(st, id, { expect, next, rows, start, merge, canE
   const cur = (await rq(st.get(rowKey(reg.h, "k"))))?.v ?? null;
   if (canon(cur) !== canon(expect ?? null)) throw refusedWith("the pull cursor moved: this page is not applied");
   const key = syncedKey(id, m.n);
-  // (the mode the answer says, recorded with this page's rows, before them: checked against this device's own line
-  // alone, never against what this page brings)
-  const mm = await mergeRecorded(st, key, m, merge, noun, canExact);
-  if (mm) m = changes.m = mm;
   let j = (await rq(st.get(rowKey(reg.h, "j"))))?.v?.j ?? 0, applied = 0;
   for (const r of rows) {
     const had = await rq(st.get([key, r.time]));

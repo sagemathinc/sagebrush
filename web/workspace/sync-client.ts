@@ -43,9 +43,8 @@ import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, ca
 import type { SyncOp } from "./sync-reduce";
 import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
 import { reserve } from "./reserve";
-import { accountHash, Bucket } from "../sync-protocol/protocol";
+import { accountHash, Bucket, VERSION } from "../sync-protocol/protocol";
 import type { DocSync } from "./doc-sync";
-import { helloMergeField } from "./merge-client";
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -516,7 +515,7 @@ export class SyncClient {
       this.conn = c;
       this.cursor = start;
       ws.onopen = () => {
-        this.send(c, { t: "hello", v: 1, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation, ...helloMergeField() });
+        this.send(c, { t: "hello", v: VERSION, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation });
       };
       ws.onmessage = (ev) => {
         c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {
@@ -585,7 +584,7 @@ export class SyncClient {
   }
 
   private async welcome(c: Conn, m: Record<string, unknown>) {
-    if (m.v !== 1 || !isNat(m.generation) || !isNat(m.next_dseq) || typeof m.state !== "string") return c.end("closed");
+    if (m.v !== VERSION || !isNat(m.generation) || !isNat(m.next_dseq) || typeof m.state !== "string") return c.end("closed");
     // (another generation than the namespace's: a new namespace, read again from the status)
     if (m.generation !== c.generation) return c.end("generation");
     await this.timerOk(c.ns, "connect");
