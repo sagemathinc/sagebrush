@@ -820,6 +820,10 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const rran = await runRecoveryTests(check);
   console.log(`remote-recovery: ${rran} controls ran`);
   check(rran === 29, `remote-recovery: every control ran (${rran} of 29)`);
+  // (the preview's Stop: the run ends when its interpreter stops)
+  const { runPreviewStopTests } = await import("./test-remote-preview-stop.mjs");
+  const pran = await runPreviewStopTests(check);
+  check(pran === 3, `remote-preview-stop: every case ran (${pran} of 3)`);
   const { runLossTests } = await import("./test-remote-loss.mjs");
   await runLossTests(check);
 }
