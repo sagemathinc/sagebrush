@@ -22,6 +22,7 @@ import { openHistoryDb } from "../notebook/stores.js";
 import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
+import { OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -234,6 +235,15 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!st.available && st.reason === "not_allowlisted") return;
     sec.append(h("h4", { textContent: "Sync" }));
     if (note) sec.append(h("p", { className: "note", textContent: note }));
+    // (EXACT-ONLY: old sync state here: sync can't be turned on, and the page says what to do; its sync data
+    // unreadable (R-DET-1): off the same, without advice to clear anything)
+    const why = owner.view().s.reason;
+    if (why === OLD_SYNC_REASON || why === UNREADABLE_REASON) {
+      const sw = btn("Turn on sync…", () => {});
+      sw.disabled = true;
+      sec.append(sw, h("p", { className: "note", textContent: why === OLD_SYNC_REASON ? OLD_SYNC_MESSAGE : UNREADABLE_MESSAGE }));
+      return;
+    }
     if (!st.available) {
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
@@ -345,6 +355,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!st) return;
     // (the lifecycle this action saw: the answer is applied here only if it is still the one)
     const mark = await readLife(w);
+    // (EXACT-ONLY: old sync state here, read afresh: nothing asked of the server; the owner's view says it)
+    if ((await owner.checkOld()).old) return poll.request();
     const use = await host.usage();
     const supported = "limit_bytes" in st;
     const lim = supported && st.limit_bytes !== null && st.limit_bytes !== undefined ? `\nYour plan's storage: ${fmt(st.used_bytes ?? 0)} of ${fmt(st.limit_bytes)} used.` : "";
@@ -378,7 +390,14 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       note = body.message ?? body.error ?? `Sync couldn't be turned on (${r.status})`;
       return poll.request();
     }
-    const lease = await switchToIf(w, `${bound}:${body.generation}:${w.device}`, mark);
+    let lease;
+    try {
+      lease = await switchToIf(w, `${bound}:${body.generation}:${w.device}`, mark);
+    } catch (e) {
+      if (!(e instanceof OldSyncError)) throw e;
+      void owner.checkOld();
+      return poll.request();
+    }
     if (!lease) {
       note = "Sync was turned on for your account, but this browser's sync changed meanwhile (another tab), so it was left as it is";
       return poll.request();

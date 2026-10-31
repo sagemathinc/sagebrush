@@ -29,7 +29,8 @@
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
 import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
-import { dbMerge3 } from "./db-merge3.ts";
+import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
+import { diffMain, mergeStrings3 } from "patchflow";
 export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
@@ -39,32 +40,57 @@ export { journalClasses, pageControls, switchJournal, TAKEOVER, TAKEOVER_FAILED,
 export { journalStoreClasses, hashOf } from "../journal/store.js";
 
 export const SCHEMA = { primaryKeys: ["type", "id"], stringCols: ["input"] };
-const codec = createImmerDbCodec(SCHEMA);
-// (exact merges, plan-merge-align r3.2 §5: cocalc-ai's dbMerge3 (db-merge3.ts) as the codec's merge3, for a synced
-// history whose server document is exact-v1; patchflow reads codec.merge3 each time it computes a value)
-// (compiled in only with __SB_EXACT_MERGE__, as merge-client.ts reads it: a production build carries none of it until
-// activation.  The define tested here itself, inline in the condition: Bun folds a define where it is written, but not
-// through an imported constant or a const binding, and only a folded condition drops the reader (measured; the built
-// page is checked by test-merge-client-off.mjs))
-// eslint-disable-next-line no-undef
-const exactMerge3 = typeof __SB_EXACT_MERGE__ !== "undefined" && __SB_EXACT_MERGE__ === true ? dbMerge3((s) => codec.fromString(s), (d) => codec.toString(d), SCHEMA) : undefined;
-/** The codec of a notebook history kept by `store`: merge3 only while it is a journal store's synced history (its key
- * isn't the document's own id) whose recorded mode is exact-v1 (the store's mergeMode, read with its patches or told
- * before the next ones).  Every other history (a notebook's own, from before sync or restored from a replay; one with
- * no mode recorded, or legacy) reads as it always has.  The mode only ever goes from none to a value, and before it the
- * synced history is this device's one line, which both read alike (rows.js mergeRecorded). */
-export function codecFor(store) {
-  return Object.create(codec, {
-    merge3: {
-      get: () => {
-        if (!(store && store.docId && store.id !== store.docId && store.mergeMode === "exact-v1")) return undefined;
-        // (an exact-v1 history in a build without the reader (told live by a newer tab): fails, never read legacy; the
-        // store refuses such a history before it opens it, exactReadable)
-        if (!exactMerge3) throw new Error("exact merges aren't in this build: reload this page");
-        return exactMerge3;
-      },
-    },
-  });
+// (every notebook's history merges concurrent heads exactly, as CoCalc's Jupyter does: cocalc-ai's dbMerge3
+// (db-merge3.ts) as the codec's merge3 (plan-exact-only r1: no mode, no other rule).  patchflow reads it each time it
+// computes a value; a linear history (one writer) reads the same with or without it (test-merge-mode-chain.mjs))
+const plain = createImmerDbCodec(SCHEMA);
+const codec = { ...plain, merge3: dbMerge3((s) => plain.fromString(s), (d) => plain.toString(d), SCHEMA) };
+/** The notebook histories' codec (for tests: test-merge-mode-chain.mjs). */
+export const notebookCodec = codec;
+// (the merges outside the patch graph, CoCalc's way (plan-exact-only r1): the store's and the editor's)
+/** The store's merge of a notebook's records (journal.js notebookKind.apply): db-merge3.ts's own mergeDbStrings over
+ * them, `b` the later side.  Never a clash. */
+export function exactRecords3(base, a, b) {
+  const lines = (rs) => rs.map((r) => JSON.stringify(r)).join("\n");
+  return mergeDbStrings({ ...SCHEMA, base: lines(base), a: lines(a), b: lines(b) }).split("\n").filter((l) => l !== "").map((l) => JSON.parse(l));
+}
+/** An edit of a text (base -> local) merged into a newer version of it (base -> remote), as cocalc-ai's mergeText
+ * (sync/editor/generic/string-merge3.ts at 0b8b7547, written here from its rules, not copied): nothing either side
+ * added is lost. */
+export function mergeText({ base, local, remote }) {
+  if (local === remote || base === remote) return local;
+  if (base === local) return remote;
+  return mergeStrings3({ base, a: remote, b: local });
+}
+// (a position in `from` as a position in `to`, by their diff (UTF-16 units, as a textarea's): kept within text both
+// have; at the start of a deleted run for a position inside it; for text inserted exactly at it, before that text if
+// `before`, else after it)
+function mapPos(diffs, pos, before) {
+  let x = 0, y = 0;
+  for (const [op, text] of diffs) {
+    if (op === 0) {
+      if (pos < x + text.length || (pos === x + text.length && before)) return y + pos - x;
+      x += text.length; y += text.length;
+    } else if (op === -1) {
+      if (pos < x + text.length) return y;
+      x += text.length;
+    } else {
+      if (pos === x && before) return y;
+      y += text.length;
+    }
+  }
+  return y + pos - x;
+}
+/** The editor's merge of an unsaved edit (notebook.js applyRemote, through the store's mergeText): mergeText's text,
+ * and the selection [start, end] in `local` mapped onto it.  Insertion affinity: a caret stays after the text it
+ * follows, with text inserted exactly at it after it; a selection's ends keep text inserted exactly at them outside
+ * it. */
+export function mergeTextAt({ base, local, remote, sel }) {
+  const text = mergeText({ base, local, remote });
+  if (!sel || text === local) return { text, sel };
+  const d = diffMain(local, text);
+  const [s, e] = sel;
+  return { text, sel: s === e ? [mapPos(d, s, true), mapPos(d, s, true)] : [mapPos(d, s, false), mapPos(d, e, true)] };
 }
 const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab" };
 const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab" };
@@ -81,7 +107,7 @@ export function toRecords(doc) {
   (doc.cells ?? []).forEach((c, i) => (d = d.set(cellRecord(c, i))));
   return d;
 }
-/** A notebook document's records as a plain array (settings, then cells): what merge3.js's mergeRecords3 merges. */
+/** A notebook document's records as a plain array (settings, then cells): what exactRecords3 merges. */
 export const recordsOf = (doc) => [...toRecords(doc).get({ type: "settings" }), ...toRecords(doc).get({ type: "cell" })];
 /** A plain array of records as a notebook document (no outputs). */
 export function docOfRecords(records) {
@@ -115,7 +141,7 @@ export function textHash(s) {
 
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
-  constructor(store) { super(store, codecFor(store)); }
+  constructor(store) { super(store, codec); }
   /** Record the document as it is now (nothing if it has not changed). */
   record(doc) {
     if (!this.session) return null;

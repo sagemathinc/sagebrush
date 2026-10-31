@@ -1,6 +1,6 @@
-// Whether two edits of a text overlap, and their merge when they don't: one decision for every three-way merge
-// of text the client makes (the notebooks' journal, web/notebook/merge3.js, and the boards' boardMerge3), so the
-// two decide alike (plan-sync-slice2-client r4 §2.1; the ruling of Oct 26: overlapping edits are a clash).
+// Whether two edits of a text overlap, and their merge when they don't: the boards' three-way merge of text
+// (boardMerge3; plan-sync-slice2-client r4 §2.1; the ruling of Oct 26: overlapping edits are a clash).  Notebooks merge
+// text exactly instead, as CoCalc's Jupyter does (history.js, plan-exact-only r1).
 //
 // A text is its lines, each with its line break (the last may have none).  Each side's edit is its hunks against
 // the base, from a longest common subsequence of lines after the common prefix and suffix: a half-open range

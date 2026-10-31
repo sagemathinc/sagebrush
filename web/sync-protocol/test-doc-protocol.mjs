@@ -108,45 +108,10 @@ check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused b
   check(P.shapeMismatch(ep, by("batch", "another epoch")) === null && P.shapeMismatch(ep, by("pull", "another epoch")) === null, "shapes: the cleared history's refusal matches, for batch and pull");
   check(/code: not "stale_epoch"/.test(P.shapeMismatch(ep, by("doc_claim", "another epoch")) ?? ""), "shapes: a claim's other epoch is stale_epoch, not epoch");
 }
-// ---- merge modes (plan-merge-align r3.2 §2-§3): the vectors (gen-doc-vectors.py, an independent implementation) against
-// doc-protocol.ts's helloMerge, creationMode, mergeAdmits and checkDocClaim; merge_mode is a Code; its answers' shapes
-{
-  const J = JSON.stringify;
-  const M = V.merge ?? {};
-  check(J(M.modes) === J(P.MERGE_MODES), "merge: the modes, as the vectors: " + J(M.modes));
-  check((M.hello ?? []).length === 16 && (M.creation ?? []).length === 24 && (M.admits ?? []).length === 8 && (M.claims ?? []).length === 6, "merge: every vector there");
-  const out = (f) => { try { return [...f()].sort(); } catch (e) { return e?.code === "invalid" ? "invalid" : "threw " + e; } };
-  for (const h of M.hello ?? []) {
-    const got = out(() => P.helloMerge(h.absent ? undefined : h.in));
-    check(J(got) === J(h.out), `merge: hello ${h.absent ? "(absent)" : J(h.in).slice(0, 60)} -> ${J(h.out)}: ${J(got)}`);
-  }
-  for (const c of M.creation ?? []) {
-    const got = P.creationMode({ exactOn: c.exact_on, runs: new Set(c.runs), ...(c.asked ? { asked: c.asked } : {}) });
-    check(got === c.out, `merge: made with the switch ${c.exact_on ? "on" : "off"}, runs ${J(c.runs)}, asked ${c.asked ?? "(nothing)"} -> ${c.out}: ${got}`);
-  }
-  check((M.creation ?? []).filter((c) => c.out === "exact-v1").length === 2, "merge: exact-v1 only with the switch on, a socket that runs it and asked for (2 of 24)");
-  for (const x of M.admits ?? []) check(P.mergeAdmits(x.mode, new Set(x.runs)) === x.out, `merge: ${x.mode} admitted to ${J(x.runs)}: ${x.out}`);
-  for (const c of M.claims ?? []) {
-    let ok = true, merge;
-    try { merge = P.checkDocClaim(c.in).merge; } catch { ok = false; }
-    check(ok === c.ok && (!ok || merge === c.in.merge), `merge: a claim with merge ${J(c.in.merge)}: ${c.ok ? "taken" : "refused"}`);
-  }
-  check(J(P.checkDocClaim({ t: "doc_claim", req: 1, doc: "0123456789ab", epoch: 1, client: "c1" })) === J({ t: "doc_claim", req: 1, epoch: 1, client: "c1", doc: "0123456789ab" }), "merge: a claim without merge is as before (no merge key)");
-  check(R.isCode("merge_mode") && (M.refusals ?? []).every((r) => R.isCode(r.error.code)), "merge: merge_mode is a Code");
-  const e = R.refusalOf({ code: "merge_mode", message: "m", detail: { merge: "exact-v1" } });
-  check(e.code === "merge_mode" && e.detail?.merge === "exact-v1", "merge: merge_mode read as itself, with the document's mode");
-  const A = M.answers ?? [];
-  const by = (f, w) => A.find((a) => a.for === f && a.when.startsWith(w))?.shape;
-  const claim = { client: "c1", fgen: 0, next_cseq: 1 };
-  check(P.shapeMismatch({ t: "ack", req: 1, claim: { ...claim, merge: "exact-v1" } }, by("doc_claim", "to a socket whose hello said")) === null, "merge: a claim's ack with merge, to a socket that said merge");
-  check(P.shapeMismatch({ t: "ack", req: 1, claim }, by("doc_claim", "to a socket whose hello didn't")) === null, "merge: a claim's ack, to an older socket, as before");
-  check(/merge: not in the shape/.test(P.shapeMismatch({ t: "ack", req: 1, claim: { ...claim, merge: "legacy" } }, by("doc_claim", "to a socket whose hello didn't")) ?? ""), "merge: an older socket's claim ack never carries merge");
-  for (const f of ["doc_claim", "pull", "batch"]) check(P.shapeMismatch({ t: "error", req: 2, code: "merge_mode", detail: { message: "m", merge: "exact-v1" } }, by(f, "the document's mode")) === null, `merge: ${f}'s merge_mode refusal`);
-}
 // ---- a refusal with a code this build doesn't know fails closed: "invalid", final, its code kept (daybreak3's U2)
 {
   const J = JSON.stringify;
-  check(J([...R.CODES].sort()) === J([...new Set(R.CODES)].sort()) && R.CODES.length === 19 && R.isCode("unavailable") && R.isCode("merge_mode") && !R.isCode("brand_new") && !R.isCode(5), "protocol.ts's CODES at runtime, and isCode");
+  check(J([...R.CODES].sort()) === J([...new Set(R.CODES)].sort()) && R.CODES.length === 18 && R.isCode("unavailable") && !R.isCode("brand_new") && !R.isCode(5), "protocol.ts's CODES at runtime, and isCode");
   let got = null;
   try { R.unwrap({ error: { code: "brand_new", message: "from a newer server", detail: { retry_after: 5 } } }); } catch (e) { got = e; }
   check(got instanceof R.SyncError && got.code === "invalid" && got.detail?.unknown_code === "brand_new" && got.detail?.final === true && !("retry_after" in got.detail), "an unknown code: invalid, final, no retry_after kept: " + J(got?.detail));
