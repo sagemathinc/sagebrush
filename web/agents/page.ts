@@ -393,6 +393,9 @@ type Host = {
   nb?: NotebookHost;
   running: boolean;
   flush?: () => Promise<void>;
+  /** Closing: saved, or kept as a copy, or (false) neither, and then it stays (ART-C2/C4 r3). */
+  release?: () => Promise<Released>;
+  /** Closing without keeping anything. */
   dispose?: () => Promise<void>;
   /** Its own bar (a warning, a refusal, with its actions): shown whenever it is the host shown, and only then (ART-C5). */
   bar: Bar;
@@ -410,18 +413,57 @@ function paneShell(pane: HTMLElement) {
   return { head: $(".pane-head", pane), body: $(".pane-body", pane), bar: $(".pane-bar", pane) };
 }
 
-/** Let go of every host of a thread: saves flushed (or kept as copies), notebooks stopped, editors destroyed. */
-async function releaseHosts(threadId: string | null) {
-  if (!threadId) return;
-  const gone = [...hosts].filter(([k]) => k.startsWith(threadId + "\u0000"));
-  for (const [k] of gone) hosts.delete(k); // (at once: nothing of them is shown or acted on from here)
+/** Close every host of a thread: each saves, or keeps what it couldn't save as a copy, then goes (notebooks stopped,
+ * editors destroyed). One that could do neither stays, shown, with its own bar: Try again, or Close without keeping.
+ * True when all have gone. */
+async function releaseHosts(threadId: string | null): Promise<boolean> {
+  if (!threadId) return true;
+  const mine = [...hosts].filter(([k]) => k.startsWith(threadId + "\u0000"));
+  let kept: [string, Host] | null = null;
   await Promise.all(
-    gone.map(async ([, h]) => {
-      h.el.hidden = true;
-      await h.dispose?.().catch(() => {});
-      h.el.remove();
+    mine.map(async ([k, h]) => {
+      const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
+      if (r.ok) {
+        if (hosts.get(k) === h) hosts.delete(k);
+        h.el.remove();
+        return;
+      }
+      kept = [k, h];
+      h.bar = {
+        kind: "refused",
+        text: r.why,
+        actions: [
+          { label: "Try again", run: () => void closePaneOf(threadId) },
+          {
+            label: "Close without keeping",
+            run: () =>
+              void (async () => {
+                await h.dispose?.();
+                if (hosts.get(k) === h) hosts.delete(k);
+                h.el.remove();
+                await closePaneOf(threadId);
+              })(),
+          },
+        ],
+      };
     }),
   );
+  if (!kept) return true;
+  const [k] = kept as [string, Host];
+  if (current().id === threadId) {
+    openArtifact = k.slice(threadId.length + 1);
+    renderArtifacts();
+  }
+  return false;
+}
+
+/** The pane of a thread closed, once each of its hosts has saved or kept its content. */
+async function closePaneOf(threadId: string) {
+  if (current().id !== threadId) return;
+  if (!(await releaseHosts(threadId)) || current().id !== threadId) return;
+  openArtifact = null;
+  fullscreen = false;
+  renderArtifacts();
 }
 
 /** The bar of the host shown: its own state, its actions only while it is still that host (ART-C5). */
@@ -432,6 +474,8 @@ function renderBar(h: Host | undefined) {
   if (!h || !b) {
     bar.hidden = true;
     bar.innerHTML = "";
+    bar.className = "pane-bar"; // (no kind, no alert role, left from another host's bar: BAC-7)
+    bar.removeAttribute("role");
     return;
   }
   bar.hidden = false;
@@ -450,8 +494,9 @@ const shownHost = () => hosts.get(hostKey(current().id, openArtifact ?? ""));
  * to whether it may be left, still the same thread then (ART-C6). */
 async function mayLeaveThread(): Promise<boolean> {
   const from = current().id;
-  if (!(await mayClosePane(from))) return false;
-  return current().id === from;
+  if (!(await mayClosePane(from)) || current().id !== from) return false;
+  // (its hosts close first: one that can't keep its content keeps the thread)
+  return (await releaseHosts(from)) && current().id === from;
 }
 
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
@@ -510,10 +555,7 @@ function renderArtifacts() {
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
-      openArtifact = null;
-      fullscreen = false;
-      await releaseHosts(thread.id);
-      renderArtifacts();
+      await closePaneOf(thread.id);
     };
     $("#copy", head).onclick = () => {
       const h = hosts.get(hostKey(thread.id, openArtifact ?? ""));
@@ -578,6 +620,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     h.nb = nb;
     h.copy = nb.copyText;
     h.flush = nb.flush;
+    h.release = nb.release;
     h.dispose = nb.dispose;
     nb.hidden(shownHost() !== h);
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
@@ -588,6 +631,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
     h.copy = f.text;
     h.flush = f.flush;
+    h.release = f.release;
     h.dispose = f.dispose;
     keepFocus();
     return;
@@ -608,23 +652,26 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
 // edit; writes are tracked, so flush waits for them; after a conflict nothing more is written (the text stays
 // here); dispose saves the editor's latest text (the LaTeX editor's own debounce included), then destroys it.
 /** A text file's copy beside it, never over another: "name (copy).ext", "name (copy 2).ext", ... */
-async function keepFileCopy(path: string, text: string): Promise<string> {
+async function keepFileCopy(path: string, text: string, signal?: AbortSignal): Promise<string> {
   const m = /^(.*?)(\.[^./]*)?$/.exec(path)!;
   for (let i = 1; ; i++) {
     const name = `${m[1]} (copy${i > 1 ? ` ${i}` : ""})${m[2] ?? ""}`;
     try {
-      await workspace!.create(name, { content: text });
+      await workspace!.create(name, { content: text, ...(signal ? { signal } : {}) });
       return name;
     } catch (e) {
       if ((e as { code?: string }).code !== "exists" || i >= 50) throw e;
     }
   }
 }
-type FileHost = { text: () => string; flush: () => Promise<void>; dispose: () => Promise<void> };
+type Released = { ok: true } | { ok: false; why: string };
+type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void> };
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
   let alive = true;
+  let open = true; // (this host's writer: closed at release, after which no write of its is admitted, ART-C4)
   let rev = -1; // (the revision the shown text is based on: known before anything is written)
+  let fid: string | undefined; // (the file's identity: a write goes only to this file, never to another at its path, ART-C3)
   let text = a.body; // (the editor's text as last told)
   let savedText: string | null = null; // (the text the file has, as far as this host knows)
   let timer = 0;
@@ -633,20 +680,25 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   let latest: () => string = () => text; // (the editor's current text, its unsent edits included)
   let destroyEditor: () => void = () => {};
   const say = (s: string) => alive && (saved.textContent = s);
+  // (refused under the workspace's lock, where the write would happen, once this host's writer is closed)
+  const admit = () => {
+    if (!open) throw Object.assign(new Error("this file's pane was closed"), { code: "closed" });
+  };
   const write = () => {
     clearTimeout(timer);
+    const value = latest(); // (the text as it is now: what this write writes, whenever its turn comes)
     inflight = inflight.then(async () => {
-      const value = latest();
-      if (stopped || rev < 0 || value === savedText) return;
+      if (!open || stopped || rev < 0 || value === savedText) return;
       try {
-        const r = await workspace!.write(path, value, { base: rev });
+        const r = await workspace!.write(path, value, { base: rev, ...(fid ? { fid } : {}), admit });
         rev = r.rev;
         savedText = value;
         say(latest() === value ? "Saved" : "Editing…");
       } catch (e) {
+        if (!open) return; // (closed meanwhile: refused by design)
         stopped = true;
         const code = (e as { code?: string }).code;
-        say(code === "conflict" ? "Not saved: changed elsewhere since (your text stays here; reopen to see that version)" : `Not saved: ${(e as Error).message}`);
+        say(code === "conflict" ? "Not saved: changed or replaced elsewhere since (your text stays here; reopen to see that version)" : `Not saved: ${(e as Error).message}`);
       }
     });
     return inflight;
@@ -681,12 +733,14 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
       }
       if (content === null) return say("(not a text file)");
       rev = r.rev;
+      fid = r.entry.kind === "file" ? r.entry.fid : undefined;
       text = savedText = content;
       say("Saved");
       if (a.kind === "markdown") {
         const ed = new BlockEditor(text, { render: md, typeset: (el) => typeset(el), onChange: changed });
         ed.el.classList.add("doc");
         box.append(ed.el);
+        latest = () => ed.value;
       } else if (m?.mountEditor) {
         const host = document.createElement("div");
         host.className = "tex-host";
@@ -713,27 +767,44 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
       box.append(pre);
     },
   );
+  const dispose = async () => {
+    if (!alive) return;
+    open = false;
+    alive = false;
+    clearTimeout(timer);
+    destroyEditor();
+    destroyEditor = () => {};
+  };
   return {
     text: () => latest(),
-    flush: () => (alive && latest() !== savedText ? write() : inflight),
-    async dispose() {
-      if (!alive) return;
-      // (the latest text, edits inside the editor's own debounce included, written before the editor goes)
-      if (latest() !== savedText) await Promise.race([write(), new Promise((r) => setTimeout(r, 3000))]);
-      else await inflight;
-      const unsaved = latest() !== savedText && rev >= 0 ? latest() : null;
-      alive = false;
+    flush: () => (alive && open && latest() !== savedText ? write() : inflight),
+    async release() {
+      if (!alive) return { ok: true };
+      // (1) the latest text, edits inside the editor's own debounce included, written: 3 s at most
+      if (open && !stopped && rev >= 0 && latest() !== savedText) await Promise.race([write(), new Promise((r) => setTimeout(r, 3000))]);
+      // (2) then this host's writer is closed: a write still queued or waiting for the lock is refused where it would write
+      open = false;
       clearTimeout(timer);
-      destroyEditor();
-      destroyEditor = () => {};
-      // (text that couldn't be written (a conflict, a refusal, the workspace busy) isn't lost: kept as a copy, and said)
-      if (unsaved !== null) {
-        void keepFileCopy(path, unsaved).then(
-          (name) => toast(`${path}: your last changes couldn't be saved; they were kept as ${name}.`, 8000),
-          (e) => toast(`${path}: your last changes couldn't be saved, nor kept as a copy (${(e as Error).message}).`, 8000),
-        );
+      // (3) text the file doesn't have is kept as a copy before the editor goes; if it can't be, the editor stays
+      const value = latest();
+      if (rev >= 0 && value !== savedText) {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 5000);
+        try {
+          const name = await keepFileCopy(path, value, ctl.signal);
+          toast(`${path}: your last changes weren't saved there; they were kept as ${name}.`, 8000);
+        } catch (e) {
+          const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
+          say("Not saved, nor kept as a copy");
+          return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
+        } finally {
+          clearTimeout(t);
+        }
       }
+      await dispose();
+      return { ok: true };
     },
+    dispose,
   };
 }
 

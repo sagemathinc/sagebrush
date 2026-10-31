@@ -148,6 +148,7 @@
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
   .pane-host { flex: 1; overflow: auto; }
   .pane-host[hidden] { display: none; }
+  .pane-bar[hidden] { display: none; } /* (else display: flex below beats [hidden]: an empty strip, BAC-7) */
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
@@ -155,6 +156,19 @@
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
+  /* (the notebook's compact layout by the pane's width: notebook.css's @media (max-width: 640px) declarations, for the
+     notebook in this page's pane; kept here, in the agents page, so the notebook bundle and the CLI don't grow) */
+  @container sbnb-pane (max-width: 640px) {
+    .nb-artifact .sbnb { --gutter: 44px; }
+    .nb-artifact .sbnb .cell .gutter { padding-right: 6px; }
+    .nb-artifact .sbnb .cell .n { font-size: 11.5px; }
+    .nb-artifact .sbnb .cell .runb { width: 26px; height: 26px; top: 5px; right: 5px; }
+    .nb-artifact .sbnb .cell .adder { left: var(--gutter); transform: none; }
+    .nb-artifact .sbnb .cell .head .drag { display: none; }
+    .nb-artifact .sbnb .cell .head { right: 6px; }
+    .nb-artifact .sbnb .cell .head button, .nb-artifact .sbnb .cell .head select { padding: 1px 5px; }
+    .nb-artifact .sbnb .cell .adder button { padding: 1px 8px; }
+  }
   /* (the label spans the cell's grid, the gutter and the code: in the gutter column alone it squeezed the code, BAC-1) */
   .nb-agent-mark { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); margin: 0 0 2px var(--gutter, 44px); }
   .tab-running { color: var(--accent); }
