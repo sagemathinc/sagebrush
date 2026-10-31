@@ -7,8 +7,9 @@
 // panel says what this browser holds, whether the browser may clear it,
 // and frees old versions.
 import { migrationState, type MigrationState } from "./migrator";
-import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
-import { nameOf, splitExt } from "./paths";
+import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
+import { TRASH, nameOf, splitExt } from "./paths";
+import { notebookFileText, boardFileText } from "./file-bytes";
 import { syncSection } from "./sync-panel";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
@@ -318,7 +319,25 @@ export async function dropFolderVersions(w: Workspace, folder: string, host: Pre
   }
 }
 
-export type StorageHost = PreviewHost & { showTrash(): void; emptyTrash(): Promise<void> };
+export type StorageHost = PreviewHost & {
+  showTrash(): void;
+  emptyTrash(): Promise<void>;
+  /** "Export all current files (.zip)" (export plan E1 r2c): the address of a file of the lazy export chunk
+   * (sagebrush-export.js, sagebrush-export-worker.js) beside this page; absent, the export isn't offered */
+  exportUrl?: (file: string) => string;
+  /** this tab's open documents saved, before an export reads them */
+  saveOpen?: () => Promise<void>;
+  /** fetch these cloud-only files to this device (sync's "Keep on this device"), when sync is on */
+  fetchFirst?: (paths: string[]) => Promise<void>;
+};
+
+/** "Last export prepared on this device: …" (E1 r2c §0): set only after an export's file was closed. */
+export function exportStatus(last: { at: number; partial: boolean } | undefined, now = Date.now()): string {
+  if (!last) return "No export prepared on this device yet";
+  const m = Math.floor((now - last.at) / 60_000), d = Math.floor(m / 1440);
+  const when = m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : d === 1 ? "yesterday" : `${d} days ago`;
+  return `Last export prepared on this device: ${when}${last.partial ? " (partial)" : ""}`;
+}
 
 /** The browser's estimate of what this site holds, and of what it may: undefined where it can't say. */
 export async function estimate(): Promise<{ usage: number; quota: number } | undefined> {
@@ -388,8 +407,27 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       keep.append(ask);
     }
     body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
-    body.append(syncBox);
+    body.append(exportBox, syncBox);
   };
+  // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
+  const exportBox = h("div", { className: "export" });
+  if (host.exportUrl) {
+    const status = h("p", { className: "note" }), flow = h("div");
+    const stamp = () => w.lastExport().then((l) => { status.textContent = exportStatus(l); }, () => { status.textContent = ""; });
+    let running = false;
+    const go = button("Export all current files (.zip)", async () => {
+      if (running) return;
+      running = true;
+      go.disabled = true;
+      try {
+        const m = await import(host.exportUrl!("sagebrush-export.js"));
+        const kit = { notebookFileText, boardFileText, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
+        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, fetchFirst: host.fetchFirst, stamped: stamp, site: location.host, app: "sagebrush", kit }, flow);
+      } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
+    });
+    exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
+    void stamp();
+  }
   // (sync, step 5: its own section, drawn by its own poll, ended with the panel)
   const syncBox = h("div");
   const sync = NO_SYNC ? { dispose() {} } : syncSection(w, syncBox, { say: host.say, fail: host.fail, usage: () => w.usage() });

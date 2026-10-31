@@ -1515,6 +1515,8 @@ if (ws && local) {
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
+      // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
+      exportUrl: (f) => new URL("/" + f, location.href).href,
       // (this board renamed here: its title follows, saved by this page as
       // its other changes are, never written beside them: CORR-0B0-2)
       retitles: (e) => e.kind === "board" && e.ref === source.slice(6),

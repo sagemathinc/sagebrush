@@ -613,6 +613,7 @@ jobs:
           CHROME=google-chrome node web/workspace/test-workspace-preview.mjs
           CHROME=google-chrome node web/workspace/test-workspace-filemenu.mjs
           CHROME=google-chrome node web/workspace/test-workspace-upload.mjs
+          CHROME=google-chrome node web/workspace/test-export.mjs
           bun web/board/test-own-names.mjs
           bun web/board/test-edit-state.mjs
           bun web/board/test-edit-channel.mjs
