@@ -168,8 +168,10 @@ export class TerminalPanel {
     this.status.setAttribute("role", "status");
     this.status.setAttribute("aria-live", "polite");
 
-    // (the intro: a static line above the prompt, once per tab, named by the input; not live, not a dialog: T358-3)
-    const intro = this.opts.intro && !sessionStorage.getItem("sb-term-intro") && root.appendChild(el("div", "sb-term-intro", this.opts.intro));
+    // (the intro: a static line above the prompt, once per tab, named by the input; not live, not a dialog: T358-3;
+    // in each tab's first terminal until its "Got it", which this device then keeps, as the site keeps its other
+    // preferences: localStorage, sagebrush-*; William, Oct 30)
+    const intro = this.opts.intro && !localStorage.getItem("sagebrush-term-intro") && !sessionStorage.getItem("sb-term-intro") && root.appendChild(el("div", "sb-term-intro"));
     const form = root.appendChild(el("div", "sb-term-in"));
     this.inputLabel = form.appendChild(el("label", "sb-term-prompt"));
     this.input = el("textarea");
@@ -179,7 +181,17 @@ export class TerminalPanel {
     this.input.setAttribute("autocomplete", "off");
     this.input.id = "sb-term-input";
     this.input.setAttribute("aria-describedby", intro ? "sb-term-intro sb-term-note" : "sb-term-note");
-    if (intro) (intro.id = "sb-term-intro"), sessionStorage.setItem("sb-term-intro", "1");
+    if (intro) {
+      // (the text alone names the input; the button beside it)
+      intro.appendChild(el("span", "", this.opts.intro)).id = "sb-term-intro";
+      sessionStorage.setItem("sb-term-intro", "1");
+      intro.appendChild(el("button", "", "Got it")).onclick = () => {
+        localStorage.setItem("sagebrush-term-intro", "1");
+        intro.remove();
+        this.input.setAttribute("aria-describedby", "sb-term-note");
+        this.input.focus();
+      };
+    }
     this.inputLabel.htmlFor = this.input.id;
     form.appendChild(this.input);
     // (the note under the input: polite, apart from the log, which is never live; the input names it: TP-6)
