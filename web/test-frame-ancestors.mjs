@@ -110,7 +110,13 @@ const kindOf = (pattern) => (pattern === "/frame/*" ? "frame" : pattern === "/ru
 export function scriptSrcProblems(kind, csp) {
   const d = csp.split(";").map((x) => x.trim()).filter((x) => /^script-src\b/i.test(x));
   if (d.length !== 1) return [`script-src given ${d.length} times`];
-  return d[0].split(/\s+/).slice(1).filter((t) => !SCRIPT_SRC[kind].includes(t) && !(HASHED.includes(kind) && /^'sha256-[A-Za-z0-9+/]+=*'$/.test(t))).map((t) => `script-src ${t}`);
+  // (exactly: nothing beyond the policy's set and its hashes, nothing of the set missing, nothing twice)
+  const tokens = d[0].split(/\s+/).slice(1);
+  return [
+    ...tokens.filter((t, i) => tokens.indexOf(t) !== i).map((t) => `script-src ${t} twice`),
+    ...tokens.filter((t) => !SCRIPT_SRC[kind].includes(t) && !(HASHED.includes(kind) && /^'sha256-[A-Za-z0-9+/]+=*'$/.test(t))).map((t) => `script-src ${t}`),
+    ...SCRIPT_SRC[kind].filter((t) => !tokens.includes(t)).map((t) => `script-src lacks ${t}`),
+  ];
 }
 const policiesOf = (text) => parseHeaders(text).flatMap(([p, h]) => h.filter(([n]) => n === "content-security-policy").map(([, v]) => [p, v]));
 // the _headers rules whose script-src is wrong
@@ -201,6 +207,8 @@ try {
     ["C-G2b (https://example.com in framePolicy)", (s) => once(s, FRAME_SRC, `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://example.com"`), ["/frame/*"], null],
     ["C-G2c ('unsafe-eval' in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"`), pageRules, null],
     ["C-G2d (blob: in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' blob:"`), pageRules, null],
+    ["C-G2e ('wasm-unsafe-eval' out of pagePolicy: exact, not only no extras)", (s) => once(s, PAGE_SRC, `"script-src 'self'"`), pageRules, pagesMeta],
+    ["C-G2f (blob: out of framePolicy)", (s) => once(s, FRAME_SRC, `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'"`), ["/frame/*"], null],
   ]) {
     const m = await mutated(edit, name), t = m.headersFor(fx), w = scriptWrong(t);
     ok(same(w, want), `control ${name}: exactly ${want.join(", ")} fail (${w.join(", ") || "none"} did)`);
@@ -227,8 +235,11 @@ for (const d of [join(here, "dist"), join(here, "site", "public")]) if (existsSy
   // script-src (G-2)
   const { pagePolicy } = await import(join(here, "csp-policy.mts"));
   ok(scriptSrcProblems("page", pagePolicy(["'sha256-abc+/='"])).length === 0, "checker: the page policy with a hash passes");
-  ok(scriptSrcProblems("page", "script-src 'self' https:").length === 1 && scriptSrcProblems("page", "script-src *").length === 1 && scriptSrcProblems("page", "script-src 'self' data:").length === 1 && scriptSrcProblems("page", "script-src 'self' 'strict-dynamic'").length === 1, "checker: https:, *, data: and an unlisted keyword are refused");
-  ok(scriptSrcProblems("page", "script-src 'self' 'unsafe-inline'").length === 1 && scriptSrcProblems("shell", "script-src 'self' blob: 'unsafe-eval'").length === 1 && scriptSrcProblems("shell", "script-src 'self' blob: 'sha256-abc='").length === 1, "checker: 'unsafe-inline', 'unsafe-eval' and a hash where a policy has none are refused");
+  const P = "script-src 'self' 'wasm-unsafe-eval'";
+  ok(["https:", "*", "data:", "'strict-dynamic'", "https://static.cloudflareinsights.com"].every((t) => JSON.stringify(scriptSrcProblems("page", `${P} ${t}`)) === JSON.stringify([`script-src ${t}`])), "checker: https:, *, data:, an unlisted keyword and a host are refused, each alone");
+  ok(JSON.stringify(scriptSrcProblems("page", `${P} 'unsafe-inline'`)) === `["script-src 'unsafe-inline'"]` && JSON.stringify(scriptSrcProblems("shell", "script-src 'self' blob: 'unsafe-eval'")) === `["script-src 'unsafe-eval'"]` && JSON.stringify(scriptSrcProblems("shell", "script-src 'self' blob: 'sha256-abc='")) === `["script-src 'sha256-abc='"]`, "checker: 'unsafe-inline', 'unsafe-eval' and a hash where a policy has none are refused");
+  ok(JSON.stringify(scriptSrcProblems("page", "script-src 'self'")) === `["script-src lacks 'wasm-unsafe-eval'"]` && JSON.stringify(scriptSrcProblems("runner", "script-src 'unsafe-eval' 'wasm-unsafe-eval'")) === `["script-src lacks blob:"]` && JSON.stringify(scriptSrcProblems("srcdoc", "script-src 'self'")) === `["script-src 'self'","script-src lacks 'unsafe-inline'","script-src lacks 'unsafe-eval'","script-src lacks 'wasm-unsafe-eval'","script-src lacks blob:"]`, "checker: a policy missing a token of its set is refused (exact, not only no extras)");
+  ok(JSON.stringify(scriptSrcProblems("page", `${P} 'self'`)) === `["script-src 'self' twice"]` && scriptSrcProblems("page", `${P} 'sha256-abc=' 'sha256-abc='`).length === 1, "checker: a token given twice is refused");
   ok(scriptSrcProblems("page", "default-src 'self'").length === 1, "checker: a policy without script-src is refused");
 }
 

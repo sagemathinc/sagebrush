@@ -489,6 +489,8 @@ jobs:
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
+          # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
+          CHROME=google-chrome node web/test-pwa.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
       # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
