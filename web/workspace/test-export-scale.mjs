@@ -23,7 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { judgeRun, majorGcs, maxGap, PROGRESS_OBSERVER } from "./export-campaign-check.mjs";
+import { judgeRun, majorGcs, maxGap, PROGRESS_OBSERVER, progressSeries } from "./export-campaign-check.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const CI = process.argv.includes("--ci");
@@ -288,11 +288,14 @@ try {
         new MutationObserver(() => { if (/ written/.test(document.querySelector(".sbfprev").textContent)) body.push(performance.now()); }).observe(document.body, { subtree: true, childList: true, characterData: true });
         let n = 0; const noise = setInterval(() => { n++; sib.textContent = String(n); out.textContent = String(n); other.textContent = "x " + n + " written"; }, 30);
         const t0 = performance.now();
-        for (const [i, t] of ${JSON.stringify(times)}.entries()) setTimeout(() => { line.textContent = (i + 1) * 10 + " of 100 files and folders · " + (i + 1) + " KB written"; }, t);
-        setTimeout(() => { clearInterval(noise); let g = 0, bg = 0; for (let i = 1; i < raw.length; i++) g = Math.max(g, raw[i] - raw[i - 1]); for (let i = 1; i < body.length; i++) bg = Math.max(bg, body[i] - body[i - 1]); ok({ writes: raw.length, gap: Math.round(g), noise: n, bodyGap: Math.round(bg), bodyCount: body.length }); }, ${Math.max(...times)} + 150);
+        for (const [i, item] of ${JSON.stringify(times)}.entries()) { const [t, kind] = Array.isArray(item) ? item : [item, "w"]; setTimeout(() => { line.textContent = kind === "c" ? "Checking… " + (i + 1) * 10 + " files · 1 KB" : kind === "f" ? "Finishing the archive's index… " + (i + 1) + " KB written" : (i + 1) * 10 + " of 100 files and folders · " + (i + 1) + " KB written"; }, t); }
+        const last = Math.max(...${JSON.stringify(times)}.map((x) => (Array.isArray(x) ? x[0] : x)));
+        setTimeout(() => { clearInterval(noise); let g = 0, bg = 0; for (let i = 1; i < raw.length; i++) g = Math.max(g, raw[i] - raw[i - 1]); for (let i = 1; i < body.length; i++) bg = Math.max(bg, body[i] - body[i - 1]); ok({ writes: raw.length, first: Math.round(raw[0] - t0), gap: Math.round(g), noise: n, bodyGap: Math.round(bg), bodyCount: body.length }); }, last + 150);
       })`);
-      const a = await run([0, 100, 200, 600, 700], "__obsA");
-      check(a.writes === 5 && a.noise >= 20 && a.gap >= 390 && a.gap <= 420, "observer: five line rewrites among " + a.noise + " unrelated mutations each 30 ms: exactly 5 counted, the 400 ms stall seen (" + a.gap + " ms; the body-wide count saw " + a.bodyCount + " with a longest gap of " + a.bodyGap + " ms)");
+      // (r3: preflight's "Checking…" line at 0 and 50 ms, then a 350 ms wait (the head: not counted); writing rewrites at
+      // 400, 500, 600 and 1000 ms (a 400 ms stall); the finishing line at 1100 ms (counted))
+      const a = await run([[0, "c"], [50, "c"], [400, "w"], [500, "w"], [600, "w"], [1000, "w"], [1100, "f"]], "__obsA");
+      check(a.writes === 5 && a.first >= 390 && a.noise >= 30 && a.gap >= 390 && a.gap <= 420, "observer: among " + a.noise + " unrelated mutations each 30 ms, the two Checking… rewrites not counted (the first counted at " + a.first + " ms), the 4 writing rewrites and the finishing one counted (" + a.writes + "), the 400 ms stall seen (" + a.gap + " ms; the body-wide count saw " + a.bodyCount + " with a longest gap of " + a.bodyGap + " ms)");
       check(a.bodyGap < 100, "observer: the body-wide way of counting would have hidden the stall (" + a.bodyGap + " ms), which is why it isn't used");
       const b = await run([0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100], "__obsB");
       check(b.writes === 12 && b.gap <= 150, "observer: a line rewritten every 100 ms among unrelated mutations: " + b.writes + " counted (12 made), no gap over 250 ms (" + b.gap + " ms)");
@@ -452,7 +455,8 @@ try {
       const m2 = await c.ev(`performance.mark("sb-sync-2").startTime`);
       await sleep(200);
       const tasks = await c.ev(`window.__tasks`);
-      const page = await c.ev(`(() => { clearInterval(window.__hbt); const r = window.__raw, a = r[0], b = r[r.length - 1]; return { raw: r, hb: window.__hb.filter((t) => t >= a && t <= b), endT: window.__expT ?? null }; })()`);
+      // (r3: the heartbeat over the same span as the progress series, the first writing rewrite to the handoff)
+      const page = await c.ev(`(() => { clearInterval(window.__hbt); const r = window.__raw, a = r[0], b = window.__expT ?? r[r.length - 1]; return { raw: r, hb: window.__hb.filter((t) => t >= a && t <= b), endT: window.__expT ?? null }; })()`);
       await c.send("Tracing.end");
       await done;
       const mark = (name) => events.find((e) => e.name === name && /user_timing/.test(e.cat ?? ""));
@@ -486,7 +490,8 @@ try {
       const win = [(clickT + offset) * 1000, ((page.endT ?? m2) + offset) * 1000];
       // (r2, daybreak2's R2: a measure that couldn't be taken is null, never 0: GC needs the mapped window and a main
       // thread; a gap needs two rewrites)
-      const pg = maxGap(page.raw), hg = maxGap(page.hb);
+      // (r3, daybreak2's window: from the first writing rewrite, the handoff appended as the series' last point)
+      const pg = maxGap(progressSeries(page.raw, page.endT)), hg = maxGap(page.hb);
       const record = { c8: Math.round(c8), mapped, ended, errored: c.errors.length > 0, longTasks: out.map((t) => ({ ms: t.ms, class: t.class })), majorGc: mapped ? majorGcs(events, win[0], win[1]) : null, progressGap: pg === null ? null : Math.round(pg), progressWrites: page.raw.length, heartbeatGap: hg === null ? null : Math.round(hg) };
       const j = judgeRun(record);
       console.log("(campaign: run record " + JSON.stringify({ ...record, majorGcOver20: (record.majorGc ?? []).filter((g) => g > 20).map((g) => Math.round(g)), verdict: { valid: j.valid, fix: j.fix, invalid: j.invalid, longNonExport: j.longNonExport } }) + ")");

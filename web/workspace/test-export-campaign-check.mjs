@@ -4,7 +4,7 @@
 // failing the GC bound and nothing else.
 //   node web/workspace/test-export-campaign-check.mjs [TRACE=file]
 import { readFileSync } from "node:fs";
-import { BOUNDS, judgeRun, majorGcs, maxGap, outcome } from "./export-campaign-check.mjs";
+import { BOUNDS, judgeRun, majorGcs, maxGap, outcome, progressSeries } from "./export-campaign-check.mjs";
 
 let checks = 0;
 const fails = [];
@@ -59,6 +59,14 @@ const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.len
   check(inv({ progressWrites: 0, progressGap: null }), "no progress rewrite observed: the run is INVALID, not a pass");
   check(inv({ progressWrites: 1, progressGap: null }), "one progress rewrite observed: INVALID");
   check(inv({ progressWrites: 5, progressGap: 100 }), "five rewrites (the measure not activated: more than 10 needed): INVALID");
+  // (r3, grader's V-1: the boundary itself)
+  check(inv({ progressWrites: 10, progressGap: 100 }), "exactly 10 rewrites: not activated, INVALID");
+  { const j = judgeRun(runWith({ progressWrites: 11, progressGap: 100 })); check(j.valid && j.fix.length === 0, "11 rewrites: activated, valid, no failure"); }
+  // (r3, V-2: the handoff ends the series; a stall in the finishing tail is a gap)
+  { const rw = Array.from({ length: 21 }, (_, i) => i * 100); const s = progressSeries(rw, 2300); const j = judgeRun(runWith({ progressWrites: rw.length, progressGap: maxGap(s) }));
+    check(s.length === 22 && maxGap(s) === 300 && j.fix.length === 1 && /progress gap of 300/.test(j.fix[0]), "rewrites every 100 ms to 2000 ms, the handoff at 2300 ms: the 300 ms finishing-tail stall measured, FIX"); }
+  { const rw = Array.from({ length: 21 }, (_, i) => i * 100); const s = progressSeries(rw, 2150); check(maxGap(s) === 150 && judgeRun(runWith({ progressWrites: rw.length, progressGap: maxGap(s) })).fix.length === 0, "the handoff 150 ms after the last rewrite: no failure"); }
+  check(progressSeries([0, 100], null).length === 2 && progressSeries([], 500).length === 0, "no handoff: the series as observed; no rewrites: nothing appended (no series)");
   check(judgeRun(runWith({ progressWrites: 5, progressGap: 300 })).fix.length === 1, "five rewrites with a 300 ms gap: FIX (an observed gap over the bound counts, activated or not)");
   check(inv({ mapped: false, majorGc: [70] }), "unmapped with a GC value supplied: not counted (no window), the run INVALID, no FIX");
   check(inv({ mapped: false, majorGc: null }), "unmapped, the GC measure unavailable: INVALID");
