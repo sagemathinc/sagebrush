@@ -23,13 +23,16 @@
 # gem's and CocoaPods' installed sets are recorded before init and must be
 # identical after it.
 #
-# It runs by hand (workflow_dispatch) and on a PR that changes this file (so
-# the PR adding it produces the first artifact); it is never a required check.
+# It runs by hand only (workflow_dispatch), never as a required check. The
+# committed gen/apple (since 5737e3fb) is the source of truth: app-ios-selftest
+# builds from it on every PR and push that changes app/src-tauri, and weekly,
+# and fails when a build changes it beyond the allowed Info.plist merge. This
+# regenerates it, e.g. for a new Tauri CLI: the committed tree is moved aside
+# first, so init still starts from nothing, and the artifact lists how the
+# fresh tree differs from the committed one (information for that PR).
 name: app-ios-generate
 
 on:
-  pull_request:
-    paths: [".github/workflows/app-ios-generate.yml"]
   workflow_dispatch:
 
 permissions:
@@ -129,7 +132,10 @@ jobs:
           for t in brew gem pod; do
             [ "$(command -v "$t")" = "$g/$t" ] || { echo "FAIL: the $t wrapper is not first on PATH"; exit 1; }
           done
-          [ ! -e gen/apple ] || { echo "FAIL: gen/apple exists already; this generates it from nothing"; exit 1; }
+          # (the committed tree goes aside: init generates from nothing)
+          [ -d gen/apple ] || { echo "FAIL: no committed gen/apple to move aside"; exit 1; }
+          mv gen/apple "$RUNNER_TEMP/committed-apple"
+          [ ! -e gen/apple ] || { echo "FAIL: gen/apple still exists"; exit 1; }
           cargo tauri ios init --ci --skip-targets-install
           [ ! -s "$RUNNER_TEMP/guard-refused.txt" ] || { echo "FAIL: ios init made a call that isn't allowed:"; cat "$RUNNER_TEMP/guard-refused.txt"; exit 1; }
           echo "--- brew/gem/pod calls (all allowed)"; cat "$RUNNER_TEMP/guard-calls.txt" 2>/dev/null || echo "(none)"
@@ -170,8 +176,10 @@ jobs:
         run: |
           set -euo pipefail
           o="$RUNNER_TEMP/out"; mkdir -p "$o"
-          # (a tar keeps modes and symlinks, which the artifact's zip doesn't)
-          tar -C app/src-tauri/gen -cf "$o/apple.tar" apple
+          # (a tar keeps modes and symlinks, which the artifact's zip doesn't;
+          # COPYFILE_DISABLE keeps macOS's tar from adding AppleDouble "._*"
+          # entries for files with extended attributes)
+          COPYFILE_DISABLE=1 tar -C app/src-tauri/gen -cf "$o/apple.tar" apple
           # (one line per entry: "file <mode> <sha256> <path>" or "link <path> -> <target>")
           (cd app/src-tauri/gen/apple && find . \( -type f -o -type l \) | LC_ALL=C sort | while IFS= read -r f; do
             if [ -L "$f" ]; then echo "link $f -> $(readlink "$f")"
@@ -195,6 +203,11 @@ jobs:
           git diff -- . ':(exclude)app/src-tauri/gen/apple' > "$o/other-changes.diff"
           echo "--- changed outside gen/apple ($(wc -l < "$o/other-changes.txt") paths):"; cat "$o/other-changes.txt"
           echo "--- their diff (tracked files):"; cat "$o/other-changes.diff"
+          # (information, not a check: how the fresh tree differs from the
+          # committed one; diff exits 1 when they differ, 2 on trouble)
+          rc=0; diff -r "$RUNNER_TEMP/committed-apple" app/src-tauri/gen/apple > "$o/committed-vs-generated.diff" || rc=$?
+          [ "$rc" -le 1 ] || { echo "FAIL: diff -r exited $rc"; exit 1; }
+          echo "--- committed gen/apple vs generated (diff -r exit $rc):"; grep -E '^(diff -r|Only in|Binary files)' "$o/committed-vs-generated.diff" || echo "(identical)"
           # (the App Store's 1024 px icon must have no alpha channel)
           n=0
           while IFS= read -r f; do
