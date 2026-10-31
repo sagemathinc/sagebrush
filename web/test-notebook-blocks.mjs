@@ -143,6 +143,30 @@ try {
   await ev(`${NB}.select(${C(2)})`);
   await key("m");
   check(await until(`${C(2)}.el.classList.contains('markdown') && ${C(2)}.el.classList.contains('blocks') && ${C(2)}.el.querySelector('.mb p')?.textContent === 'y = 2'`, 3000), "M makes a code cell Markdown, as blocks");
+  // a heading written in (William's report, Oct 30): its field is as tall as the heading's line, on opening and as it
+  // is typed, and its highlighted copy is where the field is, so nothing of the text is cut off (the cell's first
+  // block too, which the page's first-child margin had moved down)
+  const HEADS = "# Welcome to Sagebrush\n\n## Second heading gjpq\n\n### Third heading gjpq\n\nA paragraph.";
+  const fits = `(() => { const ta = document.activeElement, box = ta.closest('.mb-edit'), pre = box.querySelector('pre');
+    const rg = document.createRange(); rg.selectNodeContents(pre); const t = rg.getBoundingClientRect(), f = ta.getBoundingClientRect(), p = pre.getBoundingClientRect();
+    let top = -Infinity, bottom = Infinity;
+    for (let e = pre; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') { const r = e.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom); } }
+    const m = { kind: box.className, scroll: ta.scrollHeight, client: ta.clientHeight, text: [t.top, t.bottom].map(Math.round), clip: [top, bottom].map(Math.round), field: Math.round(f.top), copy: Math.round(p.top) };
+    return { ok: ta.scrollHeight <= ta.clientHeight && t.top >= top - 0.5 && t.bottom <= bottom + 0.5 && Math.abs(p.top - f.top) <= 0.5, m }; })()`;
+  await ev(`${NB}.setInput(${C(1)}, ${JSON.stringify(HEADS)}), ${NB}.renderMd(${C(1)})`);
+  for (const lv of [1, 2, 3]) {
+    await ev(`${NB}.renderMd(${C(1)})`);
+    await until(`${C(1)}.el.classList.contains('rendered') && !!${C(1)}.el.querySelector('.mdout h${lv}')`, 3000);
+    const hd = await ev(`(() => { const r = ${C(1)}.el.querySelector('.mdout h${lv}').getBoundingClientRect(); return { x: r.left + 30, y: r.top + r.height / 2 }; })()`);
+    await dblclick(hd.x, hd.y);
+    const opened = await ev(fits);
+    check(opened.ok && opened.m.kind.includes(`mb-h${lv}`), `H${lv} written in: its field fits its line and nothing is cut off: ` + JSON.stringify(opened.m));
+    await caret(1e6);
+    await type("x");
+    const typed = await ev(fits);
+    check(typed.ok, `H${lv} as it is typed: still nothing cut off: ` + JSON.stringify(typed.m));
+    await key("Escape");
+  }
   check(await ev("document.querySelectorAll('style[data-mb]').length === 1"), "the blocks' stylesheet is in the page once");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {

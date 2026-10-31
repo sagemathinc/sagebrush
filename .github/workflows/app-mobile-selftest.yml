@@ -12,11 +12,15 @@
 # Android project, the app's Rust code, Cargo or tauri.conf.json, or the
 # self-test, nightly, and by hand.  Expected 20-30 min; bounded by the job's
 # 40 min, the emulator's 600 s boot timeout and the script's 300 s wait for
-# the report.  A second job, release-starts, checks that the RELEASE build
+# the report.  The emulator job has two legs on API 34: "image" (the image's
+# own WebView, every run) and "current" (a pinned current WebView build
+# sideloaded and selected; the nightly cron, by hand and pull requests, never
+# master pushes).  A second job, release-starts, checks that the RELEASE build
 # starts (see it below); its own 40 min, in parallel.
 #
 # Pinned: the runner image's Android SDK, NDK 27.3.13750724 and JDK 17 (no
-# downloads); Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
+# downloads); the current leg's one download, Chromium's snapshot
+# AndroidDesktop_x64/1727419, by the sha256 of its zip and of its APK; Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
 # dependencies through the committed checksums (app/src-tauri/gen/android);
 # reactivecircus/android-emulator-runner v2.38.0 by commit; the system image
 # system-images;android-34;google_apis;x86_64 and the stable emulator, which
@@ -63,24 +67,47 @@ jobs:
       - run: node scripts/build-cli.mjs
       - run: bun web/build.ts
       - run: node app/build-frontend.mjs
+      # (the COI diagnosis is its own module, loaded only by the app's self-test:
+      # the page everyone loads carries only the call; and the controls FAIL)
+      - name: the self-test's diagnosis is not in the page
+        run: node app/selftest/check-diagnose-lazy.mjs app/dist && node app/selftest/check-diagnose-lazy.mjs app/dist --control
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: app-page
           path: app/dist
 
+  # (two legs on API 34: "image", the image's own WebView, every run; and
+  # "current", a pinned current WebView build sideloaded and selected
+  # (COI Stage B), on the nightly cron, by hand and on pull requests, never on
+  # master pushes: it downloads about 500 MB. The build: Chromium's official
+  # snapshot AndroidDesktop_x64/1727419 (the newest at or below the M158 branch
+  # point; a trunk snapshot, not a stable-channel build), its zip and APK each
+  # pinned by sha256 and checked by app/selftest/verify-then.sh before use)
   emulator:
     if: github.repository == 'sagemathinc/sagebrush'
     needs: page
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        webview: ${{ fromJSON(github.event_name == 'push' && '["image"]' || '["image", "current"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
+      BUILD_TOOLS_VERSION: 35.0.0
+      WEBVIEW_URL: https://storage.googleapis.com/chromium-browser-snapshots/AndroidDesktop_x64/1727419/chrome-android-desktop.zip
+      WEBVIEW_ZIP_SHA256: bfc4c333340726ef39c3e410c5abd40455575ae1477c578d8ad0338564cdc29c
+      WEBVIEW_APK_SHA256: 2ac87d41b05a24fe22dbc00c574b113a6848b3c114446166dab7ad84c326fa27
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # (the report's judge on fixed reports, before anything slow)
-      - name: the self-test report judge
-        run: bash app/selftest/test-android-report.sh
+      # (the judges on fixed inputs, before anything slow: the self-test report,
+      # the WebView provider checker, and the hash gate with a wrong hash on a
+      # small fixture, which must fail without reaching its command)
+      - name: the self-test report judge and the COI diagnosis readers
+        run: bash app/selftest/test-android-report.sh && bash app/selftest/test-coi-reading.sh && node app/selftest/test-report-lines.mjs && node app/selftest/test-diagnose.mjs
+      - name: the WebView provider checker and the hash gate
+        run: bash app/selftest/test-webview-provider.sh && bash app/selftest/test-verify-then.sh && bash app/selftest/test-webview-badging.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: app-page
@@ -130,6 +157,30 @@ jobs:
           echo "path=${apks[0]}" >> "$GITHUB_OUTPUT"
       - name: the committed project is unchanged by the build
         run: test -z "$(git status --porcelain -- app/src-tauri/gen/android)"
+      # (the current-WebView leg: download, then the zip's sha256 BEFORE
+      # unzipping, then the APK's sha256 BEFORE anything reads it; the expected
+      # version is the verified APK's own versionName, from aapt2)
+      - name: the pinned WebView build, downloaded and verified
+        if: matrix.webview == 'current'
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/webview"; mkdir -p "$d"
+          curl -sS --fail --retry 3 --max-time 900 -o "$d/chrome-android-desktop.zip" "$WEBVIEW_URL"
+          bash app/selftest/verify-then.sh "$WEBVIEW_ZIP_SHA256" "$d/chrome-android-desktop.zip" -- unzip -q -o "$d/chrome-android-desktop.zip" chrome-android-desktop/apks/SystemWebView.apk -d "$d"
+          apk="$d/chrome-android-desktop/apks/SystemWebView.apk"
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          [ -x "$bt/aapt2" ] || { echo "build-tools $BUILD_TOOLS_VERSION has no aapt2 on this runner image:"; ls "$ANDROID_HOME/build-tools"; exit 1; }
+          bash app/selftest/verify-then.sh "$WEBVIEW_APK_SHA256" "$apk" -- "$bt/aapt2" dump badging "$apk" > "$d/badging.txt"
+          python3 -I app/selftest/webview-badging.py "$d/badging.txt" 34 | tee "$d/badging-check.txt"
+          ver=$(sed -n 's/^VERSION=//p' "$d/badging-check.txt")
+          [ -n "$ver" ] || { echo "FAIL: no VERSION from webview-badging.py"; exit 1; }
+          {
+            echo "pinned WebView build: $WEBVIEW_URL"
+            echo "zip sha256 $WEBVIEW_ZIP_SHA256, APK sha256 $WEBVIEW_APK_SHA256 (both verified)"
+            grep '^ok: com.android.webview' "$d/badging-check.txt"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "WEBVIEW_APK=$apk" >> "$GITHUB_ENV"
+          echo "WEBVIEW_VERSION=$ver" >> "$GITHUB_ENV"
       # (KVM for the emulator: the action's documented udev rule)
       - name: KVM
         run: |
@@ -146,11 +197,13 @@ jobs:
           channel: stable
           emulator-boot-timeout: 600
           disable-animations: true
-          # (one line: the action runs each line of `script` as its own shell)
-          # (android-image-info.sh first: the booted image must be API 34, and the
-          # summary records its revision and "WebView <ver>: current|old against
-          # threshold 145")
-          script: bash app/selftest/android-image-info.sh 34 "$GITHUB_STEP_SUMMARY" && bash app/selftest/android-selftest.sh "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
+          # (one line: the action runs each line of `script` as its own shell.
+          # app/selftest/android-selftest-leg.sh: on "current", the sideload and
+          # its provider check first, and the provider check again after; on
+          # both legs android-image-info.sh (the booted image must be API 34; the
+          # summary records "WebView <ver>: current|old against threshold 145")
+          # and the self-test)
+          script: bash app/selftest/android-selftest-leg.sh "${{ matrix.webview }}" "${{ steps.apk.outputs.path }}" "$GITHUB_STEP_SUMMARY"
 
   # The RELEASE APK (x86_64, for the emulator) starts: R8 or LTO removing
   # something reached only through JNI or reflection crashes it, which the
