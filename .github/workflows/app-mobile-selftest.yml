@@ -104,8 +104,8 @@ jobs:
       # (the judges on fixed inputs, before anything slow: the self-test report,
       # the WebView provider checker, and the hash gate with a wrong hash on a
       # small fixture, which must fail without reaching its command)
-      - name: the self-test report judge and the COI diagnosis readers
-        run: bash app/selftest/test-android-report.sh && bash app/selftest/test-coi-reading.sh && node app/selftest/test-report-lines.mjs && node app/selftest/test-diagnose.mjs
+      - name: the self-test report judge, the COI diagnosis readers and the Terminal probe's log reader
+        run: bash app/selftest/test-android-report.sh && bash app/selftest/test-coi-reading.sh && node app/selftest/test-report-lines.mjs && node app/selftest/test-diagnose.mjs && bash app/selftest/test-probe-log.sh && bash app/selftest/test-wait-log-sentinel.sh && node app/selftest/test-run-judge.mjs
       - name: the WebView provider checker and the hash gate
         run: bash app/selftest/test-webview-provider.sh && bash app/selftest/test-verify-then.sh && bash app/selftest/test-webview-badging.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
