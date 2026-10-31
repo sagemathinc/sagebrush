@@ -1,0 +1,2 @@
+ok   the self-test notebook opens
+all passed

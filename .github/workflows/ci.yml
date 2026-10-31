@@ -907,13 +907,17 @@ jobs:
               # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,
               # as a hosted preview has it)
               bun web/shell/test-panel-render.mjs
+              # (Tab completion, help, compgen and ls colours, the pure functions: plan-term-help-tab)
+              bun web/shell/test-panel-complete.mjs
               bun web/shell/panel-size.mjs
               node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
               bun web/shell/test-panel-page.mjs
-              # (the Terminal in the desktop and Android apps: app/dist served as the app serves it, isolated and not)
+              # (the Terminal in the desktop and Android apps: app/dist served as the app serves it, isolated and not;
+              # the app self-test's Terminal checks, their probe and verdicts without an app)
               node app/build-frontend.mjs
               bun web/shell/test-panel-app.mjs
+              bun web/notebook/test-terminal-probe.mjs
               ;;
             board-a)
               node web/board/bench.mjs

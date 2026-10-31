@@ -898,18 +898,38 @@ try {
   check(await until(`document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000), "the edited large paragraph is re-patched");
   check((await ev(`window.__mixed`)) === 0, "…never an old and a new version of it at once");
 
-  // ---- the patch loop: no Long Task over 50 ms while a large paragraph and list are re-patched. Timing assertions
-  // gate only on a timing box (BOX "timing", VM3/VM4: @sagebrush's ruling, Oct 29); on a build box they are recorded
-  await ev(`(() => { window.__lt = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: "longtask", buffered: false }); return true; })()`);
-  await typeInto(para.replace("CHANGED word", "AGAIN word"));
-  await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN")`, 60000);
+  // ---- the patch loop: no Long Task over 50 ms from the edit's synchronous work (the textarea's setter and the input
+  // handler) or from the scheduler tasks after it (the highlighter, the worker's reply, the re-patch and swap), until
+  // the preview has the edit. It doesn't measure frame rendering (edit-to-paint): headless Chromium on the timing box
+  // doesn't run it in an observed task. Timing assertions gate only on a timing box (BOX "timing", VM3/VM4:
+  // @sagebrush's ruling, Oct 29); on a build box they are recorded.
+  // The window (LR-1, astra's and daybreak3's ruling, Oct 31): the edited 1.5 MiB text is staged in the page first, in
+  // its own task; then a fresh observer; then a small evaluate schedules ONE page task that assigns it and dispatches
+  // input. (A page task, not the evaluate: CDP's evaluate runs as a V8 interrupt, which the Long Task API doesn't see.
+  // The old window's result, from a trigger that didn't change the text, is retired as unattributed.) The edit must land, its marker in the
+  // preview, or this fails: never a timing pass. The observer is checked first: an 80 ms busy loop in a page task,
+  // with an observer of its own, is seen.
+  const edited2 = para.replace("word word", "AGAIN word");
+  const staged = await ev(`(() => { window.__staged = ${JSON.stringify(edited2)}; const v = document.querySelector(".tex-src").value; return { len: window.__staged.length, differs: window.__staged !== v, had: v.includes("CHANGED") }; })()`);
+  check(edited2 !== para && staged.len === edited2.length && staged.differs && staged.had, "the re-patch's edit: staged, and a change of the text the editor has (CHANGED to AGAIN)", staged);
+  const watchLt = `(() => { window.__lt = []; window.__ltOb?.disconnect(); window.__ltOb = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }); window.__ltOb.observe({ type: "longtask", buffered: false }); return true; })()`;
+  await ev(watchLt);
+  await ev(`(() => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 80); }, 0); return true; })()`);
+  await sleep(300);
+  const ltc = await ev(`window.__lt`);
+  check(ltc.some((d) => d >= 75), "the Long Task observer sees an 80 ms busy loop in a page task (the window's sensitivity)", ltc);
+  await sleep(300);
+  await ev(watchLt);
+  await ev(`(() => { setTimeout(() => { const t = document.querySelector(".tex-src"); t.value = window.__staged; t.dispatchEvent(new Event("input")); }, 0); return true; })()`);
+  const landed = await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN") && !document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000);
   await sleep(500);
   const lts = await ev(`window.__lt`);
+  check(landed, "the re-patch's edit landed: AGAIN in the preview, CHANGED gone");
   const own = await ev(`({ step: +document.querySelector(".tex-preview").dataset.patchMaxMs, swap: +document.querySelector(".tex-preview").dataset.swapMaxMs, reply: +document.querySelector(".tex-preview").dataset.replyMs })`);
   console.log("long tasks during the re-patch (ms):", JSON.stringify(lts), "patch loop's own longest step and swap (ms):", JSON.stringify(own));
   if (BOX === "timing") {
     check(own.step <= 50 && own.swap <= 50, "the patch loop's own steps and swap each under 50 ms (a timing box)", own);
-    check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own });
+    check(landed && lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own, landed });
   } else console.log("timing, reported, not gated (a build box): long tasks over 50 ms:", JSON.stringify(lts.filter((d) => d > 50)), "own step/swap over 50 ms:", own.step > 50 || own.swap > 50);
 
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
