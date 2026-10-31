@@ -273,7 +273,8 @@ try {
     await until(`/\\[\\d+\\]/.test(${cellJs(0)}.querySelector('.n').textContent)`, 60000);
     await sleep(2500);
     const o3 = await outs();
-    ok(!/AGENT-RAN/.test(o3), "the person's Run runs that cell only: the agent's cell that depends on it doesn't run with it (no autorun)", { o3 });
+    const states = await ev(`[...document.querySelectorAll('${PANE} .cell')].map((c) => c.className + ' ' + c.querySelector('.n')?.textContent + ' ' + (c.querySelector('.time')?.textContent ?? ''))`);
+    ok(!/AGENT-RAN/.test(o3), "the person's Run runs that cell only: the agent's cell that depends on it doesn't run with it (no autorun)", { o3, states });
   }
 
   // ======================================================================== saved, with its base; reopened
