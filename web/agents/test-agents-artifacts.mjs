@@ -1451,14 +1451,14 @@ try {
         const want = (x) => x.res === !refuse && x.st.tab === draft && (name === "E28" ? x.st.inDraft && x.st.caret === 5 : x.st.id === "sbtest-b" && x.st.caret === 2);
         ok(got.every(want), `${name}: the person ${name === "E28" ? "moves the caret in the draft (3 to 5)" : "moves to another input"} while the edit waits (at W1, at W4), the edit ${refuse ? "refused" : "ok"}: the focus and caret stay where they put them`, got);
       }
-      // E29: the person shows the notebook while the edit waits (W4) and clicks into its first cell (caret 1): the focus
-      // stays there, the edit ok
+      // E29: the person, in input B (visible, outside the pane: what a wrong restore could put the focus back on),
+      // shows the notebook while the edit waits (W4) and clicks into its first cell (caret 1): the focus stays there
       {
         const { path, ids } = await mk();
         await open(path);
         await ev(`${tabJs(draft)}.click()`);
         await sleep(300);
-        await focusDraft();
+        await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
         const r = await readOf(path);
         await holdDb("sagebrush-workspace", "entries", 3000);
         const pending = edit(path, r, { set: [{ id: ids[1], source: "print(29)" }] });
@@ -1469,7 +1469,7 @@ try {
         const res = await pending;
         await sleep(300);
         const st = await ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, inCell: !!t?.closest('#artifacts .cell') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
-        ok(res.ok && st.tab === path && st.inCell && st.caret === 1, "E29: the person shows the notebook while the edit waits and clicks into a cell: the focus and caret stay there", { res, st });
+        ok(res.ok && st.tab === path && st.inCell && st.caret === 1, "E29: the person, in another input, shows the notebook while the edit waits and clicks into a cell: the focus and caret stay there", { res, st });
       }
       await ev(`(document.getElementById('sbtest-b')?.remove(), true)`);
     }
