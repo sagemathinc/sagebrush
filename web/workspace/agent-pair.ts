@@ -12,11 +12,15 @@
 //   5. the workspace, through forAgent: every change credited to agent:<name>.
 // Nothing the server sends is ever evaluated; the page sends it nothing but notifications after the hello.
 
-import { checkCall, AGENT_LIMITS } from "./agent-schema";
+import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
+import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, type Grant, type TrashEntry } from "./agent-grant";
 
 /** What the hello's result says (the agent's own claims, shown as such). */
-export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string };
+export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[] };
+/** What a page may offer beyond the workspace's verbs, said in its hello and in the agent's: "notebook.edit", an
+ * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1). */
+export const FEATURES = ["notebook.edit"] as const;
 /** The verbs, as Workspace.forAgent gives them. */
 export type AgentVerbs = {
   list(folder: string, opts?: { recursive?: boolean }): Promise<any[]>;
@@ -146,7 +150,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit) => Promise<unknown> },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -185,7 +189,7 @@ export class AgentPairing {
           }
           const r = msg.result;
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
-          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined };
+          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [] };
           if (!this.pairingId) this.pairingId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
           this.state = "paired";
           this.emit();
@@ -225,6 +229,8 @@ export class AgentPairing {
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client));
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: false, expires: grant.expires } });
+    // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
+    if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
     if (this.timer) clearTimeout(this.timer);
     if (grant.expires !== null) this.timer = setTimeout(() => void this.revoke("the grant expired"), Math.max(0, grant.expires - now));
@@ -314,6 +320,7 @@ export class AgentPairing {
     if (this.inFlight >= AGENT_LIMITS.inFlight) return this.fail(id, "limit", `${AGENT_LIMITS.inFlight} calls are already in flight`, { retryAfterMs: 250 });
     if (this.tokens < 1) return this.fail(id, "limit", `more than ${AGENT_LIMITS.perSecond} calls a second`, { retryAfterMs: Math.ceil(((1 - this.tokens) * 1000) / AGENT_LIMITS.perSecond) });
     this.tokens -= 1;
+    if (method === "notebook.edit") return void this.edit(id, params);
     const bad = checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
@@ -350,6 +357,37 @@ export class AgentPairing {
     }
   }
 
+  /** Whether this pairing edits notebooks by cell: the page offers it and the agent said it uses it (its hello). */
+  private edits() { return !!this.opts.notebookEdit && !!this.hello?.features?.includes("notebook.edit"); }
+
+  /** An agent's edit of a notebook (notebook-edit.ts): its grammar, then the grant as for a write of its path, then the
+   * page's own apply (the open notebook's host); the same grant checked after every wait, as for the verbs. */
+  private async edit(id: string, params: unknown) {
+    if (!this.edits()) return this.fail(id, "invalid", "not a verb: \"notebook.edit\"");
+    const bad = badValue(params) ?? editProblem(params);
+    if (bad) return this.fail(id, "invalid", bad);
+    const e = params as NotebookEdit;
+    this.inFlight++;
+    const g = this.grant, verbs = this.verbs, now = this.now();
+    try {
+      const no = await authorize("workspace.write", { path: e.path }, g, now, this.opts.trashEntry);
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
+      if (no) return this.fail(id, "invalid", no);
+      const result = await this.opts.notebookEdit!(e);
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
+      g!.lastUsed = this.now();
+      this.changes++;
+      this.emit();
+      this.reply(id, result);
+    } catch (err: any) {
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
+      if (err instanceof AgentError) return this.fail(id, err.code, err.message, err.extra);
+      this.fail(id, "invalid", String(err?.message ?? err).slice(0, 500));
+    } finally {
+      this.inFlight--;
+    }
+  }
+
   private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry): Promise<unknown> {
     const sized = (c: any) => contentIn(c, p.path ?? "contents");
     const changed = <T,>(x: T) => { this.changes++; this.emit(); return x; };
@@ -365,9 +403,13 @@ export class AgentPairing {
       case "read": {
         const r = await v.read(p.path);
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
-        return { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path) };
+        // (a notebook's ref, for an edit by cell: the document read, so an edit never reaches another put at its path)
+        return { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
       }
-      case "write": { const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
+      case "write": {
+        // (an agent that edits notebooks by cell never rewrites one whole: that would drop its outputs, A12)
+        if (this.edits() && /\.ipynb$/i.test(String(p.path))) throw new AgentError("invalid", `${p.path} is a notebook: change it with workspace_edit_notebook (by cell, its outputs kept), not a whole write`);
+        const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
       case "create": return changed({ entry: entryOut(await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) })) });
       case "mkdir": return changed({ entry: entryOut(await v.mkdir(p.path)) });
       case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to)) });

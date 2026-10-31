@@ -14,7 +14,8 @@ import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
-import type { AgentPairing } from "../workspace/agent-pair";
+import { AgentError, type AgentPairing } from "../workspace/agent-pair";
+import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
@@ -929,9 +930,30 @@ try {
   workspace = null; // (no IndexedDB: the scripted demo still works)
 }
 $("#connect").hidden = !workspace;
+// An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
+// opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
+async function editNotebook(e: NotebookEdit): Promise<unknown> {
+  const thread = state.threads.find((t) => t.id === e.conversation);
+  if (!thread) throw new AgentError("invalid", "no such chat on this page");
+  const turn = runningTurn(thread);
+  if (!turn) throw new AgentError("busy", "this chat has no turn running: an edit comes from a turn");
+  // (a chat that isn't the one shown has no pane here: its notebook isn't opened over the person's view)
+  if (thread.id !== current().id) throw new AgentError("busy", "the person is looking at another chat: this one's notebook isn't open, so it isn't changed (ask them to open this chat)");
+  const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
+  if (!art) emitTo(thread, turn.turn_id, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
+  openArtifact = e.path;
+  renderArtifacts();
+  const h = hosts.get(hostKey(thread.id, e.path));
+  if (!h?.nb) throw new AgentError("busy", "the notebook couldn't be opened here");
+  const r = await h.nb.edit(e);
+  if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
+  return { ok: true, inserted: r.inserted };
+}
+
 if (workspace) {
   mountAgentPairing(workspace, {
     button: $("#connect"),
+    notebookEdit: editNotebook,
     onPairing(p) {
       pairing = p;
       p.onNotification(onAgent);
