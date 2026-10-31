@@ -105,6 +105,19 @@ jobs:
             > /tmp/appimage-tools.sha256
           sha256sum -c /tmp/appimage-tools.sha256
           chmod 0755 AppRun-x86_64 linuxdeploy-07333c6-x86_64.AppImage linuxdeploy-plugin-appimage.AppImage
+          # The bundler patches linuxdeploy in place on every build: its
+          # prepare_tools ends with `dd if=/dev/zero bs=1 count=3 seek=8
+          # conv=notrunc of=<linuxdeploy>` ("This should prevent linuxdeploy to
+          # be detected by appimage integration tools"), zeroing the AppImage
+          # magic "AI\x02".  So after the build linuxdeploy must be exactly the
+          # pinned bytes with that patch, and the other two exactly the pins.
+          [ "$(od -An -tx1 -j8 -N3 linuxdeploy-07333c6-x86_64.AppImage | tr -d ' \n')" = 414902 ] || { echo "FAIL: linuxdeploy's bytes 8-10 are not the AppImage magic AI\\x02"; exit 1; }
+          cp linuxdeploy-07333c6-x86_64.AppImage /tmp/linuxdeploy-patched
+          dd if=/dev/zero of=/tmp/linuxdeploy-patched bs=1 count=3 seek=8 conv=notrunc 2> /dev/null
+          grep -v ' linuxdeploy-07333c6-x86_64.AppImage$' /tmp/appimage-tools.sha256 > /tmp/appimage-tools-after.sha256
+          echo "$(sha256sum < /tmp/linuxdeploy-patched | cut -d' ' -f1)  linuxdeploy-07333c6-x86_64.AppImage" >> /tmp/appimage-tools-after.sha256
+          rm /tmp/linuxdeploy-patched
+          cat /tmp/appimage-tools-after.sha256
       - name: build
         if: runner.os != 'Linux'
         working-directory: app/src-tauri
@@ -117,14 +130,14 @@ jobs:
         shell: bash
         run: tauri build --ci 2>&1 | tee /tmp/tauri-build.log
       # (the bundler must have used the pinned tools: it downloaded nothing,
-      # and they are still the pinned bytes)
+      # and they are still the pinned bytes, linuxdeploy with only its patch)
       - name: the AppImage tools were the pinned ones
         if: runner.os == 'Linux'
         run: |
           if grep -n 'Downloading http' /tmp/tauri-build.log; then echo "FAIL: the bundler downloaded a tool (above), so a pin's file name no longer matches"; exit 1; fi
           grep -q 'Bundling .*\.AppImage' /tmp/tauri-build.log || { echo "FAIL: no AppImage bundled"; exit 1; }
           cd "${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
-          sha256sum -c /tmp/appimage-tools.sha256
+          sha256sum -c /tmp/appimage-tools-after.sha256
       - name: self-test (Linux, in a virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
