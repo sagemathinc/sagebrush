@@ -23,8 +23,9 @@
 # AndroidDesktop_x64/1727419, by the sha256 of its zip and of its APK; Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
 # dependencies through the committed checksums (app/src-tauri/gen/android);
 # reactivecircus/android-emulator-runner v2.38.0 by commit; the system image
-# system-images;android-34;google_apis;x86_64 and the stable emulator, which
-# sdkmanager checks against Google's repository.
+# system-images;android-34;google_apis;x86_64 (the emulator legs) and
+# system-images;android-34;default;x86_64 (release-starts) and the stable
+# emulator, which sdkmanager checks against Google's repository.
 name: app-mobile-selftest
 
 on:
@@ -306,11 +307,17 @@ jobs:
       # preinstalled toolchains removed, then a clear failure below 8192 MB)
       - name: the disk for the AVD
         run: bash app/selftest/test-disk-before-avd.sh && bash app/selftest/disk-before-avd.sh 8192
+      # (on the AOSP image without Google Play services: on google_apis, GMS's
+      # persistent process dying took the app down with it, 3 times: "killed by
+      # the system (dependency died): provider com.google.android.gms/.fonts.
+      # provider.FontsProvider", runs 41078076607, 41145830456, 41198609203.
+      # This job only asks whether the release build starts and keeps running
+      # with a WebView renderer, which needs no GMS)
       - name: the release APK starts on the emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
-          target: google_apis
+          target: default
           arch: x86_64
           channel: stable
           emulator-boot-timeout: 600
