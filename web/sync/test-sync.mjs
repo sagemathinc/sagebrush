@@ -266,7 +266,7 @@ async function socket(session, origin = SITE, path = "/api/sync/v1/account") {
   return s;
 }
 async function hello(s, device, index_after = 0) {
-  s.send({ t: "hello", v: 1, device, name: "test", index_after });
+  s.send({ t: "hello", v: 2, device, name: "test", index_after });
   const w = await s.next((m) => m.t === "welcome" || m.t === "error");
   const ix = await s.next((m) => m.t === "index");
   return { welcome: w, index: ix };
@@ -352,7 +352,7 @@ const dev2 = "device-two-0002";
   const s = await socket(sa);
   ok(s.status === 101, "the account socket opens");
   const { welcome, index } = await hello(s, dev1);
-  ok(welcome?.t === "welcome" && welcome.v === 1 && welcome.next_dseq === 1 && welcome.state === "active" && welcome.generation === 1, "welcome, with the generation (for Delete my synced data)");
+  ok(welcome?.t === "welcome" && welcome.v === 2 && welcome.next_dseq === 1 && welcome.state === "active" && welcome.generation === 1, "welcome, with the generation (for Delete my synced data)");
   ok(index?.t === "index" && index.ops.length === 0 && index.more === false, "an empty index");
   const nb = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const op = (dseq, o) => ({ dseq, t: 1000 + dseq, by: "person", kind: "folder", ...o });
@@ -2239,13 +2239,13 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   // a session of another account, or another generation, is refused before anything is sent or stored)
   const mine = sha("sagebrush-account\n" + P2), other = sha("sagebrush-account\n" + P1);
   const sb = await socket(sp);
-  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: other, generation: 1 });
+  sb.send({ t: "hello", v: 2, device: "device-bind-0001", name: "t", index_after: 0, account: other, generation: 1 });
   const refusedHello = await sb.next((m) => m.t === "welcome" || m.t === "error");
   ok(refusedHello?.t === "error" && refusedHello.code === "forbidden" && refusedHello.detail?.reason === "account", "hello bound to another account's hash: refused, no welcome: " + JSON.stringify(refusedHello));
-  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 2 });
+  sb.send({ t: "hello", v: 2, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 2 });
   const refusedGen = await sb.next((m) => m.t === "welcome" || m.t === "error");
   ok(refusedGen?.t === "error" && refusedGen.code === "conflict" && refusedGen.detail?.reason === "generation", "hello bound to another generation: refused: " + JSON.stringify(refusedGen));
-  sb.send({ t: "hello", v: 1, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 1 });
+  sb.send({ t: "hello", v: 2, device: "device-bind-0001", name: "t", index_after: 0, account: mine, generation: 1 });
   ok((await sb.next((m) => m.t === "welcome" || m.t === "error"))?.t === "welcome", "hello bound to its own account and generation: welcome");
   sb.ws.close();
   const bytes3 = Buffer.from("bound bytes");

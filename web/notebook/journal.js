@@ -31,7 +31,6 @@
 // catch-up (ingestion) then makes a version of and unmarks.
 // It loads with the history (the sagebrush-history.js bundle, history.js), and is given the page's own stores
 // (journalClasses): one copy of stores.js, the page's, its gate and its queues, writes everything.
-import { mergeRecords3 } from "./merge3.js";
 import { journalTexts } from "../journal/core.js";
 import { journalStoreClasses, canonical, hashOf } from "../journal/store.js";
 import { bytesHash } from "./stores.js";
@@ -89,8 +88,8 @@ export const SAVED_UNJOURNALED = T.SAVED_UNJOURNALED;
 export const SAVED_TOO_LARGE = T.SAVED_TOO_LARGE;
 
 /** Notebooks' kind (web/journal/store.js), over the history's module `mod` (history.js: {NotebookHistory, toRecords,
- * fromRecords, recordsOf, docOfRecords, SCHEMA}): `apply` merges by records (merge3.js mergeRecords3), the side `wins`
- * names kept whole on a clash, from an empty notebook in `shown`'s mode when there is no `lastSynced`. */
+ * fromRecords, recordsOf, docOfRecords, SCHEMA}): `apply` merges by records (history.js exactRecords3, never a clash), the
+ * side `wins` names the later, from an empty notebook in `shown`'s mode when there is no `lastSynced`. */
 export function notebookKind(mod) {
   return {
     kind: "notebooks",
@@ -115,10 +114,12 @@ export function notebookKind(mod) {
       return { ...rest, mode: v.mode, cells: v.cells.map(cell) };
     },
     empty: (id, initial) => ({ ...(initial ?? { name: "Untitled", mode: "python", cells: [] }), id }),
+    // (dbMerge3's rules (history.js exactRecords3), as the patch graph merges, the side `wins` names as `b`, the later
+    // one: never a clash (plan-exact-only r1))
     apply(lastSynced, shown, remote, wins) {
-      const [a, b] = wins === "remote" ? [remote, shown] : [shown, remote];
-      const r = mergeRecords3(mod.SCHEMA, mod.recordsOf(lastSynced ?? { mode: shown.mode, cells: [] }), mod.recordsOf(a), mod.recordsOf(b));
-      return { value: r.clashes.length ? a : mod.docOfRecords(r.value), clashes: r.clashes };
+      const base = mod.recordsOf(lastSynced ?? { mode: shown.mode, cells: [] });
+      const [a, b] = wins === "remote" ? [shown, remote] : [remote, shown];
+      return { value: mod.docOfRecords(mod.exactRecords3(base, mod.recordsOf(a), mod.recordsOf(b))), clashes: [] };
     },
     conflictCopy: null,
   };
