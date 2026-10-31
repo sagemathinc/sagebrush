@@ -1249,8 +1249,21 @@ export class Workspace {
   }
   /** An entry and its contents read together, holding the workspace's lock (exclusive across tabs): what is returned
    * is one state of that entry (the export's capture). */
-  async readLocked(p: string): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
-    return this.locked(() => this.readNow(p));
+  async readLocked(p: string, signal?: AbortSignal): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
+    // (`signal`: the wait for the lock ends at a Cancel (the export's, astra's E1-A4); a read already under way is short)
+    return this.locked(() => this.readNow(p), signal);
+  }
+  /** Whether an entry's contents are in this browser, checked by key without reading them (the export's preflight:
+   * an unflagged data file without its bytes is refused before anything is written, astra's E1-A2). */
+  async present(p: string): Promise<boolean> {
+    const e = await this.stat(p);
+    if (!e || e.remote || e.missing) return false;
+    if (e.kind === "folder") return true;
+    if (e.kind === "notebook") return (await this.mainTx("notebooks", "readonly", (st) => st.getKey(e.ref!))) !== undefined;
+    if (e.kind === "board") return (await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(e.ref!)))) !== undefined;
+    if (e.migrated) return (await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getKey(e.fid!)))) !== undefined;
+    // (kept the old way: read, as contents() does; such files are few, and the migrator moves them)
+    return (await this.contents(e)) !== undefined;
   }
   /** The last export prepared on this device, of this workspace (meta "export:last"), or undefined. */
   async lastExport(): Promise<{ at: number; partial: boolean; members: number; bytes: number } | undefined> {

@@ -1517,6 +1517,20 @@ if (ws && local) {
       close: () => show(false),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
+      // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
+      // what is being written kept, every save made, a refused save said, never a second writer (astra's E1-A5))
+      saveOpen: async () => {
+        for (let i = 0; ; i++) {
+          await mounted.keepWriting();
+          let late: ReturnType<typeof setTimeout> | undefined;
+          const saved = await Promise.race([wsFlush().then(() => true), new Promise<boolean>((r) => (late = setTimeout(() => r(false), DEPART_MS)))]);
+          clearTimeout(late);
+          if (!saved) throw new Error("this board's last changes are still being saved (your files are busy); try again in a moment");
+          if (local && ws && wsRefused) throw new Error(`this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it isn't exported as it is now`);
+          if (!mounted.writing()) return;
+          if (i >= 9) throw new Error("this board is still being written; try again in a moment");
+        }
+      },
       // (this board renamed here: its title follows, saved by this page as
       // its other changes are, never written beside them: CORR-0B0-2)
       retitles: (e) => e.kind === "board" && e.ref === source.slice(6),

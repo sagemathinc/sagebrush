@@ -29,6 +29,13 @@ function modeOf(metadata) {
  * cell metadata: widgets, tags, ...; raw cells) is written back as it was
  * read; the kernelspec is the original one unless the mode changed. */
 export function toIpynb(doc) {
+  return JSON.stringify(ipynbObject(doc), null, 1);
+}
+
+/** The .ipynb's JSON value, which toIpynb writes with one space of indent.  `toLines` makes a text (a string, or
+ * an array of strings joined) into its list of lines: the export (web/workspace/export/stream.ts) passes one that
+ * splits lazily, as it writes, so that a large output never splits in one piece of work. */
+export function ipynbObject(doc, toLines = (t) => lines(joinText(t))) {
   const md = doc.metadata ?? {};
   const same = md.kernelspec && modeOf(md) === doc.mode;
   const metadata = {
@@ -37,14 +44,14 @@ export function toIpynb(doc) {
     language_info: same && md.language_info ? md.language_info : { name: (KERNELSPEC[doc.mode] ?? KERNELSPEC.python).language },
   };
   const cell = (c) => {
-    const base = { id: c.id, metadata: c.metadata ?? {}, source: lines(c.code) };
+    const base = { id: c.id, metadata: c.metadata ?? {}, source: toLines(c.code) };
     if (c.type === "markdown") return { cell_type: "markdown", ...base, ...(c.attachments ? { attachments: c.attachments } : {}) };
     if (c.type === "raw") return { cell_type: "raw", ...base };
     // (its last run time, in Sagebrush's namespace of the cell's metadata)
     if (c.ms != null) base.metadata = { ...base.metadata, sagebrush: { ...(base.metadata.sagebrush ?? {}), ms: c.ms } };
-    return { cell_type: "code", ...base, execution_count: c.n == null ? null : +c.n, outputs: (c.outputs ?? []).map((o) => (o.output_type === "stream" ? { ...o, text: lines(joinText(o.text)) } : o)) };
+    return { cell_type: "code", ...base, execution_count: c.n == null ? null : +c.n, outputs: (c.outputs ?? []).map((o) => (o.output_type === "stream" ? { ...o, text: toLines(o.text) } : o)) };
   };
-  return JSON.stringify({ cells: doc.cells.map(cell), metadata, nbformat: 4, nbformat_minor: Math.max(5, +doc.nbformat_minor || 0) }, null, 1);
+  return { cells: doc.cells.map(cell), metadata, nbformat: 4, nbformat_minor: Math.max(5, +doc.nbformat_minor || 0) };
 }
 
 /** A document from a file's name and text; `mode` for files that do not say (.py). */
