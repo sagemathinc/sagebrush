@@ -104,8 +104,10 @@ async function run(): Promise<void> {
 
 /** For the page's sign-out (none on this page yet): the population becomes "b", inside the lock, so a held account
  * answer can't overwrite it.  One deadline, SIGNOUT_MS from the call, bounds the lock wait and the work inside it; on
- * a timeout, an error, no Web Locks or no IndexedDB it writes nothing (r4b §1, r4c3 §2). */
+ * a timeout, an error, no Web Locks or no IndexedDB it writes nothing (r4b §1, r4c3 §2).  Consent is checked on entry
+ * (off: no lock, no IndexedDB) and again right before the put, after the waits (astra 4ce985ec). */
 export async function signedOut(): Promise<void> {
+  if (!mayMeasure()) return;
   const deadline = Date.now() + SIGNOUT_MS;
   const left = () => Math.max(0, Math.min(IDB_MS, deadline - Date.now()));
   try {
@@ -117,7 +119,7 @@ export async function signedOut(): Promise<void> {
       try {
         const ok = await notesTx(db, "readwrite", left(), (s) => {
           const ra = s.get("a");
-          ra.onsuccess = () => s.put({ p: "b", ad: readA(ra.result).ad }, "a");
+          ra.onsuccess = () => { if (mayMeasure()) s.put({ p: "b", ad: readA(ra.result).ad }, "a"); };
           return () => 1;
         });
         if (ok && wasWithdrawn()) void removeNotes();

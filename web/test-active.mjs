@@ -122,7 +122,7 @@ const INSTRUMENT = `(() => {
     const r = fake();
     if (f === "error") setTimeout(() => r.onerror?.({}), 0);
     else if (f === "blocked") setTimeout(() => r.onblocked?.({}), 0);
-    else if (f === "late") setTimeout(() => { const q = o.open.call(this, name, ...a); q.onupgradeneeded = (e) => { r.result = q.result; r.onupgradeneeded?.(e); }; q.onsuccess = (e) => { r.result = q.result; r.onsuccess?.(e); }; q.onerror = (e) => r.onerror?.(e); }, 7000);
+    else if (f === "delay" || f === "late") setTimeout(() => { const q = o.open.call(this, name, ...a); q.onupgradeneeded = (e) => { r.result = q.result; r.onupgradeneeded?.(e); }; q.onsuccess = (e) => { r.result = q.result; r.onsuccess?.(e); }; q.onerror = (e) => r.onerror?.(e); }, f === "delay" ? (window.__idbOpenMs ?? 1500) : 7000);
     // ("hang": never settles)
     return r;
   };
@@ -552,6 +552,31 @@ async function cases() {
     const took = Date.now() - t0, after = await t.state();
     return { took, same: J(before) === J(after) };
   }, (r) => r.took < 13_000 && r.same);
+  // C-7.off: consent off, signedOut(): no lock, no IndexedDB, no put (the entry check)
+  await pop("C-7.off", async ({ t }) => {
+    await t.open(); await t.ev(`localStorage.setItem("sb-consent", "no")`); await sleep(300);
+    const k0 = await t.counts(); await t.ev("__sbHarness.signedOut()"); const k = await t.counts();
+    return { locks: k.locks - k0.locks, opens: (k.idb.open ?? 0) - (k0.idb.open ?? 0), puts: (k.idb["put:a"] ?? 0) - (k0.idb["put:a"] ?? 0) };
+  }, (r) => r.locks === 0 && r.opens === 0 && r.puts === 0);
+  // C-7.off.lock / .open: consent on at the call, withdrawn while signedOut waits on the lock (another tab holds it) or on
+  // its open (delayed): no put (the pre-put check; the clears would empty the store anyway, so the put itself is asserted)
+  await pop("C-7.off.lock", async ({ t, t2 }) => {
+    await t.open(); await t2.open(); await sleep(300);
+    void t2.ev(`navigator.locks.request("sb-active", () => new Promise((r) => setTimeout(r, 1500)))`); await sleep(200);
+    const k0 = await t.counts();
+    const so = t.ev("__sbHarness.signedOut()"); await sleep(300);
+    await t.ev("__sbHarness.setMeasure(false)"); await so;
+    const k = await t.counts();
+    return { puts: (k.idb["put:a"] ?? 0) - (k0.idb["put:a"] ?? 0) };
+  }, (r) => r.puts === 0);
+  await pop("C-7.off.open", async ({ t }) => {
+    await t.open(); await sleep(300); await t.ev(`window.__idbOpen = "delay"; window.__idbOpenMs = 1500`);
+    const k0 = await t.counts();
+    const so = t.ev("__sbHarness.signedOut()"); await sleep(300);
+    await t.ev("__sbHarness.setMeasure(false)"); await so;
+    const k = await t.counts();
+    return { puts: (k.idb["put:a"] ?? 0) - (k0.idb["put:a"] ?? 0) };
+  }, (r) => r.puts === 0);
   // C-7.hang.tx: another tab holds the lock 10 s, then signedOut's transaction is held forever: settled ≤ 12 s + 1 s,
   // nothing written
   await pop("C-7.hang.tx", async ({ t, t2 }) => {
@@ -692,15 +717,17 @@ const CONTROLS = [
   ["K-29", [["A", "if (self.requestIdleCallback) requestIdleCallback(start);\nelse setTimeout(start, FETCH_MS);", "start();"]], ["C-6.pre"]],
   ["K-30", [["A", "        const body = JSON.stringify(", "        { const z = Date.now(); while (Date.now() - z < 20); }\n        const body = JSON.stringify("]], ["C-6.due-out", "C-6.due-in"]],
   ["K-31", [["A", "const due = (a: A, b: B | null, t: number) => (a.p === \"a\" ? t >= a.ad : t >= (b?.bd ?? 0));", "const due = (a: A, b: B | null, t: number) => { const m = new Date(t); m.setHours(0, 0, 0, 0); const last = a.p === \"a\" ? a.ad : (b?.bd ?? 0); return last === 0 || last - 86_400_000 < m.valueOf(); };"]], ["C-1.tz", "C-1s", "C-1d"]],
-  ["K-32", [["A", "export async function signedOut(): Promise<void> {\n", "export async function signedOut(): Promise<void> {\n  if (Date.now() > 0) return;\n"]], ["C-7.logout", "C-7.firstweek", "C-7.prior", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
+  ["K-32", [["A", "export async function signedOut(): Promise<void> {\n  if (!mayMeasure()) return;\n", "export async function signedOut(): Promise<void> {\n  if (Date.now() > 0) return;\n  if (!mayMeasure()) return;\n"]], ["C-7.logout", "C-7.firstweek", "C-7.prior", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
   ["K-33", [["A", "  if (!MEASURE_ORIGINS.includes(location.origin)) return;\n", ""]], ["C-8.origin"]],
   ["K-35", [["C", "    return permits(localStorage.getItem(CONSENT_KEY));\n  } catch {\n    return false;\n  }", "    return permits(localStorage.getItem(CONSENT_KEY));\n  } finally {\n  }"]], ["C-9.get"]],
   ["K-36", [["A", "          if (as === \"b\") s.put({ bd:", "          s.put({ bd:"]], ["C-7.logout", "C-7.firstweek", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
-  ["K-38", [["A", "          ra.onsuccess = () => s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\");", "          ra.onsuccess = () => { s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\"); s.delete(\"b\"); };"]], ["C-7.abs", "C-7.repeat"]],
+  ["K-38", [["A", "          ra.onsuccess = () => { if (mayMeasure()) s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\"); };", "          ra.onsuccess = () => { if (mayMeasure()) s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\"); s.delete(\"b\"); };"]], ["C-7.abs", "C-7.repeat"]],
   ["K-41", [["A", "    await locks.request(LOCK, { signal: AbortSignal.timeout(SIGNOUT_MS) }, async () => {", "    await (async (f: any) => f())(async () => {"]], ["C-7.held.self", "C-7.held.other", "C-7.hang"]],
   ["K-43", [["A", "{ signal: AbortSignal.timeout(SIGNOUT_MS) }, ", ""]], ["C-7.hang"]],
   ["K-44", [["C", "  withdrawn = !v;\n", "  if (!v) withdrawn = true;\n"], ["C", "  if (permits(e.newValue)) withdrawn = false;\n", "  if (permits(e.newValue)) void 0;\n"]], ["C-2c.regrant"]],
   ["K-45", [["A", "  } catch {\n    // (settled, nothing written)\n  }", "  } catch {\n    const db = await openNotes(IDB_MS);\n    if (db) { await notesTx(db, \"readwrite\", IDB_MS, (s) => { s.put({ p: \"b\", ad: 0 }, \"a\"); return () => 1; }); db.close(); }\n  }"]], ["C-7.hang"]],
+  ["K-60", [["A", "export async function signedOut(): Promise<void> {\n  if (!mayMeasure()) return;\n", "export async function signedOut(): Promise<void> {\n"]], ["C-7.off"]],
+  ["K-61", [["A", "          ra.onsuccess = () => { if (mayMeasure()) s.put(", "          ra.onsuccess = () => { s.put("]], ["C-7.off.lock", "C-7.off.open"]],
   ["K-56", [["A", "  const left = () => Math.max(0, Math.min(IDB_MS, deadline - Date.now()));", "  const left = () => IDB_MS + 0 * deadline;"]], ["C-7.hang.tx"]],
   ["K-47", [["A", "          s.put(1, \"w\");\n", ""]], ["C-9.idb.write"]],
   ["K-49m", [["A", "    if (!self.indexedDB) return;\n", "    if (!self.indexedDB) return void (await send({ method: \"POST\", body: \"{}\" }));\n"]], ["C-9.idb.missing"]],
