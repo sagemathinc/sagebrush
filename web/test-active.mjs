@@ -11,6 +11,7 @@
 // run again; the cases that fail must EQUAL the control's closed set.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,7 +187,27 @@ class Browser {
     await tab.attach(pre);
     return tab;
   }
-  async stop() { browsers.delete(this); try { this.proc.kill("SIGKILL"); } catch {} await sleep(200); rmSync(this.profile, { recursive: true, force: true }); }
+  /** the renderer processes (SystemInfo, on the browser's own DevTools connection) */
+  async procs() {
+    if (!this.bws) {
+      const v = await (await fetch(`http://127.0.0.1:${this.port}/json/version`)).json();
+      this.bws = new WebSocket(v.webSocketDebuggerUrl); await new Promise((r) => (this.bws.onopen = r));
+      this.bn = 0; this.bwait = new Map();
+      this.bws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && this.bwait.has(m.id)) { this.bwait.get(m.id)(m.result ?? m.error); this.bwait.delete(m.id); } };
+    }
+    const r = await new Promise((res) => { const id = ++this.bn; this.bwait.set(id, res); this.bws.send(J({ id, method: "SystemInfo.getProcessInfo" })); });
+    return (r.processInfo ?? []).filter((x) => x.type === "renderer");
+  }
+  /** a tab's renderer pid: the renderer whose CPU time grows most over a 150 ms busy loop in that tab */
+  async pidOf(tab) {
+    const a = await this.procs();
+    await tab.ev("(() => { const z = performance.now(); while (performance.now() - z < 150); return 1; })()");
+    const b = await this.procs();
+    let best = null, d = -1;
+    for (const x of b) { const dd = x.cpuTime - (a.find((y) => y.id === x.id)?.cpuTime ?? 0); if (dd > d) { d = dd; best = x.id; } }
+    return best;
+  }
+  async stop() { browsers.delete(this); try { this.bws?.close(); } catch {} try { this.proc.kill("SIGKILL"); } catch {} await sleep(200); rmSync(this.profile, { recursive: true, force: true }); }
 }
 class Tab {
   constructor(t, b) { this.t = t; this.b = b; this.n = 0; this.waiting = new Map(); this.errors = []; }
@@ -245,16 +266,24 @@ async function load(t, { skew = 0, before = "", wait = 1500 } = {}) {
 
 // C-3, as a function: ONLY=C-3 runs it alone, REPEAT times (a stress probe; not part of the suite's verdict)
 async function caseC3() {
+  const r = await c3Once();
+  c("C-3", r.waiting && r.posts === 1, J(r));
+}
+/** the C-3 interleaving once, on a fresh profile: tab 1's answer held until tab 2 waits on the lock, then released */
+async function c3Once(pids = false) {
   { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
     let release; stub.hold = new Promise((r) => (release = r)); const arrived = heldArrival();
     await t.open(); await t2.open();
-    await t.ev("window.__releaseIdle()"); await arrived;
+    await t.ev("window.__releaseIdle()"); await arrived; const heldFrom = Date.now();
     await t2.ev("window.__releaseIdle()");
     const waiting = await t2.until(`navigator.locks.query().then((q) => q.pending.some((p) => p.name === "sb-active"))`, 5000);
-    const heldMs = Date.now() - (posts()[0]?.at ?? 0) * 1000;
+    const heldMs = Date.now() - heldFrom;
     stub.hold = null; release(); await sleep(1000);
-    c("C-3", waiting && posts().length === 1, `waiting ${waiting}; posts ${posts().length}; held ${heldMs} ms; bodies ${J(posts().map((p) => p.body))}; tab1 ${J(await t.state())}; tab2 ${J(await t2.state())}; errors ${J([...t.errors, ...t2.errors])}`);
-    await b.stop(); }
+    await t2.until(LOCK_FREE, 12000);
+    const out = { waiting, posts: posts().length, heldMs, bodies: posts().map((p) => p.body), tab1: await t.state(), tab2: await t2.state(), errors: [...t.errors, ...t2.errors] };
+    if (pids) { out.pid1 = await b.pidOf(t); out.pid2 = await b.pidOf(t2); }
+    await b.stop();
+    return out; }
 }
 
 // ---- the cases
@@ -687,9 +716,45 @@ const CONTROLS = [
 ];
 
 // ---- run
+// ---- the worktree controls (r3 §G): an edit outside active.ts/consent.ts, so the tree itself is changed (and the
+// site rebuilt when the built assets are what a case reads), then put back and its sha256 checked, whatever happens
+const TREE = [
+  ["K-20", { file: "zz-k20-measure.ts", create: 'export const sendAgain = () => fetch("/api/active", { method: "POST" });\n' }, false, ["C-2"]],
+  ["K-34", { file: "board/board.ts", prepend: 'import "../active.ts";\n' }, true, ["C-8.static"]],
+];
+const rebuild = () => { const r = spawnSync("bun", ["web/build.ts"], { cwd: dirname(here), encoding: "utf8", maxBuffer: 1 << 26 }); if (r.status !== 0) throw new Error("the site didn't build: " + (r.stderr || r.stdout).slice(-300)); };
+
+// ---- the ordering evidence (r4c3 §4; a packet run, not CI): EVIDENCE=N runs the C-3 interleaving ABAB on the IDB
+// build and on the localStorage-restored build (LS_RESTORED: r4b's in-lock read, through a localStorage mirror of the
+// notes) until each has N iterations whose two tabs have distinct renderer pids; shared-pid and errored iterations are
+// excluded and counted.  One line per iteration.  Pass: IDB 0 doubles AND localStorage ≥ 3.
+const LS_RESTORED = [
+  ["A", "          return () => 1;\n        });\n        // (the fence", "          if (as === \"b\") localStorage.setItem(\"sb-mirror-b\", JSON.stringify({ bd: at + d.nd * 1000, bw: at + d.nw * 1000, bm: at + d.nm * 1000 }));\n          localStorage.setItem(\"sb-mirror-a\", JSON.stringify(as === \"b\" ? { p: \"b\", ad: a.ad } : { p: \"a\", ad: at + d.nd * 1000 }));\n          return () => 1;\n        });\n        // (the fence"],
+  ["A", "        a = readA(inl.v[0]);\n        let bb = readB(inl.v[1]);", "        a = readA(JSON.parse(localStorage.getItem(\"sb-mirror-a\") ?? \"null\"));\n        let bb = readB(JSON.parse(localStorage.getItem(\"sb-mirror-b\") ?? \"null\"));"],
+];
+if (process.env.EVIDENCE) {
+  const N = Number(process.env.EVIDENCE), builds = { idb: bundle(), ls: bundle(LS_RESTORED) };
+  const tally = { idb: { included: 0, doubles: 0, shared: 0, errors: 0 }, ls: { included: 0, doubles: 0, shared: 0, errors: 0 } };
+  const t0 = Date.now();
+  for (let i = 0, cap = 3 * N; (tally.idb.included < N || tally.ls.included < N) && i < cap; i++) {
+    for (const k of ["idb", "ls"]) {
+      if (tally[k].included >= N) continue;
+      harnessJs = builds[k];
+      let r;
+      try { r = await c3Once(true); } catch (e) { r = { error: String(e?.message ?? e).slice(0, 160) }; for (const b of [...browsers]) await b.stop(); }
+      const shared = !r.error && r.pid1 != null && r.pid1 === r.pid2;
+      if (r.error) tally[k].errors++; else if (shared) tally[k].shared++; else { tally[k].included++; if (r.posts > 1) tally[k].doubles++; }
+      console.log(`${k} attempt ${i + 1}: posts=${r.posts} waiting=${r.waiting} held=${r.heldMs}ms pids=${r.pid1},${r.pid2}${shared ? " SHARED (excluded)" : ""}${r.error ? " ERROR (excluded) " + r.error : ""}`);
+    }
+  }
+  const pass = tally.idb.included >= N && tally.ls.included >= N && tally.idb.doubles === 0 && tally.ls.doubles >= 3;
+  console.log(`tally ${J(tally)} (${((Date.now() - t0) / 1000).toFixed(0)} s): ${pass ? "PASS" : "FAIL"}${tally.ls.doubles < 3 ? " (the localStorage build doubled fewer than 3 times: the zero says nothing)" : ""}`);
+  front.stop(true); plain.stop(true); rmSync(tmp, { recursive: true, force: true });
+  process.exit(pass ? 0 : 1);
+}
 // (DUMP_CONTROLS=1: the controls, their exact substitutions and sets, as JSON, then stop: the frozen §5 file's source)
 if (process.env.DUMP_CONTROLS) {
-  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })) }, null, 1));
+  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER, LS_RESTORED }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })), tree: TREE.map(([name, edit, build, set]) => ({ name, edit, rebuild: build, set })) }, null, 1));
   rmSync(tmp, { recursive: true, force: true });
   process.exit(0);
 }
@@ -697,10 +762,11 @@ if (process.env.DUMP_CONTROLS) {
 if (process.env.CHECK_SUBS) {
   let n = 0;
   for (const [name, subs] of CONTROLS) { try { bundle(subs); n++; } catch (e) { console.log(`FAIL ${name}: ${String(e.message).slice(0, 200)}`); } }
+  try { bundle(LS_RESTORED); n++; } catch (e) { console.log(`FAIL LS_RESTORED: ${String(e.message).slice(0, 200)}`); }
   for (const v of [ASK, BARRIER]) { try { bundle([v]); n++; } catch (e) { console.log(`FAIL variant: ${String(e.message).slice(0, 200)}`); } }
-  console.log(`substitutions: ${n} of ${CONTROLS.length + 2} bundle`);
+  console.log(`substitutions: ${n} of ${CONTROLS.length + 3} bundle`);
   rmSync(tmp, { recursive: true, force: true });
-  process.exit(n === CONTROLS.length + 2 ? 0 : 1);
+  process.exit(n === CONTROLS.length + 3 ? 0 : 1);
 }
 let bad = 0;
 const t0 = Date.now();
@@ -721,6 +787,27 @@ if (which !== "none" && !baseFailed.length) {
     const f = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
     const ok = f.length > 0 && f.join() === w.join();
     console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${f.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
+    if (!ok) bad++;
+  }
+}
+if (which !== "none" && !baseFailed.length) {
+  for (const [name, edit, build, want] of TREE) {
+    if (which && which !== name) continue;
+    const t1 = Date.now(), f = join(here, edit.file), had = existsSync(f), orig = had ? readFileSync(f) : null;
+    const hash = (b) => createHash("sha256").update(b).digest("hex");
+    try {
+      writeFileSync(f, edit.create ?? edit.prepend + orig.toString("utf8"));
+      if (build) rebuild();
+      results.clear(); harnessJs = bundle();
+      await guarded(cases); await guarded(() => variantCases());
+    } finally {
+      if (had) writeFileSync(f, orig); else rmSync(f, { force: true });
+      if (had && hash(readFileSync(f)) !== hash(orig)) { console.log(`FAIL ${name}: ${edit.file} wasn't restored`); bad++; }
+      if (build) rebuild();
+    }
+    const failed = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
+    const ok = failed.length > 0 && failed.join() === w.join();
+    console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${failed.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
     if (!ok) bad++;
   }
 }
