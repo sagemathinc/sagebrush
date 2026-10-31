@@ -686,6 +686,38 @@ try {
     const closed = !(await ev(`document.body.classList.contains('has-artifact')`));
     ok(stayed.open && /couldn't be saved or kept/.test(stayed.bar) && stayed.text === "h = 0  # held" && rec === "h = 0" && copy === "h = 0  # held" && closed, "closing while the workspace is busy: the notebook stays with its edit, the waiting save is refused where it would write, Try again keeps the edit as a copy", { stayed, rec, copy, closed });
 
+    // (a2, astra's r5 item) a Markdown cell's editor already open when a close fails: Alt+ArrowUp/Down in it change
+    // nothing (the order stays), the download has the order shown, and Try again copies that order
+    const O2 = "/notes/held-md.ipynb";
+    await call("workspace.create", { path: O2, content: docFor(O2, [{ type: "markdown", code: "# first" }, { code: "second = 2" }]), mode: "python" });
+    await openNotebook(O2);
+    await ev(`(() => { const m = ${cellJs(0)}.querySelector('.mdout'); m.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()`);
+    await until(`${cellJs(0)}.classList.contains('blocks')`, 5000).catch(() => {});
+    const opened = await ev(`${cellJs(0)}.classList.contains('blocks')`);
+    await lockWorkspace();
+    await typeInto(1, "  # edit");
+    await sleep(800);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
+    const order = () => ev(`[...document.querySelectorAll('${PANE} .nb-root .cell')].map((c) => c.classList.contains('markdown') ? 'md' : c.querySelector('textarea').value)`);
+    const before = await order();
+    // (into the open Markdown editor's block, as a person would: a real click on it, which the kept state lets through)
+    const at = await ev(`(() => { const c = ${cellJs(0)}; const b = [...c.children].find((x) => x.classList && !x.classList.contains('gutter') && x.querySelector && !x.matches('.body')) ?? c.querySelector('.body'); const blk = c.querySelector('.body > :first-child:not(.ed)') ?? c.querySelector('.body'); const r = blk.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(12, r.height / 2) }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+    await sleep(300);
+    const inEditor = await ev(`(() => { const a = document.activeElement; return !!a && ${cellJs(0)}.contains(a) && !a.closest('.ed'); })()`);
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowDown"]) await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }));
+    await sleep(500);
+    const afterKeys = await order();
+    const dl2 = await downloadCopy();
+    const dlOrder = (() => { try { return JSON.parse(dl2.text).cells.map((c) => c.cell_type === "markdown" ? "md" : [].concat(c.source).join("")); } catch { return null; } })();
+    await ev(`window.__release()`);
+    await sleep(1500);
+    await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
+    const copy2 = await readCells("/notes/held-md (copy).ipynb").then((c) => c.map((x) => x.type === "markdown" ? "md" : x.code), (e) => "no copy: " + e.message);
+    ok(opened && inEditor && JSON.stringify(before) === JSON.stringify(["md", "second = 2  # edit"]) && JSON.stringify(afterKeys) === JSON.stringify(before) && JSON.stringify(dlOrder) === JSON.stringify(before) && JSON.stringify(copy2) === JSON.stringify(before), "after a failed close, Alt+ArrowUp/Down in an open Markdown editor move nothing: the order shown, downloaded and copied on Try again is the same", { opened, inEditor, before, afterKeys, dlOrder, copy2 });
+
     // (b) An edit pending when the file goes to Trash, then closed without Save as a copy: the edit is kept as a copy.
     const T = "/notes/letgo-close.ipynb";
     await call("workspace.create", { path: T, content: docFor(T, [{ code: "t = 0" }]), mode: "python" });
