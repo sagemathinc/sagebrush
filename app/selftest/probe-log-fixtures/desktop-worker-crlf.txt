@@ -1,0 +1,5 @@
+[localhost] logger start port=1430 cap=200
+[page] start isolated=true secure=true
+[page] terminal bridge probe: page 11111111-2222-4333-8444-555555555555
+[page] terminal bridge probe: page-route:tauri-internals-invoke 11111111-2222-4333-8444-555555555555
+[page] terminal bridge probe: worker-route:ipc-postmessage 11111111-2222-4333-8444-555555555555
