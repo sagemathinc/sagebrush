@@ -352,6 +352,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
       for (let t = tCount[v] ? v : dict[v]; t; t = dict[t]) {
         for (let j = tStart[t], je = j + tCount[t]; j < je; j++) {
           if (!pay(1)) return;
+          if (q >= Q) { q = 0; last = { kind: "output", size: Q }; yield; }
           const r = recs[terms[j]];
           if (r.st) continue;
           const n = r.s, start = i + 1 - Math.min(n.length, KEY);
