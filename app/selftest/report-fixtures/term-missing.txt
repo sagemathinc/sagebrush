@@ -9,7 +9,7 @@ ok   Stop interrupts a loop: "KeyboardInterrupt" (the worker shares its interrup
 ok   ...and keeps the variables
 ok   saved the notebook with its outputs
 ok   the shell worker's policy (lib.rs): "default-src 'none'; script-src 'self' blob:; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'"
-ok   the shell worker can't reach the app's bridge: engine=chromium mode=all-events violations=3 differential=own-origin:refused,control:fetched-ok routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused
+ok   the shell worker can't reach the app's bridge: engine=chromium mode=all-events violations=3 events=ipc-scheme:1,ipc-localhost:1,own-origin:1 unmatched=0 differential=own-origin:refused,control:fetched-ok routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused
 info origin: "http://127.0.0.1:41234"
 info secure-context: true
 info top-level: true

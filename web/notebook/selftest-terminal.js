@@ -37,15 +37,50 @@ export function engineOf(ua) {
   return "unknown";
 }
 
+// The three requests the shell worker makes, each of which its policy must refuse (terminal-probe.js start()).
+export const REQUESTS = ["ipc-scheme", "ipc-localhost", "own-origin"];
+export const requestUrls = (ownUrl) => ({ "ipc-scheme": "ipc://localhost/app_log", "ipc-localhost": "http://ipc.localhost/app_log", "own-origin": ownUrl });
+
+// The forms a violation event's blockedURI may take for a request to `url` from a worker of `origin` (astra's
+// NC-R1-A1: explicit normalization rules, nothing looser):
+//   not HTTP(S): its scheme alone (CSP 3, "strip URL for use in reports"), or the URL without fragment/credentials;
+//   HTTP(S), same origin: the URL without fragment or credentials, only;
+//   HTTP(S), another origin: that, or the origin alone (CSP 2's cross-origin rule, which WebKit may still follow).
+export function reportForms(url, origin) {
+  let u;
+  try { u = new URL(url); } catch { return []; }
+  u.hash = ""; u.username = ""; u.password = "";
+  if (u.protocol !== "http:" && u.protocol !== "https:") return [u.protocol.slice(0, -1), u.href];
+  return u.origin === origin ? [u.href] : [u.href, u.origin];
+}
+
+// Match the recorded events to the requests, one to one: an event counts for a request only if it is enforced
+// (disposition "enforce"), its directive is connect-src and its blockedURI is one of that request's forms; any other
+// event (a report-only one, another directive, a URI of no request, or a second for the same request) is
+// "unmatched".  -> { per: {request: matching events}, unmatched, total }.
+export function matchEvents(events, urls, origin) {
+  const per = Object.fromEntries(REQUESTS.map((k) => [k, 0]));
+  let unmatched = 0;
+  const list = Array.isArray(events) ? events : [];
+  for (const ev of list) {
+    const k = ev && ev.disposition === "enforce" && ev.directive === "connect-src"
+      ? REQUESTS.find((k) => per[k] === 0 && reportForms(urls[k], origin).includes(ev.uri)) : undefined;
+    if (k) per[k]++;
+    else unmatched++;
+  }
+  return { per, unmatched, total: list.length };
+}
+
 // Check 3's verdict, pure: the worker's report (terminal-probe.js start()) for this nonce, on this engine, with the
-// differential's control (the identical own-origin fetch from a policy-free worker) and the page's own policy.
-//   chromium: every route unavailable; the three fetches refused, each with its connect-src violation (3 of 3);
-//     and the differential.
+// differential's control (the identical own-origin fetch from a policy-free worker), the page's own policy, and the
+// URLs and origin the events are matched against (ctx.ownUrl, ctx.origin).
+//   chromium: every route unavailable; the three fetches refused; for EACH request exactly one matching enforced
+//     connect-src violation and no other event (3 events, matched one to one); and the differential.
 //   webkit (astra's narrow amendment): every route unavailable; the own-origin fetch refused while the control
-//     fetched the asset (the differential); violations 0 or 3 (reported); the two IPC fetches information only
-//     (their refusal not attributed to the policy).
-//   Either: violations 1 or 2 FAIL (inconsistent); a control that failed or timed out FAILS (inconclusive), as does
-//   a page with a policy of its own (the control would not be policy-free).
+//     fetched the asset (the differential); events: none at all, or the full set matched one to one as chromium's;
+//     the two IPC fetches information only (their refusal not attributed to the policy).
+//   Either: any other event set FAILS (partial, duplicated, unrelated, report-only); a control that failed or timed
+//   out FAILS (inconclusive), as does a page with a policy of its own (the control would not be policy-free).
 export function workerVerdict(rep, nonce, ctx = {}) {
   if (!rep || rep.done !== true) return [false, "the worker didn't report: " + JSON.stringify(rep?.error ?? rep ?? "no report")];
   if (rep.nonce !== nonce) return [false, "another nonce: " + JSON.stringify(rep.nonce)];
@@ -53,17 +88,18 @@ export function workerVerdict(rep, nonce, ctx = {}) {
   const bad = [];
   if (engine !== "chromium" && engine !== "webkit") bad.push("unknown engine");
   for (const r of ROUTES) if (rep.routes?.[r] !== "unavailable") bad.push(r + ":" + rep.routes?.[r]);
-  const n = (rep.violations ?? []).filter((d) => d === "connect-src").length;
-  if (n === 1 || n === 2) bad.push("violations " + n + " of 3 (inconsistent)");
+  const { per, unmatched, total } = matchEvents(rep.violations, requestUrls(ctx.ownUrl), ctx.origin);
+  const full = REQUESTS.every((k) => per[k] === 1) && unmatched === 0 && total === 3;
+  if (!full && !(engine === "webkit" && total === 0))
+    bad.push("violations " + total + " not one matching enforced connect-src event per request" + (engine === "webkit" ? " (nor none)" : ""));
   if (rep.fetches?.["own-origin"] !== "refused") bad.push("own-origin:" + rep.fetches?.["own-origin"]);
   if (ctx.control !== "fetched-ok") bad.push("control:" + ctx.control + " (inconclusive)");
   if (ctx.pageCsp !== null) bad.push("the page has a policy " + JSON.stringify(ctx.pageCsp) + " (the control isn't policy-free)");
-  if (engine === "chromium") {
+  if (engine === "chromium")
     for (const f of ["ipc-scheme", "ipc-localhost"]) if (rep.fetches?.[f] !== "refused") bad.push(f + ":" + rep.fetches?.[f]);
-    if (n !== 3) bad.push("violations " + n + " of 3 (chromium needs all three)");
-  }
   const mode = engine === "webkit" ? "webkit-differential" : "all-events";
-  const detail = "engine=" + engine + " mode=" + mode + " violations=" + n + " differential=own-origin:" + rep.fetches?.["own-origin"] + ",control:" + ctx.control +
+  const detail = "engine=" + engine + " mode=" + mode + " violations=" + total + " events=" + REQUESTS.map((k) => k + ":" + per[k]).join(",") + " unmatched=" + unmatched +
+    " differential=own-origin:" + rep.fetches?.["own-origin"] + ",control:" + ctx.control +
     " routes=" + ROUTES.map((r) => r + ":" + rep.routes?.[r]).join(",") + " ipc=" + ["ipc-scheme", "ipc-localhost"].map((f) => f + ":" + rep.fetches?.[f]).join(",") + (engine === "webkit" ? "(information)" : "");
   return [bad.length === 0, bad.length ? "reachable or unproven: " + bad.join(", ") + " (" + detail + ")" : detail];
 }
@@ -117,7 +153,7 @@ export async function terminalChecks(invoke, base = location.href) {
       worker.postMessage({ text: probeText, port: ch.port2 }, [ch.port2]);
       ch.port1.postMessage({ nonce, ownUrl });
     }), 30000, "the worker's report");
-    out.push([TERMINAL_CHECKS[2], ...workerVerdict(rep, nonce, { engine, control: ctl, pageCsp })]);
+    out.push([TERMINAL_CHECKS[2], ...workerVerdict(rep, nonce, { engine, control: ctl, pageCsp, ownUrl, origin: new URL(workerUrl).origin })]);
   } catch (e) { out.push([TERMINAL_CHECKS[2], false, String(e?.message ?? e)]); }
   finally {
     try { ch?.port1.close(); } catch {}
@@ -125,5 +161,11 @@ export async function terminalChecks(invoke, base = location.href) {
     try { control?.terminate(); } catch {}
     if (cblob) URL.revokeObjectURL(cblob);
   }
+  // The capture's end (sage2's sentinel, astra's placement): with every probe worker terminated above and before
+  // the page reports (selftest_report exits the desktop app), the page logs "done" once, whatever the checks found.
+  // probe-log.py requires it exactly once, after this run's page markers, with no probe marker after it: proof
+  // that the native log was read through the self-test's end.  (It is not an ordering barrier for IPC sent
+  // earlier by another sender; a worker route that was callable already fails check 3.)
+  await timeout(invoke("app_log", { message: "terminal bridge probe: done " + nonce }), 5000, "the done marker").catch(() => {});
   return out;
 }

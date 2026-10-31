@@ -5,7 +5,10 @@
 # twice, or the self-test throwing; and the Terminal's three keys: one missing,
 # one twice, one FAIL; check 3's engine rule against the caller's --engine: webkit's 0 or 3 events with the
 # differential pass, chromium's 0 or 1 fail, 1-2 fail anywhere, a failed control, the own fetch fetched, an IPC
-# fetch not refused on chromium, a report's engine not the caller's (iOS claiming chromium), a broken detail; and
+# fetch not refused on chromium, a report's engine not the caller's (iOS claiming chromium), a broken detail; the
+# per-request matching (astra's NC-R1-A1): an unmatched event in place of a request's, an extra one, counts that
+# don't add up, a request matched twice, webkit's unmatched-only or partial sets, webkit's IPC not marked
+# information; and
 # --engine missing or unknown, exit 2); then the diagnosis lines' grammar: a key
 # missing, twice, unknown, without ": ", a prefix of another, empty, or a raw
 # CR in a value fail; an escaped newline, a truncated value and error,
@@ -21,7 +24,9 @@ for f in good:chromium:0 coi-fail:chromium:0 req-fail:chromium:1 renamed:chromiu
     info-escaped:chromium:0 info-truncated:chromium:0 info-errors:chromium:0 term-missing:chromium:1 term-dup:chromium:1 term-fail:chromium:1 \
     term-webkit-good:webkit:0 term-webkit-three:webkit:0 term-chromium-zero:chromium:1 term-chromium-one:chromium:1 term-webkit-two:webkit:1 \
     term-control-failed:webkit:1 term-own-fetched:chromium:1 term-engine-webkit:chromium:1 term-ios-claims-chromium:webkit:1 \
-    term-chromium-ipc-timeout:chromium:1 term-bad-grammar:chromium:1; do
+    term-chromium-ipc-timeout:chromium:1 term-bad-grammar:chromium:1 \
+    term-chromium-unmatched:chromium:1 term-chromium-extra:chromium:1 term-sum-mismatch:chromium:1 term-events-two:chromium:1 \
+    term-webkit-unmatched-only:webkit:1 term-webkit-one-unmatched:webkit:1 term-webkit-three-no-information:webkit:1; do
   IFS=: read -r name engine want <<< "$f"
   python3 -I "$here/android-report.py" --engine "$engine" "$here/report-fixtures/$name.txt" > /dev/null 2>&1
   got=$?

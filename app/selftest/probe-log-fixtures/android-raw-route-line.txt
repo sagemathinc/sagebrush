@@ -1,3 +1,4 @@
 10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: page 11111111-2222-4333-8444-555555555555
 10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: page-route:tauri-internals-invoke 11111111-2222-4333-8444-555555555555
 10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: page-route:ipc-postmessage 11111111-2222-4333-8444-555555555555
+10-31 01:20:02.123  4242  4243 I RustStdout: [page] terminal bridge probe: done 11111111-2222-4333-8444-555555555555

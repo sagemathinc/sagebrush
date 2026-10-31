@@ -68,14 +68,15 @@ if (typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScop
 
 // In the shell worker (worker-boot.js calls start(port)): the page's first message on the port carries the
 // nonce and the own-origin URL; the worker runs the probe on itself, then three fetches its policy must refuse
-// (the app's IPC scheme two ways, with Tauri's header names, and the own-origin asset, with ownOrigin), counts
-// the connect-src violations, and reports once, naming every attempt.
+// (the app's IPC scheme two ways, with Tauri's header names, and the own-origin asset, with ownOrigin), records
+// every policy violation event as it came (its blocked URI, directive and disposition: the page matches them to
+// the three requests, selftest-terminal.js matchEvents), and reports once, naming every attempt.
 export function start(port) {
   port.onmessage = async (e) => {
     port.onmessage = null;
     const nonce = String(e.data?.nonce ?? "");
     const violations = [];
-    const onViolation = (v) => violations.push(v.effectiveDirective);
+    const onViolation = (v) => violations.push({ uri: String(v.blockedURI ?? ""), directive: String(v.effectiveDirective ?? ""), disposition: String(v.disposition ?? "") });
     self.addEventListener("securitypolicyviolation", onViolation);
     const report = { done: false, nonce, routes: {}, fetches: {}, violations };
     try {

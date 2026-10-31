@@ -66,19 +66,22 @@ INFO_LINE = re.compile(r"info ([a-z-]+): (\S.*)")
 ENGINES = ("chromium", "webkit")
 CHECK3 = "the shell worker can't reach the app's bridge"
 ROUTES = ["tauri-internals-invoke", "tauri-core-invoke", "ipc-postmessage", "webkit-ipc-postmessage", "webview2-postmessage"]
+# (events=: per request, the violation events matched to it one to one, enforced connect-src with its blockedURI;
+# unmatched=: every other event; violations=: all of them, so violations = the three + unmatched)
 CHECK3_DETAIL = re.compile(
-    r"engine=(chromium|webkit|unknown) mode=(all-events|webkit-differential) violations=([0-3]) "
+    r"engine=(chromium|webkit|unknown) mode=(all-events|webkit-differential) violations=(0|[1-9][0-9]{0,3}) "
+    r"events=ipc-scheme:([01]),ipc-localhost:([01]),own-origin:([01]) unmatched=(0|[1-9][0-9]{0,3}) "
     r"differential=own-origin:([a-z0-9-]+),control:([a-z0-9 -]+) routes=(\S+) "
     r"ipc=ipc-scheme:([a-z0-9-]+),ipc-localhost:([a-z0-9-]+)(\(information\))?")
 
 
 def check3_problems(line, engine):
-    """The Terminal's check 3, ok, judged again with the caller's engine (the grader's conditions)."""
+    """The Terminal's check 3, ok, judged again with the caller's engine (the grader's conditions, astra's NC-R1-A1)."""
     m = CHECK3_DETAIL.fullmatch(line[len("ok   " + CHECK3 + ": "):])
     if not m:
         return [f"check 3's detail is not the grammar: {line[:300]!r}"]
-    eng, mode, n, own, control, routes, ipc1, ipc2, info = m.groups()
-    n = int(n)
+    eng, mode, n, e1, e2, e3, unmatched, own, control, routes, ipc1, ipc2, info = m.groups()
+    n, events, unmatched = int(n), (int(e1), int(e2), int(e3)), int(unmatched)
     out = []
     if eng != engine:
         out.append(f"check 3 reports engine {eng!r}, the platform's is {engine!r}")
@@ -88,10 +91,15 @@ def check3_problems(line, engine):
         out.append(f"check 3: a route is not unavailable: {routes}")
     if own != "refused" or control != "fetched-ok":
         out.append(f"check 3: no differential (own-origin {own}, control {control})")
-    if n in (1, 2):
-        out.append(f"check 3: {n} of 3 violations (inconsistent)")
-    if engine == "chromium" and (n != 3 or ipc1 != "refused" or ipc2 != "refused" or info):
-        out.append(f"check 3: chromium needs 3 of 3 violations and every IPC fetch refused (violations {n}, {ipc1}, {ipc2})")
+    if n != sum(events) + unmatched:
+        out.append(f"check 3: violations {n} is not the matched {sum(events)} plus unmatched {unmatched}")
+    full = events == (1, 1, 1) and unmatched == 0 and n == 3
+    none = events == (0, 0, 0) and unmatched == 0 and n == 0
+    if engine == "chromium" and (not full or ipc1 != "refused" or ipc2 != "refused" or info):
+        out.append(f"check 3: chromium needs one matching enforced violation per request, nothing else, and every IPC fetch refused "
+                   f"(violations {n}, events {events}, unmatched {unmatched}, {ipc1}, {ipc2})")
+    if engine == "webkit" and not (full or none):
+        out.append(f"check 3: webkit needs no events or one matching per request and nothing else (violations {n}, events {events}, unmatched {unmatched})")
     if engine == "webkit" and not info:
         out.append("check 3: webkit's IPC fetches must be marked information")
     return out
