@@ -91,6 +91,7 @@ function lazyKernel(mod: any, closing: () => boolean = () => false) {
  * nothing that would change or run it, BAC-8). */
 export type Guard = "open" | "closing" | "kept";
 const MUTATING_INPUT = new Set(["beforeinput", "input", "paste", "drop", "cut", "keypress"]);
+const KEPT_KEYS = new Set(["Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 /** Whether `e` may go on in `state` (a gesture inside a host's content). */
 export function gestureAllowed(e: Event, state: Guard): boolean {
   if (state === "open") return true;
@@ -98,10 +99,13 @@ export function gestureAllowed(e: Event, state: Guard): boolean {
   if (MUTATING_INPUT.has(e.type)) return false;
   if (e.type === "click" || e.type === "dblclick") return !(e.target instanceof Element && e.target.closest("button, select, input, [role=menuitem]"));
   if (e.type === "keydown") {
+    // (an allowlist, not a blocklist (ART-r5, @sagebrush's ruling): reading and copying keys only; any other key, a
+    // shortcut of today's or of a future editor's, is stopped)
     const k = e as KeyboardEvent;
-    if (k.key === "Enter" || k.key === "Backspace" || k.key === "Delete") return false; // (Run, edits, command mode's Enter)
-    if (k.ctrlKey || k.metaKey) return ["c", "a", "C", "A", "Control", "Meta", "Shift", "Alt"].includes(k.key); // (copy and select all)
-    return k.key.length > 1; // (Tab, arrows, Home/End, Escape: reading; a printable key would edit, or act in command mode)
+    if (k.key === "Control" || k.key === "Meta" || k.key === "Shift") return true; // (a chord's first key)
+    if (k.ctrlKey || k.metaKey) return !k.altKey && (k.key === "c" || k.key === "C" || k.key === "a" || k.key === "A"); // (copy, select all)
+    if (k.altKey) return false;
+    return KEPT_KEYS.has(k.key); // (Tab, Shift+Tab, Escape; arrows, Home, End, PageUp/Down, with Shift or not)
   }
   return true; // (mousedown and the rest: selecting)
 }
