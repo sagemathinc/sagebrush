@@ -819,7 +819,7 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const { runRecoveryTests } = await import("./test-remote-recovery.mjs");
   const rran = await runRecoveryTests(check);
   console.log(`remote-recovery: ${rran} controls ran`);
-  check(rran === 25, `remote-recovery: every control ran (${rran} of 25)`);
+  check(rran === 29, `remote-recovery: every control ran (${rran} of 29)`);
   const { runLossTests } = await import("./test-remote-loss.mjs");
   await runLossTests(check);
 }

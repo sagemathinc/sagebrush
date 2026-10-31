@@ -9,6 +9,7 @@
 
 import { page } from "./test-remote-gate.mjs";
 import { NOTES, RECOVERY } from "./remote-kernel.js";
+import { RESPONSE_MAX } from "./remote-client.js";
 
 // A virtual clock: timers fire only when the test advances it; between, the event loop is let run (the fake's
 // crypto and streams settle on real turns), so every timing is the clock's, exactly.
@@ -462,6 +463,103 @@ export async function runRecoveryTests(check) {
     check(next.length >= 1 && next[0].fence !== tk[0].fence, `C9h: a Run asked after the deadline: a new fence transaction (${next[0]?.fence} after ${tk[0].fence})`);
     await p.gesture(["c2"]);
     check(doneOf(p, "c2") && !p.kernel.needsFence, "C9h: and the next Run runs");
+  });
+
+  // (a body whose cancel never settles: the client must not wait for it, on any path)
+  const stuckBody = () => new ReadableStream({ cancel: () => new Promise(() => {}) });
+  await control("C9j", async () => {
+    // (the takeover's first answer is a nonce challenge, then (second page) a declared length past RESPONSE_MAX; each
+    // body's cancel never settles: the next attempt goes at once (the challenge) or after the 500 ms backoff (the
+    // oversize answer, no answer), and c0 runs)
+    for (const [kind, make, by] of [
+      ["nonce challenge", (p) => () => new Response(stuckBody(), { status: 401, headers: { "WWW-Authenticate": 'DPoP error="use_dpop_nonce"', "DPoP-Nonce": p.fake.nonce, "Content-Type": "application/json" } }), 1000],
+      ["oversize answer", () => () => new Response(stuckBody(), { status: 200, headers: { "Content-Length": String(RESPONSE_MAX + 1), "Content-Type": "application/json" } }), 2000],
+    ]) {
+      const { p, clock, log } = await clockedPage([["u", "x = 1"], ["c0", "v0 = 0"]]);
+      loseToUnknown(p);
+      p.fake.raw("POST", TAKEOVER, make(p));
+      const run = burst(p, ["u", "c0"]);
+      const t0 = await untilTakeover(clock, log);
+      await clock.advanceTo(t0 + by);
+      const ranInTime = doneOf(p, "c0");
+      await ended(clock, run);
+      check(ranInTime, `C9j: a ${kind} whose body's cancel never settles: not waited for; c0 ran by ${by / 1000} s after the first takeover`);
+    }
+  });
+
+  await control("C9k", async () => {
+    // (takeovers that never answer, each ending at its 15 s, until one answers ready with a run in flight near the
+    // deadline: c0 is told so, and the transaction stays (the same object and deadline).  c1, asked right after
+    // that answer (a fresh consent: the in-flight answer proved no continuity, so the old ones reset), joins it: its
+    // takeover never answers, and it is refused at the episode's original deadline, not 100 s after the answer)
+    const { p, clock, log, live } = await clockedPage([["u", "x = 1"], ["c0", "v0 = 0"], ["c1", "v1 = 1"]]);
+    loseToUnknown(p);
+    const sched = fenceSchedule(0).posts; // (relative to the transaction's opening)
+    for (let k = 0; k < sched.length - 1; k++) p.fake.intercept("POST", TAKEOVER, { pause: true });
+    let tx = null, deadline = null;
+    p.fake.intercept("POST", TAKEOVER, { skip: false, mutate: (d) => { d.in_flight = [{ op_id: "rq.ghost", kind: "run" }]; }, after: () => { tx = p.kernel.fenceTx; deadline = tx?.deadline; } });
+    for (let k = 0; k < 10; k++) p.fake.intercept("POST", TAKEOVER, { pause: true });
+    const run = burst(p, ["u", "c0"]);
+    const t0 = await untilTakeover(clock, log);
+    const refusedAt = t0 + RECOVERY.fenceTotalMs;
+    const inFlightAt = t0 + sched[sched.length - 1][0];
+    await clock.advanceTo(inFlightAt + 100);
+    const asked = p.gesture(["c1"]);
+    await clock.advanceTo(refusedAt - 1);
+    const early = p.results.get("c1")?.note === NOTES.unreachable;
+    const kept = !!tx && p.kernel.fenceTx === tx && tx.deadline === deadline && deadline === refusedAt;
+    await clock.advanceTo(refusedAt);
+    const atDeadline = p.results.get("c1")?.note === NOTES.unreachable;
+    await ended(clock, run);
+    await ended(clock, asked);
+    check(p.results.get("c0")?.note === NOTES.inFlight && kept && !early && atDeadline, `C9k: a ready answer with a run in flight at ${inFlightAt / 1000} s keeps the transaction (kept: ${kept}); c1 refused at exactly ${refusedAt / 1000} s, its original deadline (early ${early}, then ${atDeadline})`);
+    clean("C9k", clock, live, p);
+  });
+
+  await control("C9l", async () => {
+    // (the kernel closed, or moved to another tab, while its recovery waits on a takeover request or in its backoff:
+    // the transaction ends with it at once (no timer left right away), and nothing tells a status afterwards)
+    for (const [how, end] of [["closed", (p) => p.kernel.close()], ["moved away", (p) => p.kernel.movedAway()]]) {
+      for (const [during, arm, at] of [
+        ["a takeover request", (p) => p.fake.intercept("POST", TAKEOVER, { pause: true }), 1000],
+        ["the backoff", (p) => { for (let i = 0; i < 60; i++) p.fake.intercept("POST", TAKEOVER, { lose: true }); }, 200],
+      ]) {
+        const { p, clock, log, live } = await clockedPage([["u", "x = 1"], ["c0", "v0 = 0"]]);
+        loseToUnknown(p);
+        arm(p);
+        const run = burst(p, ["u", "c0"]);
+        const t0 = await untilTakeover(clock, log);
+        await clock.advanceTo(t0 + at);
+        const armedBefore = clock.armed;
+        end(p);
+        await clock.settle();
+        const armedAfter = clock.armed;
+        const after = [];
+        p.kernel.on("status", (st) => after.push(st));
+        await clock.advanceTo(t0 + 2 * RECOVERY.fenceTotalMs);
+        await ended(clock, run);
+        check(armedBefore > 0 && armedAfter === 0 && !p.kernel.fenceTx && after.length === 0 && live.size === 0, `C9l: ${how} during ${during}: no timer left at once (${armedBefore} -> ${armedAfter}), no listener (${live.size}), no status after it (${JSON.stringify(after)})`);
+      }
+    }
+  });
+
+  await control("C9m", async () => {
+    // (the submit's answer lost; its resend's token never comes: the resend ends at 10 s, inside F3's window, and
+    // the GETs that follow (never answered) too: unknown at exactly 31.5 s after the lost answer, so the bound from it
+    // stays 31.5 + 100 s (C9c/C9h pin the fence's 100 s))
+    const { p, clock, log, live } = await clockedPage([["u", "x = 1"]]);
+    p.fake.intercept("POST", RUN_POST, { lose: true, after: () => p.pauseToken() });
+    for (let i = 0; i < 3; i++) p.fake.intercept("GET", RUN_GET, { pause: true }); // (as in C9a: each ends at its 10 s)
+    const run = p.gesture(["u"]);
+    const at = RECOVERY.reconcileWaits.reduce((a, b) => a + b, 0) + 3 * RECOVERY.reconcileGetMs;
+    await clock.advanceTo(at - 1);
+    const early = unknownOf(p, "u");
+    await clock.advanceTo(at);
+    const atDeadline = unknownOf(p, "u");
+    await ended(clock, run);
+    const reqs = JSON.stringify(log.filter((e) => e.kind !== "other").map((e) => [e.kind, e.start, e.end]));
+    check(!early && atDeadline, `C9m: a resend that never settles: unknown at exactly ${at / 1000} s after the submit, not before and not never (${reqs})`);
+    clean("C9m", clock, live, p);
   });
 
   await control("C4-deadline", async () => {
