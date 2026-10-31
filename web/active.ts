@@ -1,6 +1,6 @@
 // First-party active-user counting, signed-out browsers (active-users plan r2 §1.2, r3 §B-§D, r4 §B', r4b; reviewed by
 // astra, the grader and daybreak2).  Once per server day at most, after the page's first idle callback, a browser sends
-// {"v":1,"day":1,"week":W,"month":M,"client":"web"} to /api/active, through consent.ts's measure().  It keeps no
+// {"v":1,"day":1,"week":W,"month":M,"client":"web"} to consent.ts's ACTIVE_PATH, through its measure().  It keeps no
 // identifier: only the instants at which the server's next UTC day, ISO week and month begin (from the server's own
 // answer), and which population its last count was in.
 //
@@ -10,7 +10,7 @@
 // Nothing here runs before the first idle callback; nothing runs at all off MEASURE_ORIGINS (the desktop app and the
 // CLI carry the same bundle and send nothing: William, Oct 31, "Not for now").
 
-import { afterNoteWrite, mayMeasure, measure } from "./consent.ts";
+import { ACTIVE_PATH, afterNoteWrite, mayMeasure, measure } from "./consent.ts";
 
 /** the desktop app and the CLI are not counted for now (William, Oct 31): no origin of theirs is listed */
 export const COUNT_DESKTOP = false;
@@ -51,7 +51,7 @@ function answerOf(v: unknown): { as: "a" | "b"; nd: number; nw: number; nm: numb
 
 async function run(): Promise<void> {
   if (!MEASURE_ORIGINS.includes(globalThis.location?.origin ?? "")) return;
-  await measure("/api/active", async (send) => {
+  await measure(ACTIVE_PATH, async (send) => {
     // (pre-lock: the counted path, which takes no lock)
     const t0 = Date.now();
     let a = readA();

@@ -10,6 +10,8 @@ export const MEASURE_DEFAULT: "on" | "ask" = "on";
 export const HONOR_GPC = true;
 /** every path a measurement is sent to; only measure() may send to them */
 export const MEASURE_PATHS = ["/api/active"] as const;
+/** the active-user count's path (active.ts names it only through this) */
+export const ACTIVE_PATH = MEASURE_PATHS[0];
 /** the measurement notes this module removes when consent ends */
 export const NOTE_KEYS = ["sb-active", "sb-active-b"] as const;
 const CONSENT_KEY = "sb-consent";
