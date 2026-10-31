@@ -58,6 +58,10 @@ type TestHooks = {
   slicePause?: number;
   /** after each member is written (its count), between members: the r2d heap checkpoints wait here */
   between?(written: number): Promise<void> | void;
+  /** (r2a) the capture log at its observation boundary, before it settles: chunks written out, bytes still buffered */
+  onLookup?(at: { chunks: number; buffered: number }): void;
+  /** (r2a) each chunk the capture log's lookup reads, in order: the log as the tree check sees it */
+  captureChunk?(chunk: Uint8Array): void;
   /** preflight's plan, before Save… (a test lowers a cap to what it found, to test the checks on actual output) */
   onPlan?(plan: Plan): Promise<void> | void;
   /** preflight about to stream a document to measure it; write about to write a member */
@@ -341,13 +345,23 @@ const MANIFEST_ENDS = 512;
  * many entries there are.  The tree check reads back only the lines of the paths it needs. */
 export class CaptureLog {
   constructor(readonly spool: Spool) {}
-  async add(path: string, kind: Entry["kind"], ident: string | undefined) { await this.spool.appendText(JSON.stringify([path, kind, ident ?? null]) + "\n"); }
+  /** One line, written into the spool's buffer at once; a promise only when the buffer is due to be flushed (r2a: at
+   * 100,000 entries, an awaited append per line was 92 MiB of short-lived allocation). */
+  add(path: string, kind: Entry["kind"], ident: string | undefined): Promise<void> | undefined {
+    const rest = this.spool.putText(JSON.stringify([path, kind, ident ?? null]) + "\n");
+    return rest === null ? undefined : this.spool.appendText(rest);
+  }
   /** The captured kind and identity of each of `paths` that was captured. */
   async lookup(paths: Set<string>): Promise<Map<string, { kind: string; ident: string | null }>> {
+    // (the observation boundary: the lines still in the spool's buffer (at most its 1 MiB slice) written out first, here,
+    // so that no reader of the log can miss them; lookup is the log's only reader, E1 r2a)
+    T().onLookup?.({ chunks: this.spool.chunks, buffered: this.spool.buffered });
+    await this.spool.settle();
     const out = new Map<string, { kind: string; ident: string | null }>();
     const dec = new TextDecoder();
     let carry = "";
-    for await (const chunk of this.spool.replay()) {
+    for await (const chunk of this.spool.read()) {
+      T().captureChunk?.(chunk);
       const text = carry + dec.decode(chunk, { stream: true });
       const lines = text.split("\n");
       carry = lines.pop() ?? "";
@@ -481,13 +495,13 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
         let line: string;
         if (e.kind === "folder") {
           await zip.folder(zipName(e), e.updated);
-          await log.add(e.path, e.kind, e.ident);
+          { const p = log.add(e.path, e.kind, e.ident); if (p) await p; }
           line = manifestEntry(e, Date.now());
         } else {
           await T().beforeCapture?.(e.path);
           const c = await timed("capture", () => capture(w, e, opts.signal));
           await T().afterCapture?.(e.path);
-          await log.add(e.path, c.entry.kind, c.entry.ident);
+          { const p = log.add(e.path, c.entry.kind, c.entry.ident); if (p) await p; }
           // (the member's cap, or what is left of the total if that is less: both checked on the bytes as they go)
           const left = cap("total") - total, docCap = capOf(e.kind);
           const max = Math.min(docCap, left), why = left < docCap ? `the export passed ${cap("total") / 2 ** 30} GiB while it was written (files grew meanwhile)` : capWhy(e.path, e.kind);

@@ -571,6 +571,7 @@ jobs:
           CHROME=google-chrome node web/workspace/test-export.mjs
           CHROME=google-chrome node web/workspace/test-export-scale.mjs --ci
           CHROME=google-chrome node web/workspace/test-export-controls.mjs
+          node web/workspace/test-export-campaign-check.mjs
 
   web-runner:
     needs: changes

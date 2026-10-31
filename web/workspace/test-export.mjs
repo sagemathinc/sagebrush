@@ -843,6 +843,83 @@ try {
     await ev(`Promise.all([${W}.remove("/Wide.board.json"), ${W}.remove("/Many.ipynb")]).then(() => 1)`);
   });
 
+  // ---- E1 r2a (daybreak2's and grader's buffering controls): the capture log's lines go into its spool's 1 MiB slice
+  // and are written out a slice at a time; the tree check's lookup settles the slice first.  Accepted writes whose file
+  // and folder lines are still in the unflushed tail, below the first flush and after one; the log as the lookup reads
+  // it, byte for byte the unbuffered reference (the order across slice boundaries); Cancel and a structural stop before
+  // and after the first flush: the sink aborted, the status unchanged, the scratch removed.
+  await scenario("tail", async () => {
+    const SLICE = 1 << 20;
+    // (the log an unbuffered writer makes, from the raw rows, in their key (path) order: its bytes, and how many bytes
+    // its first n lines take, and how many its lines from `from` on take)
+    const REF = `(async () => { const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; }); const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => [e.path, JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n"]); const enc = new TextEncoder(); const len = lines.map(([, l]) => enc.encode(l).length); window.__ref = { lines, len }; return lines.length; })()`;
+    const HEX = `(async (parts) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await new Blob(parts).arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join(""))`;
+    const firstBytes = (n) => ev(`window.__ref.len.slice(0, ${n}).reduce((a, b) => a + b, 0)`);
+    const fromBytes = (path) => ev(`window.__ref.lines.reduce((a, [p], i) => a + (p >= ${JSON.stringify(path)} ? window.__ref.len[i] : 0), 0)`);
+    const sameAsRef = () => ev(`Promise.all([${HEX}(window.__cap ?? []), ${HEX}(window.__ref.lines.map(([, l]) => l))]).then(([a, b]) => a === b)`);
+    const LOOK = `onLookup: (x) => { window.__lookupAt = x; }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`;
+    const accepted = (path, body) => `afterCapture: async (p) => { if (p === ${JSON.stringify(path)}) await window.sagebrush.workspace.write(p, ${JSON.stringify(body)}); }`;
+    const reset = () => ev(`(() => { window.__lookupAt = null; window.__cap = null; window.__clickAt = 0; return 1; })()`);
+    const stopsClean = async (label, r, re, before) => {
+      await closeFlow();
+      const clean = await until(`${LOCKS}.then((m) => m === 0)`, 20000);
+      const n = await scratchCount();
+      check(!!r.stopped && re.test(r.stopped) && !(await ev(`!!window.__exp`)) && (await lastAt()) === before && clean && n === 0, label + ": stopped, saying so; nothing handed over (the sink aborted), the status unchanged, no lock and no scratch left: " + String(r.stopped ?? r.name).slice(-140));
+    };
+    // (t0) the small workspace: an accepted write; the lookup runs before any flush, so the needed lines are buffered
+    await ev(`${W}.create("/tail-victim.txt", { content: "v" }).then(() => 1)`);
+    await reset();
+    await hooks(`${LOOK}, ${accepted("/data/primes.csv", "n,p\n1,2\n2,3\n")}`);
+    await ev(REF);
+    const r0 = await exportOnce(join(out, "t0.zip"));
+    const at0 = await ev(`window.__lookupAt`);
+    check(!r0.stopped && !!at0 && at0.chunks === 0 && at0.buffered > 0, "tail t0: an accepted write whose file and folder lines are in the unflushed tail, below the first flush (the lookup saw " + JSON.stringify(at0) + "): the export completes: " + String(r0.stopped ?? r0.name).slice(-100));
+    await ev(`${W}.write("/data/primes.csv", "n,p\\n1,2\\n").then(() => 1)`);
+    // (e0) a structural stop below the first flush
+    let before = await lastAt();
+    await reset();
+    await hooks(`${LOOK}, afterCapture: async (p) => { if (p === "/data/primes.csv") await window.sagebrush.workspace.remove("/tail-victim.txt"); }`);
+    await ev(REF);
+    const below = await firstBytes(await ev(`window.__ref.lines.length`));
+    const e0 = await exportOnce(join(out, "e0.zip"));
+    check(below < SLICE, `tail e0: the whole log is below the first flush (${below} bytes)`);
+    await stopsClean("tail e0: a delete during the export, below the first flush", e0, /tail-victim\.txt/, before);
+    // (the large workspace: about 2,800 folders with long names, sorted before /zzz, then /zzz/late.csv)
+    const BULK = 2800;
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(), pad = "y".repeat(440); s.put({ path: "/bulk", kind: "folder", ref: null, created: t, updated: t, fid: "bulkfid", ident: "bulkfid", nkey: "/\\u0000bulk" }); for (let i = 0; i < ${BULK}; i++) { const name = pad + String(i).padStart(6, "0"), path = "/bulk/" + name, f = "bulkfid-" + i; s.put({ path, kind: "folder", ref: null, created: t, updated: t, fid: f, ident: f, nkey: "/bulk\\u0000" + name }); } return null; }`);
+    await ev(`${W}.mkdir("/zzz").then(() => ${W}.create("/zzz/late.csv", { content: "a\\n" })).then(() => ${W}.create("/tail-victim.txt", { content: "v" })).then(() => 1)`);
+    // (t1) an accepted write on /zzz/late.csv: the lookup runs after at least one flushed slice, with /zzz's and
+    // /zzz/late.csv's lines still buffered; the log as read is byte for byte the reference
+    await reset();
+    await hooks(`${LOOK}, ${accepted("/zzz/late.csv", "b\n")}`);
+    await ev(REF);
+    const tailBytes = await fromBytes("/zzz");
+    const r1 = await exportOnce(join(out, "t1.zip"));
+    const at1 = await ev(`window.__lookupAt`);
+    check(!r1.stopped && !!at1 && at1.chunks >= 1 && at1.buffered >= tailBytes, `tail t1: an accepted write whose file and folder lines are in the unflushed tail after ${at1?.chunks} flushed slice(s) (${at1?.buffered} bytes buffered, the needed lines ${tailBytes}): the export completes: ` + String(r1.stopped ?? r1.name).slice(-100));
+    check(await sameAsRef(), "tail t1: the capture log as the lookup read it, across its slice boundary, is byte for byte the unbuffered reference");
+    // (s0, s1) Cancel below and past the first flush
+    for (const [label, k, below] of [["s0", 5, true], ["s1", BULK - 100, false]]) {
+      before = await lastAt();
+      await reset();
+      await hooks(`${LOOK}, between: (n) => { if (n !== ${k} || window.__clickAt) return; window.__clickAt = performance.now(); [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel")?.click(); }`);
+      await ev(REF);
+      const bytes = await firstBytes(k);
+      const r = await exportOnce(join(out, label + ".zip"));
+      check(below ? bytes < SLICE : bytes > SLICE, `tail ${label}: Cancel after ${k} members, with ${bytes} bytes of log (${below ? "below" : "past"} the first flush)`);
+      await stopsClean(`tail ${label}: Cancel ${below ? "below" : "past"} the first flush`, r, /cancelled/, before);
+    }
+    // (e1) a structural stop past the first flush
+    before = await lastAt();
+    await reset();
+    await hooks(`${LOOK}, afterCapture: async (p) => { if (p === "/zzz/late.csv") await window.sagebrush.workspace.remove("/tail-victim.txt"); }`);
+    const e1 = await exportOnce(join(out, "e1.zip"));
+    await stopsClean("tail e1: a delete during the export, past the first flush", e1, /tail-victim\.txt/, before);
+    // (the large workspace taken away again)
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/bulk", "/bulk/\\uffff"))`);
+    await ev(`${W}.remove("/zzz/late.csv").then(() => ${W}.remove("/zzz")).then(() => 1, () => 0)`);
+  });
+
   check(errors.length === 0, "no page errors: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

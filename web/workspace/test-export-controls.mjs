@@ -27,6 +27,8 @@ const CONTROLS = [
   ["A1a", "an accepted write kept the file's identity, exactly as captured", X + "run.ts", "c.ident !== null && c.ident === a.id", "true", "structure", /changed the file's identity|the status line unchanged by every stopped export/, "chunk"],
   ["A1b", "the log's floor is read again after the scan", X + "run.ts", "    await pause();\n  }\n  if ((await w.opsFloor()) > s0) throw new ExportStopped(trimmed);", "    await pause();\n  }", "structure", /the log trimmed while the check runs|the status line unchanged by every stopped export/, "chunk"],
   ["A1c", "an accepted write kept the kind captured at its path (astra's E1-R2-A1)", X + "run.ts", "!!c && c.kind === op.kind && c.ident", "!!c && c.ident", "structure", /a write that changed the file's kind|the status line unchanged by every stopped export/, "chunk"],
+  // (E1 r2a, daybreak2's and grader's buffering controls: the observation boundary, the lookup's settle, removed)
+  ["A1t", "the capture log's lookup settles its spool's buffered tail before reading", X + "run.ts", "    await this.spool.settle();\n", "", "tail", /tail t0: an accepted write|tail t1: an accepted write|tail t1: the capture log as the lookup read it/, "chunk"],
   ["A2", "preflight checks a data file's bytes are here", X + "run.ts", "if (!(await w.present(e.path)))", "if (false)", "unavailable", /a data file whose bytes aren't here/, "chunk"],
   // (the lock's hold through the handoff undone: the sweep then removes the handing-off archive.  The sweep's own half,
   // a file removed only under its export's lock, is A2s, in the worker)
