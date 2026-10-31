@@ -496,6 +496,17 @@ try {
       const st = r2.placed?.statuses ?? {};
       check(r2.ok && r2.placed.work <= C.LIMITS.workBudget && (st.moved ?? 0) > 0 && (st.moved ?? 0) + (st.unresolved ?? 0) === 300 && r2.drawn > 0 && r2.drawn < 200, "comments: exactly 2 MiB, 300 moved anchors: placed within the work budget (each moved or unresolved), drawn near the view", r2);
       timed(r2, 32, "2 MiB, 300 moved anchors");
+      // (the shared pass: the native search below its dispatch bound, 300 needles over 256 KiB; the pass above it, the
+      // same over 2 MiB, its table's bytes reported)
+      check(r1.placed?.pass?.path === "native" && r2.placed?.pass?.path === "pass" && r2.placed.pass.bytes > 0, "comments: the native search at 256 KiB with 300 anchors, the shared pass at 2 MiB (its bytes measured)", { k256: r1.placed?.pass, m2: r2.placed?.pass });
+      // 1,800 moved anchors over exactly 2 MiB: the shared pass re-finds every one within the default work budget,
+      // in slices and drawn near the view (quote-only anchors, as the 2,000 threads below; 1,800 of these quotes keep
+      // the comments file under 2 MiB, about 1 KB a thread)
+      const d5 = C.emptyDoc({});
+      for (let i = 0; i < 1800; i++) { const q = `a phrase numbered ${i * 10}.`, s0 = t2.indexOf(q); if (s0 < 0) throw new Error("no " + q); d5.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-31T00:00Z" }).doc.threads[0]); }
+      const r5 = await measure("m2t1800", t2, d5), s5 = r5.placed?.statuses ?? {};
+      check(r5.ok && r5.placed.pass?.path === "pass" && s5.moved === 1800 && r5.placed.work <= C.LIMITS.workBudget && r5.drawn > 0 && r5.drawn < 300 && r5.list.shown <= 100, "comments: exactly 2 MiB, 1,800 moved anchors: the shared pass re-finds all within the work budget; drawn near the view, the list's first 100", { placed: r5.placed, drawn: r5.drawn, list: r5.list });
+      timed(r5, 32, "2 MiB, 1,800 moved anchors");
       // the admitted 2,000 live threads (astra's fixture: small threads, short times, a file under 2 MiB, though a new one
       // is refused past 1.75 MiB): on a document of 2,000 tokens, each thread re-found (moved) by its token, all placed;
       // drawing only near the view, the list's first 100 a section
@@ -504,7 +515,7 @@ try {
       for (let i = 0; i < 2000; i++) { const q = `w${i},`, s0 = toks.indexOf("item " + q) + 5; d3.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-30T00:00Z" }).doc.threads[0]); }
       const side3 = C.serialize(d3);
       const r3 = await measure("t2000", toks, d3);
-      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
+      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.placed.pass?.path === "native" && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
       timed(r3, 8, "2,000 threads on a small document");
       // one unit over 2 MiB: refused with the size, nothing drawn or written, the comments file untouched
       const t4 = t2.replace("%", "%%"), d4 = threadsOn(t2, 3, 50, false), side4 = C.serialize(d4);

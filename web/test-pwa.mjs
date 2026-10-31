@@ -90,6 +90,8 @@ await ready();
 out = await runCode("import fractions\nprint(getattr(fractions, 'POISONED', 'clean'))\nfrom sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("clean") && out.includes("274177 * 67280421310721"), "a rewritten kept copy is not used: the library's own code and the engine run: " + JSON.stringify(out));
 ok(await ev(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); const req = (await c.keys()).find((r) => r.url.includes("/lib/core.pre.")); if (req) return !(await (await c.match(req)).text()).includes("cache-poison-ran"); } return false; })()`), "...and the kept copy is the site's again");
+// (and framed only by this site: frame-ancestors 'self' and X-Frame-Options SAMEORIGIN, security audit G-1)
+ok(await ev(`fetch("/", { cache: "no-store" }).then((r) => r.status === 200 && /(^|; )frame-ancestors 'self'(;|$)/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-frame-options") === "SAMEORIGIN", () => false)`), "online, the page says only this site may frame it (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)");
 // offline: no server at all
 server.kill();
 await sleep(500);
@@ -154,6 +156,7 @@ await send("Network.enable");
 // (the same answer to a fetch from this page: the service worker's offline
 // fallback, deterministic: refused, or the build's own response)
 // (first: offline, the service worker answers for the page, as built)
+ok(await ev(`fetch("/").then((r) => r.status === 200 && /(^|; )frame-ancestors 'self'(;|$)/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-frame-options") === "SAMEORIGIN", () => false)`), "offline, the service worker's kept page says only this site may frame it (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)");
 ok(await ev(`fetch("/").then((r) => r.status === 200 && r.headers.get("cross-origin-opener-policy") === "same-origin" && !!r.headers.get("content-security-policy"), () => false)`), "offline, the service worker serves the kept page with the build's status and headers");
 const fetchPage = () => ev(`fetch("/", { cache: "no-store", redirect: "manual" }).then((r) => ({ status: r.status, type: r.type, coop: r.headers.get("cross-origin-opener-policy"), csp: !!r.headers.get("content-security-policy"), refresh: r.headers.get("refresh") }), (e) => ({ refused: String(e) }))`);
 const asBuilt = (r) => !!r.refused || (r.status === 200 && r.coop === "same-origin" && r.csp && !r.refresh);
