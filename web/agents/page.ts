@@ -19,7 +19,9 @@ import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { mountNotebook, type AgentCells, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 
-const LATEX_URL = "/sagebrush-latex.js";
+// (the LaTeX editor, in builds that have it: web/build.ts's define)
+declare const __SB_LATEX__: boolean | undefined;
+const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -78,12 +80,15 @@ function emitTo(thread: Thread, turn_id: string, d: Draft) {
     const art = d as { kind?: string; path?: string };
     if (art.kind === "notebook" && art.path && workspace) {
       const path = art.path;
-      workspace.read(path).then(
-        (r) => {
-          const cells = (r.content as { cells?: { id?: string; code?: string }[] } | null)?.cells ?? [];
-          agentCellsByPath.set(path, new Map(cells.filter((c) => typeof c.id === "string" && typeof c.code === "string").map((c) => [c.id!, c.code!])));
-        },
-        () => {},
+      agentCellsByPath.set(
+        path,
+        workspace.read(path).then(
+          (r) => {
+            const cells = (r.content as { cells?: { id?: string; code?: string }[] } | null)?.cells ?? [];
+            return new Map(cells.filter((c) => typeof c.id === "string" && typeof c.code === "string").map((c) => [c.id!, c.code!]));
+          },
+          () => null,
+        ),
       );
     }
   }
@@ -390,7 +395,7 @@ const hosts = new Map<string, Host>();
 let paneThread: string | null = null;
 let headKey = "";
 // The cells the agent wrote in each notebook (path -> cell id -> source), for the written-by label.
-const agentCellsByPath = new Map<string, AgentCells>();
+const agentCellsByPath = new Map<string, Promise<AgentCells | null>>();
 
 const hostKey = (threadId: string, artifactId: string) => `${threadId}\u0000${artifactId}`;
 
@@ -528,7 +533,7 @@ function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
         if (current().id === threadId) renderArtifacts();
       },
     };
-    void mountNotebook(workspace, a.path, $(".file-body", h.el), ui, agentCellsByPath.get(a.path) ?? null).then(
+    void mountNotebook(workspace, a.path, $(".file-body", h.el), ui, agentCellsByPath.get(a.path) ?? Promise.resolve(null), () => hosts.get(h.key) === h).then(
       (nb) => {
         if (hosts.get(h.key) !== h) return void nb.dispose(); // (closed while it opened: nothing of it stays)
         h.nb = nb;
@@ -600,8 +605,11 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): { text: (
     ta.oninput = () => changed(ta.value);
     box.append(ta);
     set = (v) => (ta.value = v);
-    if (/\.tex$/i.test(path)) {
-      // (LaTeX: the LaTeX editor's live preview where this build has it; else this text, and no editor link)
+    if (/\.tex$/i.test(path) && !__SB_LATEX__) {
+      // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
+      saved.insertAdjacentHTML("afterend", ` <a class="open-full" href="/w${esc(path)}" target="_blank" rel="noopener">Open in Sagebrush</a>`);
+    } else if (/\.tex$/i.test(path)) {
+      // (LaTeX: the LaTeX editor's live preview, in place of the text)
       import(/* @vite-ignore */ LATEX_URL).then(
         (m: { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { setText(t: string): void } }) => {
           if (!m.mountEditor || !box.isConnected) return;

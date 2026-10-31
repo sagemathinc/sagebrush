@@ -8,8 +8,8 @@ import type { Workspace } from "../workspace/api";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
 export const FENCE = "__sagebrush-workspace__";
-const NOTEBOOK_URL = "/sagebrush-notebook.js";
-const WORKER_URL = "/sagebrush-worker.js";
+// (the site's root: this page is /agents/agents.js; built as a URL so the bundler leaves the import to the browser)
+const SITE = new URL("../", import.meta.url);
 
 export type NotebookUi = {
   /** The pane's saved indicator. */
@@ -61,7 +61,7 @@ export function fenceMoved(f: Fence, seen: Fence): boolean {
   return !!seen && (f.workspace !== seen.workspace || f.generation !== seen.generation);
 }
 
-export async function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui: NotebookUi, agentCells: AgentCells | null): Promise<NotebookHost> {
+export async function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui: NotebookUi, agentCellsOf: Promise<AgentCells | null>, wanted: () => boolean = () => true): Promise<NotebookHost> {
   const el = document.createElement("div");
   el.className = "nb-artifact";
   box.append(el);
@@ -78,6 +78,7 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
   let kernel: any = null;
   let unwatch: (() => void) | null = null;
   let running = 0;
+  let bound = false;
   const fail = (text: string) => {
     ui.bar({ kind: "refused", text });
     return host;
@@ -85,20 +86,27 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
   const host: NotebookHost = {
     el,
     async flush() {
-      if (!nb) return;
-      nb.detach(); // (its pending save goes out now)
-      await nb.mayLeave(); // (and is made, or said why not)
+      if (!nb || !bound) return;
+      nb.flush(); // (its pending save goes out now, the notebook still attached)
+      await nb.saved(); // (and is made, or said why not)
     },
     async dispose() {
-      alive = false;
       unwatch?.();
       unwatch = null;
+      if (nb && bound && alive) {
+        nb.flush();
+        await nb.saved().catch(() => {});
+      }
+      alive = false;
+      bound = false;
       if (nb) {
         nb.detach();
         await nb.mayLeave().catch(() => {});
         nb.destroy();
       }
-      kernel?.worker?.terminate?.();
+      // (destroy leaves the page's one plot tooltip, shared by every notebook here: hidden, not removed)
+      for (const t of document.querySelectorAll<HTMLElement>(".sbnb-tip")) t.hidden = true;
+      kernel?.close();
       kernel = null;
       nb = null;
       el.remove();
@@ -115,19 +123,39 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
   };
 
   const entry = await ws.stat(path).catch(() => undefined);
-  if (!alive) return host;
+  if (!alive || !wanted()) return host; // (closed while it opened: nothing more is made)
   if (!entry || entry.kind !== "notebook" || !entry.ref) return fail("This notebook isn't in this browser's workspace.");
   const db = ws.main;
   if (!db) return fail("This browser has no storage for notebooks.");
   const ref = entry.ref;
+  // A copy beside it (a new file, never over another): "name (copy).ipynb", "name (copy 2).ipynb", ...
+  const keepCopy = async (doc: { mode?: string; cells?: unknown[] }) => {
+    const stem = path.replace(/\.ipynb$/i, "");
+    for (let i = 1; ; i++) {
+      const name = `${stem} (copy${i > 1 ? ` ${i}` : ""}).ipynb`;
+      try {
+        await ws.create(name, { content: { mode: doc.mode, cells: doc.cells }, mode: doc.mode });
+        return name;
+      } catch (e) {
+        if ((e as { code?: string }).code !== "exists" || i >= 50) throw e;
+      }
+    }
+  };
   const fence0 = await fenceOf(db);
   const journal = fence0?.phase === "journal";
 
-  const mod: any = await import(/* @vite-ignore */ NOTEBOOK_URL);
-  if (!alive) return host;
-  // (the worker is made on the first execute: WorkerKernel.execute starts it; nothing starts it here)
-  kernel = new mod.WorkerKernel({ createWorker: () => new Worker(WORKER_URL, { type: "module" }) });
-  nb = mod.createNotebook(nbRoot, { kernel, assetBase: "/", reactive: false, remotePictures: "click", readOnly: journal });
+  const mod: any = await import(new URL("sagebrush-notebook.js", SITE).href);
+  if (!alive || !wanted()) return host; // (closed while it opened: nothing more is made)
+  // The interpreter starts on the first Run, not before: its worker is made when the component first asks it to
+  // execute (the code was taken from the cell at the person's click, before this). Until then nothing else starts it
+  // (a completion waits for the first Run).
+  kernel = new mod.WorkerKernel({ createWorker: () => new Worker(new URL("sagebrush-worker.js", SITE), { type: "module" }) });
+  const execute = kernel.execute.bind(kernel);
+  kernel.execute = (code: string, o: unknown, sink: unknown) => {
+    if (!kernel.worker) kernel.start();
+    return execute(code, o, sink);
+  };
+  nb = mod.createNotebook(nbRoot, { kernel, assetBase: SITE.href, reactive: false, remotePictures: "click", readOnly: journal });
 
   // Running: the tab's mark (a cell element is .running while its code runs)
   const watchRunning = new MutationObserver(() => {
@@ -144,29 +172,47 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
     if (r?.content) nb.load(r.content);
     nb.setReadOnly(true);
     for (const b of nbRoot.querySelectorAll<HTMLButtonElement>("button")) b.disabled = true;
+    ui.saved("Read only here");
     ui.bar({ kind: "readonly", text: "This workspace saves notebooks through sync: open it in Sagebrush to run and edit it.", actions: [{ label: "Open in Sagebrush", run: () => open(`/w${path}`, "_blank", "noopener") }] });
     return host;
   }
 
-  const store = new mod.IdbStore(db, ref);
-  const mine = store; // (callbacks check they still belong to this store: none of them writes after a detach)
+  // The store, bound to this document while the pane shows it: once it lets go (gone, dispose), a save that was
+  // pending or comes late is refused here, never made, whatever document is now at the path.
+  const inner = new mod.IdbStore(db, ref);
+  bound = true;
+  const store = {
+    load: () => inner.load(),
+    save: (doc: unknown, o?: unknown) => (bound && alive ? inner.save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane")),
+    subscribe: (f: (d: unknown) => void) => inner.subscribe(f),
+  };
+  const mine = store; // (callbacks check they still belong to this store)
   await nb.attach(store);
-  if (!alive || nb?.store !== mine) {
+  if (!alive || !wanted() || !bound || nb?.store !== mine) {
+    bound = false;
     nb?.detach(); // (a late attach after dispose or a switch: let go at once)
     return host;
   }
   ui.saved("Saved");
   nb.on("dirty", () => alive && nb?.store === mine && ui.saved("Editing…"));
-  nb.on("saved", () => alive && nb?.store === mine && ui.saved("Saved"));
+  // (a save the store refused: shown as it says; if the workspace's fence moved (a reset, sync), the pane lets go)
+  nb.on("saved", (t: unknown) => {
+    if (!alive || nb?.store !== mine) return;
+    const refused = typeof t === "string" && t.startsWith("not saved");
+    ui.saved(refused ? (t as string) : "Saved");
+    if (refused) void checkFence();
+  });
   nb.on("remote", () => alive && nb?.store === mine && ui.saved("Updated from elsewhere"));
-  nb.onDetachedConflict((_doc: unknown, _theirs: unknown) => {
-    if (!alive) return;
-    ui.bar({ kind: "conflict", text: "Changed elsewhere (another tab, or Open in Sagebrush): your last changes here were kept as a copy, not saved over it.", actions: [] });
+  // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
+  nb.onDetachedConflict(async (doc: any) => {
+    const name = await keepCopy(doc);
+    if (alive) ui.bar({ kind: "conflict", text: `Changed elsewhere (another tab, or Open in Sagebrush): your last changes here were kept as ${name}, not saved over it.` });
   });
 
   // The file moved, went to Trash, was replaced, or the workspace was reset: stop saving here, keep what's shown.
   const gone = (why: string) => {
     if (!alive || !nb || nb.store !== mine) return;
+    bound = false; // (first: the pending save detach flushes is refused)
     nb.detach();
     nb.setReadOnly(true);
     ui.saved("Not saved");
@@ -179,13 +225,16 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
   const saveCopy = async () => {
     const snap = nb?.snapshot?.();
     if (!snap) return;
-    const name = path.replace(/\.ipynb$/i, "") + " (copy).ipynb";
     try {
-      await ws.create(name, { content: { ...snap, cells: snap.cells }, mode: snap.mode });
-      ui.bar({ kind: "readonly", text: `Saved as ${name}.` });
+      ui.bar({ kind: "readonly", text: `Saved as ${await keepCopy(snap)}.` });
     } catch (e) {
       ui.bar({ kind: "refused", text: `Couldn't save a copy: ${(e as Error).message}` });
     }
+  };
+  const checkFence = async () => {
+    const f = await fenceOf(db);
+    if (!alive || nb?.store !== mine) return;
+    if (fenceMoved(f, fence0)) gone("This workspace changed how it saves notebooks (sync, a reset, or a recovery).");
   };
   unwatch = ws.watch(async () => {
     const e = await ws.stat(path).catch(() => undefined);
@@ -193,12 +242,12 @@ export async function mountNotebook(ws: Workspace, path: string, box: HTMLElemen
     if (!e) return gone("This notebook was moved or removed.");
     if ((e as any).trashed) return gone("This notebook went to Trash.");
     if (e.ref !== ref) return gone("Another notebook replaced this one at the same path.");
-    const f = await fenceOf(db);
-    if (!alive || nb?.store !== mine) return;
-    if (fenceMoved(f, fence0)) gone("This workspace changed how it saves notebooks (sync, a reset, or a recovery).");
+    await checkFence();
   });
 
   // Written by the agent: a text label on each cell it wrote, while the cell still has that source and hasn't run.
+  const agentCells = await agentCellsOf.catch(() => null);
+  if (!alive || nb?.store !== mine) return host;
   if (agentCells?.size) {
     for (const c of nb.cells()) {
       if (agentCells.get(c.id) !== c.ta.value) continue;
