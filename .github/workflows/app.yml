@@ -76,10 +76,71 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
-      - run: npm install -g @tauri-apps/cli@^2
+      # (the exact CLI: its bundler, tauri-bundler 2.10.4, names the AppImage
+      # tools below; the iOS and Android workflows pin the same 2.12.4)
+      - run: npm install -g @tauri-apps/cli@2.12.4
+      # The AppImage tools, pinned: the bundler downloads them from GitHub
+      # unverified unless they are already in its tools directory
+      # (tauri-bundler 2.10.4 src/bundle/linux/appimage/linuxdeploy.rs: the
+      # cache dir's tauri/, each file skipped if it exists, AppRun-x86_64,
+      # linuxdeploy-07333c6-x86_64.AppImage, linuxdeploy-plugin-appimage.AppImage).
+      # So they are put there first, each checked by its SHA-256: a mismatch or
+      # a failed download is a red, never skipped.  The plugin is the tagged
+      # 1-alpha-20250213-1, not the bundler's moving "continuous" URL.
+      - name: the AppImage tools, pinned by SHA-256
+        if: runner.os == 'Linux'
+        run: |
+          T="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$T"
+          cd "$T"
+          curl -fsSL -o AppRun-x86_64 https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+          curl -fsSL -o linuxdeploy-07333c6-x86_64.AppImage https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-appimage.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage
+          # (printed before the check: the packet's cross-check of the pins)
+          sha256sum AppRun-x86_64 linuxdeploy-07333c6-x86_64.AppImage linuxdeploy-plugin-appimage.AppImage
+          printf '%s\n' \
+            'f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f  AppRun-x86_64' \
+            '36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62  linuxdeploy-07333c6-x86_64.AppImage' \
+            '992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3  linuxdeploy-plugin-appimage.AppImage' \
+            > /tmp/appimage-tools.sha256
+          sha256sum -c --strict /tmp/appimage-tools.sha256
+          chmod 0755 AppRun-x86_64 linuxdeploy-07333c6-x86_64.AppImage linuxdeploy-plugin-appimage.AppImage
+          # The bundler patches linuxdeploy in place on every build: its
+          # prepare_tools ends with `dd if=/dev/zero bs=1 count=3 seek=8
+          # conv=notrunc of=<linuxdeploy>` ("This should prevent linuxdeploy to
+          # be detected by appimage integration tools"), zeroing the AppImage
+          # magic "AI\x02".  So after the build linuxdeploy must be exactly the
+          # pinned bytes with that patch, and the other two exactly the pins.
+          [ "$(od -An -tx1 -j8 -N3 linuxdeploy-07333c6-x86_64.AppImage | tr -d ' \n')" = 414902 ] || { echo "FAIL: linuxdeploy's bytes 8-10 are not the AppImage magic AI\\x02"; exit 1; }
+          cp linuxdeploy-07333c6-x86_64.AppImage /tmp/linuxdeploy-patched
+          dd if=/dev/zero of=/tmp/linuxdeploy-patched bs=1 count=3 seek=8 conv=notrunc 2> /dev/null
+          grep -v ' linuxdeploy-07333c6-x86_64.AppImage$' /tmp/appimage-tools.sha256 > /tmp/appimage-tools-after.sha256
+          echo "$(sha256sum < /tmp/linuxdeploy-patched | cut -d' ' -f1)  linuxdeploy-07333c6-x86_64.AppImage" >> /tmp/appimage-tools-after.sha256
+          rm /tmp/linuxdeploy-patched
+          cat /tmp/appimage-tools-after.sha256
+          # (exactly three well-formed lines: an empty hash from a failed
+          # sha256sum above must not leave a list that checks fewer files)
+          [ "$(grep -c -E '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' /tmp/appimage-tools-after.sha256)" = 3 ] && [ "$(wc -l < /tmp/appimage-tools-after.sha256)" = 3 ] || { echo "FAIL: the expected-after list is not three well-formed lines"; exit 1; }
       - name: build
+        if: runner.os != 'Linux'
         working-directory: app/src-tauri
         run: tauri build --ci
+      # (Linux: its output kept, for the check below)
+      - name: build (Linux)
+        if: runner.os == 'Linux'
+        working-directory: app/src-tauri
+        # (an explicit bash is -eo pipefail: the build's status, not tee's)
+        shell: bash
+        run: tauri build --ci 2>&1 | tee /tmp/tauri-build.log
+      # (the bundler must have used the pinned tools: it downloaded nothing,
+      # and they are still the pinned bytes, linuxdeploy with only its patch)
+      - name: the AppImage tools were the pinned ones
+        if: runner.os == 'Linux'
+        run: |
+          if grep -n 'Downloading http' /tmp/tauri-build.log; then echo "FAIL: the bundler downloaded a tool (above), so a pin's file name no longer matches"; exit 1; fi
+          grep -q 'Bundling .*\.AppImage' /tmp/tauri-build.log || { echo "FAIL: no AppImage bundled"; exit 1; }
+          cd "${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          sha256sum -c --strict /tmp/appimage-tools-after.sha256
       - name: self-test (Linux, in a virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
