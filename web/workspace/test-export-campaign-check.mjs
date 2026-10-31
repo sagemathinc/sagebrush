@@ -18,7 +18,7 @@ const base = () => [
 const X = (name, tid, tsMs, durMs) => ({ name, ph: "X", pid: 1, tid, ts: tsMs * 1000, dur: durMs * 1000 });
 const W = [1000 * 1000, 9000 * 1000]; // the export window, µs
 const gcOf = (events) => majorGcs(events, W[0], W[1]);
-const runWith = (over) => ({ c8: 120, mapped: true, ended: true, errored: false, longTasks: [], majorGc: [], progressGap: 100, heartbeatGap: 20, ...over });
+const runWith = (over) => ({ c8: 120, mapped: true, ended: true, errored: false, longTasks: [], majorGc: [], progressWrites: 50, progressGap: 100, heartbeatGap: 20, ...over });
 const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.length > 0;
 
 {
@@ -51,6 +51,21 @@ const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.len
   const hb = [0, 20, 40, 571, 591];
   const j = judgeRun(runWith({ heartbeatGap: maxGap(hb) }));
   check(maxGap(hb) === 531 && j.heartbeatGap === 531 && j.fix.length === 0, "a heartbeat series with a 531 ms gap: reported as 531, and no failure from the heartbeat alone");
+}
+// ---- r2 (daybreak2's R1, R2): each measure's availability; absent evidence is INVALID, never zero or a pass
+{
+  check(maxGap([]) === null && maxGap([5]) === null, "a series of zero or one time has no gap (null, not 0)");
+  const inv = (over) => { const j = judgeRun(runWith(over)); return !j.valid && j.fix.length === 0; };
+  check(inv({ progressWrites: 0, progressGap: null }), "no progress rewrite observed: the run is INVALID, not a pass");
+  check(inv({ progressWrites: 1, progressGap: null }), "one progress rewrite observed: INVALID");
+  check(inv({ progressWrites: 5, progressGap: 100 }), "five rewrites (the measure not activated: more than 10 needed): INVALID");
+  check(judgeRun(runWith({ progressWrites: 5, progressGap: 300 })).fix.length === 1, "five rewrites with a 300 ms gap: FIX (an observed gap over the bound counts, activated or not)");
+  check(inv({ mapped: false, majorGc: [70] }), "unmapped with a GC value supplied: not counted (no window), the run INVALID, no FIX");
+  check(inv({ mapped: false, majorGc: null }), "unmapped, the GC measure unavailable: INVALID");
+  check(inv({ majorGc: null }), "mapped but no main thread in the trace (GC unavailable): INVALID");
+  check(judgeRun(runWith({ c8: 40, majorGc: [70] })).fix.length === 1, "C8 void but mapped, a 70 ms MajorGC: FIX");
+  check(judgeRun(runWith({ errored: true, majorGc: [70] })).fix.length === 1, "an error after a mapped window with a 70 ms MajorGC: FIX");
+  check(outcome([runWith({}), runWith({}), runWith({ progressWrites: 0, progressGap: null }), runWith({}), runWith({})]).outcome === "INVALID", "five runs, one with no progress observed: INVALID");
 }
 // ---- the outcome's precedence
 {

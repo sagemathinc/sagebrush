@@ -23,7 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { judgeRun, majorGcs, maxGap } from "./export-campaign-check.mjs";
+import { judgeRun, majorGcs, maxGap, PROGRESS_OBSERVER } from "./export-campaign-check.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const CI = process.argv.includes("--ci");
@@ -270,6 +270,35 @@ try {
       check(c.errors.length === 0, "resp: no page errors: " + c.errors.slice(0, 3).join(" | "));
     } finally { await c.close(); }
   }
+  // ---- observer (r2, daybreak2's R3): the frozen progress observer in a page of its own making: a progress line in a
+  // .sbfprev, rewritten at 0, 100, 200, then 600 and 700 ms (a 400 ms stall), while other nodes (a sibling in the panel,
+  // a span outside it, the line's own panel's other <p>) change every 30 ms throughout.  The observer must count exactly
+  // the five rewrites and see the stall; the old body-wide way of counting sees none.  A second series rewrites the
+  // line every 100 ms: no gap over 250 ms.  (The exact 250/251 bound is the parser's fixture.)
+  if (PASSES.has("observer")) {
+    const c = await open();
+    try {
+      // (each series its own sink: an earlier series' observer is still attached to the body)
+      const run = (times, sink) => c.ev(`new Promise((ok) => {
+        document.body.innerHTML = '<div class="sbfprev"><p class="note" id="line"></p><p class="note" id="other">x</p><span id="sib">0</span></div><span id="out">0</span>';
+        const line = document.getElementById("line"), other = document.getElementById("other"), sib = document.getElementById("sib"), out = document.getElementById("out");
+        const raw = [], body = [];
+        window[${JSON.stringify(sink)}] = raw;
+        ${PROGRESS_OBSERVER(`window[${JSON.stringify(sink)}]`)};
+        new MutationObserver(() => { if (/ written/.test(document.querySelector(".sbfprev").textContent)) body.push(performance.now()); }).observe(document.body, { subtree: true, childList: true, characterData: true });
+        let n = 0; const noise = setInterval(() => { n++; sib.textContent = String(n); out.textContent = String(n); other.textContent = "x " + n + " written"; }, 30);
+        const t0 = performance.now();
+        for (const [i, t] of ${JSON.stringify(times)}.entries()) setTimeout(() => { line.textContent = (i + 1) * 10 + " of 100 files and folders · " + (i + 1) + " KB written"; }, t);
+        setTimeout(() => { clearInterval(noise); let g = 0, bg = 0; for (let i = 1; i < raw.length; i++) g = Math.max(g, raw[i] - raw[i - 1]); for (let i = 1; i < body.length; i++) bg = Math.max(bg, body[i] - body[i - 1]); ok({ writes: raw.length, gap: Math.round(g), noise: n, bodyGap: Math.round(bg), bodyCount: body.length }); }, ${Math.max(...times)} + 150);
+      })`);
+      const a = await run([0, 100, 200, 600, 700], "__obsA");
+      check(a.writes === 5 && a.noise >= 20 && a.gap >= 390 && a.gap <= 420, "observer: five line rewrites among " + a.noise + " unrelated mutations each 30 ms: exactly 5 counted, the 400 ms stall seen (" + a.gap + " ms; the body-wide count saw " + a.bodyCount + " with a longest gap of " + a.bodyGap + " ms)");
+      check(a.bodyGap < 100, "observer: the body-wide way of counting would have hidden the stall (" + a.bodyGap + " ms), which is why it isn't used");
+      const b = await run([0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100], "__obsB");
+      check(b.writes === 12 && b.gap <= 150, "observer: a line rewritten every 100 ms among unrelated mutations: " + b.writes + " counted (12 made), no gap over 250 ms (" + b.gap + " ms)");
+    } finally { await c.close(); }
+  }
+
   // ---- capid (E1 r2a, daybreak2's and grader's buffering controls): the capture log at N entries, as the tree check's
   // lookup reads it after its settle, byte for byte the log an unbuffered writer makes: a reference built in the page
   // from the raw IndexedDB rows, in their key (path) order, Trash and the root left out.  A file written after its
@@ -403,7 +432,8 @@ try {
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`).replace(`window.__exp = { blob, name, then };`, `window.__expT = performance.now(); window.__exp = { blob, name, then };`));
       const events = [];
       // (campaign 3: the progress line's rewrites and a 20 ms heartbeat, in the page, as the resp pass measures them)
-      await c.ev(`(() => { window.__raw = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20); new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; if (/ written/.test(t)) window.__raw.push(performance.now()); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+      // (r2, daybreak2's R3: the frozen observer, which counts only the progress line's own rewrites)
+      await c.ev(`(() => { window.__raw = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20); ${PROGRESS_OBSERVER("window.__raw")}; return 1; })()`);
       await c.ev(`(() => { window.__tasks = []; window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__tasks.push([e.startTime, e.duration]); }); window.__lto.observe({ type: "longtask", buffered: false }); return 1; })()`);
       // (C8, in this context, from a page timer)
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = Math.max(0, ...window.__tasks.map((x) => x[1])); window.__tasks = []; ok(l); }, 400); })`);
@@ -454,9 +484,12 @@ try {
       // (campaign 3, the frozen parser and gate: MajorGC on the main thread from the click to the handoff, whether or
       // not inside a task; the progress line's longest rewrite gap; the heartbeat's, reported only)
       const win = [(clickT + offset) * 1000, ((page.endT ?? m2) + offset) * 1000];
-      const record = { c8: Math.round(c8), mapped, ended, errored: c.errors.length > 0, longTasks: out.map((t) => ({ ms: t.ms, class: t.class })), majorGc: mapped ? majorGcs(events, win[0], win[1]) : [], progressGap: Math.round(maxGap(page.raw)), progressWrites: page.raw.length, heartbeatGap: Math.round(maxGap(page.hb)) };
+      // (r2, daybreak2's R2: a measure that couldn't be taken is null, never 0: GC needs the mapped window and a main
+      // thread; a gap needs two rewrites)
+      const pg = maxGap(page.raw), hg = maxGap(page.hb);
+      const record = { c8: Math.round(c8), mapped, ended, errored: c.errors.length > 0, longTasks: out.map((t) => ({ ms: t.ms, class: t.class })), majorGc: mapped ? majorGcs(events, win[0], win[1]) : null, progressGap: pg === null ? null : Math.round(pg), progressWrites: page.raw.length, heartbeatGap: hg === null ? null : Math.round(hg) };
       const j = judgeRun(record);
-      console.log("(campaign: run record " + JSON.stringify({ ...record, majorGcOver20: record.majorGc.filter((g) => g > 20).map((g) => Math.round(g)), verdict: { valid: j.valid, fix: j.fix, longNonExport: j.longNonExport } }) + ")");
+      console.log("(campaign: run record " + JSON.stringify({ ...record, majorGcOver20: (record.majorGc ?? []).filter((g) => g > 20).map((g) => Math.round(g)), verdict: { valid: j.valid, fix: j.fix, invalid: j.invalid, longNonExport: j.longNonExport } }) + ")");
       if (process.env.TRACE_OUT) { const f = join(process.env.TRACE_OUT, `trace-${Date.now()}.json`); writeFileSync(f, JSON.stringify({ window: win, run: record, events })); console.log("(campaign: the trace saved to " + f + ")"); }
     } finally { await c.close(); }
   }
