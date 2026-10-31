@@ -2,21 +2,21 @@
   <!-- Sagebrush's share card (og:image, twitter:image): static, 1200 x 630. Everything that matters stays
        inside the central 1200 x 600 (X's 2:1 crop) with 60 px margins; the wordmark is legible at 300 px wide. -->
   <rect width="1200" height="630" fill="#fbfaf7"/>
-  <!-- the mark: the app icon's sprig, on its green -->
-  <rect x="60" y="75" width="480" height="480" rx="56" fill="#668a5b"/>
-  <g stroke="#f4f1e6" stroke-width="21" stroke-linecap="round" fill="none" transform="translate(60 75) scale(1.548)">
-    <path d="M155 113 V253"/>
-    <path d="M155 166 L203 104"/>
-    <path d="M155 168 L106 128"/>
-    <path d="M155 206 L198 166"/>
-    <path d="M155 206 L116 181"/>
-  </g>
+  <!-- the mark: the app icon (design/logo/sagebrush-logo.svg, logo F), its corners rounded -->
+  <svg x="60" y="75" width="480" height="480" viewBox="0 0 100 100">
+    <rect width="100" height="100" rx="11.67" fill="#AE472A"/>
+    <path fill="#FADEB6" d="M14.5 63.4 L16.5 61.8 L18.8 59.8 L25.3 58.4 L26.3 56 L27.4 54 L28.6 52 L30.2 50 L32.8 48 L33.3 43.3 L43.5 43.3 L43.5 48.6 L45.7 48.6 L45.7 45 L47.3 45 L47.3 49.2 L47.9 50 L49.6 52 L43 54.2 L37.1 56 L34.4 58 L31.2 60 L29.6 62 L28.9 63.4 Z"/>
+    <path fill="#FADEB6" d="M55.6 63.4 L57 62 L59.7 60 L63.6 58.6 L64 55.2 L67.7 55.2 L67.7 51 L68.2 49.6 L69.6 49.6 L70.4 51 L70.4 55 L71 56 L72 58 L76.9 60 L79.6 62 L81.6 63.4 Z"/>
+    <path fill="#FADEB6" d="M58 39.5 C57.7 40.7 58 44.7 57.6 46.5 C57.2 48.3 56.9 49.1 55.6 50.2 C54.3 51.4 52.5 52.1 50 53.4 C47.5 54.7 42.6 56.8 40.4 58.2 C38.2 59.6 36.6 60.7 36.7 62 C36.8 63.3 38.6 64.7 41.2 66 C43.8 67.3 50.3 68.7 52.4 69.9 C54.5 71.1 54.9 72.2 53.8 73.4 C52.6 74.6 49.2 75.6 45.5 77 C41.8 78.4 34.9 80.6 31.5 82 C28.1 83.4 25.4 84.7 25.3 85.4 C25.2 86.2 27.7 86.2 31 86.5 C34.3 86.8 40.2 87.7 45 87.5 C49.8 87.3 55.7 86.4 60 85.2 C64.3 84 68.4 82.3 70.6 80.6 C72.8 78.9 73.4 76.8 73.3 75 C73.2 73.2 72.4 71.5 70 70 C67.6 68.5 62.7 67.2 59 66 C55.3 64.8 50.2 63.7 48 62.6 C45.8 61.5 45.2 60.8 45.9 59.6 C46.6 58.4 49.9 56.7 52 55.2 C54.1 53.7 57.1 52.3 58.4 50.6 C59.7 48.9 59.5 46.9 59.7 45 C59.9 43.1 59.7 40.4 59.4 39.5 C59.1 38.6 58.3 38.3 58 39.5 Z"/>
+    <path fill="#BAC49E" d="M59.2 40.8 C54.5 36 54.8 28.5 60 24 C65 19.6 72 17.5 79.3 13.4 C79 21 77.5 28.5 71.5 33.6 C67 37.4 62.5 39.3 59.9 40.8 Z"/>
+    <path fill="#AE472A" d="M57.7 37 C57.3 31 62 26.2 72.6 22.3 C66 26.6 61.6 31.2 59.5 36.8 Z"/>
+  </svg>
   <!-- the words -->
   <g font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" fill="#1f2421">
     <text x="610" y="258" font-size="86" font-weight="700" letter-spacing="-1.5">Sagebrush</text>
-    <text x="612" y="338" font-size="46" font-weight="600" fill="#4a6b49">A shared notebook</text>
+    <text x="612" y="338" font-size="46" font-weight="600" fill="#AE472A">A shared notebook</text>
     <text x="612" y="398" font-size="32" fill="#5d645f">Open it to run it in your browser.</text>
     <text x="612" y="500" font-size="28" fill="#5d645f" letter-spacing="0.5">sagebrush.space</text>
   </g>
-  <rect x="612" y="438" width="120" height="6" rx="3" fill="#8aa37b"/>
+  <rect x="612" y="438" width="120" height="6" rx="3" fill="#AE472A"/>
 </svg>
