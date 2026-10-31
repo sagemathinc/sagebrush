@@ -20,7 +20,16 @@ LOGC=$(mktemp)
 PLOG=$(mktemp)
 fail() { echo "FAIL: $*"; exit 1; }
 on_exit() {
-  local rc=$?
+  local rc=$? n
+  # (information every run, not judged: the debug app can abort in its
+  # teardown after the designed app.exit (FORTIFY, a destroyed mutex; run
+  # 41202232761, a known issue); a count of those lines in the start pid's
+  # log, after a moment for the teardown, so how often it happens is visible)
+  if [ -n "${pid:-}" ]; then
+    sleep 2
+    n=$(timeout -k 2 10 adb logcat -d -v threadtime 2>/dev/null | awk -v p="$pid" '$3 == p && /FORTIFY|Fatal signal/' | wc -l) || n="?"
+    echo "info: the exit teardown (known issue, not judged): $n FORTIFY or Fatal signal line(s) in pid $pid's log"
+  fi
   if [ "$rc" != 0 ]; then
     echo "--- the app's log (last 400 lines: the app, WebView and chromium tags)"
     adb logcat -d -t 4000 2>/dev/null | grep -E "$PKG|chromium|WebView|Tauri|RustStdout|AndroidRuntime" | tail -400 || true
@@ -69,11 +78,18 @@ done
 [ -s "$REPORT" ] || fail "no self-test report after 300 s"
 tr -d '\r' < "$REPORT" > "$REPORT.clean" && mv "$REPORT.clean" "$REPORT"
 # (selftest_report ends with app.exit (lib.rs), so the app may already be gone:
-# empty is the designed exit; any OTHER pid is a restart, so its log can't be
-# read as one run.  The report above and, below, the sentinel and every marker
-# must come from the start pid's own lines, so an early crash still fails.)
-now=$(adb shell pidof "$PKG" | tr -d '\r' || true)
-[ "$now" = "$pid" ] || [ -z "$now" ] || fail "the app's process changed during the self-test (pid $pid, now '$now'): its log can't be read as one run"
+# empty is the designed exit; the start pid listed with others is still this
+# run (a process it forked, such as Chromium's crash handler when the app
+# aborts in its exit); others WITHOUT the start pid is a restart, so its log
+# can't be read as one run.  pidof's words are compared whole, as a set.  The
+# report above and, below, the sentinel and every marker must come from the
+# start pid's own lines, so an early crash still fails.)
+now=$(adb shell pidof "$PKG" | tr -s '\r\n\t' '   ' | sed 's/^ *//; s/ *$//' || true)
+case " $now " in
+  "  " | " $pid ") ;;
+  *" $pid "*) echo "info: pidof lists more than the start pid $pid: '$now'" ;;
+  *) fail "the app's process changed during the self-test (pid $pid, now '$now'): its log can't be read as one run" ;;
+esac
 echo "--- report"
 cat "$REPORT"
 echo "---"
