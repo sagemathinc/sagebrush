@@ -52,6 +52,19 @@ export interface TerminalOptions {
   commands?: Record<string, PanelCommand>;
   /** a line above the prompt in a tab's first terminal (web/shell/terminal.ts: what commands do to your files) */
   intro?: string;
+  /** Tab completion, help NAME's routing and ls colours (web/shell/panel-tab.ts), the page's like `commands` */
+  tab?: PanelTab;
+}
+export interface TabState { busy: boolean; cwd: string; ended: boolean }
+export interface PanelTab {
+  /** a Tab in the input: true if it is the completion's (the panel then prevents the browser's own) */
+  key(input: HTMLTextAreaElement, root: HTMLElement, state: () => TabState): boolean;
+  /** an edit, a cd, a run, reset, end: what a Tab has in flight is superseded, its block put away */
+  reset(): void;
+  /** what bash runs for a typed line the page's commands would otherwise take or answer (help NAME, compgen's other forms), or null */
+  route(argv: string[] | null, line: string): string | null;
+  /** a command's stdout, coloured if it is a plain ls typed alone */
+  colour(line: string, out: string, cwd: string): Promise<string>;
 }
 
 /** A page command: its output through `io`, Stop through `io.signal`; resolves with its exit status. */
@@ -203,7 +216,7 @@ export class TerminalPanel {
     this.note.id = "sb-term-note";
     this.note.setAttribute("aria-live", "polite");
     this.input.addEventListener("keydown", (e) => this.key(e));
-    this.input.addEventListener("input", () => this.grow());
+    this.input.addEventListener("input", () => (this.grow(), this.opts.tab?.reset()));
     root.addEventListener("keydown", (e) => this.globalKey(e));
     this.setCwd("/");
     document.body.appendChild(root);
@@ -267,6 +280,7 @@ export class TerminalPanel {
   /** ✕ ends the session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
+    this.opts.tab?.reset();
     this.ended = true;
     this.hide();
     removeEventListener("resize", this.place);
@@ -385,6 +399,7 @@ export class TerminalPanel {
     const ta = this.input;
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
+      this.opts.tab?.reset();
       if (this.running) return this.say("A command is running: Stop it first.");
       const s = ta.value;
       if (s.trim() === "") {
@@ -408,7 +423,8 @@ export class TerminalPanel {
         }
         return;
       }
-      const argv = words(word);
+      const argv = words(word), via = this.opts.tab?.route(argv, s);
+      if (via) return void this.submit(s, via);
       if (argv && argv.length && Object.hasOwn(this.opts.commands ?? {}, argv[0])) {
         void this.builtin(s, argv);
         return;
@@ -427,8 +443,9 @@ export class TerminalPanel {
       this.hpos++;
       ta.value = this.hpos === this.history.length ? this.draft : this.history[this.hpos];
       this.grow();
-    } else if (e.key === "Tab") {
-      // (no completion in the first release; Tab moves focus as usual)
+    } else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // (the page's completion takes it only at a word's end; otherwise Tab moves focus as usual: no keyboard trap)
+      if (this.opts.tab?.key(ta, this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }))) e.preventDefault();
     }
   }
 
@@ -593,12 +610,13 @@ export class TerminalPanel {
     }
   }
 
-  private async submit(script: string) {
-    this.remember(script);
+  /** `script` runs; `line`, what was typed (help NAME's), is what the prompt shows and history keeps. */
+  private async submit(line: string, script = line) {
+    this.remember(line);
     this.say("");
     this.input.value = "";
     this.grow();
-    const cmd = this.newCmd(`${this.cwd} $ ${script}`);
+    const cmd = this.newCmd(`${this.cwd} $ ${line}`);
     if (!this.ready) {
       // (the first command while bash loads: says so, under its prompt, until the shell is up)
       const wait = this.addLine(cmd, "Starting the shell\u2026", "sb-term-loading");
@@ -631,6 +649,7 @@ export class TerminalPanel {
           out = out.slice(0, k);
         }
       }
+      if (script === line && this.opts.tab) out = await this.opts.tab.colour(line, out, this.cwd);
       await this.paint(cmd, out, r.stderr, ctl.signal);
       if (r.code !== 0) end(`exit ${r.code}`);
       status = r.code === 0 ? "done" : `exit ${r.code}`;
