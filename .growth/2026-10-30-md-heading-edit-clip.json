@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "A Markdown heading written in is not cut off (William's report, Oct 30): notebook.css's first-child margin rule gains :not(.mb-edit), so it no longer moves the highlighted copy of a cell's first block below its field (blocks.ts only reorders two statements: no growth). Measured locally with CI's bun 1.4.4 tool: master 78cf5353 against this change; engine/sagebrush-notebook.js +14 exact, cli/pyjs.cjs +12 marked 40 (its embedded-wasm formula drifts by a few bytes; +20 against cdba6c0c).",
+  "bytes": {
+    "cli/pyjs.cjs": 40,
+    "engine/sagebrush-notebook.js": 14
+  }
+}

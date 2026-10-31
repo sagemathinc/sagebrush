@@ -1,0 +1,9 @@
+Executable=/x/Sagebrush.app/Sagebrush
+Identifier=space.sagebrush.notebook
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=81329 flags=0x0(none) hashes=2530+7 location=embedded
+Signature size=4790
+Authority=Apple Development: Someone (ABCDE12345)
+Authority=Apple Worldwide Developer Relations Certification Authority
+Authority=Apple Root CA
+TeamIdentifier=ABCDE12345

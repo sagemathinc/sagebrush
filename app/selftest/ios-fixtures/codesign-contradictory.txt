@@ -1,0 +1,6 @@
+Executable=/x/Sagebrush.app/Sagebrush
+Identifier=space.sagebrush.notebook
+Signature size=4790
+Authority=Apple Development: Someone (ABCDE12345)
+TeamIdentifier=ABCDE12345
+/x/Sagebrush.app: code object is not signed at all

@@ -1,0 +1,2 @@
+ M app/src-tauri/gen/apple/sagebrush-app_iOS/Info.plist
+?? app/src-tauri/gen/apple/sagebrush-app_iOS/extra.txt

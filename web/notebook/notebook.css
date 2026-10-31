@@ -117,7 +117,7 @@
 .sbnb .cell.markdown.rendered .mdout { display: block; }
 .sbnb .cell.markdown.rendered .ed, .sbnb .cell.markdown.blocks .ed { display: none; }
 .sbnb .cell .mb { padding: 0 10px; overflow-wrap: anywhere; }
-.sbnb .mdout > :first-child, .sbnb .mb > :first-child > :first-child, .sbnb .mb > .mb-edit:first-child { margin-top: .2em; }
+.sbnb .mdout > :first-child, .sbnb .mb > :first-child:not(.mb-edit) > :first-child, .sbnb .mb > .mb-edit:first-child { margin-top: .2em; }
 .sbnb :is(.mdout, .mb) :is(h1, h2, h3, h4) { margin: .6em 0 .3em; line-height: 1.25; }
 .sbnb :is(.mdout, .mb) h1, .sbnb .mb-edit.mb-h1 { font-size: 1.7em; } .sbnb :is(.mdout, .mb) h2, .sbnb .mb-edit.mb-h2 { font-size: 1.4em; } .sbnb :is(.mdout, .mb) h3, .sbnb .mb-edit.mb-h3 { font-size: 1.2em; }
 .sbnb :is(.mdout, .mb) :is(p, ul, ol, blockquote, table, pre) { margin: .5em 0; }

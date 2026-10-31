@@ -52,6 +52,9 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "iOS": {
+      "minimumSystemVersion": "16.0"
     }
   }
 }
