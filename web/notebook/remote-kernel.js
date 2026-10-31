@@ -71,7 +71,34 @@ function validTakeover(r) {
   if (!Array.isArray(r.applied_before_takeover) || !r.applied_before_takeover.every(isOpEntry)) return false;
   if (!Array.isArray(r.in_flight) || !r.in_flight.every(isOpEntry)) return false;
   if (r.applied_before_takeover.some((a) => a.kind === "restart" || a.kind === "delete") && !isInt(r.incarnation)) return false;
+  // (continuity, when the gateway sends it: the epoch it was asked from and whether this client was its sole owner since)
+  if (r.continuity !== undefined && !(r.continuity && typeof r.continuity === "object" && isInt(r.continuity.from_epoch) && typeof r.continuity.sole === "boolean")) return false;
   return true;
+}
+
+/**
+ * The loss recovery's bounds (plan r8 F3/F4): a run's record asked at most 3 times, 10 s each, 500 then 1000 ms
+ * apart (31.5 s at most); a fence's takeover POSTs 15 s each, one transaction of 100 s for all of them.
+ */
+export const RECOVERY = Object.freeze({ reconcileGetMs: 10_000, reconcileWaits: Object.freeze([500, 1000]), fencePostMs: 15_000, fenceTotalMs: 100_000 });
+
+// (the page's timers, which don't keep a process alive; tests inject a clock)
+const REAL_TIMERS = Object.freeze({
+  setTimeout: (f, ms) => { const t = setTimeout(f, ms); t?.unref?.(); return t; },
+  clearTimeout: (t) => clearTimeout(t),
+  now: () => Date.now(),
+});
+// (a signal aborted when any of `signals` is; its listeners removed by the returned off())
+function anySignal(signals) {
+  const ctl = new AbortController();
+  const offs = [];
+  for (const s of signals) {
+    if (s.aborted) { ctl.abort(); break; }
+    const f = () => ctl.abort();
+    s.addEventListener("abort", f, { once: true });
+    offs.push(() => s.removeEventListener("abort", f));
+  }
+  return { signal: ctl.signal, off: () => offs.splice(0).forEach((f) => f()) };
 }
 
 /** What the page says when a request ends without running, or is stopped (the plan's §9.4 notes). */
@@ -183,22 +210,28 @@ export class RemoteKernel {
    * @param {string} [o.kernel] the kernel spec (default python3)
    * @param {string} [o.clientId] this page's id in request ids (default: random)
    * @param {(ms: number) => Promise<void>} [o.sleep] (tests: a faster clock)
+   * @param {{setTimeout, clearTimeout, now}} [o.timers] the loss recovery's clock (tests: a virtual one)
    */
-  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep, requireGate = false }) {
+  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep, requireGate = false, timers }) {
     this.client = client;
     this.notebook = notebook;
     this.path = path;
     this.kernelName = kernel;
     this.clientId = clientId ?? Math.random().toString(36).slice(2, 10);
     this.sleep = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.timers = timers ?? REAL_TIMERS;
+    this.clocked = !!timers; // (a recovery's waits on the injected clock; else on `sleep`, as before)
     this.requireGate = !!requireGate;
     // phase: "idle" (no binding), "ready", "moved" (another tab took it), "closed"
-    this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, generation: 0, incarnation: null, phase: "idle" });
+    // (own: the page's lineage, changed by every transition but a fence the gateway attests as continuous: plan r8 F1)
+    this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, own: 0, generation: 0, incarnation: null, phase: "idle" });
     // aborted whenever the binding, generation or phase changes: everything begun under the old one
     this.abortCtl = new AbortController();
     this.lifeChain = Promise.resolve();
     this.lifeOps = 0;
-    this.needsFence = false; // after an unknown outcome: take the binding over (fence) before more work
+    this.fenceTx = null; // the loss recovery's fence transaction while needsFence holds (plan r8 F2/F4)
+    this.recoveryEndedAt = null; // when the last one ended unproved (its deadline), until a fence succeeds
+    this.fenceWanted = false;
     this.queue = []; // {code, opts, sink, generation (null: asked before its binding existed)}
     this.current = null; // the job being run: {..., lc, request}
     this.nextN = 1;
@@ -209,6 +242,50 @@ export class RemoteKernel {
     // (what a run asked of this kernel while it is not ready is told: its own note when the page set one, e.g.
     // a preview whose connect failed; NOTES.notReady otherwise)
     this.notReadyNote = null;
+  }
+
+  // After an unknown outcome: take the binding over (fence) before more work.  Setting it opens the fence
+  // transaction (one id, the epoch held, one RECOVERY.fenceTotalMs deadline) that every job taken while it lasts
+  // joins; clearing it closes the transaction.
+  get needsFence() { return this.fenceWanted; }
+  set needsFence(v) {
+    this.fenceWanted = !!v;
+    if (!v) this.recoveryEndedAt = null;
+    if (v && !this.fenceTx) this.openFence();
+    if (!v && this.fenceTx) this.closeFence(this.fenceTx);
+  }
+  openFence() {
+    const tx = { id: `f.${this.clientId}.${Math.random().toString(36).slice(2, 10)}`, from: this.lc.epoch, ctl: new AbortController(), closed: false, deadline: this.timers.now() + RECOVERY.fenceTotalMs, timer: null };
+    tx.timer = this.timers.setTimeout(() => this.expireFence(tx), RECOVERY.fenceTotalMs);
+    this.fenceTx = tx;
+    return tx;
+  }
+  closeFence(tx) {
+    tx.closed = true;
+    this.timers.clearTimeout(tx.timer);
+    if (this.fenceTx === tx) this.fenceTx = null;
+  }
+  // The transaction's deadline, unproved: it is closed and the queue detached first, then every job queued, or
+  // waiting for this fence, is refused together; the fence is still wanted (a later Run opens a new transaction).
+  expireFence(tx) {
+    if (tx.closed) return;
+    this.closeFence(tx);
+    this.recoveryEndedAt = tx.deadline;
+    const queued = this.queue.splice(0);
+    tx.ctl.abort();
+    this.emit("status", "error: the remote kernel could not be reached");
+    for (const j of queued) this.notSent(j, NOTES.unreachable);
+  }
+  // A wait that `signal` ends early (resolving); on the injected clock when there is one.
+  wait(ms, signal) {
+    return new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      let t = null;
+      const done = () => { signal?.removeEventListener?.("abort", done); if (t !== null) this.timers.clearTimeout(t); resolve(); };
+      signal?.addEventListener?.("abort", done, { once: true });
+      if (this.clocked) t = this.timers.setTimeout(done, ms);
+      else this.sleep(ms).then(done);
+    });
   }
 
   get generation() { return this.lc.generation; }
@@ -227,9 +304,13 @@ export class RemoteKernel {
   // A new lifecycle record.  If the binding, generation or phase changed:
   // everything begun under the old one is aborted, and the running request
   // is told `note` and released now (its late answers are stale).
-  setLc(patch, note) {
+  setLc(patch, note, { preserve = false } = {}) {
     const old = this.lc;
-    const lc = Object.freeze({ ...old, ...patch, serial: old.serial + 1 });
+    // (the lineage follows the binding and its epoch, where approvals always started over; a fence whose continuity
+    // the gateway attested changes the wire epoch only, and the lineage stays)
+    const moved = ["binding", "epoch"].some((k) => k in patch && patch[k] !== old[k]);
+    const own = moved && !preserve ? old.own + 1 : old.own;
+    const lc = Object.freeze({ ...old, ...patch, own, serial: old.serial + 1 });
     this.lc = lc;
     // (synchronously, before anything else: approvals and records follow the kernel)
     this.emit("lifecycle", old, lc);
@@ -313,7 +394,7 @@ export class RemoteKernel {
     if (this.lc.phase === "idle" && !this.lifeOps) return s.stopped(NOTES.unreachable);
     // (asked while no binding exists, being made: it runs on the kernel that comes next, so its
     // generation is the one current when it is sent, not the one before the binding)
-    this.queue.push({ code, opts: o, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation });
+    this.queue.push({ code, opts: o, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation, askedAt: o.gate?.askedAt ?? this.timers.now() });
     this.pump();
   }
 
@@ -366,7 +447,7 @@ export class RemoteKernel {
       if (!this.ready) return fan.skipped({ notRun: "skip", note: this.notReadyNote ?? NOTES.notReady });
       if (this.closed) return fan.stopped(NOTES.closed);
       if (this.moved) return fan.stopped(NOTES.moved);
-      this.queue.push({ wave: { ...w, entries }, result, started: t0, code: null, opts: { gate }, sink: fan, generation: this.lc.generation });
+      this.queue.push({ wave: { ...w, entries }, result, started: t0, code: null, opts: { gate }, sink: fan, generation: this.lc.generation, askedAt: gate.askedAt ?? this.timers.now() });
       this.pump();
     });
   }
@@ -390,6 +471,8 @@ export class RemoteKernel {
     if (job.generation !== null && job.generation !== this.lc.generation) return this.notSent(job, NOTES.restarted);
     if (job.generation === null) job.generation = this.lc.generation;
     if (this.needsFence) {
+      // (asked before a loss recovery's deadline passed unproved: refused with it, never a new transaction's)
+      if (this.recoveryEndedAt !== null && job.askedAt <= this.recoveryEndedAt) return this.notSent(job, NOTES.unreachable);
       const ok = await this.lifecycle(() => this.takeover(job));
       if (!ok || this.current !== job) return;
     }
@@ -614,14 +697,23 @@ export class RemoteKernel {
   // this one stops taking work).
   async reconcileSubmit(job, retryErr, signal) {
     const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
-    let r = null, err = null;
-    try {
-      r = await this.client.request("GET", path, undefined, { signal });
-    } catch (e) {
-      err = e;
+    // (plan r8 F3: asked up to 3 times, RECOVERY.reconcileWaits apart, each with its own deadline; only a record of
+    // this request is proof, and nothing else, a not-found included, ends the asking early)
+    for (let i = 0; i <= RECOVERY.reconcileWaits.length; i++) {
+      if (i) {
+        await this.wait(RECOVERY.reconcileWaits[i - 1], signal);
+        if (this.current !== job || signal.aborted) return false;
+      }
+      let r = null, err = null;
+      try {
+        r = await this.client.request("GET", path, undefined, { signal, timeoutMs: RECOVERY.reconcileGetMs });
+      } catch (e) {
+        err = e;
+      }
+      if (this.current !== job) return false;
+      if (!err && r?.request === job.request) return true;
+      if (signal.aborted) return false;
     }
-    if (this.current !== job) return false;
-    if (!err && r.request === job.request) return true;
     this.needsFence = true;
     if (retryErr instanceof GatewayError && retryErr.code === "epoch" && this.lc === job.lc) this.movedAway(NOTES.unknown);
     else job.sink.stopped(NOTES.unknown);
@@ -858,37 +950,67 @@ export class RemoteKernel {
    */
   async takeover(job, lost = null) {
     if (job && this.current !== job) return false;
-    const deadline = Date.now() + 100_000; // (the gateway's own fence wait)
+    // (plan r8 F2/F4: the recovery's one transaction; a job taken while it lasts joins it, never a new one)
+    const tx = this.fenceTx ?? this.openFence();
     let wait = 500;
     for (;;) {
       const lc0 = this.lc;
       if (lc0.phase !== "ready") return false;
-      let r, err = null;
-      try {
-        r = await this.client.request("POST", `/bindings/${lc0.binding}/takeover`, { client: this.clientId }, { signal: this.abortCtl.signal });
-      } catch (e) {
-        err = e;
-      }
-      if (this.lc !== lc0 || (job && this.current !== job)) return false;
-      if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
-      if (!err && !validTakeover(r)) err = new AmbiguousError("the gateway's answer to takeover was incomplete or not valid");
-      if (err) {
-        // (no complete evidence: nothing is concluded, and the fence stays)
-        this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
-        this.needsFence = true;
+      if (tx.closed) {
         if (job) this.notSent(job, NOTES.unreachable);
         return false;
       }
+      const sig = anySignal([this.abortCtl.signal, tx.ctl.signal]);
+      let r, err = null;
+      try {
+        r = await this.client.request("POST", `/bindings/${lc0.binding}/takeover`, { client: this.clientId, fence: tx.id, from_epoch: tx.from }, { signal: sig.signal, timeoutMs: RECOVERY.fencePostMs });
+      } catch (e) {
+        err = e;
+      } finally {
+        sig.off();
+      }
+      if (this.lc !== lc0 || (job && this.current !== job)) return false;
+      // (an answer after the transaction ended, or from an earlier one, is inert)
+      if (tx.closed || this.fenceTx !== tx) {
+        if (job) this.notSent(job, NOTES.unreachable);
+        return false;
+      }
+      if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
+      const invalid = !err && !validTakeover(r);
+      if (invalid) err = new AmbiguousError("the gateway's answer to takeover was incomplete or not valid");
+      if (err instanceof GatewayError || invalid) {
+        // (a typed refusal, or an answer that isn't valid: nothing is concluded, and the fence stays)
+        this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
+        if (job) this.notSent(job, NOTES.unreachable);
+        return false;
+      }
+      if (err) {
+        // (no answer at all, or none in time: the same fence again, while the transaction lasts)
+        if (this.timers.now() + wait > tx.deadline) {
+          this.expireFence(tx);
+          if (job) this.notSent(job, NOTES.unreachable);
+          return false;
+        }
+        this.emit("status", "the remote kernel didn't answer; trying again…");
+        await this.wait(wait, tx.ctl.signal);
+        if (this.lc !== lc0 || (job && this.current !== job)) return false;
+        wait = Math.min(5000, wait * 2);
+        continue;
+      }
       if (r.state === "quarantined") return this.replace(lc0);
       if (r.state === "ready") {
-        this.needsFence = false;
-        this.setLc({ epoch: r.epoch });
         const applied = r.applied_before_takeover;
+        const controlOps = applied.some((a) => a.kind === "restart" || a.kind === "delete");
+        // (plan r8 F1: the lineage is kept only on the gateway's word: sole since the epoch this transaction held,
+        // the same binding and incarnation, no restart or delete applied, nothing in flight)
+        const preserve = r.continuity?.sole === true && r.continuity.from_epoch === tx.from && this.lc === lc0 && r.incarnation === lc0.incarnation && !controlOps && r.in_flight.length === 0;
+        this.needsFence = false;
+        this.setLc({ epoch: r.epoch }, undefined, { preserve });
         if (lost && applied.some((a) => a.op_id === lost.opId && a.kind === "restart")) {
           this.restarted(lost.message, r.incarnation);
           return false;
         }
-        if (applied.some((a) => a.kind === "restart" || a.kind === "delete")) {
+        if (controlOps) {
           for (const j of this.queue.splice(0)) this.notSent(j, NOTES.kernelReplaced);
           this.setLc({ generation: this.lc.generation + 1, incarnation: r.incarnation }, NOTES.kernelReplaced);
           this.emit("status", "the remote kernel was restarted before this tab took it over; variables are gone");
@@ -905,8 +1027,8 @@ export class RemoteKernel {
         return true;
       }
       // fencing: the gateway refuses new work until its fence is acknowledged
-      if (Date.now() + wait > deadline) return this.replace(lc0);
-      await this.sleep(wait);
+      if (this.timers.now() + wait > tx.deadline) return this.replace(lc0);
+      await this.wait(wait, tx.ctl.signal);
       if (this.lc !== lc0 || (job && this.current !== job)) return false;
       wait = Math.min(5000, wait * 2);
     }
