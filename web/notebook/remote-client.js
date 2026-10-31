@@ -262,7 +262,8 @@ export class RemoteClient {
       const wantsNonce = res.status === 401 && /use_dpop_nonce/.test(res.headers.get("WWW-Authenticate") ?? "");
       // (a nonce challenge is a refusal before any effect: retried once)
       if (wantsNonce && attempt === 0 && fresh) {
-        await res.body?.cancel?.().catch?.(() => {});
+        // (not awaited: a body whose cancel never settles can't hold the request past its deadline)
+        res.body?.cancel?.().catch?.(() => {});
         continue;
       }
       return res;
@@ -394,7 +395,7 @@ export async function readJson(res, signal) {
   const tooLarge = () => Object.assign(new Error("the gateway's answer was over its size limit"), { tooLarge: true });
   const len = Number(res.headers.get("Content-Length"));
   if (Number.isFinite(len) && len > RESPONSE_MAX) {
-    await res.body?.cancel?.().catch?.(() => {});
+    res.body?.cancel?.().catch?.(() => {}); // (not awaited, as above)
     throw tooLarge();
   }
   if (!res.body) return null;

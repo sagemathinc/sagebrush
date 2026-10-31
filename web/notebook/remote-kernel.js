@@ -80,7 +80,9 @@ function validTakeover(r) {
  * The loss recovery's bounds (plan r8 F3/F4): a run's record asked at most 3 times, 10 s each, 500 then 1000 ms
  * apart (31.5 s at most); a fence's takeover POSTs 15 s each, one transaction of 100 s for all of them.
  */
-export const RECOVERY = Object.freeze({ reconcileGetMs: 10_000, reconcileWaits: Object.freeze([500, 1000]), fencePostMs: 15_000, fenceTotalMs: 100_000 });
+export const RECOVERY = Object.freeze({ submitPostMs: 10_000, reconcileGetMs: 10_000, reconcileWaits: Object.freeze([500, 1000]), fencePostMs: 15_000, fenceTotalMs: 100_000 });
+// (F3's window, from the first attempt's lost answer: the resend and the record GETs all end inside it, 31.5 s)
+const RECONCILE_WINDOW_MS = RECOVERY.reconcileWaits.reduce((a, b) => a + b, 0) + (RECOVERY.reconcileWaits.length + 1) * RECOVERY.reconcileGetMs;
 
 // (the page's timers, which don't keep a process alive; tests inject a clock)
 const REAL_TIMERS = Object.freeze({
@@ -251,7 +253,8 @@ export class RemoteKernel {
   set needsFence(v) {
     this.fenceWanted = !!v;
     if (!v) this.recoveryEndedAt = null;
-    if (v && !this.fenceTx) this.openFence();
+    // (no transaction for a kernel that is gone: moved to another tab, or closed)
+    if (v && !this.fenceTx && !this.moved && !this.closed) this.openFence();
     if (!v && this.fenceTx) this.closeFence(this.fenceTx);
   }
   openFence() {
@@ -275,6 +278,15 @@ export class RemoteKernel {
     tx.ctl.abort();
     this.emit("status", "error: the remote kernel could not be reached");
     for (const j of queued) this.notSent(j, NOTES.unreachable);
+  }
+  // A fence backoff: ended early by the transaction's end or by a lifecycle change, so no timer outlives either.
+  async fenceWait(ms, tx) {
+    const sig = anySignal([this.abortCtl.signal, tx.ctl.signal]);
+    try {
+      await this.wait(ms, sig.signal);
+    } finally {
+      sig.off();
+    }
   }
   // A wait that `signal` ends early (resolving); on the injected clock when there is one.
   wait(ms, signal) {
@@ -312,6 +324,8 @@ export class RemoteKernel {
     const own = moved && !preserve ? old.own + 1 : old.own;
     const lc = Object.freeze({ ...old, ...patch, own, serial: old.serial + 1 });
     this.lc = lc;
+    // (a kernel that moved away or closed ends its recovery: its deadline would refuse nothing, only tell a stale status)
+    if ((lc.phase === "moved" || lc.phase === "closed") && this.fenceTx) this.closeFence(this.fenceTx);
     // (synchronously, before anything else: approvals and records follow the kernel)
     this.emit("lifecycle", old, lc);
     if (lc.binding !== old.binding || lc.generation !== old.generation || lc.phase !== old.phase) {
@@ -642,18 +656,22 @@ export class RemoteKernel {
   // (`guard`: the client calls it right before each fetch; both attempts share it)
   async submit(job, body, signal, guard) {
     const path = `/bindings/${job.lc.binding}/runs`;
-    let mayBeAdmitted = false;
+    let mayBeAdmitted = false, windowEnd = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       let err = null;
       try {
-        await this.client.request("POST", path, body, { signal, ...(guard ? { guard } : {}) });
+        // (the POST admits the run, its output comes on the events stream, so no deadline here bounds a user
+        // program: the first attempt has its own, an answer that never comes being a lost one; the resend's is
+        // F3's window, so a resend that never settles can't keep the reconcile from ending)
+        const timeoutMs = attempt === 0 ? RECOVERY.submitPostMs : Math.min(RECOVERY.reconcileGetMs, windowEnd - this.timers.now());
+        await this.client.request("POST", path, body, { signal, timeoutMs, ...(guard ? { guard } : {}) });
       } catch (e) {
         err = e;
       }
       if (this.current !== job) return false; // (stale: the job was already told why)
       if (!err) return true;
       // (a retry's refusal, or a failure to send it, says nothing about the first attempt)
-      if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal);
+      if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal, windowEnd);
       if (err instanceof NotSentError) {
         // (not admitted: not run; admitted, then refused before a retry was sent: stopped)
         if (job.opts.gate && !job.admitted) job.sink.skipped({ notRun: "skip", note: err.stale ? NOTES.changed : `\nNot run: ${clip(err.message)}\n` });
@@ -665,6 +683,7 @@ export class RemoteKernel {
         return false;
       }
       mayBeAdmitted = true;
+      windowEnd = this.timers.now() + RECONCILE_WINDOW_MS;
     }
     return false;
   }
@@ -695,18 +714,21 @@ export class RemoteKernel {
   // it hasn't seen yet can never be admitted later), so the outcome is
   // unknown, and fenced (and if the retry said another tab has the binding,
   // this one stops taking work).
-  async reconcileSubmit(job, retryErr, signal) {
+  async reconcileSubmit(job, retryErr, signal, windowEnd) {
     const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
-    // (plan r8 F3: asked up to 3 times, RECOVERY.reconcileWaits apart, each with its own deadline; only a record of
-    // this request is proof, and nothing else, a not-found included, ends the asking early)
+    // (plan r8 F3: asked up to 3 times, RECOVERY.reconcileWaits apart, each with its own deadline, all inside the
+    // window the lost answer opened; only a record of this request is proof, and nothing else, a not-found
+    // included, ends the asking early)
     for (let i = 0; i <= RECOVERY.reconcileWaits.length; i++) {
       if (i) {
         await this.wait(RECOVERY.reconcileWaits[i - 1], signal);
         if (this.current !== job || signal.aborted) return false;
       }
+      const left = windowEnd - this.timers.now();
+      if (left <= 0) break;
       let r = null, err = null;
       try {
-        r = await this.client.request("GET", path, undefined, { signal, timeoutMs: RECOVERY.reconcileGetMs });
+        r = await this.client.request("GET", path, undefined, { signal, timeoutMs: Math.min(RECOVERY.reconcileGetMs, left) });
       } catch (e) {
         err = e;
       }
@@ -992,7 +1014,7 @@ export class RemoteKernel {
           return false;
         }
         this.emit("status", "the remote kernel didn't answer; trying again…");
-        await this.wait(wait, tx.ctl.signal);
+        await this.fenceWait(wait, tx);
         if (this.lc !== lc0 || (job && this.current !== job)) return false;
         wait = Math.min(5000, wait * 2);
         continue;
@@ -1004,7 +1026,8 @@ export class RemoteKernel {
         // (plan r8 F1: the lineage is kept only on the gateway's word: sole since the epoch this transaction held,
         // the same binding and incarnation, no restart or delete applied, nothing in flight)
         const preserve = r.continuity?.sole === true && r.continuity.from_epoch === tx.from && this.lc === lc0 && r.incarnation === lc0.incarnation && !controlOps && r.in_flight.length === 0;
-        this.needsFence = false;
+        // (a run still in flight keeps the transaction open: the same fence id and deadline, never renewed)
+        if (controlOps || r.in_flight.length === 0) this.needsFence = false;
         this.setLc({ epoch: r.epoch }, undefined, { preserve });
         if (lost && applied.some((a) => a.op_id === lost.opId && a.kind === "restart")) {
           this.restarted(lost.message, r.incarnation);
@@ -1019,7 +1042,7 @@ export class RemoteKernel {
         }
         if (r.in_flight.length) {
           this.emit("status", "a run from the previous tab is still executing");
-          this.needsFence = true; // (asked again before the next run)
+          // (asked again before the next run, in the same transaction)
           if (job) this.notSent(job, NOTES.inFlight);
           return false;
         }
@@ -1028,7 +1051,7 @@ export class RemoteKernel {
       }
       // fencing: the gateway refuses new work until its fence is acknowledged
       if (this.timers.now() + wait > tx.deadline) return this.replace(lc0);
-      await this.wait(wait, tx.ctl.signal);
+      await this.fenceWait(wait, tx);
       if (this.lc !== lc0 || (job && this.current !== job)) return false;
       wait = Math.min(5000, wait * 2);
     }
