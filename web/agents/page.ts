@@ -953,39 +953,57 @@ async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknow
   // to it only when it is closed or already shows it.
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== e.path;
   const keep = openArtifact;
-  // (where the person is: put back after a hidden notebook mounts and after the edit, if either moved it)
-  const focused = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
-  const range = focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement ? [focused.selectionStart, focused.selectionEnd] : null;
-  const putFocusBack = () => {
-    if (!shownOther || !focused?.isConnected || document.activeElement === focused) return;
-    focused.focus({ preventScroll: true });
-    if (range && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) && range[0] !== null) focused.setSelectionRange(range[0], range[1]);
+  // (where the person is: put back only if the edit took it, to the page or into the notebook's host while that is
+  // hidden (board's ruling); a focus or caret the person chose meanwhile, in the notebook too if they showed it, is
+  // theirs, A12-R2-F1. What is put back is the last thing that lost the focus that way: what had it at the start, or
+  // what the person moved to since)
+  const inHidden = (n: unknown) => {
+    const el = hosts.get(hostKey(thread.id, e.path))?.el;
+    return n instanceof Node && !!el?.hidden && el.contains(n);
   };
-  if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) emitTo(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
-  const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
-  if (!art) throw new AgentError("busy", "the notebook couldn't be opened here");
-  if (shownOther) {
-    openArtifact = keep;
-    hiddenHost(thread.id, art);
-  } else {
-    openArtifact = e.path;
-    renderArtifacts();
-  }
-  const h = hosts.get(hostKey(thread.id, e.path));
-  if (!h?.nb) throw new AgentError("busy", "the notebook couldn't be opened here");
-  putFocusBack();
-  await h.nb.ready;
-  putFocusBack();
-  const r = await h.nb.edit(e, mayHere);
-  putFocusBack();
-  if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
-  if (shownHost() !== h) {
-    h.changed = true;
-    headKey = "";
-    if (current().id === thread.id) renderArtifacts();
+  const where = (el: Element | null) => (el instanceof HTMLElement && el !== document.body ? { el, range: el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement ? [el.selectionStart, el.selectionEnd] : null } : null);
+  let back = where(document.activeElement);
+  const lost = (ev: FocusEvent) => {
+    if (!inHidden(ev.target) && (ev.relatedTarget === null || inHidden(ev.relatedTarget))) back = where(ev.target as Element | null);
+  };
+  const putFocusBack = () => {
+    const now = document.activeElement;
+    if (!shownOther || !back?.el.isConnected || now === back.el) return;
+    if (now && now !== document.body && !inHidden(now)) return;
+    const { el, range } = back;
+    el.focus({ preventScroll: true });
+    if (range && (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) && range[0] !== null) el.setSelectionRange(range[0], range[1]);
+  };
+  document.addEventListener("focusout", lost, true);
+  try {
+    if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) emitTo(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
+    const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
+    if (!art) throw new AgentError("busy", "the notebook couldn't be opened here");
+    if (shownOther) {
+      openArtifact = keep;
+      hiddenHost(thread.id, art);
+    } else {
+      openArtifact = e.path;
+      renderArtifacts();
+    }
+    const h = hosts.get(hostKey(thread.id, e.path));
+    if (!h?.nb) throw new AgentError("busy", "the notebook couldn't be opened here");
     putFocusBack();
+    await h.nb.ready;
+    putFocusBack();
+    const r = await h.nb.edit(e, mayHere);
+    putFocusBack();
+    if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
+    if (shownHost() !== h) {
+      h.changed = true;
+      headKey = "";
+      if (current().id === thread.id) renderArtifacts();
+      putFocusBack();
+    }
+    return { ok: true, inserted: r.inserted };
+  } finally {
+    document.removeEventListener("focusout", lost, true);
   }
-  return { ok: true, inserted: r.inserted };
 }
 /** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
 function hiddenHost(threadId: string, a: Artifact) {
