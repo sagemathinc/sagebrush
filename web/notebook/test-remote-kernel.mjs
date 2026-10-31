@@ -805,6 +805,13 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   console.log(`remote-gate: ${ran} controls ran`);
   check(ran === 33, `remote-gate: every control ran (${ran} of 33)`);
 }
+// ---- waves: one reactive action, one request (the policy, the gateway, the page, admitWave per attempt)
+{
+  const { runWaveTests } = await import("./test-remote-wave.mjs");
+  const ran = await runWaveTests(check);
+  console.log(`remote-wave: ${ran} controls ran`);
+  check(ran === 31, `remote-wave: every control ran (${ran} of 31)`);
+}
 // ---- the GPU kernel's preview (remote-ui.js): its simulated gateway and startPreview
 {
   const { runUiTests } = await import("./test-remote-ui.mjs");

@@ -52,6 +52,7 @@
 // (forgetting names) only with its `forgetGuard`.
 
 import { GatewayError, StreamError, NotSentError, AmbiguousError } from "./remote-client.js";
+import { newWaveState, waveDecide, waveRecord, waveRunResult, waveStop, sameDecision, waveEnvelopeInvalid } from "../../src/wave-policy.ts";
 
 const ENVELOPE_MIME = "application/vnd.sagebrush.envelope.v1+json";
 const clip = (s, n = 300) => String(s ?? "").slice(0, n);
@@ -153,7 +154,7 @@ function once(sink) {
 }
 
 // The run payload of a checked spec (remote-approval.ts RunSpec): exactly its bytes.
-function payloadOf(spec) {
+export function payloadOf(spec) {
   const op = spec.options;
   return {
     code: spec.source,
@@ -316,6 +317,60 @@ export class RemoteKernel {
     this.pump();
   }
 
+  /**
+   * One wave (the waves design r3; web/notebook/remote-gate.js host.executeWave): the whole action in one request.
+   * `w`: {entries: [{cell, auto, est, parents, desc, defs} and either {place, note?} (a placeholder: never sent) or
+   * {code, opts, sink} (opts as for execute; the sink, the cell's)], policy, forget ({names} or null), mode}; `gate`:
+   * the wave's ({check, sameRun, admitWave, stillAdmitted}).  Resolves to {refused} (checked, nothing sent), or to
+   * {decisions, ran, submits, roundTrips, ms}: each entry's decision as the gateway made it and this page replayed
+   * it (src/wave-policy.ts; a difference is a protocol error: the entries not yet ended are unknown, and the
+   * binding fenced).  Each sendable entry's sink gets its run's events and terminal; one that doesn't run is
+   * skipped, silently (the scheduler shows why).
+   */
+  executeWave(w, gate) {
+    return new Promise((resolve) => {
+      const entries = w.entries.map((e) => (e.place ? { ...e } : { ...e, sink: once(e.sink) }));
+      const sendable = entries.filter((e) => !e.place);
+      let settled = false;
+      const result = { decisions: entries.map(() => undefined), ran: 0, submits: 0, roundTrips: 0, ms: 0 };
+      const t0 = Date.now();
+      const finish = (extra = {}) => {
+        if (settled) return;
+        settled = true;
+        result.ms = Date.now() - t0;
+        resolve({ ...result, ...extra });
+      };
+      // (the job's own sink: what is told to the whole wave goes to every entry not yet ended)
+      const fan = {
+        get ended() { return settled; },
+        start() {},
+        out() {},
+        display() {},
+        interact() {},
+        clear() {},
+        done() { finish(); },
+        stopped(note) {
+          entries.forEach((e, k) => {
+            if (e.place || e.sink.ended) return;
+            result.decisions[k] ??= { kind: "run" };
+            e.sink.stopped(note);
+          });
+          finish();
+        },
+        skipped(info) {
+          for (const e of sendable) e.sink.skipped(info);
+          finish(info?.note ? { refused: info.note } : { refused: "\nNot run.\n" });
+        },
+      };
+      if (!gate) return fan.stopped(NOTES.noGate);
+      if (!this.ready) return fan.skipped({ notRun: "skip", note: this.notReadyNote ?? NOTES.notReady });
+      if (this.closed) return fan.stopped(NOTES.closed);
+      if (this.moved) return fan.stopped(NOTES.moved);
+      this.queue.push({ wave: { ...w, entries }, result, started: t0, code: null, opts: { gate }, sink: fan, generation: this.lc.generation });
+      this.pump();
+    });
+  }
+
   // the next queued run, once the one before it has its terminal, and no lifecycle operation is pending
   pump() {
     if (this.current || this.lifeOps || this.lc.phase !== "ready" || !this.queue.length) return;
@@ -342,6 +397,7 @@ export class RemoteKernel {
     const lc = (job.lc = this.lc);
     const signal = this.abortCtl.signal;
     const request = (job.request = `rq.${this.clientId}.${lc.generation}.${this.nextN++}`);
+    if (job.wave) return this.runWave(job, lc, signal, request);
     const o = job.opts;
     let payload, guard;
     if (o.gate) {
@@ -386,6 +442,110 @@ export class RemoteKernel {
     if (!(await this.submit(job, body, signal, guard))) return;
     if (this.current !== job) return;
     await this.follow(job, signal);
+  }
+
+  // A wave's check, its one submit and its stream.  The check is the batch's (every sendable entry, in order, on one
+  // snapshot); the bytes sent are the bytes checked, entry by entry; admission is the gate's one transition
+  // (admitWave), at the first fetch, and a retry of that same send only while stillAdmitted holds.
+  async runWave(job, lc, signal, request) {
+    const w = job.wave, g = job.opts.gate;
+    let v;
+    try {
+      v = await g.check(request);
+    } catch {
+      return this.current === job ? this.notSent(job, NOTES.checkFailed) : undefined;
+    }
+    if (this.current !== job) return;
+    if (this.lc !== lc) return this.notSent(job, NOTES.changed);
+    if (!v.send) return job.sink.skipped({ notRun: "wait" in v ? "wait" : "skip", note: `\nNot run: ${"wait" in v ? v.wait : v.skip}.\n` });
+    const sendable = w.entries.filter((e) => !e.place);
+    if (v.plan.length !== sendable.length || sendable.some((e, i) => !g.sameRun(e.code, e.opts ?? {}, v.plan[i].run))) return this.notSent(job, NOTES.changed);
+    let i = 0;
+    const entries = w.entries.map((e) => {
+      const policy = { cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs ?? [] };
+      return e.place ? { ...policy, place: e.place, ...(e.note ? { note: e.note } : {}) } : { ...policy, ...payloadOf(v.plan[i++].run) };
+    });
+    const body = deepFreeze({
+      request, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, kind: "wave",
+      payload: { mode: w.mode, forget: [...(w.forget?.names ?? [])], policy: { budget: w.policy.budget, all: w.policy.all }, entries }, // (as the scheduler gave them: validated below, never coerced)
+    });
+    // (the whole envelope, as the gateway validates it, before anything is admitted)
+    const bad = waveEnvelopeInvalid(body.payload);
+    if (bad !== null) return this.notSent(job, `\nNot run: the wave was malformed (${bad}).\n`);
+    await g.sending?.(body.payload); // (the audit: the bytes about to be sent)
+    if (this.current !== job) return;
+    if (this.lc !== lc) return this.notSent(job, NOTES.changed);
+    job.st = newWaveState();
+    job.next = 0;
+    const guard = () => {
+      job.result.submits++;
+      job.result.roundTrips++;
+      if (job.admitted) {
+        const ok = g.stillAdmitted(v);
+        g.attempt?.("resend", ok);
+        return ok;
+      }
+      if (!g.admitWave(v)) {
+        g.attempt?.("send", false);
+        return false;
+      }
+      g.attempt?.("send", true);
+      job.admitted = true;
+      g.admitted?.(v);
+      return true;
+    };
+    if (!(await this.submit(job, body, signal, guard))) return;
+    if (this.current !== job) return;
+    await this.follow(job, signal);
+  }
+
+  // One entry's end, in order: replayed (the same decision, from the same state), recorded, and told to its cell.
+  // false: a protocol error (out of order, or another decision than the replay's).
+  waveEnd(job, k, end) {
+    const w = job.wave;
+    if (k !== job.next || !end || typeof end.decision !== "object") return false;
+    const e = w.entries[k];
+    const mine = waveDecide(w.policy, job.st, k, e);
+    if (!sameDecision(mine, end.decision)) return false;
+    job.next++;
+    job.result.decisions[k] = end.decision;
+    if (mine.kind !== "run") {
+      waveRecord(job.st, k, e, mine);
+      e.sink?.skipped({ notRun: "skip" });
+      return true;
+    }
+    const o = end.outcome && typeof end.outcome === "object" && !Array.isArray(end.outcome) ? end.outcome : { status: "unknown" };
+    waveRecord(job.st, k, e, mine, waveRunResult(o));
+    job.result.ran++;
+    const ms = Number.isFinite(o.ms) ? o.ms : 0;
+    if (o.status === "ok") e.sink.done(ms, { error: false });
+    else if (o.status === "error") {
+      if (o.ename === "KeyboardInterrupt" && !e.sawErrorText) e.sink.out("KeyboardInterrupt\n", true);
+      e.sink.done(ms, { error: true, ...(o.ename === "KeyboardInterrupt" ? { interrupted: true } : {}) });
+    } else {
+      e.sink.stopped(outcomeNote(o));
+      if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
+    }
+    return true;
+  }
+
+  // The wave's terminal: done (every entry ended before it), or the run's outcome for whatever hadn't ended.
+  waveTerminal(job, outcome) {
+    const o = outcome && typeof outcome === "object" && !Array.isArray(outcome) ? outcome : { status: "unknown" };
+    if (o.status === "done" && job.next === job.wave.entries.length) {
+      this.emit("status", `ready (remote) · ${job.result.ran} cell${job.result.ran === 1 ? "" : "s"}, ${job.result.submits} submit${job.result.submits === 1 ? "" : "s"}, ${job.result.roundTrips} round trips, ${((Date.now() - job.started) / 1000).toFixed(1)} s`);
+      return job.sink.done();
+    }
+    if (o.status === "done") return this.waveBroken(job);
+    job.sink.stopped(outcomeNote(o));
+    if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
+    if (o.status === "restarted-before-run") this.recover(job.lc, isInt(o.incarnation) ? o.incarnation : null);
+  }
+
+  // A wave that answered something this page doesn't agree with: what hadn't ended is unknown, and the binding fenced.
+  waveBroken(job) {
+    this.needsFence = true;
+    job.sink.stopped(NOTES.unknown);
   }
 
   // POST the run; true once the gateway has it.  On the first attempt: not
@@ -478,12 +638,37 @@ export class RemoteKernel {
     let after = 0, failures = 0, started = false;
     while (this.current === job && !sink.ended) {
       try {
+        if (job.wave) job.result.roundTrips++;
         for await (const ev of this.client.events(path, after, signal)) {
           if (this.current !== job || sink.ended) return;
           if (!Number.isInteger(ev.seq) || ev.seq <= after) continue; // (a replay or a duplicate)
           if (ev.seq !== after + 1) break; // (a gap: reconnect from the last one seen)
           after = ev.seq;
           failures = 0;
+          if (job.wave) {
+            // (a wave's events: each entry's to its cell, in order; its end replayed; the wave's terminal last)
+            if (ev.type === "terminal") return this.waveTerminal(job, ev.outcome);
+            // (a Stop the gateway latched with no entry running: the entries after it are not run, as the policy says)
+            if (ev.type === "stop") {
+              if (!Number.isInteger(ev.before) || ev.before !== job.next) return this.waveBroken(job);
+              waveStop(job.st);
+              continue;
+            }
+            const e = Number.isInteger(ev.entry) ? job.wave.entries[ev.entry] : undefined;
+            // (a placeholder has only its end; any other entry's events are the next one's)
+            if (!e || (ev.type !== "end" && (e.place || ev.entry !== job.next))) return this.waveBroken(job);
+            if (ev.type === "end") {
+              if (!this.waveEnd(job, ev.entry, ev)) return this.waveBroken(job);
+            } else if (ev.type === "start") {
+              if (!e.started) { e.started = true; e.sink.start(); }
+            } else if (ev.type === "stream") {
+              if (ev.name === "stderr") e.sawErrorText = true;
+              e.sink.out(String(ev.text ?? ""), ev.name === "stderr");
+            } else if (ev.type === "display") {
+              if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) e.sink.display(ev.data);
+            } else if (ev.type === "clear") e.sink.clear();
+            continue;
+          }
           if (ev.type === "start") { if (!started) { started = true; sink.start(); } }
           else if (ev.type === "stream") {
             if (ev.name === "stderr") job.sawErrorText = true;
@@ -518,12 +703,25 @@ export class RemoteKernel {
     while (this.current === job && !job.sink.ended) {
       let r = null;
       try {
+        if (job.wave) job.result.roundTrips++;
         r = await this.client.request("GET", path, undefined, { signal });
         failures = 0;
       } catch {
         failures++;
       }
       if (this.current !== job || job.sink.ended) return;
+      if (job.wave && r?.outcome && typeof r.outcome === "object") {
+        // (the entries' ends the stream didn't bring, from the record, without their output; then the terminal)
+        const ends = Array.isArray(r.entries) ? r.entries : [];
+        // (a Stop latched before an entry: replayed there, as the stream's stop event)
+        const stopAt = (k) => { if (r.stop === k && !job.st.stopped) waveStop(job.st); };
+        stopAt(job.next);
+        while (job.next < job.wave.entries.length && ends[job.next]) {
+          if (!this.waveEnd(job, job.next, ends[job.next])) return this.waveBroken(job);
+          stopAt(job.next);
+        }
+        return this.waveTerminal(job, r.outcome);
+      }
       if (r?.outcome && typeof r.outcome === "object") return this.finish(job, r.outcome);
       if (failures > 5) break;
       await this.sleep(wait);
