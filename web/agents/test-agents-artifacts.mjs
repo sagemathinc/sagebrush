@@ -1256,9 +1256,10 @@ try {
       const w = await call("workspace.write", { path, content: docFor(path, [{ code: "over" }]), base: r.rev }).then(() => "written", (e) => e.message);
       ok(/workspace_edit_notebook/.test(w) && same(await rec(path), before), "E13: a whole write of a notebook from a notebook.edit helper is refused", w);
     }
-    // E14: a notebook not open: the page opens it, then applies
+    // E14: a notebook not open, the pane closed: the page opens it, then applies
     {
       const { path, ids } = await mk();
+      if (await ev(`!!document.querySelector('#close')`)) { await ev(`document.querySelector('#close').click()`); await until(`!document.body.classList.contains('has-artifact')`, 10000); }
       const r = await readOf(path);
       const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 7" }] });
       ok(res.ok && (await ev(`!!${tabJs(path)}`)) && (await rec(path)).cells[0].code === "x = 7", "E14: a notebook that isn't open is opened (its tab), then edited", res);
@@ -1386,6 +1387,9 @@ try {
     // E24 (board's BA12-1): the person types in another artifact while the agent edits a notebook, first one not open,
     // then one open in a hidden tab: the pane stays, the focus and the caret too, and the notebook's tab says it changed
     {
+      // (in a chat of its own, so what an earlier case left open doesn't reach this one)
+      await converse();
+      newTurn();
       const draft = "/notes/draft.txt";
       await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
       await artifactTurn(draft, { finish: false, turn });
