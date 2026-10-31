@@ -72,10 +72,12 @@ export function fenceMoved(f: Fence, seen: Fence): boolean {
 /** The interpreter, started on the first Run, not before: its worker is made when the component first asks it to
  * execute (the code was taken from the cell at the person's click, before this). Until then nothing else starts it
  * (a completion waits for the first Run). */
-function lazyKernel(mod: any) {
+function lazyKernel(mod: any, closing: () => boolean = () => false) {
   const k = new mod.WorkerKernel({ createWorker: () => new Worker(new URL("sagebrush-worker.js", SITE), { type: "module" }) });
   const execute = k.execute.bind(k);
-  k.execute = (code: string, o: unknown, sink: unknown) => {
+  k.execute = (code: string, o: unknown, sink: any) => {
+    // (a notebook closing runs nothing, by whatever path a Run came: ART-C2b r4)
+    if (closing()) return sink?.stopped?.("\nNot run: this notebook is closing.\n");
     if (!k.worker) k.start();
     return execute(code, o, sink);
   };
@@ -87,8 +89,19 @@ export const CLOSE_SAVE_MS = 3000;
 /** How long closing waits for that copy (the workspace busy) before it gives up and keeps the notebook open. */
 export const CLOSE_COPY_MS = 5000;
 
-// (a document's cells as compared for "is this what the store has": id, type, source and outputs)
-const cellsKey = (cells: any[] | undefined) => JSON.stringify((cells ?? []).map((c: any) => [c.id, c.type ?? "code", c.code ?? "", c.outputs ?? []]));
+// What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
+// has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
+// metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and times).
+const BOOKKEEPING = ["id", "rev", "updated", "baseRev", "name", "j", "hash", "unjournaled"];
+const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !BOOKKEEPING.includes(k)));
+// (a stable form to compare: keys sorted at every depth, so the store's key order and the snapshot's don't matter)
+const stable = (v: unknown): string =>
+  Array.isArray(v)
+    ? `[${v.map(stable).join(",")}]`
+    : v && typeof v === "object"
+      ? `{${Object.keys(v).filter((k) => (v as any)[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stable((v as any)[k])}`).join(",")}}`
+      : JSON.stringify(v ?? null);
+const sameContent = (a: any, b: any) => stable(contentOf(a)) === stable(contentOf(b));
 
 /**
  * A notebook artifact, mounted into `box`. The handle is returned at once and owns everything the mount makes, so it
@@ -114,7 +127,18 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   let kernel: any = null;
   let running = 0;
   let check: () => Promise<void> = async () => {}; // (the path, ref and fence checked again: set once attached)
-  let keepCopy: ((doc: { mode?: string; cells?: unknown[] }, signal?: AbortSignal) => Promise<string>) | null = null;
+  let keepCopy: ((doc: any, signal?: AbortSignal) => Promise<string>) | null = null;
+  let releasing: Promise<{ ok: true } | { ok: false; why: string }> | null = null; // (one release at a time)
+  let frozen = false; // (closing: no edit, no Run)
+  // (while frozen, every gesture inside the notebook stops at its root, before any cell's own handler: a click (Run,
+  // the cell menu), a key (Shift+Enter, command mode), typing, a paste or a drop; inert alone doesn't stop a script's
+  // click() in every browser)
+  for (const type of ["click", "dblclick", "mousedown", "keydown", "keypress", "beforeinput", "input", "paste", "drop"])
+    nbRoot.addEventListener(type, (e) => {
+      if (!frozen) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
   let stored: (() => Promise<any>) | null = null; // (the record the store has now, read beside the page's writes)
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
@@ -134,40 +158,10 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       nb.flush(); // (its pending save goes out now, the notebook still attached)
       await nb.saved(); // (and is made, or said why not)
     },
-    async release() {
-      if (!alive) return { ok: true };
-      const comp = nb;
-      if (!comp || !attached || !keepCopy || !stored) {
-        await host.dispose();
-        return { ok: true };
-      }
-      // (1) what was edited is saved, while this pane may still save: CLOSE_SAVE_MS at most
-      if (bound) {
-        comp.flush();
-        await Promise.race([comp.saved().catch(() => {}), new Promise((r) => setTimeout(r, CLOSE_SAVE_MS))]);
-      }
-      // (2) from here nothing is written to the document: a save still waiting is refused at its write transaction
-      bound = false;
-      // (3) is the latest content what the store has? (a save may have been refused with a resolved "not saved", the
-      // pane may have let go with an edit pending, a save may still be waiting): if not, it is kept as a copy first
-      const snap = comp.snapshot();
-      const rec = await stored().catch(() => undefined);
-      if (!rec || cellsKey(rec.cells) !== cellsKey(snap.cells)) {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), CLOSE_COPY_MS);
-        try {
-          const name = await keepCopy(snap, ctl.signal);
-          ui.notice(`${path}: your last changes weren't saved there; they were kept as ${name}.`);
-        } catch (e) {
-          // (not kept: the notebook stays open, its content in it, and says so; nothing is dropped)
-          const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
-          return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-      await host.dispose();
-      return { ok: true };
+    release() {
+      // (one at a time: a Close, a thread switch and a Try again share the one under way)
+      releasing ??= doRelease().finally(() => (releasing = null));
+      return releasing;
     },
     async dispose() {
       if (!alive) return;
@@ -202,6 +196,58 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   });
   return host;
 
+  // Closing (NotebookHost.release): frozen, then saved, or kept as a copy, or (false) neither, and then it stays.
+  async function doRelease(): Promise<{ ok: true } | { ok: false; why: string }> {
+    if (!alive) return { ok: true };
+    const comp = nb;
+    if (!comp || !attached || !keepCopy || !stored) {
+      await host.dispose();
+      return { ok: true };
+    }
+    // (0) frozen first, before anything is awaited: no edit and no Run from here (ART-C2b r4), so the content kept
+    // below is the content shown; if it can't be kept, it stays frozen, with Try again / Close without keeping
+    freeze(comp);
+    // (1) what was edited is saved, while this pane may still save: CLOSE_SAVE_MS at most
+    if (bound) {
+      comp.flush();
+      await Promise.race([comp.saved().catch(() => {}), new Promise((r) => setTimeout(r, CLOSE_SAVE_MS))]);
+    }
+    // (2) from here nothing is written to the document: a save still waiting is refused at its write transaction
+    bound = false;
+    // (3) is the content shown what the store has, all of it (ART-C2a r4)? (a save may have been refused with a
+    // resolved "not saved", the pane may have let go with an edit pending, a save may still be waiting): if not, it
+    // is kept as a copy first, whole
+    const snap = comp.snapshot();
+    const rec = await stored().catch(() => undefined);
+    if (!rec || !sameContent(rec, snap)) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), CLOSE_COPY_MS);
+      try {
+        const name = await keepCopy(snap, ctl.signal);
+        ui.notice(`${path}: your last changes weren't saved there; they were kept as ${name}.`);
+      } catch (e) {
+        // (not kept: the notebook stays open, frozen, its content in it, and says so; nothing is dropped)
+        const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
+        ui.saved("Not saved");
+        return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    await host.dispose();
+    return { ok: true };
+  }
+  // (no edits and no Run while it closes: the notebook inert (no focus, no input, no click) and read only, its popups
+  // closed, and it says so)
+  function freeze(comp: Nb) {
+    frozen = true;
+    nbRoot.inert = true;
+    el.classList.add("closing");
+    comp.setReadOnly(true);
+    for (const p of document.querySelectorAll<HTMLElement>(".sbnb-pop:not(dialog)")) p.hidden = true;
+    ui.saved("Closing…");
+  }
+
   async function mount() {
     const fail = (text: string) => ui.bar({ kind: "refused", text });
     const entry = await ws.stat(path).catch(() => undefined);
@@ -216,7 +262,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       for (let i = 1; ; i++) {
         const name = `${stem} (copy${i > 1 ? ` ${i}` : ""}).ipynb`;
         try {
-          await ws.create(name, { content: { mode: doc.mode, cells: doc.cells }, mode: doc.mode, ...(signal ? { signal } : {}) });
+          await ws.create(name, { content: contentOf(doc), mode: doc.mode, ...(signal ? { signal } : {}) });
           return name;
         } catch (e) {
           if ((e as { code?: string }).code !== "exists" || i >= 50) throw e;
@@ -242,7 +288,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       ui.bar({ kind: "readonly", text: "This workspace saves notebooks through sync: open it in Sagebrush to run and edit it.", actions: [{ label: "Open in Sagebrush", run: () => open(`/w${path}`, "_blank", "noopener") }] });
       return;
     }
-    const k = (kernel = lazyKernel(mod));
+    const k = (kernel = lazyKernel(mod, () => frozen));
     const comp = (nb = mod.createNotebook(nbRoot, { kernel: k, assetBase: SITE.href, reactive: false, remotePictures: "click" }));
 
     // The store, bound to this document while the pane shows it. The database it writes through refuses every write
