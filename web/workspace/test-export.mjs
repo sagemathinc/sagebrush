@@ -502,6 +502,151 @@ try {
     await ev(`${W}.write("/data/primes.csv", "n,p\\n1,2\\n").then(() => 1)`);
   });
 
+  // (r2a: these three load pages (a second tab, the board page): they run before "structure", whose log-trim cases
+  // leave the workspace in a state a newly loaded page quarantines)
+  // ---- astra's E1-R2-A2: scratch ownership.  (1) This tab's export starts, its sweep paused before its listing (a test
+  // hook); meanwhile another tab's export starts after it and reaches its OPFS handoff; then this sweep lists and
+  // removes: the other export's archive survives (its lock is held), an abandoned file (no lock) is removed.  (2) The
+  // probe's write or flush failing, and a scratch file's open failing, leave no file behind.
+  await scenario("scratch", async () => {
+    const OPFS = (body) => `navigator.storage.getDirectory().then((r) => r.getDirectoryHandle("sagebrush-export", { create: true })).then(async (d) => { ${body} })`;
+    const names = () => ev(OPFS(`const n = []; for await (const k of d.keys()) n.push(k); return n;`));
+    const OLD = "00000000-0000-4000-8000-000000000000-old";
+    // (the other tab, made ready to export first: its own hooks keep its handoff open until told)
+    const b = await secondTab();
+    await b.until(`!!document.querySelector("#wsfilesbtn") && !document.querySelector("#wsfilesbtn").hidden`, 60000);
+    await b.ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
+    await b.until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
+    await b.ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); window.__exp = null; window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; } }; return 1; })()`);
+    await b.until(`[...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].some((x) => /^Export all current files/.test(x.textContent))`);
+    // (this tab's export first, its sweep paused 10 s before it lists; then the other's)
+    await hooks(`sweepPauseMs: 10000`);
+    await startFlow();
+    const t0 = Date.now();
+    // (the other export started well after this one's sweep has begun: 3 s into its 10 s pause)
+    await sleep(3000);
+    const clickB = (re) => b.until(`(() => { const x = [...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].find((y) => ${re}.test(y.textContent)); x?.click(); return !!x; })()`, 60000);
+    const clickedB = await clickB(/^Export all current files/);
+    const savedB = await clickB(/^Save…$/);
+    const handing = await b.until(`!!window.__exp`, 60000);
+    // (an abandoned file, made after the other export's own sweep: only this tab's paused sweep can remove it)
+    await ev(OPFS(`const f = await d.getFileHandle(${JSON.stringify(OLD)}, { create: true }); const w = await f.createWritable(); await w.write("abandoned"); await w.close(); return 1;`));
+    const other = (await names()).filter((x) => /-out\.zip$/.test(x));
+    const inPause = Date.now() - t0 < 9000;
+    check(clickedB && savedB && handing && other.length === 1 && inPause, "the other tab's export, started after this one, is handing off its archive from OPFS while this one's sweep waits: " + JSON.stringify(other) + " at " + (Date.now() - t0) + " ms");
+    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
+    const left = await names();
+    check(ready && other.length === 1 && left.includes(other[0]), "a sweep begun before the other export, listing after it, leaves its handing-off archive (its lock held): " + JSON.stringify(left));
+    check(ready && !left.includes(OLD), "…and removes the abandoned file, whose export holds no lock: " + JSON.stringify(left));
+    await ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((x) => x.textContent === "Cancel")?.click(); return 1; })()`);
+    await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Close")`, 10000);
+    await closeFlow();
+    await b.ev(`(() => { window.__exp?.then?.(); return 1; })()`);
+    await until(`${LOCKS}.then((m) => m === 0)`, 20000);
+    await b.close();
+    await ev(OPFS(`for (const k of [...(await (async () => { const n = []; for await (const k of d.keys()) n.push(k); return n; })())]) await d.removeEntry(k).catch(() => {}); return 1;`));
+    // (setup faults: none may leave a file)
+    for (const [label, extra, re] of [["the probe's write fails", `failProbe: "write"`, null], ["the probe's flush fails", `failProbe: "flush"`, null], ["a scratch spool's open fails", `failOpen: "spool"`, /couldn't be truncated/], ["the archive's scratch file's open fails", `failOpen: "sink"`, /couldn't be truncated/]]) {
+      await hooks(extra);
+      const r = await exportOnce(join(out, "sf.zip"));
+      await handed().catch(() => {});
+      await until(`${LOCKS}.then((m) => m === 0)`, 20000);
+      const n = await names();
+      check((re ? !!r.stopped && re.test(r.stopped) : !r.stopped) && n.length === 0, label + ": " + (re ? "the export stops, saying so, and " : "the export goes on (without OPFS), and ") + "no scratch file is left: " + JSON.stringify(n) + " " + String(r.stopped ?? "").slice(-160));
+    }
+  });
+
+  // ---- astra's E1-R2-A3 (E1-A4): Cancel while the export waits for the workspace's lock, held by another tab, in
+  // preflight and while writing: within 250 ms, timed in the page; this tab's request for the lock withdrawn at once;
+  // and once the other tab lets the lock go, nothing late: no archive, no stamp, no scratch file, no lock.
+  await scenario("lockwait", async () => {
+    const WSL = "sagebrush-workspace";
+    const pendingWs = `navigator.locks.query().then((q) => q.pending.filter((l) => l.name === ${JSON.stringify(WSL)}).length)`;
+    const b = await secondTab();
+    await b.until(`!!window.sagebrush?.workspace`, 60000);
+    // (the other tab takes the workspace's lock when told, says so once it holds it, and lets it go when told)
+    await b.ev(`(() => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "hold") navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => { window.__release = r; ch.postMessage("held"); })); if (m.data === "release") { window.__release?.(); window.__release = null; } }; return 1; })()`);
+    for (const [label, hook] of [["in preflight", "preflightMember"], ["while writing", "beforeCapture"]]) {
+      // (at the first document's capture, this export asks the other tab to hold the lock, and goes on once it does)
+      await hooks(`${hook}: () => { if (window.__asked) return; window.__asked = true; return new Promise((ok) => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "held") { ch.close(); ok(); } }; ch.postMessage("hold"); }); }`);
+      await ev(`(() => { window.__asked = false; window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+      const before = await lastAt();
+      await startFlow();
+      if (hook === "beforeCapture") { await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Save…")`, 60000); await panelButton(/^Save…$/); }
+      const waiting = await until(`${pendingWs}.then((n) => n >= 1)`, 30000);
+      await sleep(300);
+      const waitingStill = (await ev(pendingWs)) >= 1;
+      await ev(`(() => { const x = [...document.querySelectorAll(".sbfprev button")].find((y) => y.textContent === "Cancel"); window.__clickAt = performance.now(); x?.click(); return 1; })()`);
+      const shown = await until(`!!window.__cancelledAt`, 5000);
+      const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
+      const diag = shown ? "" : " " + JSON.stringify({ waiting, waitingStill, shown, clickAt: await ev(`window.__clickAt`), text: (await panelText()).slice(-200), locks: await ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name), pending: q.pending.map((l) => l.name) }))`) });
+      check(waiting && waitingStill && shown && took >= 0 && took <= 250, "Cancel " + label + ", while the export waits for the workspace's lock held by another tab, stops it within 250 ms, timed in the page: " + Math.round(took) + " ms" + diag);
+      await sleep(100);
+      const left = await ev(pendingWs);
+      check(left === 0, "…and its request for the lock is withdrawn at once, while the other tab still holds it: " + left + " waiting");
+      await b.ev(`(() => { new BroadcastChannel("sb-lockwait").postMessage("release"); return 1; })()`);
+      await sleep(1500);
+      // (the stopped flow's panel closed: an export holds its lock, and its worker, until its panel is dismissed)
+      await closeFlow();
+      await sleep(300);
+      const late = { exp: await ev(`!!window.__exp`), stamp: (await lastAt()) !== before, locks: await ev(LOCKS), scratch: await scratchCount(), pending: await ev(pendingWs) };
+      check(!late.exp && !late.stamp && late.locks === 0 && late.scratch === 0 && late.pending === 0, "…then, the lock let go, nothing late: no archive, no stamp, no scratch file, nothing waiting, and once its panel is closed no export lock: " + JSON.stringify(late));
+      await closeFlow();
+    }
+    await b.close();
+  });
+
+  // ---- astra's E1-A5 (r2: the evidence asked for): an export from the board page while that board's own save is
+  // paused (the workspace's lock held by another tab), then let go: the export waits for it, and its member has the
+  // edit; and a save refused (this origin's storage quota put below its use): the export stops, saying the board's
+  // last changes aren't kept, nothing handed over, the status unchanged.  (The refusal: IndexedDB's put failing as a
+  // full disk makes it fail, QuotaExceededError, injected in the page from the edit to the export's end.)
+  await scenario("boardsave", async () => {
+    const WSL = "sagebrush-workspace";
+    const bdRef = await ev(`${W}.stat("/Plan.board.json").then((e) => e.ref)`);
+    const b = await secondTab();
+    await b.until(`!!window.sagebrush?.workspace`, 60000);
+    await go(base + "board/?doc=local:" + encodeURIComponent(bdRef));
+    check(await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector('[data-sbb="files"]')`, 60000), "the board page opens the board, with its Files");
+    await sleep(1500);
+    await ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector('[data-sbb="files"]').click(); return 1; })()`);
+    await until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
+    // (1) the save paused: the other tab holds the workspace's lock; an edit here; Export clicked; the lock let go 2 s on
+    await b.ev(`(() => { navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => (window.__release = r))); return 1; })()`);
+    await until(`navigator.locks.query().then((q) => q.held.some((l) => l.name === ${JSON.stringify(WSL)}))`, 10000);
+    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5paused", text: "A5 the paused save" }); }).then(() => 1)`);
+    await hooks();
+    await startFlow();
+    await sleep(2000);
+    const early = await ev(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`);
+    await b.ev(`(() => { window.__release?.(); return 1; })()`);
+    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
+    let has = false, why = "";
+    if (ready && (await ev(`[...${P}.querySelectorAll("button")].some((x) => x.textContent === "Save…")`))) {
+      await panelButton(/^Save…$/);
+      if (await until(`!!window.__exp`, 60000)) {
+        const bytes = Buffer.from(await ev(`window.__exp.blob.arrayBuffer().then((a) => { let s = ""; const u = new Uint8Array(a); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode(...u.subarray(i, i + 32768)); return btoa(s); })`), "base64");
+        writeFileSync(join(out, "a5.zip"), bytes);
+        has = member(join(out, "a5.zip"), "files/Plan.board.json").toString("utf8").includes("A5 the paused save");
+        await handed();
+      }
+    } else why = (await panelText()).slice(-240);
+    check(!early && ready && has, "an export while this board's save is paused waits for it, and its member has the edit made before the click: " + JSON.stringify({ early, ready, has, why }));
+    await closeFlow();
+    // (2) the save refused: the quota put below this origin's use, an edit, Export
+    await ev(`(() => { const put = IDBObjectStore.prototype.put; window.__unrefuse = () => { IDBObjectStore.prototype.put = put; }; IDBObjectStore.prototype.put = function (...a) { throw new DOMException("the disk is full (a test)", "QuotaExceededError"); }; return 1; })()`);
+    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5refused", text: "A5 the refused save" }); }).then(() => 1, () => 1)`);
+    await sleep(1500);
+    const before = await lastAt();
+    await hooks();
+    const r = await exportOnce(join(out, "a5r.zip"));
+    await ev(`(() => { window.__unrefuse(); return 1; })()`);
+    check(!!r.stopped && /last changes aren't kept in your files/.test(r.stopped) && !(await ev(`!!window.__exp`)) && (await lastAt()) === before, "an export while this board's last save was refused stops, saying so, nothing handed over, the status unchanged: " + String(r.stopped ?? r.name).slice(-200));
+    await b.close();
+    await go(base);
+    await openFiles();
+  });
+
   // ---- rule 1 (§2, astra's E1-A1): every structural change during an export stops it, naming it
   await scenario("structure", async () => {
     const before = await lastAt();
@@ -696,149 +841,6 @@ try {
       }
     } else check(false, "the reference export stopped: " + e.stopped);
     await ev(`Promise.all([${W}.remove("/Wide.board.json"), ${W}.remove("/Many.ipynb")]).then(() => 1)`);
-  });
-
-  // ---- astra's E1-R2-A2: scratch ownership.  (1) This tab's export starts, its sweep paused before its listing (a test
-  // hook); meanwhile another tab's export starts after it and reaches its OPFS handoff; then this sweep lists and
-  // removes: the other export's archive survives (its lock is held), an abandoned file (no lock) is removed.  (2) The
-  // probe's write or flush failing, and a scratch file's open failing, leave no file behind.
-  await scenario("scratch", async () => {
-    const OPFS = (body) => `navigator.storage.getDirectory().then((r) => r.getDirectoryHandle("sagebrush-export", { create: true })).then(async (d) => { ${body} })`;
-    const names = () => ev(OPFS(`const n = []; for await (const k of d.keys()) n.push(k); return n;`));
-    const OLD = "00000000-0000-4000-8000-000000000000-old";
-    // (the other tab, made ready to export first: its own hooks keep its handoff open until told)
-    const b = await secondTab();
-    await b.until(`!!document.querySelector("#wsfilesbtn") && !document.querySelector("#wsfilesbtn").hidden`, 60000);
-    await b.ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
-    await b.until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
-    await b.ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); window.__exp = null; window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; } }; return 1; })()`);
-    await b.until(`[...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].some((x) => /^Export all current files/.test(x.textContent))`);
-    // (this tab's export first, its sweep paused 10 s before it lists; then the other's)
-    await hooks(`sweepPauseMs: 10000`);
-    await startFlow();
-    const t0 = Date.now();
-    // (the other export started well after this one's sweep has begun: 3 s into its 10 s pause)
-    await sleep(3000);
-    const clickB = (re) => b.until(`(() => { const x = [...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].find((y) => ${re}.test(y.textContent)); x?.click(); return !!x; })()`, 60000);
-    const clickedB = await clickB(/^Export all current files/);
-    const savedB = await clickB(/^Save…$/);
-    const handing = await b.until(`!!window.__exp`, 60000);
-    // (an abandoned file, made after the other export's own sweep: only this tab's paused sweep can remove it)
-    await ev(OPFS(`const f = await d.getFileHandle(${JSON.stringify(OLD)}, { create: true }); const w = await f.createWritable(); await w.write("abandoned"); await w.close(); return 1;`));
-    const other = (await names()).filter((x) => /-out\.zip$/.test(x));
-    const inPause = Date.now() - t0 < 9000;
-    check(clickedB && savedB && handing && other.length === 1 && inPause, "the other tab's export, started after this one, is handing off its archive from OPFS while this one's sweep waits: " + JSON.stringify(other) + " at " + (Date.now() - t0) + " ms");
-    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
-    const left = await names();
-    check(ready && other.length === 1 && left.includes(other[0]), "a sweep begun before the other export, listing after it, leaves its handing-off archive (its lock held): " + JSON.stringify(left));
-    check(ready && !left.includes(OLD), "…and removes the abandoned file, whose export holds no lock: " + JSON.stringify(left));
-    await ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((x) => x.textContent === "Cancel")?.click(); return 1; })()`);
-    await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Close")`, 10000);
-    await closeFlow();
-    await b.ev(`(() => { window.__exp?.then?.(); return 1; })()`);
-    await until(`${LOCKS}.then((m) => m === 0)`, 20000);
-    await b.close();
-    await ev(OPFS(`for (const k of [...(await (async () => { const n = []; for await (const k of d.keys()) n.push(k); return n; })())]) await d.removeEntry(k).catch(() => {}); return 1;`));
-    // (setup faults: none may leave a file)
-    for (const [label, extra, re] of [["the probe's write fails", `failProbe: "write"`, null], ["the probe's flush fails", `failProbe: "flush"`, null], ["a scratch spool's open fails", `failOpen: "spool"`, /couldn't be truncated/], ["the archive's scratch file's open fails", `failOpen: "sink"`, /couldn't be truncated/]]) {
-      await hooks(extra);
-      const r = await exportOnce(join(out, "sf.zip"));
-      await handed().catch(() => {});
-      await until(`${LOCKS}.then((m) => m === 0)`, 20000);
-      const n = await names();
-      check((re ? !!r.stopped && re.test(r.stopped) : !r.stopped) && n.length === 0, label + ": " + (re ? "the export stops, saying so, and " : "the export goes on (without OPFS), and ") + "no scratch file is left: " + JSON.stringify(n) + " " + String(r.stopped ?? "").slice(-160));
-    }
-  });
-
-  // ---- astra's E1-R2-A3 (E1-A4): Cancel while the export waits for the workspace's lock, held by another tab, in
-  // preflight and while writing: within 250 ms, timed in the page; this tab's request for the lock withdrawn at once;
-  // and once the other tab lets the lock go, nothing late: no archive, no stamp, no scratch file, no lock.
-  await scenario("lockwait", async () => {
-    const WSL = "sagebrush-workspace";
-    const pendingWs = `navigator.locks.query().then((q) => q.pending.filter((l) => l.name === ${JSON.stringify(WSL)}).length)`;
-    const b = await secondTab();
-    await b.until(`!!window.sagebrush?.workspace`, 60000);
-    // (the other tab takes the workspace's lock when told, says so once it holds it, and lets it go when told)
-    await b.ev(`(() => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "hold") navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => { window.__release = r; ch.postMessage("held"); })); if (m.data === "release") { window.__release?.(); window.__release = null; } }; return 1; })()`);
-    for (const [label, hook] of [["in preflight", "preflightMember"], ["while writing", "beforeCapture"]]) {
-      // (at the first document's capture, this export asks the other tab to hold the lock, and goes on once it does)
-      await hooks(`${hook}: () => { if (window.__asked) return; window.__asked = true; return new Promise((ok) => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "held") { ch.close(); ok(); } }; ch.postMessage("hold"); }); }`);
-      await ev(`(() => { window.__asked = false; window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
-      const before = await lastAt();
-      await startFlow();
-      if (hook === "beforeCapture") { await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Save…")`, 60000); await panelButton(/^Save…$/); }
-      const waiting = await until(`${pendingWs}.then((n) => n >= 1)`, 30000);
-      await sleep(300);
-      const waitingStill = (await ev(pendingWs)) >= 1;
-      await ev(`(() => { const x = [...document.querySelectorAll(".sbfprev button")].find((y) => y.textContent === "Cancel"); window.__clickAt = performance.now(); x?.click(); return 1; })()`);
-      const shown = await until(`!!window.__cancelledAt`, 5000);
-      const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
-      const diag = shown ? "" : " " + JSON.stringify({ waiting, waitingStill, shown, clickAt: await ev(`window.__clickAt`), text: (await panelText()).slice(-200), locks: await ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name), pending: q.pending.map((l) => l.name) }))`) });
-      check(waiting && waitingStill && shown && took >= 0 && took <= 250, "Cancel " + label + ", while the export waits for the workspace's lock held by another tab, stops it within 250 ms, timed in the page: " + Math.round(took) + " ms" + diag);
-      await sleep(100);
-      const left = await ev(pendingWs);
-      check(left === 0, "…and its request for the lock is withdrawn at once, while the other tab still holds it: " + left + " waiting");
-      await b.ev(`(() => { new BroadcastChannel("sb-lockwait").postMessage("release"); return 1; })()`);
-      await sleep(1500);
-      // (the stopped flow's panel closed: an export holds its lock, and its worker, until its panel is dismissed)
-      await closeFlow();
-      await sleep(300);
-      const late = { exp: await ev(`!!window.__exp`), stamp: (await lastAt()) !== before, locks: await ev(LOCKS), scratch: await scratchCount(), pending: await ev(pendingWs) };
-      check(!late.exp && !late.stamp && late.locks === 0 && late.scratch === 0 && late.pending === 0, "…then, the lock let go, nothing late: no archive, no stamp, no scratch file, nothing waiting, and once its panel is closed no export lock: " + JSON.stringify(late));
-      await closeFlow();
-    }
-    await b.close();
-  });
-
-  // ---- astra's E1-A5 (r2: the evidence asked for): an export from the board page while that board's own save is
-  // paused (the workspace's lock held by another tab), then let go: the export waits for it, and its member has the
-  // edit; and a save refused (this origin's storage quota put below its use): the export stops, saying the board's
-  // last changes aren't kept, nothing handed over, the status unchanged.  (The refusal: IndexedDB's put failing as a
-  // full disk makes it fail, QuotaExceededError, injected in the page from the edit to the export's end.)
-  await scenario("boardsave", async () => {
-    const WSL = "sagebrush-workspace";
-    const bdRef = await ev(`${W}.stat("/Plan.board.json").then((e) => e.ref)`);
-    const b = await secondTab();
-    await b.until(`!!window.sagebrush?.workspace`, 60000);
-    await go(base + "board/?doc=local:" + encodeURIComponent(bdRef));
-    check(await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector('[data-sbb="files"]')`, 60000), "the board page opens the board, with its Files");
-    await sleep(1500);
-    await ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector('[data-sbb="files"]').click(); return 1; })()`);
-    await until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
-    // (1) the save paused: the other tab holds the workspace's lock; an edit here; Export clicked; the lock let go 2 s on
-    await b.ev(`(() => { navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => (window.__release = r))); return 1; })()`);
-    await until(`navigator.locks.query().then((q) => q.held.some((l) => l.name === ${JSON.stringify(WSL)}))`, 10000);
-    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5paused", text: "A5 the paused save" }); }).then(() => 1)`);
-    await hooks();
-    await startFlow();
-    await sleep(2000);
-    const early = await ev(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`);
-    await b.ev(`(() => { window.__release?.(); return 1; })()`);
-    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
-    let has = false, why = "";
-    if (ready && (await ev(`[...${P}.querySelectorAll("button")].some((x) => x.textContent === "Save…")`))) {
-      await panelButton(/^Save…$/);
-      if (await until(`!!window.__exp`, 60000)) {
-        const bytes = Buffer.from(await ev(`window.__exp.blob.arrayBuffer().then((a) => { let s = ""; const u = new Uint8Array(a); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode(...u.subarray(i, i + 32768)); return btoa(s); })`), "base64");
-        writeFileSync(join(out, "a5.zip"), bytes);
-        has = member(join(out, "a5.zip"), "files/Plan.board.json").toString("utf8").includes("A5 the paused save");
-        await handed();
-      }
-    } else why = (await panelText()).slice(-240);
-    check(!early && ready && has, "an export while this board's save is paused waits for it, and its member has the edit made before the click: " + JSON.stringify({ early, ready, has, why }));
-    await closeFlow();
-    // (2) the save refused: the quota put below this origin's use, an edit, Export
-    await ev(`(() => { const put = IDBObjectStore.prototype.put; window.__unrefuse = () => { IDBObjectStore.prototype.put = put; }; IDBObjectStore.prototype.put = function (...a) { throw new DOMException("the disk is full (a test)", "QuotaExceededError"); }; return 1; })()`);
-    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5refused", text: "A5 the refused save" }); }).then(() => 1, () => 1)`);
-    await sleep(1500);
-    const before = await lastAt();
-    await hooks();
-    const r = await exportOnce(join(out, "a5r.zip"));
-    await ev(`(() => { window.__unrefuse(); return 1; })()`);
-    check(!!r.stopped && /last changes aren't kept in your files/.test(r.stopped) && !(await ev(`!!window.__exp`)) && (await lastAt()) === before, "an export while this board's last save was refused stops, saying so, nothing handed over, the status unchanged: " + String(r.stopped ?? r.name).slice(-200));
-    await b.close();
-    await go(base);
-    await openFiles();
   });
 
   check(errors.length === 0, "no page errors: " + errors.slice(0, 3).join(" | "));
