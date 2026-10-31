@@ -140,7 +140,6 @@
   body.has-artifact #artifacts { display: flex; flex-direction: column; width: min(46vw, 760px); flex: none; border-left: 1px solid var(--line); background: var(--card); }
   body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
   body.has-artifact.wide-artifact #artifacts { width: min(60vw, 960px); }
-  /* (the notebook's popups are on the document body: above the pane, full screen included; BAP-7) */
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
   .pane-host { flex: 1; overflow: auto; }
