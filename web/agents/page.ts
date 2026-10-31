@@ -226,7 +226,9 @@ function renderSidebar() {
     a.className = "thread" + (t.id === state.current ? " on" : "");
     a.textContent = t.title;
     if (isRunning(t)) a.append(Object.assign(document.createElement("span"), { className: "dot", title: "working" }));
-    a.onclick = () => {
+    a.onclick = async () => {
+      if (t.id === state.current) return;
+      if (!(await mayLeaveThread())) return;
       state.current = t.id;
       openArtifact = t.artifacts.at(-1)?.id ?? null;
       save();
@@ -382,6 +384,7 @@ function diffHtml(before: string, after: string): string {
 // The pane: a head (tabs and buttons, redrawn when what it shows changes) and one host per artifact, kept while
 // its thread is shown. A host is mounted once: full screen, a new artifact or another tab only hide or show it,
 // so a notebook keeps its kernel, a running cell and its pending saves (the artifacts plan, BAP-1).
+type Bar = Parameters<NotebookUi["bar"]>[0];
 type Host = {
   key: string;
   el: HTMLElement;
@@ -390,6 +393,9 @@ type Host = {
   nb?: NotebookHost;
   running: boolean;
   flush?: () => Promise<void>;
+  dispose?: () => Promise<void>;
+  /** Its own bar (a warning, a refusal, with its actions): shown whenever it is the host shown, and only then (ART-C5). */
+  bar: Bar;
 };
 const hosts = new Map<string, Host>();
 let paneThread: string | null = null;
@@ -404,16 +410,48 @@ function paneShell(pane: HTMLElement) {
   return { head: $(".pane-head", pane), body: $(".pane-body", pane), bar: $(".pane-bar", pane) };
 }
 
-/** Let go of every host of a thread: saves flushed, notebooks stopped and disposed. */
+/** Let go of every host of a thread: saves flushed (or kept as copies), notebooks stopped, editors destroyed. */
 async function releaseHosts(threadId: string | null) {
   if (!threadId) return;
-  for (const [k, h] of [...hosts]) {
-    if (!k.startsWith(threadId + "\u0000")) continue;
-    hosts.delete(k);
-    await h.flush?.().catch(() => {});
-    await h.nb?.dispose().catch(() => {});
-    h.el.remove();
+  const gone = [...hosts].filter(([k]) => k.startsWith(threadId + "\u0000"));
+  for (const [k] of gone) hosts.delete(k); // (at once: nothing of them is shown or acted on from here)
+  await Promise.all(
+    gone.map(async ([, h]) => {
+      h.el.hidden = true;
+      await h.dispose?.().catch(() => {});
+      h.el.remove();
+    }),
+  );
+}
+
+/** The bar of the host shown: its own state, its actions only while it is still that host (ART-C5). */
+function renderBar(h: Host | undefined) {
+  const bar = $("#artifacts .pane-bar");
+  if (!bar) return;
+  const b = h?.bar;
+  if (!h || !b) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
   }
+  bar.hidden = false;
+  bar.className = `pane-bar ${b.kind}`;
+  bar.setAttribute("role", "alert");
+  bar.innerHTML = `<span>${esc(b.text)}</span>` + (b.actions ?? []).map((x, i) => `<button data-act="${i}">${esc(x.label)}</button>`).join("");
+  for (const btn of bar.querySelectorAll<HTMLButtonElement>("[data-act]"))
+    btn.onclick = () => {
+      if (hosts.get(h.key) !== h || h.bar !== b || shownHost() !== h) return;
+      b.actions![Number(btn.dataset.act)].run();
+    };
+}
+const shownHost = () => hosts.get(hostKey(current().id, openArtifact ?? ""));
+
+/** Leave the thread shown (another thread, New chat): a running cell is stopped only if the person says so. Resolves
+ * to whether it may be left, still the same thread then (ART-C6). */
+async function mayLeaveThread(): Promise<boolean> {
+  const from = current().id;
+  if (!(await mayClosePane(from))) return false;
+  return current().id === from;
 }
 
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
@@ -443,10 +481,11 @@ function renderArtifacts() {
     void releaseHosts(paneThread);
     paneThread = thread.id;
   }
-  const { head, body, bar } = paneShell(pane);
+  const { head, body } = paneShell(pane);
   if (!a) {
     for (const h of hosts.values()) (h.nb ? h.nb.hidden(true) : (h.el.hidden = true));
     headKey = "";
+    renderBar(undefined);
     return;
   }
   // the head: tabs (a running notebook's name says so), copy, full screen, close
@@ -459,6 +498,9 @@ function renderArtifacts() {
         return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}</button>`;
       })
       .join("");
+    // (the control that had the focus has it again after the head is redrawn: a tab, copy, full screen or close, BAC-6)
+    const had = document.activeElement instanceof HTMLElement && head.contains(document.activeElement) ? document.activeElement : null;
+    const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.id ? `#${had.id}` : null) : null;
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
@@ -467,7 +509,7 @@ function renderArtifacts() {
     for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
-      if (!(await mayClosePane(thread.id))) return;
+      if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
       openArtifact = null;
       fullscreen = false;
       await releaseHosts(thread.id);
@@ -477,12 +519,13 @@ function renderArtifacts() {
       const h = hosts.get(hostKey(thread.id, openArtifact ?? ""));
       navigator.clipboard?.writeText(h?.copy() ?? "").then(() => toast("Copied"), () => toast("Couldn't copy"));
     };
+    if (refocus) head.querySelector<HTMLElement>(refocus)?.focus();
   }
   // this artifact's host: mounted once; the others of this thread hidden (kept)
   const key = hostKey(thread.id, a.id);
   let h = hosts.get(key);
   const staticBody = a.path && workspace ? "" : a.body;
-  if (h && !h.nb && !h.flush && h.body !== staticBody) {
+  if (h && !h.nb && !h.dispose && h.body !== staticBody) {
     h.el.remove();
     hosts.delete(key);
     h = undefined;
@@ -491,9 +534,9 @@ function renderArtifacts() {
     const el = document.createElement("div");
     el.className = "pane-host";
     body.append(el);
-    h = { key, el, body: staticBody, copy: () => a.body, running: false };
+    h = { key, el, body: staticBody, copy: () => a.body, running: false, bar: null };
     hosts.set(key, h);
-    mountHost(thread.id, a, h, bar);
+    mountHost(thread.id, a, h);
   }
   for (const x of hosts.values()) {
     const show = x === h;
@@ -501,11 +544,11 @@ function renderArtifacts() {
     x.el.hidden = !show;
     if (!show) x.flush?.().catch(() => {});
   }
-  if (!h.nb) bar.hidden = true;
+  renderBar(h);
 }
 
 // What an artifact's host holds: a notebook, a workspace file (Markdown, LaTeX, code), or the artifact's own text.
-function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
+function mountHost(threadId: string, a: Artifact, h: Host) {
   const before = document.activeElement as HTMLElement | null;
   const keepFocus = () => {
     // (an artifact opened by the agent never takes the composer's focus: BAP-6)
@@ -514,36 +557,30 @@ function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
   if (a.kind === "notebook" && a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> <a class="open-full" href="/w${esc(a.path)}" target="_blank" rel="noopener">Open in Sagebrush</a></div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
-    const showBar = (b: Parameters<NotebookUi["bar"]>[0]) => {
-      if (hosts.get(h.key) !== h || openArtifact !== a.id) return;
-      if (!b) return void (bar.hidden = true);
-      bar.hidden = false;
-      bar.className = `pane-bar ${b.kind}`;
-      bar.setAttribute("role", "alert");
-      bar.innerHTML = `<span>${esc(b.text)}</span>` + (b.actions ?? []).map((x, i) => `<button data-act="${i}">${esc(x.label)}</button>`).join("");
-      for (const btn of bar.querySelectorAll<HTMLButtonElement>("[data-act]")) btn.onclick = () => b.actions![Number(btn.dataset.act)].run();
-    };
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
-      bar: showBar,
+      // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
+      bar: (b) => {
+        if (hosts.get(h.key) !== h) return;
+        h.bar = b;
+        if (shownHost() === h) renderBar(h);
+      },
       agentName,
       running: (on) => {
         h.running = on;
         headKey = "";
         if (current().id === threadId) renderArtifacts();
       },
+      notice: (text) => toast(text, 8000),
     };
-    void mountNotebook(workspace, a.path, $(".file-body", h.el), ui, agentCellsByPath.get(a.path) ?? Promise.resolve(null), () => hosts.get(h.key) === h).then(
-      (nb) => {
-        if (hosts.get(h.key) !== h) return void nb.dispose(); // (closed while it opened: nothing of it stays)
-        h.nb = nb;
-        h.copy = nb.copyText;
-        h.flush = nb.flush;
-        nb.hidden(openArtifact !== a.id || current().id !== threadId);
-        keepFocus();
-      },
-      (e) => showBar({ kind: "refused", text: `Couldn't open this notebook: ${(e as Error).message}` }),
-    );
+    // (the handle at once: closing never waits for the mount, nor for any read it makes, ART-C2)
+    const nb = mountNotebook(workspace, a.path, $(".file-body", h.el), ui, agentCellsByPath.get(a.path) ?? Promise.resolve(null));
+    h.nb = nb;
+    h.copy = nb.copyText;
+    h.flush = nb.flush;
+    h.dispose = nb.dispose;
+    nb.hidden(shownHost() !== h);
+    void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
     return;
   }
   if (a.path && workspace) {
@@ -551,6 +588,7 @@ function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
     h.copy = f.text;
     h.flush = f.flush;
+    h.dispose = f.dispose;
     keepFocus();
     return;
   }
@@ -563,84 +601,138 @@ function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
   typeset(h.el);
 }
 
-// An artifact that is a workspace file: the file itself, editable here (saved as the person, with its
-// revision as base, so a change the agent made meanwhile is never overwritten). Markdown in the block editor,
-// LaTeX in the LaTeX editor where this build has it (web/latex, /sagebrush-latex.js), other text as text.
-function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): { text: () => string; flush: () => Promise<void> } {
-  const path = a.path!;
-  let rev = -1;
-  let text = a.body;
-  let timer = 0;
-  let pending: string | null = null;
-  const say = (s: string) => (saved.textContent = s);
-  const write = async (value: string) => {
-    pending = null;
+// An artifact that is a workspace file: the file itself, editable here (saved as the person, with its revision as
+// base, so a change the agent made meanwhile is never overwritten). Markdown in the block editor, LaTeX in the LaTeX
+// editor where this build has it (web/latex, /sagebrush-latex.js), other text as text. (ART-C3, C4:) The editor
+// appears once the file and its revision are read, so no write goes without a base and no late read replaces an
+// edit; writes are tracked, so flush waits for them; after a conflict nothing more is written (the text stays
+// here); dispose saves the editor's latest text (the LaTeX editor's own debounce included), then destroys it.
+/** A text file's copy beside it, never over another: "name (copy).ext", "name (copy 2).ext", ... */
+async function keepFileCopy(path: string, text: string): Promise<string> {
+  const m = /^(.*?)(\.[^./]*)?$/.exec(path)!;
+  for (let i = 1; ; i++) {
+    const name = `${m[1]} (copy${i > 1 ? ` ${i}` : ""})${m[2] ?? ""}`;
     try {
-      const r = await workspace!.write(path, value, rev >= 0 ? { base: rev } : {});
-      rev = r.rev;
-      say("Saved");
+      await workspace!.create(name, { content: text });
+      return name;
     } catch (e) {
-      const code = (e as { code?: string }).code;
-      say(code === "conflict" ? "Not saved: changed elsewhere since (reopen it to see that version)" : `Not saved: ${(e as Error).message}`);
-    }
-  };
-  const changed = (value: string) => {
-    text = value;
-    pending = value;
-    say("Editing…");
-    clearTimeout(timer);
-    timer = window.setTimeout(() => void write(value), 700);
-  };
-  let set: (v: string) => void = () => {};
-  if (a.kind === "markdown") {
-    const ed = new BlockEditor(text, { render: md, typeset: (el) => typeset(el), onChange: changed });
-    ed.el.classList.add("doc");
-    box.append(ed.el);
-    set = (v) => (ed.value = v);
-  } else {
-    const ta = document.createElement("textarea");
-    ta.className = "code-edit";
-    ta.spellcheck = false;
-    ta.value = text;
-    ta.oninput = () => changed(ta.value);
-    box.append(ta);
-    set = (v) => (ta.value = v);
-    if (/\.tex$/i.test(path) && !__SB_LATEX__) {
-      // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
-      saved.insertAdjacentHTML("afterend", ` <a class="open-full" href="/w${esc(path)}" target="_blank" rel="noopener">Open in Sagebrush</a>`);
-    } else if (/\.tex$/i.test(path)) {
-      // (LaTeX: the LaTeX editor's live preview, in place of the text)
-      import(/* @vite-ignore */ LATEX_URL).then(
-        (m: { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { setText(t: string): void } }) => {
-          if (!m.mountEditor || !box.isConnected) return;
-          ta.remove();
-          const host = document.createElement("div");
-          host.className = "tex-host";
-          box.append(host);
-          const ed = m.mountEditor(host, { text, onChange: changed, layout: "split" });
-          set = (v) => ed.setText(v);
-        },
-        () => {},
-      );
+      if ((e as { code?: string }).code !== "exists" || i >= 50) throw e;
     }
   }
+}
+type FileHost = { text: () => string; flush: () => Promise<void>; dispose: () => Promise<void> };
+function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
+  const path = a.path!;
+  let alive = true;
+  let rev = -1; // (the revision the shown text is based on: known before anything is written)
+  let text = a.body; // (the editor's text as last told)
+  let savedText: string | null = null; // (the text the file has, as far as this host knows)
+  let timer = 0;
+  let inflight: Promise<void> = Promise.resolve();
+  let stopped = false; // (a conflict or refusal: nothing more is written from here)
+  let latest: () => string = () => text; // (the editor's current text, its unsent edits included)
+  let destroyEditor: () => void = () => {};
+  const say = (s: string) => alive && (saved.textContent = s);
+  const write = () => {
+    clearTimeout(timer);
+    inflight = inflight.then(async () => {
+      const value = latest();
+      if (stopped || rev < 0 || value === savedText) return;
+      try {
+        const r = await workspace!.write(path, value, { base: rev });
+        rev = r.rev;
+        savedText = value;
+        say(latest() === value ? "Saved" : "Editing…");
+      } catch (e) {
+        stopped = true;
+        const code = (e as { code?: string }).code;
+        say(code === "conflict" ? "Not saved: changed elsewhere since (your text stays here; reopen to see that version)" : `Not saved: ${(e as Error).message}`);
+      }
+    });
+    return inflight;
+  };
+  const changed = (value: string) => {
+    if (!alive) return;
+    text = value;
+    say("Editing…");
+    clearTimeout(timer);
+    timer = window.setTimeout(() => void write(), 700);
+  };
+  say("Loading…");
+  const tex = /\.tex$/i.test(path);
+  if (tex && !__SB_LATEX__) {
+    // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
+    saved.insertAdjacentHTML("afterend", ` <a class="open-full" href="/w${esc(path)}" target="_blank" rel="noopener">Open in Sagebrush</a>`);
+  }
+  type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
+  const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
-  workspace!.read(path).then(
-    (r) => {
+  void Promise.all([workspace!.read(path), latexMod]).then(
+    ([r, m]) => {
+      if (!alive) return;
+      // (a data file's content is its bytes: shown here only if they are UTF-8 text)
+      let content: string | null = typeof r.content === "string" ? r.content : null;
+      if (content === null && r.content instanceof Uint8Array) {
+        try {
+          content = new TextDecoder("utf-8", { fatal: true }).decode(r.content);
+        } catch {
+          content = null;
+        }
+      }
+      if (content === null) return say("(not a text file)");
       rev = r.rev;
-      if (typeof r.content === "string" && r.content !== text) {
-        text = r.content;
-        set(text);
+      text = savedText = content;
+      say("Saved");
+      if (a.kind === "markdown") {
+        const ed = new BlockEditor(text, { render: md, typeset: (el) => typeset(el), onChange: changed });
+        ed.el.classList.add("doc");
+        box.append(ed.el);
+      } else if (m?.mountEditor) {
+        const host = document.createElement("div");
+        host.className = "tex-host";
+        box.append(host);
+        const ed = m.mountEditor(host, { text, onChange: changed, layout: "split" });
+        latest = () => ed.getText();
+        destroyEditor = () => ed.destroy();
+      } else {
+        const ta = document.createElement("textarea");
+        ta.className = "code-edit";
+        ta.spellcheck = false;
+        ta.value = text;
+        ta.oninput = () => changed(ta.value);
+        box.append(ta);
+        latest = () => ta.value;
       }
     },
-    () => say("(not in this browser's workspace)"),
+    () => {
+      if (!alive) return;
+      say("(not in this browser's workspace)");
+      const pre = document.createElement("pre");
+      pre.className = "code";
+      pre.textContent = a.body;
+      box.append(pre);
+    },
   );
   return {
-    text: () => text,
-    flush: async () => {
-      if (pending === null) return;
+    text: () => latest(),
+    flush: () => (alive && latest() !== savedText ? write() : inflight),
+    async dispose() {
+      if (!alive) return;
+      // (the latest text, edits inside the editor's own debounce included, written before the editor goes)
+      if (latest() !== savedText) await Promise.race([write(), new Promise((r) => setTimeout(r, 3000))]);
+      else await inflight;
+      const unsaved = latest() !== savedText && rev >= 0 ? latest() : null;
+      alive = false;
       clearTimeout(timer);
-      await write(pending);
+      destroyEditor();
+      destroyEditor = () => {};
+      // (text that couldn't be written (a conflict, a refusal, the workspace busy) isn't lost: kept as a copy, and said)
+      if (unsaved !== null) {
+        void keepFileCopy(path, unsaved).then(
+          (name) => toast(`${path}: your last changes couldn't be saved; they were kept as ${name}.`, 8000),
+          (e) => toast(`${path}: your last changes couldn't be saved, nor kept as a copy (${(e as Error).message}).`, 8000),
+        );
+      }
     },
   };
 }
@@ -655,11 +747,13 @@ function renderComposer() {
   $("#queued").textContent = q ? `${q} queued` : "";
 }
 
-function toast(text: string) {
+let toastTimer = 0;
+function toast(text: string, ms = 1500) {
   const t = $("#toast");
   t.textContent = text;
   t.hidden = false;
-  setTimeout(() => (t.hidden = true), 1500);
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (t.hidden = true), ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -682,7 +776,8 @@ $("#send").onclick = () => submit("sent");
 $("#queue").onclick = () => submit("queued");
 $("#note").onclick = () => submit("note");
 $("#stop").onclick = () => interrupt(current());
-$("#new").onclick = () => {
+$("#new").onclick = async () => {
+  if (!(await mayLeaveThread())) return;
   const t = newThread(id(), "New chat");
   state.threads.push(t);
   state.current = t.id;
@@ -701,7 +796,8 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("[data-try]")) {
 }
 addEventListener("keydown", (e) => {
   // (Escape inside an editor in the pane is the editor's: a notebook leaves edit mode, closes its completer)
-  if (e.key === "Escape" && (e.defaultPrevented || (e.target instanceof Element && e.target.closest("#artifacts .file-body, #artifacts .nb-root")))) return;
+  // (and in a dialog or a notebook popup, which live on the document body: the shortcuts dialog, a completer, BAC-5)
+  if (e.key === "Escape" && (e.defaultPrevented || (e.target instanceof Element && e.target.closest("#artifacts .file-body, #artifacts .nb-root, dialog, .sbnb-pop")))) return;
   if (e.key === "Escape" && fullscreen) {
     fullscreen = false;
     renderArtifacts();

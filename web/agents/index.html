@@ -139,7 +139,11 @@
   #artifacts { display: none; }
   body.has-artifact #artifacts { display: flex; flex-direction: column; width: min(46vw, 760px); flex: none; border-left: 1px solid var(--line); background: var(--card); }
   body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
-  body.has-artifact.wide-artifact #artifacts { width: min(60vw, 960px); }
+  /* (a notebook's pane: wider, but the chat keeps at least 420 px beside the 250 px sidebar; only where the pane is a
+     column (over 900 px), and not in full screen; BAC-2, BAC-3) */
+  @media (min-width: 901px) {
+    body.has-artifact.wide-artifact:not(.fullscreen) #artifacts { width: max(360px, min(60vw, 960px, calc(100vw - 250px - 420px))); }
+  }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
   .pane-host { flex: 1; overflow: auto; }
@@ -151,7 +155,8 @@
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
-  .nb-agent-mark { font-size: 11.5px; color: var(--muted); margin: 0 0 2px 44px; }
+  /* (the label spans the cell's grid, the gutter and the code: in the gutter column alone it squeezed the code, BAC-1) */
+  .nb-agent-mark { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); margin: 0 0 2px var(--gutter, 44px); }
   .tab-running { color: var(--accent); }
   #close-running { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
   #close-running menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
