@@ -113,6 +113,8 @@ jobs:
       - name: build (Linux)
         if: runner.os == 'Linux'
         working-directory: app/src-tauri
+        # (an explicit bash is -eo pipefail: the build's status, not tee's)
+        shell: bash
         run: tauri build --ci 2>&1 | tee /tmp/tauri-build.log
       # (the bundler must have used the pinned tools: it downloaded nothing,
       # and they are still the pinned bytes)
