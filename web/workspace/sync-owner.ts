@@ -21,6 +21,7 @@ import { req } from "./db";
 import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
 import { confirmedIndex } from "./sync-confirmed";
 import { accountHash } from "../sync-protocol/protocol";
+import { detectOldSync, OLD_SYNC_REASON, UNREADABLE_REASON, type OldSync } from "./sync-old";
 
 export const STATUS_PUB = {
   /** status messages at most this often (one slot) */
@@ -85,6 +86,8 @@ export class SyncOwner {
   private lastAt = -Infinity;
   private forced = false;
   private slot: ReturnType<typeof setTimeout> | null = null;
+  // (EXACT-ONLY: this browser's old-sync detection, kept once it has an answer (a read that failed isn't kept))
+  private old: OldSync | null = null;
   /** (tests) what the holder side did */
   readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0 };
 
@@ -232,9 +235,34 @@ export class SyncOwner {
     })().finally(() => { this.reconciling = null; });
     return this.reconciling;
   }
+  /** EXACT-ONLY: whether this browser holds sync state from a build before the cutover (sync-old.ts), read afresh;
+   * found old, sync is off here and stays off, said in the snapshot (reconciled). */
+  async checkOld(): Promise<OldSync> {
+    const o = await this.detectOld();
+    if (o.old) void this.reconcile();
+    return o;
+  }
+  // (an answer kept, except one from a read that failed (old, failing closed): read again next time)
+  private async detectOld(): Promise<OldSync> {
+    const o = await detectOldSync(this.w);
+    this.old = o.unreadable ? null : o;
+    return o;
+  }
   private async reconcileOnce() {
     if (this.suspended) return;
     let d = await this.durable();
+    // (old sync state here: no client, whatever the lease says.  Old is kept; clean is read again while a lease is
+    // live, which is one read (this build's enable writes the marker with the lease), so an old build's lease is seen)
+    const old = this.old && (this.old.old || !d) ? this.old : await this.detectOld();
+    if (old.old) {
+      if (this.client) await this.stopClient();
+      this.life = null;
+      this.limit = null;
+      this.holder = null;
+      this.own = { state: "off", used: true, reason: old.unreadable ? UNREADABLE_REASON : OLD_SYNC_REASON };
+      this.changed();
+      return;
+    }
     if (d && !(await this.sessionIs(d.ns))) d = null;
     const same = !!d && !!this.life && d.ns === this.life.ns && d.epoch === this.life.epoch;
     if (same && this.client) return;

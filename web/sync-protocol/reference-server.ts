@@ -26,7 +26,7 @@ import {
   LIMITS, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, clientOf, enc, fields, has, isDevice,
   isDocId, isHash, isNat, isSha, parseMessage, sha256Hex, toB64, type Batch, type Env, type Head, type Op,
 } from "./protocol.ts";
-import { batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkUpto, creationMode, helloMerge, hex, mergeAdmits, type MergeMode } from "./doc-protocol.ts";
+import { batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkUpto, hex } from "./doc-protocol.ts";
 
 /** The cookie a test session rides on: the same name as the site's, so a test front can pass it along. */
 export const SESSION_COOKIE = "__Host-sb_session";
@@ -45,8 +45,6 @@ interface Stored { seq: number; epoch: number; author: string; writer: string; d
 interface Doc {
   doc: string;
   kind?: string;
-  /** how its concurrent edits merge: fixed when it was made, kept by every epoch (plan-merge-align r3.2 §2) */
-  merge: MergeMode;
   epoch: number;
   /** the last seq stored, in any epoch: seqs are never reused (r9 §5.1) */
   seq: number;
@@ -86,10 +84,6 @@ export class RefSocket {
   closed = false;
   /** set by hello */
   device: string | null = null;
-  /** set by hello: the merge modes the client runs (none said: legacy only), and whether it said them (only then do
-   * answers carry a document's `merge`, so an older client's answers keep their shapes) */
-  merge: ReadonlySet<MergeMode> = new Set<MergeMode>(["legacy"]);
-  saidMerge = false;
   inflight = 0;
   constructor(private server: ReferenceServer, readonly account: Account, readonly session: string) {}
   /** From the page to the server: each message starts in arrival order and runs until it awaits, as the real
@@ -125,18 +119,14 @@ export class ReferenceServer {
   private holds = new Map<string, { wait: Promise<void>; release: () => void }>();
   private fakes = new Map<string, Fake[]>();
   private nowMs: number | null = null;
-  /** Who may sync (the allowlist); everyone by default.  `exactMerge`: the deployment's switch for exact merges (off by
-   * default): only with it on is a document made "exact-v1", and only when its creating claim asks for it from a
-   * socket that runs it (doc-protocol.ts creationMode). */
-  constructor(private opts: { allow?: (account: string) => boolean; exactMerge?: boolean } = {}) {}
+  /** Who may sync (the allowlist); everyone by default. */
+  constructor(private opts: { allow?: (account: string) => boolean } = {}) {}
 
   // ---- test controls
 
   readonly controls = {
     /** The server's clock (ms); null: the real one. */
     setNow: (ms: number | null) => { this.nowMs = ms; },
-    /** The deployment's exact-merge switch (`exactMerge`), for a test that turns it on for its own documents. */
-    exactMerge: (on: boolean) => { this.opts.exactMerge = on; },
     /** Hold the next batch for `doc` (and `client`, if given) after its checks and before its commit; returns the release. */
     holdForward: (doc: string, client?: string): (() => void) => {
       let release!: () => void;
@@ -159,7 +149,7 @@ export class ReferenceServer {
     /** A document's head and stored batches, for assertions. */
     doc: (account: string, doc: string) => {
       const d = this.accounts.get(account)?.docs.get(doc);
-      return d ? { epoch: d.epoch, head: d.head, seq: d.seq, merge: d.merge, batches: d.batches.map((b) => ({ ...b })) } : null;
+      return d ? { epoch: d.epoch, head: d.head, seq: d.seq, batches: d.batches.map((b) => ({ ...b })) } : null;
     },
   };
 
@@ -333,7 +323,7 @@ export class ReferenceServer {
 
   private async handle(ws: RefSocket, m: Json) {
     const a = ws.account, t = m.t;
-    if (t === "hello") return this.hello(ws, fields(m, ["t", "v", "device", "name", "index_after", "docs", "account", "generation", "merge"], "hello"));
+    if (t === "hello") return this.hello(ws, fields(m, ["t", "v", "device", "name", "index_after", "docs", "account", "generation"], "hello"));
     if (!ws.device) throw new SyncError("invalid", "say hello first");
     const req = m.req;
     if (!isNat(req)) throw new SyncError("invalid", "req");
@@ -352,23 +342,15 @@ export class ReferenceServer {
     } else if (t === "doc_claim") {
       const c = attemptDoc(() => checkDocClaim(m));
       this.owner(a, c.owner);
-      // (a document that exists: its own mode, checked against the socket's; one this claim makes: the mode it's made in)
-      const had = this.docOf(a, c.doc, false);
-      const mode: MergeMode = had ? this.mergeOf(ws, had)! : creationMode({ exactOn: this.opts.exactMerge === true, runs: ws.merge, asked: c.merge });
-      if (!had && !mergeAdmits(mode, ws.merge)) throw mergeRefused(mode);
-      const claim = this.claim(a, `session:${ws.device}`, c.doc, c.epoch, c.client, mode);
-      this.answer(ws, "doc_claim", req, { t: "ack", req, claim: { ...claim, ...(ws.saidMerge ? { merge: this.docOf(a, c.doc, false)!.merge } : {}) } });
+      this.answer(ws, "doc_claim", req, { t: "ack", req, claim: this.claim(a, `session:${ws.device}`, c.doc, c.epoch, c.client) });
     } else if (t === "doc_fence") {
       const f = attemptDoc(() => checkDocFence(m));
       this.owner(a, f.owner);
-      this.mergeOf(ws, this.docOf(a, f.doc, false));
       this.answer(ws, "doc_fence", req, { t: "ack", req, fence: { clients: this.fence(a, `session:${ws.device}`, f.doc, f.epoch, f.clients) } });
     } else if (t === "batch") {
-      fields(m, ["t", "req", "owner", "doc", "epoch", "kind", "expect_head", "patches", "body", "fgen", "merge"], "batch");
+      fields(m, ["t", "req", "owner", "doc", "epoch", "kind", "expect_head", "patches", "body", "fgen"], "batch");
       const b = checkBatch(m);
       this.owner(a, b.owner);
-      // (a batch's `merge` is read only by a batch that makes its document (cloud's); here a claim always comes first)
-      this.mergeOf(ws, this.docOf(a, b.doc, false));
       const fgen = attemptDoc(() => checkFgen(m.fgen, new Set(b.patches.map((e) => clientOf(e.id)))));
       const out = await this.batch(a, ws.device, b, fgen);
       this.answer(ws, "batch", req, { t: "ack", req, batch: out });
@@ -377,14 +359,12 @@ export class ReferenceServer {
       const o = fields(m, ["t", "req", "owner", "doc", "epoch", "after", "upto", "limit"], "pull");
       if (!isDocId(o.doc) || !isNat(o.epoch) || !isNat(o.after) || (has(o, "limit") && !isNat(o.limit))) throw new SyncError("invalid", "pull");
       this.owner(a, o.owner);
-      const pd = this.mergeOf(ws, this.docOf(a, o.doc as string, false));
       const upto = attemptDoc(() => checkUpto(o, o.after as number));
-      this.answer(ws, "pull", req, { t: "batches", req, owner: a.hash, doc: o.doc, ...this.pull(a, o.doc, o.epoch, o.after, upto, o.limit as number | undefined), ...(ws.saidMerge && pd ? { merge: pd } : {}) });
+      this.answer(ws, "pull", req, { t: "batches", req, owner: a.hash, doc: o.doc, ...this.pull(a, o.doc, o.epoch, o.after, upto, o.limit as number | undefined) });
     } else if (t === "clear") {
       fields(m, ["t", "req", "owner", "doc", "expect_head", "root", "fgen"], "clear");
       if (!isDocId(m.doc)) throw new SyncError("invalid", "clear: doc");
       this.owner(a, m.owner);
-      this.mergeOf(ws, this.docOf(a, m.doc, false));
       const head = checkHead(m.expect_head, "clear: expect_head");
       const root = checkBatch({ ...fields(m.root, ["patches", "body"], "clear: root"), doc: m.doc, epoch: head.epoch });
       const fgen = attemptDoc(() => checkFgen(m.fgen, new Set(root.patches.map((e) => clientOf(e.id)))));
@@ -421,18 +401,15 @@ export class ReferenceServer {
       if (!isHash(o.owner) || !isDocId(o.doc) || !isNat(o.after)) throw new SyncError("invalid", "hello: docs");
       return { owner: o.owner as string, doc: o.doc as string, after: o.after as number };
     });
-    const merge = attemptDoc(() => helloMerge(m.merge));
     if (!a.devices.has(m.device)) a.devices.set(m.device, { next_dseq: 1, answers: new Map(), refused: 0 });
     ws.device = m.device;
-    ws.merge = merge;
-    ws.saidMerge = has(m, "merge");
     const head = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
     ws.deliver({ t: "welcome", v: VERSION, state: a.state, generation: a.generation, index_head: head, next_dseq: a.devices.get(m.device)!.next_dseq, server_time: this.now() });
     ws.deliver({ t: "index", ...this.index(a, m.index_after) });
     // (the documents the page names whose head is past its cursor: told as `changed`, as another device's batch would be)
     for (const d of docs) {
       const doc = d.owner === a.hash ? a.docs.get(d.doc) : undefined;
-      if (doc && doc.head > d.after && mergeAdmits(doc.merge, ws.merge)) ws.deliver({ t: "changed", owner: a.hash, doc: d.doc, head: { epoch: doc.epoch, seq: doc.head }, by_device: "" });
+      if (doc && doc.head > d.after) ws.deliver({ t: "changed", owner: a.hash, doc: d.doc, head: { epoch: doc.epoch, seq: doc.head }, by_device: "" });
     }
   }
 
@@ -496,19 +473,13 @@ export class ReferenceServer {
 
   // ---- documents (design/sync-server.md §4; plan-sync-slice2-r9.md §5.1, §5.5, §5.8)
 
-  private docOf(a: Account, doc: string, make: boolean, merge: MergeMode = "legacy"): Doc | undefined {
+  private docOf(a: Account, doc: string, make: boolean): Doc | undefined {
     let d = a.docs.get(doc);
     if (!d && make) {
-      d = { doc, merge, epoch: 1, seq: 0, head: 0, batches: [], clients: new Map(), ranges: new Map(), recvLast: 0, recvFloor: 0, chain: chainSeed(a.hash, doc, 1) };
+      d = { doc, epoch: 1, seq: 0, head: 0, batches: [], clients: new Map(), ranges: new Map(), recvLast: 0, recvFloor: 0, chain: chainSeed(a.hash, doc, 1) };
       a.docs.set(doc, d);
     }
     return d;
-  }
-  /** A document's mode, if it exists, checked against the socket's (every document operation, plan-merge-align r3.2
-   * §3): one the socket doesn't run is refused merge_mode before anything else is looked at, and nothing changes. */
-  private mergeOf(ws: RefSocket, d: Doc | undefined): MergeMode | undefined {
-    if (d && !mergeAdmits(d.merge, ws.merge)) throw mergeRefused(d.merge);
-    return d?.merge;
   }
   private headOf(d: Doc): Head & { chain: string } {
     return { epoch: d.epoch, seq: d.head, chain: hex(d.chain) };
@@ -522,9 +493,9 @@ export class ReferenceServer {
   }
 
   /** doc_claim (§5.8): binds a client to its writer before any batch of it; idempotent for the same writer. */
-  private claim(a: Account, writer: string, doc: string, epoch: number, client: string, merge: MergeMode): { client: string; fgen: number; next_cseq: number } {
+  private claim(a: Account, writer: string, doc: string, epoch: number, client: string): { client: string; fgen: number; next_cseq: number } {
     this.sameEpoch(a, doc, epoch);
-    const d = this.docOf(a, doc, true, merge)!;
+    const d = this.docOf(a, doc, true)!;
     const c = d.clients.get(client);
     if (c) {
       if (c.writer !== writer) throw new SyncError("forbidden", "this patchflow client belongs to another writer");
@@ -726,14 +697,9 @@ export class ReferenceServer {
 
   /** Every other socket of the account hears that a document's head moved (§5.3 step 3). */
   private changed(a: Account, from: RefSocket, doc: string, head: Head, device: string) {
-    // (not to a socket that doesn't run the document's mode: it couldn't pull it)
-    const mode = a.docs.get(doc)?.merge ?? "legacy";
-    for (const s of a.sockets) if (s !== from && s.device && mergeAdmits(mode, s.merge)) s.deliver({ t: "changed", owner: a.hash, doc, head, by_device: device });
+    for (const s of a.sockets) if (s !== from && s.device) s.deliver({ t: "changed", owner: a.hash, doc, head, by_device: device });
   }
 }
-
-/** merge_mode (plan-merge-align r3.2 §3): the document's mode in `detail.merge`. */
-const mergeRefused = (mode: MergeMode) => new SyncError("merge_mode", `this document merges as ${mode}, which this client doesn't run: update the page`, { merge: mode });
 
 /** The client's binding (§5.2): the account hash and generation, each if given, must be this account's. */
 function bindingRefusal(a: Account, account: unknown, generation: unknown): { status: number; code: string; reason: string } | null {
