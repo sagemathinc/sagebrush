@@ -246,18 +246,20 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   // passQuota units it yields. Its needles end "complete" (every occurrence, up to the cap + 1), "cap" (more than the cap
   // + 1: too many, which is all an anchor needs to know) or, if the budget ran out first, incomplete: an anchor that needs
   // an incomplete needle is unresolved (budget), and is never searched again. The suffix isn't shared: each start's own
-  // window is searched as before. Exact anchors aren't in the pass, and there is a pass only when the anchors' own
-  // whole-text searches can't fit the budget (anchors x text length >= 2 x budget): below that, each anchor's own
-  // searches (native, and stopping at the cap) are faster, and mostly fit. The scan ends early once
+  // window is searched as before. Which path runs is a conservative, deterministic rule on the worst-case charged volume
+  // of the anchors' own whole-text searches: with n the anchors not exact here that have a quote or a prefix, the pass
+  // runs when n x text length >= 2 x this resolver's budget, else each anchor's own searches run (native, and able to
+  // stop early: they may well fit, so this is a dispatch heuristic, not a proof). pass: true forces it (the tests). The scan ends early once
   // every needle has passed the cap. The root's children are a direct table (65,536 entries), not the hash: a step at the
   // root costs one unit, whether or not the unit starts a key.
   const KEY = LIMITS.passKey, Q = LIMITS.passQuota, SEG = 1 << 16;
   let prep = null, stats = null;
   function* prepare(anchors) {
     if (starved) return;
-    anchors = anchors.filter((a) => !(a.textSha === textSha && a.end <= text.length));
-    // (pass: true, the tests' seam: the pass whatever the sizes)
+    anchors = anchors.filter((a) => !(a.textSha === textSha && a.end <= text.length) && (a.quote || a.prefix));
+    stats = { path: "native", n: anchors.length };
     if (!pass && anchors.length * text.length < 2 * budget) return;
+    stats.path = "pass";
     const map = new Map(), recs = [], keys = new Map();
     prep = map;
     let q = 0;
@@ -290,7 +292,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     if (!pay(65536)) return;
     const root = new Int32Array(65536);
     q = 0; last = { kind: "alloc", size: 65536 }; yield;
-    stats = { nodes: N, cap, bytes: cap * 12 + N * 30 + recs.length * 4 + 4 * 65536 };
+    Object.assign(stats, { nodes: N, cap, bytes: cap * 12 + N * 30 + recs.length * 4 + 4 * 65536 });
     // the child of (n, u) or -1, each slot inspected charged (null: the budget ran out); slot: the empty one found
     let slot = 0;
     const get = (n, u) => {
