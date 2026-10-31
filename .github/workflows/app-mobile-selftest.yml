@@ -14,8 +14,8 @@
 # 40 min, the emulator's 600 s boot timeout and the script's 300 s wait for
 # the report.  The emulator job has two legs on API 34: "image" (the image's
 # own WebView, every run) and "current" (a pinned current WebView build
-# sideloaded and selected; the nightly cron, by hand and pull requests, never
-# master pushes).  A second job, release-starts, checks that the RELEASE build
+# sideloaded and selected; the nightly cron and by hand only, never pull
+# requests or master pushes: retired to the cron once its evidence was in).  A second job, release-starts, checks that the RELEASE build
 # starts (see it below); its own 40 min, in parallel.
 #
 # Pinned: the runner image's Android SDK, NDK 27.3.13750724 and JDK 17 (no
@@ -23,8 +23,9 @@
 # AndroidDesktop_x64/1727419, by the sha256 of its zip and of its APK; Rust 1.99.0; tauri-cli 2.12.4 --locked; Gradle and its
 # dependencies through the committed checksums (app/src-tauri/gen/android);
 # reactivecircus/android-emulator-runner v2.38.0 by commit; the system image
-# system-images;android-34;google_apis;x86_64 and the stable emulator, which
-# sdkmanager checks against Google's repository.
+# system-images;android-34;google_apis;x86_64 (the emulator legs) and
+# system-images;android-34;default;x86_64 (release-starts) and the stable
+# emulator, which sdkmanager checks against Google's repository.
 name: app-mobile-selftest
 
 on:
@@ -78,8 +79,10 @@ jobs:
 
   # (two legs on API 34: "image", the image's own WebView, every run; and
   # "current", a pinned current WebView build sideloaded and selected
-  # (COI Stage B), on the nightly cron, by hand and on pull requests, never on
-  # master pushes: it downloads about 500 MB. The build: Chromium's official
+  # (COI Stage B), on the nightly cron and by hand only, never on pull
+  # requests or master pushes: it downloads about 500 MB, and its question
+  # (does a current WebView isolate the page?) is answered, NOT isolated,
+  # sagebrush/android-coi-decision, Oct 30; the cron keeps watching for a change. The build: Chromium's official
   # snapshot AndroidDesktop_x64/1727419 (the newest at or below the M158 branch
   # point; a trunk snapshot, not a stable-channel build), its zip and APK each
   # pinned by sha256 and checked by app/selftest/verify-then.sh before use)
@@ -91,7 +94,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        webview: ${{ fromJSON(github.event_name == 'push' && '["image"]' || '["image", "current"]') }}
+        webview: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["image", "current"]' || '["image"]') }}
     env:
       NDK_VERSION: 27.3.13750724
       TAURI_CLI_VERSION: 2.12.4
@@ -304,11 +307,17 @@ jobs:
       # preinstalled toolchains removed, then a clear failure below 8192 MB)
       - name: the disk for the AVD
         run: bash app/selftest/test-disk-before-avd.sh && bash app/selftest/disk-before-avd.sh 8192
+      # (on the AOSP image without Google Play services: on google_apis, GMS's
+      # persistent process dying took the app down with it, 3 times: "killed by
+      # the system (dependency died): provider com.google.android.gms/.fonts.
+      # provider.FontsProvider", runs 41078076607, 41145830456, 41198609203.
+      # This job only asks whether the release build starts and keeps running
+      # with a WebView renderer, which needs no GMS)
       - name: the release APK starts on the emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
-          target: google_apis
+          target: default
           arch: x86_64
           channel: stable
           emulator-boot-timeout: 600
