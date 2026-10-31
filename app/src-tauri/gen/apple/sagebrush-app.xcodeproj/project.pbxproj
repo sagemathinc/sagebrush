@@ -1,0 +1,460 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		000D688255A8180445695933 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = B980323554D92F9820608972 /* assets */; };
+		08A52930685AB679477A4D2C /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EE46ED5CF70CBB5A28CDB324 /* WebKit.framework */; };
+		0A196600011A00F1204A845C /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E7F7F2114D80C4812F2080CB /* Security.framework */; };
+		0F71E4310B8B9B14B254AAC7 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A3C010F9BB45671C3D082D2F /* MetalKit.framework */; };
+		536220945695434F508A24C0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C84829376D12FC8D871E4322 /* LaunchScreen.storyboard */; };
+		54DB89D1301DBB5188E7F345 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3986E1D0BE4D5660FD349883 /* Metal.framework */; };
+		85DB791D0D7585787B17E412 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 675024271F893A37DF56FBEC /* UIKit.framework */; };
+		93720F621A572414DD501550 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = C7CBCAC13D4A4E6C1654040E /* main.mm */; };
+		BE3A6C262589FFDAB55B3124 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBFE1C626DF52B3219466A27 /* CoreGraphics.framework */; };
+		C1E553AADB10B92F66057981 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4B95C40555213481F8C05960 /* QuartzCore.framework */; };
+		C7D8986EEAC757DD9CC94F91 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5254C5F9FF9C243B2182E16C /* libapp.a */; };
+		CA9FA08B726DFDEB990E256C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C74A811EC7A9443C2330A69B /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0521DDECDB008D8CC0506D9B /* sagebrush-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "sagebrush-app_iOS.entitlements"; sourceTree = "<group>"; };
+		064E1CC9937690D363DE4E01 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		3986E1D0BE4D5660FD349883 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		4B95C40555213481F8C05960 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		5254C5F9FF9C243B2182E16C /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		598014FC2DB7A9A3A40C4895 /* sagebrush-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "sagebrush-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		675024271F893A37DF56FBEC /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		7421283461951A614F7F4722 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		7CB8C9E152E99F9BB103A73E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A3C010F9BB45671C3D082D2F /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		B980323554D92F9820608972 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		BBFE1C626DF52B3219466A27 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		C74A811EC7A9443C2330A69B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C7CBCAC13D4A4E6C1654040E /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		C84829376D12FC8D871E4322 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		E7F7F2114D80C4812F2080CB /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		EE46ED5CF70CBB5A28CDB324 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		FD22DD2B0FDD757E4BC196F9 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5EC6953CE25D102E63986454 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7D8986EEAC757DD9CC94F91 /* libapp.a in Frameworks */,
+				BE3A6C262589FFDAB55B3124 /* CoreGraphics.framework in Frameworks */,
+				54DB89D1301DBB5188E7F345 /* Metal.framework in Frameworks */,
+				0F71E4310B8B9B14B254AAC7 /* MetalKit.framework in Frameworks */,
+				C1E553AADB10B92F66057981 /* QuartzCore.framework in Frameworks */,
+				0A196600011A00F1204A845C /* Security.framework in Frameworks */,
+				85DB791D0D7585787B17E412 /* UIKit.framework in Frameworks */,
+				08A52930685AB679477A4D2C /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2B5A2ED1DB4399C5BB632BEB /* sagebrush-app_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7CB8C9E152E99F9BB103A73E /* Info.plist */,
+				0521DDECDB008D8CC0506D9B /* sagebrush-app_iOS.entitlements */,
+			);
+			path = "sagebrush-app_iOS";
+			sourceTree = "<group>";
+		};
+		42F1FD301FDC63FBD6A24D58 /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				064E1CC9937690D363DE4E01 /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		469EAAD9DCA48DF03DEB168E /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		47AD18B052ACC967845A2757 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				BBFE1C626DF52B3219466A27 /* CoreGraphics.framework */,
+				5254C5F9FF9C243B2182E16C /* libapp.a */,
+				3986E1D0BE4D5660FD349883 /* Metal.framework */,
+				A3C010F9BB45671C3D082D2F /* MetalKit.framework */,
+				4B95C40555213481F8C05960 /* QuartzCore.framework */,
+				E7F7F2114D80C4812F2080CB /* Security.framework */,
+				675024271F893A37DF56FBEC /* UIKit.framework */,
+				EE46ED5CF70CBB5A28CDB324 /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		826E7F922191DB10F278647B /* src */ = {
+			isa = PBXGroup;
+			children = (
+				FD22DD2B0FDD757E4BC196F9 /* lib.rs */,
+				7421283461951A614F7F4722 /* main.rs */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		9A283763BD505BD5B9C4CBC2 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				D5DC4CA8E2C541C73B9E4D22 /* sagebrush-app */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A8026EE477E2D6A61B5BBDEA = {
+			isa = PBXGroup;
+			children = (
+				B980323554D92F9820608972 /* assets */,
+				C74A811EC7A9443C2330A69B /* Assets.xcassets */,
+				C84829376D12FC8D871E4322 /* LaunchScreen.storyboard */,
+				469EAAD9DCA48DF03DEB168E /* Externals */,
+				2B5A2ED1DB4399C5BB632BEB /* sagebrush-app_iOS */,
+				9A283763BD505BD5B9C4CBC2 /* Sources */,
+				826E7F922191DB10F278647B /* src */,
+				47AD18B052ACC967845A2757 /* Frameworks */,
+				D0367E05ED06C4CCFF6AEDC9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D0367E05ED06C4CCFF6AEDC9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				598014FC2DB7A9A3A40C4895 /* sagebrush-app_iOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D5DC4CA8E2C541C73B9E4D22 /* sagebrush-app */ = {
+			isa = PBXGroup;
+			children = (
+				C7CBCAC13D4A4E6C1654040E /* main.mm */,
+				42F1FD301FDC63FBD6A24D58 /* bindings */,
+			);
+			path = "sagebrush-app";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		DDEEED8D0138E5A6618C5050 /* sagebrush-app_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6E14C8FBCB0FE3B389327146 /* Build configuration list for PBXNativeTarget "sagebrush-app_iOS" */;
+			buildPhases = (
+				5F6512EA0612734516C4C1D2 /* Build Rust Code */,
+				7E030220090996BFBE6296B2 /* Sources */,
+				789B7FE15700DD334F51274B /* Resources */,
+				5EC6953CE25D102E63986454 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "sagebrush-app_iOS";
+			packageProductDependencies = (
+			);
+			productName = "sagebrush-app_iOS";
+			productReference = 598014FC2DB7A9A3A40C4895 /* sagebrush-app_iOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6F1521D0A1450BC45EB2F025 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 8842DBC87444DC7D6791B26C /* Build configuration list for PBXProject "sagebrush-app" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A8026EE477E2D6A61B5BBDEA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D0367E05ED06C4CCFF6AEDC9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DDEEED8D0138E5A6618C5050 /* sagebrush-app_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		789B7FE15700DD334F51274B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA9FA08B726DFDEB990E256C /* Assets.xcassets in Resources */,
+				536220945695434F508A24C0 /* LaunchScreen.storyboard in Resources */,
+				000D688255A8180445695933 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5F6512EA0612734516C4C1D2 /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cargo tauri ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7E030220090996BFBE6296B2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				93720F621A572414DD501550 /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		6180794F90A3721F9943A6CA /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+		9C0567E00CF5AF9DFAD632BE /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "sagebrush-app_iOS/sagebrush-app_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "sagebrush-app_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = space.sagebrush.notebook;
+				PRODUCT_NAME = "Sagebrush";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+		EFECD028C83947BF914358F8 /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = (
+					arm64,
+				);
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "sagebrush-app_iOS/sagebrush-app_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "sagebrush-app_iOS/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = space.sagebrush.notebook;
+				PRODUCT_NAME = "Sagebrush";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		F4A905568A98D468E5F9786A /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6E14C8FBCB0FE3B389327146 /* Build configuration list for PBXNativeTarget "sagebrush-app_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9C0567E00CF5AF9DFAD632BE /* debug */,
+				EFECD028C83947BF914358F8 /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		8842DBC87444DC7D6791B26C /* Build configuration list for PBXProject "sagebrush-app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6180794F90A3721F9943A6CA /* debug */,
+				F4A905568A98D468E5F9786A /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 6F1521D0A1450BC45EB2F025 /* Project object */;
+}

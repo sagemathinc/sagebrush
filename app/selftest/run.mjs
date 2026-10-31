@@ -2,13 +2,17 @@
 // scratch folder, start the app with SAGEBRUSH_APP_SELFTEST pointing at it,
 // and print its report.  The page opens the notebook, runs it (Sage, a file
 // in its folder, 3D), checks what Python wrote, saves, and reports
-// (selftest() in web/index.html); the app then exits.
+// (selftest() in web/index.html); the app then exits.  The report's
+// diagnosis lines are then read (coi-reading.py, --no-logcat): information
+// for comparing with Android, never part of the verdict.
 //
 //   node app/selftest/run.mjs <the app's executable>
-import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, copyFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { reportLines } from "./report-lines.mjs";
 
 const exe = process.argv[2];
 if (!exe) throw new Error("usage: node app/selftest/run.mjs <executable>");
@@ -23,6 +27,15 @@ const timer = setTimeout(() => { console.log("FAIL the app did not report within
 p.on("exit", (code) => {
   clearTimeout(timer);
   const passed = code === 0 && out.includes("all passed");
+  const report = join(dir, "report.txt");
+  writeFileSync(report, reportLines(out).join("\n") + "\n");
+  const reading = fileURLToPath(new URL("coi-reading.py", here));
+  let r = { status: null };
+  for (const py of ["python3", "python"]) {
+    r = spawnSync(py, ["-I", reading, report, "--no-logcat"], { stdio: "inherit" });
+    if (!r.error) break;
+  }
+  if (r.status !== 0) console.log(`(coi-reading.py: ${r.error ? "no python" : "exit " + r.status}; the readings are information only)`);
   console.log(passed ? "self-test passed" : `self-test failed (exit code ${code})`);
   process.exit(passed ? 0 : 1);
 });

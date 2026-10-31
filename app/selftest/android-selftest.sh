@@ -13,6 +13,7 @@ APK=${1:?usage: android-selftest.sh <apk> [summary.md]}
 SUMMARY=${2:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPORT=$(mktemp)
+LOGC=$(mktemp)
 fail() { echo "FAIL: $*"; exit 1; }
 on_exit() {
   local rc=$?
@@ -20,7 +21,7 @@ on_exit() {
     echo "--- the app's log (last 400 lines: the app, WebView and chromium tags)"
     adb logcat -d -t 4000 2>/dev/null | grep -E "$PKG|chromium|WebView|Tauri|RustStdout|AndroidRuntime" | tail -400 || true
   fi
-  rm -f "$REPORT"
+  rm -f "$REPORT" "$LOGC"
 }
 trap on_exit EXIT
 
@@ -59,5 +60,17 @@ tr -d '\r' < "$REPORT" > "$REPORT.clean" && mv "$REPORT.clean" "$REPORT"
 echo "--- report"
 cat "$REPORT"
 echo "---"
+# (the diagnosis of cross-origin isolation, information only: the debug
+# build's server lines and the page's start line, which reaches the log the
+# same way (eprintln), at most 60 lines, then the readings, coi-reading.py)
+adb logcat -d 2>/dev/null | grep -a -F -e '[localhost]' -e '[page] start' | head -60 > "$LOGC" || true
+echo "--- the app's server log ([localhost] and [page] start lines, at most 60)"
+cat "$LOGC"
+n_req=$(grep -a -c -F '[localhost] #' "$LOGC" || true)
+has() { if grep -a -q -F "$1" "$LOGC"; then echo yes; else echo no; fi; }
+line="server log: $n_req request lines; logger start: $(has '[localhost] logger start'); [page] start: $(has '[page] start'); cap reached: $(has '[localhost] cap reached')"
+echo "$line"
+[ -z "$SUMMARY" ] || printf '%s\n\n' "$line" >> "$SUMMARY"
+python3 -I "$HERE/coi-reading.py" "$REPORT" --logcat "$LOGC" ${SUMMARY:+--summary "$SUMMARY"} || echo "(coi-reading.py exited $?; the readings are information only)"
 python3 -I "$HERE/android-report.py" "$REPORT" ${SUMMARY:+"$SUMMARY"} || fail "the self-test's required checks (see above)"
 echo "ok: the Android self-test's required checks passed"

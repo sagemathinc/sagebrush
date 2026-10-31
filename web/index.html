@@ -2969,13 +2969,20 @@ try {
 
 // SAGEBRUSH_APP_SELFTEST=<notebook> (app/): open the notebook, run it, check
 // its outputs and the computer's files, save, and report to the app
+// p, or a rejection after ms (the self-test's waits are all bounded)
+const bounded = (p, ms) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`timed out after ${ms / 1000} s`)), ms); })]).finally(() => clearTimeout(t)); };
 async function selftest(path) {
   const checks = [];
+  let infoLines = [];
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
     check("cross-origin isolated (Stop keeps variables)", window.crossOriginIsolated === true);
+    // (the COI diagnosis's info lines: a module loaded only here, its load
+    // bounded at 15 s like the diagnosis itself; if either fails, the reason
+    // is logged and the report's judge names every missing line)
+    try { infoLines = await (await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000)).diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
     await nb.runAll();
@@ -3006,7 +3013,7 @@ async function selftest(path) {
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
   } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
   const ok = checks.every((c) => c.startsWith("ok"));
-  await TAURI.core.invoke("selftest_report", { report: checks.join("\n") + (ok ? "\nall passed" : ""), ok });
+  await TAURI.core.invoke("selftest_report", { report: [...checks, ...infoLines].join("\n") + (ok ? "\nall passed" : ""), ok });
 }
 
 // The app: offline (web/sw.js) and installable; not under `sagebrush notebook`,
