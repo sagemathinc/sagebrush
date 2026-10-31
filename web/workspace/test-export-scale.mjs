@@ -220,7 +220,8 @@ try {
       // (in the page: long tasks from now, and when the progress line changes while the archive is written)
       await c.ev(`(() => {
         window.__long = 0; window.__marks = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20);
-        new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long = Math.max(window.__long, e.duration); }).observe({ type: "longtask", buffered: false });
+        window.__tasks = [];
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) { window.__long = Math.max(window.__long, e.duration); window.__tasks.push([Math.round(e.startTime), Math.round(e.duration), (e.attribution ?? []).map((a) => a.containerType + ":" + (a.containerSrc || a.name)).join(",")]); } }).observe({ type: "longtask", buffered: false });
         new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; const m = / written/.test(t); if (m) (window.__raw ??= []).push(performance.now()); if (m && t !== window.__lastText) { window.__lastText = t; window.__marks.push(performance.now()); (window.__texts ??= []).push(t.match(/[^.]*written/)?.[0] ?? ""); } if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true });
         return 1;
       })()`);
@@ -228,10 +229,16 @@ try {
       // of the page's own (a timer): one run from DevTools' evaluate isn't a page task, and isn't reported)
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
       check(c8 >= 100, `resp: C8, a 120 ms busy loop shows in the long-task observer (${Math.round(c8)} ms)`);
+      await c.ev(`(() => { window.__tasks = []; window.__clickT = performance.now(); return 1; })()`);
       await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      await c.ev(`(() => { window.__saveT = performance.now(); return 1; })()`);
       await c.ev(btn("/^Save…$/"));
       check(await c.until(`!!window.__exp`, 1200000), "resp: the export ends");
+      await c.ev(`(() => { window.__endT = performance.now(); return 1; })()`);
+      await sleep(1500);
+      // (each long task: when, relative to the click, Save… and the archive handed over; diagnostics)
+      console.log("(resp long tasks [start, ms, attribution] with click/save/end at " + JSON.stringify(await c.ev(`[Math.round(window.__clickT), Math.round(window.__saveT), Math.round(window.__endT)]`)) + ": " + JSON.stringify(await c.ev(`window.__tasks`)) + ")");
       const longest = await c.ev(`window.__long`);
       check(c8 >= 100 && longest <= 50, `resp: the longest main-thread task from the click ${Math.round(longest)} ms (at most 50 ms; counts only with C8 passing)`);
       // (the values must move at least every 250 ms once the first member is written: before it, nothing moves (the
