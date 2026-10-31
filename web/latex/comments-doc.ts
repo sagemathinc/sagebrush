@@ -74,9 +74,20 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       const stepped = (ms: number, kind: string, size: number, thread = "") => { if (ms > maxStep.ms) maxStep = { ms: Math.round(ms * 100) / 100, phase, kind, size, thread }; };
       const pause = async () => { const d = performance.now() - t0; if (d < SLICE_MS) return false; if (d > maxSlice) { maxSlice = d; maxPhase = phase; } slices++; await frame(); t0 = performance.now(); return stale(); };
       if ((await hashOf(text, pause, stepped)) === null) return;
-      phase = "resolve";
+      phase = "pass";
       if (await pause()) return;
       const R = C.resolver(text, undefined, { textSha: shaFor.sha });
+      // (the shared pass over every anchor's searches, when the resolver's rule calls for it: a step at a time, each
+      //  recorded by its kind, collect, alloc, insert, terminals, fail, scan or verify)
+      const pg = R.prepare(todo.map((t: any) => t.anchor.value));
+      for (;;) {
+        const s0 = performance.now(), x = pg.next(), ms = performance.now() - s0;
+        if (x.done) { stepped(ms, "pass end", 0); break; }
+        const st = R.lastStep(); stepped(ms, st?.kind ?? "pass", st?.size ?? 0);
+        if (await pause()) return;
+      }
+      phase = "resolve";
+      if (await pause()) return;
       for (const t of todo) {
         // (each anchor's search, a step at a time: a window of the text searched, or a piece of a long span hashed)
         const g = R.steps(t.anchor.value);
@@ -92,7 +103,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
       }
       if (performance.now() - t0 > maxSlice) { maxSlice = performance.now() - t0; maxPhase = phase; }
       const statuses: Record<string, number> = {}; for (const t of todo) { const st = places.get(t.id)!.status; statuses[st] = (statuses[st] ?? 0) + 1; }
-      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, maxSlicePhase: maxPhase, maxStep, work: R.work(), units: text.length, statuses });
+      mark("tex-comments-placed", { threads: todo.length, slices, maxSliceMs: Math.round(maxSlice * 10) / 10, maxSlicePhase: maxPhase, maxStep, work: R.work(), units: text.length, statuses, pass: R.passStats() });
     }
     if (!stale()) { queueDraw(); showList(); }
   };

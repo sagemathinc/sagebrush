@@ -71,9 +71,14 @@ function normalizers() {
     // (the one copy, inside the shell's "Content-Security-Policy" header value; VERSION; and the docs index's
     //  SHA-256, only where each side's is that side's file's)
     "sw.js": (a, b, baseFile, prodFile) => {
-      const at = b.indexOf(PAGE + LOOPBACK + ";"), key = b.lastIndexOf('"Content-Security-Policy":"', at);
-      if (at < 0 || key < 0 || b.slice(key + 27, at).includes('"')) return false;
-      let u = once(b, PAGE + LOOPBACK + ";", PAGE + ";");
+      // (the loopback addition undone only where PROD adds it to a base without it; a base that has it already, from
+      //  the PR that added it, compares as it is: then only VERSION and the docs index's SHA-256 may differ)
+      let u = b;
+      if (b.includes(PAGE + LOOPBACK + ";") && !a.includes(PAGE + LOOPBACK + ";")) {
+        const at = b.indexOf(PAGE + LOOPBACK + ";"), key = b.lastIndexOf('"Content-Security-Policy":"', at);
+        if (key < 0 || b.slice(key + 27, at).includes('"')) return false;
+        u = once(b, PAGE + LOOPBACK + ";", PAGE + ";");
+      }
       const docs = (s) => [...s.matchAll(/"docs-index-python\.json":\{"sha256":"([0-9a-f]{64})"/g)];
       const da = docs(a), db = docs(u ?? "");
       if (da.length !== db.length || da.length > 1) return false;
@@ -161,7 +166,9 @@ if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the L
 // 4d. the agent pairing's chunk (web/workspace/agent-ui.ts, the shared module, through web/latex/agent.ts): at most
 //     40 KiB minified, 14 KiB gzip, fetched only to connect an agent (the Agent button, a ?pair= link, a remembered one)
 if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX agent pairing's chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
-if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
+// (16 KiB gzip, was 14: @sagebrush's ruling, Oct 31, for the shared pass in the comments' core, measured 35,707 / 14,289
+//  at master 7ff6d103 -> 39,564 / 15,774 at its head; it holds only with the pass's measured benefit on VM3)
+if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 16 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 16 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));
 check("DEV: the test build's hooks folded away (no file names __sbTexImageRead, __sbTexMountRead, __sbTexCommentsWrite or __sbTexSaveWrite)", testHooks.length === 0, { testHooks });
