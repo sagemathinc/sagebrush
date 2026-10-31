@@ -3002,7 +3002,8 @@ async function selftest(path) {
     // (the COI diagnosis's info lines: a module loaded only here, its load
     // bounded at 15 s like the diagnosis itself; if either fails, the reason
     // is logged and the report's judge names every missing line)
-    try { infoLines = await (await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000)).diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
+    let st = null;
+    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
     await nb.runAll();
@@ -3027,6 +3028,8 @@ async function selftest(path) {
     const stopped = await looping;
     check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)) + (kernel.interruptFlag ? " (the worker shares its interrupt flag)" : " (no shared interrupt flag from the worker)"));
     check("...and keeps the variables", (await exec("print(keep + 1)")).includes("42"));
+    // (the Terminal's shell worker in the real app: its policy, the bridge from the page and none from the worker)
+    for (const [n, o, d] of st ? await st.terminalChecks((c, a) => TAURI.core.invoke(c, a)) : [["the Terminal's checks", false, "no self-test module"]]) check(n, o, d);
     nb.flush();
     await new Promise((r) => setTimeout(r, 500));
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));

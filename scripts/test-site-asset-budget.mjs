@@ -13,12 +13,14 @@ const GATE = join(dirname(fileURLToPath(import.meta.url)), "site-asset-budget.mj
 const PAGE = "connect-src 'self' data: blob: https: http:", LOOP = " ws://127.0.0.1:* ws://localhost:*";
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 const policy = (connect, script = "'self'") => `default-src 'self'; script-src ${script}; ${connect}; frame-src 'self'; object-src 'none'`;
-const headers = ({ page = PAGE, frame = PAGE, runner = "connect-src 'none'", script } = {}) => [
+const headers = ({ page = PAGE, frame = PAGE, runner = "connect-src 'none'", script, board = page, embed = page } = {}) => [
   "# every page's Content-Security-Policy",
   "/", `  Content-Security-Policy: ${policy(page, script)}`, "  X-Content-Type-Options: nosniff",
   "/index.html", `  Content-Security-Policy: ${policy(page, script)}`,
   "/frame/*", `  Content-Security-Policy: ${policy(frame)}`,
   "/runner/*", `  Content-Security-Policy: ${policy(runner)}`,
+  "/board/*", `  Content-Security-Policy: ${policy(board, script)}`,
+  "/embed/*", `  Content-Security-Policy: ${policy(embed, script)}`,
   "/s/*", `  Content-Security-Policy: ${policy(page, script)}`, "",
 ].join("\n");
 const sha = (s) => createHash("sha256").update(s).digest("hex");
@@ -41,7 +43,7 @@ function gate(prodFiles) {
   try {
     tree(join(d, "base"), BASE); tree(join(d, "prod"), { ...BASE, ...prodFiles }); tree(join(d, "dev"), { ...BASE, ...prodFiles }, true);
     let out;
-    try { out = execFileSync(process.execPath, [GATE, "--base-prod", join(d, "base"), "--prod", join(d, "prod"), "--dev", join(d, "dev")], { encoding: "utf8" }); }
+    try { out = execFileSync(process.execPath, [GATE, "--base-prod", join(d, "base"), "--prod", join(d, "prod"), "--dev", join(d, "dev")], { encoding: "utf8", timeout: 30_000 }); }
     catch (e) { out = String(e.stdout); }
     const line = out.split("\n").find((l) => / PROD files: /.test(l));
     if (!line) throw new Error("no check 1 line:\n" + out);
@@ -60,6 +62,8 @@ expect("each reviewed difference alone: docs-index-python.json", true, { "dist/d
 // _headers
 expect("the loopback sources in the frame policy too", false, { ...REVIEWED, "dist/_headers": headers({ page: PAGE + LOOP, frame: PAGE + LOOP }) });
 expect("the loopback sources in the frame policy only", false, { "dist/_headers": headers({ frame: PAGE + LOOP }) });
+expect("the loopback sources in the /board/* and /embed/* rules alone (page paths)", true, { "dist/_headers": headers({ board: PAGE + LOOP, embed: PAGE + LOOP }) });
+expect("a broader source in the /embed/* rule", false, { "dist/_headers": headers({ page: PAGE + LOOP, embed: PAGE + " ws:" }) });
 expect("the runner policy changed", false, { ...REVIEWED, "dist/_headers": headers({ page: PAGE + LOOP, runner: "connect-src 'self'" }) });
 expect("a broader source: ws:", false, { "dist/_headers": headers({ page: PAGE + " ws:" }) });
 expect("a further source after the loopback ones", false, { "dist/_headers": headers({ page: PAGE + LOOP + " wss://example.com" }) });

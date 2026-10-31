@@ -81,7 +81,7 @@ if [ "$MODE" = debug ]; then
   cat "$T/report.txt"
   echo "---"
   python3 -I "$HERE/coi-reading.py" "$T/report.txt" --no-logcat ${SUMMARY:+--summary "$SUMMARY"} || echo "(coi-reading.py exited $?; the readings are information only)"
-  python3 -I "$HERE/android-report.py" "$T/report.txt" ${SUMMARY:+"$SUMMARY"} || fail "the self-test's required checks (see above)"
+  python3 -I "$HERE/android-report.py" --engine webkit "$T/report.txt" ${SUMMARY:+"$SUMMARY"} || fail "the self-test's required checks (see above)"
   echo "ok: the iOS simulator self-test's required checks passed"
 else
   sleep 60

@@ -9,8 +9,8 @@ import { readFileSync, existsSync, mkdtempSync, copyFileSync, appendFileSync, rm
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// (strings only the diagnosis has: its marked fetches and two of its keys)
-const MARKERS = ["sb-diag=", "fetch-kernel-script", "kernel-interrupt-shared"];
+// (strings only the diagnosis has: its marked fetches and two of its keys; and the Terminal probe's markers)
+const MARKERS = ["sb-diag=", "fetch-kernel-script", "kernel-interrupt-shared", "terminal bridge probe"];
 
 function problems(dir) {
   const out = [];
