@@ -60,6 +60,7 @@ const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.len
   check(outcome([ok(), ok(), runWith({ c8: 40, majorGc: [70] }), ok(), ok()]).outcome === "FIX", "a void run with a MajorGC of 70 ms: FIX (over INVALID)");
   check(outcome([ok(), runWith({ longTasks: [{ ms: 60, class: "export" }] }), ok(), ok(), ok()]).outcome === "FIX", "an export-classified task of 60 ms: FIX");
   check(outcome([ok(), runWith({ c8: 40 }), ok(), ok(), ok()]).outcome === "INVALID", "a void run, nothing else: INVALID");
+  check(outcome([ok(), runWith({ c8: 40, longTasks: [{ ms: 60, class: "export" }] }), ok(), ok(), ok()]).outcome === "INVALID", "a void run whose 60 ms task is classified export: INVALID (an export finding needs a valid run)");
   check(outcome([ok(), ok(), ok(), ok()]).outcome === "INVALID", "four runs: INVALID");
   check(outcome([ok(), runWith({ longTasks: [{ ms: 60, class: "gc" }] }), ok(), ok(), ok()]).outcome === "INCONCLUSIVE", "a non-export task of 60 ms only: INCONCLUSIVE (fallback (b) may apply)");
   check(outcome([ok(), runWith({ longTasks: [{ ms: 60, class: "page" }], progressGap: 300 }), ok(), ok(), ok()]).outcome === "FIX", "a non-export task with a 300 ms progress gap: FIX (the fallback never waives a progress failure)");
