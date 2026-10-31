@@ -37,7 +37,9 @@ export const BOUNDS = { longTaskMs: 50, majorGcMs: 50, progressGapMs: 250 };
 export function judgeRun(run) {
   const valid = run.c8 >= 100 && !!run.mapped && !!run.ended && !run.errored;
   const fix = [];
-  for (const t of run.longTasks ?? []) if (t.ms > BOUNDS.longTaskMs && t.class === "export") fix.push(`an export task of ${t.ms} ms`);
+  // (an export-classified task counts only in a valid, mapped run (a class needs the mapping); a GC pause or a progress
+  // gap counts in any run: it happened, whatever the run's long-task figures are worth)
+  for (const t of run.longTasks ?? []) if (valid && t.ms > BOUNDS.longTaskMs && t.class === "export") fix.push(`an export task of ${t.ms} ms`);
   for (const g of run.majorGc ?? []) if (g > BOUNDS.majorGcMs) fix.push(`a main-thread MajorGC of ${g} ms`);
   if (run.progressGap > BOUNDS.progressGapMs) fix.push(`a progress gap of ${run.progressGap} ms`);
   const longNonExport = (run.longTasks ?? []).filter((t) => t.ms > BOUNDS.longTaskMs && t.class !== "export").map((t) => t.ms);
@@ -46,7 +48,8 @@ export function judgeRun(run) {
 
 /**
  * The campaign's outcome from its five runs, in daybreak2's precedence:
- *   FIX if any run names export code over 50 ms, has a main-thread MajorGC over 50 ms, or a progress gap over 250 ms
+ *   FIX if any valid run names export code over 50 ms, or any run has a main-thread MajorGC over 50 ms or a progress
+ *   gap over 250 ms
  *   (a GC or progress failure counts in any run whose trace was taken, valid or not: the pause happened);
  *   then INVALID if any run is void (C8), errored, unmapped or not ended, or there aren't exactly five;
  *   PASS if no run has a long task over 50 ms;

@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "E1 r2a (daybreak2's E1-D2-2; @sagebrush's eager-size ruling): the export's lazy chunk and worker, each its own reviewed ceiling, at most 1024 bytes over its bun 1.4.4 size (scripts/check-export-size.mjs). r2a moves the serializers (file-bytes.ts: the notebook's ipynbObject, the board's canonical, cleanDocSteps and boardTextParts) from the page into the chunk, and adds the capture log, the paced board and notebook writers and the sweep's per-file locks. Measured on cd94723d with bun 1.4.4: 48374 and 5043 bytes; ceilings +128 and +64.",
+  "reason": "E1 r2a (daybreak2's E1-D2-2; @sagebrush's eager-size ruling): the export's lazy chunk and worker, each its own reviewed ceiling, at most 1024 bytes over its bun 1.4.4 size (scripts/check-export-size.mjs). r2a moves the serializers (file-bytes.ts: the notebook's ipynbObject, the board's canonical, cleanDocSteps and boardTextParts) from the page into the chunk, and adds the capture log, the paced board and notebook writers and the sweep's per-file locks. r2a's capture-log correction (no per-line promise; the lookup's settle) and its test hooks add 547 bytes. Measured on b00fb43f with bun 1.4.4: 48921 and 5043 bytes; ceilings +128 and +64.",
   "bytes": {
-    "sagebrush-export.js": 48502,
+    "sagebrush-export.js": 49049,
     "sagebrush-export-worker.js": 5107
   }
 }
