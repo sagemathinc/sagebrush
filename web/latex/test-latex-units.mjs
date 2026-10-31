@@ -97,6 +97,13 @@ check("hl-math-open", run("text $x+1", "N").end === "M" && run("y$ more", "M").e
 check("hl-verbatim-state", run("\\begin{verbatim}", "N").end === "V:verbatim" && run("$ % \\x", "V:verbatim").end === "V:verbatim" && run("\\end{verbatim} after", "V:verbatim").end === "N", null);
 check("hl-display", run("\\[ a", "N").end === "D" && run("b \\]", "D").end === "N" && run("$$ a", "N").end === "D", null);
 check("hl-mathenv", run("\\begin{align}", "N").end === "E:align" && run("\\end{align}", "E:align").end === "N", null);
+// (a math environment's \begin and \end in the same color, math's, as $ and \[ \] are; a non-math environment's both
+//  plain commands; one nested in math, both math)
+{
+  const cls = (line, st) => run(line, st).toks.find(([, t]) => t.startsWith("\\begin") || t.startsWith("\\end"))?.[0];
+  check("hl-mathenv-begin-end-same-color", cls("\\begin{align}", "N") === "c-math c-cmd" && cls("\\end{align}", "E:align") === "c-math c-cmd" && cls("\\begin{itemize}", "N") === "c-cmd" && cls("\\end{itemize}", "N") === "c-cmd" && cls("\\begin{pmatrix}", "E:align") === "c-math c-cmd" && cls("\\end{pmatrix}", "E:align") === "c-math c-cmd",
+    { begin: cls("\\begin{align}", "N"), end: cls("\\end{align}", "E:align") });
+}
 // (a blank line ends inline and display math, as in TeX; not a math environment, not verbatim)
 check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end === "N" && run("", "E:align").end === "E:align" && run("", "V:verbatim").end === "V:verbatim" && run("% c", "M").end === "M", null);
 
