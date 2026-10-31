@@ -1,0 +1,3 @@
+ok   the self-test notebook opens
+FAIL the page reaches the app's bridge: invoke rejected: denied
+all passed
