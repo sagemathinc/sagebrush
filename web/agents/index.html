@@ -141,7 +141,8 @@
   body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
   body.has-artifact.wide-artifact #artifacts { width: min(60vw, 960px); }
   /* (the notebook's popups are on the document body: above the pane, full screen included; BAP-7) */
-  body .sbnb-menu, body .sbnb-completer, body .sbnb-dropline, body .sbnb-tip { z-index: 40; }
+  /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
+  body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
   .pane-host { flex: 1; overflow: auto; }
   .pane-host[hidden] { display: none; }
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
@@ -149,7 +150,8 @@
   .pane-bar button { font-size: 12px; }
   .open-full { margin-left: 8px; font-size: 12px; }
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
-  .nb-root { container-type: inline-size; container-name: sbnb-pane; }
+  /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
+  .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
   .nb-agent-mark { font-size: 11.5px; color: var(--muted); margin: 0 0 2px 44px; }
   .tab-running { color: var(--accent); }
   #close-running { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; }
@@ -176,7 +178,7 @@
   }
 </style>
 </head>
-<body>
+<body class="agents-host">
 <div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>
 <div class="app">
   <nav class="side">
