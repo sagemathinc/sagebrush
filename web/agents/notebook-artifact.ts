@@ -284,6 +284,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         comp.load({ ...before, rev: baseRev });
         return { ok: false, code: "invalid", why: `not applied, nothing changed: ${(err as Error).message}` };
       }
+      // (an edit that changed nothing (each set to what it was): answered ok, with nothing to save)
+      if (canonical(comp.snapshot()) === canonical(before)) return { ok: true, inserted };
       // (a code cell whose source the agent changed keeps its old output, marked as from before the change until it is
       // run or edited here: this pane's notebook isn't reactive, so the component marks nothing itself)
       for (const c of pre.edits.set) {

@@ -953,6 +953,14 @@ async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknow
   // to it only when it is closed or already shows it.
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== e.path;
   const keep = openArtifact;
+  // (where the person is: put back after a hidden notebook mounts and after the edit, if either moved it)
+  const focused = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  const range = focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement ? [focused.selectionStart, focused.selectionEnd] : null;
+  const putFocusBack = () => {
+    if (!shownOther || !focused?.isConnected || document.activeElement === focused) return;
+    focused.focus({ preventScroll: true });
+    if (range && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) && range[0] !== null) focused.setSelectionRange(range[0], range[1]);
+  };
   if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) emitTo(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
   const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
   if (!art) throw new AgentError("busy", "the notebook couldn't be opened here");
@@ -965,12 +973,17 @@ async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknow
   }
   const h = hosts.get(hostKey(thread.id, e.path));
   if (!h?.nb) throw new AgentError("busy", "the notebook couldn't be opened here");
+  putFocusBack();
+  await h.nb.ready;
+  putFocusBack();
   const r = await h.nb.edit(e, mayHere);
+  putFocusBack();
   if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
   if (shownHost() !== h) {
     h.changed = true;
     headKey = "";
     if (current().id === thread.id) renderArtifacts();
+    putFocusBack();
   }
   return { ok: true, inserted: r.inserted };
 }
