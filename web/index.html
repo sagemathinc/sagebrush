@@ -453,6 +453,8 @@
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
+// (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
+import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
 import { createRunnerPill } from "./notebook/runner-pill.js";
