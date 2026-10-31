@@ -117,6 +117,20 @@ function untilAborted(promise, signal) {
   });
 }
 
+// A promise raced with `signal`: its abort rejects at once (the promise's own late outcome is dropped).
+function raceAbort(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { promise.catch(() => {}); return reject(new Error("aborted")); }
+    const onAbort = () => { promise.catch(() => {}); reject(new Error("aborted")); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (v) => { signal.removeEventListener("abort", onAbort); resolve(v); },
+      (e) => { signal.removeEventListener("abort", onAbort); reject(e); },
+    );
+  });
+}
+
 /** The gateway's base URL, checked: absolute https:, no user info, query or fragment. */
 export function checkBase(base) {
   let u;
@@ -151,17 +165,17 @@ export class RemoteClient {
    * @param {CryptoKeyPair} [o.keys] (default, and the only sound choice: a new non-extractable
    *   P-256 pair; a supplied pair whose private key is extractable is refused)
    */
-  static async create({ base, token, fetch: f, keys }) {
+  static async create({ base, token, fetch: f, keys, timers }) {
     const checked = checkBase(base);
     if (keys && keys.privateKey?.extractable !== false) throw new TypeError("the DPoP private key must not be extractable");
     const pair = keys ?? (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]));
     // (a public key is always exportable; the private key never is)
     const full = await crypto.subtle.exportKey("jwk", pair.publicKey);
     const jwk = { kty: full.kty, crv: full.crv, x: full.x, y: full.y };
-    return new RemoteClient({ base: checked, token, fetch: f, privateKey: pair.privateKey, jwk, jkt: await jwkThumbprint(jwk) });
+    return new RemoteClient({ base: checked, token, fetch: f, privateKey: pair.privateKey, jwk, jkt: await jwkThumbprint(jwk), timers });
   }
 
-  constructor({ base, token, fetch: f, privateKey, jwk, jkt }) {
+  constructor({ base, token, fetch: f, privateKey, jwk, jkt, timers }) {
     this.base = checkBase(base);
     this.token = token;
     this.fetch = f ?? ((...a) => globalThis.fetch(...a));
@@ -169,6 +183,8 @@ export class RemoteClient {
     this.jwk = jwk;
     this.jkt = jkt;
     this.nonce = null; // the server's latest DPoP-Nonce
+    // (a request's deadline runs on these: tests inject a clock; the page's timers don't keep a process alive)
+    this.timers = timers ?? { setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t?.unref?.(); return t; }, clearTimeout: (t) => clearTimeout(t) };
   }
 
   /** A DPoP proof for one request (RFC 9449 §4.2): htu is the URL without query or fragment. */
@@ -236,7 +252,8 @@ export class RemoteClient {
       if (testHooks?.awaitAfterGuard) await testHooks.awaitAfterGuard();
       let res;
       try {
-        res = await this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) });
+        // (raced with the signal: a fetch that ignored its abort can't hold the request past its deadline)
+        res = await raceAbort(this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) }), signal);
       } catch (e) {
         throw new AmbiguousError(signal?.aborted ? "aborted after it was sent" : `the request failed: ${String(e?.message ?? e).slice(0, 200)}`, { aborted: !!signal?.aborted });
       }
@@ -245,7 +262,8 @@ export class RemoteClient {
       const wantsNonce = res.status === 401 && /use_dpop_nonce/.test(res.headers.get("WWW-Authenticate") ?? "");
       // (a nonce challenge is a refusal before any effect: retried once)
       if (wantsNonce && attempt === 0 && fresh) {
-        await res.body?.cancel?.().catch?.(() => {});
+        // (not awaited: a body whose cancel never settles can't hold the request past its deadline)
+        res.body?.cancel?.().catch?.(() => {});
         continue;
       }
       return res;
@@ -258,11 +276,37 @@ export class RemoteClient {
    * (no valid answer: a 2xx that isn't a JSON object, an untyped error, an
    * answer over RESPONSE_MAX, a broken or aborted read).
    */
-  async request(method, path, body, { signal, guard } = {}) {
+  async request(method, path, body, { signal, guard, timeoutMs } = {}) {
+    if (!timeoutMs) return this.requestUnder(method, path, body, signal, guard);
+    // (plan r8 F4: an active deadline over every await of the request, the token, the proof, the headers and the
+    // body: its own signal, aborted by the caller's or by the timer; neither is ever left behind)
+    const ctl = new AbortController();
+    let timedOut = false;
+    const onAbort = () => ctl.abort();
+    if (signal?.aborted) ctl.abort();
+    else signal?.addEventListener?.("abort", onAbort, { once: true });
+    const t = this.timers.setTimeout(() => { timedOut = true; ctl.abort(); }, timeoutMs);
+    try {
+      return await this.requestUnder(method, path, body, ctl.signal, guard);
+    } catch (e) {
+      if (!timedOut || signal?.aborted) throw e;
+      // (the same kind it would be as an abort: not sent before the fetch, ambiguous after)
+      if (e instanceof NotSentError) throw new NotSentError(`no answer in ${timeoutMs} ms, so it was not sent`, { aborted: true });
+      if (e instanceof AmbiguousError) throw new AmbiguousError(`no answer in ${timeoutMs} ms`, { aborted: true, status: e.status });
+      throw e;
+    } finally {
+      this.timers.clearTimeout(t);
+      signal?.removeEventListener?.("abort", onAbort);
+    }
+  }
+
+  async requestUnder(method, path, body, signal, guard) {
     const res = await this.send(method, path, body, { signal, guard });
     let data;
     try {
       data = await readJson(res, signal);
+      // (a read the abort ended is no answer, whatever it read)
+      if (signal?.aborted) throw new Error("aborted while the answer was read");
     } catch (e) {
       throw new AmbiguousError(e?.message ?? "the answer could not be read", { aborted: !!signal?.aborted, tooLarge: !!e?.tooLarge, status: res.status });
     }
@@ -351,7 +395,7 @@ export async function readJson(res, signal) {
   const tooLarge = () => Object.assign(new Error("the gateway's answer was over its size limit"), { tooLarge: true });
   const len = Number(res.headers.get("Content-Length"));
   if (Number.isFinite(len) && len > RESPONSE_MAX) {
-    await res.body?.cancel?.().catch?.(() => {});
+    res.body?.cancel?.().catch?.(() => {}); // (not awaited, as above)
     throw tooLarge();
   }
   if (!res.body) return null;

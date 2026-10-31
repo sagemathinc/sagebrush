@@ -182,13 +182,17 @@ export interface ApprovalGraph {
 /** The kernel the page is bound to now. */
 export interface KernelContext {
   binding: string | null;
-  epoch: number | null;
+  /**
+   * the page's lineage (remote-kernel.js lc.own): it changes with every transition of the kernel record except a
+   * fence the gateway attests as continuous (plan r8 F1), so a consent captured before such a fence still holds
+   */
+  own: number;
   generation: number;
   incarnation: number | null;
   /** the grant connected and the binding ready */
   ready: boolean;
 }
-const CTX_FIELDS = ["binding", "epoch", "generation", "incarnation", "ready"] as const;
+const CTX_FIELDS = ["binding", "own", "generation", "incarnation", "ready"] as const;
 
 /** A successful run's execution identity. */
 export interface ExecutionIdentity {
@@ -218,7 +222,7 @@ export interface Frozen {
   approvalEpoch: number;
   doc: string;
   binding: string | null;
-  epoch: number | null;
+  own: number;
   generation: number;
   /** S v2, or null: the closure has a cycle */
   witness: string | null;
@@ -547,7 +551,7 @@ export class Approvals {
 
   private ctxNow(): Readonly<KernelContext> {
     const c = this.context();
-    return Object.freeze({ binding: c.binding, epoch: c.epoch, generation: c.generation, incarnation: c.incarnation, ready: c.ready });
+    return Object.freeze({ binding: c.binding, own: c.own, generation: c.generation, incarnation: c.incarnation, ready: c.ready });
   }
 
   // `ids` and their ancestors, now (synchronous), with the structural caps; the visits are counted.
@@ -1092,7 +1096,7 @@ export class Approvals {
       const spec = s.cells.get(id)!.spec;
       eids.push(spec ? await this.eidOf(spec) : "");
     }
-    return { cells: [...ids], eids, approvalEpoch: s.approvalEpoch, doc: s.doc, binding: s.ctx.binding, epoch: s.ctx.epoch, generation: s.ctx.generation, witness };
+    return { cells: [...ids], eids, approvalEpoch: s.approvalEpoch, doc: s.doc, binding: s.ctx.binding, own: s.ctx.own, generation: s.ctx.generation, witness };
   }
 
   // Provenance validity in a snapshot (the plan's §3.2): a record in its
@@ -1158,7 +1162,7 @@ export class Approvals {
     if (s.approvalEpoch !== frozen.approvalEpoch || s.doc !== frozen.doc) return { send: false, skip: "approvals were reset or the notebook was replaced" };
     // 5. the kernel it was queued for, still bound and ready
     const ctx = s.ctx;
-    if (!ctx.ready || ctx.binding === null || ctx.binding !== frozen.binding || ctx.epoch !== frozen.epoch || ctx.generation !== frozen.generation) {
+    if (!ctx.ready || ctx.binding === null || ctx.binding !== frozen.binding || ctx.own !== frozen.own || ctx.generation !== frozen.generation) {
       return { send: false, skip: "the kernel changed" };
     }
     const binding: string = ctx.binding;
