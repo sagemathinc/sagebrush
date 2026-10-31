@@ -1,0 +1,4 @@
+ok   the self-test notebook opens
+ok   the page reaches the app's bridge: nonce=11111111-2222-4333-8444-555555555555 routes=tauri-internals-invoke:ok,tauri-core-invoke:unavailable,ipc-postmessage:no-native-effect,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable
+ok   cross-origin isolated (Stop keeps variables)
+all passed
