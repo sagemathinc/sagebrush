@@ -327,8 +327,9 @@ export async function write(w: Workspace, plan: Plan, choice: Choice, opts: { wo
     const zip = new ZipWriter(sink, cd, { signal: opts.signal, crc: opts.worker, progress: (n) => { written += n; }, slicePause: T().slicePause });
     const omitted: Unavailable[] = [];
     // (progress: the files and folders written and the archive's bytes so far, its index included; at most every 100
-    // ms from the loop, and every 200 ms from a timer too, so a wait on storage or the index's writing still shows
-    // (E1 r2c §6: at least every 250 ms while bytes move); never an object and a string per entry)
+    // ms from the loop, and every 100 ms from a timer too, so a wait on storage or the index's writing still shows
+    // (E1 r2c §6: at least every 250 ms while bytes move, with room for a timer that runs late on a busy machine);
+    // never an object and a string per entry)
     let lastTick = 0;
     const tick = (p: Progress["phase"], now = false) => {
       const t = performance.now();
@@ -339,7 +340,7 @@ export async function write(w: Workspace, plan: Plan, choice: Choice, opts: { wo
       // steadily; the archive's own offset moves in bursts while the compressor holds its output)
       opts.progress({ phase, files: done, of: plan.files + plan.folders, bytes: written, total: plan.bound });
     };
-    progressTimer = setInterval(() => tick(phase, true), 200);
+    progressTimer = setInterval(() => tick(phase, true), 100);
     for await (const page of entries(w)) {
       for (const e of page) {
         if (opts.signal.aborted) throw new ExportStopped("cancelled");
