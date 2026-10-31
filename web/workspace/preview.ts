@@ -9,7 +9,6 @@
 import { migrationState, type MigrationState } from "./migrator";
 import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { TRASH, nameOf, splitExt } from "./paths";
-import { notebookFileText, boardFileText, ipynbObject } from "./file-bytes";
 import { syncSection } from "./sync-panel";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
@@ -419,7 +418,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       go.disabled = true;
       try {
         const m = await import(host.exportUrl!("sagebrush-export.js"));
-        const kit = { notebookFileText, boardFileText, ipynbObject, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
+        const kit = { isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
         await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit }, flow);
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
     });

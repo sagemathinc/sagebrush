@@ -33,17 +33,36 @@ async function handle(m: any): Promise<unknown> {
     case "hashEnd":
       return { crc: crc32Final(crc), sha256: sha.hex() };
     case "probe": {
-      // (can a scratch file be made and written here: OPFS present, a sync handle, and room)
-      const d = await scratch(), f = await d.getFileHandle(m.name, { create: true }), h = await f.createSyncAccessHandle();
-      try { h.write(new Uint8Array([1]), { at: 0 }); h.flush(); } finally { h.close(); }
-      await d.removeEntry(m.name);
+      // (can a scratch file be made and written here: OPFS present, a sync handle, and room.  The file is removed
+      // however the probe ends: a failed write, flush or handle leaves nothing (astra's E1-R2-A2))
+      const d = await scratch();
+      try {
+        const f = await d.getFileHandle(m.name, { create: true }), h = await f.createSyncAccessHandle();
+        try {
+          if (m.fail === "write") throw new Error("the probe's write failed (a test)");
+          h.write(new Uint8Array([1]), { at: 0 });
+          if (m.fail === "flush") throw new Error("the probe's flush failed (a test)");
+          h.flush();
+        } finally { h.close(); }
+      } finally { await d.removeEntry(m.name).catch(() => {}); }
       return true;
     }
     case "open": {
       if (files.has(m.name)) throw new Error(`${m.name} is open already`);
-      const d = await scratch(), f = await d.getFileHandle(m.name, { create: true }), h = await f.createSyncAccessHandle();
-      h.truncate(0);
-      files.set(m.name, { h, size: 0 });
+      // (the file and its handle owned from the moment they exist: on any failure, closed and removed)
+      const d = await scratch();
+      let h: any = null;
+      try {
+        const f = await d.getFileHandle(m.name, { create: true });
+        h = await f.createSyncAccessHandle();
+        if (m.fail === "truncate") throw new Error("the scratch file couldn't be truncated (a test)");
+        h.truncate(0);
+        files.set(m.name, { h, size: 0 });
+      } catch (e) {
+        try { h?.close(); } catch {}
+        await d.removeEntry(m.name).catch(() => {});
+        throw e;
+      }
       return null;
     }
     case "failAfter":
@@ -80,18 +99,24 @@ async function handle(m: any): Promise<unknown> {
       return null;
     }
     case "removeStale": {
-      // (what an earlier export left, ended by a closed tab: each file whose export (the first 36 characters of its
-      // name, the export's id) no longer holds its lock, m.lockPrefix + id; a running or handing-off export, in any
-      // tab, holds it until its last file is removed (astra's E1-A3).  A file still open elsewhere refuses removal.)
-      const q = await navigator.locks.query();
-      const live = new Set([...(q.held ?? []), ...(q.pending ?? [])].map((l: any) => String(l.name)).filter((n) => n.startsWith(m.lockPrefix)).map((n) => n.slice(m.lockPrefix.length)));
+      // (what an earlier export left, ended by a closed tab: each file is removed only while holding ITS export's lock
+      // (m.lockPrefix + the first 36 characters of its name, the export's id), taken if no one holds it: a running or
+      // handing-off export, in any tab, holds its lock from before its first file until its last is gone, so its
+      // files are never removed, whenever it started relative to this sweep (astra's E1-R2-A2).  A file still open
+      // elsewhere refuses removal.)
+      // (tests only: a pause before the listing, where another export may start and hand off: its files are then
+      // listed here, and must be left)
+      if (m.pauseMs) await new Promise((r) => setTimeout(r, m.pauseMs));
       const d = await scratch();
       const names: string[] = [];
       for await (const [name] of (d as any).entries()) names.push(name);
       let n = 0;
       for (const name of names) {
-        if (live.has(name.slice(0, 36))) continue;
-        try { await d.removeEntry(name); n++; } catch {}
+        const id = name.slice(0, 36);
+        await navigator.locks.request(m.lockPrefix + id, { ifAvailable: true }, async (lock: unknown) => {
+          if (!lock) return;
+          try { await d.removeEntry(name); n++; } catch {}
+        });
       }
       return n;
     }

@@ -558,20 +558,50 @@ export function badPictureNames(d: any): string[] {
   return [...out];
 }
 
+/** Steps of work that yield every so often (cleanDocSteps): run through at once by the page, paced by the export,
+ * which yields to the browser between them (web/workspace/export/stream.ts). */
+export type Steps<T> = Generator<void, T, void>;
+const runSteps = <T,>(g: Steps<T>): T => { for (;;) { const r = g.next(); if (r.done) return r.value; } };
+/** Each `per` items of a loop, a step. */
+const STEP = 256;
+
 export function cleanDoc(d: any): BoardDoc {
-  const node = (n: any): DocNode | null => {
+  return runSteps(cleanDocSteps(d));
+}
+
+/** cleanDoc, in steps: the same code, yielding every STEP items (nodes, a group's children, a stroke's points in
+ * blocks, edges, steps, the previews' walk), so the export can clean a large board without one long piece of work. */
+export function* cleanDocSteps(d: any): Steps<BoardDoc> {
+  let count = 0;
+  const tick = function* () { if (++count % STEP === 0) yield; };
+  // (a list's items each through f, those it keeps, in order)
+  const keep = function* <T, R>(xs: T[], f: (x: T) => Steps<R | null | undefined> | R | null | undefined): Steps<R[]> {
+    const out: R[] = [];
+    for (const x of xs) {
+      const r = f(x);
+      const v = r && typeof (r as any).next === "function" && typeof (r as any)[Symbol.iterator] === "function" ? yield* (r as Steps<R | null | undefined>) : (r as R | null | undefined);
+      if (v !== null && v !== undefined) out.push(v as R);
+      yield* tick();
+    }
+    return out;
+  };
+  const node = function* (n: any): Steps<DocNode | null> {
     if (!n || typeof n !== "object" || n.id == null) return null;
     if (n.kind === "group") {
+      const children = yield* keep(Array.isArray(n.children) ? n.children : [], node);
       return strip({ id: String(n.id), kind: "group" as const, title: str(n.title), text: str(n.text), layout: one(n.layout, LAYOUTS), columns: num(n.columns), direction: one(n.direction, DIRS),
-        children: (Array.isArray(n.children) ? n.children : []).map(node).filter((c: DocNode | null): c is DocNode => !!c), color: safeColor(n.color), x: num(n.x), y: num(n.y),
+        children, color: safeColor(n.color), x: num(n.x), y: num(n.y),
         w: groupSide(n.w), h: groupSide(n.h) });
     }
     // (a stroke: its points as numbers, three a point, and its place; else none)
     if (n.kind === "ink") {
       const ps = Array.isArray(n.points) ? n.points.slice(0, n.points.length - (n.points.length % 3)) : [];
-      if (!ps.length || !ps.every((v: unknown) => typeof v === "number" && Number.isFinite(v)) || num(n.x) === undefined || num(n.y) === undefined) return null;
+      if (!ps.length || num(n.x) === undefined || num(n.y) === undefined) return null;
+      // (in blocks of 64Ki numbers, a step each)
+      for (let i = 0; i < ps.length; i += 65536) { for (let j = i; j < Math.min(ps.length, i + 65536); j++) if (!(typeof ps[j] === "number" && Number.isFinite(ps[j]))) return null; yield; }
       const size = num(n.size), opacity = num(n.opacity);
-      const world = ps.map((v: number, i: number) => (i % 3 === 0 ? v + n.x : i % 3 === 1 ? v + n.y : v));
+      const world: number[] = new Array(ps.length);
+      for (let i = 0; i < ps.length; i += 65536) { for (let j = i; j < Math.min(ps.length, i + 65536); j++) world[j] = j % 3 === 0 ? ps[j] + n.x : j % 3 === 1 ? ps[j] + n.y : ps[j]; yield; }
       return inkNode(String(n.id), world, { size: size !== undefined && size > 0 && size <= 200 ? size : undefined, color: safeColor(n.color), opacity: opacity !== undefined && opacity > 0 && opacity < 1 ? opacity : undefined });
     }
     // (a sticker: one emoji, or an icon's name; else none)
@@ -583,7 +613,7 @@ export function cleanDoc(d: any): BoardDoc {
     // (a question: its input one of those; else, as a reader that doesn't
     // know the kind shows it, a note with its title and text)
     if (n.kind === "ask" && one(n.input, ASK_INPUTS)) {
-      const options = Array.isArray(n.options) ? n.options.map(askOption).filter((o: AskOption | undefined): o is AskOption => o !== undefined) : undefined;
+      const options = Array.isArray(n.options) ? yield* keep(n.options, askOption) : undefined;
       return strip({ id: String(n.id), kind: "ask" as const, title: str(n.title), text: str(n.text), input: n.input as AskInput, options, required: n.required === true ? true : undefined,
         min: num(n.min), max: num(n.max), step: num(n.step), low: str(n.low), high: str(n.high), lines: num(n.lines), answer: askAnswer(n.answer), note: typeof n.note === "string" ? n.note : undefined,
         check: typeof n.check === "string" ? n.check : undefined, checkMs: Number.isInteger(n.checkMs) && n.checkMs >= 1 && n.checkMs <= 10000 ? n.checkMs : undefined,
@@ -599,22 +629,28 @@ export function cleanDoc(d: any): BoardDoc {
       color: safeColor(n.color), shape: SHAPES.has(n.shape) ? (n.shape as NoteShape) : undefined, fit: n.fit === true ? true : undefined,
       x: num(n.x), y: num(n.y), w: num(n.w), h: num(n.h), preview: code !== undefined ? cleanPreview(n.preview) : undefined });
   };
-  const page = (p: any) => strip({
-    id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
-    slide: slideRect(p?.slide), background: background(p?.background), template: p?.template === true ? true : undefined, uses: str(p?.uses),
-    nodes: Array.isArray(p?.nodes) ? p.nodes.map(node).filter((n: DocNode | null): n is DocNode => !!n) : undefined,
-    edges: Array.isArray(p?.edges) ? p.edges.filter((e: any) => e && e.from != null && e.to != null).map((e: any) => strip({ from: String(e.from), to: String(e.to), label: str(e.label),
-      hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) })) : undefined,
-    steps: Array.isArray(p?.steps) ? p.steps.filter((t: any) => t && (typeof t.focus === "string" || Array.isArray(t.focus))).map((t: any) => strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) })) : undefined,
-  });
-  const out: any = strip({ format: FORMAT, version: VERSION, ...page(d), title: str(d?.title), mode: one(d?.mode, MODES), engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
+  const edge = (e: any) => (e && e.from != null && e.to != null ? strip({ from: String(e.from), to: String(e.to), label: str(e.label),
+    hidden: e.hidden === true ? true : undefined, arrow: one(e.arrow, ["none", "both"] as const), line: one(e.line, ["dotted", "thick"] as const) }) : null);
+  const stepOf = (t: any) => (t && (typeof t.focus === "string" || Array.isArray(t.focus)) ? strip({ focus: typeof t.focus === "string" ? t.focus : t.focus.map(String), say: str(t.say) }) : null);
+  const page = function* (p: any): Steps<any> {
+    const nodes = Array.isArray(p?.nodes) ? yield* keep(p.nodes, node) : undefined;
+    const edges = Array.isArray(p?.edges) ? yield* keep(p.edges, edge) : undefined;
+    const steps = Array.isArray(p?.steps) ? yield* keep(p.steps, stepOf) : undefined;
+    return strip({
+      id: str(p?.id), title: str(p?.title), intro: str(p?.intro), layout: one(p?.layout, LAYOUTS), columns: num(p?.columns), direction: one(p?.direction, DIRS),
+      slide: slideRect(p?.slide), background: background(p?.background), template: p?.template === true ? true : undefined, uses: str(p?.uses),
+      nodes, edges, steps,
+    });
+  };
+  const top = yield* page(d);
+  const out: any = strip({ format: FORMAT, version: VERSION, ...top, title: str(d?.title), mode: one(d?.mode, MODES), engine: d?.engine === "latest" ? "latest" : undefined, seed: typeof d?.seed === "string" && /^[0-9a-f]{64}$/.test(d.seed) ? d.seed : undefined, refBase: str(d?.refBase), tools: Array.isArray(d?.tools) ? d.tools.filter((t: unknown) => typeof t === "string") : undefined, images: cleanImages(d?.images) });
   delete out.id;
-  if (Array.isArray(d?.pages)) out.pages = d.pages.map(page);
+  if (Array.isArray(d?.pages)) { const pages: any[] = []; for (const p of d.pages) { pages.push(yield* page(p)); yield* tick(); } out.pages = pages; }
   // (previews: at most DOC_MAX in all, every page's, SEC-14C-2)
   const notes: DocNote[] = [];
-  const walk = (ns: DocNode[] | undefined) => { for (const n of ns ?? []) n.kind === "group" ? walk(n.children) : isNote(n) && n.preview && notes.push(n); };
-  walk(out.nodes);
-  for (const p of out.pages ?? []) walk(p.nodes);
+  const walk = function* (ns: DocNode[] | undefined): Steps<void> { for (const n of ns ?? []) { if (n.kind === "group") yield* walk(n.children); else if (isNote(n) && n.preview) notes.push(n); yield* tick(); } };
+  yield* walk(out.nodes);
+  for (const p of out.pages ?? []) yield* walk(p.nodes);
   capPreviews(notes);
   return out as BoardDoc;
 }
@@ -632,6 +668,50 @@ const DOC_KEYS = ["format", "version", "title", "mode", "engine", "seed", "refBa
  */
 export function canonical(d: BoardDoc): string {
   return boardText(cleanDoc(d));
+}
+
+/** boardText's text in parts, for the export to write as it goes (web/workspace/export/stream.ts): the same layout,
+ * piece by piece; a string is handed over as `{ s }`, for the reader to write as JSON.stringify writes it (a long one
+ * in pieces).  **It must agree with boardText byte for byte**: web/workspace/test-export.mjs proves it, the export's
+ * stream cut everywhere, against Download. */
+export function* boardTextParts(d: any): Generator<string | { s: string }, void, void> {
+  const c: any = d, out: any = {};
+  for (const k of DOC_KEYS) if (c[k] !== undefined) out[k] = c[k];
+  for (const k of Object.keys(c)) if (!Object.hasOwn(out, k)) Object.defineProperty(out, k, { value: c[k], enumerable: true, writable: true, configurable: true });
+  const scalar = function* (x: any): Generator<string | { s: string }, void, void> {
+    if (typeof x === "string") yield { s: x };
+    else { const j = JSON.stringify(x); if (j !== undefined) yield j; }
+  };
+  const text = function* (v: any, indent: string): Generator<string | { s: string }, void, void> {
+    if (Array.isArray(v)) {
+      if (!v.length) { yield "[]"; return; }
+      if (v.every((x) => typeof x !== "object" || x === null)) {
+        yield "[";
+        for (let i = 0; i < v.length; i++) { if (i) yield ", "; yield* scalar(v[i]); }
+        yield "]";
+        return;
+      }
+      const i2 = indent + "  ";
+      yield "[\n";
+      for (let i = 0; i < v.length; i++) { if (i) yield ",\n"; yield i2; yield* text(v[i], i2); }
+      yield "\n" + indent + "]";
+      return;
+    }
+    if (v && typeof v === "object") {
+      const ks = Object.keys(v).filter((k) => v[k] !== undefined);
+      if (!ks.length) { yield "{}"; return; }
+      const i2 = indent + "  ";
+      yield "{\n";
+      for (let i = 0; i < ks.length; i++) { if (i) yield ",\n"; yield i2 + JSON.stringify(ks[i]) + ": "; yield* text(v[ks[i]], i2); }
+      yield "\n" + indent + "}";
+      return;
+    }
+    // (as boardText: a value JSON doesn't write, a function say, is the text "undefined")
+    if (typeof v === "string") yield { s: v };
+    else yield String(JSON.stringify(v));
+  };
+  yield* text(out, "");
+  yield "\n";
 }
 
 /** A board's JSON in canonical()'s layout (the format's keys first, two-space
