@@ -444,6 +444,28 @@ try {
   check((await cmdCount()) === 0 && (await evaluate(`${ta}.value`)) === "", "a new session after ✕: no scrollback and no history");
   check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${ta}.getAttribute("aria-describedby")`)) === "sb-term-note",
     "T358-3: the intro once per tab: a new terminal in the same tab has none");
+  // (the intro's "Got it", William, Oct 30: until it, every tab's first terminal shows the intro; it takes the intro
+  // away, the input keeps the focus and loses the intro's description, and this device keeps it away, in every tab)
+  const reopen = async () => {
+    await evaluate(`document.querySelector(".sb-term-end").click()`);
+    // (as a new tab's first terminal: this tab's own record of the intro gone)
+    await evaluate(`sessionStorage.removeItem("sb-term-intro")`);
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden`, 10000);
+  };
+  await reopen();
+  const got = await evaluate(`(() => { const b = document.querySelector(".sb-term-intro button"); return { text: b?.textContent, described: ${ta}.getAttribute("aria-describedby"),
+    kept: localStorage.getItem("sagebrush-term-intro"), named: document.getElementById("sb-term-intro")?.textContent.includes("Got it") }; })()`);
+  check(got.text === "Got it" && got.described === "sb-term-intro sb-term-note" && got.kept === null && got.named === false,
+    `the intro, not yet put away, in a new tab's first terminal, with its "Got it" (not part of the input's description): ${JSON.stringify(got)}`);
+  await evaluate(`document.querySelector(".sb-term-intro button").click()`);
+  const gone = await evaluate(`({ intro: document.querySelectorAll(".sb-term-intro, #sb-term-intro").length, described: ${ta}.getAttribute("aria-describedby"),
+    focus: document.activeElement === ${ta}, kept: localStorage.getItem("sagebrush-term-intro") })`);
+  check(gone.intro === 0 && gone.described === "sb-term-note" && gone.focus && gone.kept === "1", `"Got it" puts the intro away, the input keeps the focus, and this device keeps it: ${JSON.stringify(gone)}`);
+  await reopen();
+  const later = await evaluate(`({ intro: document.querySelectorAll(".sb-term-intro").length, described: ${ta}.getAttribute("aria-describedby") })`);
+  check(later.intro === 0 && later.described === "sb-term-note", `put away, a new tab's first terminal on this device has no intro: ${JSON.stringify(later)}`);
+  await evaluate(`localStorage.removeItem("sagebrush-term-intro")`);
   // (under 700 px: a full-height sheet)
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await new Promise((res) => setTimeout(res, 300));

@@ -19,8 +19,11 @@ import { join, relative } from "node:path";
 // first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1; raised to
 // 9 728 B by daybreak2's ruling DB2-T358-3 on #358 (bun 1.4.4 measured 9 667 B, +68): the first-open notice, the
 // static aria-describedby line about what commands do to your files, required safety context for the terminal on
-// every host (its text in terminal.ts, outside these inputs)
-const LIMIT = 9728;
+// every host (its text in terminal.ts, outside these inputs); raised to 9 792 B by daybreak2's E5.6 ceiling ruling on
+// the dismissible intro (terminal-intro-dismiss-e56-size-ruling-daybreak2.md, 38b3b43a; bun 1.4.4 measured 9 741 B,
+// +74): its "Got it" (William, Oct 30: "it needs to be dismissible"), kept per device in the site's localStorage
+// preferences, the input's description corrected and its focus restored, and the button's font and margin
+const LIMIT = 9792;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);
