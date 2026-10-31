@@ -268,14 +268,20 @@ try {
     await sleep(2500);
     const o2 = await outs();
     ok((await shown()).some((v) => v.includes("AGENT-RAN")) && !/AGENT-RAN/.test(o2), "the agent's change is shown, and runs nothing (no applyEdits, no autorun)", { o2, cells: await shown() });
-    // ---- a Run runs that cell only: the agent's cell, which reads x, doesn't run with the cell that sets x (the
-    // reactive notebook's autorun would run it: its stale descendants, notebook.js 843)
+    // ---- a Run runs that cell only. The person runs the agent's cell (it reads x: AGENT-RAN 1), then changes x and runs
+    // that cell alone: the agent's cell isn't rerun with it (the reactive notebook's autorun would rerun it, a stale
+    // descendant: notebook.js 843; a cell changed and not yet run is never autorun, so this is the case it would run)
+    await ev(`${cellJs(1)}.querySelector('.runb').click()`);
+    await until(`/AGENT-RAN 1/.test(${cellJs(1)}.querySelector('.out').textContent)`, 60000);
+    await ev(`(() => { const t = ${cellJs(0)}.querySelector('textarea'); t.focus(); t.select(); })()`);
+    await send("Input.insertText", { text: "x = 2" });
+    const n0 = await ev(`${cellJs(0)}.querySelector('.n').textContent`);
     await ev(`${cellJs(0)}.querySelector('.runb').click()`);
-    await until(`/\\[\\d+\\]/.test(${cellJs(0)}.querySelector('.n').textContent)`, 60000);
+    await until(`${cellJs(0)}.querySelector('.n').textContent !== ${JSON.stringify(n0)} && /\\[\\d+\\]/.test(${cellJs(0)}.querySelector('.n').textContent)`, 60000);
     await sleep(2500);
-    const o3 = await outs();
+    const o3 = await ev(`${cellJs(1)}.querySelector('.out').textContent`);
     const states = await ev(`[...document.querySelectorAll('${PANE} .cell')].map((c) => c.className + ' ' + c.querySelector('.n')?.textContent + ' ' + (c.querySelector('.time')?.textContent ?? ''))`);
-    ok(!/AGENT-RAN/.test(o3), "the person's Run runs that cell only: the agent's cell that depends on it doesn't run with it (no autorun)", { o3, states });
+    ok(/AGENT-RAN 1/.test(o3) && !/AGENT-RAN 2/.test(o3), "the person's Run runs that cell only: the agent's cell that reads it isn't rerun with it (no autorun)", { o3, states });
   }
 
   // ======================================================================== saved, with its base; reopened
