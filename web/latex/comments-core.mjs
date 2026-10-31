@@ -14,7 +14,7 @@ export const LIMITS = {
   sidecarBytes: 2 << 20, newThreadBytes: 1.75 * (1 << 20), threadBytes: 256 << 10, sourceUnits: 2 << 20,
   liveThreads: 2000, threads: 4000, messages: 200, text: 8000, author: 100, id: 64,
   quoteFull: 600, quoteHead: 300, context: 32, shown: 300, candidates: 64, workBudget: 64 << 20,
-  passKey: 32, passQuota: 1 << 15, passMin: 16, listThreads: 200, listBytes: 1 << 20, summaryUnits: 500, contextLines: 3, contextLineUnits: 200, changedWindow: 2000,
+  passKey: 32, passQuota: 1 << 14, listThreads: 200, listBytes: 1 << 20, summaryUnits: 500, contextLines: 3, contextLineUnits: 200, changedWindow: 2000,
   attempts: 5, backoffMs: [50, 100, 200, 400], deadlineMs: 10000,
 };
 
@@ -175,7 +175,7 @@ export function lineIndex(text) {
  * exact | moved | changed | ambiguous | orphaned | unresolved (never a guess). steps(anchor) is the same as a generator
  * that yields between bounded steps (a window of the text searched, a piece of a long span hashed), so the page can
  * give the main thread back between them; its return value is resolve's. */
-export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onCopy } = {}) {
+export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onCopy, pass } = {}) {
   sourceFits(text);
   // (the text's hash, the caller's when it hashed the text already in slices (the page), and its line index, built
   // when first needed: both charged here, the same either way)
@@ -246,8 +246,9 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   // passQuota units it yields. Its needles end "complete" (every occurrence, up to the cap + 1), "cap" (more than the cap
   // + 1: too many, which is all an anchor needs to know) or, if the budget ran out first, incomplete: an anchor that needs
   // an incomplete needle is unresolved (budget), and is never searched again. The suffix isn't shared: each start's own
-  // window is searched as before. Exact anchors aren't in the pass, and with fewer than passMin anchors left to place
-  // there is no pass (each anchor's own searches, native and stopping at the cap, cost less). The scan ends early once
+  // window is searched as before. Exact anchors aren't in the pass, and there is a pass only when the anchors' own
+  // whole-text searches can't fit the budget (anchors x text length >= 2 x budget): below that, each anchor's own
+  // searches (native, and stopping at the cap) are faster, and mostly fit. The scan ends early once
   // every needle has passed the cap. The root's children are a direct table (65,536 entries), not the hash: a step at the
   // root costs one unit, whether or not the unit starts a key.
   const KEY = LIMITS.passKey, Q = LIMITS.passQuota, SEG = 1 << 16;
@@ -255,7 +256,8 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
   function* prepare(anchors) {
     if (starved) return;
     anchors = anchors.filter((a) => !(a.textSha === textSha && a.end <= text.length));
-    if (anchors.length < LIMITS.passMin) return;
+    // (pass: true, the tests' seam: the pass whatever the sizes)
+    if (!pass && anchors.length * text.length < 2 * budget) return;
     const map = new Map(), recs = [], keys = new Map();
     prep = map;
     let q = 0;
