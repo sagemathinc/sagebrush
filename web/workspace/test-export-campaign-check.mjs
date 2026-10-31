@@ -4,16 +4,21 @@
 // failing the GC bound and nothing else.
 //   node web/workspace/test-export-campaign-check.mjs [TRACE=file]
 import { readFileSync } from "node:fs";
-import { BOUNDS, judgeRun, majorGcs, maxGap, outcome, progressSeries } from "./export-campaign-check.mjs";
+import { gunzipSync } from "node:zlib";
+import { BOUNDS, judgeRun, majorGcs, maxGap, outcome, pageMainThread, progressSeries } from "./export-campaign-check.mjs";
 
 let checks = 0;
 const fails = [];
 const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
 // ---- a minimal trace: the renderer main thread (pid 1, tid 10) and a worker thread (pid 1, tid 20)
+// (r6: the page's main thread carries its sb-sync-1 mark, and a MinorGC in the window, as every real run does)
 const base = () => [
   { name: "thread_name", ph: "M", pid: 1, tid: 10, args: { name: "CrRendererMain" } },
   { name: "thread_name", ph: "M", pid: 1, tid: 20, args: { name: "DedicatedWorker thread" } },
+  { name: "sb-sync-1", ph: "R", cat: "blink.user_timing", pid: 1, tid: 10, ts: 900 * 1000 },
+  { name: "sb-sync-2", ph: "R", cat: "blink.user_timing", pid: 1, tid: 10, ts: 9500 * 1000 },
+  { name: "MinorGC", ph: "X", pid: 1, tid: 10, ts: 1500 * 1000, dur: 2 * 1000 },
 ];
 const X = (name, tid, tsMs, durMs) => ({ name, ph: "X", pid: 1, tid, ts: tsMs * 1000, dur: durMs * 1000 });
 const W = [1000 * 1000, 9000 * 1000]; // the export window, µs
@@ -42,6 +47,38 @@ const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.len
 {
   const e = [...base(), X("MajorGC", 10, 500, 60), X("MajorGC", 10, 9500, 60)];
   check(gcOf(e).length === 0, "MajorGCs before the click and after the export's end: outside the window, not counted");
+}
+// ---- r6 (campaign 3's finding; @sagebrush's ruling): the page's main thread, and the GC measure's availability
+{
+  // (two renderer processes, an idle one named first, as in campaign 3's runs 2 and 3)
+  const idleFirst = [{ name: "thread_name", ph: "M", pid: 2, tid: 30, args: { name: "CrRendererMain" } }, ...base(), X("MajorGC", 10, 3000, 60), { name: "MajorGC", ph: "X", pid: 2, tid: 30, ts: 3000 * 1000, dur: 5 * 1000 }];
+  const t = pageMainThread(idleFirst);
+  check(t && t.pid === 1 && t.tid === 10 && JSON.stringify(gcOf(idleFirst)) === "[60]" && gcFails(idleFirst), "two renderer processes, an idle one named first: the page's thread (by its sb-sync-1 mark) is read, its 60 ms MajorGC measured, FAIL");
+  const ambiguous = [...base(), { name: "sb-sync-2", ph: "R", cat: "blink.user_timing", pid: 2, tid: 30, ts: 9600 * 1000 }, X("MajorGC", 10, 3000, 60)];
+  check(pageMainThread(ambiguous) === null && gcOf(ambiguous) === null && !judgeRun(runWith({ majorGc: gcOf(ambiguous) })).valid, "the marks on two different threads: the selection ambiguous, the GC measure unavailable, INVALID, never a pass");
+  const noMark2 = base().filter((e) => e.name !== "sb-sync-2").concat([X("MajorGC", 10, 3000, 60)]);
+  check(gcOf(noMark2) === null, "sb-sync-2 missing: the selection unknown, unavailable");
+  const noMark = base().filter((e) => e.name !== "sb-sync-1").concat([X("MajorGC", 10, 3000, 60)]);
+  check(gcOf(noMark) === null && !judgeRun(runWith({ majorGc: gcOf(noMark) })).valid, "no sb-sync-1 mark: the page's thread unknown, the GC measure unavailable (null), INVALID, never a pass");
+  const noGc = base().filter((e) => e.name !== "MinorGC").concat([X("RunTask", 10, 2000, 10)]);
+  const j = judgeRun(runWith({ majorGc: gcOf(noGc) }));
+  check(gcOf(noGc) === null && !j.valid && j.fix.length === 0, "the page's thread present but without the expected GC classes (no MinorGC) in the window: unavailable, INVALID, never a pass");
+  const minorOutside = base().filter((e) => e.name !== "MinorGC").concat([X("MinorGC", 10, 500, 2)]);
+  check(gcOf(minorOutside) === null, "a MinorGC only outside the export window: still unavailable");
+}
+// ---- r6: campaign 3's five real traces (REAL_TRACES=<dir with run1-…json.gz>), on the page's thread
+{
+  const dir = process.env.REAL_TRACES;
+  if (dir) {
+    const { readdirSync } = await import("node:fs");
+    const want = { 1: [145.4, 30], 2: [23, 37.3], 3: [146.8, 30.6], 4: [25.4, 33.2, 26.7], 5: [144, 29.1] };
+    for (const k of [1, 2, 3, 4, 5]) {
+      const f = readdirSync(dir).find((n) => n.startsWith(`run${k}-trace-`));
+      const { window: [a, b], events } = JSON.parse(gunzipSync(readFileSync(`${dir}/${f}`)).toString("utf8"));
+      const got = majorGcs(events, a, b)?.map((g) => +g.toFixed(1));
+      check(JSON.stringify(got) === JSON.stringify(want[k]), `campaign 3's run ${k}, re-read on the page's thread: MajorGC ${JSON.stringify(got)} (expected ${JSON.stringify(want[k])}); available`);
+    }
+  }
 }
 // ---- the progress gap (a gate) and the heartbeat (reported only)
 {
@@ -88,21 +125,25 @@ const gcFails = (events) => judgeRun(runWith({ majorGc: gcOf(events) })).fix.len
   check(outcome([ok(), runWith({ longTasks: [{ ms: 60, class: "gc" }] }), ok(), ok(), ok()]).outcome === "INCONCLUSIVE", "a non-export task of 60 ms only: INCONCLUSIVE (fallback (b) may apply)");
   check(outcome([ok(), runWith({ longTasks: [{ ms: 60, class: "page" }], progressGap: 300 }), ok(), ok(), ok()]).outcome === "FIX", "a non-export task with a 300 ms progress gap: FIX (the fallback never waives a progress failure)");
 }
-// ---- a real saved trace: as saved, then with a 60 ms main-thread MajorGC inserted in its export window
+// ---- a real saved trace (the liveness trace): read on the page's thread, then with a 60 ms main-thread MajorGC
+// inserted into its export window on that thread
 const file = process.argv.find((a) => a.startsWith("TRACE="))?.slice(6) ?? process.env.TRACE;
 if (file) {
   const rec = JSON.parse(readFileSync(file, "utf8"));
   const { events, window: [from, to], run } = rec;
   const asSaved = majorGcs(events, from, to);
+  // (r6: this trace's record came from r5's parser, which read the first CrRendererMain; on the page's own thread (its
+  // sb-sync marks) the trace has a 137.6 ms MajorGC that r5 missed, exactly campaign 3's runs 2 and 3)
+  const main = pageMainThread(events), firstNamed = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
+  check(main && (main.pid !== firstNamed.pid || main.tid !== firstNamed.tid) && JSON.stringify(run.majorGc) === "[]" && JSON.stringify(asSaved?.map((g) => +g.toFixed(1))) === "[137.6,10.6]",
+    `the liveness trace on the page's thread (${main?.pid}/${main?.tid}, not the first CrRendererMain ${firstNamed.pid}/${firstNamed.tid}): MajorGC ${JSON.stringify(asSaved?.map((g) => +g.toFixed(1)))}, where r5 recorded ${JSON.stringify(run.majorGc)}`);
   const j0 = judgeRun({ ...run, majorGc: asSaved });
-  check(JSON.stringify(asSaved) === JSON.stringify(run.majorGc), `the saved trace parses as its run recorded it: MajorGC ${JSON.stringify(asSaved)}; the run ${j0.valid ? "valid" : "NOT valid"}, ${j0.fix.length ? "FIX: " + j0.fix.join("; ") : "within the GC and progress bounds"}`);
-  const main = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
   const mid = Math.round((from + to) / 2);
   const mutated = [...events, { name: "MajorGC", ph: "X", pid: main.pid, tid: main.tid, ts: mid, dur: 60000, cat: "disabled-by-default-v8.gc" }];
   const after = majorGcs(mutated, from, to);
   const j1 = judgeRun({ ...run, majorGc: after });
-  const onlyGc = j1.fix.length === j0.fix.length + 1 && j1.fix.some((r) => /MajorGC of 60 ms/.test(r)) && j1.valid === j0.valid;
-  check(after.includes(60) && onlyGc, "the same trace with a 60 ms main-thread MajorGC inserted mid-export: the GC bound FAILs, and nothing else changes: " + j1.fix.join("; "));
+  check(after.includes(60) && j1.fix.length === j0.fix.length + 1 && j1.fix.some((r) => /MajorGC of 60 ms/.test(r)) && j1.valid === j0.valid,
+    "the same trace with a 60 ms MajorGC inserted mid-window on the page's thread: one more GC failure, and nothing else changes: " + j1.fix.join("; "));
 }
 console.log(`${checks - fails.length}/${checks} passed`);
 for (const f of fails) console.log("FAIL " + f);

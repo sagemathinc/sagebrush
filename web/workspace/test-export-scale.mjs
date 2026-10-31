@@ -23,7 +23,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
-import { judgeRun, majorGcs, maxGap, PROGRESS_OBSERVER, progressSeries } from "./export-campaign-check.mjs";
+import { judgeRun, majorGcs, mainThreadEvents, maxGap, PROGRESS_OBSERVER, progressSeries } from "./export-campaign-check.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const CI = process.argv.includes("--ci");
@@ -464,8 +464,8 @@ try {
       const offset = t1 ? t1.ts / 1000 - m1 : NaN, err = t2 ? Math.abs(t2.ts / 1000 - (m2 + offset)) : NaN;
       const mapped = Number.isFinite(err) && err <= 1;
       console.log(`(trace: the clock mapping: sb-sync-1 ${t1 ? "found" : "MISSING"}, sb-sync-2 predicted within ${Number.isFinite(err) ? err.toFixed(3) : "—"} ms: ${mapped ? "valid" : "INVALID"})`);
-      const main = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
-      const onMain = events.filter((e) => e.ph === "X" && main && e.pid === main.pid && e.tid === main.tid);
+      // (r6: the page's main thread, by its sb-sync-1 mark, not the first thread named CrRendererMain)
+      const onMain = mainThreadEvents(events) ?? [];
       const isGc = (e) => /^(MajorGC|MinorGC|Scavenge|V8\.GC)/.test(e.name);
       const urlOf = (e) => e.args?.data?.url ?? e.args?.data?.stackTrace?.[0]?.url ?? e.args?.beginData?.url ?? "";
       const isScript = (e) => /^(FunctionCall|EvaluateScript|v8\.callFunction|v8\.compile|TimerFire|EventDispatch|RunMicrotasks)$/.test(e.name);

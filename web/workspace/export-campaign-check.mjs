@@ -4,13 +4,29 @@
 // pass uses the same code on real runs.  (r2, daybreak2's R1-R3: each metric's availability is explicit, and absent
 // evidence is INVALID, never zero; the progress observer counts only the progress line's own rewrites.)
 
-/** The renderer main thread's events (complete events, ph "X"): the thread named CrRendererMain; null if the trace
- * has no such thread (the measure is then unavailable). */
+/** The page's main thread (r6, campaign 3's finding): the thread that carries the page's own `sb-sync-1` user-timing
+ * mark, which the page emits on its main thread.  A trace has more than one CrRendererMain (campaign 3's had two
+ * renderer processes in every run), so a thread's name doesn't identify the page's; r5 took the first one, which in
+ * two runs was an idle renderer.  null without the mark (the measure is then unavailable). */
+export function pageMainThread(events) {
+  // (both marks, sb-sync-1 and sb-sync-2, must be found, and all of them on one thread: missing or on more than one
+  // thread, the selection is unknown or ambiguous, and the measure is unavailable: fail closed)
+  const marks = events.filter((e) => (e.name === "sb-sync-1" || e.name === "sb-sync-2") && /user_timing/.test(e.cat ?? ""));
+  if (!marks.some((e) => e.name === "sb-sync-1") || !marks.some((e) => e.name === "sb-sync-2")) return null;
+  const threads = new Set(marks.map((e) => e.pid + "/" + e.tid));
+  return threads.size === 1 ? { pid: marks[0].pid, tid: marks[0].tid } : null;
+}
+
+/** The page's main thread's complete events (ph "X"); null if it can't be identified. */
 export function mainThreadEvents(events) {
-  const main = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
+  const main = pageMainThread(events);
   if (!main) return null;
   return events.filter((e) => e.ph === "X" && e.pid === main.pid && e.tid === main.tid);
 }
+
+/** The GC event classes a 100k export's main thread must show in its window for the GC measure to be taken
+ * (r6, @sagebrush's ruling): a MinorGC (every run of campaign 3 had 40–41 on the page's thread). */
+export const EXPECTED_GC = ["MinorGC"];
 
 /** Main-thread MajorGC pauses (ms) that overlap [from, to] (trace µs), in order, whether or not inside a task: the
  * Long Task API doesn't see a collection outside a task, so this doesn't look at tasks at all.  null if the trace has
@@ -18,8 +34,12 @@ export function mainThreadEvents(events) {
 export function majorGcs(events, from, to) {
   const main = mainThreadEvents(events);
   if (!main) return null;
-  return main
-    .filter((e) => e.name === "MajorGC" && e.ts < to && e.ts + e.dur > from)
+  const inWindow = main.filter((e) => e.ts < to && e.ts + e.dur > from);
+  // (r6: a main thread without the expected GC classes in the window: the measure wasn't taken; unavailable, so the
+  // run is INVALID, never a pass)
+  if (!EXPECTED_GC.every((name) => inWindow.some((e) => e.name === name))) return null;
+  return inWindow
+    .filter((e) => e.name === "MajorGC")
     .sort((a, b) => a.ts - b.ts)
     .map((e) => e.dur / 1000);
 }
