@@ -779,11 +779,15 @@ async function completion(check) {
     `H1: complete() lists what ls lists (/ ${names(c1)} vs ${l1}; /A ${names(c2)} vs ${l2}; /B ${JSON.stringify(c3)} vs ${l3})`);
   check(JSON.stringify(c2.entries?.find((e) => e.name === "nb.ipynb")) === JSON.stringify({ name: "nb.ipynb", kind: "notebook" }) && c2.entries?.find((e) => e.name === "sub")?.kind === "folder",
     `H1k: the workspace's kinds kept for the colours (${JSON.stringify(c2.entries)})`);
-  // H3: Tab's calls start no worker and change nothing (the ls runs above started one: counted from here)
-  starts = 0;
-  mutated.length = 0;
-  for (let i = 0; i < 5; i++) { await host.complete(g, "/A"); await host.complete(PERSON, "/"); }
-  check(starts === 0 && mutated.length === 0 && host.endings.length === 0, `H3: ten complete() calls: no worker started (${starts}), no mutating verb (${mutated.join(",")}), no ending`);
+  // H3: Tab's calls start no worker and change nothing: a host of its own on which nothing has run yet, so a call
+  // that invoked the shell would have to start one
+  let starts3 = 0;
+  const mutated3 = [];
+  const spy3 = (w) => { const v = Object.create(w); for (const verb of ["write", "create", "mkdir", "rename", "duplicate", "remove"]) v[verb] = async function (...a) { mutated3.push(verb); return w[verb].apply(this, a); }; return v; };
+  const host3 = new ShellHost(spy3(ws), (signal) => { starts3++; return startShell(D.S, "/", { signal }).then((x) => x.shell); });
+  for (let i = 0; i < 5; i++) { await host3.complete(g, "/A"); await host3.complete(PERSON, "/"); }
+  check(starts3 === 0 && mutated3.length === 0 && host3.endings.length === 0, `H3: ten complete() calls on a fresh host: no worker started (${starts3}), no mutating verb (${mutated3.join(",")}), no ending`);
+  host3.endShell("H3 done");
   // H2: past bash.list_entries (its floor, 100): "too many", never a partial list
   const { ws: ws2, host: host2 } = await fresh("completion-many", { bash: { list_entries: 100 } });
   await ws2.mkdir("/M");
