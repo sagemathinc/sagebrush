@@ -204,6 +204,16 @@ async function lockWorkspace() {
   await ev(`(() => { window.__release = null; navigator.locks.request("sagebrush-workspace", { mode: "exclusive" }, () => new Promise((r) => (window.__release = r))); return true; })()`);
   await until(`typeof window.__release === "function"`);
 }
+/** Another tab's long readwrite transaction on the notebooks' store, for `ms`: the pane's reads and writes of
+ * notebooks wait for it. */
+const holdStore = (ms) => ev(`(() => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const db = r.result, t = db.transaction("notebooks", "readwrite"), st = t.objectStore("notebooks"), end = Date.now() + ${ms}; const spin = () => { if (Date.now() < end) st.get("__hold__").onsuccess = spin; }; spin(); t.oncomplete = () => db.close(); }; return true; })()`);
+/** Try to change and run a frozen notebook's first cell, as a person would: typing, its Run button, Shift+Enter. */
+async function poke(i, text) {
+  await ev(`(() => { const t = ${cellJs(i)}?.querySelector('textarea'); t?.focus(); t?.setSelectionRange(t.value.length, t.value.length); })()`);
+  await send("Input.insertText", { text });
+  await ev(`${cellJs(i)}?.querySelector('.runb')?.click()`);
+  await key("Enter", { modifiers: 8, windowsVirtualKeyCode: 13 });
+}
 const live = (name) => [...liveWorkers.values()].filter((u) => u.includes(name)).length;
 const tabJs = (path) => `document.querySelector('#artifacts .tab[data-tab="${path}"]')`;
 const workerCount = () => workers.filter((u) => u.includes("sagebrush-worker.js")).length;
@@ -683,6 +693,79 @@ try {
     const recF = (await record(refF)).cells[0].code;
     const copyF = await readCells("/notes/refused-close (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
     ok(outcome !== "neither" && recF === "f = 0" && copyF === "f = 0  # refused", "a save refused during close with a resolved not-saved: the edit is kept as a copy, the original unchanged", { outcome, recF, copyF });
+    // (d, ART-C2a r4) only a cell's metadata changed ("Run only by hand"), pending when the file goes to Trash, then
+    // closed: the change is content, so it is kept as a copy (tried again if its save beat the Trash)
+    let metaDone = false;
+    for (let attempt = 1; attempt <= 3 && !metaDone; attempt++) {
+      const M = `/notes/meta-only-${attempt}.ipynb`;
+      await call("workspace.create", { path: M, content: docFor(M, [{ code: "m = 0" }]), mode: "python" });
+      const refM = await refOf(M);
+      await openNotebook(M);
+      await ev(`${cellJs(0)}.querySelector('[data-a="menu"]').click()`);
+      await ev(`[...document.querySelectorAll('.sbnb-menu')].find((x) => !x.hidden).querySelector('[data-m="manual"]').click()`);
+      await call("workspace.remove", { path: M });
+      await until(`/gone/.test(document.querySelector('#artifacts .pane-bar')?.className ?? '')`, 5000).catch(() => {});
+      const saved = (await record(refM)).cells[0].metadata?.sagebrush?.manual === true;
+      if (saved && attempt < 3) { console.log(`     (meta-only: its save beat the Trash: again)`); await ev(`document.querySelector('#close').click()`); await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {}); continue; }
+      metaDone = true;
+      await ev(`document.querySelector('#close').click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+      const copy = await call("workspace.read", { path: M.replace(".ipynb", " (copy).ipynb") }).then((r) => r.content.json.cells[0], (e) => "no copy: " + e.message);
+      ok(!saved && copy?.metadata?.sagebrush?.manual === true && copy.code === "m = 0", "only a cell's metadata changed, then let go and closed: the change is kept as a copy", { saved, copy });
+    }
+    // (e, ART-C2a r4) a copy keeps the whole notebook: its metadata (seed, autorun) and a Markdown cell's attachments
+    const A = "/notes/meta-copy.ipynb";
+    const tagA = tagOf(A);
+    await call("workspace.create", { path: A, content: { json: { mode: "python", autorun: "always", seed: "s-42", cells: [{ id: `${tagA}0`, type: "markdown", code: "![x](attachment:x.png)", attachments: { "x.png": { "image/png": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" } } }, { id: `${tagA}1`, code: "a = 1" }] } }, mode: "python" });
+    const recA = await record(await refOf(A));
+    await openNotebook(A);
+    await typeInto(1, "  # edit");
+    await call("workspace.remove", { path: A });
+    await until(`/gone/.test(document.querySelector('#artifacts .pane-bar')?.className ?? '')`, 5000).catch(() => {});
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+    const copyA = await call("workspace.read", { path: "/notes/meta-copy (copy).ipynb" }).then((r) => r.content.json, (e) => ({ error: e.message }));
+    ok(recA?.seed === "s-42" && !!recA?.cells?.[0]?.attachments && copyA.seed === "s-42" && copyA.autorun === "always" && !!copyA.cells?.[0]?.attachments?.["x.png"] && copyA.cells?.[1]?.code === "a = 1  # edit", "a recovery copy keeps the whole notebook: its seed and autorun, a Markdown cell's attachments, and the edit", { before: { seed: recA?.seed, att: !!recA?.cells?.[0]?.attachments }, copy: { seed: copyA.seed, autorun: copyA.autorun, att: Object.keys(copyA.cells?.[0]?.attachments ?? {}), code: copyA.cells?.[1]?.code, error: copyA.error } });
+
+    // (f, ART-C2b r4) while a close waits for its copy (the workspace busy), the notebook is frozen: typing, its Run
+    // button and Shift+Enter change and run nothing; once the copy is made it closes, with the content it showed
+    const Z = "/notes/frozen.ipynb";
+    await call("workspace.create", { path: Z, content: docFor(Z, [{ code: "z = 0" }, { code: "print('Z-RAN')" }]), mode: "python" });
+    const refZ = await refOf(Z);
+    await openNotebook(Z);
+    const w0 = workerCount();
+    await lockWorkspace();
+    await typeInto(0, "  # before");
+    await ev(`document.querySelector('#close').click()`);
+    await sleep(1500);
+    const during = await ev(`({ inert: !!document.querySelector('${PANE} .nb-root')?.inert, said: document.querySelector('${PANE} .saved')?.textContent })`);
+    await poke(0, " # late");
+    await poke(1, "");
+    const shownZ = await ev(`${cellJs(0)}?.querySelector('textarea').value ?? null`);
+    await sleep(3000);
+    await ev(`window.__release()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+    const copyZ = await readCells("/notes/frozen (copy).ipynb").then((c) => c, (e) => "no copy: " + e.message);
+    const recZ = (await record(refZ)).cells[0].code;
+    ok(during.inert && during.said === "Closing…" && shownZ === "z = 0  # before" && copyZ?.[0]?.code === "z = 0  # before" && !(copyZ?.[1]?.outputs ?? []).length && workerCount() === w0 && recZ === "z = 0", "while a close waits for its copy the notebook is frozen (no typing, no Run, no Shift+Enter); it closes with what it showed, kept as a copy", { during, shownZ, copy: Array.isArray(copyZ) ? copyZ.map((c) => [c.code, (c.outputs ?? []).length]) : copyZ, workers: workerCount() - w0, recZ });
+
+    // (g, ART-C2b r4) the same while the close waits for the store's read: frozen, and its edit saved before it closes
+    const Y = "/notes/frozen-read.ipynb";
+    await call("workspace.create", { path: Y, content: docFor(Y, [{ code: "y = 0" }]), mode: "python" });
+    const refY = await refOf(Y);
+    await openNotebook(Y);
+    await typeInto(0, "  # before");
+    await holdStore(3500);
+    await ev(`document.querySelector('#close').click()`);
+    await sleep(800);
+    const duringY = await ev(`({ inert: !!document.querySelector('${PANE} .nb-root')?.inert, said: document.querySelector('${PANE} .saved')?.textContent })`);
+    await poke(0, " # late");
+    const shownY = await ev(`${cellJs(0)}?.querySelector('textarea').value ?? null`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    await sleep(500);
+    const recY = (await record(refY)).cells[0].code;
+    const copyY = await readCells("/notes/frozen-read (copy).ipynb").then((c) => c[0].code, () => null);
+    ok(duringY.inert && duringY.said === "Closing…" && shownY === "y = 0  # before" && (recY === "y = 0  # before" || copyY === "y = 0  # before") && recY !== "y = 0  # before # late" && copyY !== "y = 0  # before # late", "while a close waits for the store's read the notebook is frozen; what it showed is saved (or kept), nothing typed later", { duringY, shownY, recY, copyY });
     await freshPage();
   }
 
@@ -755,6 +838,37 @@ try {
     };
     const qa = await queued("/notes/queued.py", false);
     ok(/couldn't be saved or kept/.test(qa.bar) && qa.file === "q = 1\n" && qa.copy === "q = 1\n# one\n# two\n" && qa.closed, "file writes queued behind a busy workspace, then closed: nothing is written after the close, the latest text is kept as a copy", qa);
+    // (ART-C2b/C4 r4) while a file's close waits for its copy, its editor is frozen: typing changes nothing; it closes
+    // with what it showed, kept as a copy
+    const frozenFile = async (Q, latex) => {
+      await call("workspace.create", { path: Q, content: { text: "f = 1\n" } });
+      await artifactTurn(Q);
+      const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
+      await lockWorkspace();
+      const type = async (t) => {
+        await ev(`(() => { const x = document.querySelector('${box}'); x?.focus(); x?.setSelectionRange(x.value.length, x.value.length); })()`);
+        await send("Input.insertText", { text: t });
+      };
+      await type("# before\n");
+      if (!latex) await sleep(1200);
+      await ev(`document.querySelector('#close').click()`);
+      await sleep(1500);
+      const during = await ev(`({ inert: !!document.querySelector('${PANE} .file-body')?.inert, said: document.querySelector('${PANE} .saved')?.textContent })`);
+      await type("# late\n");
+      const shown = await ev(`document.querySelector('${box}')?.value ?? null`);
+      await sleep(3000);
+      await ev(`window.__release()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+      const copy = await call("workspace.read", { path: Q.replace(/(\.[a-z]+)$/, " (copy)$1") }).then((r) => r.content.text, (e) => "no copy: " + e.message);
+      return { during, shown, copy, file: (await call("workspace.read", { path: Q })).content.text };
+    };
+    const fz = await frozenFile("/notes/frozen.py", false);
+    ok(fz.during.inert && fz.during.said === "Closing…" && fz.shown === "f = 1\n# before\n" && fz.copy === "f = 1\n# before\n" && fz.file === "f = 1\n", "while a file's close waits for its copy its editor is frozen (typing changes nothing); it closes with what it showed, kept as a copy", fz);
+    if (LATEX) {
+      const fl = await frozenFile("/notes/frozen.tex", true);
+      ok(fl.during.inert && fl.shown === "f = 1\n# before\n" && fl.copy === "f = 1\n# before\n" && fl.file === "f = 1\n", "a LaTeX file closed within its debounce while the workspace is busy: frozen, it closes with what it showed, kept as a copy", fl);
+    }
     if (LATEX) {
       const ql = await queued("/notes/queued.tex", true);
       ok(/couldn't be saved or kept/.test(ql.bar) && ql.file === "q = 1\n" && ql.copy === "q = 1\n# one\n# two\n" && ql.closed, "a LaTeX file closed within its editor's debounce while the workspace is busy: nothing is written after the close, the latest text is kept as a copy", ql);

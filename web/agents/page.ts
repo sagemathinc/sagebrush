@@ -775,11 +775,27 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     destroyEditor();
     destroyEditor = () => {};
   };
-  return {
-    text: () => latest(),
-    flush: () => (alive && open && latest() !== savedText ? write() : inflight),
-    async release() {
+  // (no edits while it closes: the editor inert (no focus, no input) and read only, and it says so, ART-C2b/C4 r4)
+  let frozen = false;
+  // (while frozen, every gesture inside the editor stops at its box, before the editor's own handlers)
+  for (const type of ["click", "mousedown", "keydown", "keypress", "beforeinput", "input", "paste", "drop"])
+    box.addEventListener(type, (e) => {
+      if (!frozen) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
+  const freeze = () => {
+    frozen = true;
+    box.inert = true;
+    for (const t of box.querySelectorAll<HTMLTextAreaElement>("textarea")) t.readOnly = true;
+    say("Closing…");
+  };
+  let releasing: Promise<Released> | null = null; // (one release at a time)
+  const doRelease = async (): Promise<Released> => {
+    {
       if (!alive) return { ok: true };
+      // (0) frozen first, before anything is awaited: the text kept below is the text shown
+      freeze();
       // (1) the latest text, edits inside the editor's own debounce included, written: 3 s at most
       if (open && !stopped && rev >= 0 && latest() !== savedText) await Promise.race([write(), new Promise((r) => setTimeout(r, 3000))]);
       // (2) then this host's writer is closed: a write still queued or waiting for the lock is refused where it would write
@@ -803,7 +819,13 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
       }
       await dispose();
       return { ok: true };
-    },
+    }
+  };
+  return {
+    text: () => latest(),
+    flush: () => (alive && open && latest() !== savedText ? write() : inflight),
+    // (one at a time: a Close, a thread switch and a Try again share the one under way)
+    release: () => (releasing ??= doRelease().finally(() => (releasing = null))),
     dispose,
   };
 }
