@@ -17,6 +17,9 @@ import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import type { AgentPairing } from "../workspace/agent-pair";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
+import { mountNotebook, type AgentCells, type NotebookHost, type NotebookUi } from "./notebook-artifact";
+
+const LATEX_URL = "/sagebrush-latex.js";
 
 const STORE = "sagebrush-agents-preview-v1";
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -69,7 +72,21 @@ const current = () => state.threads.find((t) => t.id === state.current) ?? state
 function emitTo(thread: Thread, turn_id: string, d: Draft) {
   const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
   apply(thread, e);
-  if (d.type === "artifact") openArtifact = (d as { id: string }).id;
+  if (d.type === "artifact") {
+    openArtifact = (d as { id: string }).id;
+    // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
+    const art = d as { kind?: string; path?: string };
+    if (art.kind === "notebook" && art.path && workspace) {
+      const path = art.path;
+      workspace.read(path).then(
+        (r) => {
+          const cells = (r.content as { cells?: { id?: string; code?: string }[] } | null)?.cells ?? [];
+          agentCellsByPath.set(path, new Map(cells.filter((c) => typeof c.id === "string" && typeof c.code === "string").map((c) => [c.id!, c.code!])));
+        },
+        () => {},
+      );
+    }
+  }
   save();
   if (thread.id === state.current) schedule();
 }
@@ -334,10 +351,10 @@ function toolHtml(t: ToolCall): string {
 }
 
 function artifactIcon(a: Artifact) {
-  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : "⌨";
+  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : "⌨";
 }
 function artifactLabel(a: Artifact) {
-  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : `Code${a.lang ? ` · ${a.lang}` : ""}`;
+  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${a.lang ? ` · ${a.lang}` : ""}`;
 }
 
 // A line diff (longest common subsequence): small files only.
@@ -357,8 +374,58 @@ function diffHtml(before: string, after: string): string {
   return `<div class="diff">${rows.join("")}</div>`;
 }
 
-// What the pane shows, so streaming frames don't redraw it (an editor in it keeps its caret).
-let paneKey = "";
+// The pane: a head (tabs and buttons, redrawn when what it shows changes) and one host per artifact, kept while
+// its thread is shown. A host is mounted once: full screen, a new artifact or another tab only hide or show it,
+// so a notebook keeps its kernel, a running cell and its pending saves (the artifacts plan, BAP-1).
+type Host = {
+  key: string;
+  el: HTMLElement;
+  body: string; // (a static host's content key: redrawn only when the artifact's body changes)
+  copy: () => string;
+  nb?: NotebookHost;
+  running: boolean;
+  flush?: () => Promise<void>;
+};
+const hosts = new Map<string, Host>();
+let paneThread: string | null = null;
+let headKey = "";
+// The cells the agent wrote in each notebook (path -> cell id -> source), for the written-by label.
+const agentCellsByPath = new Map<string, AgentCells>();
+
+const hostKey = (threadId: string, artifactId: string) => `${threadId}\u0000${artifactId}`;
+
+function paneShell(pane: HTMLElement) {
+  if (!pane.querySelector(":scope > .pane-head")) pane.innerHTML = `<div class="pane-head"></div><div class="pane-bar" hidden></div><div class="pane-body"></div>`;
+  return { head: $(".pane-head", pane), body: $(".pane-body", pane), bar: $(".pane-bar", pane) };
+}
+
+/** Let go of every host of a thread: saves flushed, notebooks stopped and disposed. */
+async function releaseHosts(threadId: string | null) {
+  if (!threadId) return;
+  for (const [k, h] of [...hosts]) {
+    if (!k.startsWith(threadId + "\u0000")) continue;
+    hosts.delete(k);
+    await h.flush?.().catch(() => {});
+    await h.nb?.dispose().catch(() => {});
+    h.el.remove();
+  }
+}
+
+/** Before a pane or thread closes: a running cell is stopped only if the person says so. */
+async function mayClosePane(threadId: string | null): Promise<boolean> {
+  if (!threadId) return true;
+  const busy = [...hosts].filter(([k, h]) => k.startsWith(threadId + "\u0000") && h.nb?.isRunning());
+  if (!busy.length) return true;
+  // (the notebook's popups close first: a modal dialog is above them, in the top layer)
+  for (const p of document.querySelectorAll<HTMLElement>(".sbnb-pop:not(dialog)")) p.hidden = true;
+  const dlg = $<HTMLDialogElement>("#close-running");
+  dlg.returnValue = "";
+  dlg.showModal();
+  const answer = await new Promise<string>((resolve) => dlg.addEventListener("close", () => resolve(dlg.returnValue), { once: true }));
+  if (answer !== "stop") return false;
+  for (const [, h] of busy) h.nb?.interrupt();
+  return true;
+}
 
 function renderArtifacts() {
   const thread = current();
@@ -366,64 +433,160 @@ function renderArtifacts() {
   const a = thread.artifacts.find((x) => x.id === openArtifact);
   document.body.classList.toggle("has-artifact", !!a);
   document.body.classList.toggle("fullscreen", !!a && fullscreen);
-  const key = a ? JSON.stringify([thread.id, thread.artifacts.map((x) => x.id), a.id, a.body, fullscreen, !!workspace]) : "";
-  if (key === paneKey) return;
-  paneKey = key;
+  document.body.classList.toggle("wide-artifact", !!a && a.kind === "notebook");
+  if (paneThread !== thread.id) {
+    void releaseHosts(paneThread);
+    paneThread = thread.id;
+  }
+  const { head, body, bar } = paneShell(pane);
   if (!a) {
-    pane.innerHTML = "";
+    for (const h of hosts.values()) (h.nb ? h.nb.hidden(true) : (h.el.hidden = true));
+    headKey = "";
     return;
   }
-  const tabs = thread.artifacts
-    .map((x) => `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}</button>`)
-    .join("");
-  let body: string;
-  if (a.path && workspace) body = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
-  else if (a.kind === "markdown") body = `<div class="doc board-text">${md(a.body)}</div>`;
+  // the head: tabs (a running notebook's name says so), copy, full screen, close
+  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false]), a.id, fullscreen]);
+  if (hk !== headKey) {
+    headKey = hk;
+    const tabs = thread.artifacts
+      .map((x) => {
+        const run = hosts.get(hostKey(thread.id, x.id))?.running;
+        return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}</button>`;
+      })
+      .join("");
+    head.innerHTML =
+      `<div class="tabs">${tabs}</div>` +
+      `<button class="icon" id="copy" title="Copy">⧉</button>` +
+      `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
+      `<button class="icon" id="close" title="Close">✕</button>`;
+    for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+    $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
+    $("#close", head).onclick = async () => {
+      if (!(await mayClosePane(thread.id))) return;
+      openArtifact = null;
+      fullscreen = false;
+      await releaseHosts(thread.id);
+      renderArtifacts();
+    };
+    $("#copy", head).onclick = () => {
+      const h = hosts.get(hostKey(thread.id, openArtifact ?? ""));
+      navigator.clipboard?.writeText(h?.copy() ?? "").then(() => toast("Copied"), () => toast("Couldn't copy"));
+    };
+  }
+  // this artifact's host: mounted once; the others of this thread hidden (kept)
+  const key = hostKey(thread.id, a.id);
+  let h = hosts.get(key);
+  const staticBody = a.path && workspace ? "" : a.body;
+  if (h && !h.nb && !h.flush && h.body !== staticBody) {
+    h.el.remove();
+    hosts.delete(key);
+    h = undefined;
+  }
+  if (!h) {
+    const el = document.createElement("div");
+    el.className = "pane-host";
+    body.append(el);
+    h = { key, el, body: staticBody, copy: () => a.body, running: false };
+    hosts.set(key, h);
+    mountHost(thread.id, a, h, bar);
+  }
+  for (const x of hosts.values()) {
+    const show = x === h;
+    if (x.nb) x.nb.hidden(!show);
+    x.el.hidden = !show;
+    if (!show) x.flush?.().catch(() => {});
+  }
+  if (!h.nb) bar.hidden = true;
+}
+
+// What an artifact's host holds: a notebook, a workspace file (Markdown, LaTeX, code), or the artifact's own text.
+function mountHost(threadId: string, a: Artifact, h: Host, bar: HTMLElement) {
+  const before = document.activeElement as HTMLElement | null;
+  const keepFocus = () => {
+    // (an artifact opened by the agent never takes the composer's focus: BAP-6)
+    if (before && document.activeElement !== before && $("#artifacts").contains(document.activeElement)) before.focus();
+  };
+  if (a.kind === "notebook" && a.path && workspace) {
+    h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> <a class="open-full" href="/w${esc(a.path)}" target="_blank" rel="noopener">Open in Sagebrush</a></div><div class="file-body"></div>`;
+    const saved = $(".saved", h.el);
+    const showBar = (b: Parameters<NotebookUi["bar"]>[0]) => {
+      if (hosts.get(h.key) !== h || openArtifact !== a.id) return;
+      if (!b) return void (bar.hidden = true);
+      bar.hidden = false;
+      bar.className = `pane-bar ${b.kind}`;
+      bar.setAttribute("role", "alert");
+      bar.innerHTML = `<span>${esc(b.text)}</span>` + (b.actions ?? []).map((x, i) => `<button data-act="${i}">${esc(x.label)}</button>`).join("");
+      for (const btn of bar.querySelectorAll<HTMLButtonElement>("[data-act]")) btn.onclick = () => b.actions![Number(btn.dataset.act)].run();
+    };
+    const ui: NotebookUi = {
+      saved: (t) => (saved.textContent = t),
+      bar: showBar,
+      agentName,
+      running: (on) => {
+        h.running = on;
+        headKey = "";
+        if (current().id === threadId) renderArtifacts();
+      },
+    };
+    void mountNotebook(workspace, a.path, $(".file-body", h.el), ui, agentCellsByPath.get(a.path) ?? null).then(
+      (nb) => {
+        if (hosts.get(h.key) !== h) return void nb.dispose(); // (closed while it opened: nothing of it stays)
+        h.nb = nb;
+        h.copy = nb.copyText;
+        h.flush = nb.flush;
+        nb.hidden(openArtifact !== a.id || current().id !== threadId);
+        keepFocus();
+      },
+      (e) => showBar({ kind: "refused", text: `Couldn't open this notebook: ${(e as Error).message}` }),
+    );
+    return;
+  }
+  if (a.path && workspace) {
+    h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
+    const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
+    h.copy = f.text;
+    h.flush = f.flush;
+    keepFocus();
+    return;
+  }
+  if (a.kind === "markdown") h.el.innerHTML = `<div class="doc board-text">${md(a.body)}</div>`;
   else if (a.kind === "diff") {
     const d = JSON.parse(a.body) as { before: string; after: string };
-    body = diffHtml(d.before, d.after);
-  } else body = `<pre class="code">${esc(a.body)}</pre>`;
-  pane.innerHTML =
-    `<div class="pane-head"><div class="tabs">${tabs}</div>` +
-    `<button class="icon" id="copy" title="Copy">⧉</button>` +
-    `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
-    `<button class="icon" id="close" title="Close">✕</button></div>` +
-    `<div class="pane-body">${body}</div>`;
-  for (const t of pane.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
-  $("#full", pane).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
-  $("#close", pane).onclick = () => ((openArtifact = null), (fullscreen = false), renderArtifacts());
-  let copyText = () => (a.kind === "diff" ? (JSON.parse(a.body) as { after: string }).after : a.body);
-  if (a.path && workspace) copyText = mountFile(a, $(".file-body", pane), $(".saved", pane));
-  $("#copy", pane).onclick = () => {
-    navigator.clipboard?.writeText(copyText()).then(() => toast("Copied"), () => toast("Couldn't copy"));
-  };
-  typeset(pane);
+    h.el.innerHTML = diffHtml(d.before, d.after);
+    h.copy = () => d.after;
+  } else h.el.innerHTML = `<pre class="code">${esc(a.body)}</pre>`;
+  typeset(h.el);
 }
 
 // An artifact that is a workspace file: the file itself, editable here (saved as the person, with its
-// revision as base, so a change the agent made meanwhile is never overwritten). Returns its current text.
-function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): () => string {
+// revision as base, so a change the agent made meanwhile is never overwritten). Markdown in the block editor,
+// LaTeX in the LaTeX editor where this build has it (web/latex, /sagebrush-latex.js), other text as text.
+function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): { text: () => string; flush: () => Promise<void> } {
   const path = a.path!;
   let rev = -1;
   let text = a.body;
   let timer = 0;
+  let pending: string | null = null;
   const say = (s: string) => (saved.textContent = s);
   const write = async (value: string) => {
+    pending = null;
     try {
       const r = await workspace!.write(path, value, rev >= 0 ? { base: rev } : {});
       rev = r.rev;
-      say("saved");
+      say("Saved");
     } catch (e) {
-      say(`not saved: ${(e as Error).message}`);
+      const code = (e as { code?: string }).code;
+      say(code === "conflict" ? "Not saved: changed elsewhere since (reopen it to see that version)" : `Not saved: ${(e as Error).message}`);
     }
   };
   const changed = (value: string) => {
     text = value;
-    say("editing…");
+    pending = value;
+    say("Editing…");
     clearTimeout(timer);
     timer = window.setTimeout(() => void write(value), 700);
   };
-  let set: (v: string) => void;
+  let set: (v: string) => void = () => {};
   if (a.kind === "markdown") {
     const ed = new BlockEditor(text, { render: md, typeset: (el) => typeset(el), onChange: changed });
     ed.el.classList.add("doc");
@@ -437,6 +600,21 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): () => str
     ta.oninput = () => changed(ta.value);
     box.append(ta);
     set = (v) => (ta.value = v);
+    if (/\.tex$/i.test(path)) {
+      // (LaTeX: the LaTeX editor's live preview where this build has it; else this text, and no editor link)
+      import(/* @vite-ignore */ LATEX_URL).then(
+        (m: { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { setText(t: string): void } }) => {
+          if (!m.mountEditor || !box.isConnected) return;
+          ta.remove();
+          const host = document.createElement("div");
+          host.className = "tex-host";
+          box.append(host);
+          const ed = m.mountEditor(host, { text, onChange: changed, layout: "split" });
+          set = (v) => ed.setText(v);
+        },
+        () => {},
+      );
+    }
   }
   // (the file as it is now: the agent may have written it again since this artifact)
   workspace!.read(path).then(
@@ -449,7 +627,14 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): () => str
     },
     () => say("(not in this browser's workspace)"),
   );
-  return () => text;
+  return {
+    text: () => text,
+    flush: async () => {
+      if (pending === null) return;
+      clearTimeout(timer);
+      await write(pending);
+    },
+  };
 }
 
 function renderComposer() {
@@ -507,6 +692,8 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("[data-try]")) {
   };
 }
 addEventListener("keydown", (e) => {
+  // (Escape inside an editor in the pane is the editor's: a notebook leaves edit mode, closes its completer)
+  if (e.key === "Escape" && (e.defaultPrevented || (e.target instanceof Element && e.target.closest("#artifacts .file-body, #artifacts .nb-root")))) return;
   if (e.key === "Escape" && fullscreen) {
     fullscreen = false;
     renderArtifacts();
@@ -563,6 +750,7 @@ function renderHeader() {
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
+  $("#stop").textContent = `Stop ${agentName()}`;
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
