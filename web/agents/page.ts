@@ -55,6 +55,8 @@ const liveRunning = new Set<string>(); // threads with a turn of the paired agen
 let pairing: AgentPairing | null = null;
 let workspace: Workspace | null = null; // this browser's workspace: where the paired agent's files are
 const live = () => pairing?.state === "granted";
+// The paired agent's name, as it says (Claude, Codex, ...): the demo is Claude.
+const agentName = () => (pairing && pairing.state !== "closed" && pairing.hello?.agent.name?.trim().slice(0, 40)) || "Claude";
 const isRunning = (thread: Thread) => agents.has(thread.id) || liveRunning.has(thread.id);
 const queues = new Map<string, UserEntry[]>(); // queued messages, by thread
 let openArtifact: string | null = null;
@@ -303,7 +305,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
           ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${turn.usage.output_tokens} tokens</div>`
           : "";
   const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
-  div.innerHTML = `<div class="who"><span class="avatar">✳</span>Claude ${tag}</div>${parts.join("")}${status}`;
+  div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
@@ -551,17 +553,18 @@ $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 function renderHeader() {
   const who = $("#who");
   if (live()) {
-    who.innerHTML = `<span class="conn on"></span>Claude <small>on your computer</small>`;
+    who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (pairing && pairing.state === "paired") {
-    who.innerHTML = `<span class="conn wait"></span>Claude <small>connected: allow it in the dialog</small>`;
+    who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
-  $("#connect").textContent = live() ? "Connected" : "Connect Claude";
+  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  $("#connect").textContent = live() ? "Connected" : "Connect your agent";
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
-    ? "Connected to Claude on your computer (your own Claude login). Its files are in this browser's workspace; chats are kept in this browser."
-    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
+    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own Claude or Codex (\"Use your own agent\"). Chats are kept in this browser only.";
 }
 
 renderHeader();

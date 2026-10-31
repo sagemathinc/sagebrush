@@ -30,7 +30,8 @@
 
   /* the chat: primary, full height */
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .top { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
+  .top #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
   .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
@@ -160,7 +161,7 @@
 </style>
 </head>
 <body>
-<div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>
+<div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own Claude or Codex ("Use your own agent"). Chats are kept in this browser only.</div>
 <div class="app">
   <nav class="side">
     <div class="brand">🌿 Sagebrush agents</div>
@@ -173,8 +174,8 @@
       <button id="menu" aria-label="Chats">☰</button>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
-      <button id="howto" class="link">Use your own Claude</button>
-      <button id="connect" hidden>Connect Claude</button>
+      <button id="howto" class="link">Use your own agent</button>
+      <button id="connect" hidden>Connect your agent</button>
     </div>
     <div id="help" hidden>
       <b>Chat with Claude on your own computer.</b> In a terminal (Node 20 or later, and Claude Code logged in once with your Claude account):
