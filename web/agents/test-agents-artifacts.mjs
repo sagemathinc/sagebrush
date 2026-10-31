@@ -1384,6 +1384,21 @@ try {
       const cs = (await rec(path)).cells;
       ok(!res.ok && cs[2].code === "# other tab" && /# mine/.test(cs[1].code) && cs[0].code === "x = 1", `${during ? "E23b" : "E23"}: after a rollback, another tab's change (made ${during ? "during the apply" : "after it"}) and the person's next edit both survive`, { res, cs: cs.map((c) => c.code) });
     }
+    // E25 (grader's D-1): an edit that changes nothing (each cell set to what it is) is answered ok, the record and its
+    // revision unchanged, and nothing saved
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await ev(`(() => { window.__sbSaves = 0; window.__sbTestStoreSave = () => { window.__sbSaves++; return null; }; return true; })()`);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(2)" }] });
+      await sleep(900);
+      const saves = await ev(`window.__sbSaves`);
+      await refuseNone();
+      const after = await rec(path);
+      ok(res.ok && same(after, before) && after.rev === before.rev && saves === 0, "E25: an edit that changes nothing is answered ok; the record and its revision unchanged, nothing saved", { res, saves, rev: [before.rev, after.rev] });
+    }
     // E24 (board's BA12-1): the person types in another artifact while the agent edits a notebook, first one not open,
     // then one open in a hidden tab: the pane stays, the focus and the caret too, and the notebook's tab says it changed
     {
@@ -1410,6 +1425,53 @@ try {
         results.push({ hidden, res: res.ok, st, changedTab, stored });
       }
       ok(results.every((x) => x.res && x.st.tab === draft && x.st.inDraft && x.st.caret === 3 && x.changedTab && x.stored), "E24: the agent's edit of a notebook (not open, then in a hidden tab) leaves the shown tab, the focus and the caret as they were; its tab says it changed; the edit is stored", results);
+      // E26-E28 (astra's A12-R2-F1, board's ruling): the person's own choice while the edit waits (W1: a notebook not
+      // open, its mount; W4: one in a hidden tab, the document's stat) is kept: E26 they move to input B and put its
+      // caret at 2, the edit ok; E27 the same, the edit refused (the turn finished); E28 they move A's caret 3 -> 5, ok
+      await ev(`(() => { const b = document.createElement('input'); b.id = 'sbtest-b'; b.value = 'bbbbbb'; document.body.append(b); return true; })()`);
+      const stateB = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, id: t?.id, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      for (const [name, refuse] of [["E26", false], ["E27", true], ["E28", false]]) {
+        const got = [];
+        for (const w of ["W1", "W4"]) {
+          const { path, ids } = await mk();
+          if (w === "W4") { await open(path); await ev(`${tabJs(draft)}.click()`); await sleep(300); }
+          await focusDraft();
+          const r = await readOf(path);
+          await holdDb("sagebrush-workspace", "entries", 3000);
+          const pending = edit(path, r, { set: [{ id: ids[1], source: `print(${name})` }] });
+          await sleep(700);
+          if (name === "E28") await ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.focus(); t.setSelectionRange(5, 5); return true; })()`);
+          else await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
+          if (refuse) await lose("a");
+          const res = await pending;
+          await sleep(300);
+          got.push({ w, res: res.ok, st: await stateB() });
+          if (refuse) newTurn();
+        }
+        const want = (x) => x.res === !refuse && x.st.tab === draft && (name === "E28" ? x.st.inDraft && x.st.caret === 5 : x.st.id === "sbtest-b" && x.st.caret === 2);
+        ok(got.every(want), `${name}: the person ${name === "E28" ? "moves the caret in the draft (3 to 5)" : "moves to another input"} while the edit waits (at W1, at W4), the edit ${refuse ? "refused" : "ok"}: the focus and caret stay where they put them`, got);
+      }
+      // E29: the person shows the notebook while the edit waits (W4) and clicks into its first cell (caret 1): the focus
+      // stays there, the edit ok
+      {
+        const { path, ids } = await mk();
+        await open(path);
+        await ev(`${tabJs(draft)}.click()`);
+        await sleep(300);
+        await focusDraft();
+        const r = await readOf(path);
+        await holdDb("sagebrush-workspace", "entries", 3000);
+        const pending = edit(path, r, { set: [{ id: ids[1], source: "print(29)" }] });
+        await sleep(700);
+        await ev(`${tabJs(path)}.click()`);
+        await sleep(300);
+        await ev(`(() => { const t = ${cellJs(0)}.querySelector('textarea'); t.focus(); t.setSelectionRange(1, 1); return true; })()`);
+        const res = await pending;
+        await sleep(300);
+        const st = await ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, inCell: !!t?.closest('#artifacts .cell') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+        ok(res.ok && st.tab === path && st.inCell && st.caret === 1, "E29: the person shows the notebook while the edit waits and clicks into a cell: the focus and caret stay there", { res, st });
+      }
+      await ev(`(document.getElementById('sbtest-b')?.remove(), true)`);
     }
     event(turn, { type: "turn_finished", outcome: "completed" });
   }
