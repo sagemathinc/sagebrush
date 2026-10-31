@@ -1,7 +1,7 @@
 // web/shell/complete.ts's pure functions (plan-term-help-tab r3.1 §5: U1-U7, T-H2), each case with its own id: the
 // control runs (K*) compare the exact set of failing ids.  The literal encoding (U3) is judged by just-bash's own
 // parser (test/vendor/just-bash-3.6.0): the completed word must parse to ONE literal word equal to the path.
-//   bun web/shell/test-panel-complete.mjs        (prints "ok   ID" / "FAIL ID: why"; exit 1 on any FAIL)
+//   bun web/shell/test-panel-complete.mjs        (prints "ok   ID" / "FAIL ID :: why"; exit 1 on any FAIL)
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ const check = (id, ok, why = "") => {
   if (ok) console.log(`ok   ${id}`);
   else {
     fails.push(id);
-    console.log(`FAIL ${id}: ${why}`.slice(0, 400));
+    console.log(`FAIL ${id} :: ${why}`.slice(0, 400));
   }
 };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
