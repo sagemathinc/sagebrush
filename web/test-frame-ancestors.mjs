@@ -135,15 +135,16 @@ function checkSite(dir, label) {
   ok(n > 0 && w.length === 0, `${label}: all ${n} policies' script-src exactly as allowed, no other site's (${w.length} wrong)`);
 }
 
-// web/csp.ts and its imports copied, with web/csp-policy.mts changed by `edit` (a mutation control): its headersFor
+// web/csp.ts and its imports copied, with web/csp-policy.mts (or web/csp.ts) changed by `edit` (a mutation
+// control): its headersFor
 let mutations = 0;
-async function mutated(edit, what) {
+async function mutated(edit, what, file = "csp-policy.mts") {
   const mut = mkdtempSync(join(tmpdir(), `frame-anc-mut${++mutations}-`));
   mkdirSync(join(mut, "notebook"));
-  for (const f of ["csp.ts", "site-dir.mts", "_headers", "notebook/files-runner.js"]) copyFileSync(join(here, f), join(mut, f));
-  const src = readFileSync(join(here, "csp-policy.mts"), "utf8"), out = edit(src);
-  ok(out !== null && out !== src, `control ${what}: the change applies to web/csp-policy.mts`);
-  writeFileSync(join(mut, "csp-policy.mts"), out ?? src);
+  for (const f of ["csp.ts", "csp-policy.mts", "site-dir.mts", "_headers", "notebook/files-runner.js"]) copyFileSync(join(here, f), join(mut, f));
+  const src = readFileSync(join(here, file), "utf8"), out = edit(src);
+  ok(out !== null && out !== src, `control ${what}: the change applies to web/${file}`);
+  writeFileSync(join(mut, file), out ?? src);
   const { headersFor: h } = await import(join(mut, "csp.ts"));
   return { headersFor: h, done: () => rmSync(mut, { recursive: true, force: true }) };
 }
@@ -181,6 +182,17 @@ try {
     const { urls, wrong } = wrongOf(fx, m.headersFor);
     const want = urls.filter((u) => !u.startsWith("/frame/") && !u.startsWith("/runner/"));
     ok(want.length > 0 && JSON.stringify(wrong.map(([u]) => u)) === JSON.stringify(want), `control: without frame-ancestors in pagePolicy, exactly its ${want.length} URLs fail (${wrong.length} did)`);
+    m.done();
+  }
+  // C-XFO: web/csp.ts writes no X-Frame-Options -> every URL but the embeddable frame's fails;
+  // C-AGENTS: /agents/* given pagePolicy's default ('self') -> exactly the /agents URLs fail
+  for (const [name, edit, want] of [
+    ["C-XFO (no X-Frame-Options written)", (s) => once(s, "${xfo(csp)}", ""), (u) => !EMBEDDABLE.some((p) => u.startsWith(p))],
+    ["C-AGENTS (/agents/* framed by 'self')", (s) => once(s, `(h: string[]) => pagePolicy(h, "'none'")`, "pagePolicy"), (u) => u.startsWith("/agents/")],
+  ]) {
+    const m = await mutated(edit, name, "csp.ts");
+    const { urls, wrong } = wrongOf(fx, m.headersFor), expect = urls.filter(want);
+    ok(expect.length > 0 && JSON.stringify(wrong.map(([u]) => u)) === JSON.stringify(expect), `control ${name}: exactly its ${expect.length} URLs fail (${wrong.map(([u]) => u).join(", ") || "none"} did)`);
     m.done();
   }
   const PAGE_SRC = `"script-src 'self' 'wasm-unsafe-eval'"`, FRAME_SRC = `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:"`;
