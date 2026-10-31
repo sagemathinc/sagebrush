@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "E1 r2 (daybreak2's E1-D2-2): the export's lazy chunk and worker, each its own reviewed ceiling, at most 1024 bytes over its bun 1.4.4 size (scripts/check-export-size.mjs).",
+  "bytes": {
+    "sagebrush-export.js": 0,
+    "sagebrush-export-worker.js": 0
+  }
+}

@@ -9,7 +9,7 @@
 import { migrationState, type MigrationState } from "./migrator";
 import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { TRASH, nameOf, splitExt } from "./paths";
-import { notebookFileText, boardFileText } from "./file-bytes";
+import { notebookFileText, boardFileText, ipynbObject } from "./file-bytes";
 import { syncSection } from "./sync-panel";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
@@ -327,8 +327,6 @@ export type StorageHost = PreviewHost & {
   exportUrl?: (file: string) => string;
   /** this tab's open documents saved, before an export reads them */
   saveOpen?: () => Promise<void>;
-  /** fetch these cloud-only files to this device (sync's "Keep on this device"), when sync is on */
-  fetchFirst?: (paths: string[]) => Promise<void>;
 };
 
 /** "Last export prepared on this device: …" (E1 r2c §0): set only after an export's file was closed. */
@@ -421,8 +419,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       go.disabled = true;
       try {
         const m = await import(host.exportUrl!("sagebrush-export.js"));
-        const kit = { notebookFileText, boardFileText, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
-        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, fetchFirst: host.fetchFirst, stamped: stamp, site: location.host, app: "sagebrush", kit }, flow);
+        const kit = { notebookFileText, boardFileText, ipynbObject, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
+        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit }, flow);
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
     });
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);

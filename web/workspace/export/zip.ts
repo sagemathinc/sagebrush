@@ -19,6 +19,7 @@ export class ExportStopped extends Error {
 export class ExportWorker {
   private n = 0;
   private waiting = new Map<number, [(v: any) => void, (e: Error) => void]>();
+  private stopped = false;
   constructor(private w: Worker) {
     w.onmessage = (ev) => {
       const m = ev.data, p = this.waiting.get(m.id);
@@ -29,18 +30,28 @@ export class ExportWorker {
     w.onerror = (ev) => { for (const [, p] of this.waiting) p[1](new Error(`the export's worker failed: ${ev.message}`)); this.waiting.clear(); };
   }
   ask<T = unknown>(op: string, args: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<T> {
+    // (a stopped worker answers nothing: refused at once, never left waiting (astra's E1-A3))
+    if (this.stopped) return Promise.reject(new Error("the export's worker was stopped"));
     const id = ++this.n;
     return new Promise<T>((ok, no) => { this.waiting.set(id, [ok, no]); this.w.postMessage({ id, op, ...args }, transfer); });
   }
-  terminate() { this.w.terminate(); for (const [, p] of this.waiting) p[1](new Error("the export's worker was stopped")); this.waiting.clear(); }
+  /** A Cancel ends every request waiting on the worker at once (astra's E1-A4): each rejects as cancelled, and its
+   * late answer is ignored.  The worker takes requests one at a time, in order (worker.ts), so a cleanup asked after
+   * the Cancel runs after whatever was still running there. */
+  cancelOn(signal: AbortSignal) {
+    signal.addEventListener("abort", () => { for (const [, p] of this.waiting) p[1](new ExportStopped("cancelled")); this.waiting.clear(); }, { once: true });
+  }
+  terminate() { this.stopped = true; this.w.terminate(); for (const [, p] of this.waiting) p[1](new Error("the export's worker was stopped")); this.waiting.clear(); }
 }
 
 // ------------------------------------------------------------------ sinks
 /** Where the bundle's bytes go, in order. */
 export interface Sink {
   write(chunk: Uint8Array): Promise<void>;
-  /** the bundle is complete: commit it (the picker's file closed; OPFS or Blob handed to the browser's download) */
-  close(name: string): Promise<void>;
+  /** the bundle is complete: commit it (the picker's file closed; OPFS or Blob handed to the browser's download).
+   * Resolves once committed, to what is still to happen after (the scratch's delayed removal), if anything: wrapped,
+   * as a promise resolved with a promise would wait for that one too. */
+  close(name: string): Promise<{ later: Promise<void> } | void>;
   /** stopped: nothing committed, nothing left behind */
   abort(): Promise<void>;
 }
@@ -52,15 +63,17 @@ export class PickerSink implements Sink {
   async abort() { try { await this.out.abort(); } catch {} }
 }
 
-/** A download of `blob` as `name`; the object URL is revoked a minute later (the download has its bytes by then). */
+/** A download of `blob` as `name`; the object URL is revoked a minute later (the download has its bytes by then);
+ * then `then`.  (A test page may set the delay: __SB_EXPORT_TEST__.handDelay.) */
 export function hand(blob: Blob, name: string, then?: () => void) {
+  const delay = (globalThis as any).__SB_EXPORT_TEST__?.handDelay ?? 60_000;
   const url = URL.createObjectURL(blob), a = document.createElement("a");
   a.href = url;
   a.download = name;
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => { URL.revokeObjectURL(url); then?.(); }, 60_000);
+  setTimeout(() => { URL.revokeObjectURL(url); then?.(); }, delay);
 }
 
 export class BlobSink implements Sink {
@@ -83,8 +96,10 @@ export class OpfsSink implements Sink {
   async write(chunk: Uint8Array) { await this.wk.ask("append", { name: this.file, data: chunk }, [chunk.buffer]); }
   async close(name: string) {
     await this.wk.ask("close", { name: this.file });
-    // (the disk-backed File, handed to the download; the scratch file is removed once the download has its bytes)
-    this.onHand(await this.fileOf(), name, () => void this.wk.ask("remove", { name: this.file }).catch(() => {}));
+    // (the disk-backed File, handed to the download; the scratch file is removed once the download has its bytes:
+    // the promise returned settles then, and the caller keeps the worker (and the export's lock) until it does)
+    const file = await this.fileOf();
+    return { later: new Promise<void>((done) => this.onHand(file, name, () => void this.wk.ask("remove", { name: this.file }).catch(() => {}).finally(done))) };
   }
   async abort() { await this.wk.ask("remove", { name: this.file }).catch(() => {}); }
 }
@@ -158,7 +173,7 @@ export function dosTime(ms: number): { time: number; date: number } {
   return { time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date: ((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() };
 }
 
-export type Written = { crc: number; csize: number; usize: number; offset: number };
+export type Written = { crc: number; csize: number; usize: number; offset: number; sha256?: string };
 export type Hooks = { signal: AbortSignal; progress(bytes: number): void; crc: ExportWorker; /** (tests only) ms after each slice */ slicePause?: number };
 
 const pause = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -238,7 +253,7 @@ export class ZipWriter {
     const n = this.nameOf(name), t = dosTime(mtime), method = deflate ? 8 : 0, flags = 0x0808;
     const w: Written = { crc: 0, csize: 0, usize: 0, offset: this.offset };
     await this.emit(this.local(n, flags, method, t));
-    await this.hooks.crc.ask("crcInit");
+    await this.hooks.crc.ask("hashInit");
     let cs: CompressionStream | undefined, writer: WritableStreamDefaultWriter<Uint8Array> | undefined, pumping: Promise<void> | undefined;
     if (deflate) {
       cs = new CompressionStream("deflate-raw");
@@ -263,10 +278,10 @@ export class ZipWriter {
           const slice = s.subarray(at, Math.min(s.length, at + SLICE));
           w.usize += slice.length;
           if (w.usize > cap) throw new ExportStopped(capWhy);
-          // (the CRC in the worker: a 1 MiB copy of the slice is transferred there (posting the slice itself would
-          // clone its whole buffer, the member); the slice goes on)
+          // (the CRC and the SHA-256 in the worker: a 1 MiB copy of the slice is transferred there (posting the slice
+          // itself would clone its whole buffer, the member); the slice goes on)
           const copy = slice.slice();
-          await this.hooks.crc.ask("crcAdd", { data: copy }, [copy.buffer]);
+          await this.hooks.crc.ask("hashAdd", { data: copy }, [copy.buffer]);
           if (writer) await writer.write(slice);
           else { w.csize += slice.length; await this.emit(slice); }
           this.hooks.progress(slice.length);
@@ -278,7 +293,9 @@ export class ZipWriter {
       if (writer) { try { await writer.abort(e); } catch {} try { await pumping; } catch {} }
       throw e;
     }
-    w.crc = await this.hooks.crc.ask<number>("crcEnd");
+    const hashed = await this.hooks.crc.ask<{ crc: number; sha256: string }>("hashEnd");
+    w.crc = hashed.crc;
+    w.sha256 = hashed.sha256;
     const d = new Uint8Array(16), v = new DataView(d.buffer);
     u32(v, 0, 0x08074b50); u32(v, 4, w.crc); u32(v, 8, w.csize); u32(v, 12, w.usize);
     await this.emit(d);

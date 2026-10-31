@@ -9,12 +9,15 @@
 //                      members written, after cleanup): at most 32 MiB.  The archive checked by Python's zipfile.
 //   peak  (3 contexts) the transient guard, §6 (2): main + worker usedSize over the baselines, sampled every 50 ms, no
 //                      forced collection during the run: at most 256 MiB in each; every peak and the maximum reported.
-//   resp  (1 context)  responsiveness, no forced collections: the longest main-thread task from the click at most 50 ms;
-//                      the progress line changing at least every 250 ms while the archive is written
-//                      (timed in the page).
+//   resp  (1 context)  responsiveness, no forced collections: first the long-task observer's own check (grader's C8: a
+//                      120 ms busy loop must show in it), then the longest main-thread task from the click at most 50 ms,
+//                      and the progress line rewritten at least every 250 ms, its text changed or not (@sagebrush's
+//                      ruling of Oct 31); how long its numbers stand still is printed, a diagnostic.
 //   cancel (1 context) an export cancelled half-way: the "cancelled" line within 250 ms of the click (timed in the page).
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   N=100000 node web/workspace/test-export-scale.mjs
+// In CI (grader's Q10): node web/workspace/test-export-scale.mjs --ci: N = 70,000 (past Zip64's 65,535 members), the live
+// pass only, its archive read by zipfile AND unzip -t; the timing and peak passes stay local.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +25,8 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
-const N = Number(process.env.N ?? 100000);
+const CI = process.argv.includes("--ci");
+const N = Number(process.env.N ?? (CI ? 70000 : 100000));
 const MiB = 2 ** 20;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fails = [];
@@ -113,7 +117,7 @@ const hooks = (half) => `(() => {
   window.__exp = null;
   window.__at = null;
   const stop = (name) => new Promise((go) => { window.__at = name; window.__go = () => { window.__at = null; go(); }; });
-  window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name) => { window.__exp = { blob, name }; }, stats: {},
+  window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; }, stats: {},
     beforePreflight: () => stop("baseline")${half ? `, between: (n) => (n === ${half} ? stop("half") : undefined)` : ""} };
   return 1;
 })()`;
@@ -129,12 +133,13 @@ async function readArchive(c, out) {
   }
   const file = join(out, "scale.zip");
   writeFileSync(file, Buffer.concat(parts));
-  const r = spawnSync("python3", ["-I", "-c", "import sys, zipfile, json; z = zipfile.ZipFile(sys.argv[1]); n = z.namelist(); m = json.loads(z.read('manifest.json')); print(json.dumps({'members': len(n), 'last': n[-1], 'entries': len(m['entries'])}))", file], { encoding: "utf8" });
-  return { size, ...(r.status === 0 ? JSON.parse(r.stdout) : { error: r.stderr.slice(0, 300) }) };
+  const r = spawnSync("python3", ["-I", "-c", "import sys, zipfile, json; z = zipfile.ZipFile(sys.argv[1]); bad = z.testzip(); n = z.namelist(); m = json.loads(z.read('manifest.json')); print(json.dumps({'bad': bad, 'members': len(n), 'last': n[-1], 'entries': len(m['entries'])}))", file], { encoding: "utf8" });
+  const u = spawnSync("unzip", ["-tq", file], { encoding: "utf8" });
+  return { size, unzip: u.status, ...(r.status === 0 ? JSON.parse(r.stdout) : { error: r.stderr.slice(0, 300) }) };
 }
 
 const out = mkdtempSync(join(tmpdir(), "sb-export-scale-out-"));
-const PASSES = new Set((process.env.PASSES ?? "live,peak,resp,cancel").split(","));
+const PASSES = new Set((process.env.PASSES ?? (CI ? "live" : "live,peak,resp,cancel")).split(","));
 try {
   // ---- live: the hard bound at three checkpoints
   if (PASSES.has("live")) {
@@ -163,7 +168,10 @@ try {
       check(live.length === 3 && live.every(([, g]) => g <= 32), "live: main + worker live growth at most 32 MiB at every checkpoint (max " + Math.max(...live.map(([, g]) => g)).toFixed(2) + " MiB)");
       if (await c.ev(`!!window.__exp`)) {
         const z = await readArchive(c, out);
-        check(!z.error && z.members === N + 2 && z.last === "manifest.json", "live: zipfile reads the archive: " + JSON.stringify(z));
+        // (the handoff's cleanup let run once the archive is read)
+        await c.ev(`(() => { window.__exp.then?.(); return 1; })()`);
+        check(!z.error && z.bad === null && z.members === N + 2 && z.last === "manifest.json" && z.entries === N + 1, "live: zipfile reads the archive, every member, manifest last: " + JSON.stringify(z));
+        check(z.unzip === 0, "live: unzip -t accepts it (" + (N + 2) + " members, past Zip64's 65,535): exit " + z.unzip);
         const st = await c.ev(`window.__SB_EXPORT_TEST__.stats`);
         check(st.spoolChunks > 0 && st.spoolChunks < 300, "live: the spool holds 1 MiB chunks: " + st.spoolChunks + " for " + st.members + " members");
       }
@@ -216,12 +224,16 @@ try {
         new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; const m = / written/.test(t); if (m) (window.__raw ??= []).push(performance.now()); if (m && t !== window.__lastText) { window.__lastText = t; window.__marks.push(performance.now()); (window.__texts ??= []).push(t.match(/[^.]*written/)?.[0] ?? ""); } if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true });
         return 1;
       })()`);
+      // (grader's C8: the instrument's own check, in this context, before any of its figures counts; the busy loop a task
+      // of the page's own (a timer): one run from DevTools' evaluate isn't a page task, and isn't reported)
+      const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
+      check(c8 >= 100, `resp: C8, a 120 ms busy loop shows in the long-task observer (${Math.round(c8)} ms)`);
       await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       await c.ev(btn("/^Save…$/"));
       check(await c.until(`!!window.__exp`, 1200000), "resp: the export ends");
       const longest = await c.ev(`window.__long`);
-      check(longest <= 50, `resp: the longest main-thread task from the click ${Math.round(longest)} ms (at most 50 ms)`);
+      check(c8 >= 100 && longest <= 50, `resp: the longest main-thread task from the click ${Math.round(longest)} ms (at most 50 ms; counts only with C8 passing)`);
       // (the values must move at least every 250 ms once the first member is written: before it, nothing moves (the
       // first reads, the workspace's lock), and that wait is reported, not bounded; throughout, the line itself must be
       // written at least every 250 ms, its text unchanged or not, so the page never looks stopped)
@@ -231,9 +243,57 @@ try {
       // included, and the longest gap of a 20 ms page heartbeat between the first and the last progress change)
       const diag = await c.ev(`(() => { clearInterval(window.__hbt); const gapOf = (m) => { let g = 0, at = 0; for (let i = 1; i < m.length; i++) if (m[i] - m[i - 1] > g) { g = m[i] - m[i - 1]; at = m[i - 1]; } return [Math.round(g), Math.round(at)]; }; const a = window.__marks[0], b = window.__marks[window.__marks.length - 1]; return { writes: (window.__raw ?? []).length, writeGap: gapOf(window.__raw ?? []), heartbeatGap: gapOf(window.__hb.filter((t) => t >= a && t <= b)), changes: [Math.round(a), Math.round(b)] }; })()`);
       console.log("(progress diagnostics: " + JSON.stringify(diag) + ")");
-      check(gap[0] > 10 && gap[4] >= 0 && gap[1] <= 250, `resp: once the first member is written, progress moves at least every 250 ms (${gap[0]} updates, the longest gap ${gap[1]} ms; the wait before the first member ${gap[4]} ms)`);
-      check(diag.writes > 10 && diag.writeGap[0] <= 250, `resp: the progress line is written at least every 250 ms throughout (${diag.writes} writes, the longest gap ${diag.writeGap[0]} ms)`);
+      // (the ruling: the line rewritten at least every 250 ms is the check; how long its numbers stood still, a diagnostic)
+      console.log(`(diagnostic: the numbers' longest stand-still after the first member ${gap[1]} ms over ${gap[0]} changes; the wait before the first member ${gap[4]} ms; the heartbeat's longest gap ${diag.heartbeatGap[0]} ms)`);
+      check(diag.writes > 10 && diag.writeGap[0] <= 250, `resp: the progress line is rewritten at least every 250 ms throughout (${diag.writes} writes, the longest gap ${diag.writeGap[0]} ms)`);
       check(c.errors.length === 0, "resp: no page errors: " + c.errors.slice(0, 3).join(" | "));
+    } finally { await c.close(); }
+  }
+  // ---- profile (E1 r2, @sagebrush's (c); the rules fixed before the run:
+  // /scratch/sagebrush-reviews/e1-r2-profile-rules/RULES.md): each stall of the progress line's numbers over 250 ms after
+  // the first member, classified by the heartbeat and the writing loop's waits (run.ts's probe).  Information only.
+  if (PASSES.has("profile")) {
+    const c = await open();
+    try {
+      await prepare(c);
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined, probe: (what, edge) => window.__probe.push([what, edge, performance.now()])`));
+      await c.ev(`(() => {
+        window.__probe = []; window.__long = 0; window.__marks = []; window.__texts = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 10);
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long = Math.max(window.__long, e.duration); }).observe({ type: "longtask", buffered: false });
+        new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; if (/ written/.test(t) && t !== window.__lastText) { window.__lastText = t; window.__marks.push(performance.now()); window.__texts.push(t.match(/[^.]*written/)?.[0] ?? ""); } }).observe(document.body, { subtree: true, childList: true, characterData: true });
+        return 1;
+      })()`);
+      const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
+      console.log(`(profile: C8, the long-task observer saw the 120 ms busy loop as ${Math.round(c8)} ms${c8 >= 100 ? "" : ": the run is void (RULES.md)"})`);
+      await c.ev(btn("/^Export all current files/"));
+      await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      await c.ev(btn("/^Save…$/"));
+      const ended = await c.until(`!!window.__exp`, 1200000);
+      const r = await c.ev(`(() => {
+        clearInterval(window.__hbt);
+        const m = window.__marks, x = window.__texts, hb = window.__hb;
+        const k = x.findIndex((t) => !/^\\D*0 of /.test(t));
+        // (each probe kind's pending intervals)
+        const open = {}, iv = { page: [], capture: [], member: [], spool: [] };
+        for (const [w, e, t] of window.__probe) { if (e === 0) open[w] = t; else if (open[w] !== undefined) { iv[w].push([open[w], t]); delete open[w]; } }
+        const cover = (list, a, b) => { let n = 0; for (const [s, e] of list) n += Math.max(0, Math.min(b, e) - Math.max(a, s)); return n; };
+        const union = (a, b) => { const all = Object.values(iv).flat().map(([s, e]) => [Math.max(a, s), Math.min(b, e)]).filter(([s, e]) => e > s).sort((p, q) => p[0] - q[0]); let n = 0, cs = -1, ce = -1; for (const [s, e] of all) { if (s > ce) { if (ce > cs) n += ce - cs; cs = s; ce = e; } else ce = Math.max(ce, e); } if (ce > cs) n += ce - cs; return n; };
+        const stalls = [];
+        for (let i = Math.max(k + 1, 1); i < m.length; i++) {
+          const a = m[i - 1], b = m[i], len = b - a;
+          if (len <= 250) continue;
+          let gap = 0, prev = null; for (const t of hb) { if (t < a || t > b) continue; if (prev !== null) gap = Math.max(gap, t - prev); prev = t; }
+          const share = Object.fromEntries(Object.entries(iv).map(([w, l]) => [w, Math.round(100 * cover(l, a, b) / len)]));
+          const all = Math.round(100 * union(a, b) / len);
+          const top = Object.entries(share).sort((p, q) => q[1] - p[1])[0];
+          const cls = gap > 100 ? "main thread busy" : top[1] >= 80 ? "one wait: " + top[0] : all >= 80 ? "mixed" : "unattributed";
+          stalls.push({ at: Math.round(a), ms: Math.round(len), cls, share, all, heartbeat: Math.round(gap), from: x[i - 1], to: x[i] });
+        }
+        const by = {}; for (const s of stalls) by[s.cls] = (by[s.cls] ?? 0) + 1;
+        return { stalls, by, longest: Math.max(0, ...stalls.map((s) => s.ms)), export_ms: Math.round(m[m.length - 1] - m[0]) };
+      })()`);
+      console.log("(profile: " + JSON.stringify({ ended, by: r.by, longest: r.longest, export_ms: r.export_ms, stalls: r.stalls.length }) + ")");
+      for (const st of r.stalls) console.log("(profile stall: " + JSON.stringify(st) + ")");
     } finally { await c.close(); }
   }
   // ---- cancel: in a fresh context, an export cancelled when about half the members are written: the click to the
