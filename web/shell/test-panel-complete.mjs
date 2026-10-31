@@ -69,6 +69,15 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // (multibyte: names of 2-byte characters; never a cut character, the block within the cap)
   const mb = Array.from({ length: 40 }, (_, i) => "é".repeat(126) + String(i).padStart(2, "0"));
   const bm = candidateBlock(mb);
+  // (the exact cap: a block of exactly BLOCK_BYTES is kept, with and without its footer, and one byte more is not;
+  // a name of 2-byte characters exactly at the cap is kept whole and one character over it is left out, never cut)
+  const a = "a".repeat(BLOCK_BYTES - bytesOf("  …and 1 more")), h = "b".repeat((BLOCK_BYTES - 2) / 2), e = "é".repeat(BLOCK_BYTES / 2);
+  const exact = [
+    [[h, h], `${h}  ${h}`], [[h, h + "b"], `${h}  …and 1 more`],
+    [[a, "z".repeat(16)], `${a}  …and 1 more`], [[a + "a", "z".repeat(16)], "…and 2 more"],
+    [[e], e], [[e + "é"], "…and 1 more"],
+  ];
+  check("U2.k4", exact.every(([n, want]) => candidateBlock(n) === want) && bytesOf(`${a}  …and 1 more`) === BLOCK_BYTES && bytesOf(e) === BLOCK_BYTES, exact.map(([n, want]) => `${candidateBlock(n) === want ? "ok" : "BAD"} ${bytesOf(candidateBlock(n))}`).join(", "));
   check("U2.k3", bytesOf(bm) <= BLOCK_BYTES && !bm.includes("\ufffd") && bm.split("  ").filter((x) => x.startsWith("é")).every((x) => mb.includes(x)), `${bytesOf(bm)} bytes`);
 }
 
