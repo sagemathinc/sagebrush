@@ -618,6 +618,8 @@ jobs:
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
           CHROME=google-chrome node web/workspace/test-workspace-preview.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-lookalike.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-lookalike-controls.mjs
           CHROME=google-chrome node web/workspace/test-workspace-filemenu.mjs
           CHROME=google-chrome node web/workspace/test-workspace-upload.mjs
           bun web/board/test-own-names.mjs
