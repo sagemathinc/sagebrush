@@ -1434,7 +1434,10 @@ try {
         const got = [];
         for (const w of ["W1", "W4"]) {
           const { path, ids } = await mk();
-          if (w === "W4") { await open(path); await ev(`${tabJs(draft)}.click()`); await sleep(300); }
+          // (the draft shown first, at W1 too: what an earlier case left in the pane doesn't decide this one)
+          if (w === "W4") await open(path);
+          await ev(`${tabJs(draft)}.click()`);
+          await sleep(300);
           await focusDraft();
           const r = await readOf(path);
           await holdDb("sagebrush-workspace", "entries", 3000);
