@@ -140,7 +140,7 @@ try {
     if (coi) {
       const T = `document.querySelector(".sb-term textarea")`;
       const key = async (k, shift = false) => {
-        const ev = { key: k, code: k, windowsVirtualKeyCode: k === "Tab" ? 9 : 13, modifiers: shift ? 8 : 0 };
+        const ev = { key: k, code: k, windowsVirtualKeyCode: { Tab: 9, Enter: 13, ArrowUp: 38, ArrowDown: 40 }[k], modifiers: shift ? 8 : 0 };
         await send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
         await send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
       };
@@ -224,6 +224,12 @@ try {
       check(e4.running, `E4.running: a command running + Tab: focus leaves`);
       check(e4.shift, `E4.shift: Shift-Tab: focus leaves`);
       check(e4.end, `E4.end: at a word's end + Tab: focus stays (it completes)`);
+      // (TH-C1: inside a quoted word that goes on after the caret: declined, nothing asked of the host, focus leaves)
+      const rq0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
+      const qline = "cat 'notes x'";
+      const qleft = await leaves(() => set(qline, 10));
+      const rq1 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
+      check(qleft && (await value()) === qline && rq1 === rq0, `E4.qmid: Tab inside a quoted word, before its space: declined (focus left ${qleft}, ${JSON.stringify(await value())}, ${rq1 - rq0} requests)`);
       // E5 a late listing inserts nothing
       await evaluate(`window.__sbTermTabDelayMs = 400`);
       const req0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
@@ -237,6 +243,14 @@ try {
       await sleepMs(900);
       check((await value()) === "" && !(await evaluate(`document.querySelector(".sb-term-cands")`)), `E5.b: a cd during a slow listing: nothing inserted (${JSON.stringify(await value())})`);
       await run("cd /e2e");
+      // E5.d: history's Up then Down back to the same text during a slow listing: superseded, nothing inserted
+      const ab0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabAborts ?? 0`));
+      await set("cat no"); await key("Tab"); await sleepMs(50);
+      await key("ArrowUp"); await key("ArrowDown");
+      const back = await value();
+      await sleepMs(900);
+      const ab1 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabAborts ?? 0`));
+      check(back === "cat no" && (await value()) === "cat no" && ab1 === ab0 + 1, `E5.d: Up then Down back to the same text during a slow listing: ${JSON.stringify(await value())}, ${ab1 - ab0} abort`);
       // E6 colours
       const c6 = await run("ls");
       const c6l = await run("ls -l"), c6p = await run("ls | cat"), c6r = await run("ls > out.txt; cat out.txt");
@@ -253,9 +267,12 @@ try {
       // E5.c last: the panel ended while a slow listing is in flight: nothing inserted anywhere, no block
       await evaluate(`window.__sbTermTabDelayMs = 400`);
       await set("cat no"); await key("Tab"); await sleepMs(50);
+      // (the input and the root kept by reference: the close must abort the listing and leave the input as it was)
+      await evaluate(`window.__e5c = { ta: ${T}, root: document.querySelector(".sb-term"), ab: Number(document.querySelector(".sb-term").dataset.tabAborts ?? 0) }`);
       await evaluate(`document.querySelector(".sb-term-end").click()`);
       await sleepMs(900);
-      check(!(await evaluate(`document.querySelector(".sb-term-cands") || document.querySelector(".sb-term")`)), `E5.c: the session ended during a slow listing: nothing left`);
+      const e5c = await evaluate(`({ v: window.__e5c.ta.value, ab: Number(window.__e5c.root.dataset.tabAborts ?? 0) - window.__e5c.ab, left: !!(document.querySelector(".sb-term-cands") || document.querySelector(".sb-term")) })`);
+      check(e5c && e5c.v === "cat no" && e5c.ab === 1 && !e5c.left, `E5.c: the session ended during a slow listing: aborted, the input untouched, nothing left (${JSON.stringify(e5c)})`);
       await evaluate(`window.__sbTermTabDelayMs = 0`);
     }
   }

@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  SHELL_COMMANDS, BUILTINS, PANEL_COMMANDS, commandNames, compgen, tabAction, wordAt, encodeWord, splitPath,
+  SHELL_COMMANDS, BUILTINS, PANEL_COMMANDS, commandNames, compgen, tabAction, wordAt, tabWord, encodeWord, splitPath,
   commonPrefix, matches, complete, candidateBlock, BLOCK_NAMES, BLOCK_BYTES, lsColourable, colourLs,
 } from "./complete.ts";
 
@@ -38,6 +38,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check("U1.j", same(w("cat 'my d"), { start: 4, first: false, ctx: "single", literal: "my d" }), JSON.stringify(w("cat 'my d")));
   check("U1.k", same(w('cat "a\\$b'), { start: 4, first: false, ctx: "double", literal: "a$b" }), JSON.stringify(w('cat "a\\$b')));
   check("U1.l", w("cat my\\ d")?.literal === "my d", JSON.stringify(w("cat my\\ d")));
+  // (TH-C1: a caret inside a quoted word that goes on after it: a true mid-word, declined; at the line's end: completed)
+  const q1 = "cat 'alpha beta'", q2 = 'cat "alpha beta"';
+  check("U1.m", tabWord(q1, 10) === null && tabWord(q2, 10) === null && tabAction(q1, 10, 10, false) === "complete", "inside a quote, before its space: declined");
+  check("U1.n", tabWord("cat 'alp", 8)?.literal === "alp" && tabWord('cat "alp', 8)?.literal === "alp" && tabWord("cat alp", 7)?.literal === "alp", "an open quote at the line's end, or unquoted: completed");
 }
 
 // ---------------------------------------------------------------- U2 candidates, the common prefix, the block
@@ -55,7 +59,17 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const long = Array.from({ length: 50 }, (_, i) => `${"x".repeat(300)}${i}`);
   const kb = candidateBlock(long);
   const shownK = kb.split("  ").filter((x) => x.startsWith("x")).length;
-  check("U2.k", new TextEncoder().encode(kb).length <= BLOCK_BYTES + 40 && shownK < 50 && kb.endsWith(`…and ${50 - shownK} more`), `${shownK} shown, ${new TextEncoder().encode(kb).length} bytes`);
+  const bytesOf = (s) => new TextEncoder().encode(s).length;
+  check("U2.k", bytesOf(kb) <= BLOCK_BYTES && shownK < 50 && kb.endsWith(`…and ${50 - shownK} more`), `${shownK} shown, ${bytesOf(kb)} bytes`);
+  // (TH-C2: 34 distinct 254-byte names: the whole block, footer included, at most 8 192 bytes, and as many names as fit)
+  const n34 = Array.from({ length: 34 }, (_, i) => String(i).padStart(2, "0") + "y".repeat(252));
+  const b34 = candidateBlock(n34), s34 = b34.split("  ").filter((x) => x.length === 254).length;
+  const more34 = (k) => n34.slice(0, k).join("  ") + `  …and ${34 - k} more`;
+  check("U2.k2", bytesOf(b34) <= BLOCK_BYTES && b34.endsWith(`…and ${34 - s34} more`) && bytesOf(more34(s34 + 1)) > BLOCK_BYTES, `${s34} shown, ${bytesOf(b34)} bytes`);
+  // (multibyte: names of 2-byte characters; never a cut character, the block within the cap)
+  const mb = Array.from({ length: 40 }, (_, i) => "é".repeat(126) + String(i).padStart(2, "0"));
+  const bm = candidateBlock(mb);
+  check("U2.k3", bytesOf(bm) <= BLOCK_BYTES && !bm.includes("\ufffd") && bm.split("  ").filter((x) => x.startsWith("é")).every((x) => mb.includes(x)), `${bytesOf(bm)} bytes`);
 }
 
 // ---------------------------------------------------------------- U3 the literal encoding, judged by just-bash's parser

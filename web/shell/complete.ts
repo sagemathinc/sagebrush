@@ -112,6 +112,18 @@ export function wordAt(line: string, caret: number): WordAt | null {
   return { start, first, ctx, literal: lit };
 }
 
+/**
+ * The word Tab may complete, or null (the browser's own Tab): wordAt's word, literal, and not a TRUE mid-word: a caret
+ * inside an open quote with more of the line after it is inside that quoted word, whatever character follows (astra
+ * TH-C1: `cat 'alpha| beta'`), so it declines.
+ */
+export function tabWord(line: string, caret: number): WordAt | null {
+  const w = wordAt(line, caret);
+  if (!w || w.literal === null) return null;
+  if (w.ctx !== "none" && caret < line.length) return null;
+  return w;
+}
+
 // ---------------------------------------------------------------- the literal encoding (§2T.Q; U3)
 const SAFE = /^[A-Za-z0-9._/+@%:,=-]+$/;
 // (a name we can't put on the line as one literal word: a newline or any other C0 control, or DEL)
@@ -190,19 +202,23 @@ export function complete(line: string, caret: number, w: WordAt, cands: Cand[], 
 export const BLOCK_NAMES = 100;
 export const BLOCK_BYTES = 8192;
 const utf8Len = (s: string) => new TextEncoder().encode(s).length;
-/** The candidates as one block: at most BLOCK_NAMES names and BLOCK_BYTES bytes, then "…and N more". */
+/**
+ * The candidates as one block: at most BLOCK_NAMES whole names, and the WHOLE string, its "…and N more" footer
+ * included, at most BLOCK_BYTES bytes of UTF-8 (astra TH-C2); a name is never cut, so no character is split.
+ */
 export function candidateBlock(names: string[], maxNames = BLOCK_NAMES, maxBytes = BLOCK_BYTES): string {
-  const shown: string[] = [];
-  let bytes = 0;
-  for (const n of names) {
-    if (shown.length >= maxNames) break;
-    const b = utf8Len(n) + 2;
-    if (bytes + b > maxBytes) break;
-    shown.push(n);
-    bytes += b;
+  const text = (k: number) => {
+    const more = names.length - k;
+    return names.slice(0, k).join("  ") + (more > 0 ? `${k ? "  " : ""}…and ${more} more` : "");
+  };
+  let k = Math.min(names.length, maxNames), bytes = 0;
+  // (the most names whose block, footer and all, fits: grown name by name, then shrunk if the footer doesn't fit)
+  for (let i = 0; i < k; i++) {
+    bytes += utf8Len(names[i]) + (i ? 2 : 0);
+    if (bytes > maxBytes) { k = i; break; }
   }
-  const more = names.length - shown.length;
-  return shown.join("  ") + (more > 0 ? `${shown.length ? "  " : ""}…and ${more} more` : "");
+  while (k > 0 && utf8Len(text(k)) > maxBytes) k--;
+  return text(k);
 }
 
 // ---------------------------------------------------------------- ls colours (§2C; U5)
