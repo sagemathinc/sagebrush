@@ -77,6 +77,3 @@ export async function diagnoseLines(kernel) {
   await diagnose(info, kernel);
   return SELFTEST_INFO_KEYS.map((k) => "info " + k + ": " + info[k]);
 }
-
-// (the Terminal's shell worker in the real app: web/notebook/selftest-terminal.js, in this same lazily loaded module)
-export { terminalChecks, TERMINAL_CHECKS } from "./selftest-terminal.js";

@@ -138,9 +138,9 @@ const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(he
 const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
 // TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
 const historyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true });
-// the app self-test's COI diagnosis (web/notebook/selftest-diagnose.js), imported by selftest() only when the
-// app's self-test runs; the app copies it (app/build-frontend.mjs), the CLI doesn't serve it
-const selftestResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "selftest-diagnose.js")], outdir: join(here, "dist"), naming: "sagebrush-selftest.js", target: "browser", format: "esm", minify: true });
+// the app self-test's COI diagnosis and the Terminal's checks (web/notebook/selftest-entry.js), imported by
+// selftest() only when the app's self-test runs; the app copies it (app/build-frontend.mjs), the CLI doesn't serve it
+const selftestResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "selftest-entry.js")], outdir: join(here, "dist"), naming: "sagebrush-selftest.js", target: "browser", format: "esm", minify: true });
 // The reactive notebook's analyzer (web/analyze-worker.ts): pyparse and
 // src/dataflow.ts in a worker of their own
 const analyzeResult = await Bun.build(<any>{
