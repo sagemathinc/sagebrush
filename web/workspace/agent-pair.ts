@@ -150,7 +150,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit) => Promise<unknown> },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -373,7 +373,8 @@ export class AgentPairing {
       const no = await authorize("workspace.write", { path: e.path }, g, now, this.opts.trashEntry);
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
-      const result = await this.opts.notebookEdit!(e);
+      // (with the check of this very grant, for the page to make right before it changes anything: astra's C1)
+      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs));
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.changes++;
