@@ -1931,12 +1931,8 @@ export class Workspace {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).count());
   }
   async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
-    const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
+    let all: Entry[] | undefined = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
-    // (names that look the same in one folder, made before they were refused: by a cursor over the index
-    // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
-    // the rest counted, never all of them held: LIMIT-CAP1B-1)
-    Object.assign(out, await this.lookalikeGroups());
     for (const e of all) {
       // (data files whose bytes the migrator hasn't moved yet, Trash's too: capabilities §2b)
       if (e.kind === "file" && !e.migrated && !e.unmoved && !e.missing && e.ref !== null) out.migration.left++;
@@ -1946,6 +1942,13 @@ export class Workspace {
       } else if (e.kind === "file") { out.files.count++; out.files.bytes += e.size ?? 0; }
       else if (e.kind === "notebook" || e.kind === "board") out.documents++;
     }
+    // (every entry let go before the walk below, so its pages aren't read while all of them are held: lookalike
+    // plan L2b r2 code, A4)
+    all = undefined;
+    // (names that look the same in one folder, made before they were refused: by a cursor over the index
+    // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
+    // the rest counted, never all of them held: LIMIT-CAP1B-1)
+    Object.assign(out, await this.lookalikeGroups());
     return out;
   }
 
