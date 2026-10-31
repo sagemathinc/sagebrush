@@ -5,6 +5,7 @@
 // can never reach another document at the same path; under sync's journal the pane is read-only; remote pictures
 // wait for a click whatever the document says.
 import type { Workspace } from "../workspace/api";
+import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
 export const FENCE = "__sagebrush-workspace__";
@@ -39,12 +40,16 @@ export type NotebookHost = {
   /** After a failed close: the content it kept frozen, as a file to download (.ipynb), or null. */
   download(): { name: string; text: string; type: string } | null;
   isRunning(): boolean;
+  /** An agent's edit by cell (A12 step 1): checked whole against what's shown, then applied, then saved once; or
+   * refused with nothing changed.  Resolves once the change is saved (or says why not). */
+  edit(e: NotebookEdit, may: () => boolean): Promise<EditResult>;
   hidden(on: boolean): void;
   interrupt(): void;
   copyText(): string;
 };
 
 type Nb = any; // (the component is plain JS: its API is web/notebook/README.md's)
+export type EditResult = { ok: true; inserted: string[]; rev?: number } | { ok: false; code: "conflict" | "invalid" | "busy"; why: string; ids?: string[] };
 
 /** The cells the agent wrote, by id: their source when it wrote them (a label shows while a cell still has it and hasn't run). */
 export type AgentCells = Map<string, string>;
@@ -172,6 +177,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   // doesn't stop a script's click() in every browser)
   guardGestures(nbRoot, () => guard);
   let stored: (() => Promise<any>) | null = null; // (the record the store has now, read beside the page's writes)
+  let readOnlyHere = false; // (sync's journal writes this workspace: shown read only, never edited here)
+  let docRef: string | null = null; // (the document this pane is bound to, once attached and editable: an agent's edit must name it)
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
   const unwatch = ws.watch(() => void check());
@@ -222,8 +229,107 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       else nb?.resize();
     },
     interrupt: () => nb?.interrupt(),
+    async edit(e, may) {
+      // (the agent's authority: the same grant, in force, and the turn the edit came from still the chat's running
+      // one; checked once, after the last wait and right before the change, so a loss at any wait reaches it; C1)
+      const no = { ok: false as const, code: "busy" as const, why: "the grant or the turn changed while this edit waited: nothing changed" };
+      await host.ready;
+      const comp = nb;
+      // (today's guards: only a pane that may save this document takes an edit, never one closing, let go, read only)
+      if (readOnlyHere) return { ok: false, code: "busy", why: "this notebook is read only here (sync saves it: open it in Sagebrush to change it)" };
+      if (!alive || !comp || !attached || !bound || frozen || guard !== "open" || docRef === null || !stored) return { ok: false, code: "busy", why: "this notebook is closing, or isn't saved here now" };
+      if (e.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
+      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref;
+      const closing = { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" };
+      // (the store's record, in the notebook's form, equals what is shown: a save the store refused ("not saved: ...")
+      // still resolves saved(), so it is checked here, positively; astra's C2)
+      const keptAsShown = (rec: any) => !!rec && Array.isArray(rec.cells) && canonical(rec.cells.map(cellForm)) === canonical(comp.snapshot().cells.map(cellForm));
+      // (1) what the person typed, saved first, and seen to be kept; then the document as stored, the form the agent
+      // read it in: each named cell's hash checked against that (three-way: the cells it doesn't name aren't looked at)
+      comp.flush();
+      try {
+        await comp.saved();
+      } catch (err) {
+        return { ok: false, code: "busy", why: `not applied: this notebook couldn't be saved first (${(err as Error).message})` };
+      }
+      if (!usable()) return closing;
+      const rec0 = await stored().catch(() => null);
+      if (!usable()) return closing;
+      if (!keptAsShown(rec0)) return { ok: false, code: "busy", why: "not applied: the person's changes here couldn't be saved first (the store refused them); nothing changed" };
+      // (the revision this pane's next save is made from: kept for a rollback, so that save still conflicts with another
+      // tab's change instead of writing over it; astra's C3)
+      const baseRev = rec0.rev;
+      const seen = comp.snapshot();
+      const read = await ws.read(path).catch(() => null);
+      if (!usable()) return closing;
+      if (!read || (read.entry as any)?.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
+      const checked = preflight(e, (read.content as any)?.cells ?? [], { hashes: true });
+      if (!checked.ok) return { ok: false, code: "conflict", why: checked.why, ...(checked.ids ? { ids: checked.ids } : {}) };
+      // (2) then, in one synchronous stretch (no await): the authority, nothing shown changed since that save,
+      // the edit fits what is shown, and the change is made; what the person does can't come between the check and it
+      if (!may()) return no;
+      const before = comp.snapshot();
+      if (canonical(before) !== canonical(seen)) return { ok: false, code: "conflict", why: "the notebook changed while this edit was checked (read it again)" };
+      const pre = preflight(e, before.cells, { hashes: false });
+      if (!pre.ok) return { ok: false, code: "conflict", why: pre.why, ...(pre.ids ? { ids: pre.ids } : {}) };
+      let inserted: string[] = [];
+      try {
+        const apply = (globalThis as any).__sbTestApplyEdits && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? (globalThis as any).__sbTestApplyEdits : null;
+        // (run: false: an edit runs nothing; applyEdits mutates synchronously, its promise settles at once)
+        const r = apply ? apply(comp, pre.edits) : comp.applyEdits(pre.edits, { run: false });
+        inserted = (await r)?.ids ?? [];
+      } catch (err) {
+        // (put back as it was, with the revision it was saved at: loaded, which saves nothing, and the next save is made
+        // from that revision, so it conflicts with a change made elsewhere meanwhile rather than writing over it)
+        comp.load({ ...before, rev: baseRev });
+        return { ok: false, code: "invalid", why: `not applied, nothing changed: ${(err as Error).message}` };
+      }
+      // (an edit that changed nothing (each set to what it was): answered ok, with nothing to save)
+      if (canonical(comp.snapshot()) === canonical(before)) return { ok: true, inserted };
+      // (a code cell whose source the agent changed keeps its old output, marked as from before the change until it is
+      // run or edited here: this pane's notebook isn't reactive, so the component marks nothing itself)
+      for (const c of pre.edits.set) {
+        const cell = c.code !== undefined ? comp.cells().find((x: any) => x.id === c.id) : null;
+        if (cell && cell.type === "code" && cell.out?.childNodes.length > 0) markCell(cell, `Changed by ${ui.agentName()}: the output below is from before the change`, "nb-edit-mark");
+      }
+      // (one save for the whole edit, awaited, and seen kept: the edit is answered ok only once the store has it)
+      comp.flush();
+      try {
+        await comp.saved();
+      } catch (err) {
+        return { ok: false, code: "busy", why: `applied here but not saved: ${(err as Error).message}` };
+      }
+      const rec1 = await stored().catch(() => null);
+      if (!keptAsShown(rec1) || !(rec1.rev > baseRev)) return { ok: false, code: "busy", why: "applied here but not saved: the store refused it" };
+      return { ok: true, inserted };
+    },
     copyText: () => (nb ? nb.cells().map((c: any) => c.ta.value).join("\n\n") : ""),
   };
+  // A label on a cell (the agent wrote it, or changed it since its output): text, for assistive technology too, until the
+  // person edits the cell or it runs.
+  function markCell(c: any, text: string, cls = "nb-agent-mark") {
+    c.el.querySelector(`.${cls}`)?.remove();
+    const label = document.createElement("div");
+    label.className = `nb-agent-mark ${cls}`;
+    label.id = `${cls}-${c.id}`;
+    label.textContent = text;
+    // (under "Written by", when the cell has it: the two read in the order they happened)
+    const written = c.el.querySelector(":scope > .nb-agent-mark:not(.nb-edit-mark)");
+    if (written) written.after(label);
+    else c.el.prepend(label);
+    c.ta.setAttribute("aria-describedby", [c.ta.getAttribute("aria-describedby"), label.id].filter(Boolean).join(" "));
+    const clear = () => {
+      label.remove();
+      c.ta.setAttribute("aria-describedby", (c.ta.getAttribute("aria-describedby") ?? "").split(" ").filter((x: string) => x && x !== label.id).join(" "));
+      c.ta.removeEventListener("input", clear);
+      ranObserver.disconnect();
+    };
+    c.ta.addEventListener("input", clear);
+    const ranObserver = new MutationObserver(() => c.el.classList.contains("running") && clear());
+    ranObserver.observe(c.el, { attributes: true, attributeFilter: ["class"] });
+    return clear;
+  }
+
   host.ready = mount().catch((e) => {
     if (alive) ui.bar({ kind: "refused", text: `Couldn't open this notebook: ${(e as Error).message}` });
   });
@@ -326,6 +432,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (!alive) return;
       if (r?.content) comp.load(r.content);
       comp.setReadOnly(true);
+      readOnlyHere = true;
       for (const b of nbRoot.querySelectorAll<HTMLButtonElement>("button")) b.disabled = true;
       ui.saved("Read only here");
       ui.bar({ kind: "readonly", text: "This workspace saves notebooks through sync: open it in Sagebrush to run and edit it.", actions: [{ label: "Open in Sagebrush", run: () => open(`/w${path}`, "_blank", "noopener") }] });
@@ -352,7 +459,13 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     stored = () => inner.loadRecord();
     const store = {
       load: () => inner.load(),
-      save: (doc: unknown, o?: unknown) => (bound && alive ? inner.save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane")),
+      save: (doc: unknown, o?: unknown) => {
+        // (a test's refusal of a save, as the store answers one: loopback pages only, test-agents-artifacts.mjs)
+        const hook = (globalThis as any).__sbTestStoreSave;
+        const refused = typeof hook === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? hook(doc) : null;
+        if (typeof refused === "string") return Promise.resolve(refused);
+        return bound && alive ? inner.save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane");
+      },
       subscribe: (f: (d: unknown) => void) => inner.subscribe(f),
     };
     const mine = store; // (callbacks check they still belong to this store)
@@ -364,6 +477,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       return;
     }
     attached = true;
+    docRef = ref;
     const owned = () => alive && nb === comp && comp.store === mine;
     ui.saved("Saved");
     comp.on("dirty", () => owned() && ui.saved("Editing…"));

@@ -9,6 +9,7 @@
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
 //   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,8 @@ const site = `http://127.0.0.1:${sitePort}`;
 // ---- the agent: a stand-in for sagebrush-agent (its hello, its calls, its turn events)
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 let sock = null, nextId = 1, picHits = 0;
+// (whether the stand-in says it edits notebooks by cell, notebook.edit: the A12 section pairs again with it)
+let FEATURES = false;
 const pending = new Map(), notes = [];
 const daemon = Bun.serve({
   port: 0,
@@ -53,7 +56,7 @@ const daemon = Bun.serve({
       if (m.method === "hello") {
         sock = ws;
         // (it asks for run too: the page's grant must say run false whatever it asks)
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true } } }));
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, ...(FEATURES ? { features: ["notebook.edit"] } : {}) } }));
       } else if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id);
         pending.delete(m.id);
@@ -93,6 +96,18 @@ const write = async (path, cells, extra) => {
   return call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
 };
 const readCells = async (path) => (await call("workspace.read", { path })).content.json.cells;
+// (the hash an edit by cell names a cell by, as the helper computes it: web/workspace/notebook-edit.ts cellHash)
+const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+// (in the form the notebook keeps a cell: web/workspace/notebook-edit.ts cellForm)
+const cellForm = (c) => {
+  const type = c?.type ?? "code";
+  const out = { id: c?.id, ...(type === "code" ? {} : { type }), code: c?.code ?? "" };
+  if (type === "code") { out.outputs = Array.isArray(c?.outputs) ? c.outputs : []; out.n = c?.n == null ? null : String(c.n); if (c?.ms != null) out.ms = c.ms; }
+  if (type === "markdown" && c?.attachments) out.attachments = c.attachments;
+  if (c?.metadata) out.metadata = c.metadata;
+  return out;
+};
+const cellHash = (c) => createHash("sha256").update(canonical(cellForm(c)), "utf8").digest("hex");
 
 // ---- the browser
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
@@ -1058,6 +1073,411 @@ try {
     } finally {
       if (fence0) await putRecord(fence0);
     }
+  }
+
+  // ======================================================================== A12 step 1: an agent's edit by cell
+  // (cases E1-E20 of /scratch/sagebrush-reviews/agents-panel/a12-step1-r2.1 + r2.2; whole JSON read from the store)
+  if (want("edit")) {
+    // E17 (page, an old helper): no notebook.edit in its hello, so notebooks are written whole as before, and the page
+    // takes no notebook.edit from it
+    {
+      const P0 = "/notes/e17.ipynb";
+      await call("workspace.create", { path: P0, content: docFor(P0, [{ code: "1" }]), mode: "python" });
+      const w = await write(P0, [{ code: "2" }]).then(() => "written", (e) => e.code ?? e.message);
+      const r0 = await call("workspace.read", { path: P0 });
+      const ed = await call("notebook.edit", { conversation: conv, path: P0, ref: "x", base: r0.rev, set: [{ id: r0.content.json.cells[0].id, source: "3" }], was: {} }).then(() => "answered", (e) => e.message);
+      ok(w === "written" && /not a verb/.test(ed) && r0.ref === undefined, "E17: with an old helper (no notebook.edit) a notebook is written whole as today, no ref is read, and no edit is taken", { w, ed });
+    }
+    FEATURES = true;
+    await ev(`document.querySelector('#new')?.click()`);
+    await sleep(700);
+    await pair();
+    ok(notes.some((m) => m.method === "page.features" && m.params?.features?.includes("notebook.edit")), "with a helper that says notebook.edit, the page offers it once granted (page.features)");
+    await converse();
+    let turn = `t${++turnN}`;
+    event(turn, { type: "turn_started" });
+    // (a new running turn, after one finished: what the following cases' edits come from)
+    const newTurn = () => { turn = `t${++turnN}`; event(turn, { type: "turn_started" }); };
+    // a notebook with outputs: c0 and c1 code (each its output), c2 markdown; ids tagged so its record is found
+    let made = 0;
+    const refs = new Map();
+    // (form: the notebook's own form, cellForm, as a document it saved: so a save keeps it byte for byte)
+    const mk = async (cells0, { form = false } = {}) => {
+      const path = `/notes/edit-${++made}.ipynb`, tag = tagOf(path);
+      const cells0f = (cells0 ?? [
+        { code: "x = 1", outputs: [{ output_type: "stream", name: "stdout", text: "A\n" }], n: 1 },
+        { code: "print(2)", outputs: [{ output_type: "stream", name: "stdout", text: "B\n" }], n: 2 },
+        { type: "markdown", code: "# heading" },
+      ]).map((c, i) => ({ id: `${tag}${i}`, type: c.type ?? "code", ...c }));
+      const cells = form ? cells0f.map(cellForm) : cells0f;
+      await call("workspace.create", { path, content: { json: { mode: "python", cells } }, mode: "python" });
+      refs.set(path, await refOf(path)); // (found by its first cell now: an insert first changes that)
+      return { path, ids: cells.map((c) => c.id) };
+    };
+    const open = (path) => openNotebook(path, { finish: false, turn });
+    // (another tab's long readwrite on a store, holding the page's reads and writes of it for ms: "notebooks" in
+    // "sagebrush", or "entries" in "sagebrush-workspace", the index a stat reads)
+    const holdDb = (db, store, ms) => ev(`(() => { const r = indexedDB.open(${JSON.stringify(db)}); r.onsuccess = () => { const d = r.result, t = d.transaction(${JSON.stringify(store)}, "readwrite"), st = t.objectStore(${JSON.stringify(store)}), end = Date.now() + ${ms}; const spin = () => { if (Date.now() < end) st.get("__hold__").onsuccess = spin; }; spin(); t.oncomplete = () => d.close(); }; return true; })()`);
+    const readOf = async (path) => {
+      const r = await call("workspace.read", { path });
+      return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
+    };
+    // (each answered within 15 s: a control that leaves an edit waiting doesn't hold the run)
+    const edit = (path, r, e) => Promise.race([
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
+    ]);
+    const rec = (path) => record(refs.get(path));
+    const same = (a, b) => canonical(a) === canonical(b);
+    const byId = (cs) => Object.fromEntries(cs.map((c) => [c.id, c]));
+    const untilSaved = () => until(`/^Saved/.test(document.querySelector('${PANE} .saved')?.textContent ?? '')`, 10000);
+
+    // E1, E2, E3, E15: one set: every unnamed cell byte-identical, in order; the set cell's text changed, its output kept
+    // and marked as from before; exactly one new version (a document in the notebook's own form: a save keeps it byte
+    // for byte; one in another form is re-formed by any save, the person's too: E5)
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      const after = await rec(path);
+      const b = byId(before.cells), a = byId(after.cells);
+      ok(res.ok && same(a[ids[0]], b[ids[0]]) && same(a[ids[2]], b[ids[2]]) && after.cells.map((c) => c.id).join() === before.cells.map((c) => c.id).join() && same(a[ids[1]].outputs, b[ids[1]].outputs), "E1: an edit of one cell keeps every other cell byte-identical (whole JSON), in order, and that cell's outputs", { res, a, b });
+      ok(a[ids[1]].code === "print(22)", "E2: the set cell's stored source is the new text (source -> code)", a[ids[1]]);
+      ok(await ev(`/Changed by Claude/.test(${cellJs(1)}.querySelector('.nb-edit-mark')?.textContent ?? '')`), "E3: the changed cell is marked: its output is from before the change");
+    }
+    // E15: one new version for a whole edit, of two cells (so a save per change would make two)
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 3" }, { id: ids[1], source: "print(3)" }] });
+      await sleep(800); // (past the component's save debounce: no late second save)
+      const after = await rec(path);
+      ok(res.ok && after.rev === before.rev + 1 && after.cells[0].code === "x = 3" && after.cells[1].code === "print(3)", "E15: exactly one new version for an edit of two cells", { res, before: before.rev, after: after.rev });
+    }
+    // E4: insert after an id, insert first, remove by id
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const res = await edit(path, r, { insert: [{ source: "y = 2", after: ids[0] }, { source: "top", type: "markdown", after: null }], remove: [ids[2]] });
+      const cs = (await rec(path)).cells;
+      ok(res.ok && cs.length === 4 && cs[0].code === "top" && cs[0].type === "markdown" && cs[1].id === ids[0] && cs[2].code === "y = 2" && cs[3].id === ids[1] && !cs.some((c) => c.id === ids[2]), "E4: an insert after an id, an insert first and a remove by id, each as asked", { res, cs: cs.map((c) => [c.id, c.type, c.code]) });
+    }
+    // E5, E6: three-way: the person changed another cell (applied, the person's change kept), or a named one (refused)
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      await typeInto(0, " # mine");
+      await untilSaved();
+      const mid = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(5)" }] });
+      const a = byId((await rec(path)).cells), m = byId(mid.cells);
+      ok(res.ok && a[ids[1]].code === "print(5)" && same(a[ids[0]], m[ids[0]]) && /# mine/.test(a[ids[0]].code), "E5: the person changed another cell since the read: the edit applies, and the person's change is kept byte-identical", { res, c0: a[ids[0]]?.code });
+      const r2 = await readOf(path);
+      await typeInto(1, " # theirs");
+      await untilSaved();
+      const mid2 = await rec(path);
+      const res2 = await edit(path, r2, { set: [{ id: ids[1], source: "print(6)" }] });
+      ok(!res2.ok && res2.code === "conflict" && /changed since/.test(res2.msg) && same(await rec(path), mid2), "E6: the person changed a named cell since the read: the whole edit is refused, the file byte-identical", res2);
+    }
+    // E7b, E8, E9, E10, E11, E19, E20: refused whole, the file byte-identical (each its own notebook, so one case's
+    // outcome never reaches another's)
+    const fresh = async () => {
+      const n = await mk();
+      await open(n.path);
+      const r = await readOf(n.path), before = await rec(n.path);
+      return { ...n, r, before, unchanged: async () => same(await rec(n.path), before) };
+    };
+    {
+      const f = await fresh();
+      const res = await edit(f.path, { ...f.r, ref: "another" }, { set: [{ id: f.ids[1], source: "z" }] });
+      ok(!res.ok && (await f.unchanged()), "E7b: an edit naming another document (ref) is refused, the file byte-identical", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "z" }, { id: "nosuch", source: "w" }] });
+      await sleep(800); // (past the component's save debounce)
+      ok(!res.ok && (await f.unchanged()) && (await shown())[1] === "print(2)", "E8: a valid change then an unknown id: refused whole, the file byte-identical, nothing changed here", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { remove: ["nosuch"] });
+      ok(!res.ok && (await f.unchanged()), "E9: a remove of an unknown id is refused, not ignored", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], type: "markdown" }] });
+      await sleep(800);
+      const ok1 = !res.ok && (await f.unchanged());
+      const g = await fresh();
+      const res2 = await edit(g.path, g.r, { set: [{ id: g.ids[2], type: "code" }] });
+      ok(ok1 && res2.ok && ((await rec(g.path)).cells[2].type ?? "code") === "code", "E10: code -> markdown on a cell with outputs is refused (it would drop them); markdown -> code is applied", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "z", outputs: [] }] });
+      const res2 = await edit(f.path, f.r, { set: [{ id: f.ids[1], type: "raw" }] });
+      await sleep(800);
+      ok(!res.ok && !res2.ok && res.code === "invalid" && (await f.unchanged()), "E11: an extra field, or a type outside the grammar, is refused whole by the page", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "a" }, { id: f.ids[1], source: "b" }] });
+      const res2 = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "a" }], remove: [f.ids[1]] });
+      await sleep(800);
+      ok(!res.ok && !res2.ok && (await f.unchanged()), "E19: an id named twice (set twice, or set and removed) is refused", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { insert: Array.from({ length: 201 }, (_, i) => ({ source: `${i}`, after: null })) });
+      await sleep(800);
+      const ok1 = !res.ok && (await f.unchanged());
+      const g = await fresh();
+      const res2 = await edit(g.path, g.r, { insert: Array.from({ length: 200 }, (_, i) => ({ source: `${i}`, after: null })) });
+      ok(ok1 && res2.ok && (await rec(g.path)).cells.length === 203, "E20: 201 changes are refused; 200 in one edit are applied", [res, res2.ok || res2]);
+    }
+    // E12, E13: no notebook is rewritten whole: create on a taken path, a raw write from this helper
+    {
+      const { path } = await mk();
+      const before = await rec(path);
+      const c = await call("workspace.create", { path, content: docFor(path, [{ code: "over" }]), mode: "python" }).then(() => "made", (e) => e.code);
+      ok(c === "exists" && same(await rec(path), before), "E12: create on a taken notebook path is refused, the file byte-identical", c);
+    }
+    {
+      // (its own notebook: what E12 does to its one never reaches this case)
+      const { path } = await mk();
+      const before = await rec(path);
+      const r = await call("workspace.read", { path });
+      const w = await call("workspace.write", { path, content: docFor(path, [{ code: "over" }]), base: r.rev }).then(() => "written", (e) => e.message);
+      ok(/workspace_edit_notebook/.test(w) && same(await rec(path), before), "E13: a whole write of a notebook from a notebook.edit helper is refused", w);
+    }
+    // E14: a notebook not open, the pane closed: the page opens it, then applies
+    {
+      const { path, ids } = await mk();
+      if (await ev(`!!document.querySelector('#close')`)) { await ev(`document.querySelector('#close').click()`); await until(`!document.body.classList.contains('has-artifact')`, 10000); }
+      const r = await readOf(path);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 7" }] });
+      ok(res.ok && (await ev(`!!${tabJs(path)}`)) && (await rec(path)).cells[0].code === "x = 7", "E14: a notebook that isn't open is opened (its tab), then edited", res);
+    }
+    // E18: applyEdits throwing after its first change (a test hook): put back, nothing saved, during or after
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await ev(`(window.__sbTestApplyEdits = (comp, e) => { comp.applyEdits({ set: e.set.slice(0, 1), insert: [], remove: [] }, { run: false }); throw new Error("injected"); }, true)`);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 8" }, { id: ids[1], source: "print(8)" }] });
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      const now = await rec(path);
+      await sleep(1500); // (past the component's save debounce: no late save)
+      const later = await rec(path);
+      ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
+    }
+    // E16a (read only under sync's journal), E16b (closing): refused, nothing changed
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await lockWorkspace();
+      await ev(`document.querySelector('#close').click()`);
+      await sleep(300);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 9" }] });
+      await ev(`window.__release()`);
+      await sleep(500);
+      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
+    }
+    {
+      const fence0 = await record(FENCE);
+      try {
+        const { path, ids } = await mk();
+        const r = await readOf(path);
+        const before = await rec(path);
+        await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 });
+        await open(path);
+        const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 10" }] });
+        ok(!res.ok && /read only/.test(res.msg) && same(await rec(path), before), "E16a: under sync's journal the pane is read only: an edit is refused, nothing changed", res);
+      } finally {
+        if (fence0) await putRecord(fence0);
+      }
+    }
+    // E21 (astra's C1): the authority lost while the edit waits, at each of its waits W1-W4 (r2.6), by the turn
+    // finishing (a) or the person revoking the grant (b); E21c: another turn started meanwhile. Refused, nothing changed.
+    const lose = async (how) => {
+      if (how === "a") event(turn, { type: "turn_finished", outcome: "completed" });
+      else if (how === "c") { event(turn, { type: "turn_finished", outcome: "completed" }); newTurn(); }
+      else await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Revoke')?.click()`);
+    };
+    // (after a revoke: paired again, a new chat and turn, as before this section's first case)
+    const regain = async (how) => {
+      if (how === "b") { await ev(`document.querySelector('#new')?.click()`); await sleep(700); await pair(); await converse(); turn = `t${++turnN}`; event(turn, { type: "turn_started" }); }
+      else if (how === "a") newTurn();
+    };
+    for (const w of ["W1", "W2", "W3", "W4"]) for (const how of w === "W3" ? ["a", "b", "c"] : ["a", "b"]) {
+      const { path, ids } = await mk();
+      if (w !== "W1") await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      if (w === "W1") await holdDb("sagebrush-workspace", "entries", 3000); // (its mount's stat waits)
+      if (w === "W2") { await lockWorkspace(); await typeInto(0, " # mine"); } // (its preliminary save waits for the lock)
+      if (w === "W3") await holdDb("sagebrush", "notebooks", 3000); // (the record read waits)
+      if (w === "W4") await holdDb("sagebrush-workspace", "entries", 3000); // (the document's stat waits; the record read doesn't)
+      const pending = edit(path, r, { set: [{ id: ids[1], source: "print('AGENT')" }] });
+      await sleep(700);
+      await lose(how);
+      if (w === "W2") await ev(`window.__release()`);
+      const res = await pending;
+      await sleep(900);
+      const after = await rec(path);
+      const agentNone = !after.cells.some((c) => /AGENT/.test(c.code ?? ""));
+      const name = how === "c" ? "E21c" : `E21-${w}${how}`;
+      const what = how === "a" ? "the turn finished" : how === "b" ? "the grant was revoked" : "another turn started";
+      ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
+      await regain(how === "c" ? "none" : how);
+    }
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
+    // resolves: never answered ok, nothing applied or written
+    const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      await refuseNone();
+      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await typeInto(0, " # p");
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(23)" }] });
+      await refuseNone();
+      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(await rec(path), before) && /# p/.test((await shown())[0]) && (await shown())[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
+    }
+    // E23, E23b (C3): the rollback keeps the revision it was saved at, so the person's next save conflicts with another
+    // tab's change and merges it: E23 with that change made after the rollback, E23b with it made during the apply
+    const otherTab = (ref, i, text) => ev(`(async () => { const r = await ${IDB}.get(${JSON.stringify(ref)}); r.cells[${i}].code = ${JSON.stringify(text)}; r.rev = (r.rev ?? 0) + 1; await ${IDB}.put(r); return r.rev; })()`);
+    for (const during of [false, true]) {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const ref = refs.get(path);
+      // (during: the hook writes the other tab's change, as that tab would, before it throws)
+      const inPage = `const x = await ${IDB}.get(${JSON.stringify(ref)}); x.cells[2].code = "# other tab"; x.rev = (x.rev ?? 0) + 1; await ${IDB}.put(x);`;
+      await ev(`(window.__sbTestApplyEdits = (comp, e) => { comp.applyEdits({ set: e.set.slice(0, 1), insert: [], remove: [] }, { run: false }); ${during ? `return (async () => { ${inPage} throw new Error("injected"); })();` : `throw new Error("injected");`} }, true)`);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 8" }, { id: ids[1], source: "print(8)" }] });
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      if (!during) await otherTab(ref, 2, "# other tab");
+      await typeInto(1, " # mine");
+      await sleep(2500); // (its save, its conflict with the other tab's write, the merge and its save)
+      const cs = (await rec(path)).cells;
+      ok(!res.ok && cs[2].code === "# other tab" && /# mine/.test(cs[1].code) && cs[0].code === "x = 1", `${during ? "E23b" : "E23"}: after a rollback, another tab's change (made ${during ? "during the apply" : "after it"}) and the person's next edit both survive`, { res, cs: cs.map((c) => c.code) });
+    }
+    // E25 (grader's D-1): an edit that changes nothing (each cell set to what it is) is answered ok, the record and its
+    // revision unchanged, and nothing saved
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await ev(`(() => { window.__sbSaves = 0; window.__sbTestStoreSave = () => { window.__sbSaves++; return null; }; return true; })()`);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(2)" }] });
+      await sleep(900);
+      const saves = await ev(`window.__sbSaves`);
+      await refuseNone();
+      const after = await rec(path);
+      ok(res.ok && same(after, before) && after.rev === before.rev && saves === 0, "E25: an edit that changes nothing is answered ok; the record and its revision unchanged, nothing saved", { res, saves, rev: [before.rev, after.rev] });
+    }
+    // E24 (board's BA12-1): the person types in another artifact while the agent edits a notebook, first one not open,
+    // then one open in a hidden tab: the pane stays, the focus and the caret too, and the notebook's tab says it changed
+    {
+      // (in a chat of its own, so what an earlier case left open doesn't reach this one)
+      await converse();
+      newTurn();
+      const draft = "/notes/draft.txt";
+      await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
+      await artifactTurn(draft, { finish: false, turn });
+      await until(`!!document.querySelector('${PANE} textarea')`);
+      // (A, the draft's textarea, tagged when focused: E28's person moves A's caret in A itself, wherever the pane is)
+      const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.dataset.sbA = "1"; t.focus(); t.setSelectionRange(3, 3); return true; })()`);
+      const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      const results = [];
+      for (const hidden of [false, true]) {
+        const { path, ids } = await mk();
+        if (hidden) { await open(path); await ev(`${tabJs(draft)}.click()`); await sleep(300); }
+        await focusDraft();
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: ids[1], source: "print(24)" }] });
+        await sleep(300);
+        const st = await state();
+        const changedTab = await ev(`/changed/.test(${tabJs(path)}?.textContent ?? '')`);
+        const stored = (await rec(path)).cells[1].code === "print(24)";
+        results.push({ hidden, res: res.ok, st, changedTab, stored });
+      }
+      ok(results.every((x) => x.res && x.st.tab === draft && x.st.inDraft && x.st.caret === 3 && x.changedTab && x.stored), "E24: the agent's edit of a notebook (not open, then in a hidden tab) leaves the shown tab, the focus and the caret as they were; its tab says it changed; the edit is stored", results);
+      // E26-E28 (astra's A12-R2-F1, board's ruling): the person's own choice while the edit waits (W1: a notebook not
+      // open, its mount; W4: one in a hidden tab, the document's stat) is kept: E26 they move to input B and put its
+      // caret at 2, the edit ok; E27 the same, the edit refused (the turn finished); E28 they move A's caret 3 -> 5, ok
+      await ev(`(() => { const b = document.createElement('input'); b.id = 'sbtest-b'; b.value = 'bbbbbb'; document.body.append(b); return true; })()`);
+      const stateB = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, id: t?.id, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      for (const [name, refuse] of [["E26", false], ["E27", true], ["E28", false]]) {
+        const got = [];
+        for (const w of ["W1", "W4"]) {
+          const { path, ids } = await mk();
+          // (the draft shown first, at W1 too: what an earlier case left in the pane doesn't decide this one)
+          if (w === "W4") await open(path);
+          await ev(`${tabJs(draft)}.click()`);
+          await sleep(300);
+          await focusDraft();
+          const r = await readOf(path);
+          await holdDb("sagebrush-workspace", "entries", 3000);
+          const pending = edit(path, r, { set: [{ id: ids[1], source: `print(${name})` }] });
+          await sleep(700);
+          if (name === "E28") await ev(`(() => { const t = document.querySelector('textarea[data-sb-a]'); t.focus(); t.setSelectionRange(5, 5); return true; })()`);
+          else await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
+          if (refuse) await lose("a");
+          const res = await pending;
+          await sleep(300);
+          got.push({ w, res: res.ok, st: await stateB() });
+          if (refuse) newTurn();
+        }
+        const want = (x) => x.res === !refuse && x.st.tab === draft && (name === "E28" ? x.st.inDraft && x.st.caret === 5 : x.st.id === "sbtest-b" && x.st.caret === 2);
+        ok(got.every(want), `${name}: the person ${name === "E28" ? "moves the caret in the draft (3 to 5)" : "moves to another input"} while the edit waits (at W1, at W4), the edit ${refuse ? "refused" : "ok"}: the focus and caret stay where they put them`, got);
+      }
+      // E29: the person, in input B (visible, outside the pane: what a wrong restore could put the focus back on),
+      // shows the notebook while the edit waits (W4) and clicks into its first cell (caret 1): the focus stays there
+      {
+        const { path, ids } = await mk();
+        await open(path);
+        await ev(`${tabJs(draft)}.click()`);
+        await sleep(300);
+        await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
+        const r = await readOf(path);
+        await holdDb("sagebrush-workspace", "entries", 3000);
+        const pending = edit(path, r, { set: [{ id: ids[1], source: "print(29)" }] });
+        await sleep(700);
+        await ev(`${tabJs(path)}.click()`);
+        await sleep(300);
+        await ev(`(() => { const t = ${cellJs(0)}.querySelector('textarea'); t.focus(); t.setSelectionRange(1, 1); return true; })()`);
+        const res = await pending;
+        await sleep(300);
+        const st = await ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, inCell: !!t?.closest('#artifacts .cell') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+        ok(res.ok && st.tab === path && st.inCell && st.caret === 1, "E29: the person, in another input, shows the notebook while the edit waits and clicks into a cell: the focus and caret stay there", { res, st });
+      }
+      await ev(`(document.getElementById('sbtest-b')?.remove(), true)`);
+    }
+    event(turn, { type: "turn_finished", outcome: "completed" });
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
