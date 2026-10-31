@@ -6,6 +6,7 @@ import { ShellHost } from "./host.ts";
 import { startShell } from "./loader.ts";
 import { TerminalPanel } from "./panel.ts";
 import { terminalCommands, type PageHooks } from "./panel-commands.ts";
+import { panelTab } from "./panel-tab.ts";
 import { gatherPresence, type Proc } from "./presence.ts";
 
 export interface OpenTerminal {
@@ -28,6 +29,6 @@ const INTRO = "Commands here change the files in your workspace right away, as t
 /** A terminal panel on a new ShellHost; ✕ ends its shell too. */
 export function openTerminal(o: OpenTerminal): TerminalPanel {
   const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, o.base ?? "./", { signal })).shell);
-  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }) });
+  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }), tab: panelTab(host) });
   return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }
