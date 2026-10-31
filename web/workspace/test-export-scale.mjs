@@ -19,15 +19,19 @@
 // In CI (grader's Q10): node web/workspace/test-export-scale.mjs --ci: N = 70,000 (past Zip64's 65,535 members), the live
 // pass only, its archive read by zipfile AND unzip -t; the timing and peak passes stay local.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { judgeRun, majorGcs, maxGap } from "./export-campaign-check.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const CI = process.argv.includes("--ci");
 const N = Number(process.env.N ?? (CI ? 70000 : 100000));
 const MiB = 2 ** 20;
+// (the alloc pass: an unminified build of the chunk and the worker, served in place of the built ones, so that the
+// heap profile names their functions)
+const chunk = process.env.CHUNK ? readFileSync(process.env.CHUNK) : null, chunkWorker = process.env.CHUNK_WORKER ? readFileSync(process.env.CHUNK_WORKER) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fails = [];
 let checks = 0;
@@ -52,11 +56,19 @@ async function open() {
     if (m.method === "Target.attachedToTarget" && /sagebrush-export-worker/.test(m.params.targetInfo?.url ?? "")) worker = m.params.sessionId;
     if (m.method === "Target.detachedFromTarget" && m.params.sessionId === worker) worker = null;
     if (/^Tracing\./.test(m.method ?? "")) self.onTrace?.(m);
+    // (paused at the response, its headers kept: a worker's script needs the page's Cross-Origin-Embedder-Policy)
+    if (m.method === "Fetch.requestPaused") {
+      const body = /sagebrush-export-worker\.js/.test(m.params.request.url) ? chunkWorker : chunk;
+      const headers = (m.params.responseHeaders ?? []).filter((h) => !/^(content-length|content-encoding|etag|last-modified)$/i.test(h.name));
+      if (body) send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: headers, body: body.toString("base64") });
+      else send("Fetch.continueRequest", { requestId: m.params.requestId });
+    }
   };
   const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  if (chunk || chunkWorker) await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-export*.js*", requestStage: "Response" }] });
   const close = async () => { ws.close(); chrome.kill(); await sleep(1000); rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); };
   const self = { send, ev, until, errors, worker: () => worker, close, onTrace: null };
   return self;
@@ -258,6 +270,75 @@ try {
       check(c.errors.length === 0, "resp: no page errors: " + c.errors.slice(0, 3).join(" | "));
     } finally { await c.close(); }
   }
+  // ---- capid (E1 r2a, daybreak2's and grader's buffering controls): the capture log at N entries, as the tree check's
+  // lookup reads it after its settle, byte for byte the log an unbuffered writer makes: a reference built in the page
+  // from the raw IndexedDB rows, in their key (path) order, Trash and the root left out.  A file written after its
+  // capture makes an accepted write, so the lookup runs and reads the whole log.
+  if (PASSES.has("capid")) {
+    const c = await open();
+    try {
+      await prepare(c);
+      await c.ev(`window.sagebrush.workspace.create("/zz-capid.csv", { content: "a\\n" }).then(() => 1)`);
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined, afterCapture: async (p) => { if (p === "/zz-capid.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, onLookup: (x) => { window.__lookupAt = x; }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`));
+      await c.ev(btn("/^Export all current files/"));
+      await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      await c.ev(btn("/^Save…$/"));
+      const ended = await c.until(`!!window.__exp`, 1200000);
+      const r = await c.ev(`(async () => {
+        const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
+        const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n");
+        const ref = new Blob(lines), got = new Blob(window.__cap ?? []);
+        return { lines: lines.length, refBytes: ref.size, gotBytes: got.size, ref: await hex(ref), got: await hex(got), at: window.__lookupAt ?? null };
+      })()`);
+      check(ended, "capid: the export ends");
+      check(r.at && r.at.chunks >= 1 && r.lines >= N, "capid: the lookup ran with the log past its first flush: " + JSON.stringify(r.at) + ", " + r.lines + " lines");
+      check(r.got === r.ref && r.gotBytes === r.refBytes, `capid: the capture log as the lookup read it is byte for byte the unbuffered reference (${r.gotBytes} bytes, sha256 ${r.got.slice(0, 16)} / ${r.ref.slice(0, 16)})`);
+    } finally { await c.close(); }
+  }
+
+  // ---- alloc (E1 r2a, the transient-heap follow-up: what the ~170 MiB high-water is made of; information only): V8's
+  // sampling heap profiler over one export, on the page and on the worker, keeping the samples of objects that either
+  // collector has freed, so the profile is what was allocated, not what is live.  Run with CHUNK and CHUNK_WORKER set to
+  // unminified builds, so the export's own functions are named; the page's bundle stays minified, its allocations
+  // reported by script.
+  if (PASSES.has("alloc")) {
+    const c = await open();
+    try {
+      await prepare(c);
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: () => stop("baseline")`));
+      const opts = { samplingInterval: 8192, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true };
+      await c.ev(btn("/^Export all current files/"));
+      await at(c, "baseline", 60000);
+      const w = c.worker();
+      await c.send("HeapProfiler.enable"); await c.send("HeapProfiler.startSampling", opts);
+      if (w) { await c.send("HeapProfiler.enable", {}, w); await c.send("HeapProfiler.startSampling", opts, w); }
+      const marks = [Date.now()];
+      await go(c);
+      await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      marks.push(Date.now());
+      await c.ev(btn("/^Save…$/"));
+      const ended = await c.until(`!!window.__exp`, 1200000);
+      marks.push(Date.now());
+      const main = (await c.send("HeapProfiler.stopSampling")).profile;
+      const wk = w ? (await c.send("HeapProfiler.stopSampling", {}, w))?.profile : null;
+      check(ended, "alloc: the export ends");
+      // (self sizes summed by function and script: each sample's selfSize is the bytes sampled at that frame)
+      const sum = (profile, who) => {
+        const by = new Map(); let total = 0;
+        const walk = (n) => { const f = n.callFrame, src = (f.url || "(native)").replace(/^.*\//, ""); const key = `${who} ${f.functionName || "(anonymous)"} ${src}:${f.lineNumber + 1}`; if (n.selfSize) { by.set(key, (by.get(key) ?? 0) + n.selfSize); total += n.selfSize; } for (const k of n.children ?? []) walk(k); };
+        if (profile) walk(profile.head);
+        return { by, total };
+      };
+      const m = sum(main, "page"), k = sum(wk, "worker");
+      const byScript = new Map();
+      for (const [key, v] of [...m.by, ...k.by]) { const sc = key.split(" ")[0] + " " + key.replace(/:\d+$/, "").split(" ").pop(); byScript.set(sc, (byScript.get(sc) ?? 0) + v); }
+      console.log(`(alloc: sampled allocations over preflight ${((marks[1] - marks[0]) / 1000).toFixed(1)} s and writing ${((marks[2] - marks[1]) / 1000).toFixed(1)} s: page ${(m.total / MiB).toFixed(1)} MiB, worker ${(k.total / MiB).toFixed(1)} MiB)`);
+      console.log("(alloc by script, MiB: " + JSON.stringify([...byScript].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([s, v]) => [s, +(v / MiB).toFixed(1)])) + ")");
+      console.log("(alloc by function, top 25, MiB: " + JSON.stringify([...m.by, ...k.by].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([s, v]) => [s, +(v / MiB).toFixed(1)])) + ")");
+    } finally { await c.close(); }
+  }
+
   // ---- profile (E1 r2, @sagebrush's (c); the rules fixed before the run:
   // /scratch/sagebrush-reviews/e1-r2-profile-rules/RULES.md): each stall of the progress line's numbers over 250 ms after
   // the first member, classified by the heartbeat and the writing loop's waits (run.ts's probe).  Information only.
@@ -319,8 +400,10 @@ try {
     const c = await open();
     try {
       await prepare(c);
-      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`).replace(`window.__exp = { blob, name, then };`, `window.__expT = performance.now(); window.__exp = { blob, name, then };`));
       const events = [];
+      // (campaign 3: the progress line's rewrites and a 20 ms heartbeat, in the page, as the resp pass measures them)
+      await c.ev(`(() => { window.__raw = []; window.__hb = []; window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20); new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; if (/ written/.test(t)) window.__raw.push(performance.now()); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
       await c.ev(`(() => { window.__tasks = []; window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__tasks.push([e.startTime, e.duration]); }); window.__lto.observe({ type: "longtask", buffered: false }); return 1; })()`);
       // (C8, in this context, from a page timer)
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = Math.max(0, ...window.__tasks.map((x) => x[1])); window.__tasks = []; ok(l); }, 400); })`);
@@ -339,6 +422,7 @@ try {
       const m2 = await c.ev(`performance.mark("sb-sync-2").startTime`);
       await sleep(200);
       const tasks = await c.ev(`window.__tasks`);
+      const page = await c.ev(`(() => { clearInterval(window.__hbt); const r = window.__raw, a = r[0], b = r[r.length - 1]; return { raw: r, hb: window.__hb.filter((t) => t >= a && t <= b), endT: window.__expT ?? null }; })()`);
       await c.send("Tracing.end");
       await done;
       const mark = (name) => events.find((e) => e.name === name && /user_timing/.test(e.cat ?? ""));
@@ -367,6 +451,13 @@ try {
       for (const t of out) console.log("(trace: long task " + JSON.stringify(t) + ")");
       const gcs = onMain.filter((e) => /^MajorGC$/.test(e.name) && e.dur > 20000).map((e) => Math.round(e.dur / 1000));
       console.log("(trace: main-thread MajorGC over 20 ms during the trace: " + JSON.stringify(gcs) + ")");
+      // (campaign 3, the frozen parser and gate: MajorGC on the main thread from the click to the handoff, whether or
+      // not inside a task; the progress line's longest rewrite gap; the heartbeat's, reported only)
+      const win = [(clickT + offset) * 1000, ((page.endT ?? m2) + offset) * 1000];
+      const record = { c8: Math.round(c8), mapped, ended, errored: c.errors.length > 0, longTasks: out.map((t) => ({ ms: t.ms, class: t.class })), majorGc: mapped ? majorGcs(events, win[0], win[1]) : [], progressGap: Math.round(maxGap(page.raw)), progressWrites: page.raw.length, heartbeatGap: Math.round(maxGap(page.hb)) };
+      const j = judgeRun(record);
+      console.log("(campaign: run record " + JSON.stringify({ ...record, majorGcOver20: record.majorGc.filter((g) => g > 20).map((g) => Math.round(g)), verdict: { valid: j.valid, fix: j.fix, longNonExport: j.longNonExport } }) + ")");
+      if (process.env.TRACE_OUT) { const f = join(process.env.TRACE_OUT, `trace-${Date.now()}.json`); writeFileSync(f, JSON.stringify({ window: win, run: record, events })); console.log("(campaign: the trace saved to " + f + ")"); }
     } finally { await c.close(); }
   }
   // ---- cancel: in a fresh context, an export cancelled when about half the members are written: the click to the

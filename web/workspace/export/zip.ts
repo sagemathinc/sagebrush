@@ -114,6 +114,8 @@ export class Spool {
   size = 0;
   /** (tests) chunks flushed */
   chunks = 0;
+  /** Bytes appended and not yet written out (at most SLICE). */
+  get buffered() { return this.used; }
   constructor(private name: string, private wk: ExportWorker | null, private cap: number) {}
   async open() { if (this.wk) await this.wk.ask("open", { name: this.name, fail: (globalThis as any).__SB_EXPORT_TEST__?.failOpen === "spool" ? "truncate" : undefined }); }
   async append(b: Uint8Array) {
@@ -129,6 +131,15 @@ export class Spool {
     this.size += b.length;
   }
   /** Text appended as UTF-8, encoded straight into the buffer (no array per record). */
+  /** `s` written into the buffer now if it takes all of it with room left (null); else what is left of `s`, for
+   * appendText (which flushes). Synchronous, so a caller with many small lines makes no promise per line. */
+  putText(s: string): string | null {
+    const r = enc.encodeInto(s, this.buf.subarray(this.used));
+    this.used += r.written;
+    this.size += r.written;
+    if (this.size > this.cap) throw new ExportStopped(`the export's index grew past ${this.cap} bytes`);
+    return r.read === s.length && this.used < SLICE ? null : s.slice(r.read);
+  }
   async appendText(s: string) {
     let rest = s;
     for (;;) {
@@ -153,7 +164,14 @@ export class Spool {
   /** Every byte appended, in order, in slices of at most 1 MiB. */
   async *replay(): AsyncGenerator<Uint8Array> {
     await this.flush();
-    for (let at = 0; at < this.size; at += SLICE) {
+    yield* this.read();
+  }
+  /** What is in the buffer, written out: after it, read() sees everything appended. */
+  async settle() { await this.flush(); }
+  /** What has been written out, in order, in 1 MiB slices, WITHOUT a flush first: the caller settles (the capture
+   * log's lookup, its only reader, does, E1 r2a). */
+  async *read(): AsyncGenerator<Uint8Array> {
+    for (let at = 0; at < this.size - this.used; at += SLICE) {
       if (this.wk) yield await this.wk.ask<Uint8Array>("read", { name: this.name, at, len: SLICE });
       else yield new Uint8Array(await new Blob(this.parts).slice(at, at + SLICE).arrayBuffer());
     }
