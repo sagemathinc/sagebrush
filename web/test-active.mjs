@@ -175,7 +175,10 @@ class Browser {
   async start() {
     browsers.add(this);
     this.profile = mkdtempSync(join(tmp, "chrome-"));
-    this.proc = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${this.profile}`, `--host-resolver-rules=MAP sagebrush.space 127.0.0.1:${front.port}`, "--ignore-certificate-errors", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    this.proc = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${this.profile}`, `--host-resolver-rules=MAP sagebrush.space 127.0.0.1:${front.port}`, "--ignore-certificate-errors",
+      // (no OS keyring: where a D-Bus session bus exists without one, Chrome's first run otherwise waits out D-Bus's 25 s
+      // timeout before the first page loads (Chrome 155, VM2); found with a minimal repro, auth-msgs/c155-repro.mjs)
+      "--password-store=basic", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
     this.port = await new Promise((ok, no) => { let b = ""; const t = setTimeout(() => no(new Error("no DevTools")), 30000); this.proc.stderr.on("data", (d) => { b += d; const m = /DevTools listening on ws:\/\/[^:]+:(\d+)\//.exec(b); if (m) { clearTimeout(t); ok(Number(m[1])); } }); });
     let ts; for (let i = 0; i < 300 && !ts; i++) { try { ts = await (await fetch(`http://127.0.0.1:${this.port}/json`)).json(); } catch { await sleep(100); } }
     this.first = ts.find((t) => t.type === "page");
@@ -245,8 +248,9 @@ const results = new Map();
 const c = (id, ok, what) => { if (process.env.TRACE) console.log(`  ${ok ? "ok" : "FAIL"} ${id} (${new Date().toISOString().slice(11, 19)})${ok ? "" : ": " + what}`); if (!results.has(id)) results.set(id, true); if (!ok) { results.set(id, false); if (process.env.SHOW_FAILS) console.log(`  fail ${id}: ${what}`); } };
 const reset = () => { stub.requests.length = 0; stub.mode = null; stub.hold = null; stub.skew = 0; };
 const posts = () => stub.requests.filter((r) => !r.unlisted);
-/** the held POST's arrival, bounded (15 s) */
-const heldArrival = () => Promise.race([new Promise((r) => (stub.holdArrived = r)), sleep(15000).then(() => { throw new Error("the held POST never arrived"); })]);
+/** the held POST's arrival, bounded (60 s: a hang guard only, never a measured bound; it covers the tabs' opening,
+ * which a loaded host or a first run can make slow) */
+const heldArrival = () => Promise.race([new Promise((r) => (stub.holdArrived = r)), sleep(60000).then(() => { throw new Error("the held POST never arrived"); })]);
 const DAY = 86400;
 async function fresh(pre = "") { const b = new Browser(); await b.start(); const t = await b.tab(pre); return { b, t }; }
 /** a page load with idle held, then released; waits for its ping (or for quiet) */
