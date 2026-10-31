@@ -22,8 +22,12 @@ import { join, relative } from "node:path";
 // every host (its text in terminal.ts, outside these inputs); raised to 9 792 B by daybreak2's E5.6 ceiling ruling on
 // the dismissible intro (terminal-intro-dismiss-e56-size-ruling-daybreak2.md, 38b3b43a; bun 1.4.4 measured 9 741 B,
 // +74): its "Got it" (William, Oct 30: "it needs to be dismissible"), kept per device in the site's localStorage
-// preferences, the input's description corrected and its focus restored, and the button's font and margin
-const LIMIT = 9792;
+// preferences, the input's description corrected and its focus restored, and the button's font and margin; raised to
+// 9 856 B by daybreak2's E5.6 ceiling ruling on the terminal's help/Tab (terminal-help-tab-e56-size-ruling-daybreak2.md;
+// bun 1.4.4 measured base 9 756 B, candidate 280e0b58 9 820 B, +64): only the panel's integration surface (the `tab`
+// option's calls: Tab, the input and Enter resets, help NAME's route, the ls colour call); Tab completion, help,
+// compgen and the colours themselves are web/shell/complete.ts and panel-tab.ts, outside these inputs
+const LIMIT = 9856;
 const here = import.meta.dir;
 const root = join(here, "..", "..");
 const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);
