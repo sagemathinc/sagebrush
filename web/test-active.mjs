@@ -105,12 +105,63 @@ const INSTRUMENT = `(() => {
     navigator.locks.request = function (name, ...a) { c.locks++; c.lockNames.push(name); if (window.__lockReject) return Promise.reject(new Error("locks refused")); return req(name, ...a); };
   }
   if (window.__noLocks) Object.defineProperty(navigator, "locks", { value: undefined, configurable: true });
+  // (IndexedDB: every page call counted in c.idb; window.__idb* switches inject faults; __orig is the harness's own,
+  // uncounted path to the store)
+  c.idb = {}; c.rw = 0;
+  const n = (k) => (c.idb[k] = (c.idb[k] ?? 0) + 1);
+  const F = IDBFactory.prototype, D = IDBDatabase.prototype, OS = IDBObjectStore.prototype;
+  const o = window.__orig = { open: F.open, tx: D.transaction, close: D.close, get: OS.get, put: OS.put, del: OS.delete, clear: OS.clear };
+  let opens = 0;
+  const fake = () => ({ result: undefined, error: null });
+  F.open = function (name, ...a) {
+    if (name !== "sb-active") return o.open.call(this, name, ...a);
+    n("open"); opens++;
+    const f = window.__idbOpen, nth = window.__idbOpenFrom ?? 1;
+    if (!f || opens < nth) return o.open.call(this, name, ...a);
+    const r = fake();
+    if (f === "error") setTimeout(() => r.onerror?.({}), 0);
+    else if (f === "blocked") setTimeout(() => r.onblocked?.({}), 0);
+    else if (f === "late") setTimeout(() => { const q = o.open.call(this, name, ...a); q.onupgradeneeded = (e) => { r.result = q.result; r.onupgradeneeded?.(e); }; q.onsuccess = (e) => { r.result = q.result; r.onsuccess?.(e); }; q.onerror = (e) => r.onerror?.(e); }, 7000);
+    // ("hang": never settles)
+    return r;
+  };
+  D.close = function () { if (this.name === "sb-active" && !this.__harness) n("close"); return o.close.call(this); };
+  D.transaction = function (store, mode, ...a) {
+    const tx = o.tx.call(this, store, mode, ...a);
+    if (this.name !== "sb-active" || this.__harness) return tx;
+    n("tx:" + (mode ?? "readonly"));
+    if (window.__idbTxFail === (mode ?? "readonly")) setTimeout(() => { try { tx.abort(); } catch {} }, 0);
+    if (mode === "readwrite") {
+      c.rw++;
+      const h = window.__idbHold;
+      // (held: the transaction kept alive by a get from each get's success, until released or forever)
+      if (h && (h.nth === undefined || h.nth === c.rw)) {
+        window.__idbHeld = true; const st = tx.objectStore(store);
+        const loop = () => { if (window.__idbHold === h && !h.released) { const q = o.get.call(st, "__hold"); q.onsuccess = loop; } else window.__idbHeld = false; };
+        loop();
+      }
+    }
+    return tx;
+  };
+  window.__idbRelease = () => { if (window.__idbHold) window.__idbHold.released = true; };
+  const wrap = (m, f) => function (...a) {
+    if (this.transaction?.db?.__harness) return f.apply(this, a);
+    const key = m === "put" ? a[1] : a[0];
+    if (key !== "__hold") n(m + (key === undefined ? "" : ":" + key));
+    if (window.__idbPutFail && m === "put") { try { this.transaction.abort(); } catch {} }
+    if (window.__idbClearFail && m === "clear") { try { this.transaction.abort(); } catch {} }
+    return f.apply(this, a);
+  };
+  OS.get = wrap("get", o.get); OS.put = wrap("put", o.put); OS.delete = wrap("delete", o.del); OS.clear = wrap("clear", o.clear);
+  // (the harness's own access: an uncounted connection, flagged so no wrapper counts or faults it)
+  window.__notes = (fn) => new Promise((res) => { const r = o.open.call(indexedDB, "sb-active", 1); r.onupgradeneeded = () => r.result.createObjectStore("notes"); r.onerror = () => res({ err: true }); r.onsuccess = () => { const db = r.result; db.__harness = true; const tx = o.tx.call(db, "notes", "readwrite"); const st = tx.objectStore("notes"); const out = fn(st); tx.oncomplete = () => { o.close.call(db); res(out()); }; tx.onabort = () => { o.close.call(db); res({ err: true }); }; }; });
   const f = window.fetch.bind(window);
   window.fetch = (u, init) => { if (String(u).endsWith("/api/active")) c.fetch++; return f(u, init); };
   const st = window.setTimeout.bind(window);
-  window.setTimeout = (fn, ms, ...a) => { if (!c.released && ms === 10000) c.timers++; return st(fn, ms, ...a); };
+  c.t5 = { set: 0, fired: 0 };
+  window.setTimeout = (fn, ms, ...a) => { if (!c.released && ms === 10000) c.timers++; if (ms === 5000) { c.t5.set++; return st((...b) => { c.t5.fired++; return fn(...b); }, ms, ...a); } return st(fn, ms, ...a); };
   window.requestIdleCallback = (cb) => { c.idle.push(cb); return c.idle.length; };
-  window.__releaseIdle = () => { c.before = JSON.parse(JSON.stringify({ get: c.get, set: c.set, rm: c.rm, locks: c.locks, fetch: c.fetch })); c.released = true; for (const cb of c.idle.splice(0)) cb({ didTimeout: false, timeRemaining: () => 50 }); };
+  window.__releaseIdle = () => { c.before = JSON.parse(JSON.stringify({ get: c.get, set: c.set, rm: c.rm, locks: c.locks, fetch: c.fetch, idb: c.idb })); c.released = true; for (const cb of c.idle.splice(0)) cb({ didTimeout: false, timeRemaining: () => 50 }); };
 })();`;
 const browsers = new Set();
 /** every case runs to its end or fails as "threw" (its message shown): the browsers it started are stopped either way */
@@ -152,10 +203,21 @@ class Tab {
   // (loaded: the instrument ran and the document's scripts too, so a harness page's __sbHarness exists)
   async open(url = ORIGIN + "/") { await this.send("Page.navigate", { url }); for (let i = 0; i < 200; i++) { if (await this.ev("!!window.__c && document.readyState === 'complete'").catch(() => false)) return; await sleep(50); } throw new Error("page didn't load"); }
   async until(expr, ms = 10000) { const t = Date.now(); while (Date.now() - t < ms) { if (await this.ev(expr).catch(() => false)) return true; await sleep(50); } return false; }
-  state() { return this.ev(`({ a: localStorage.getItem("sb-active"), b: localStorage.getItem("sb-active-b"), consent: localStorage.getItem("sb-consent") })`); }
+  // (the notes, read on the harness's own uncounted connection; null when absent, else their JSON)
+  state() { return this.ev(`window.__notes((st) => { const ga = window.__orig.get.call(st, "a"), gb = window.__orig.get.call(st, "b"); return () => ({ a: ga.result === undefined ? null : JSON.stringify(ga.result), b: gb.result === undefined ? null : JSON.stringify(gb.result), consent: localStorage.getItem("sb-consent") }); })`); }
+  /** writes the notes given (a value, or undefined to leave it), on the harness's own connection */
+  seed(v) { return this.ev(`window.__notes((st) => { const v = ${J(v)}; for (const k of ["a", "b"]) if (k in v) { if (v[k] === null) window.__orig.del.call(st, k); else window.__orig.put.call(st, v[k], k); } return () => 1; })`); }
+  wipe() { return this.ev(`window.__notes((st) => { window.__orig.clear.call(st); return () => 1; })`); }
   counts() { return this.ev("JSON.parse(JSON.stringify(window.__c))"); }
   async close() { try { this.ws.close(); } catch {} }
 }
+
+// (in-page: whether this tab holds or waits on the count lock)
+const LOCK_FREE = `navigator.locks.query().then((q) => !q.held.some((h) => h.name === "sb-active") && !q.pending.some((h) => h.name === "sb-active"))`;
+const sees = (v) => `localStorage.getItem("sb-consent") === ${J(v)}`;
+const putsAB = (k) => (k.idb["put:a"] ?? 0) + (k.idb["put:b"] ?? 0);
+const getsAB = (k) => (k.idb["get:a"] ?? 0) + (k.idb["get:b"] ?? 0);
+const txs = (k) => (k.idb["tx:readonly"] ?? 0) + (k.idb["tx:readwrite"] ?? 0);
 
 // ---- results
 const results = new Map();
@@ -261,7 +323,7 @@ async function cases() {
   { reset(); const { b, t } = await fresh(`Object.defineProperty(Navigator.prototype, "globalPrivacyControl", { get: () => true, configurable: true });`);
     await load(t);
     const s = await t.state(), k = await t.counts();
-    c("C-1.gpc", posts().length === 0 && s.a === null && s.b === null && !k.set["sb-active"] && !k.set["sb-active-b"], `gpc: ${posts().length} posts, ${J(s)}`);
+    c("C-1.gpc", posts().length === 0 && s.a === null && s.b === null && putsAB(k) === 0, `gpc: ${posts().length} posts, ${J(s)} ${J(k.idb)}`);
     await b.stop(); }
   // C-2: only consent.ts (and the bundle that holds it) contains a measurement path
   { const hits = [];
@@ -274,12 +336,13 @@ async function cases() {
     c("C-2", hits.join() === "consent.ts" && distHits.join() === "index.html", `sources ${J(hits)}, dist ${J(distHits)}`); }
   // C-2a: consent "no": one consent read, the notes removed, no lock, timer or fetch after it
   { reset(); const { b, t } = await fresh();
-    await t.open(); await t.ev(`localStorage.setItem("sb-active-b", "{}"); localStorage.setItem("sb-consent", "no")`);
+    await t.open(); await t.seed({ a: { p: "b", ad: 0 }, b: { bd: 1, bw: 1, bm: 1 } }); await t.ev(`localStorage.setItem("sb-consent", "no")`);
     await load(t);
+    await t.until(`window.__notes((st) => { const g = window.__orig.get.call(st, "b"); return () => g.result === undefined; })`, 6000);
     const k = await t.counts(), s = await t.state();
-    c("C-2a", posts().length === 0 && k.locks === 0 && s.b === null && (k.get["sb-consent"] ?? 0) - (k.before.get["sb-consent"] ?? 0) === 1 && !(k.get["sb-active"] > (k.before.get["sb-active"] ?? 0)), `off: ${J(k)} ${J(s)}`);
-    await t.ev(`localStorage.setItem("sb-consent", "yes"); localStorage.setItem("sb-active-b", "{}"); __sbHarness.setMeasure(false)`);
-    c("C-2a", (await t.state()).b === null, "setMeasure(false) removes the note");
+    c("C-2a", posts().length === 0 && k.locks === 0 && s.a === null && s.b === null && (k.get["sb-consent"] ?? 0) - (k.before.get["sb-consent"] ?? 0) === 1 && getsAB(k) === 0 && (k.idb.clear ?? 0) === 1, `off: ${J(k)} ${J(s)}`);
+    await t.ev(`localStorage.setItem("sb-consent", "yes")`); await t.seed({ b: { bd: 1, bw: 1, bm: 1 } }); await t.ev("__sbHarness.setMeasure(false)");
+    c("C-2a", await t.until(`window.__notes((st) => { const g = window.__orig.get.call(st, "b"); return () => g.result === undefined; })`, 6000), "setMeasure(false) removes the note");
     await b.stop(); }
   // C-2c.lock: tab 2 waits on the lock while tab 1's request is held; tab 1 withdraws; tab 2 sends nothing
   { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
@@ -288,8 +351,12 @@ async function cases() {
     await t2.open(); await t2.ev("window.__releaseIdle()");
     const waiting = await t2.until(`navigator.locks.query().then((q) => q.pending.some((p) => p.name === "sb-active"))`, 5000);
     await t.ev("__sbHarness.setMeasure(false)");
-    stub.hold = null; release(); await sleep(800);
-    c("C-2c.lock", waiting && posts().length === 1, `tab 2 waiting ${waiting}; posts ${posts().length}`);
+    const seen = await t2.until(sees("no"), 5000);
+    stub.hold = null; release(); await t2.until(LOCK_FREE, 6000); await sleep(300);
+    const k2 = await t2.counts();
+    // (check 2 alone keeps tab 2 from its in-lock transaction, the one with the probe put; check 3 would stop the POST
+    // anyway.  Tab 2's other readwrite transaction is its listener's clear)
+    c("C-2c.lock", waiting && seen && posts().length === 1 && !k2.idb["put:w"], `tab 2 waiting ${waiting}, sees "no" ${seen}; posts ${posts().length}; tab 2 ${J(k2.idb)}`);
     await b.stop(); }
   // C-2c.persist: the answer held; consent withdrawn (this tab, then another tab): no note afterwards
   for (const where of ["self", "other"]) {
@@ -298,11 +365,53 @@ async function cases() {
     let release; stub.hold = new Promise((r) => (release = r)); const arrived = heldArrival();
     await t.open(); await t.ev("window.__releaseIdle()"); await arrived;
     await (t2 ?? t).ev("__sbHarness.setMeasure(false)");
-    stub.hold = null; release(); await sleep(800);
-    const s = await t.state();
-    c(`C-2c.persist.${where}`, s.a === null && s.b === null, `after a ${where} withdrawal: ${J(s)}`);
+    const seen = await t.until(sees("no"), 5000);
+    stub.hold = null; release(); await t.until(LOCK_FREE, 6000); await sleep(300);
+    const k = await t.counts(), s = await t.state();
+    // (check 4 alone keeps the persist from being created; the clears would remove its notes anyway)
+    c(`C-2c.persist.${where}`, seen && putsAB(k) === 0 && s.a === null && s.b === null, `after a ${where} withdrawal: ${J(s)} ${J(k.idb)}`);
     await b.stop();
   }
+  // C-2c.admit: the in-lock transaction held; a withdrawal during it (this tab, then another); released: no POST (check 3)
+  for (const where of ["self", "other"]) {
+    reset(); const { b, t } = await fresh(); const t2 = where === "other" ? await b.tab() : null;
+    if (t2) await t2.open();
+    await t.open(); await t.ev("window.__idbHold = { nth: 1 }"); await t.ev("window.__releaseIdle()");
+    const held = await t.until("window.__idbHeld === true", 5000);
+    await (t2 ?? t).ev("__sbHarness.setMeasure(false)");
+    const seen = await t.until(sees("no"), 5000);
+    await t.ev("window.__idbRelease()"); await t.until(LOCK_FREE, 6000); await sleep(300);
+    c(`C-2c.admit.${where}`, held && seen && posts().length === 0, `held ${held}, sees "no" ${seen}; posts ${posts().length}`);
+    await b.stop();
+  }
+  // C-2c.persist.tx: the persist transaction held; setMeasure(false); released: no notes once the clears are done
+  { reset(); const { b, t } = await fresh();
+    await t.open(); await t.ev("window.__idbHold = { nth: 2 }"); await t.ev("window.__releaseIdle()");
+    const held = await t.until("window.__idbHeld === true", 5000);
+    await t.ev("__sbHarness.setMeasure(false)");
+    await t.ev("window.__idbRelease()"); await t.until(LOCK_FREE, 12000);
+    const gone = await t.until(`window.__notes((st) => { const a = window.__orig.get.call(st, "a"), b = window.__orig.get.call(st, "b"); return () => a.result === undefined && b.result === undefined; })`, 6000);
+    c("C-2c.persist.tx", held && posts().length === 1 && gone, `held ${held}; posts ${posts().length}; notes gone ${gone}`);
+    await b.stop(); }
+  // C-2c.lag: (i) after A sees B's "no", A's idle: no POST; (ii) A's idle as B withdraws: at most one POST, and no notes
+  // once A sees "no" (the lag is reported, as information)
+  { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
+    await t.open(); await t2.open();
+    await t2.ev("__sbHarness.setMeasure(false)"); const t0 = Date.now();
+    const seen = await t.until(sees("no"), 6000); const lag = Date.now() - t0;
+    await t.ev("window.__releaseIdle()"); await sleep(1200);
+    c("C-2c.lag", seen && posts().length === 0, `(i) A saw "no" after ${lag} ms; posts ${posts().length}`);
+    console.log(`  (info) C-2c.lag (i): A observed the withdrawal ${lag} ms after B's setMeasure(false)`);
+    await b.stop(); }
+  { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
+    await t.open(); await t2.open();
+    await Promise.all([t2.ev("__sbHarness.setMeasure(false)"), t.ev("window.__releaseIdle()")]); const t0 = Date.now();
+    const seen = await t.until(sees("no"), 6000); const lag = Date.now() - t0;
+    await t.until(LOCK_FREE, 12000);
+    const gone = await t.until(`window.__notes((st) => { const a = window.__orig.get.call(st, "a"), b = window.__orig.get.call(st, "b"); return () => a.result === undefined && b.result === undefined; })`, 6000);
+    c("C-2c.lag", seen && posts().length <= 1 && gone, `(ii) posts ${posts().length}; notes gone ${gone}; A saw "no" after ${lag} ms`);
+    console.log(`  (info) C-2c.lag (ii): ${posts().length} POST, A observed the withdrawal ${lag} ms after it`);
+    await b.stop(); }
   // C-2c.regrant: withdraw in tab A, re-grant in tab B: A's next due ping persists
   { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
     await t.open(); await t2.open();
@@ -315,7 +424,7 @@ async function cases() {
     c("C-2c.regrant", posts().length === 1 && s.b !== null, `after a re-grant: ${posts().length} posts ${J(s)}`);
     await b.stop(); }
   // C-3: two tabs at once: one POST (the first answer held until the second waits on the lock)
-  await caseC3();
+  for (let i = 0; i < 5; i++) await caseC3();
   // C-4: 429, 503, 500, a network error, a malformed 200: nothing written; the next load POSTs once
   for (const m of [{ status: 429 }, { status: 503 }, { status: 500 }, { network: true, status: 200 }, { status: 200, raw: '{"as":"b","nd":0}' }]) {
     reset(); const { b, t } = await fresh();
@@ -331,10 +440,7 @@ async function cases() {
     const p = posts()[0];
     c("C-5", p && p.body === '{"v":1,"day":1,"week":1,"month":1,"client":"web"}' && p.body.length === 49 && !p.headers.referer && p.headers["content-type"] === "application/json" && !new URL(p.url).search && p.method === "POST", `request: ${J(p)}`);
     // (keepalive and credentials, read from the page's own fetch call)
-    const init = await t.ev(`(async () => { const f = window.fetch; let seen; window.fetch = (u, i) => { seen = i; return f(u, i); }; localStorage.removeItem("sb-active-b"); localStorage.removeItem("sb-active"); return null; })()`);
-    await t.ev(`(async () => { const real = window.fetch; window.__seenInit = null; window.fetch = (u, i) => { if (String(u).endsWith("/api/active")) window.__seenInit = { keepalive: i.keepalive, credentials: i.credentials, referrerPolicy: i.referrerPolicy, cache: i.cache }; return real(u, i); }; return 1; })()`);
-    void init;
-    await t.ev(`localStorage.clear()`);
+    await t.wipe();
     await load(t, { before: `(() => { const real = window.fetch; window.fetch = (u, i) => { if (String(u).endsWith("/api/active")) window.__seenInit = { keepalive: i.keepalive, credentials: i.credentials, referrerPolicy: i.referrerPolicy, cache: i.cache }; return real(u, i); }; return 1; })()` });
     const seen = await t.ev("window.__seenInit");
     c("C-5", seen && seen.keepalive === true && seen.credentials === "same-origin" && seen.referrerPolicy === "no-referrer" && seen.cache === "no-store", "init: " + J(seen));
@@ -343,19 +449,20 @@ async function cases() {
   { reset(); const { b, t } = await fresh();
     await t.open(); await sleep(400);
     const k0 = await t.counts();
-    c("C-6.pre", Object.keys(k0.get).length === 0 && Object.keys(k0.set).length === 0 && k0.locks === 0 && k0.fetch === 0 && k0.timers === 0 && k0.idle.length === 1, "before idle: " + J(k0));
+    c("C-6.pre", Object.keys(k0.get).length === 0 && Object.keys(k0.set).length === 0 && Object.keys(k0.idb).length === 0 && k0.locks === 0 && k0.fetch === 0 && k0.timers === 0 && k0.idle.length === 1, "before idle: " + J(k0));
     // due (signed out)
     await t.ev("window.__releaseIdle()"); await sleep(1200);
     const k1 = await t.counts();
     const reads = (k, key) => (k.get[key] ?? 0);
-    const dueOk = (k) => reads(k, "sb-active") + reads(k, "sb-active-b") <= 4 && reads(k, "sb-consent") <= 3 && (k.set["sb-active"] ?? 0) + (k.set["sb-active-b"] ?? 0) <= 2 && k.locks <= 1 && k.fetch === 1;
+    // (due: ≤ 5 consent reads, 1 open, ≤ 3 transactions, ≤ 4 gets, the probe and ≤ 2 note puts, ≤ 1 lock, 1 POST)
+    const dueOk = (k) => reads(k, "sb-consent") <= 5 && (k.idb.open ?? 0) === 1 && txs(k) <= 3 && getsAB(k) <= 4 && (k.idb["put:w"] ?? 0) <= 1 && putsAB(k) <= 2 && k.locks <= 1 && k.fetch === 1;
     c("C-6.due-out", dueOk(k1) && posts().length === 1 && posts()[0].body.length <= 64, "due: " + J(k1));
     // counted
     await t.open(); await t.ev("window.__releaseIdle()"); await sleep(600);
     const k2 = await t.counts();
-    c("C-6.counted", reads(k2, "sb-consent") <= 1 && reads(k2, "sb-active") + reads(k2, "sb-active-b") <= 2 && k2.locks === 0 && k2.fetch === 0, "counted: " + J(k2));
+    c("C-6.counted", reads(k2, "sb-consent") <= 1 && (k2.idb.open ?? 0) === 1 && (k2.idb["tx:readonly"] ?? 0) === 1 && !k2.idb["tx:readwrite"] && getsAB(k2) <= 2 && k2.locks === 0 && k2.fetch === 0, "counted: " + J(k2));
     // due, with a live session (the stub answers "a"): the same counts
-    reset(); await t.ev(`localStorage.clear(); document.cookie = "__Host-sb_session=x; Secure; Path=/"`);
+    reset(); await t.ev(`localStorage.clear(); document.cookie = "__Host-sb_session=x; Secure; Path=/"`); await t.wipe();
     stub.mode = { status: 200, as: "a" };
     await t.open(); await t.ev("window.__releaseIdle()"); await sleep(1200);
     const k3 = await t.counts();
@@ -364,7 +471,8 @@ async function cases() {
     await t.ev(`localStorage.setItem("sb-consent", "no")`);
     await t.open(); await t.ev("window.__releaseIdle()"); await sleep(500);
     const k4 = await t.counts();
-    c("C-6.off", reads(k4, "sb-consent") <= 1 && reads(k4, "sb-active") + reads(k4, "sb-active-b") === 0 && k4.locks === 0 && k4.fetch === 0 && (k4.rm["sb-active"] ?? 0) + (k4.rm["sb-active-b"] ?? 0) <= 2, "off: " + J(k4));
+    await t.until(`window.__c.idb.close >= 1`, 6000); const k4b = await t.counts();
+    c("C-6.off", reads(k4b, "sb-consent") <= 1 && (k4b.idb.open ?? 0) === 1 && (k4b.idb.clear ?? 0) === 1 && getsAB(k4b) === 0 && k4b.locks === 0 && k4b.fetch === 0, "off: " + J(k4b));
     await b.stop(); }
   // C-6's task bound: no task attributable to the harness over 5 ms, in 5 cold contexts per path
   { let worst = 0; const ok = [];
@@ -407,12 +515,25 @@ async function cases() {
   }, (r) => r.pending && r.p === "b" && r.more === 1);
   await pop("C-7.hang", async ({ t, t2 }) => {
     await t.open(); await t2.open();
-    await t.ev(`localStorage.setItem("sb-active", JSON.stringify({ p: "a", ad: 1 })); localStorage.setItem("sb-active-b", JSON.stringify({ bd: 2, bw: 3, bm: 4 }))`);
+    await t.seed({ a: { p: "a", ad: 1 }, b: { bd: 2, bw: 3, bm: 4 } });
     void t2.ev(`navigator.locks.request("sb-active", () => new Promise(() => {}))`);
     await sleep(300);
     const before = await t.state(); const t0 = Date.now();
     await t.ev("__sbHarness.signedOut()");
     const took = Date.now() - t0, after = await t.state();
+    return { took, same: J(before) === J(after) };
+  }, (r) => r.took < 13_000 && r.same);
+  // C-7.hang.tx: another tab holds the lock 10 s, then signedOut's transaction is held forever: settled ≤ 12 s + 1 s,
+  // nothing written
+  await pop("C-7.hang.tx", async ({ t, t2 }) => {
+    await t.open(); await t2.open();
+    await t.seed({ a: { p: "a", ad: 1 }, b: { bd: 2, bw: 3, bm: 4 } });
+    void t2.ev(`navigator.locks.request("sb-active", () => new Promise((r) => setTimeout(r, 10000)))`);
+    await sleep(300);
+    const before = await t.state(); await t.ev("window.__idbHold = { nth: 1 }"); const t0 = Date.now();
+    await t.ev("__sbHarness.signedOut()");
+    const took = Date.now() - t0; await t.ev("window.__idbRelease()"); await sleep(300);
+    const after = await t.state();
     return { took, same: J(before) === J(after) };
   }, (r) => r.took < 13_000 && r.same);
   // C-8.static: active.ts and consent.ts are bundled into the "/" page only (the production dist)
@@ -428,7 +549,7 @@ async function cases() {
     const n = stub.requests.length;
     await t.open(`http://127.0.0.1:${plain.port}/`); await sleep(2000); await t.ev("window.__releaseIdle()"); await sleep(2500);
     const k = await t.counts();
-    c("C-8.origin", stub.requests.length === n && !k.lockNames.includes("sb-active") && !(k.set["sb-active"] || k.set["sb-active-b"]), `unlisted origin: ${stub.requests.length - n} requests ${J(k)}`);
+    c("C-8.origin", stub.requests.length === n && !k.lockNames.includes("sb-active") && !k.idb.open, `unlisted origin: ${stub.requests.length - n} requests ${J(k)}`);
     await b.stop(); pageMode = "harness"; }
   // C-9: storage and lock errors: no uncaught error, no POST, no retry loop
   for (const [id, flag] of [["C-9.get", "window.__throwGet = true"], ["C-9.set", "window.__throwSet = true"], ["C-9.lockreject", "window.__lockReject = true"]]) {
@@ -442,62 +563,145 @@ async function cases() {
     await load(t);
     c("C-9.nolocks", t.errors.length === 0 && posts().length === 0, `no locks: ${posts().length} posts`);
     await b.stop(); }
+  // C-9.idb: no IndexedDB, or it fails: no count, no lock, no uncaught error, and nothing left hanging
+  for (const [id, pre, before] of [["C-9.idb.missing", `Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });`, ""], ["C-9.idb.open", "", `window.__idbOpen = "error"`], ["C-9.idb.blocked", "", `window.__idbOpen = "blocked"`], ["C-9.idb.pre", "", `window.__idbTxFail = "readonly"`]]) {
+    reset(); const { b, t } = await fresh(pre);
+    await load(t, { before, wait: 1500 });
+    const k = await t.counts();
+    c(id, t.errors.length === 0 && posts().length === 0 && k.locks === 0, `${id}: ${t.errors.length} errors, ${posts().length} posts, ${k.locks} locks`);
+    await b.stop();
+  }
   { reset(); const { b, t } = await fresh();
-    await t.open(); await t.ev(`localStorage.setItem("sb-active", "{not json"); localStorage.setItem("sb-active-b", "[1,2")`);
+    await load(t, { before: `window.__idbOpen = "hang"`, wait: 7000 });
+    const k = await t.counts();
+    c("C-9.idb.hang", t.errors.length === 0 && posts().length === 0 && k.locks === 0 && k.t5.set >= 1 && k.t5.fired >= 1, `hang: ${posts().length} posts, ${k.locks} locks, 5 s timers ${J(k.t5)}`);
+    await b.stop(); }
+  { reset(); const { b, t } = await fresh();
+    await load(t, { before: `window.__idbOpen = "late"`, wait: 10000 });
+    const k = await t.counts();
+    c("C-9.idb.late", t.errors.length === 0 && posts().length === 0 && k.locks === 0 && (k.idb.open ?? 0) === 1 && (k.idb.close ?? 0) === 1, `late: ${posts().length} posts, ${k.locks} locks, ${J(k.idb)}`);
+    await b.stop(); }
+  { reset(); const { b, t } = await fresh();
+    await t.open(); await t.ev("window.__idbHold = { nth: 1 }"); await t.ev("window.__releaseIdle()");
+    const held = await t.until("window.__idbHeld === true", 5000); const t0 = Date.now();
+    const freed = await t.until(LOCK_FREE, 8000); const took = Date.now() - t0;
+    c("C-9.idb.txhang", held && freed && took < 6500 && posts().length === 0, `txhang: held ${held}, the lock freed after ${took} ms; ${posts().length} posts`);
+    await t.ev("window.__idbRelease()"); await b.stop(); }
+  { reset(); const { b, t } = await fresh();
+    await load(t, { before: "window.__idbPutFail = true", wait: 1500 });
+    await load(t, { before: "window.__idbPutFail = true", wait: 1500 });
+    c("C-9.idb.write", t.errors.length === 0 && posts().length === 0, `every put aborts: ${posts().length} posts over two loads`);
+    await b.stop(); }
+  { reset(); const { b, t } = await fresh();
+    await t.open(); await t.ev(`localStorage.setItem("sb-consent", "no")`);
+    await load(t, { before: "window.__idbClearFail = true", wait: 300 }); await sleep(1500);
+    const k = await t.counts();
+    c("C-9.idb.clear", t.errors.length === 0 && (k.idb.open ?? 0) >= 1 && (k.idb.close ?? 0) === (k.idb.open ?? 0), `the clear aborts: ${J(k.idb)}, ${t.errors.length} errors`);
+    await b.stop(); }
+  // C-9.idb.clear.fence: a withdrawal during the persist; the fence's removeNotes can't open: the lock goes ≤ 6.5 s after
+  { reset(); const { b, t } = await fresh();
+    await t.open(); await t.ev("window.__idbHold = { nth: 2 }"); await t.ev("window.__releaseIdle()");
+    const held = await t.until("window.__idbHeld === true", 5000);
+    await t.ev(`window.__idbOpen = "hang"; window.__idbOpenFrom = 2`); await t.ev("__sbHarness.setMeasure(false)");
+    await t.ev("window.__idbRelease()"); const t0 = Date.now();
+    const freed = await t.until(LOCK_FREE, 12000); const took = Date.now() - t0;
+    c("C-9.idb.clear.fence", held && freed && took < 6500 && t.errors.length === 0, `fence: the lock freed after ${took} ms; ${t.errors.length} errors`);
+    await b.stop(); }
+  { reset(); const { b, t } = await fresh();
+    await t.open(); await t.seed({ a: "{not json", b: [1, 2] });
     await load(t);
     const s = await t.state();
     c("C-9.malformed", t.errors.length === 0 && posts().length === 1 && JSON.parse(s.b ?? "null")?.bd > 0, `malformed: ${posts().length} posts ${J(s)}`);
     await b.stop(); }
 }
 
-// C-2b (the "ask" default) and C-2c.listener (a barrier between the final consent read and the write) need their own
-// harness bundles, built here from substitutions as the controls are.
-async function variantCases() {
-  harnessJs = bundle([["C", 'export const MEASURE_DEFAULT: "on" | "ask" = "on";', 'export const MEASURE_DEFAULT: "on" | "ask" = "ask";']]);
-  { reset(); const { b, t } = await fresh();
+// C-2b (the "ask" default) and C-2c.listener (a barrier right after check 4, before the persist is created) need their
+// own harness bundles, built from substitutions as the controls are, on top of a control's own (subs).
+const ASK = ["C", 'export const MEASURE_DEFAULT: "on" | "ask" = "on";', 'export const MEASURE_DEFAULT: "on" | "ask" = "ask";'];
+const BARRIER = ["A", "        if (!mayMeasure()) return;\n        const at = Date.now(), as = ans.as, d = ans;", "        if (!mayMeasure()) return;\n        await (globalThis as any).__barrier?.();\n        const at = Date.now(), as = ans.as, d = ans;"];
+async function variantCases(subs = []) {
+  let ok = true;
+  try { harnessJs = bundle([...subs, ASK]); } catch { ok = false; }
+  if (ok) { reset(); const { b, t } = await fresh();
     await load(t);
     const k = await t.counts();
-    c("C-2b", posts().length === 0 && k.locks === 0, `ask: ${posts().length} posts, ${k.locks} locks`);
+    // ("ask" with no consent is off: no lock, no note read, no POST; the per-load clear runs, as C-6.off)
+    c("C-2b", posts().length === 0 && k.locks === 0 && getsAB(k) === 0 && !k.idb["put:w"], `ask: ${posts().length} posts, ${k.locks} locks, ${J(k.idb)}`);
     await b.stop(); }
-  harnessJs = bundle([["A", "      if (!mayMeasure()) return;\n      const at = Date.now();", "      if (!mayMeasure()) return;\n      await (globalThis as any).__barrier?.();\n      const at = Date.now();"]]);
-  { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
+  ok = true;
+  try { harnessJs = bundle([...subs, BARRIER]); } catch { ok = false; }
+  // (the clear before the persist: B's listener clears while B waits at the barrier; B then persists; the fence clears)
+  if (ok) { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
     await t2.open();
     await t.open(); await t.ev(`window.__barrier = () => new Promise((r) => { window.__releaseBarrier = r; })`);
     await t.ev("window.__releaseIdle()");
     const atBarrier = await t.until("!!window.__releaseBarrier", 5000);
-    await t2.ev("__sbHarness.setMeasure(false)"); await sleep(300);
-    await t.ev("window.__releaseBarrier()"); await sleep(500);
+    await t2.ev("__sbHarness.setMeasure(false)");
+    const seen = await t.until(sees("no"), 6000); await sleep(600);
+    await t.ev("window.__releaseBarrier && window.__releaseBarrier()");
+    await t.until(LOCK_FREE, 12000); await sleep(300);
     const s = await t.state();
-    c("C-2c.listener", atBarrier && s.a === null && s.b === null, `a withdrawal between the final consent read and the write: ${J(s)}`);
+    c("C-2c.listener", atBarrier && seen && s.a === null && s.b === null, `the clear before the persist: ${J(s)}`);
     await b.stop(); }
 }
 
-// ---- the controls: [name, substitutions, the closed FAIL set]
+// ---- the controls: [name, substitutions [file, find, replace], the closed FAIL set] (r4c3/r4c3a, frozen by the grader
+// 5acb533a; the §5 file lists each text)
+const PERSIST_FENCE = "        if (ok && (wasWithdrawn() || !mayMeasure())) await removeNotes();\n";
 const CONTROLS = [
-  ["K-21", [["C", "  if (!mayMeasure()) {\n    removeNotes();\n    return;\n  }\n  await run(", "  await run("]], ["C-2a", "C-2b", "C-6.off"]],
-  ["K-22", [["A", "    await locks.request(LOCK, async () => {\n      if (!mayMeasure()) return;", "    await locks.request(LOCK, async () => {"]], ["C-2c.lock"]],
-  ["K-23a", [["A", "      if (!mayMeasure()) return;\n      const at = Date.now();", "      const at = Date.now();"]], ["C-2c.persist.self"]],
-  ["K-23b", [["C", "    if (permits(e.newValue)) withdrawn = false;\n    else {\n      withdrawn = true;\n      removeNotes();\n    }", "    void e;"]], ["C-2c.listener"]],
+  ["K-21", [["C", "  if (!mayMeasure()) {\n    await removeNotes();\n    return;\n  }\n  await run(", "  await run("]], ["C-2a", "C-2b", "C-6.off"]],
+  ["K-22", [["A", "      await locks.request(LOCK, async () => {\n        if (!mayMeasure()) return;\n", "      await locks.request(LOCK, async () => {\n"]], ["C-2c.lock"]],
+  ["K-55", [["A", "        if (!mayMeasure()) return; // (after the awaited transaction, immediately before the send)\n", ""]], ["C-2c.admit.self", "C-2c.admit.other"]],
+  ["K-23a", [["A", "        if (!mayMeasure()) return;\n        const at = Date.now(), as = ans.as, d = ans;", "        const at = Date.now(), as = ans.as, d = ans;"]], ["C-2c.persist.self", "C-2c.persist.other"]],
+  ["K-57", [["A", PERSIST_FENCE, ""]], ["C-2c.listener"]],
   ["K-24", [["C", "  return MEASURE_DEFAULT === \"on\";", "  return true;"]], ["C-2b"]],
-  ["K-25", [["A", "    await locks.request(LOCK, async () => {\n      if (!mayMeasure()) return;", "    await (async (f: any) => f())(async () => {\n      if (!mayMeasure()) return;"]], ["C-3", "C-2c.lock"]],
-  ["K-26", [["A", "        if (r.status !== 200) return; // (429, 503, …: nothing written; a later load tries again)\n        ans = answerOf(await r.json());", "        ans = answerOf(await r.json().catch(() => ({ as: \"b\", nd: 86400, nw: 86400, nm: 86400 }))) ?? { as: \"b\", nd: 86400, nw: 86400, nm: 86400 };"]], ["C-4"]],
+  ["K-25", [["A", "      await locks.request(LOCK, async () => {", "      await (async (f: any) => f())(async () => {"]], ["C-3", "C-2c.lock"]],
+  ["C-C3", [["A", "        a = readA(inl.v[0]);\n        let bb = readB(inl.v[1]);", "        a = readA(pre.v[0]);\n        let bb = readB(pre.v[1]);"]], ["C-3"]],
+  ["K-26", [["A", "          if (r.status !== 200) return; // (429, 503, …: nothing written; a later load tries again)\n          ans = answerOf(await r.json());", "          ans = answerOf(await r.json().catch(() => ({ as: \"b\", nd: 86400, nw: 86400, nm: 86400 }))) ?? { as: \"b\", nd: 86400, nw: 86400, nm: 86400 };"]], ["C-4"]],
   ["K-27", [["A", ' referrerPolicy: "no-referrer",', ""]], ["C-5"]],
   ["K-28", [["A", " keepalive: true,", ""]], ["C-5"]],
-  ["K-29", [["A", "if (typeof globalThis.requestIdleCallback === \"function\") globalThis.requestIdleCallback(start);\nelse globalThis.setTimeout?.(start, FETCH_MS);", "start();"]], ["C-6.pre"]],
-  ["K-30", [["A", "      const body = JSON.stringify(", "      { const z = Date.now(); while (Date.now() - z < 20); }\n      const body = JSON.stringify("]], ["C-6.due-out", "C-6.due-in"]],
+  ["K-29", [["A", "if (self.requestIdleCallback) requestIdleCallback(start);\nelse setTimeout(start, FETCH_MS);", "start();"]], ["C-6.pre"]],
+  ["K-30", [["A", "        const body = JSON.stringify(", "        { const z = Date.now(); while (Date.now() - z < 20); }\n        const body = JSON.stringify("]], ["C-6.due-out", "C-6.due-in"]],
   ["K-31", [["A", "const due = (a: A, b: B | null, t: number) => (a.p === \"a\" ? t >= a.ad : t >= (b?.bd ?? 0));", "const due = (a: A, b: B | null, t: number) => { const m = new Date(t); m.setHours(0, 0, 0, 0); const last = a.p === \"a\" ? a.ad : (b?.bd ?? 0); return last === 0 || last - 86_400_000 < m.valueOf(); };"]], ["C-1.tz", "C-1s", "C-1d"]],
-  ["K-33", [["A", "  if (!MEASURE_ORIGINS.includes(globalThis.location?.origin ?? \"\")) return;\n", ""]], ["C-8.origin"]],
-  ["K-35", [["C", "    return permits(globalThis.localStorage.getItem(CONSENT_KEY));\n  } catch {\n    return false;\n  }", "    return permits(globalThis.localStorage.getItem(CONSENT_KEY));\n  } finally {\n  }"]], ["C-9.get"]],
-  ["K-36", [["A", "        localStorage.setItem(KEY_A, JSON.stringify({ p: \"a\", ad: at + ans.nd * 1000 }));", "        localStorage.setItem(KEY_A, JSON.stringify({ p: \"a\", ad: at + ans.nd * 1000 }));\n        localStorage.setItem(KEY_B, JSON.stringify({ bd: at + ans.nd * 1000, bw: at + ans.nw * 1000, bm: at + ans.nm * 1000 }));"]], ["C-7.logout", "C-7.firstweek", "C-7.prior", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
-  ["K-38", [["A", "      localStorage.setItem(KEY_A, JSON.stringify({ p: \"b\", ad: a.ad }));\n      afterNoteWrite();\n    });\n  } catch {", "      localStorage.setItem(KEY_A, JSON.stringify({ p: \"b\", ad: a.ad }));\n      localStorage.removeItem(KEY_B);\n      afterNoteWrite();\n    });\n  } catch {"]], ["C-7.abs", "C-7.repeat"]],
-  ["K-41", [["A", "    await locks.request(LOCK, { signal: AbortSignal.timeout(SIGNOUT_LOCK_MS) }, async () => {", "    await (async (f: any) => f())(async () => {"]], ["C-7.held.self", "C-7.held.other", "C-7.hang"]],
-  ["K-43", [["A", "{ signal: AbortSignal.timeout(SIGNOUT_LOCK_MS) }, ", ""]], ["C-7.hang"]],
-  ["K-44", [["C", "  if (v) withdrawn = false;\n", ""], ["C", "    if (permits(e.newValue)) withdrawn = false;\n    else {", "    if (permits(e.newValue)) void 0;\n    else {"]], ["C-2c.regrant"]],
-  ["K-45", [["A", "  } catch {\n    // (settled, nothing written)\n  }", "  } catch {\n    localStorage.setItem(KEY_A, JSON.stringify({ p: \"b\", ad: 0 }));\n  }"]], ["C-7.hang"]],
-  ["K-GPC", [["C", "    if (HONOR_GPC && (globalThis.navigator as { globalPrivacyControl?: boolean } | undefined)?.globalPrivacyControl === true) return false;\n", ""]], ["C-1.gpc"]],
+  ["K-32", [["A", "export async function signedOut(): Promise<void> {\n", "export async function signedOut(): Promise<void> {\n  if (Date.now() > 0) return;\n"]], ["C-7.logout", "C-7.firstweek", "C-7.prior", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
+  ["K-33", [["A", "  if (!MEASURE_ORIGINS.includes(location.origin)) return;\n", ""]], ["C-8.origin"]],
+  ["K-35", [["C", "    return permits(localStorage.getItem(CONSENT_KEY));\n  } catch {\n    return false;\n  }", "    return permits(localStorage.getItem(CONSENT_KEY));\n  } finally {\n  }"]], ["C-9.get"]],
+  ["K-36", [["A", "          if (as === \"b\") s.put({ bd:", "          s.put({ bd:"]], ["C-7.logout", "C-7.firstweek", "C-7.repeat", "C-7.held.self", "C-7.held.other"]],
+  ["K-38", [["A", "          ra.onsuccess = () => s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\");", "          ra.onsuccess = () => { s.put({ p: \"b\", ad: readA(ra.result).ad }, \"a\"); s.delete(\"b\"); };"]], ["C-7.abs", "C-7.repeat"]],
+  ["K-41", [["A", "    await locks.request(LOCK, { signal: AbortSignal.timeout(SIGNOUT_MS) }, async () => {", "    await (async (f: any) => f())(async () => {"]], ["C-7.held.self", "C-7.held.other", "C-7.hang"]],
+  ["K-43", [["A", "{ signal: AbortSignal.timeout(SIGNOUT_MS) }, ", ""]], ["C-7.hang"]],
+  ["K-44", [["C", "  withdrawn = !v;\n", "  if (!v) withdrawn = true;\n"], ["C", "  if (permits(e.newValue)) withdrawn = false;\n", "  if (permits(e.newValue)) void 0;\n"]], ["C-2c.regrant"]],
+  ["K-45", [["A", "  } catch {\n    // (settled, nothing written)\n  }", "  } catch {\n    const db = await openNotes(IDB_MS);\n    if (db) { await notesTx(db, \"readwrite\", IDB_MS, (s) => { s.put({ p: \"b\", ad: 0 }, \"a\"); return () => 1; }); db.close(); }\n  }"]], ["C-7.hang"]],
+  ["K-56", [["A", "  const left = () => Math.max(0, Math.min(IDB_MS, deadline - Date.now()));", "  const left = () => IDB_MS + 0 * deadline;"]], ["C-7.hang.tx"]],
+  ["K-47", [["A", "          s.put(1, \"w\");\n", ""]], ["C-9.idb.write"]],
+  ["K-49m", [["A", "    if (!self.indexedDB) return;\n", "    if (!self.indexedDB) return void (await send({ method: \"POST\", body: \"{}\" }));\n"]], ["C-9.idb.missing"]],
+  ["K-49h", [["A", "    const db = await openNotes(IDB_MS);\n    if (!db) return;\n", "    const db = await openNotes(IDB_MS);\n    if (!db) return void (await send({ method: \"POST\", body: \"{}\" }));\n"]], ["C-9.idb.open", "C-9.idb.blocked"]],
+  ["K-51", [["A", "      if (!pre) return;\n", "      if (!pre) pre = { v: [undefined, undefined] };\n"]], ["C-9.idb.pre"]],
+  // (the open and transaction timers are shared helpers: K-50 and K-52 reach every caller's case, the §5 file derives them)
+  ["K-50", [["C", "    const timer = setTimeout(() => end(null), ms);\n", "    const timer = 0;\n"]], ["C-9.idb.hang", "C-9.idb.late", "C-9.idb.clear.fence"]],
+  ["K-53", [["C", "      if (settled) return void db?.close();\n", "      if (settled) return;\n"]], ["C-9.idb.late"]],
+  ["K-52", [["C", "    const timer = setTimeout(() => {\n      try {\n        tx?.abort();\n      } catch {\n        // (already finished)\n      }\n      resolve(null);\n    }, ms);\n", "    const timer = 0;\n"]], ["C-9.idb.txhang", "C-7.hang.tx"]],
+  ["K-58", [["C", "  dropLegacy();\n  const db = await openNotes(IDB_MS);\n", "  dropLegacy();\n  const db = await openNotes(1e9);\n"]], ["C-9.idb.clear.fence"]],
+  ["K-59", [["C", "  } finally {\n    db.close();\n  }\n}\n\n/** Set when consent", "  } finally {\n  }\n}\n\n/** Set when consent"]], ["C-9.idb.clear"]],
+  ["K-GPC", [["C", "    if (HONOR_GPC && (navigator as { globalPrivacyControl?: boolean }).globalPrivacyControl === true) return false;\n", ""]], ["C-1.gpc"]],
 ];
 
 // ---- run
+// (DUMP_CONTROLS=1: the controls, their exact substitutions and sets, as JSON, then stop: the frozen §5 file's source)
+if (process.env.DUMP_CONTROLS) {
+  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })) }, null, 1));
+  rmSync(tmp, { recursive: true, force: true });
+  process.exit(0);
+}
+// (CHECK_SUBS=1: every control's substitutions match exactly once and its copy bundles, then stop)
+if (process.env.CHECK_SUBS) {
+  let n = 0;
+  for (const [name, subs] of CONTROLS) { try { bundle(subs); n++; } catch (e) { console.log(`FAIL ${name}: ${String(e.message).slice(0, 200)}`); } }
+  for (const v of [ASK, BARRIER]) { try { bundle([v]); n++; } catch (e) { console.log(`FAIL variant: ${String(e.message).slice(0, 200)}`); } }
+  console.log(`substitutions: ${n} of ${CONTROLS.length + 2} bundle`);
+  rmSync(tmp, { recursive: true, force: true });
+  process.exit(n === CONTROLS.length + 2 ? 0 : 1);
+}
 let bad = 0;
 const t0 = Date.now();
 harnessJs = bundle();
@@ -513,16 +717,7 @@ if (which !== "none" && !baseFailed.length) {
     results.clear();
     harnessJs = bundle(subs);
     await guarded(cases);
-    // (the two variant cases, with the control's change applied on top of their own)
-    const vs = [["C", 'export const MEASURE_DEFAULT: "on" | "ask" = "on";', 'export const MEASURE_DEFAULT: "on" | "ask" = "ask";']];
-    try { harnessJs = bundle([...subs, ...vs]); } catch { harnessJs = bundle(subs); }
-    { reset(); const { b, t } = await fresh(); await load(t); const k = await t.counts(); c("C-2b", posts().length === 0 && k.locks === 0, "ask"); await b.stop(); }
-    try {
-      harnessJs = bundle([...subs, ["A", "      if (!mayMeasure()) return;\n      const at = Date.now();", "      if (!mayMeasure()) return;\n      await (globalThis as any).__barrier?.();\n      const at = Date.now();"]]);
-    } catch {
-      harnessJs = bundle([...subs, ["A", "      const at = Date.now();", "      await (globalThis as any).__barrier?.();\n      const at = Date.now();"]]);
-    }
-    { reset(); const { b, t } = await fresh(); const t2 = await b.tab(); await t2.open(); await t.open(); await t.ev(`window.__barrier = () => new Promise((r) => { window.__releaseBarrier = r; })`); await t.ev("window.__releaseIdle()"); const at = await t.until("!!window.__releaseBarrier", 5000); await t2.ev("__sbHarness.setMeasure(false)"); await sleep(300); await t.ev("window.__releaseBarrier && window.__releaseBarrier()"); await sleep(500); const s = await t.state(); c("C-2c.listener", at && s.a === null && s.b === null, "listener"); await b.stop(); }
+    await guarded(() => variantCases(subs));
     const f = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
     const ok = f.length > 0 && f.join() === w.join();
     console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${f.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
