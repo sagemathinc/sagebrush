@@ -120,6 +120,19 @@ try {
     check(!!probe && probe.own === "refused" && probe.other === "refused" && probe.mod === "refused" && /^refused/.test(probe.worker) &&
       probe.seen.filter((d) => d === "connect-src").length === 2 && probe.seen.includes("worker-src") && probe.seen.some((d) => /^script-src/.test(d)),
       `${as}: in the shell worker, a fetch of this origin and of another, a module from another origin, and a worker of its own, refused by its policy (connect-src, script-src, worker-src): ${wsess ? JSON.stringify(probe) : "no shell worker attached: " + JSON.stringify([...workers.keys()])}`);
+    // The app self-test's own Terminal checks (web/notebook/selftest-terminal.js in sagebrush-selftest.js, as
+    // selftest() runs them), here with the stubbed bridge as the page's: the module's logic on app/dist served
+    // as the app serves it.  Information, not native evidence (the apps' self-tests and their logs are that).
+    const tc = await evaluate(`import("./sagebrush-selftest.js").then((m) => m.terminalChecks((c, a) => window.__TAURI__.core.invoke(c, a)))`);
+    // (Chromium: the engine fixed as chromium, all three events and the differential, the grader's cross-check)
+    check(Array.isArray(tc) && tc.length === 3 && tc.every(([, ok]) => ok) && /routes=tauri-internals-invoke:unavailable,tauri-core-invoke:ok,/.test(tc[1][2]) &&
+      /^engine=chromium mode=all-events violations=3 differential=own-origin:refused,control:fetched-ok /.test(tc[2][2]),
+      `${as}: the self-test's three Terminal checks pass, the page's route the stub's core.invoke: ${JSON.stringify(tc).slice(0, 700)}`);
+    // (a dead worker: the checks pointed at a directory with no shell/; check 3 must FAIL on the missing
+    // handshake, never pass on silence)
+    const dead = await evaluate(`import("./sagebrush-selftest.js").then((m) => m.terminalChecks((c, a) => window.__TAURI__.core.invoke(c, a), location.origin + "/no-such-dir/"))`);
+    check(Array.isArray(dead) && dead[0][1] === false && dead[2][1] === false && /didn't report|worker error|boot failed/.test(dead[2][2]),
+      `${as}: a dead worker (no shell/ there): check 3 FAILS on the handshake: ${JSON.stringify(dead?.[2] ?? dead).slice(0, 300)}`);
   }
   ws.close();
 } finally {
