@@ -5,6 +5,7 @@
 //   mountAgentPairing(ws, { button })   wires a page's button (or none: then only a ?pair=CODE&port=N link opens
 //                                       it), and offers to reconnect a remembered agent.
 
+import { pairLink } from "./pair-link";
 import { AgentPairing, type GrantStore, type Kept } from "./agent-pair";
 import { TRASH } from "./paths";
 
@@ -219,8 +220,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   }
 
   if (o.button) o.button.addEventListener("click", () => connect());
-  const q = new URLSearchParams(location.search);
-  if (q.has("pair")) connect(q.get("pair") ?? "", q.get("port") ?? "");
+  const link = pairLink();
+  if (link) connect(link.code, link.port);
   else void reconnect();
   return { connect, get pairing() { return pairing; } };
 }
