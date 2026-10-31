@@ -51,13 +51,15 @@ async function open() {
     // (the export's worker, by its script: its own heap, its own session)
     if (m.method === "Target.attachedToTarget" && /sagebrush-export-worker/.test(m.params.targetInfo?.url ?? "")) worker = m.params.sessionId;
     if (m.method === "Target.detachedFromTarget" && m.params.sessionId === worker) worker = null;
+    if (/^Tracing\./.test(m.method ?? "")) self.onTrace?.(m);
   };
   const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
   const close = async () => { ws.close(); chrome.kill(); await sleep(1000); rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); };
-  return { send, ev, until, errors, worker: () => worker, close };
+  const self = { send, ev, until, errors, worker: () => worker, close, onTrace: null };
+  return self;
 }
 
 const P = "document.querySelector('.sbfprev')";
@@ -301,6 +303,70 @@ try {
       })()`);
       console.log("(profile: " + JSON.stringify({ ended, by: r.by, longest: r.longest, export_ms: r.export_ms, stalls: r.stalls.length }) + ")");
       for (const st of r.stalls) console.log("(profile stall: " + JSON.stringify(st) + ")");
+    } finally { await c.close(); }
+  }
+  // ---- trace (the corrected campaign, daybreak2's ruling of Oct 31; rules e1-r2a-campaign2-rules): in a fresh context,
+  // (1) C8: a 120 ms busy loop in a page timer must show in the Long Task API as at least 100 ms, or the run is void;
+  // (2) the clock: performance.mark "sb-sync-1" before Save… and "sb-sync-2" after the handoff, each in the page's
+  // clock (its startTime) and in the trace's (the blink.user_timing event's ts); the offset from sb-sync-1 must
+  // predict sb-sync-2 within 1 ms, or the mapping is invalid; (3) each Long Task API entry over 50 ms from the click,
+  // mapped into the trace's clock and classified by a closed grammar over the main thread's events overlapping it:
+  //   "gc"           collections (MajorGC, MinorGC, V8.GC*, Scavenge) cover at least half of it;
+  //   "export"       script of sagebrush-export.js (its FunctionCall/EvaluateScript/v8 call frames' url) at least half;
+  //   "page"         script of any other file of the site at least half;
+  //   "unattributed" none of these.
+  if (PASSES.has("trace")) {
+    const c = await open();
+    try {
+      await prepare(c);
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
+      const events = [];
+      await c.ev(`(() => { window.__tasks = []; window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__tasks.push([e.startTime, e.duration]); }); window.__lto.observe({ type: "longtask", buffered: false }); return 1; })()`);
+      // (C8, in this context, from a page timer)
+      const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = Math.max(0, ...window.__tasks.map((x) => x[1])); window.__tasks = []; ok(l); }, 400); })`);
+      const valid = c8 >= 100;
+      console.log(`(trace: C8 ${Math.round(c8)} ms: the run is ${valid ? "valid" : "VOID"})`);
+      // (the trace from before the click to after the handoff: preflight and writing both in it)
+      const done = new Promise((r) => { c.onTrace = (m) => { if (m.method === "Tracing.dataCollected") events.push(...m.params.value); if (m.method === "Tracing.tracingComplete") r(); }; });
+      await c.send("Tracing.start", { traceConfig: { includedCategories: ["devtools.timeline", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "toplevel"] }, transferMode: "ReportEvents" });
+      const m1 = await c.ev(`performance.mark("sb-sync-1").startTime`);
+      const clickT = await c.ev(`performance.now()`);
+      await c.ev(btn("/^Export all current files/"));
+      await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      await c.ev(btn("/^Save…$/"));
+      const ended = await c.until(`!!window.__exp`, 1200000);
+      await sleep(500);
+      const m2 = await c.ev(`performance.mark("sb-sync-2").startTime`);
+      await sleep(200);
+      const tasks = await c.ev(`window.__tasks`);
+      await c.send("Tracing.end");
+      await done;
+      const mark = (name) => events.find((e) => e.name === name && /user_timing/.test(e.cat ?? ""));
+      const t1 = mark("sb-sync-1"), t2 = mark("sb-sync-2");
+      const offset = t1 ? t1.ts / 1000 - m1 : NaN, err = t2 ? Math.abs(t2.ts / 1000 - (m2 + offset)) : NaN;
+      const mapped = Number.isFinite(err) && err <= 1;
+      console.log(`(trace: the clock mapping: sb-sync-1 ${t1 ? "found" : "MISSING"}, sb-sync-2 predicted within ${Number.isFinite(err) ? err.toFixed(3) : "—"} ms: ${mapped ? "valid" : "INVALID"})`);
+      const main = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
+      const onMain = events.filter((e) => e.ph === "X" && main && e.pid === main.pid && e.tid === main.tid);
+      const isGc = (e) => /^(MajorGC|MinorGC|Scavenge|V8\.GC)/.test(e.name);
+      const urlOf = (e) => e.args?.data?.url ?? e.args?.data?.stackTrace?.[0]?.url ?? e.args?.beginData?.url ?? "";
+      const isScript = (e) => /^(FunctionCall|EvaluateScript|v8\.callFunction|v8\.compile|TimerFire|EventDispatch|RunMicrotasks)$/.test(e.name);
+      const cover = (list, a, b) => { const iv = list.map((e) => [Math.max(a, e.ts), Math.min(b, e.ts + e.dur)]).filter(([x, y]) => y > x).sort((p, q) => p[0] - q[0]); let n = 0, cs = -1, ce = -1; for (const [x, y] of iv) { if (x > ce) { if (ce > cs) n += ce - cs; cs = x; ce = y; } else ce = Math.max(ce, y); } if (ce > cs) n += ce - cs; return n; };
+      const out = [];
+      for (const [st, d] of tasks) {
+        if (d <= 50 || st < clickT) continue;
+        const a = (st + offset) * 1000, b = a + d * 1000, len = b - a;
+        const over = onMain.filter((e) => e.ts < b && e.ts + e.dur > a);
+        const gc = cover(over.filter(isGc), a, b) / len;
+        const exp = cover(over.filter((e) => isScript(e) && /sagebrush-export(-worker)?\.js/.test(urlOf(e))), a, b) / len;
+        const page = cover(over.filter((e) => isScript(e) && urlOf(e) && !/sagebrush-export(-worker)?\.js/.test(urlOf(e))), a, b) / len;
+        const cls = !mapped ? "unmapped" : gc >= 0.5 ? "gc" : exp >= 0.5 ? "export" : page >= 0.5 ? "page" : "unattributed";
+        out.push({ start: Math.round(st), ms: Math.round(d), class: cls, gc: +gc.toFixed(2), export: +exp.toFixed(2), page: +page.toFixed(2), top: over.sort((x, y) => y.dur - x.dur).slice(0, 6).map((e) => [e.name, Math.round(e.dur / 1000), urlOf(e).slice(-40)]) });
+      }
+      console.log("(trace: run result " + JSON.stringify({ valid, mapped, ended, c8: Math.round(c8), longTasks: out.map((t) => [t.ms, t.class]) }) + ")");
+      for (const t of out) console.log("(trace: long task " + JSON.stringify(t) + ")");
+      const gcs = onMain.filter((e) => /^MajorGC$/.test(e.name) && e.dur > 20000).map((e) => Math.round(e.dur / 1000));
+      console.log("(trace: main-thread MajorGC over 20 ms during the trace: " + JSON.stringify(gcs) + ")");
     } finally { await c.close(); }
   }
   // ---- cancel: in a fresh context, an export cancelled when about half the members are written: the click to the

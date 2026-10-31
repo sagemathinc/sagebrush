@@ -20,7 +20,7 @@ export type ExportHost = {
   stamped(): void;
   site: string;
   app: string;
-  /** the page's own functions (run.ts Kit) */
+  /** the page's own values (run.ts Kit) */
   kit: Kit;
 };
 

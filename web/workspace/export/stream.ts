@@ -99,6 +99,10 @@ export function sliced(produce: (put: (b: Uint8Array) => Promise<void>) => Promi
 export class LazyLines {
   constructor(readonly t: unknown) {}
 }
+/** An array whose items are made as they are written (a notebook's cells, each through the page's ipynbObject). */
+export class LazyArray {
+  constructor(readonly length: number, readonly at: (i: number) => unknown) {}
+}
 const textLength = (t: unknown) => (Array.isArray(t) ? t.reduce((n: number, x: unknown) => n + (x == null ? 0 : String(x).length), 0) : typeof t === "string" ? t.length : 0);
 /** What ipynb.js's lines(joinText(t)) gives, for a short text. */
 const splitLines = (t: unknown) => (Array.isArray(t) ? t.join("") : ((t ?? "") as string)).split(/(?<=\n)/);
@@ -129,7 +133,7 @@ function small(v: unknown, budget: number): boolean {
   const stack: unknown[] = [v];
   while (stack.length) {
     const x = stack.pop();
-    if (x instanceof LazyLines) return false;
+    if (x instanceof LazyLines || x instanceof LazyArray) return false;
     if (typeof x === "string") budget -= x.length + 8;
     else if (x && typeof x === "object") {
       if (typeof (x as any).toJSON === "function") { budget -= 64; continue; }
@@ -156,6 +160,19 @@ async function value(v: any, ind: string, out: Out): Promise<void> {
       out.add((first ? "[\n" : ",\n") + i2);
       first = false;
       await out.str(line);
+      await out.step();
+    }
+    out.add("\n" + ind + "]");
+    return;
+  }
+  if (v instanceof LazyArray) {
+    if (!v.length) { out.add("[]"); return; }
+    const i2 = ind + " ";
+    for (let i = 0; i < v.length; i++) {
+      out.add((i ? ",\n" : "[\n") + i2);
+      const x = resolve(v.at(i), String(i));
+      if (skipped(x)) out.add("null");
+      else await value(x, i2, out);
       await out.step();
     }
     out.add("\n" + ind + "]");
@@ -191,11 +208,16 @@ async function value(v: any, ind: string, out: Out): Promise<void> {
   out.add(first ? "{}" : "\n" + ind + "}");
 }
 
-/** A notebook's .ipynb, as slices: `object` is the page's ipynbObject over the captured record, with toLines. */
-export function notebookSlices(object: unknown, pace: Pace): AsyncIterable<Uint8Array> {
+/** A notebook's .ipynb, as slices, byte for byte notebookFileText's: the page's own ipynbObject (what toIpynb writes)
+ * over the captured record, its cells made one at a time as they are written (each through ipynbObject over a
+ * document of that one cell: its cells are independent of each other), long texts' lines split as they go. */
+export function notebookSlices(doc: any, ipynbObject: (doc: any, toLines: (t: unknown) => unknown) => any, pace: Pace): AsyncIterable<Uint8Array> {
   return sliced(async (put) => {
     const out = new Out(put, pace);
-    const v = resolve(object, "");
+    const cells: unknown[] = Array.isArray(doc?.cells) ? doc.cells : [];
+    const top = ipynbObject({ ...doc, cells: [] }, toLines);
+    top.cells = new LazyArray(cells.length, (i) => ipynbObject({ ...doc, cells: [cells[i]] }, toLines).cells[0]);
+    const v = resolve(top, "");
     if (skipped(v)) throw new Error("a notebook with no JSON value");
     await value(v, "", out);
     await out.flush();
@@ -242,58 +264,111 @@ function base64(b: Uint8Array): string {
 /** A picture's bytes are read this many at a time: 1 MiB of base64 a slice. */
 const PICTURE_SLICE = 3 * 256 * 1024;
 
+/** JSON.parse(JSON.stringify(v)), in steps (Images.inline's clone of a board): toJSON called, what JSON doesn't
+ * write dropped from objects and null in arrays, -0 as 0, a non-finite number as null, boxed values unwrapped, an own
+ * property for every key ("__proto__" included, as JSON.parse makes it); a yield once 8 ms of work have passed. */
+async function jsonClone(v: unknown, pace: Pace): Promise<unknown> {
+  const SKIP = Symbol("skip");
+  let n = 0;
+  const own = (o: any, k: string, x: unknown) => Object.defineProperty(o, k, { value: x, enumerable: true, writable: true, configurable: true });
+  // (every value counted, a primitive too: an await on a value already there is only a microtask, never a yield to the
+  // page, so the pause comes from breathe()'s timer, every 256 values once 8 ms have passed)
+  const count = async () => { if (++n % 256 === 0) { if (pace.signal.aborted) pace.stopped(); await pace.breathe(); } };
+  const prim = (x: any): unknown => {
+    if (x === null || typeof x === "string" || typeof x === "boolean") return x;
+    if (typeof x === "number") return Number.isFinite(x) ? (x === 0 ? 0 : x) : null;
+    if (typeof x === "bigint") return JSON.stringify(x); // (throws, as JSON.stringify does)
+    return SKIP;
+  };
+  const one = async (x: any, key: string): Promise<unknown> => {
+    await count();
+    if (x !== null && (typeof x === "object" || typeof x === "bigint") && typeof x.toJSON === "function") x = x.toJSON(key);
+    if (x instanceof Number) x = Number(x); else if (x instanceof String) x = String(x); else if (x instanceof Boolean) x = x.valueOf();
+    if (x === null || typeof x !== "object") return prim(x);
+    if (Array.isArray(x)) {
+      const out: unknown[] = new Array(x.length);
+      for (let i = 0; i < x.length; i++) {
+        const e = x[i];
+        const y = e !== null && (typeof e === "object" || typeof e === "bigint") ? await one(e, String(i)) : (await count(), prim(e));
+        out[i] = y === SKIP ? null : y;
+      }
+      return out;
+    }
+    const out: any = {};
+    for (const k of Object.keys(x)) {
+      const e = x[k];
+      const y = e !== null && (typeof e === "object" || typeof e === "bigint") ? await one(e, k) : (await count(), prim(e));
+      if (y !== SKIP) own(out, k, y);
+    }
+    return out;
+  };
+  const r = await one(v, "");
+  return r === SKIP ? undefined : r;
+}
+
+/** The page's steps of work (cleanDocSteps), driven with a yield between them. */
+async function drive<T>(g: Generator<void, T, void>, pace: Pace): Promise<T> {
+  for (;;) {
+    const r = g.next();
+    if (r.done) return r.value;
+    if (pace.signal.aborted) pace.stopped();
+    await pace.breathe();
+  }
+}
+
+/** The board's functions the export writes with (web/board/doc.ts): cleanDoc in steps, and boardText in parts. */
+export type BoardKit = {
+  cleanDocSteps(d: unknown): Generator<void, BoardDoc, void>;
+  boardTextParts(d: unknown): Generator<string | { s: string }, void, void>;
+};
+
 /**
- * A board's .board.json, as slices.  `fileText` is the page's boardFileText; it runs over a stand-in for the
- * Images it is given, whose inline() does what Images.inline does (the document cloned through JSON, each picture
- * this browser has and the document doesn't carry given a src) but with a short stand-in data: URL of the picture's
- * own type, unique to this call: a stand-in passes the board's check of a source exactly when the real data: URL
- * would (that check reads only the type, web/image-size.ts dataUrl).  Each stand-in is then written as the real
- * data: URL, as FileReader.readAsDataURL makes it ("data:" + type + ";base64," + base64), from the picture's bytes.
+ * A board's .board.json, as slices, byte for byte what Download writes: boardFileText(doc, images) is
+ * canonical(await images.inline(doc)) = boardText(cleanDoc(inline(doc))), where inline clones the document through
+ * JSON and gives each picture this browser has, and the document doesn't carry, its data: URL.  Here each step is
+ * paced: the clone (jsonClone), cleanDoc (cleanDocSteps, which cleanDoc runs) and boardText (boardTextParts).
+ * A picture's src is a short stand-in of the picture's own type through all three (the board's check of a source
+ * reads only its type, web/image-size.ts dataUrl), and each stand-in is written as the real data: URL, as
+ * FileReader.readAsDataURL makes it ("data:" + type + ";base64," + base64), from the picture's bytes in slices; a long
+ * data: URL the document already carries is stood in for, before the clone, and written as it is.
  */
-export function boardSlices(doc: BoardDoc, images: Images, fileText: (d: BoardDoc, i: { inline(d: BoardDoc): Promise<BoardDoc> }) => Promise<string>, pace: Pace): AsyncIterable<Uint8Array> {
+export function boardSlices(doc: BoardDoc, images: Images, kit: BoardKit, pace: Pace): AsyncIterable<Uint8Array> {
   return sliced(async (put) => {
     const out = new Out(put, pace);
-    // (a stand-in, and what it stands for: a picture's bytes, or a long data: URL the document already carries)
     const stand = new Map<string, Blob | string>(), tag = nonce();
     let i = 0;
     const standIn = (type: string) => `data:${type};base64,SBX${tag}${i++}`;
-    // (a source the document carries already, long: stood in before anything clones the document.  The stand-in has
-    // its type, so it passes the board's check exactly when the source does: its rest checked here, in pieces)
     const carried = await shrinkSources(doc, standIn, stand, pace);
-    const text = await fileText(carried, {
-      inline: async (d) => {
-        const o = JSON.parse(JSON.stringify(d)) as BoardDoc;
-        if (!o.images) return o;
-        for (const [name, v] of Object.entries(o.images)) {
-          // (the picture's bytes, from this browser's store: Images.blob, as Images.inline reads them)
-          const b = v.src ? undefined : await images.blob(name);
-          if (v.src || !b) continue;
-          const s = standIn(b.type || "application/octet-stream");
-          stand.set(s, b);
-          v.src = s;
-        }
-        return o;
-      },
-    });
-    // (each stand-in where it is in the text, in order; one the board dropped isn't there)
-    const at = [...stand.keys()].map((s) => ({ s, i: text.indexOf(s) })).filter((x) => x.i >= 0).sort((a, b) => a.i - b.i);
-    let from = 0;
-    for (const { s, i } of at) {
-      await out.text(text.slice(from, i));
-      const b = stand.get(s)!;
-      if (typeof b === "string") {
-        // (a carried source, its characters as they are: base64 and whitespace, which JSON writes as \n, \t, \r…)
-        for (let p = 0; p < b.length; p += PIECE) { out.add(JSON.stringify(b.slice(p, p + PIECE)).slice(1, -1)); await out.step(); }
-      } else {
-        out.add(`data:${b.type || "application/octet-stream"};base64,`);
-        for (let p = 0; p < b.size; p += PICTURE_SLICE) {
-          out.add(base64(new Uint8Array(await b.slice(p, Math.min(b.size, p + PICTURE_SLICE)).arrayBuffer())));
-          await out.step();
+    // (Images.inline: the clone, then each picture this browser has and the document doesn't carry)
+    const o = (await jsonClone(carried, pace)) as BoardDoc;
+    if (o?.images) {
+      for (const [name, v] of Object.entries(o.images)) {
+        const b = v.src ? undefined : await images.blob(name);
+        if (!b) continue;
+        const s = standIn(b.type || "application/octet-stream");
+        stand.set(s, b);
+        v.src = s;
+      }
+    }
+    const cleaned = await drive(kit.cleanDocSteps(o), pace);
+    let parts = 0;
+    for (const p of kit.boardTextParts(cleaned)) {
+      if (typeof p === "string") out.add(p);
+      else {
+        const b = stand.get(p.s);
+        if (b === undefined) await out.str(p.s);
+        else if (typeof b === "string") await out.str(b);
+        else {
+          out.add(`"data:${b.type || "application/octet-stream"};base64,`);
+          for (let at = 0; at < b.size; at += PICTURE_SLICE) {
+            out.add(base64(new Uint8Array(await b.slice(at, Math.min(b.size, at + PICTURE_SLICE)).arrayBuffer())));
+            await out.step();
+          }
+          out.add('"');
         }
       }
-      from = i + s.length;
+      if (++parts % 256 === 0) await out.step();
     }
-    await out.text(text.slice(from));
     await out.flush();
   });
 }

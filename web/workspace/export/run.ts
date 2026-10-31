@@ -12,15 +12,16 @@ import type { Entry, Op, Workspace } from "../api";
 import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
 import { BlobSink, ExportStopped, ExportWorker, OpfsSink, PickerSink, SLICE, Spool, ZipWriter, type Sink } from "./zip";
-import { boardSlices, notebookSlices, sizes, toLines, type Pace } from "./stream";
+import { boardSlices, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
+// (the serializers: Download's own functions, from the module Download calls (file-bytes.ts), built into this chunk
+// rather than handed over by the page, so that a page carries them only if it uses them itself before any click
+// (E1 r2a, @sagebrush's eager-size ruling); the same source, so the export's bytes are Download's by construction)
+import { boardFileText, boardTextParts, cleanDocSteps, ipynbObject, notebookFileText } from "../file-bytes";
+const SER: BoardKit = { cleanDocSteps, boardTextParts };
 
-/** What the page gives this chunk, from its own bundle, so the chunk carries no second copy of the workspace or the
- * serializers: Download's own functions (file-bytes.ts), how a "missing" read looks, the data-file cap, Trash. */
+/** What the page gives this chunk, from its own bundle, so the chunk carries no second copy of the workspace: how a
+ * "missing" read looks (the page's WorkspaceError), the data-file cap, Trash. */
 export type Kit = {
-  notebookFileText(doc: any): string;
-  /** the notebook's JSON value, which notebookFileText writes (web/notebook/ipynb.js), for its streaming */
-  ipynbObject(doc: any, toLines: (t: unknown) => unknown): unknown;
-  boardFileText(doc: BoardDoc, images: { inline(d: BoardDoc): Promise<BoardDoc> }): Promise<string>;
   isMissing(err: unknown): boolean;
   maxFileBytes: number;
   trash: string;
@@ -53,7 +54,7 @@ type TestHooks = {
   noOpfs?: boolean;
   noPicker?: boolean;
   onHand?(blob: Blob, name: string): void;
-  stats?: { spoolChunks?: number; members?: number };
+  stats?: { spoolChunks?: number; members?: number; refs?: Record<string, string> };
   slicePause?: number;
   /** after each member is written (its count), between members: the r2d heap checkpoints wait here */
   between?(written: number): Promise<void> | void;
@@ -68,10 +69,18 @@ type TestHooks = {
   failStamp?: boolean;
   /** the worker fails the OPFS spool's nth append (T13) */
   failSpoolAfter?: number;
+  /** (astra's E1-R2-A2) the stale sweep pauses this long between listing and removing; the probe's write or flush
+   * fails; a scratch file's open (truncate) fails */
+  sweepPauseMs?: number;
+  failProbe?: "write" | "flush";
+  failOpen?: "spool" | "sink";
   /** the instrument's own check (grader's C8): a busy loop of this many ms on the main thread after the first member */
   busyMs?: number;
   /** stream.ts's slice and piece sizes, small, so that cuts land everywhere (the byte-equality tests) */
   streamSizes?: [number, number];
+  /** (tests only, never with timing checks) each document's Download bytes, through the page's own notebookFileText
+   * and boardFileText, hashed into stats.refs by path: the streamed member's sha256 must equal it */
+  reference?: boolean;
   /** the stalls' profile (E1 r2, @sagebrush's (c)): each wait of the writing loop, its start (0) and end (1) */
   probe?(what: "page" | "capture" | "member" | "spool", edge: 0 | 1): void;
 };
@@ -127,9 +136,11 @@ export type Plan = {
   bytes: number;
   /** the bundle's upper bound */
   bound: number;
-  /** the spools' bounds: the central records', and the manifest entries' (each entry once: astra's accounting note) */
+  /** the spools' bounds: the central records', the manifest entries' (each entry once: astra's accounting note), and
+   * the capture log's (astra's E1-R2-A1) */
   cdSpool: number;
   manSpool: number;
+  capSpool: number;
   unavailable: Unavailable[];
 };
 export type Progress = { phase: "preflight" | "writing" | "finishing"; files: number; of: number; bytes: number; total: number };
@@ -217,8 +228,8 @@ function manifestEntry(e: Entry, captured: number, got?: { rev: number; size: nu
  * they stream (stream.ts), never as one string or buffer; a data file's bytes as they are (one buffer, read whole by
  * its capture; the pump slices it).  `images`: the board's pictures, let go by the caller. */
 function memberOf(e: Entry, content: any, pace: Pace, images: Images): AsyncIterable<Uint8Array> | Iterable<Uint8Array> {
-  if (e.kind === "notebook") return notebookSlices(K.ipynbObject(content, toLines), pace);
-  if (e.kind === "board") return boardSlices(content as BoardDoc, images, K.boardFileText, pace);
+  if (e.kind === "notebook") return notebookSlices(content, ipynbObject, pace);
+  if (e.kind === "board") return boardSlices(content as BoardDoc, images, SER, pace);
   if (content instanceof Uint8Array) return [content];
   if (content instanceof ArrayBuffer) return [new Uint8Array(content)];
   if (ArrayBuffer.isView(content)) return [new Uint8Array(content.buffer, content.byteOffset, content.byteLength)];
@@ -272,7 +283,7 @@ export function unavailableWhyText(u: Unavailable[]): string {
 
 export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void): Promise<Plan> {
   const s0 = await w.lastSeq();
-  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 0, manSpool: 0, unavailable: [] };
+  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 0, manSpool: 0, capSpool: 0, unavailable: [] };
   sizesNow();
   const pace = paceOf(signal);
   let lastPre = 0;
@@ -286,6 +297,7 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
       // (the spools: each member's central record, at most 46 + name + a Zip64 extra; its manifest entry and comma)
       plan.cdSpool += 46 + 12 + name;
       plan.manSpool += manifestEntryLen(e, Date.now()) + 1;
+      plan.capSpool += captureLineLen(e);
       plan.bound += 30 + 46 + 16 + 12 + 2 * name;
       if (e.kind === "folder") { plan.folders++; continue; }
       plan.files++;
@@ -324,33 +336,46 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
 /** The manifest's head and tail around its entries, at their widest. */
 const MANIFEST_ENDS = 512;
 
-/** A 53-bit hash of a string (cyrb53), for the tree check's record of what was exported: per path, its identity. */
-function h53(s: string): number {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
-}
-/** What the export captured: per path (hashed), the identity (hashed) it captured there; "/" is the root's. */
-export class Captured {
-  private m = new Map<number, number>();
-  add(path: string, ident: string | undefined) { this.m.set(h53(path), ident === undefined ? -1 : h53(ident)); }
-  /** whether `path` was captured with identity `ident` (undefined: none) */
-  is(path: string, ident: string | null | undefined): boolean {
-    const v = this.m.get(h53(path));
-    return v !== undefined && v !== -1 && ident != null && v === h53(ident);
+/** What the export captured, exactly (astra's E1-R2-A1): per member, its path, kind and identity, as one JSON line in
+ * a spool of its own (OPFS or Blob parts, as the others), so the record is exact and the heap stays flat however
+ * many entries there are.  The tree check reads back only the lines of the paths it needs. */
+export class CaptureLog {
+  constructor(readonly spool: Spool) {}
+  async add(path: string, kind: Entry["kind"], ident: string | undefined) { await this.spool.appendText(JSON.stringify([path, kind, ident ?? null]) + "\n"); }
+  /** The captured kind and identity of each of `paths` that was captured. */
+  async lookup(paths: Set<string>): Promise<Map<string, { kind: string; ident: string | null }>> {
+    const out = new Map<string, { kind: string; ident: string | null }>();
+    const dec = new TextDecoder();
+    let carry = "";
+    for await (const chunk of this.spool.replay()) {
+      const text = carry + dec.decode(chunk, { stream: true });
+      const lines = text.split("\n");
+      carry = lines.pop() ?? "";
+      for (const l of lines) {
+        if (!l) continue;
+        const [p, kind, ident] = JSON.parse(l) as [string, string, string | null];
+        if (paths.has(p)) out.set(p, { kind, ident });
+      }
+      await breathe();
+    }
+    return out;
   }
 }
+/** A line's length in the capture log, at its widest (preflight's bound). */
+const captureLineLen = (e: Entry) => jsonLen(e.path) + jsonLen(e.kind) + (e.ident === undefined ? 4 : jsonLen(e.ident)) + 5;
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
 
-/** Ops after S0, against the allow-list (E1 r2c §2 rule 1; astra's E1-A1): a content `write` that kept its entry's
- * identity, its name, its folder (by the folder's identity) and its kind, and didn't put it in Trash, each as the
- * export captured them; a dropVersions; an emptyTrash.  Anything else stops the export, naming its path; server-
- * applied ops alike.  The log's floor is read before and after the scan: ops after S0 pruned meanwhile stop it. */
-export async function treeUnchanged(w: Workspace, s0: number, got: Captured, signal: AbortSignal): Promise<void> {
+/** Ops after S0, against the allow-list (E1 r2c §2 rule 1; astra's E1-A1 and E1-R2-A1): a content `write` that kept,
+ * exactly as the export captured them, its entry's identity and kind, its folder (by the folder's identity, itself
+ * captured as a folder) and its name, and didn't put it in Trash; a dropVersions; an emptyTrash.  Anything else stops
+ * the export, naming its path; server-applied ops alike.  Two passes: the ops (any other kind stops at once; the writes
+ * kept), then the capture log, read once for just the paths the writes need.  The log's floor is read before and
+ * after: ops after S0 pruned meanwhile stop it. */
+export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, signal: AbortSignal): Promise<void> {
   const trimmed = "the workspace's change log was trimmed while exporting, so the export can't show nothing moved";
   if ((await w.opsFloor()) > s0) throw new ExportStopped(trimmed);
+  const stop = (op: Op): never => { throw new ExportStopped(`${op.path}${op.to ? ` (to ${op.to})` : ""}: "${op.op}" while exporting`); };
+  const writes: Op[] = [];
   let after = s0;
   for (;;) {
     stopIf(signal);
@@ -358,18 +383,27 @@ export async function treeUnchanged(w: Workspace, s0: number, got: Captured, sig
     if (after === s0) await T().duringTreeScan?.();
     for (const op of ops) {
       await breathe();
+      if (op.op === "dropVersions" || op.op === "emptyTrash") continue;
       const a = op.after;
-      const parent = parentOf(op.path);
-      const ok = op.op === "dropVersions" || op.op === "emptyTrash"
-        || (op.op === "write" && !!a && !a.trashed && a.name === nameOf(op.path) && a.kind === op.kind
-          && got.is(op.path, a.id) && (parent === "/" ? a.parent == null : got.is(parent, a.parent)));
-      if (!ok) throw new ExportStopped(`${op.path}${op.to ? ` (to ${op.to})` : ""}: "${op.op}" while exporting`);
+      if (op.op !== "write" || !a || a.trashed || a.name !== nameOf(op.path) || a.kind !== op.kind) stop(op);
+      writes.push(op);
     }
     if (ops.length < PAGE) break;
     after = ops[ops.length - 1].seq!;
     await pause();
   }
   if ((await w.opsFloor()) > s0) throw new ExportStopped(trimmed);
+  if (!writes.length) return;
+  const need = new Set<string>();
+  for (const op of writes) { need.add(op.path); const p = parentOf(op.path); if (p !== "/") need.add(p); }
+  stopIf(signal);
+  const got = await log.lookup(need);
+  for (const op of writes) {
+    const a = op.after!, c = got.get(op.path), parent = parentOf(op.path), pc = got.get(parent);
+    const ok = !!c && c.kind === op.kind && c.ident !== null && c.ident === a.id
+      && (parent === "/" ? a.parent == null : !!pc && pc.kind === "folder" && pc.ident !== null && pc.ident === a.parent);
+    if (!ok) stop(op);
+  }
 }
 
 export type Result = { name: string; members: number; bytes: number; stampFailed?: string };
@@ -379,7 +413,7 @@ export type Result = { name: string; members: number; bytes: number; stampFailed
 export async function chooseSink(plan: Plan, wk: ExportWorker | null, id: string): Promise<Sink> {
   if (wk) {
     const est = await (navigator.storage as any)?.estimate?.().catch(() => undefined);
-    if (est && typeof est.quota === "number" && est.quota - est.usage >= plan.bound + plan.cdSpool + plan.manSpool) {
+    if (est && typeof est.quota === "number" && est.quota - est.usage >= plan.bound + plan.cdSpool + plan.manSpool + plan.capSpool) {
       const file = `${id}-out.zip`;
       const s = new OpfsSink(wk, file, async () => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("sagebrush-export")).getFileHandle(file)).getFile(), T().onHand ?? undefined);
       await s.open();
@@ -395,7 +429,7 @@ export async function chooseSink(plan: Plan, wk: ExportWorker | null, id: string
 export async function startWorker(url: string, id: string): Promise<{ worker: ExportWorker; opfs: boolean }> {
   const worker = new ExportWorker(new Worker(url, { type: "module" }));
   if (T().noOpfs) return { worker, opfs: false };
-  try { await worker.ask("removeStale", { lockPrefix: LOCK_PREFIX }); await worker.ask("probe", { name: `${id}-probe` }); return { worker, opfs: true }; } catch { return { worker, opfs: false }; }
+  try { await worker.ask("removeStale", { lockPrefix: LOCK_PREFIX, pauseMs: T().sweepPauseMs ?? 0 }); await worker.ask("probe", { name: `${id}-probe`, fail: T().failProbe }); return { worker, opfs: true }; } catch { return { worker, opfs: false }; }
 }
 /** Each export holds the Web Lock LOCK_PREFIX + its id from its start until its last scratch file is removed. */
 export const LOCK_PREFIX = "sagebrush-export:";
@@ -411,18 +445,19 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   const spoolWk = opts.opfs ? opts.worker : null;
   const cd = new Spool(`${opts.id}-cd`, spoolWk, plan.cdSpool), man = new Spool(`${opts.id}-manifest`, spoolWk, plan.manSpool);
+  const capSpool = new Spool(`${opts.id}-capture`, spoolWk, plan.capSpool), log = new CaptureLog(capSpool);
   const pace = paceOf(opts.signal);
   sizesNow();
   try {
     if (plan.unavailable.length) throw new ExportStopped(unavailableWhyText(plan.unavailable));
-    if (!opts.opfs && plan.cdSpool + plan.manSpool > cap("spoolBlob")) throw new ExportStopped("This browser can't hold the export's index; use a browser that can save files, or export a smaller workspace");
+    if (!opts.opfs && plan.cdSpool + plan.manSpool + plan.capSpool > cap("spoolBlob")) throw new ExportStopped("This browser can't hold the export's index; use a browser that can save files, or export a smaller workspace");
     await cd.open();
     await man.open();
+    await capSpool.open();
     if (spoolWk && T().failSpoolAfter) await spoolWk.ask("failAfter", { n: T().failSpoolAfter });
     sink ??= await chooseSink(plan, spoolWk, opts.id);
     let written = 0, files = 0, done = 0, total = 0, first = true, phase: Progress["phase"] = "writing";
     const zip = new ZipWriter(sink, cd, { signal: opts.signal, crc: opts.worker, progress: (n) => { written += n; }, slicePause: T().slicePause });
-    const got = new Captured();
     // (progress: the files and folders written and the archive's bytes so far, its index included; at most every 100
     // ms from the loop, and every 100 ms from a timer too, so the line is rewritten at least every 250 ms whatever
     // the work waits on (E1 r2d §6, @sagebrush's ruling of Oct 31); never an object and a string per entry)
@@ -446,13 +481,13 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
         let line: string;
         if (e.kind === "folder") {
           await zip.folder(zipName(e), e.updated);
-          got.add(e.path, e.ident);
+          await log.add(e.path, e.kind, e.ident);
           line = manifestEntry(e, Date.now());
         } else {
           await T().beforeCapture?.(e.path);
           const c = await timed("capture", () => capture(w, e, opts.signal));
           await T().afterCapture?.(e.path);
-          got.add(e.path, c.entry.ident);
+          await log.add(e.path, c.entry.kind, c.entry.ident);
           // (the member's cap, or what is left of the total if that is less: both checked on the bytes as they go)
           const left = cap("total") - total, docCap = capOf(e.kind);
           const max = Math.min(docCap, left), why = left < docCap ? `the export passed ${cap("total") / 2 ** 30} GiB while it was written (files grew meanwhile)` : capWhy(e.path, e.kind);
@@ -466,6 +501,12 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           } finally { images.dispose(); }
           total += m.usize;
           line = manifestEntry(c.entry, c.at, { rev: c.rev, size: m.usize, sha256: m.sha256! });
+          if (T().reference && (e.kind === "notebook" || e.kind === "board")) {
+            const ref = e.kind === "notebook" ? notebookFileText(c.content) : await boardFileText(c.content as BoardDoc, new Images());
+            const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(ref)));
+            const st = T().stats;
+            if (st) (st.refs ??= {})[e.path] = Array.from(h, (x) => x.toString(16).padStart(2, "0")).join("");
+          }
           files++;
         }
         await timed("spool", async () => { if (!first) await man.appendText(","); await man.appendText(line); });
@@ -479,7 +520,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
       }
     }
     // (rule 1: nothing in the tree moved since S0)
-    await treeUnchanged(w, plan.s0, got, opts.signal);
+    await treeUnchanged(w, plan.s0, log, opts.signal);
     tick("finishing", true);
     // (§5a: created right before the manifest is serialized; the manifest is the last member)
     const created = new Date().toISOString();
@@ -502,7 +543,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
       await w.setLastExport({ at: Date.now(), partial: false, members: r.members, bytes: r.bytes });
     } catch (e) { r.stampFailed = String((e as Error)?.message ?? e); }
     const st = T().stats;
-    if (st) { st.spoolChunks = cd.chunks + man.chunks; st.members = zip.members; }
+    if (st) { st.spoolChunks = cd.chunks + man.chunks + capSpool.chunks; st.members = zip.members; }
     return r;
   } catch (e) {
     if (!committed) await sink?.abort();
@@ -511,6 +552,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     clearInterval(progressTimer);
     await cd.remove();
     await man.remove();
+    await capSpool.remove();
   }
 }
 

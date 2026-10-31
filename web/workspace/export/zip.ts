@@ -91,7 +91,7 @@ export class BlobSink implements Sink {
 
 export class OpfsSink implements Sink {
   constructor(private wk: ExportWorker, private file: string, private fileOf: () => Promise<File>, private onHand: (blob: Blob, name: string, then: () => void) => void = hand) {}
-  async open() { await this.wk.ask("open", { name: this.file }); }
+  async open() { await this.wk.ask("open", { name: this.file, fail: (globalThis as any).__SB_EXPORT_TEST__?.failOpen === "sink" ? "truncate" : undefined }); }
   // (each chunk is the writer's own copy: transferred, not cloned)
   async write(chunk: Uint8Array) { await this.wk.ask("append", { name: this.file, data: chunk }, [chunk.buffer]); }
   async close(name: string) {
@@ -115,7 +115,7 @@ export class Spool {
   /** (tests) chunks flushed */
   chunks = 0;
   constructor(private name: string, private wk: ExportWorker | null, private cap: number) {}
-  async open() { if (this.wk) await this.wk.ask("open", { name: this.name }); }
+  async open() { if (this.wk) await this.wk.ask("open", { name: this.name, fail: (globalThis as any).__SB_EXPORT_TEST__?.failOpen === "spool" ? "truncate" : undefined }); }
   async append(b: Uint8Array) {
     if (this.size + b.length > this.cap) throw new ExportStopped(`the export's index grew past ${this.cap} bytes`);
     let at = 0;

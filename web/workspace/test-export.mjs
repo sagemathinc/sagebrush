@@ -30,6 +30,7 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = []; const consoleLines = [];
+let servedWorker = 0;
 const chunk = process.env.CHUNK ? readFileSync(process.env.CHUNK) : null, chunkWorker = process.env.CHUNK_WORKER ? readFileSync(process.env.CHUNK_WORKER) : null;
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
@@ -39,13 +40,27 @@ ws.onmessage = (ev) => {
   if (m.method === "Runtime.consoleAPICalled") consoleLines.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200));
   // (a control's chunk, in place of the built one)
   if (m.method === "Fetch.requestPaused") {
-    const body = /sagebrush-export-worker\.js/.test(m.params.request.url) ? chunkWorker : chunk;
-    if (body) send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "text/javascript" }], body: body.toString("base64") });
+    const isWorker = /sagebrush-export-worker\.js/.test(m.params.request.url), body = isWorker ? chunkWorker : chunk;
+    if (isWorker && chunkWorker) servedWorker++;
+    // (paused at the response: the server's own headers kept, the body replaced; a worker's script needs the page's
+    // Cross-Origin-Embedder-Policy on it, or the worker isn't started)
+    const headers = (m.params.responseHeaders ?? []).filter((h) => !/^(content-length|content-encoding|etag|last-modified)$/i.test(h.name));
+    if (body) send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: headers.length ? headers : [{ name: "Content-Type", value: "text/javascript" }], body: body.toString("base64") });
     else send("Fetch.continueRequest", { requestId: m.params.requestId });
   }
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 400)); return r.result?.value; };
+/** A second tab of the same site (the same profile: its OPFS and its locks are shared), for the scenarios two tabs
+ * need; its own ev and until. */
+async function secondTab() {
+  const { targetId } = await send("Target.createTarget", { url: base });
+  const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+  for (const m of ["Page.enable", "Runtime.enable"]) await send(m, {}, sessionId);
+  const ev2 = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId); if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 400)); return r.result?.value; };
+  const until2 = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev2(expr).catch(() => false)) return true; await sleep(100); } return false; };
+  return { ev: ev2, until: until2, close: () => send("Target.closeTarget", { targetId }) };
+}
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
 const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
 const fails = [];
@@ -207,7 +222,7 @@ async function scenario(name, f) {
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  if (chunk || chunkWorker) await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-export*.js*", requestStage: "Request" }] });
+  if (chunk || chunkWorker) await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-export*.js*", requestStage: "Response" }] });
   await go(base);
   // (once more if the page's workspace didn't come up: a loaded machine)
   if (!(await until(`!!${W}`, 60000))) { await go(base); if (!(await until(`!!${W}`, 90000))) throw new Error("the page's workspace never came up"); }
@@ -514,6 +529,8 @@ try {
     await stops("a server-applied rename", inject({ op: "rename", path: "/data/primes.csv", to: "/data/p2.csv", kind: "file", fid: csv.fid, origin: "server", after: { id: csv.fid, parent: data.fid, name: "p2.csv", kind: "file", trashed: false } }), /primes\.csv/);
     await stops("a write that changed the file's identity", inject({ op: "write", path: "/data/primes.csv", kind: "file", fid: "other", origin: "server", after: { id: "someone-else", parent: data.fid, name: "primes.csv", kind: "file", trashed: false } }), /primes\.csv/);
     await stops("a write that changed the file's folder", inject({ op: "write", path: "/data/primes.csv", kind: "file", fid: csv.fid, after: { id: csv.fid, parent: "another-folder", name: "primes.csv", kind: "file", trashed: false } }), /primes\.csv/);
+    // (astra's E1-R2-A1: the op's own kind and its after's agree, but not with what was captured at that path and id)
+    await stops("a write that changed the file's kind", inject({ op: "write", path: "/data/primes.csv", kind: "notebook", fid: csv.fid, after: { id: csv.fid, parent: data.fid, name: "primes.csv", kind: "notebook", trashed: false } }), /primes\.csv/);
     // (the log trimmed past S0: before the scan, and while the scan runs)
     const trim = `const m = await ${IDB}("sagebrush-workspace", "meta", (s) => s.get("opsFloor")); await ${IDB}("sagebrush-workspace", "meta", (s) => s.put(1e12, "opsFloor"));`;
     await stops("the log trimmed before the check", `afterCapture: async (p) => { if (p === "/Algebra.ipynb") { ${trim} } }`, /change log was trimmed/);
@@ -606,6 +623,7 @@ try {
     check(!nc.stopped, "near-cap documents export: " + (nc.stopped ?? nc.name));
     if (!nc.stopped) { const z = inspect(join(out, "nc.zip")); check(!z.error && z.bad === null && z.mismatch.length === 0, "…valid, every hash right"); }
     check(att.outside.length === 0, "…with no main-thread task over 50 ms of the export's own: every one is a near-cap record's read from IndexedDB (" + JSON.stringify(att.inside) + " ms; the longest task " + wn.long + " ms, heartbeat " + wn.heartbeat + " ms)");
+    check(att.inside.every((d) => d <= 200), "…and each record's read at most 200 ms (D-3, daybreak2's exception): " + JSON.stringify(att.inside));
     const cancelIn = async (label, hook) => {
       await hooks(`${hook}: (p) => { if (!/^\\/Near\\./.test(p) || window.__clickAt) return; setTimeout(() => { const b = [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel"); window.__clickAt = performance.now(); b?.click(); }, 150); }`);
       await ev(`(() => { window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
@@ -618,6 +636,211 @@ try {
     await ev(`Promise.all([${W}.remove("/Near.ipynb"), ${W}.remove("/Near.board.json")]).then(() => 1)`);
   });
 
+  // ---- daybreak2's and astra's r2 finding: near-cap documents WITHOUT pictures (a board of many notes, long text, a long
+  // stroke, an extension value; a notebook of many cells and a text in many pieces) are written in bounded work too:
+  // no task of the export's own over 50 ms, each record's read at most 200 ms, Cancel within 250 ms in preflight and
+  // while written; and their members are byte for byte Download's (a separate run: the reference is computed there)
+  await scenario("nearcap2", async () => {
+    await ev(`(async () => {
+      const t = "x".repeat(900) + "\\n";
+      const nodes = [];
+      for (let i = 0; i < 30000; i++) nodes.push({ id: "n" + i, title: "Note " + i, text: t, x: i % 200 * 10, y: Math.floor(i / 200) * 10 });
+      nodes.push({ id: "big", title: "long", text: "y".repeat(5e6) });
+      const pts = new Array(1.5e6); for (let i = 0; i < pts.length; i++) pts[i] = (i * 7) % 1000;
+      nodes.push({ id: "ink", kind: "ink", points: pts, x: 0, y: 0 });
+      await ${W}.create("/Wide.board.json", { content: { format: "sagebrush-board", version: 1, title: "Wide", nodes, extension: { blob: "z".repeat(2e6) } } });
+      const cells = [];
+      for (let i = 0; i < 50000; i++) cells.push({ id: "c" + i, code: "print(" + i + ")", outputs: [{ output_type: "stream", name: "stdout", text: "line " + i + "\\n" }], n: i });
+      const parts = new Array(400000); for (let i = 0; i < parts.length; i++) parts[i] = "p" + i + (i % 7 ? "" : "\\n");
+      cells.push({ id: "many", code: "x", outputs: [{ output_type: "stream", name: "stdout", text: parts }], n: 1 });
+      await ${W}.create("/Many.ipynb", { content: { mode: "python", cells } });
+      return 1;
+    })()`);
+    const watch = `(() => { window.__long = 0; window.__tasks = []; window.__lto?.disconnect(); (window.__lto = new PerformanceObserver((l) => { for (const e of l.getEntries()) { window.__long = Math.max(window.__long, e.duration); window.__tasks.push([e.startTime, e.duration]); } })).observe({ type: "longtask", buffered: false }); return 1; })()`;
+    for (const p of ["/Wide.board.json", "/Many.ipynb"]) {
+      await ev(watch);
+      await ev(`${W}.read(${JSON.stringify(p)}).then(() => 1)`);
+      await sleep(300);
+      console.log("(evidence: a plain read of " + p + ": the longest task " + Math.round(await ev(`window.__long`)) + " ms)");
+    }
+    await ev(watch);
+    await hooks(`probe: (what, edge) => { (window.__probe ??= []).push([what, edge, performance.now()]); }`);
+    await ev(`(() => { window.__probe = []; return 1; })()`);
+    const r = await exportOnce(join(out, "nc2.zip"));
+    check(!r.stopped, "near-cap documents without pictures export: " + (r.stopped ?? r.name));
+    if (!r.stopped) { const z = inspect(join(out, "nc2.zip")); check(!z.error && z.bad === null && z.mismatch.length === 0, "…valid, every hash right"); }
+    const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
+    console.log("(long tasks over 50 ms during the export: inside a record read " + JSON.stringify(att.inside) + ", elsewhere " + JSON.stringify(att.outside) + ")");
+    check(att.outside.length === 0, "…no main-thread task over 50 ms of the export's own (the clone, cleanDoc, the board's text, the cells, the lines): " + JSON.stringify(att.outside));
+    check(att.inside.every((d) => d <= 200), "…each record's read at most 200 ms: " + JSON.stringify(att.inside));
+    const cancelIn = async (label, hook) => {
+      await hooks(`${hook}: (p) => { if (!/^\\/(Wide|Many)\\./.test(p) || window.__clickAt) return; setTimeout(() => { const b = [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel"); window.__clickAt = performance.now(); b?.click(); }, 150); }`);
+      await ev(`(() => { window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+      const before = await lastAt();
+      const x = await exportOnce(join(out, "nc2x.zip"));
+      const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
+      check(!!x.stopped && took >= 0 && took <= 250 && !(await ev(`!!window.__exp`)) && (await lastAt()) === before, "Cancel " + label + " stops within 250 ms, timed in the page, nothing handed over, status unchanged: " + Math.round(took) + " ms");
+    };
+    await cancelIn("while preflight streams a near-cap document without pictures", "preflightMember");
+    await cancelIn("while one is written", "onMember");
+    // (byte equality: each member's sha256 against the page's own Download text of the captured record, in a run
+    // apart from the timing checks)
+    await hooks("reference: true");
+    const e = await exportOnce(join(out, "nc2r.zip"));
+    if (!e.stopped) {
+      const z = inspect(join(out, "nc2r.zip"));
+      const refs = e.stats?.refs ?? {};
+      for (const p of ["/Wide.board.json", "/Many.ipynb", "/Algebra.ipynb", "/Plan.board.json"]) {
+        const m = z.entries.find((x) => x.path === p);
+        check(!!m && refs[p] === m.sha256, "the streamed " + p + " is byte for byte the page's Download text (sha256 " + (m?.sha256 ?? "-").slice(0, 12) + " / " + (refs[p] ?? "-").slice(0, 12) + ")");
+      }
+    } else check(false, "the reference export stopped: " + e.stopped);
+    await ev(`Promise.all([${W}.remove("/Wide.board.json"), ${W}.remove("/Many.ipynb")]).then(() => 1)`);
+  });
+
+  // ---- astra's E1-R2-A2: scratch ownership.  (1) This tab's export starts, its sweep paused before its listing (a test
+  // hook); meanwhile another tab's export starts after it and reaches its OPFS handoff; then this sweep lists and
+  // removes: the other export's archive survives (its lock is held), an abandoned file (no lock) is removed.  (2) The
+  // probe's write or flush failing, and a scratch file's open failing, leave no file behind.
+  await scenario("scratch", async () => {
+    const OPFS = (body) => `navigator.storage.getDirectory().then((r) => r.getDirectoryHandle("sagebrush-export", { create: true })).then(async (d) => { ${body} })`;
+    const names = () => ev(OPFS(`const n = []; for await (const k of d.keys()) n.push(k); return n;`));
+    const OLD = "00000000-0000-4000-8000-000000000000-old";
+    // (the other tab, made ready to export first: its own hooks keep its handoff open until told)
+    const b = await secondTab();
+    await b.until(`!!document.querySelector("#wsfilesbtn") && !document.querySelector("#wsfilesbtn").hidden`, 60000);
+    await b.ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
+    await b.until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
+    await b.ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); window.__exp = null; window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; } }; return 1; })()`);
+    await b.until(`[...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].some((x) => /^Export all current files/.test(x.textContent))`);
+    // (this tab's export first, its sweep paused 10 s before it lists; then the other's)
+    await hooks(`sweepPauseMs: 10000`);
+    await startFlow();
+    const t0 = Date.now();
+    // (the other export started well after this one's sweep has begun: 3 s into its 10 s pause)
+    await sleep(3000);
+    const clickB = (re) => b.until(`(() => { const x = [...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].find((y) => ${re}.test(y.textContent)); x?.click(); return !!x; })()`, 60000);
+    const clickedB = await clickB(/^Export all current files/);
+    const savedB = await clickB(/^Save…$/);
+    const handing = await b.until(`!!window.__exp`, 60000);
+    // (an abandoned file, made after the other export's own sweep: only this tab's paused sweep can remove it)
+    await ev(OPFS(`const f = await d.getFileHandle(${JSON.stringify(OLD)}, { create: true }); const w = await f.createWritable(); await w.write("abandoned"); await w.close(); return 1;`));
+    const other = (await names()).filter((x) => /-out\.zip$/.test(x));
+    const inPause = Date.now() - t0 < 9000;
+    check(clickedB && savedB && handing && other.length === 1 && inPause, "the other tab's export, started after this one, is handing off its archive from OPFS while this one's sweep waits: " + JSON.stringify(other) + " at " + (Date.now() - t0) + " ms");
+    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
+    const left = await names();
+    check(ready && other.length === 1 && left.includes(other[0]), "a sweep begun before the other export, listing after it, leaves its handing-off archive (its lock held): " + JSON.stringify(left));
+    check(ready && !left.includes(OLD), "…and removes the abandoned file, whose export holds no lock: " + JSON.stringify(left));
+    await ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((x) => x.textContent === "Cancel")?.click(); return 1; })()`);
+    await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Close")`, 10000);
+    await closeFlow();
+    await b.ev(`(() => { window.__exp?.then?.(); return 1; })()`);
+    await until(`${LOCKS}.then((m) => m === 0)`, 20000);
+    await b.close();
+    await ev(OPFS(`for (const k of [...(await (async () => { const n = []; for await (const k of d.keys()) n.push(k); return n; })())]) await d.removeEntry(k).catch(() => {}); return 1;`));
+    // (setup faults: none may leave a file)
+    for (const [label, extra, re] of [["the probe's write fails", `failProbe: "write"`, null], ["the probe's flush fails", `failProbe: "flush"`, null], ["a scratch spool's open fails", `failOpen: "spool"`, /couldn't be truncated/], ["the archive's scratch file's open fails", `failOpen: "sink"`, /couldn't be truncated/]]) {
+      await hooks(extra);
+      const r = await exportOnce(join(out, "sf.zip"));
+      await handed().catch(() => {});
+      await until(`${LOCKS}.then((m) => m === 0)`, 20000);
+      const n = await names();
+      check((re ? !!r.stopped && re.test(r.stopped) : !r.stopped) && n.length === 0, label + ": " + (re ? "the export stops, saying so, and " : "the export goes on (without OPFS), and ") + "no scratch file is left: " + JSON.stringify(n) + " " + String(r.stopped ?? "").slice(-160));
+    }
+  });
+
+  // ---- astra's E1-R2-A3 (E1-A4): Cancel while the export waits for the workspace's lock, held by another tab, in
+  // preflight and while writing: within 250 ms, timed in the page; this tab's request for the lock withdrawn at once;
+  // and once the other tab lets the lock go, nothing late: no archive, no stamp, no scratch file, no lock.
+  await scenario("lockwait", async () => {
+    const WSL = "sagebrush-workspace";
+    const pendingWs = `navigator.locks.query().then((q) => q.pending.filter((l) => l.name === ${JSON.stringify(WSL)}).length)`;
+    const b = await secondTab();
+    await b.until(`!!window.sagebrush?.workspace`, 60000);
+    // (the other tab takes the workspace's lock when told, says so once it holds it, and lets it go when told)
+    await b.ev(`(() => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "hold") navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => { window.__release = r; ch.postMessage("held"); })); if (m.data === "release") { window.__release?.(); window.__release = null; } }; return 1; })()`);
+    for (const [label, hook] of [["in preflight", "preflightMember"], ["while writing", "beforeCapture"]]) {
+      // (at the first document's capture, this export asks the other tab to hold the lock, and goes on once it does)
+      await hooks(`${hook}: () => { if (window.__asked) return; window.__asked = true; return new Promise((ok) => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "held") { ch.close(); ok(); } }; ch.postMessage("hold"); }); }`);
+      await ev(`(() => { window.__asked = false; window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+      const before = await lastAt();
+      await startFlow();
+      if (hook === "beforeCapture") { await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Save…")`, 60000); await panelButton(/^Save…$/); }
+      const waiting = await until(`${pendingWs}.then((n) => n >= 1)`, 30000);
+      await sleep(300);
+      const waitingStill = (await ev(pendingWs)) >= 1;
+      await ev(`(() => { const x = [...document.querySelectorAll(".sbfprev button")].find((y) => y.textContent === "Cancel"); window.__clickAt = performance.now(); x?.click(); return 1; })()`);
+      const shown = await until(`!!window.__cancelledAt`, 5000);
+      const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
+      const diag = shown ? "" : " " + JSON.stringify({ waiting, waitingStill, shown, clickAt: await ev(`window.__clickAt`), text: (await panelText()).slice(-200), locks: await ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name), pending: q.pending.map((l) => l.name) }))`) });
+      check(waiting && waitingStill && shown && took >= 0 && took <= 250, "Cancel " + label + ", while the export waits for the workspace's lock held by another tab, stops it within 250 ms, timed in the page: " + Math.round(took) + " ms" + diag);
+      await sleep(100);
+      const left = await ev(pendingWs);
+      check(left === 0, "…and its request for the lock is withdrawn at once, while the other tab still holds it: " + left + " waiting");
+      await b.ev(`(() => { new BroadcastChannel("sb-lockwait").postMessage("release"); return 1; })()`);
+      await sleep(1500);
+      // (the stopped flow's panel closed: an export holds its lock, and its worker, until its panel is dismissed)
+      await closeFlow();
+      await sleep(300);
+      const late = { exp: await ev(`!!window.__exp`), stamp: (await lastAt()) !== before, locks: await ev(LOCKS), scratch: await scratchCount(), pending: await ev(pendingWs) };
+      check(!late.exp && !late.stamp && late.locks === 0 && late.scratch === 0 && late.pending === 0, "…then, the lock let go, nothing late: no archive, no stamp, no scratch file, nothing waiting, and once its panel is closed no export lock: " + JSON.stringify(late));
+      await closeFlow();
+    }
+    await b.close();
+  });
+
+  // ---- astra's E1-A5 (r2: the evidence asked for): an export from the board page while that board's own save is
+  // paused (the workspace's lock held by another tab), then let go: the export waits for it, and its member has the
+  // edit; and a save refused (this origin's storage quota put below its use): the export stops, saying the board's
+  // last changes aren't kept, nothing handed over, the status unchanged.  (The refusal: IndexedDB's put failing as a
+  // full disk makes it fail, QuotaExceededError, injected in the page from the edit to the export's end.)
+  await scenario("boardsave", async () => {
+    const WSL = "sagebrush-workspace";
+    const bdRef = await ev(`${W}.stat("/Plan.board.json").then((e) => e.ref)`);
+    const b = await secondTab();
+    await b.until(`!!window.sagebrush?.workspace`, 60000);
+    await go(base + "board/?doc=local:" + encodeURIComponent(bdRef));
+    check(await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector('[data-sbb="files"]')`, 60000), "the board page opens the board, with its Files");
+    await sleep(1500);
+    await ev(`(() => { if (document.querySelector("#wssidebar").hidden) document.querySelector('[data-sbb="files"]').click(); return 1; })()`);
+    await until(`!!document.querySelector("#wssidebar .fmeter")`, 60000);
+    // (1) the save paused: the other tab holds the workspace's lock; an edit here; Export clicked; the lock let go 2 s on
+    await b.ev(`(() => { navigator.locks.request(${JSON.stringify(WSL)}, () => new Promise((r) => (window.__release = r))); return 1; })()`);
+    await until(`navigator.locks.query().then((q) => q.held.some((l) => l.name === ${JSON.stringify(WSL)}))`, 10000);
+    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5paused", text: "A5 the paused save" }); }).then(() => 1)`);
+    await hooks();
+    await startFlow();
+    await sleep(2000);
+    const early = await ev(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`);
+    await b.ev(`(() => { window.__release?.(); return 1; })()`);
+    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => /^(Save…|Export again)$/.test(x.textContent))`, 60000);
+    let has = false, why = "";
+    if (ready && (await ev(`[...${P}.querySelectorAll("button")].some((x) => x.textContent === "Save…")`))) {
+      await panelButton(/^Save…$/);
+      if (await until(`!!window.__exp`, 60000)) {
+        const bytes = Buffer.from(await ev(`window.__exp.blob.arrayBuffer().then((a) => { let s = ""; const u = new Uint8Array(a); for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode(...u.subarray(i, i + 32768)); return btoa(s); })`), "base64");
+        writeFileSync(join(out, "a5.zip"), bytes);
+        has = member(join(out, "a5.zip"), "files/Plan.board.json").toString("utf8").includes("A5 the paused save");
+        await handed();
+      }
+    } else why = (await panelText()).slice(-240);
+    check(!early && ready && has, "an export while this board's save is paused waits for it, and its member has the edit made before the click: " + JSON.stringify({ early, ready, has, why }));
+    await closeFlow();
+    // (2) the save refused: the quota put below this origin's use, an edit, Export
+    await ev(`(() => { const put = IDBObjectStore.prototype.put; window.__unrefuse = () => { IDBObjectStore.prototype.put = put; }; IDBObjectStore.prototype.put = function (...a) { throw new DOMException("the disk is full (a test)", "QuotaExceededError"); }; return 1; })()`);
+    await ev(`sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: "a5refused", text: "A5 the refused save" }); }).then(() => 1, () => 1)`);
+    await sleep(1500);
+    const before = await lastAt();
+    await hooks();
+    const r = await exportOnce(join(out, "a5r.zip"));
+    await ev(`(() => { window.__unrefuse(); return 1; })()`);
+    check(!!r.stopped && /last changes aren't kept in your files/.test(r.stopped) && !(await ev(`!!window.__exp`)) && (await lastAt()) === before, "an export while this board's last save was refused stops, saying so, nothing handed over, the status unchanged: " + String(r.stopped ?? r.name).slice(-200));
+    await b.close();
+    await go(base);
+    await openFiles();
+  });
+
   check(errors.length === 0, "no page errors: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
@@ -628,6 +851,8 @@ try {
   rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   rmSync(out, { recursive: true, force: true });
 }
+// (a control's worker in place of the built one: it must have been served, or the control shows nothing)
+if (chunkWorker) check(servedWorker > 0, "the control's worker was served in place of the built one: " + servedWorker + " times");
 console.log(`${checks - fails.length}/${checks} passed`);
 for (const f of fails) console.log("FAIL " + f);
 process.exit(fails.length ? 1 : 0);
