@@ -4,6 +4,7 @@
 // stand-in for sharePreview (the cloud's D1 lookup, tested in
 // web/share/test-share.mjs).
 //   bun web/site/test-preview.mjs
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -179,7 +180,9 @@ ok((await page("/s/notashareid")) === null && (await page("/s/ABCDEFGHIJK2")) ==
 {
   const png = readFileSync(join(here, "../share-client/og.png"));
   ok(png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) && png.readUInt32BE(16) === 1200 && png.readUInt32BE(20) === 630, "og.png is a 1200x630 PNG");
-  ok(png.length === 16616, `og.png is board's frozen file (${png.length} bytes)`);
+  // (logo F's card, rendered from og.svg: design/logo, Oct 31; pinned by content, not only length)
+  const sha = createHash("sha256").update(png).digest("hex");
+  ok(png.length === 17436 && sha === "79a1ec20fa3185f803462bb25eac44a635a0b8e95884c6f0c5751d830dc66103", `og.png is the frozen card (${png.length} bytes, sha256 ${sha})`);
   const headers = readFileSync(join(here, "../_headers"), "utf8");
   ok(/\n\/s\/og\.png\n  Cross-Origin-Resource-Policy: cross-origin\n  Cache-Control: public, max-age=86400\n/.test(headers), "/s/og.png: cross-origin readable, cached a day");
   ok(/"s\/og\.png"/.test(readFileSync(join(here, "../build.ts"), "utf8")), "the build copies it to the site");
