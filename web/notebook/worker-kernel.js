@@ -174,6 +174,7 @@ export class WorkerKernel {
 
   start() {
     this.ready = false;
+    this.context = null;
     clearTimeout(this.libTimer);
     this.libShown = false;
     this.emit("status", "loading…");
@@ -233,6 +234,7 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
         this.emit("status", this.readyText);

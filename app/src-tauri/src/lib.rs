@@ -37,7 +37,12 @@ fn selftest_file(app: tauri::AppHandle) -> Option<String> {
     if let Some(path) = std::env::var("SAGEBRUSH_APP_SELFTEST").ok().filter(|s| !s.is_empty()) {
         return Some(path);
     }
-    android_selftest_dir(&app).map(|d| d.join("selftest.ipynb").to_string_lossy().into_owned())
+    mobile_selftest_dir(&app).map(|d| d.join("selftest.ipynb").to_string_lossy().into_owned())
+}
+
+// the self-test directory on a phone (debug builds only; see below), or None
+fn mobile_selftest_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    android_selftest_dir(app).or_else(|| ios_selftest_dir(app))
 }
 
 // Android has no environment for SAGEBRUSH_APP_SELFTEST: in a DEBUG build
@@ -57,6 +62,44 @@ fn android_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     None
 }
 
+// iOS, the same: in a DEBUG build only, a self-test notebook placed in the
+// app's own Documents/selftest (by `xcrun simctl get_app_container <udid>
+// space.sagebrush.notebook data` in CI) is run, and its report is written
+// next to it.  A release build has none of it: Documents is the user's
+// (shared with the Files app), so a release build must never pick up a
+// notebook from there by itself.
+#[cfg(all(target_os = "ios", debug_assertions))]
+fn ios_selftest_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().document_dir().ok()?.join("selftest");
+    dir.join("selftest.ipynb").is_file().then_some(dir)
+}
+
+#[cfg(not(all(target_os = "ios", debug_assertions)))]
+fn ios_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    None
+}
+
+// A DEBUG build logs the first LOG_REQUESTS requests the page's server
+// answers, for the self-test's diagnosis of cross-origin isolation
+// (app/selftest/coi-reading.py): the plugin's hook sees only the URL (no
+// method or Sec-Fetch headers) and runs only for a file it serves, so each
+// line is that URL, whether it carries the self-test's ?sb-diag= marker, and
+// the two headers the hook set.  A release build has none of it.
+#[cfg(debug_assertions)]
+const LOG_REQUESTS: usize = 40;
+
+#[cfg(debug_assertions)]
+fn log_request(url: &str) {
+    static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n <= LOG_REQUESTS {
+        let diag = if url.contains("sb-diag=") { "yes" } else { "no" };
+        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp");
+    } else if n == LOG_REQUESTS + 1 {
+        eprintln!("[localhost] cap reached; later requests not logged");
+    }
+}
+
 // the page's console during a self-test (it has no other window to the outside)
 #[tauri::command]
 fn app_log(message: String) {
@@ -68,7 +111,7 @@ fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
     println!("{report}");
     // (written whole, then renamed into place: a reader polling for
     // report.txt never sees half of it)
-    if let Some(dir) = android_selftest_dir(&app) {
+    if let Some(dir) = mobile_selftest_dir(&app) {
         let tmp = dir.join("report.txt.tmp");
         if std::fs::write(&tmp, format!("{report}\n")).is_ok() {
             let _ = std::fs::rename(&tmp, dir.join("report.txt"));
@@ -97,6 +140,8 @@ pub fn run() {
     if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
         eprintln!("[app] the page is at http://127.0.0.1:{port}/");
     }
+    #[cfg(debug_assertions)]
+    eprintln!("[localhost] logger start port={port} cap={LOG_REQUESTS} (debug build; \"set:\" is what this server's hook put on the response, not what the web view received)");
     tauri::Builder::default()
         .plugin(
             tauri_plugin_localhost::Builder::new(port)
@@ -111,6 +156,8 @@ pub fn run() {
                     if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {
                         response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);
                     }
+                    #[cfg(debug_assertions)]
+                    log_request(request.url());
                 })
                 .build(),
         )
