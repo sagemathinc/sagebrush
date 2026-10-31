@@ -213,6 +213,7 @@ jobs:
           node web/test-app-frontend.mjs
           node web/test-llms.mjs
           node web/test-alpha-banner.mjs
+          node web/test-support-link.mjs
           node web/test-ipynb.mjs
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
