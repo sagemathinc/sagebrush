@@ -17,7 +17,7 @@ import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import type { AgentPairing } from "../workspace/agent-pair";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
-import { mountNotebook, type AgentCells, type NotebookHost, type NotebookUi } from "./notebook-artifact";
+import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -397,6 +397,8 @@ type Host = {
   release?: () => Promise<Released>;
   /** Closing without keeping anything. */
   dispose?: () => Promise<void>;
+  /** After a failed close: what it kept frozen, as a file to download. */
+  download?: () => { name: string; text: string; type: string } | null;
   /** Its own bar (a warning, a refusal, with its actions): shown whenever it is the host shown, and only then (ART-C5). */
   bar: Bar;
 };
@@ -434,6 +436,8 @@ async function releaseHosts(threadId: string | null): Promise<boolean> {
         text: r.why,
         actions: [
           { label: "Try again", run: () => void closePaneOf(threadId) },
+          // (the one rescue that needs no storage: the frozen content, downloaded)
+          ...(h.download?.() ? [{ label: "Download a copy", run: () => saveDownload(h.download!()) }] : []),
           {
             label: "Close without keeping",
             run: () =>
@@ -455,6 +459,17 @@ async function releaseHosts(threadId: string | null): Promise<boolean> {
     renderArtifacts();
   }
   return false;
+}
+
+/** A file downloaded from text (a Blob and an <a download>): works where the workspace can't store anything. */
+function saveDownload(f: { name: string; text: string; type: string } | null) {
+  if (!f) return;
+  const url = URL.createObjectURL(new Blob([f.text], { type: f.type }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: f.name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** The pane of a thread closed, once each of its hosts has saved or kept its content. */
@@ -622,6 +637,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     h.flush = nb.flush;
     h.release = nb.release;
     h.dispose = nb.dispose;
+    h.download = nb.download;
     nb.hidden(shownHost() !== h);
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
     return;
@@ -633,6 +649,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     h.flush = f.flush;
     h.release = f.release;
     h.dispose = f.dispose;
+    h.download = f.download;
     keepFocus();
     return;
   }
@@ -665,7 +682,7 @@ async function keepFileCopy(path: string, text: string, signal?: AbortSignal): P
   }
 }
 type Released = { ok: true } | { ok: false; why: string };
-type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void> };
+type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void>; download: () => { name: string; text: string; type: string } | null };
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
   let alive = true;
@@ -776,16 +793,12 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     destroyEditor = () => {};
   };
   // (no edits while it closes: the editor inert (no focus, no input) and read only, and it says so, ART-C2b/C4 r4)
-  let frozen = false;
-  // (while frozen, every gesture inside the editor stops at its box, before the editor's own handlers)
-  for (const type of ["click", "mousedown", "keydown", "keypress", "beforeinput", "input", "paste", "drop"])
-    box.addEventListener(type, (e) => {
-      if (!frozen) return;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-    }, true);
+  let guard: Guard = "open";
+  let keptText: string | null = null; // (the text a failed close kept frozen, for Download a copy)
+  // (gestures inside the editor stopped at its box, before the editor's own handlers, as the guard says)
+  guardGestures(box, () => guard);
   const freeze = () => {
-    frozen = true;
+    guard = "closing";
     box.inert = true;
     for (const t of box.querySelectorAll<HTMLTextAreaElement>("textarea")) t.readOnly = true;
     say("Closing…");
@@ -812,6 +825,10 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         } catch (e) {
           const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
           say("Not saved, nor kept as a copy");
+          // (readable again: not inert, selectable and copyable by hand; still read only, BAC-8)
+          keptText = value;
+          guard = "kept";
+          box.inert = false;
           return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
         } finally {
           clearTimeout(t);
@@ -827,6 +844,7 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     // (one at a time: a Close, a thread switch and a Try again share the one under way)
     release: () => (releasing ??= doRelease().finally(() => (releasing = null))),
     dispose,
+    download: () => (keptText === null ? null : { name: path.split("/").pop()!.replace(/^(.*?)(\.[^.]*)?$/, "$1 (copy)$2"), text: keptText, type: "text/plain;charset=utf-8" }),
   };
 }
 

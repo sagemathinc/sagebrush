@@ -207,6 +207,25 @@ async function lockWorkspace() {
 /** Another tab's long readwrite transaction on the notebooks' store, for `ms`: the pane's reads and writes of
  * notebooks wait for it. */
 const holdStore = (ms) => ev(`(() => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const db = r.result, t = db.transaction("notebooks", "readwrite"), st = t.objectStore("notebooks"), end = Date.now() + ${ms}; const spin = () => { if (Date.now() < end) st.get("__hold__").onsuccess = spin; }; spin(); t.oncomplete = () => db.close(); }; return true; })()`);
+/** In a host whose close failed (BAC-8): is its content readable (not inert), selectable, and is Ctrl+C let through,
+ * while typing changes nothing? `sel` is its text box. */
+async function readableKept(sel) {
+  await ev(`(() => { window.__copy = "never"; document.addEventListener("keydown", (e) => { if (e.ctrlKey && e.key === "c") window.__copy = e.defaultPrevented ? "prevented" : "let through"; }); return true; })()`);
+  const before = await ev(`document.querySelector(${JSON.stringify(sel)})?.value ?? null`);
+  const r = await ev(`(() => { const t = document.querySelector(${JSON.stringify(sel)}); if (!t) return null; let el = t, inert = false; while (el) { if (el.inert) inert = true; el = el.parentElement; } t.focus(); t.select(); return { inert, focused: document.activeElement === t, selected: t.selectionEnd - t.selectionStart }; })()`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers: 2 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "c", code: "KeyC", windowsVirtualKeyCode: 67, modifiers: 2 });
+  await ev(`(() => { const t = document.querySelector(${JSON.stringify(sel)}); t?.setSelectionRange(t.value.length, t.value.length); })()`);
+  await send("Input.insertText", { text: " # typed" });
+  const after = await ev(`document.querySelector(${JSON.stringify(sel)})?.value ?? null`);
+  return { ...r, copy: await ev(`window.__copy`), unchanged: before === after };
+}
+/** Press the bar's "Download a copy" and return the file it downloads ({name, text}), its <a download> caught. */
+async function downloadCopy() {
+  await ev(`(() => { window.__dl = null; const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) { window.__dl = { name: this.download, href: this.href }; return; } return click.call(this); }; return true; })()`);
+  await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Download a copy')?.click()`);
+  return ev(`(async () => window.__dl ? { name: window.__dl.name, text: await (await fetch(window.__dl.href)).text() } : null)()`);
+}
 /** Try to change and run a frozen notebook's first cell, as a person would: typing, its Run button, Shift+Enter. */
 async function poke(i, text) {
   await ev(`(() => { const t = ${cellJs(i)}?.querySelector('textarea'); t?.focus(); t?.setSelectionRange(t.value.length, t.value.length); })()`);
@@ -648,6 +667,16 @@ try {
     await ev(`document.querySelector('#close').click()`);
     await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
     const stayed = await ev(`({ open: document.body.classList.contains('has-artifact'), bar: document.querySelector('#artifacts .pane-bar')?.textContent ?? '', text: ${cellJs(0)}?.querySelector('textarea').value ?? null })`);
+    // (BAC-8) kept open after a failed close: readable, selectable, Ctrl+C let through; typing and Run do nothing
+    const wKept = workerCount();
+    const kept = await readableKept(`${PANE} .nb-root .cell textarea`);
+    await ev(`${cellJs(0)}?.querySelector('.runb')?.click()`);
+    await sleep(800);
+    const dl = await downloadCopy();
+    const dlCells = (() => { try { return JSON.parse(dl.text).cells.map((c) => [c.cell_type, [].concat(c.source).join("")]); } catch { return null; } })();
+    const shownCells = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell')].map((c) => c.querySelector('textarea').value)`);
+    ok(dl?.name === "held (copy).ipynb" && JSON.stringify(dlCells?.map((c) => c[1])) === JSON.stringify(shownCells), "Download a copy, after a failed close: an .ipynb of exactly the notebook it kept frozen", { name: dl?.name, dlCells, shownCells });
+    ok(stayed.open && kept.inert === false && kept.focused && kept.selected > 0 && kept.copy === "let through" && kept.unchanged && workerCount() === wKept && !/\[\d+\]/.test(await ev(`${cellJs(0)}?.querySelector('.n').textContent ?? ''`)), "a notebook kept open after a failed close is readable (not inert), selectable and copyable (Ctrl+C), and typing and Run do nothing", { kept, workers: workerCount() - wKept });
     await ev(`window.__release()`);
     await sleep(1500);
     const rec = (await record(ref)).cells[0].code;
@@ -828,16 +857,21 @@ try {
       await ev(`document.querySelector('#close').click()`);
       await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
       const bar = await barText();
+      const kept = latex ? null : await readableKept(`${PANE} textarea.code-edit`);
+      const shownText = await ev(`document.querySelector('${latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`}')?.value ?? null`);
+      const dl = await downloadCopy();
       await ev(`window.__release()`);
       await sleep(2000);
       const file = (await call("workspace.read", { path: Q })).content.text;
       await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
       await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
       const copy = await call("workspace.read", { path: Q.replace(/(\.[a-z]+)$/, " (copy)$1") }).then((r) => r.content.text, (e) => "no copy: " + e.message);
-      return { bar, file, copy, closed: !(await ev(`document.body.classList.contains('has-artifact')`)) };
+      return { bar, file, copy, kept, shownText, dl, closed: !(await ev(`document.body.classList.contains('has-artifact')`)) };
     };
     const qa = await queued("/notes/queued.py", false);
     ok(/couldn't be saved or kept/.test(qa.bar) && qa.file === "q = 1\n" && qa.copy === "q = 1\n# one\n# two\n" && qa.closed, "file writes queued behind a busy workspace, then closed: nothing is written after the close, the latest text is kept as a copy", qa);
+    ok(qa.dl?.name === "queued (copy).py" && qa.dl.text === qa.shownText && qa.shownText === "q = 1\n# one\n# two\n", "Download a copy of a file, after a failed close: exactly the text it kept frozen", { dl: qa.dl, shown: qa.shownText });
+    ok(qa.kept && qa.kept.inert === false && qa.kept.selected > 0 && qa.kept.copy === "let through" && qa.kept.unchanged, "a file kept open after a failed close is readable (not inert), selectable and copyable (Ctrl+C), and typing does nothing", qa.kept);
     // (ART-C2b/C4 r4) while a file's close waits for its copy, its editor is frozen: typing changes nothing; it closes
     // with what it showed, kept as a copy
     const frozenFile = async (Q, latex) => {

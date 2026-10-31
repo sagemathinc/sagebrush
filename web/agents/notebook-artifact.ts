@@ -36,6 +36,8 @@ export type NotebookHost = {
   release(): Promise<{ ok: true } | { ok: false; why: string }>;
   /** Closed without keeping anything: detached, stopped, its kernel ended; nothing it started writes afterwards. */
   dispose(): Promise<void>;
+  /** After a failed close: the content it kept frozen, as a file to download (.ipynb), or null. */
+  download(): { name: string; text: string; type: string } | null;
   isRunning(): boolean;
   hidden(on: boolean): void;
   interrupt(): void;
@@ -84,6 +86,35 @@ function lazyKernel(mod: any, closing: () => boolean = () => false) {
   return k;
 }
 
+/** A host's state while it closes: "open" (nothing stopped), "closing" (every gesture stopped: the content kept is the
+ * content shown, ART-C2b), "kept" (a close that couldn't save or keep it: readable, selectable and copyable by hand,
+ * nothing that would change or run it, BAC-8). */
+export type Guard = "open" | "closing" | "kept";
+const MUTATING_INPUT = new Set(["beforeinput", "input", "paste", "drop", "cut", "keypress"]);
+/** Whether `e` may go on in `state` (a gesture inside a host's content). */
+export function gestureAllowed(e: Event, state: Guard): boolean {
+  if (state === "open") return true;
+  if (state === "closing") return false;
+  if (MUTATING_INPUT.has(e.type)) return false;
+  if (e.type === "click" || e.type === "dblclick") return !(e.target instanceof Element && e.target.closest("button, select, input, [role=menuitem]"));
+  if (e.type === "keydown") {
+    const k = e as KeyboardEvent;
+    if (k.key === "Enter" || k.key === "Backspace" || k.key === "Delete") return false; // (Run, edits, command mode's Enter)
+    if (k.ctrlKey || k.metaKey) return ["c", "a", "C", "A", "Control", "Meta", "Shift", "Alt"].includes(k.key); // (copy and select all)
+    return k.key.length > 1; // (Tab, arrows, Home/End, Escape: reading; a printable key would edit, or act in command mode)
+  }
+  return true; // (mousedown and the rest: selecting)
+}
+/** Gestures inside `root` stopped (capture phase, before the content's own handlers) as `state()` says. */
+export function guardGestures(root: HTMLElement, state: () => Guard) {
+  for (const type of ["click", "dblclick", "mousedown", "keydown", "keypress", "beforeinput", "input", "paste", "drop", "cut"])
+    root.addEventListener(type, (e) => {
+      if (gestureAllowed(e, state())) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
+}
+
 /** How long closing waits for a pending save before it keeps the notebook's content as a copy instead. */
 export const CLOSE_SAVE_MS = 3000;
 /** How long closing waits for that copy (the workspace busy) before it gives up and keeps the notebook open. */
@@ -129,16 +160,13 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   let check: () => Promise<void> = async () => {}; // (the path, ref and fence checked again: set once attached)
   let keepCopy: ((doc: any, signal?: AbortSignal) => Promise<string>) | null = null;
   let releasing: Promise<{ ok: true } | { ok: false; why: string }> | null = null; // (one release at a time)
-  let frozen = false; // (closing: no edit, no Run)
-  // (while frozen, every gesture inside the notebook stops at its root, before any cell's own handler: a click (Run,
-  // the cell menu), a key (Shift+Enter, command mode), typing, a paste or a drop; inert alone doesn't stop a script's
-  // click() in every browser)
-  for (const type of ["click", "dblclick", "mousedown", "keydown", "keypress", "beforeinput", "input", "paste", "drop"])
-    nbRoot.addEventListener(type, (e) => {
-      if (!frozen) return;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-    }, true);
+  let frozen = false; // (closing, or a close that couldn't keep the content: no edit, no Run, ever again here)
+  let guard: Guard = "open";
+  let kept: any = null; // (the content a failed close kept frozen, for Download a copy)
+  let toIpynb: ((doc: any) => string) | null = null;
+  // (gestures inside the notebook stopped at its root, before any cell's own handler, as the guard says: inert alone
+  // doesn't stop a script's click() in every browser)
+  guardGestures(nbRoot, () => guard);
   let stored: (() => Promise<any>) | null = null; // (the record the store has now, read beside the page's writes)
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
@@ -181,6 +209,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       nb = null;
       el.remove();
     },
+    download: () => (kept && toIpynb ? { name: `${path.split("/").pop()!.replace(/\.ipynb$/i, "")} (copy).ipynb`, text: toIpynb(kept), type: "application/x-ipynb+json" } : null),
     isRunning: () => running > 0,
     hidden(on) {
       el.hidden = on;
@@ -229,6 +258,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         // (not kept: the notebook stays open, frozen, its content in it, and says so; nothing is dropped)
         const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
         ui.saved("Not saved");
+        kept = snap;
+        keptReadable();
         return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
       } finally {
         clearTimeout(timer);
@@ -239,8 +270,15 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   }
   // (no edits and no Run while it closes: the notebook inert (no focus, no input, no click) and read only, its popups
   // closed, and it says so)
+  // (a close that couldn't keep the content: readable again (not inert: a screen reader reads it, it can be selected and
+  // copied by hand), still nothing that edits or runs it, BAC-8)
+  function keptReadable() {
+    guard = "kept";
+    nbRoot.inert = false;
+  }
   function freeze(comp: Nb) {
     frozen = true;
+    guard = "closing";
     nbRoot.inert = true;
     el.classList.add("closing");
     comp.setReadOnly(true);
@@ -275,6 +313,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
 
     const mod: any = await import(new URL("sagebrush-notebook.js", SITE).href);
     if (!alive) return;
+    toIpynb = mod.toIpynb;
     if (journal) {
       // Sync's journal is this workspace's writer: shown here, never edited or run. No interpreter at all: no gesture
       // (button, keyboard, command mode) can start one (ART-C1).
