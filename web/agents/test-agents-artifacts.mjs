@@ -700,23 +700,33 @@ try {
     await ev(`document.querySelector('#close').click()`);
     await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
     const order = () => ev(`[...document.querySelectorAll('${PANE} .nb-root .cell')].map((c) => c.classList.contains('markdown') ? 'md' : c.querySelector('textarea').value)`);
-    const before = await order();
-    // (into the open Markdown editor's block, as a person would: a real click on it, which the kept state lets through)
-    const at = await ev(`(() => { const c = ${cellJs(0)}; const b = [...c.children].find((x) => x.classList && !x.classList.contains('gutter') && x.querySelector && !x.matches('.body')) ?? c.querySelector('.body'); const blk = c.querySelector('.body > :first-child:not(.ed)') ?? c.querySelector('.body'); const r = blk.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(12, r.height / 2) }; })()`);
-    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
-    await sleep(300);
-    const inEditor = await ev(`(() => { const a = document.activeElement; return !!a && ${cellJs(0)}.contains(a) && !a.closest('.ed'); })()`);
-    for (const key of ["ArrowDown", "ArrowUp", "ArrowDown"]) await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }));
-    await sleep(500);
-    const afterKeys = await order();
-    const dl2 = await downloadCopy();
-    const dlOrder = (() => { try { return JSON.parse(dl2.text).cells.map((c) => c.cell_type === "markdown" ? "md" : [].concat(c.source).join("")); } catch { return null; } })();
-    await ev(`window.__release()`);
+    // (kept open? if the close didn't fail (a control changing closing), there is nothing to press keys in: this check
+    // fails alone, and the workspace is freed and the pane closed for what follows)
+    const keptA2 = await ev(`document.body.classList.contains('has-artifact') && /couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`);
+    let a2 = { opened, keptA2 };
+    if (keptA2) {
+      const before = await order();
+      // (into the open Markdown editor's block, as a person would: a real click on it, which the kept state lets through)
+      const at = await ev(`(() => { const c = ${cellJs(0)}; const blk = c?.querySelector('.body > :first-child:not(.ed)') ?? c?.querySelector('.body'); if (!blk) return null; const r = blk.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(12, r.height / 2) }; })()`);
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      await sleep(300);
+      const inEditor = await ev(`(() => { const a = document.activeElement, c = ${cellJs(0)}; return !!a && !!c && c.contains(a) && !a.closest('.ed'); })()`);
+      for (const key of ["ArrowDown", "ArrowUp", "ArrowDown"]) await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: key === "ArrowUp" ? 38 : 40, modifiers: 1 }));
+      await sleep(500);
+      const afterKeys = await order();
+      const dl2 = await downloadCopy();
+      const dlOrder = (() => { try { return JSON.parse(dl2.text).cells.map((c) => c.cell_type === "markdown" ? "md" : [].concat(c.source).join("")); } catch { return null; } })();
+      a2 = { ...a2, inEditor, before, afterKeys, dlOrder };
+    }
+    await ev(`window.__release?.()`);
     await sleep(1500);
-    await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+    if (keptA2) await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
     await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
-    const copy2 = await readCells("/notes/held-md (copy).ipynb").then((c) => c.map((x) => x.type === "markdown" ? "md" : x.code), (e) => "no copy: " + e.message);
-    ok(opened && inEditor && JSON.stringify(before) === JSON.stringify(["md", "second = 2  # edit"]) && JSON.stringify(afterKeys) === JSON.stringify(before) && JSON.stringify(dlOrder) === JSON.stringify(before) && JSON.stringify(copy2) === JSON.stringify(before), "after a failed close, Alt+ArrowUp/Down in an open Markdown editor move nothing: the order shown, downloaded and copied on Try again is the same", { opened, inEditor, before, afterKeys, dlOrder, copy2 });
+    if (await ev(`document.body.classList.contains('has-artifact')`)) await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Close without keeping')?.click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 5000).catch(() => {});
+    a2.copy2 = await readCells("/notes/held-md (copy).ipynb").then((c) => c.map((x) => x.type === "markdown" ? "md" : x.code), (e) => "no copy: " + e.message);
+    const want = JSON.stringify(["md", "second = 2  # edit"]);
+    ok(a2.opened && a2.keptA2 && a2.inEditor && JSON.stringify(a2.before) === want && JSON.stringify(a2.afterKeys) === want && JSON.stringify(a2.dlOrder) === want && JSON.stringify(a2.copy2) === want, "after a failed close, Alt+ArrowUp/Down in an open Markdown editor move nothing: the order shown, downloaded and copied on Try again is the same", a2);
 
     // (b) An edit pending when the file goes to Trash, then closed without Save as a copy: the edit is kept as a copy.
     const T = "/notes/letgo-close.ipynb";
