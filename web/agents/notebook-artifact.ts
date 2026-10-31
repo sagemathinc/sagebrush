@@ -30,7 +30,11 @@ export type NotebookHost = {
   ready: Promise<void>;
   /** Saves made and kept (or an error). */
   flush(): Promise<void>;
-  /** Detached, stopped, its kernel ended; nothing it started writes afterwards. */
+  /** Closing (ART-C2 r3): what was edited is saved (CLOSE_SAVE_MS at most), then nothing more is written from here; if
+   * the latest content isn't in the store (not saved, refused, let go), it is kept as a copy first. True: closed;
+   * false: neither saved nor kept, so the notebook stays, with its bar saying so (the only copy is never dropped). */
+  release(): Promise<{ ok: true } | { ok: false; why: string }>;
+  /** Closed without keeping anything: detached, stopped, its kernel ended; nothing it started writes afterwards. */
   dispose(): Promise<void>;
   isRunning(): boolean;
   hidden(on: boolean): void;
@@ -80,6 +84,11 @@ function lazyKernel(mod: any) {
 
 /** How long closing waits for a pending save before it keeps the notebook's content as a copy instead. */
 export const CLOSE_SAVE_MS = 3000;
+/** How long closing waits for that copy (the workspace busy) before it gives up and keeps the notebook open. */
+export const CLOSE_COPY_MS = 5000;
+
+// (a document's cells as compared for "is this what the store has": id, type, source and outputs)
+const cellsKey = (cells: any[] | undefined) => JSON.stringify((cells ?? []).map((c: any) => [c.id, c.type ?? "code", c.code ?? "", c.outputs ?? []]));
 
 /**
  * A notebook artifact, mounted into `box`. The handle is returned at once and owns everything the mount makes, so it
@@ -105,7 +114,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   let kernel: any = null;
   let running = 0;
   let check: () => Promise<void> = async () => {}; // (the path, ref and fence checked again: set once attached)
-  let keepCopy: ((doc: { mode?: string; cells?: unknown[] }) => Promise<string>) | null = null;
+  let keepCopy: ((doc: { mode?: string; cells?: unknown[] }, signal?: AbortSignal) => Promise<string>) | null = null;
+  let stored: (() => Promise<any>) | null = null; // (the record the store has now, read beside the page's writes)
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
   const unwatch = ws.watch(() => void check());
@@ -124,19 +134,46 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       nb.flush(); // (its pending save goes out now, the notebook still attached)
       await nb.saved(); // (and is made, or said why not)
     },
+    async release() {
+      if (!alive) return { ok: true };
+      const comp = nb;
+      if (!comp || !attached || !keepCopy || !stored) {
+        await host.dispose();
+        return { ok: true };
+      }
+      // (1) what was edited is saved, while this pane may still save: CLOSE_SAVE_MS at most
+      if (bound) {
+        comp.flush();
+        await Promise.race([comp.saved().catch(() => {}), new Promise((r) => setTimeout(r, CLOSE_SAVE_MS))]);
+      }
+      // (2) from here nothing is written to the document: a save still waiting is refused at its write transaction
+      bound = false;
+      // (3) is the latest content what the store has? (a save may have been refused with a resolved "not saved", the
+      // pane may have let go with an edit pending, a save may still be waiting): if not, it is kept as a copy first
+      const snap = comp.snapshot();
+      const rec = await stored().catch(() => undefined);
+      if (!rec || cellsKey(rec.cells) !== cellsKey(snap.cells)) {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), CLOSE_COPY_MS);
+        try {
+          const name = await keepCopy(snap, ctl.signal);
+          ui.notice(`${path}: your last changes weren't saved there; they were kept as ${name}.`);
+        } catch (e) {
+          // (not kept: the notebook stays open, its content in it, and says so; nothing is dropped)
+          const why = ctl.signal.aborted ? "the workspace is busy" : (e as Error).message;
+          return { ok: false, why: `Your last changes to ${path} couldn't be saved or kept as a copy (${why}).` };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      await host.dispose();
+      return { ok: true };
+    },
     async dispose() {
       if (!alive) return;
       unwatch();
       watchRunning.disconnect();
       const comp = nb;
-      // (a pending save is given CLOSE_SAVE_MS; one not made by then (the workspace busy, a refusal) isn't lost: the
-      // content is kept as a copy, and said)
-      let unsaved: any = null;
-      if (comp && bound && attached) {
-        comp.flush();
-        const ok = await Promise.race([comp.saved().then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), CLOSE_SAVE_MS))]);
-        if (!ok) unsaved = comp.snapshot?.() ?? null;
-      }
       alive = false;
       bound = false;
       if (comp) {
@@ -149,13 +186,6 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       kernel = null;
       nb = null;
       el.remove();
-      if (unsaved && keepCopy) {
-        const keep = keepCopy;
-        void keep(unsaved).then(
-          (name) => ui.notice(`${path}: your last changes couldn't be saved before it closed; they were kept as ${name}.`),
-          (e) => ui.notice(`${path}: your last changes couldn't be saved before it closed, nor kept as a copy (${(e as Error).message}).`),
-        );
-      }
     },
     isRunning: () => running > 0,
     hidden(on) {
@@ -181,12 +211,12 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     if (!db) return fail("This browser has no storage for notebooks.");
     const ref = entry.ref;
     // A copy beside it (a new file, never over another): "name (copy).ipynb", "name (copy 2).ipynb", ...
-    keepCopy = async (doc) => {
+    keepCopy = async (doc, signal) => {
       const stem = path.replace(/\.ipynb$/i, "");
       for (let i = 1; ; i++) {
         const name = `${stem} (copy${i > 1 ? ` ${i}` : ""}).ipynb`;
         try {
-          await ws.create(name, { content: { mode: doc.mode, cells: doc.cells }, mode: doc.mode });
+          await ws.create(name, { content: { mode: doc.mode, cells: doc.cells }, mode: doc.mode, ...(signal ? { signal } : {}) });
           return name;
         } catch (e) {
           if ((e as { code?: string }).code !== "exists" || i >= 50) throw e;
@@ -230,6 +260,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       },
     });
     const inner = new mod.IdbStore(guarded, ref);
+    stored = () => inner.loadRecord();
     const store = {
       load: () => inner.load(),
       save: (doc: unknown, o?: unknown) => (bound && alive ? inner.save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane")),

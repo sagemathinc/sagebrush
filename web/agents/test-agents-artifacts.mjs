@@ -199,6 +199,11 @@ async function resume() {
   for (const id of paused.splice(0)) await send("Fetch.continueRequest", { requestId: id });
   await send("Fetch.disable");
 }
+/** Another tab's exclusive hold on the workspace (navigator.locks): every save and create waits until window.__release(). */
+async function lockWorkspace() {
+  await ev(`(() => { window.__release = null; navigator.locks.request("sagebrush-workspace", { mode: "exclusive" }, () => new Promise((r) => (window.__release = r))); return true; })()`);
+  await until(`typeof window.__release === "function"`);
+}
 const live = (name) => [...liveWorkers.values()].filter((u) => u.includes(name)).length;
 const tabJs = (path) => `document.querySelector('#artifacts .tab[data-tab="${path}"]')`;
 const workerCount = () => workers.filter((u) => u.includes("sagebrush-worker.js")).length;
@@ -620,22 +625,65 @@ try {
 
   // ======================================================================== ART-C2: a save held at the workspace's lock
   if (want("admission")) {
+    // Closing keeps what isn't saved (ART-C2 r3). (a) The workspace held by another tab: the edit's save waits; closing
+    // can neither save nor copy in time, so the notebook stays, saying so; once the workspace is free, the waiting save
+    // is refused where it would write, and Try again keeps the edit as a copy.
     const P = "/notes/held.ipynb";
     await call("workspace.create", { path: P, content: docFor(P, [{ code: "h = 0" }]), mode: "python" });
     const ref = await refOf(P);
     await openNotebook(P);
-    // (another tab holds the workspace: the save the edit asks for waits for it, past the store's own checks)
-    await ev(`(() => { navigator.locks.request("sagebrush-workspace", { mode: "exclusive" }, () => new Promise((r) => (window.__release = r))); return true; })()`);
-    await until(`typeof window.__release === "function"`);
+    await lockWorkspace();
     await typeInto(0, "  # held");
     await sleep(1000);
-    await ev(`document.querySelector('#close').click()`); // (closing lets go after CLOSE_SAVE_MS)
-    await until(`!document.body.classList.contains('has-artifact')`, 10000);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
+    const stayed = await ev(`({ open: document.body.classList.contains('has-artifact'), bar: document.querySelector('#artifacts .pane-bar')?.textContent ?? '', text: ${cellJs(0)}?.querySelector('textarea').value ?? null })`);
     await ev(`window.__release()`);
-    await sleep(3000);
+    await sleep(1500);
     const rec = (await record(ref)).cells[0].code;
+    await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
     const copy = await readCells("/notes/held (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
-    ok(rec === "h = 0" && copy === "h = 0  # held", "a save waiting for the workspace when the pane let go is refused where it would write; the edit is kept as a copy", { rec, copy });
+    const closed = !(await ev(`document.body.classList.contains('has-artifact')`));
+    ok(stayed.open && /couldn't be saved or kept/.test(stayed.bar) && stayed.text === "h = 0  # held" && rec === "h = 0" && copy === "h = 0  # held" && closed, "closing while the workspace is busy: the notebook stays with its edit, the waiting save is refused where it would write, Try again keeps the edit as a copy", { stayed, rec, copy, closed });
+
+    // (b) An edit pending when the file goes to Trash, then closed without Save as a copy: the edit is kept as a copy.
+    const T = "/notes/letgo-close.ipynb";
+    await call("workspace.create", { path: T, content: docFor(T, [{ code: "t = 0" }]), mode: "python" });
+    const refT = await refOf(T);
+    await openNotebook(T);
+    await typeInto(0, "  # pending");
+    await call("workspace.remove", { path: T });
+    await until(`/gone/.test(document.querySelector('#artifacts .pane-bar')?.className ?? '')`, 5000).catch(() => {});
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+    const recT = (await record(refT)).cells[0].code;
+    const copyT = await readCells("/notes/letgo-close (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+    ok(recT === "t = 0" && copyT === "t = 0  # pending", "a notebook let go (Trash) with an edit pending, closed without Save as a copy: the edit is kept as a copy, the trashed one unchanged", { recT, copyT });
+
+    // (c) A save refused with a resolved "not saved" (the workspace's fence moved), during close: kept as a copy.
+    const F = "/notes/refused-close.ipynb";
+    await call("workspace.create", { path: F, content: docFor(F, [{ code: "f = 0" }]), mode: "python" });
+    const refF = await refOf(F);
+    await openNotebook(F);
+    const fence0 = await record(FENCE);
+    await typeInto(0, "  # refused");
+    await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", phase: "ok", step: 1 }), generation: (fence0?.generation ?? 0) + 1 });
+    await ev(`document.querySelector('#close').click()`);
+    // (the copy may be refused too while the fence is moved: then the notebook stays, and is kept once it is back)
+    const outcome = await Promise.race([
+      until(`!document.body.classList.contains('has-artifact')`, 15000).then(() => "closed"),
+      until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).then(() => "stayed"),
+    ]).catch(() => "neither");
+    if (fence0) await putRecord(fence0);
+    if (outcome === "stayed") {
+      await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+    }
+    const recF = (await record(refF)).cells[0].code;
+    const copyF = await readCells("/notes/refused-close (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+    ok(outcome !== "neither" && recF === "f = 0" && copyF === "f = 0  # refused", "a save refused during close with a resolved not-saved: the edit is kept as a copy, the original unchanged", { outcome, recF, copyF });
+    await freshPage();
   }
 
   // ======================================================================== ART-C3, C4: file artifacts
@@ -659,7 +707,58 @@ try {
     await until(`!document.body.classList.contains('has-artifact')`, 10000);
     await sleep(1500);
     const copy = await call("workspace.read", { path: "/notes/f (copy).py" }).then((r) => r.content.text, (e) => "no copy: " + e.message);
-    ok(r2.content.text === "a = 2\n" && /changed elsewhere/.test(said) && kept === "a = 1\n# mine\n# more\n" && copy === kept, "a change made since is never written over: the person's text stays, and is kept as a copy when the pane closes", { file: r2.content.text, said, kept, copy });
+    ok(r2.content.text === "a = 2\n" && /changed or replaced elsewhere/.test(said) && kept === "a = 1\n# mine\n# more\n" && copy === kept, "a change made since is never written over: the person's text stays, and is kept as a copy when the pane closes", { file: r2.content.text, said, kept, copy });
+    // (ART-C3 r3) another file put at the path, at the same revision: the old pane's write is refused (the file's identity)
+    const R = "/notes/r.py";
+    await call("workspace.create", { path: R, content: { text: "old\n" } });
+    await artifactTurn(R);
+    await until(`!!document.querySelector('${PANE} textarea.code-edit') && document.querySelector('${PANE} .saved').textContent === 'Saved'`);
+    const revOld = (await call("workspace.read", { path: R })).rev;
+    await call("workspace.rename", { from: R, to: "/notes/r-old.py" });
+    await call("workspace.create", { path: R, content: { text: "new\n" } });
+    const revNew = (await call("workspace.read", { path: R })).rev;
+    await ev(`(() => { const t = document.querySelector('${PANE} textarea.code-edit'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+    await send("Input.insertText", { text: "# mine\n" });
+    await sleep(1500);
+    const atR = (await call("workspace.read", { path: R })).content.text;
+    const saidR = await savedText();
+    ok(revOld === revNew && atR === "new\n" && /replaced|changed/.test(saidR), "another file at the path, at the same revision: the old pane's write is refused, the new file unchanged", { revOld, revNew, atR, saidR });
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+
+    // (ART-C4 r3) writes queued while the workspace is busy, then the pane closed: none of them is written after, and the
+    // latest text is kept (the pane stays until it can be: Try again)
+    const queued = async (Q, latex) => {
+      await call("workspace.create", { path: Q, content: { text: "q = 1\n" } });
+      await artifactTurn(Q);
+      const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
+      await lockWorkspace();
+      const type = async (t) => {
+        await ev(`(() => { const x = document.querySelector('${box}'); x.focus(); x.setSelectionRange(x.value.length, x.value.length); })()`);
+        await send("Input.insertText", { text: t });
+      };
+      await type("# one\n");
+      await sleep(1200);
+      await type("# two\n");
+      if (!latex) await sleep(1200); // (a second write queued; with LaTeX, closed within the editor's debounce)
+      await ev(`document.querySelector('#close').click()`);
+      await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
+      const bar = await barText();
+      await ev(`window.__release()`);
+      await sleep(2000);
+      const file = (await call("workspace.read", { path: Q })).content.text;
+      await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 12000).catch(() => {});
+      const copy = await call("workspace.read", { path: Q.replace(/(\.[a-z]+)$/, " (copy)$1") }).then((r) => r.content.text, (e) => "no copy: " + e.message);
+      return { bar, file, copy, closed: !(await ev(`document.body.classList.contains('has-artifact')`)) };
+    };
+    const qa = await queued("/notes/queued.py", false);
+    ok(/couldn't be saved or kept/.test(qa.bar) && qa.file === "q = 1\n" && qa.copy === "q = 1\n# one\n# two\n" && qa.closed, "file writes queued behind a busy workspace, then closed: nothing is written after the close, the latest text is kept as a copy", qa);
+    if (LATEX) {
+      const ql = await queued("/notes/queued.tex", true);
+      ok(/couldn't be saved or kept/.test(ql.bar) && ql.file === "q = 1\n" && ql.copy === "q = 1\n# one\n# two\n" && ql.closed, "a LaTeX file closed within its editor's debounce while the workspace is busy: nothing is written after the close, the latest text is kept as a copy", ql);
+    }
     if (LATEX) {
       // (no editor until the file and its revision are read: here the LaTeX module is held)
       await freshPage();
@@ -700,11 +799,17 @@ try {
     await sleep(300);
     const onA = await barText();
     await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent.startsWith('Save as a copy'))?.click()`);
-    await sleep(1500);
-    const copy = await readCells("/notes/bar-a (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+    // (the copy is made through the workspace: waited for, up to 8 s)
+    let copy = "no copy";
+    for (let t = Date.now(); Date.now() - t < 8000; await sleep(200)) {
+      copy = await readCells("/notes/bar-a (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+      if (!copy.startsWith("no copy")) break;
+    }
     await ev(`${tabJs(B)}.click()`);
     await sleep(300);
     const backOnB = await barText();
+    const strip = await ev(`(() => { const b = document.querySelector('#artifacts .pane-bar'); return { display: getComputedStyle(b).display, role: b.getAttribute('role'), cls: b.className, h: b.getBoundingClientRect().height }; })()`);
+    ok(strip.display === "none" && strip.role === null && strip.cls === "pane-bar" && strip.h === 0, "with no bar to show, the bar takes no room and has no kind or alert role (after another notebook's warning)", strip);
     ok(onB === "" && /gone/.test(onA) && copy === "who = 'A'" && backOnB === "", "a hidden notebook's warning waits for it: shown with its own Save as a copy when it is selected (copying it), and not over the other", { onB, onA, copy, backOnB });
   }
 

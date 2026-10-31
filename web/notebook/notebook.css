@@ -168,18 +168,6 @@
   .sbnb .cell .head button, .sbnb .cell .head select { padding: 1px 5px; }
   .sbnb .cell .adder button { padding: 1px 8px; }
 }
-/* (the same, by the notebook's own width, where a host names its box sbnb-pane: the agents page's artifact pane) */
-@container sbnb-pane (max-width: 640px) {
-  .sbnb { --gutter: 44px; }
-  .sbnb .cell .gutter { padding-right: 6px; }
-  .sbnb .cell .n { font-size: 11.5px; }
-  .sbnb .cell .runb { width: 26px; height: 26px; top: 5px; right: 5px; }
-  .sbnb .cell .adder { left: var(--gutter); transform: none; }
-  .sbnb .cell .head .drag { display: none; }
-  .sbnb .cell .head { right: 6px; }
-  .sbnb .cell .head button, .sbnb .cell .head select { padding: 1px 5px; }
-  .sbnb .cell .adder button { padding: 1px 8px; }
-}
 
 /* Printing: prompts, code without the editor's textarea, outputs; 3D views as
    the picture web/viewer3d.js keeps of their current view */
