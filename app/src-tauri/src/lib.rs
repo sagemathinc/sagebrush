@@ -21,6 +21,9 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+// the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
+const SHELL_WORKER_CSP: &str = "default-src 'none'; script-src 'self' blob:; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+
 // files to open, until the page asks for them
 struct Pending(Mutex<Vec<String>>);
 
@@ -143,11 +146,18 @@ pub fn run() {
         .plugin(
             tauri_plugin_localhost::Builder::new(port)
                 .host("127.0.0.1")
-                .on_request(|_request, response| {
+                .on_request(|request, response| {
                     response.add_header("Cross-Origin-Opener-Policy", "same-origin");
                     response.add_header("Cross-Origin-Embedder-Policy", "require-corp");
+                    // the Terminal's shell worker, with its own policy as the site serves it (no network
+                    // connections, no eval, no further workers, scripts from this origin and blob: only:
+                    // web/csp-policy.mts shellWorkerPolicy, checked equal by web/test-app-frontend.mjs); the app
+                    // sets no other CSP (tauri.conf.json)
+                    if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {
+                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);
+                    }
                     #[cfg(debug_assertions)]
-                    log_request(_request.url());
+                    log_request(request.url());
                 })
                 .build(),
         )

@@ -911,6 +911,9 @@ jobs:
               node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
               bun web/shell/test-panel-page.mjs
+              # (the Terminal in the desktop and Android apps: app/dist served as the app serves it, isolated and not)
+              node app/build-frontend.mjs
+              bun web/shell/test-panel-app.mjs
               ;;
             board-a)
               node web/board/bench.mjs
