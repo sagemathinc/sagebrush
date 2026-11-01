@@ -221,6 +221,7 @@ export class LocalGateway {
   stats = {
     queuedPayloadBytes: 0, maxQueuedPayloadBytes: 0, rawBodyRefs: 0, recordBytes: 0, staleOutputs: 0,
     invariantFailures: 0, keyImports: 0, workersStarted: 0, fallbacks: 0, executions: 0,
+    fenced: { closed: 0, stale: 0 }, // requests the fence refused, by guard (G-open, G-gen)
     authRefusals: {} as Record<string, number>,
   };
 
@@ -345,10 +346,11 @@ export class LocalGateway {
   /** The fence (cases v3 §4.7): may this request still have an effect?  "closed": no, and nothing is sent. */
   private fence(req: Req): "ok" | "stale" | "closed" {
     const c = req.conn;
-    if (c.closed) return "closed";
-    if (!this.fenceInvariant(c)) { this.stats.invariantFailures++; return "closed"; }
+    // (the invariant, for an open conn only: !c.closed => it is the paired conn and owns the binding; it fails closed)
+    if (!c.closed && !this.fenceInvariant(c)) { this.stats.invariantFailures++; return "closed"; }
+    if (c.closed) { this.stats.fenced.closed++; return "closed"; }
     const b = this.binding;
-    if ((b?.gen ?? 0) !== req.gen || (b?.id ?? null) !== req.binding) return "stale";
+    if ((b?.gen ?? 0) !== req.gen || (b?.id ?? null) !== req.binding) { this.stats.fenced.stale++; return "stale"; }
     return "ok";
   }
   /** An open conn is the paired one, and owns the binding if there is one (L26 refuses a second bind; pairedConn
