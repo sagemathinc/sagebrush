@@ -4307,6 +4307,136 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: _SR_MAX_CHARS = 4 << 20 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: checked after each row operation (_SR_MAX_CHARS). #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: entry cap) for each, then _sr_guard (at most _SR_MAX rows and columns in a #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _memory_error :: def _memory_error(what, need, limit): #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _memory_error :: return _memguard.memory_guard(what, need, limit, \"one symbolic matrix\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: \"\"\"The working rows after a row operation: refused past _SR_MAX_CHARS.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: if n > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: raise _memory_error(\"The entries of a symbolic elimination\", n, _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: \"\"\"A symbolic r x w workspace: at most _SR_MAX rows and columns.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: if max(r, w) > _SR_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: raise _memory_error(\"A symbolic %d x %d workspace\" % (r, w), max(r, w), _SR_MAX) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: adjugate :: raise NotImplementedError(\"the adjugate of a symbolic matrix larger than 4 x 4 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
+ },
+ "lib/_sage_matrix_sr.py :: det :: raise NotImplementedError(\"the determinant of a symbolic matrix larger than 3 x 3 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
+ },
  "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None): #0": {
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
