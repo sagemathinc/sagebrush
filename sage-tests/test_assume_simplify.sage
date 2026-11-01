@@ -1,0 +1,27 @@
+# assume() reaches simplify() and simplify_full(): under assume(x > 0),
+# sqrt(x^2).simplify() was sqrt(x^2) (a wrong answer beside Sage's x).
+# The expected output is Sage's documented behaviour, written by hand: this
+# host's Sage has no Maxima library mode to regenerate it (--regen needs one).
+x, y = var('x y')
+print(sqrt(x^2).simplify())
+assume(x > 0)
+print(sqrt(x^2).simplify())
+print(sqrt(x^2).simplify_full())
+print(sqrt(x^2).full_simplify())
+print(sqrt(4*x^2).simplify())
+print(sqrt(x^4).simplify())
+print(sqrt(x^3).simplify())
+print((sqrt(x^2) - x).simplify())
+print((sqrt(x^2) + 1).simplify())
+print(sin(sqrt(x^2)).simplify())
+print(bool(sqrt(x^2) == x))
+forget()
+assume(x < 0)
+print(sqrt(x^2).simplify())
+print(sqrt(x^4).simplify())
+forget()
+assume(x, 'real')
+print(sqrt(x^2).simplify())
+forget()
+print(sqrt(x^2).simplify())
+print(assumptions())
