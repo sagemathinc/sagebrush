@@ -535,39 +535,24 @@ test("K20c after the hello, a frame over its cap closes (1009)", async () => {
   } finally { await s.close(); }
 });
 
-test("K21 no kernel yet: a request after the hello is refused (not-yet), and no worker starts", async () => {
+test("K21 (phase 3a) a request after the hello goes to the local gateway: a token not this socket's is refused 401 invalid_token for every rpc, and no worker starts", async () => {
   const { s } = await server();
   try {
-    const h = await hello(s, codeHello(s));
-    h.c.send({ id: "t1", rpc: "g.run", ref: { b: "b1" }, auth: "DPoP x", dpop: "x", accept: "application/json", body: "{}" });
-    const e = await h.c.next();
-    assert.equal(e.type, "text");
-    const a = (e as any).data;
-    assert.equal(a.id, "t1");
-    assert.equal(a.status, 503);
-    assert.equal(JSON.parse(a.body).error, "not-yet");
-    assert.equal(s.workersStarted, 0);
-    h.c.end();
-  } finally { await s.close(); }
-  // (the phase-2 invariant: each execution RPC is answered before its frame's feed() returns; nothing waits)
-  const t = await server();
-  try {
-    const { st, c } = stubPaired(t.s);
-    const rpcs = ["g.bind", "g.run", "g.record", "g.events", "g.interrupt", "g.restart", "g.takeover", "g.complete"];
-    rpcs.forEach((rpc, i) => {
-      const n0 = st.writes.length;
-      c.feed(maskedText({ id: `t${i + 1}`, rpc, ref: { b: "b1" }, auth: "DPoP x", dpop: "x", accept: "application/json", body: "{}" }));
-      assert.equal(st.writes.length, n0 + 1, `${rpc}: answered before feed() returned`);
-      const a = JSON.parse(serverFrame(st.writes[n0]).payload.toString());
+    const { st, c } = stubPaired(s);
+    const rpcs: [string, any, boolean][] = [["g.bind", {}, true], ["g.run", { b: "b1" }, true], ["g.record", { b: "b1", r: "r1" }, false], ["g.events", { b: "b1", r: "r1", after: 0 }, false],
+      ["g.interrupt", { b: "b1" }, true], ["g.restart", { b: "b1" }, true], ["g.takeover", { b: "b1" }, true], ["g.complete", { b: "b1" }, true]];
+    rpcs.forEach(([rpc, ref, post], i) => c.feed(maskedText({ id: `t${i + 1}`, rpc, ref, auth: "DPoP x", dpop: "x", accept: "application/json", ...(post ? { body: "{}" } : {}) })));
+    await until(() => st.writes.length >= 1 + rpcs.length, "every request answered");
+    for (let i = 0; i < rpcs.length; i++) {
+      const a = JSON.parse(serverFrame(st.writes[1 + i]).payload.toString());
       assert.equal(a.id, `t${i + 1}`);
-      assert.equal(a.status, 503);
-      assert.equal(JSON.parse(a.body).error, "not-yet");
-    });
-    assert.equal(t.s.pending, 0, "no request pending");
-    assert.equal(t.clk.pending(), 0, "no timer for the conn");
-    assert.equal(t.s.queue.length, 0, "nothing queued");
-    assert.equal(t.s.workersStarted, 0, "no worker");
-  } finally { await t.s.close(); }
+      assert.equal(a.status, 401, `${rpcs[i][0]}: refused`);
+      assert.equal(JSON.parse(a.body).error, "invalid_token");
+    }
+    assert.equal(s.gateway.stats.workersStarted, 0, "no worker");
+    assert.equal(s.gateway.stats.executions, 0, "nothing ran");
+    assert.equal(s.gateway.binding, null, "no binding");
+  } finally { await s.close(); }
 });
 
 test("K22 secrets: the code only in the link and on stderr; the token and the session nowhere", async () => {
@@ -944,11 +929,12 @@ test("K32 valid framing is read: a hello in 3 fragments around a ping pairs (the
     const r = await c.next();
     assert.ok(r.type === "text" && r.data.result?.token, "paired");
     for (const [id, pad] of [["t1", 200], ["t2", 70_000]] as const) {
-      c.send({ id, rpc: "g.run", pad: "x".repeat(pad) }); // (200: a 16-bit length; 70,000: a 64-bit one)
+      // (200: a 16-bit length; 70,000: a 64-bit one; phase 3a: a g.run frame with a padded body, refused by its token)
+      c.send({ id, rpc: "g.run", ref: { b: "b1" }, auth: "DPoP x", dpop: "x", accept: "application/json", body: JSON.stringify({ pad: "x".repeat(pad) }) });
       const e = await c.next();
       assert.ok(e.type === "text", `${id} answered`);
       assert.equal((e as any).data.id, id);
-      assert.equal(JSON.parse((e as any).data.body).error, "not-yet");
+      assert.equal(JSON.parse((e as any).data.body).error, "invalid_token");
     }
     c.end();
   } finally { await s.close(); }
