@@ -61,7 +61,8 @@ export function makeEnvAdapter(env, Denial, granted) {
 /** PYJS_SANDBOX_ALLOW's tokens: the flags for deno compile, and the env names a scoped grant names (each once).
  * An env grant spelled any other way than these is refused here, so the flags and the names can't disagree:
  * --allow-env and -A / --allow-all (everything: Deno lists the environment), --allow-env=A,B (those names), and
- * --deny-env[=...] (Deno leaves the denied keys out of its list). */
+ * --deny-env[=...] (Deno leaves the denied keys out of its list).  (-E and any clustered short flag holding E, such
+ * as -RE=NAME, are refused: their names would reach Deno and not the list.) */
 export function parseAllow(text) {
   const flags = String(text ?? "").split(/\s+/).filter(Boolean);
   const granted = [];
@@ -74,8 +75,8 @@ export function parseAllow(text) {
       for (const k of names) if (!granted.includes(k)) granted.push(k);
       continue;
     }
-    // (Deno's other spellings of an env grant: -E, -E=..., --allow-env A)
-    if (/^-E(=|$)/.test(f) || /^--allow-env/.test(f)) throw new Error(`PYJS_SANDBOX_ALLOW: ${f}: write an env grant as --allow-env or --allow-env=NAME,...`);
+    // (Deno's other spellings of an env grant: -E, -E=..., a clustered short flag holding E (-RE, -RE=A), --allow-env A)
+    if ((/^-[^-]/.test(f) && f.split("=")[0].includes("E")) || /^--allow-env/.test(f)) throw new Error(`PYJS_SANDBOX_ALLOW: ${f}: write an env grant as --allow-env or --allow-env=NAME,...`);
   }
   return { flags, granted };
 }
