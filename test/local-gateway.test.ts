@@ -1169,3 +1169,252 @@ test("L35b a valid wave: its entries run in order under src/wave-policy.ts", asy
     census(t.s);
   } finally { await t.s.close(); }
 });
+
+// ================= 4.9 Lifecycle (scripted Worker; L33 on the real one, below)
+
+test("L37 socket lost: the Worker kept, alive at 9:59 (L37+), gone after 10 idle minutes", async () => {
+  const t = await setup();
+  try {
+    await bind(t.page);
+    const w = t.port.last();
+    t.page.st.emit("close");
+    t.clk.advance(GATEWAY_LIMITS.idleMs - 1000);
+    assert.equal(w.terminated, false, "L37+ alive at 9:59");
+    assert.ok(t.s.gateway.binding, "the binding kept");
+    t.clk.advance(1000);
+    assert.equal(w.terminated, true, "terminated at 10:00");
+    assert.equal(t.s.gateway.binding, null);
+  } finally { await t.s.close(); }
+});
+test("L38 a reconnect in the Worker's life: an admitted run reconciled by request, the Worker (its variables) kept, no new run without a Run", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    t.page.st.emit("close");
+    r.finish(); // (it ends while no page is paired)
+    const p2 = newPage(t.s, t.clk, t.page.key);
+    assert.equal(t.s.gateway.stats.workersStarted, 1, "the same Worker: its variables kept");
+    const posted = t.port.posted.length;
+    const rec = await p2.request("g.record", { b, r: "req-1" }).answer();
+    assert.equal(rec.status, 200);
+    assert.equal(bodyOf(rec).state, "done", "reconciled by request");
+    const again = await p2.request("g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x = 1" } }).answer();
+    assert.deepEqual(bodyOf(again), { request: "req-1", state: "done" }, "the same request: its record, not a new run");
+    assert.equal(t.port.posted.length, posted, "no new run without a Run");
+  } finally { await t.s.close(); }
+});
+test("L39 explicit unpair: the Worker terminated; late frames on the old socket ignored, its Worker's late output dropped", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    const w = t.port.last();
+    t.page.c.feed(maskedText({ unpair: true }));
+    assert.equal(w.terminated, true);
+    assert.equal(t.s.gateway.binding, null);
+    const writes = t.page.st.writes.length, posted = t.port.posted.length;
+    t.page.request("g.run", { b }, { request: "req-2", epoch: 1, payload: { code: "y" } }); // (fed to the closed socket)
+    await new Promise((res) => setTimeout(res, 20));
+    assert.equal(t.page.st.writes.length, writes, "nothing written for a late frame");
+    assert.equal(t.port.posted.length, posted, "nothing posted");
+    const stale = t.s.gateway.stats.staleOutputs;
+    w.onMessage({ id: r.workerId, done: true, ms: 1 });
+    assert.equal(t.s.gateway.stats.staleOutputs, stale + 1, "the old Worker's output dropped, counted");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L40 server.close(): the Worker terminated", async () => {
+  const t = await setup();
+  await bind(t.page);
+  const w = t.port.last();
+  await t.s.close();
+  assert.equal(w.terminated, true);
+  census(t.s);
+});
+
+// ================= 4.7 The authentication-to-dispatch fence [S2, G1]
+
+/** Requests held between their decode and their authentication, by id, until released. */
+function holder() {
+  const ids = new Set<string>(), waiting = new Map<string, () => void>();
+  return {
+    hold: (id: string) => (ids.has(id) ? new Promise<void>((r) => waiting.set(id, r)) : Promise.resolve()),
+    add: (id: string) => ids.add(id),
+    held: (id: string) => waiting.has(id),
+    release: (id: string) => { const r = waiting.get(id); waiting.delete(id); r?.(); },
+  };
+}
+/** A request whose authentication is held: its id, and the request. */
+async function heldRequest(H: ReturnType<typeof holder>, page: ReturnType<typeof newPage>, rpc: string, ref: any, body?: unknown) {
+  const id = page.nextId();
+  H.add(id);
+  const r = page.request(rpc, ref, body, { id });
+  await until(() => H.held(id), `${rpc} held`);
+  return r;
+}
+const settle = () => new Promise((r) => setTimeout(r, 20));
+async function fenced(name: string, f: (t: any, H: ReturnType<typeof holder>) => Promise<void>) {
+  test(name, async () => {
+    const H = holder();
+    const t: any = await setup({ gateway: { authHold: H.hold } });
+    try { await f(t, H); census(t.s); } finally { await t.s.close(); }
+  });
+}
+// across sockets (G-open)
+fenced("L42a a held g.run, then the socket closes: nothing admitted, nothing sent", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
+  const writes = t.page.st.writes.length, posted = t.port.posted.length;
+  t.page.st.emit("close");
+  H.release(r.id); await settle();
+  assert.equal(t.s.gateway.binding.runs.size, 0, "nothing admitted");
+  assert.equal(t.port.posted.length, posted);
+  assert.equal(t.page.st.writes.length, writes, "nothing sent");
+});
+fenced("L42b a held g.run, then an unpair: nothing admitted, nothing sent", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
+  const posted = t.port.posted.length;
+  t.page.c.feed(maskedText({ unpair: true }));
+  const writes = t.page.st.writes.length;
+  H.release(r.id); await settle();
+  assert.equal(t.port.posted.length, posted, "nothing admitted or posted");
+  assert.equal(t.page.st.writes.length, writes, "nothing sent");
+});
+fenced("L42c a held g.run, then a rebind: no admission in the new binding, no answer on the new socket", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
+  const { p2, b2 } = await rebind(t);
+  const posted = t.port.posted.length, w2 = p2.st.writes.length;
+  H.release(r.id); await settle();
+  assert.equal(t.s.gateway.binding.id, b2);
+  assert.equal(t.s.gateway.binding.runs.size, 0, "no admission in the new binding");
+  assert.equal(t.port.posted.length, posted);
+  assert.equal(p2.st.writes.length, w2, "no answer on the new socket");
+});
+fenced("L42d a held g.interrupt and a held g.restart, then a rebind: the new Worker neither interrupted nor restarted", async (t, H) => {
+  const b = await bind(t.page);
+  const i = await heldRequest(H, t.page, "g.interrupt", { b }, { epoch: 1 });
+  const rs = await heldRequest(H, t.page, "g.restart", { b }, { epoch: 1 });
+  const { p2 } = await rebind(t);
+  const w = t.port.last(), started = t.s.gateway.stats.workersStarted, w2 = p2.st.writes.length;
+  H.release(i.id); H.release(rs.id); await settle();
+  assert.deepEqual(w.interrupts, [], "not interrupted");
+  assert.equal(w.terminated, false);
+  assert.equal(t.s.gateway.stats.workersStarted, started, "not restarted");
+  assert.equal(p2.st.writes.length, w2);
+});
+fenced("L42e a held g.complete, then a rebind: nothing delivered into the new binding", async (t, H) => {
+  const b = await bind(t.page);
+  const c = await heldRequest(H, t.page, "g.complete", { b }, { epoch: 1, code: "x" });
+  const { p2 } = await rebind(t);
+  const posted = t.port.posted.length, w2 = p2.st.writes.length;
+  H.release(c.id); await settle();
+  assert.equal(t.port.posted.length, posted, "no completion posted to the new Worker");
+  assert.equal(p2.st.writes.length, w2);
+});
+fenced("L42i a held g.bind, then an unpair: no binding created", async (t, H) => {
+  const r = await heldRequest(H, t.page, "g.bind", {}, {});
+  t.page.c.feed(maskedText({ unpair: true }));
+  H.release(r.id); await settle();
+  assert.equal(t.s.gateway.binding, null);
+  assert.equal(t.s.gateway.stats.workersStarted, 0, "no Worker started");
+});
+fenced("L42j a held g.bind, then a replacement (socket B pairs and binds): A's bind has no effect, B's binding untouched", async (t, H) => {
+  const r = await heldRequest(H, t.page, "g.bind", {}, {});
+  t.page.st.emit("close");
+  const p2 = newPage(t.s, t.clk, t.page.key);
+  const b2 = await bind(p2);
+  const before = { ...t.s.gateway.binding }, started = t.s.gateway.stats.workersStarted;
+  H.release(r.id); await settle();
+  assert.equal(t.s.gateway.binding.id, b2);
+  assert.equal(t.s.gateway.binding.conn, p2.c, "B's binding untouched");
+  assert.equal(t.s.gateway.binding.gen, before.gen);
+  assert.equal(t.s.gateway.stats.workersStarted, started);
+});
+fenced("L42k a held g.takeover, then the socket closes: no epoch change", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.takeover", { b }, { from_epoch: 1 });
+  t.page.st.emit("close");
+  H.release(r.id); await settle();
+  assert.equal(t.s.gateway.binding.epoch, 1, "no epoch change");
+});
+// on the same open socket (G-gen)
+fenced("L42f a held g.interrupt, then a g.restart completes on the same socket: the interrupt 409 stale, the new Worker not interrupted", async (t, H) => {
+  const b = await bind(t.page);
+  const i = await heldRequest(H, t.page, "g.interrupt", { b }, { epoch: 1 });
+  assert.equal((await t.page.request("g.restart", { b }, { epoch: 1 }).answer()).status, 200);
+  const w2 = t.port.last();
+  H.release(i.id);
+  const a = await i.answer();
+  assert.equal(a.status, 409);
+  assert.equal(bodyOf(a).error, "stale");
+  assert.deepEqual(w2.interrupts, []);
+});
+fenced("L42g a held g.run, then a g.takeover on the same socket: 409 stale, zero admissions", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
+  assert.equal((await t.page.request("g.takeover", { b }, { from_epoch: 1 }).answer()).status, 200);
+  H.release(r.id);
+  const a = await r.answer();
+  assert.equal(a.status, 409);
+  assert.equal(bodyOf(a).error, "stale");
+  assert.equal(t.s.gateway.binding.runs.size, 0);
+});
+fenced("L42h a held g.complete, then the 2 s fallback: 409 stale; nothing delivered, no completion to the new Worker", async (t, H) => {
+  const b = await bind(t.page);
+  const run = await admitRun(t, b, "req-1");
+  const c = await heldRequest(H, t.page, "g.complete", { b }, { epoch: 1, code: "x" });
+  assert.equal((await t.page.request("g.interrupt", { b }, { epoch: 1 }).answer()).status, 200);
+  t.clk.advance(GATEWAY_LIMITS.fallbackMs); // (the scripted Worker ignores the interrupt)
+  assert.equal(t.s.gateway.stats.fallbacks, 1);
+  const w2 = t.port.last();
+  H.release(c.id);
+  const a = await c.answer();
+  assert.equal(a.status, 409);
+  assert.equal(bodyOf(a).error, "stale");
+  assert.ok(!w2.posted.some((m: any) => m.complete !== undefined), "no completion dispatched to the new Worker");
+  void run;
+});
+fenced("L42l a held g.takeover, then a g.restart on the same socket: 409 stale, no epoch change", async (t, H) => {
+  const b = await bind(t.page);
+  const r = await heldRequest(H, t.page, "g.takeover", { b }, { from_epoch: 1 });
+  assert.equal((await t.page.request("g.restart", { b }, { epoch: 1 }).answer()).status, 200);
+  H.release(r.id);
+  const a = await r.answer();
+  assert.equal(a.status, 409);
+  assert.equal(bodyOf(a).error, "stale");
+  assert.equal(t.s.gateway.binding.epoch, 1, "no epoch change");
+});
+test("L43 old-generation Worker output after a restart and after the fallback: dropped and counted; it reaches no run or answer of the new generation", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r1 = await admitRun(t, b, "req-1");
+    const w1 = t.port.last();
+    assert.equal((await t.page.request("g.restart", { b }, { epoch: 1 }).answer()).status, 200);
+    const r2 = await admitRun(t, b, "req-2", "y = 2");
+    const w2 = t.port.last();
+    const run2 = t.s.gateway.binding!.runs.get("req-2")!;
+    const ev2 = run2.events.length, stale = t.s.gateway.stats.staleOutputs;
+    w1.onMessage({ id: r1.workerId, stream: "stdout", text: "late" });
+    w1.onMessage({ id: r2.workerId, stream: "stdout", text: "late, with the new run's id" });
+    w1.onMessage({ id: r2.workerId, done: true, ms: 1 });
+    w1.onMessage({ id: r2.workerId, matches: ["late"], prefix: "" });
+    assert.equal(t.s.gateway.stats.staleOutputs, stale + 4, "each dropped, counted");
+    assert.equal(run2.events.length, ev2, "nothing reached the new run");
+    assert.equal(run2.outcome, null);
+    // and after the fallback
+    assert.equal((await t.page.request("g.interrupt", { b }, { epoch: 1 }).answer()).status, 200);
+    t.clk.advance(GATEWAY_LIMITS.fallbackMs);
+    assert.notEqual(t.port.last(), w2, "a new Worker");
+    const r3 = await admitRun(t, b, "req-3", "z = 3");
+    const run3 = t.s.gateway.binding!.runs.get("req-3")!;
+    const s2 = t.s.gateway.stats.staleOutputs;
+    w2.onMessage({ id: r3.workerId, done: true, ms: 1 });
+    assert.equal(t.s.gateway.stats.staleOutputs, s2 + 1);
+    assert.equal(run3.outcome, null, "the new generation's run untouched");
+    r3.finish();
+  } finally { await t.s.close(); }
+});
