@@ -9,6 +9,37 @@ import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// (a promise given a deadline: past it, an error naming what was awaited; nothing here waits unbounded, astra r1)
+export function within(ms, what, p) {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`${what}: no answer within ${ms / 1000} s`)), ms)))]).finally(() => clearTimeout(t));
+}
+export const CDP_MS = 30000;
+
+// The cases a file reports, by id (the text of a line before its first colon), and the roster of each page or world:
+// a case a page didn't reach is NOT RUN, printed by name and counted as a failure (grader A2/A3)
+export function tally() {
+  const seen = new Set();
+  const t = {
+    failures: 0,
+    ok(c, msg) { seen.add(String(msg).split(":")[0]); console.log((c ? "ok   " : "FAIL ") + msg); if (!c) t.failures++; },
+    // (a page or world: its cases, run by f; a throw is a FAIL line by the page's name, and its cases not reported are
+    // NOT RUN; the next page still runs)
+    async page(name, ids, f) {
+      try { await f(); } catch (e) { t.failures++; console.log(`FAIL ${name} didn't finish: ${e?.message ?? e}`); }
+      const miss = ids.filter((i) => !seen.has(i));
+      t.failures += miss.length;
+      console.log(`${name}: NOT RUN: ${miss.length ? miss.join(", ") : "none"}`);
+      return miss;
+    },
+    summary(file, all) {
+      const miss = all.filter((i) => !seen.has(i));
+      console.log(`${file}: ${all.length} cases, ${all.length - miss.length} run; NOT RUN: ${miss.length ? miss.join(", ") : "none"}`);
+      console.log(t.failures ? `${t.failures} failed` : "all passed");
+    },
+  };
+  return t;
+}
 export async function until(fn, ms) {
   const end = Date.now() + ms;
   for (;;) {
@@ -75,15 +106,17 @@ export async function browser() {
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
   if (!cdpPort) cdpPort = await devtoolsPort(profile);
   let targets;
-  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
+  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`, { signal: AbortSignal.timeout(2000) })).json(); break; } catch { await sleep(100); } }
+  if (!targets) throw new Error("Chrome's DevTools never listed its targets (30 s)");
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
+  await within(10000, "the DevTools WebSocket", new Promise((r, rej) => { ws.onopen = r; ws.onerror = () => rej(new Error("the DevTools WebSocket failed")); }));
   let n = 0;
   const waiting = new Map();
   const attached = new Map(); // sessionId -> {type, targetId, parentFrameId, parentSession, detached}
   const requests = []; // every Network.requestWillBeSent, in every session: {sessionId, url}
   const listeners = []; // (method, params, sessionId) => void
-  const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+  // (every call bounded: one with no answer is an error naming its method, and its slot is let go)
+  const send = (method, params = {}, sessionId) => { const id = ++n; return within(CDP_MS, `CDP ${method}`, new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); })).finally(() => waiting.delete(id)); };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? { error: m.error }); waiting.delete(m.id); }

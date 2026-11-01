@@ -18,18 +18,20 @@
 //
 //   bun web/build.ts && node web/share/test-share-broker.mjs      (CHROME=... for another browser)
 import { startDev } from "./serve-dev.mjs";
-import { browser, runnerWorker, forge, refused, sleep, until } from "../test-broker-lib.mjs";
+import { browser, runnerWorker, forge, refused, sleep, until, within, tally } from "../test-broker-lib.mjs";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const LIMITS = { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } };
-let failures = 0;
-const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+const T = tally();
+const ok = T.ok;
+// (each world's cases: one the world didn't reach is NOT RUN)
+const ROSTER = { "G1s world": ["mounted", "G1s"], "G4 world": ["G4"], "G10 world": ["G10"] };
 const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
 
 // A world: its server, its browser, a collection shared from the notebook page (a notebook that reads
 // data/points.csv), then the shared page opened with the recorder in place, Run all done, and the runner's worker
 async function world(name, sitePort, filesPort, intercept = null) {
-  const dev = await startDev({ sitePort, filesPort, limits: LIMITS });
+  const dev = await within(60000, `${name}: the dev server`, startDev({ sitePort, filesPort, limits: LIMITS }));
   const b = await browser();
   const uev = (expr, ms = 30000) => until(() => b.ev(expr).catch(() => false), ms).then((v) => { if (!v) throw new Error(`${name}: timeout: ${expr.slice(0, 120)}`); return v; });
   const runFirst = async (code) => {
@@ -93,9 +95,9 @@ function interception(rules) {
       b.listeners.push(async (method, params, sessionId) => {
         if (method !== "Fetch.requestPaused" || sessionId) return;
         const url = params.request.url, rule = rules(url);
-        if (!rule) return b.send("Fetch.continueRequest", { requestId: params.requestId });
+        if (!rule) return b.send("Fetch.continueRequest", { requestId: params.requestId }).catch(() => {});
         hits.set(url, (hits.get(url) ?? 0) + 1);
-        b.send("Fetch.fulfillRequest", { requestId: params.requestId, responseCode: rule.status, responseHeaders: rule.headers, body: rule.body === undefined ? undefined : b64(rule.body) });
+        b.send("Fetch.fulfillRequest", { requestId: params.requestId, responseCode: rule.status, responseHeaders: rule.headers, body: rule.body === undefined ? undefined : b64(rule.body) }).catch(() => {});
       });
       await b.send("Fetch.enable", { patterns: [{ urlPattern: files + "/*", requestStage: "Request" }] });
     },
@@ -103,7 +105,7 @@ function interception(rules) {
 }
 
 // G1s, and the positive mounted case
-try {
+await T.page("G1s world", ROSTER["G1s world"], async () => {
   const w = await world("G1s", 18890, 18891);
   try {
     const log = await w.b.log();
@@ -114,10 +116,10 @@ try {
     const r = await forge(w.b, w.wk, new URL(`/sagebrush-engine.wasm?leak=${S}`, w.dev.site).href, w.seen);
     refused(ok, "G1s", "the share page's runner, engine?leak=SENTINEL", r, (u) => !u.includes(S));
   } finally { await end(w); }
-} catch (e) { ok(false, "G1s: " + (e?.stack ?? e)); }
+});
 
 // G4: the mounted URL answers 302
-try {
+await T.page("G4 world", ROSTER["G4 world"], async () => {
   let target = null, csv = null;
   const icpt = interception((url) => {
     if (target && url === target) return { status: 200, headers: [{ name: "Access-Control-Allow-Origin", value: "*" }, { name: "Content-Type", value: "text/csv" }], body: "SENTINEL-G4\n" };
@@ -134,10 +136,10 @@ try {
     ok(!!req && !!ans && ans.bytes === null && (icpt.hits.get(csv) ?? 0) >= 1 && toTarget === 0 && !w.out.includes("SENTINEL-G4"),
       `G4: the mounted URL answering 302: relayed (${req ? "id " + req.id : "NOT SEEN"}), answered ${ans ? (ans.bytes === null ? "null" : ans.bytes + " bytes") : "NEVER"}, the 302 given ${icpt.hits.get(csv) ?? 0} time(s), ${toTarget} request(s) to the redirect's target; the cell: ${JSON.stringify(w.out.trim().split("\n").at(-1)?.slice(0, 100))}`);
   } finally { await end(w); }
-} catch (e) { ok(false, "G4: " + (e?.stack ?? e)); }
+});
 
 // G10: a mount posted from the worker, up through the frame
-try {
+await T.page("G10 world", ROSTER["G10 world"], async () => {
   let S = null;
   const icpt = interception((url) => (S && url === S ? { status: 200, headers: [{ name: "Access-Control-Allow-Origin", value: "*" }, { name: "Content-Type", value: "text/plain" }], body: "SENTINEL-G10\n" } : null));
   const w = await world("G10", 18894, 18895, icpt);
@@ -151,7 +153,7 @@ try {
     refused(ok, "G10", "the sentinel the worker mounted", r, (u) => !u.includes("g10-SENTINEL"));
     ok((icpt.hits.get(S) ?? 0) === 0, `G10: the interception was never asked for the sentinel (${icpt.hits.get(S) ?? 0})`);
   } finally { await end(w); }
-} catch (e) { ok(false, "G10: " + (e?.stack ?? e)); }
+});
 
-console.log(failures ? `${failures} FAILED` : "all passed");
-process.exit(failures ? 1 : 0);
+T.summary("share", Object.values(ROSTER).flat());
+process.exit(T.failures ? 1 : 0);

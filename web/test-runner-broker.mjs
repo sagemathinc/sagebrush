@@ -21,13 +21,14 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { browser, runnerWorker, forge as forgeIn, refused as refusedBy, sleep, until } from "./test-broker-lib.mjs";
+import { browser, runnerWorker, forge as forgeIn, refused as refusedBy, sleep, until, within, tally } from "./test-broker-lib.mjs";
+import { tamperedIndex } from "./test-tz-fixture.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
 const work = mkdtempSync(join(tmpdir(), "sb-broker-"));
-let failures = 0;
-const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+const T = tally();
+const ok = T.ok;
 
 // ---- what the build gave the worker: the engine's ?h=, the zone index and one zone
 const list = JSON.parse(readFileSync(join(dist, "runner-fetch.json"), "utf8"));
@@ -46,11 +47,11 @@ async function server(name, overrides = {}) {
   writeFileSync(ov, JSON.stringify(overrides));
   const p = spawn("python3", [join(here, "serve.py"), "0"], { env: { ...process.env, SB_SERVE_LOG: log, SB_SERVE_OVERRIDES: ov }, stdio: ["ignore", "pipe", "inherit"] });
   servers.push(p);
-  const port = await new Promise((res, rej) => {
+  const port = await within(20000, `serve.py for ${name}`, new Promise((res, rej) => {
     let out = "";
     p.stdout.on("data", (b) => { out += b; const m = /^(\d+)\n/.exec(out); if (m) res(Number(m[1])); });
     p.on("exit", (c) => rej(new Error(`serve.py exited (${c})`)));
-  });
+  }));
   const base = `http://127.0.0.1:${port}/`;
   const lines = () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   return { name, base, lines };
@@ -85,9 +86,14 @@ async function forge(page, url) {
 // refused, judged on the requests for this case's resource (`token`, a part of its URL no other request has)
 const refused = (name, what, r, token) => refusedBy(ok, name, what, r, (u) => !String(u).includes(token));
 
-// (each page in a try of its own: a page that doesn't start, or a step that throws, is reported by that page's name
-// and the pages after it still run)
-const page = async (name, f) => { try { await f(); } catch (e) { failures++; console.log(`FAIL ${name} didn't finish: ${e.message}`); } };
+// (each page in a try of its own, with its roster: a page that doesn't start, or a step that throws, is a FAIL line by
+// the page's name, its cases not reached are NOT RUN, and the pages after it still run)
+const ROSTER = {
+  P1: ["P1-pre", "G2c", "G1", "G2a", "G6-i", "G6-ii", "G6-iii", "G6-iv", "G6-v", "G3", "G13", "G2b", "G5's setup", "G5", "G8"],
+  P2: ["G11"],
+  P3: ["G14"],
+};
+const page = (name, f) => T.page(name, ROSTER[name], f);
 try {
   await page("P1", async () => {
   // ======== P1
@@ -96,7 +102,7 @@ try {
   await send("Network.setCookie", { name: "g5", value: "SENTINEL-G5", url: s1.base });
   const p1 = await openPage(s1);
   const E = (f) => new URL(f, s1.base).href;
-  ok(!s1.lines().some((l) => l.path.includes("/lib/tzdata/")), "P1: no zone data fetched before the interpreter asks (G2c's precondition): " + JSON.stringify(s1.lines().filter((l) => l.path.includes("tzdata")).map((l) => l.path)));
+  ok(!s1.lines().some((l) => l.path.includes("/lib/tzdata/")), "P1-pre: no zone data fetched before the interpreter asks (G2c's precondition): " + JSON.stringify(s1.lines().filter((l) => l.path.includes("tzdata")).map((l) => l.path)));
 
   // G2c: a zone the index lists, asked for before the index was fetched
   refused("G2c", "a listed zone before the index", await forge(p1, E(`lib/tzdata/${LONDON}.tzif`)), LONDON);
@@ -143,9 +149,9 @@ try {
   });
   await page("P2", async () => {
   // ======== P2: G11, the index served with one byte changed (in a copy; dist is not touched)
-  const bad = Buffer.from(indexBytes);
-  const at = bad.indexOf(Buffer.from(LONDON));
-  bad[at] = bad[at] === 0x30 ? 0x31 : 0x30; // (one hex digit of a zone's SHA-256: still valid JSON and grammar, a different hash)
+  // (web/test-tz-fixture.mjs, the same bytes as the unit G11u: one hex digit of ANOTHER zone's value, so the index
+  // still lists London with its real SHA-256 and only its hash refuses it)
+  const bad = Buffer.from(tamperedIndex(indexBytes).bytes);
   const badFile = join(work, "index-one-byte.json");
   writeFileSync(badFile, bad);
   const s2 = await server("p2", { ["/" + list.tzIndex.file]: { file: badFile } });
@@ -172,12 +178,12 @@ try {
   void p3;
   });
 } catch (e) {
-  failures++;
-  console.log("FAIL", e.message);
+  T.failures++;
+  console.log("FAIL the harness:", e.message);
 } finally {
   await b.close();
   for (const s of servers) s.kill();
   rmSync(work, { recursive: true, force: true });
 }
-console.log(failures ? `${failures} failed` : "all passed");
-process.exit(failures ? 1 : 0);
+T.summary("notebook", Object.values(ROSTER).flat());
+process.exit(T.failures ? 1 : 0);
