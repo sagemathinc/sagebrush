@@ -59,7 +59,8 @@ try {
     exceptions = [];
     await send("Page.navigate", { url });
     await sleep(300);
-    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`);
+    // (the layout mounted: its separators wired and valued; the editor is mounted earlier, before the layout)
+    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`);
     await sleep(300);
   };
   /** The scripted agent's turn that opens a code artifact (through the page's own artifact path, renderArtifacts). */
