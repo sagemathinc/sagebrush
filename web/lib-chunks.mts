@@ -19,8 +19,8 @@
 // matlab-more, magma-more; MATLAB's sparse LU, _matlab_lu and _matlab_colamd,
 // is matlab-lu) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
-// "-"; each of scipy's submodules is mod-scipy-<sub>, so that one doesn't
-// fetch the others).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
+// "-"; scipy.special is mod-scipy-special, apart from scipy's other
+// submodules).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
 // pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
 // mode's start imports it (recorded as "pkg:<name>/<path>"), and in that
 // mode's start then; the manifest carries the packages' registry
@@ -58,11 +58,9 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   if (/^_matlab_(lu|colamd)$/.test(top)) return "matlab-lu";
   if (/^_matlab/.test(top)) return "matlab-more";
   if (/^_magma/.test(top)) return "magma-more";
-  // (scipy's submodules: a group each, mod-scipy-<sub>, so that importing
-  // one fetches none of the others; scipy/__init__.py, which a mode's start
-  // imports, stays in that start's group)
-  const sub = /^scipy\/([a-z0-9_]+)(?:\.py$|\/)/.exec(path);
-  if (sub && sub[1] !== "__init__") return "mod-scipy-" + sub[1].replace(/_+/g, "-");
+  // (scipy.special: a group of its own, mod-scipy-special, so that importing
+  // scipy's other submodules (mod-scipy) doesn't fetch it, nor it them)
+  if (/^scipy\/special(?:\.py$|\/)/.test(path)) return "mod-scipy-special";
   // (lowercase letters, digits and "-": an engine file's name has nothing
   // else, web/engines.ts; mod-future for __future__, mod-ipython for IPython)
   return "mod-" + top.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
