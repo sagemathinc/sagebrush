@@ -70,6 +70,36 @@ for f in [lambda: sc.zeta(2, -1000000.5), lambda: sc.zeta(2, -1e12 - 0.5), lambd
   ].join("\n"));
 });
 
+test("scipy.special: a call's total variable work beyond the bound is refused before any element", () => {
+  // (daybreak3's R5 ruling: 10**6 terms over the whole broadcast, admitted
+  // before any element begins; _work_started counts the elements begun, and
+  // each refusal must leave it unchanged and come within 0.5 s)
+  const out = py(`
+import time
+import numpy as np
+import scipy.special as sc
+for f in [lambda: sc.eval_legendre(np.array([500000, 500001]), 0.3), lambda: sc.zeta(2, np.array([-499999.5, -500000.5])),
+          lambda: sc.eval_legendre(np.full(20, 1e6), 0.3), lambda: sc.zeta(2, np.full(20, -999999.5)),
+          lambda: sc.eval_legendre(np.array([-500001, -500002]), 0.3)]:
+    c = getattr(sc, "_work_started", [0])
+    s = c[0]
+    t = time.time()
+    try:
+        f()
+        print("no error", c[0] - s)
+    except NotImplementedError as e:
+        print("NotImplementedError", e, c[0] - s, time.time() - t < 0.5)
+`);
+  assert.equal(out, [
+    "NotImplementedError scipy.special.eval_legendre: the call's variable work, 1000001 terms over its 2 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.zeta: the call's variable work, 1000001 terms over its 2 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.eval_legendre: the call's variable work, 20000000 terms over its 20 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.zeta: the call's variable work, 20000000 terms over its 20 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.eval_legendre: the call's variable work, 1000001 terms over its 2 values, is above 1000000 0 True",
+    "",
+  ].join("\n"));
+});
+
 test("scipy.special.y1 for large x, where SciPy's (Cephes's) loses accuracy: mpmath's values", () => {
   // (mpmath.bessely(1, x) at 400 digits for 1e300, 60 elsewhere; SciPy 1.18's
   // y1 is 1.2e-8 off at the second and gives -6.5e-151 at the first)
