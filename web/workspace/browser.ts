@@ -105,8 +105,8 @@ const STYLE = `
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
-.sbfiles .ftoastslot { position: relative; flex: none; height: 38px; }
-.sbfiles .ftoast { position: absolute; z-index: 2; left: 10px; right: 10px; top: 4px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.sbfiles .ftoastslot { flex: none; }
+.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .sbfiles .ftoast span { flex: 1; min-width: 0; }
 .sbfiles .ftoast button { background: none; border: 0; color: #b9e0a5; font: inherit; cursor: pointer; text-decoration: underline; }
 .sbfiles .ftoast.err { background: #fdecea; color: #7a2418; border: 1px solid #e0897c; font-weight: 500; }
@@ -177,7 +177,7 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean; error?: boolean } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -199,27 +199,40 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
-  // (the toast's slot keeps its room whether or not there is a toast, so a message never moves the list; a longer one
-  // lies over the list's top rather than pushing it down)
+  // (the toast at the foot of the files, under the list (board's (d)): a message never moves a row; while it shows the
+  // list is that much shorter at its bottom, and what it covers scrolls into view)
   const toastEl = h("div", { className: "ftoastslot" });
   const tree = h("div", { className: "ftree", role: "tree" });
   const foot = h("div", { className: "ffoot" });
   const picker = h("input", { type: "file", multiple: true, hidden: true });
-  root.append(head, search, toastEl, tree, foot, picker);
+  root.append(head, search, tree, toastEl, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void, sticky = false, error = false) => {
+  // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
+  // being reached for)
+  const hideLater = (t: NonNullable<typeof toast>, ms: number) => setTimeout(() => {
+    if (toast !== t) return;
+    if (toastEl.matches(":hover") || toastEl.contains(document.activeElement)) return void hideLater(t, 2000);
+    toast = null;
+    renderToast();
+  }, ms);
+  const say = (text: string, undo?: () => unknown, sticky = false, error = false) => {
     toast = { text, undo, sticky, error };
     renderToast();
-    if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
+    if (!sticky) hideLater(toast, 10_000);
+  };
+  // (focus once the toast it was in has gone: the row given, else the current one, else the list's first; never the body)
+  const focusList = (path?: string) => {
+    const r = (path ? tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(path)}"]`) : null) ?? tree.querySelector<HTMLElement>(".frow.cur") ?? tree.querySelector<HTMLElement>(".frow");
+    r?.focus();
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
     // (an error looks like one, and is announced as one: role=alert, kept until closed)
     const t = h("div", { className: toast.error ? "ftoast err" : "ftoast", role: toast.error ? "alert" : "status" }, h("span", { textContent: toast.text }));
-    if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
-    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
+    if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); focusList(); void f(); }; t.append(u); }
+    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Dismiss" }); x.setAttribute("aria-label", "Dismiss"); x.onclick = () => { const had = toastEl.contains(document.activeElement); toast = null; renderToast(); if (had) focusList(); }; t.append(x); }
     toastEl.append(t);
   };
   const sayError = (text: string) => say(text, undefined, true, true);
@@ -490,7 +503,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       return refresh();
     }
     try {
-      const t = await w.remove(e.path);
+      // (by its identity: whatever is at that path now, if not the entry chosen (replaced meanwhile, as across the
+      // trashing hook's waits), is refused, astra's R1 on #447)
+      const t = await w.remove(e.path, e);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
       // (and the document that was open, open again where Undo put it back)
       const reopen = async () => {
@@ -499,7 +514,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
         const back = p ? await w.stat(p) : undefined;
         if (back) host.open(back, "here");
       };
-      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).then(reopen).catch(fail).then(refresh));
+      // (Undo: back where it was, the document open again, and the focus on its row)
+      say(`"${nameOf(e.path)}" moved to Trash`, async () => {
+        let back: Entry | undefined;
+        try { back = await w.restore(t.path, t); await reopen(); } catch (err) { fail(err); }
+        await refresh();
+        if (back) focusList(back.path);
+      });
     } catch (err) { fail(err); }
     refresh();
   }
