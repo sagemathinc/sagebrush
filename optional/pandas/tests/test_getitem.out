@@ -1,0 +1,178 @@
+== s.label
+np.int64(20)
+== s.int-on-str-index
+!! KeyError: 1
+== s.int-slice
+
+b    20
+c    30
+dtype: int64
+== s.label-slice
+
+a    10
+b    20
+dtype: int64
+== s.label-list
+
+a    10
+c    30
+dtype: int64
+== s.label-list-missing
+!! KeyError: "['z'] not in index"
+== s.bool-list
+
+a    10
+c    30
+dtype: int64
+== s.bool-list-short
+!! IndexError: Boolean index has wrong length: 2 instead of 3
+== s.mask
+
+b    20
+c    30
+dtype: int64
+== s.mask-ndarray
+
+b    20
+c    30
+dtype: int64
+== s.int-index-label
+np.int64(20)
+== s.int-index-slice
+
+2    10
+1    20
+dtype: int64
+== s.int-index-missing
+!! KeyError: 5
+== s.missing
+!! KeyError: 'z'
+== s.float-index-slice
+
+1.5    2
+2.5    3
+dtype: int64
+== s.float-index-label
+np.int64(2)
+== s.dup-label
+
+a    1
+a    3
+dtype: int64
+== s.dup-slice
+
+b    2
+a    3
+c    4
+dtype: int64
+== s.neg-slice
+
+b    20
+c    30
+dtype: int64
+== s.step-slice
+
+a    10
+c    30
+dtype: int64
+== s.empty-slice
+
+Series([], dtype: int64)
+== s.compare-eq
+
+a    False
+b     True
+c    False
+dtype: bool
+== s.compare-series
+
+a     True
+b    False
+c     True
+dtype: bool
+== s.compare-misaligned
+!! ValueError: Can only compare identically-labeled Series objects
+== s.and-or
+(a    False
+b     True
+c    False
+dtype: bool, a     True
+b    False
+c     True
+dtype: bool, a     True
+b    False
+c    False
+dtype: bool)
+== s.str-compare
+
+0     True
+1    False
+2    False
+dtype: bool
+== s.str-lt
+
+0     True
+1    False
+2    False
+dtype: bool
+== s.nan-compare
+
+0     True
+1    False
+dtype: bool
+== s.nan-ne
+
+0    False
+1     True
+dtype: bool
+== df.column
+
+0    1
+1    2
+2    3
+Name: x, dtype: int64
+== df.columns-list
+
+   x  z
+0  1  p
+1  2  q
+2  3  r
+== df.missing
+!! KeyError: 'w'
+== df.missing-in-list
+!! KeyError: "['w'] not in index"
+== df.slice
+
+   x    y  z
+1  2  2.5  q
+2  3  3.5  r
+== df.mask
+
+   x    y  z
+1  2  2.5  q
+2  3  3.5  r
+== df.mask-and
+
+   x    y  z
+1  2  2.5  q
+== df.int-label
+!! KeyError: 0
+== df.bool-short
+!! ValueError: Item wrong length 2 instead of 3.
+== df.bool-list
+
+   x    y  z
+0  1  1.5  p
+2  3  3.5  r
+== df.int-columns
+
+0    2
+1    4
+Name: 1, dtype: int64
+== df.label-slice
+
+   v
+b  2
+c  3
+== df.column-name
+'y'
