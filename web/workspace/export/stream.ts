@@ -319,7 +319,7 @@ async function drive<T>(g: Generator<void, T, void>, pace: Pace): Promise<T> {
 /** The board's functions the export writes with (web/board/doc.ts): cleanDoc in steps, and boardText in parts. */
 export type BoardKit = {
   cleanDocSteps(d: unknown): Generator<void, BoardDoc, void>;
-  boardTextParts(d: unknown): Generator<string | { s: string }, void, void>;
+  boardTextParts(d: unknown): Generator<string | { s: string } | { step: true }, void, void>;
 };
 
 /**
@@ -354,6 +354,7 @@ export function boardSlices(doc: BoardDoc, images: Images, kit: BoardKit, pace: 
     let parts = 0;
     for (const p of kit.boardTextParts(cleaned)) {
       if (typeof p === "string") out.add(p);
+      else if ("step" in p) { await out.step(); continue; } // (a census checkpoint: no text, a step of the pace)
       else {
         const b = stand.get(p.s);
         if (b === undefined) await out.str(p.s);

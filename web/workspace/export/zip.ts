@@ -17,6 +17,9 @@
 
 /** 1 MiB: the slice every step works in (the sink's chunks, the CRC's, the spool's), so no task runs long. */
 export const SLICE = 1 << 20;
+/** 256 KiB: the archive's own output slices, each one sink.write (E1 r2e: a 1 MiB write to the sink was one ~50 ms
+ * task); the spools keep SLICE, and their record and segment rules are unchanged. */
+export const ZIP_OUT = 256 * 1024;
 
 export class ExportStopped extends Error {
   /** `plain`: `why` is a whole sentence, shown as it is (the no-OPFS refusal, @sagebrush's condition) */
@@ -30,11 +33,11 @@ export const counts = { slices: 0, sliceBytes: 0, blobBytes: 0, blobReadBytes: 0
 export function resetCounts() { counts.slices = counts.sliceBytes = counts.blobBytes = counts.blobReadBytes = counts.hashCopyBytes = counts.afterStop = counts.postsAfterStop = 0; counts.stopped = false; }
 
 type Slot = { buf: Uint8Array; used: number; back: Promise<void> | null };
-function newSlot(): Slot {
+function newSlot(size = SLICE): Slot {
   counts.slices++;
-  counts.sliceBytes += SLICE;
+  counts.sliceBytes += size;
   if (counts.stopped) counts.afterStop++;
-  return { buf: new Uint8Array(SLICE), used: 0, back: null };
+  return { buf: new Uint8Array(size), used: 0, back: null };
 }
 /** `s`'s buffer handed over by `give`, which resolves to the buffer to reuse; free (its valid length 0) only then.
  * The promise is marked handled here and awaited by whoever reuses the slot or settles. */
@@ -325,7 +328,7 @@ export class ZipWriter {
   /** (tests) slices handed to the sink that had to wait for the other slice's return */
   waits = 0;
   /** the archive's slice being written, and the other */
-  private a: Slot = newSlot();
+  private a: Slot = newSlot(ZIP_OUT);
   private b: Slot | null = null;
   constructor(private sink: Sink, private cd: Spool, private hooks: Hooks) {}
 
@@ -333,7 +336,7 @@ export class ZipWriter {
   /** `b[0, len)` appended to the archive: undefined, or a promise when a slice is due to go to the sink. */
   private emit(b: Uint8Array, len = b.length): Promise<void> | undefined {
     const s = this.a;
-    if (len < SLICE - s.used) {
+    if (len < ZIP_OUT - s.used) {
       copyIn(s.buf, s.used, b, 0, len);
       s.used += len;
       this.offset += len;
@@ -344,11 +347,11 @@ export class ZipWriter {
   private async emitSlow(b: Uint8Array, len: number) {
     let at = 0;
     while (at < len) {
-      const s = this.a, n = Math.min(len - at, SLICE - s.used);
+      const s = this.a, n = Math.min(len - at, ZIP_OUT - s.used);
       copyIn(s.buf, s.used, b, at, n);
       s.used += n;
       at += n;
-      if (s.used === SLICE) { const p = this.drain(); if (p) await p; }
+      if (s.used === ZIP_OUT) { const p = this.drain(); if (p) await p; }
     }
     this.offset += len;
   }
@@ -358,7 +361,7 @@ export class ZipWriter {
     if (!s.used) return;
     this.check();
     handOver(s, this.sink.write(s.buf, s.used));
-    this.a = this.b ?? newSlot();
+    this.a = this.b ?? newSlot(ZIP_OUT);
     this.b = s;
     if (this.a.back) this.waits++;
     return this.a.back ?? undefined;
