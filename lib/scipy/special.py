@@ -50,6 +50,10 @@ __all__ = [
 ]
 
 _NAN = float("nan")
+# (the most terms a variable-work path sums for one value: the Hurwitz zeta's
+# head sum for a negative q and the Legendre polynomial's recurrence in its
+# degree; more is refused before the loop, never cut short)
+_WORK_MAX = 10 ** 6
 _INF = float("inf")
 _SQRT1_2 = 0.7071067811865476
 _SQRT2 = 1.4142135623730951
@@ -264,6 +268,8 @@ def _hurwitz(x, q):
         if x != _math.floor(x):
             return _NAN
         n = int(_math.floor(-q)) + 1
+        if n > _WORK_MAX:
+            raise _S.NotCovered("a q at or below -%d (its head sum's work)" % _WORK_MAX)
         head = 0.0
         for k in range(n):
             head += (q + k) ** -x
@@ -293,17 +299,37 @@ def _gamma_sign(x):
     return -1.0 if _math.floor(x) % 2 else 1.0
 
 
+def _beta_negint(a, b, log):
+    # (Cephes's beta_negint and lbeta_negint, a a nonpositive integer: the
+    # poles cancel for an integer b with 1 - a - b > 0, where
+    # B(a, b) = (-1)^b B(1 - a - b, b); otherwise a pole)
+    if b == _math.floor(b) and 1 - a - b > 0:
+        if log:
+            return _betaln(1 - a - b, b)
+        return (1.0 if int(b) % 2 == 0 else -1.0) * _beta(1 - a - b, b)
+    return _INF
+
+
 def _beta(a, b):
-    if _is_nonpos_int(a) or _is_nonpos_int(b):
-        return _INF
+    if _is_nonpos_int(a):
+        return _beta_negint(a, b, False)
+    if _is_nonpos_int(b):
+        return _beta_negint(b, a, False)
     if _is_nonpos_int(a + b):
         return _gamma_sign(a) * _gamma_sign(b) * 0.0
     return float(_S.beta(a, b))
 
 
+def _betaln(a, b):
+    if _is_nonpos_int(a):
+        return _beta_negint(a, b, True)
+    if _is_nonpos_int(b):
+        return _beta_negint(b, a, True)
+    return float(_S.betaln(a, b))
+
+
 beta = _ufunc("beta", 2, _guard("beta", _beta, pole=lambda a, b: _INF))
-betaln = _ufunc("betaln", 2, _guard("betaln", lambda a, b: _INF if (_is_nonpos_int(a) or _is_nonpos_int(b)) else float(_S.betaln(a, b)),
-                                    pole=lambda a, b: _INF))
+betaln = _ufunc("betaln", 2, _guard("betaln", _betaln, pole=lambda a, b: _INF))
 
 
 def _gammainc(a, x):
@@ -564,6 +590,8 @@ def _legendre(n, x):
     n = int(n)
     if n < 0:
         n = -(n + 1)  # (P_{-n-1} = P_n)
+    if n > _WORK_MAX:
+        raise _S.NotCovered("a degree above %d (its recurrence's work)" % _WORK_MAX)
     if n == 0:
         return 1.0
     if n == 1:
@@ -838,17 +866,35 @@ def _entr(x):
     return -_INF
 
 
+_DBL_MIN = 2.2250738585072014e-308
+
+
+def _log_ratio(r):
+    # (C's log of x / y, which may have underflowed to 0 or overflowed)
+    return -_INF if r == 0 else (_INF if r == _INF else _math.log(r))
+
+
 def _rel_entr(x, y):
+    # (SciPy 1.18's rel_entr: log1p when x and y are close, the logarithm
+    # of the ratio where it neither underflows, overflows nor is subnormal,
+    # else the difference of the logarithms)
     if x > 0 and y > 0:
-        return x * _math.log(x / y)
+        ratio = x / y
+        if 0.5 < ratio < 2:
+            return x * _math.log1p((x - y) / y)
+        if _DBL_MIN < ratio < _INF:
+            return x * _math.log(ratio)
+        return x * (_math.log(x) - _math.log(y))
     if x == 0 and y >= 0:
         return 0.0
     return _INF
 
 
 def _kl_div(x, y):
+    # (SciPy's kl_div: x log(x / y) - x + y as written, the ratio's
+    # underflow giving -inf and its overflow inf)
     if x > 0 and y > 0:
-        return x * _math.log(x / y) - x + y
+        return x * _log_ratio(x / y) - x + y
     if x == 0 and y >= 0:
         return y
     return _INF
@@ -859,9 +905,63 @@ rel_entr = _ufunc("rel_entr", 2, _guard("rel_entr", _rel_entr))
 kl_div = _ufunc("kl_div", 2, _guard("kl_div", _kl_div))
 exp10 = _ufunc("exp10", 1, _guard("exp10", lambda x: 10.0 ** x, pole=lambda x: _INF))
 exp2 = _ufunc("exp2", 1, _guard("exp2", lambda x: 2.0 ** x, pole=lambda x: _INF))
-expm1 = _ufunc("expm1", 1, _guard("expm1", _math.expm1, pole=lambda x: _INF), _guard("expm1", lambda z: _cmath.exp(z) - 1))
+def _cosm1(x):
+    # (cos(x) - 1 without its cancellation near 0)
+    s = _math.sin(0.5 * x)
+    return -2.0 * s * s
+
+
+def _cexpm1(z):
+    # (SciPy's cexpm1, _cunity.pxd: exp(z) - 1 by its real and imaginary
+    # parts, each without cancellation near 0)
+    zr, zi = z.real, z.imag
+    if not (_math.isfinite(zr) and _math.isfinite(zi)):
+        try:
+            return _cmath.exp(z) - 1.0
+        except ValueError:
+            # (C99's cexp where Python's raises: an infinite imaginary part)
+            if zr == _INF:
+                return complex(_INF, _NAN)
+            if zr == -_INF:
+                return complex(-1.0, 0.0)
+            return complex(_NAN, _NAN)
+    if zr <= -40:
+        x = -1.0
+    else:
+        ezr = _math.expm1(zr)
+        x = ezr * _math.cos(zi) + _cosm1(zi)
+    if zr > -1.0:
+        y = (ezr + 1.0) * _math.sin(zi)
+    else:
+        y = _math.exp(zr) * _math.sin(zi)
+    return complex(x, y)
+
+
+def _clog1p(z):
+    # (SciPy's clog1p, _cunity.pxd: log(1 + z) without the cancellation of
+    # 1 + z near 0; where SciPy uses double-double arithmetic for
+    # 2 Re z + |z|^2, it is computed exactly here and rounded once)
+    zr, zi = z.real, z.imag
+    if not (_math.isfinite(zr) and _math.isfinite(zi)):
+        return _cmath.log(z + 1.0)
+    if zi == 0.0 and zr >= -1.0:
+        return complex(-_INF if zr == -1.0 else _math.log1p(zr), 0.0)
+    az = abs(z)
+    if az < 0.707:
+        azi = abs(zi)
+        if zr < 0 and abs(-zr - azi * azi / 2) / (-zr) < 0.5:
+            from fractions import Fraction as _F
+            fr, fi = _F(zr), _F(zi)
+            x = 0.5 * _math.log1p(float(2 * fr + fr * fr + fi * fi))
+        else:
+            x = 0.5 * _math.log1p(az * (az + 2 * zr / az))
+        return complex(x, _math.atan2(zi, zr + 1.0))
+    return _cmath.log(z + 1.0)
+
+
+expm1 = _ufunc("expm1", 1, _guard("expm1", _math.expm1, pole=lambda x: _INF), _guard("expm1", _cexpm1))
 log1p = _ufunc("log1p", 1, _guard("log1p", lambda x: -_INF if x == -1 else (_NAN if x < -1 else _math.log1p(x))),
-               _guard("log1p", lambda z: _cmath.log(1 + z)))
+               _guard("log1p", _clog1p))
 cbrt = _ufunc("cbrt", 1, _guard("cbrt", _math.cbrt))
 
 
@@ -881,9 +981,14 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
         b = np.asarray(b)
     if a.dtype.kind == "c" or (b is not None and b.dtype.kind == "c"):
         raise NotImplementedError("scipy.special.logsumexp: complex arguments are not supported in Sagebrush")
-    a = a.astype(float)
+    # (SciPy's xp_promote(a, b, force_floating=True): their common type, a
+    # floating one kept as it is, an integer or bool one as float64)
+    dt = np.result_type(a, b) if b is not None else a.dtype
+    if dt.kind not in "fc":
+        dt = np.dtype(np.float64)
+    a = a.astype(dt)
     if b is not None:
-        a, b = np.broadcast_arrays(a, b.astype(float))
+        a, b = np.broadcast_arrays(a, b.astype(dt))
         a, b = np.array(a), np.array(b)
     if a.ndim == 0:
         a = a.reshape(1)
@@ -938,16 +1043,18 @@ def _logsumexp(a, b, axis, return_sign):
 
 
 def softmax(x, axis=None):
-    """exp(x) / sum(exp(x)) along axis, as SciPy's."""
-    x = np.asarray(x, dtype=float)
+    """exp(x) / sum(exp(x)) along axis, as SciPy's (a floating x keeps its
+    dtype)."""
+    x = np.asarray(x)
     x_max = np.amax(x, axis=axis, keepdims=True)
     exp_x_shifted = np.exp(x - x_max)
     return exp_x_shifted / np.sum(exp_x_shifted, axis=axis, keepdims=True)
 
 
 def log_softmax(x, axis=None):
-    """log(softmax(x)) along axis, computed stably, as SciPy's."""
-    x = np.asarray(x, dtype=float)
+    """log(softmax(x)) along axis, computed stably, as SciPy's (a floating x
+    keeps its dtype)."""
+    x = np.asarray(x)
     x_max = np.amax(x, axis=axis, keepdims=True)
     if x_max.ndim > 0:
         x_max = np.where(np.isfinite(x_max), x_max, 0)
