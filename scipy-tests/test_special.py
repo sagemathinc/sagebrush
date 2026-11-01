@@ -32,6 +32,13 @@ def kind(x):
     return "f"
 
 
+def log10_abs(z):
+    # (log10 |z| without forming |z|, which overflows for parts near the
+    # largest double)
+    m, n = max(abs(z.real), abs(z.imag)), min(abs(z.real), abs(z.imag))
+    return math.log10(m) + 0.5 * math.log10(1 + (n / m) ** 2)
+
+
 def show(label, v):
     name = label.split("(")[0].split(" ")[0]
     rtol = RTOL.get(name, 1e-13)
@@ -59,7 +66,7 @@ def show(label, v):
             if math.isfinite(z.real) and math.isfinite(z.imag) and z != 0:
                 # (relative to |z|, through a power-of-ten bucket that both
                 # sides compute alike: run.py compares the tolerances too)
-                check(label, [z.real, z.imag], rtol=0.0, atol=4 * rtol * 10.0 ** round(math.log10(abs(z))))
+                check(label, [z.real, z.imag], rtol=0.0, atol=4 * rtol * 10.0 ** round(log10_abs(z)))
     else:
         print(head, " ".join(kind(float(x)) for x in flat))
         fin = [float(x) for x in flat if math.isfinite(x) and x != 0]
