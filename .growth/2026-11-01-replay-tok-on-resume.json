@@ -1,0 +1,5 @@
+{
+ "v": 1,
+ "reason": "the replay bundle's follow-up (astra on #445): a resumed session's file events keep their version's token (replay-page.js replay passes e.file.tok in its fsPut), so a later bundle carries what the resumed session read; web/ is embedded in the CLI bundle. Figures: CI's build order (pnpm run build, build-cli, bun 1.4.4 web/build.ts, build-cli) and scripts/size-measure.mjs --record (node 24.21.0): master cacbb0f4 25170792 B, this head 25170898 B, +106 B; the allowance a little above, within growth + 1024",
+ "bytes": { "cli/pyjs.cjs": 200 }
+}
