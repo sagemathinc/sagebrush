@@ -866,12 +866,14 @@ export class LocalGateway {
 function frameText(obj: unknown) {
   return JSON.stringify(obj);
 }
-/** An outcome's summary for its record: its JSON, at most GATEWAY_LIMITS.summary bytes (detail cut to fit). */
+/** An outcome's summary for its record: its JSON, at most GATEWAY_LIMITS.summary bytes as the record holds it (a
+ * JSON string, its escapes counted: a detail of quotes would otherwise double past the record's 512), detail cut to
+ * fit. */
 function summary(o: Outcome): string {
   let s = JSON.stringify(o);
-  if (Buffer.byteLength(s, "utf8") <= GATEWAY_LIMITS.summary) return s;
+  if (enc(s) <= GATEWAY_LIMITS.summary) return s;
   const short: any = { status: o.status };
   for (const k of ["reason", "ename", "ms", "incarnation"]) if (o[k] !== undefined) short[k] = typeof o[k] === "string" ? String(o[k]).slice(0, 64) : o[k];
   s = JSON.stringify(short);
-  return Buffer.byteLength(s, "utf8") <= GATEWAY_LIMITS.summary ? s : JSON.stringify({ status: String(o.status).slice(0, 32) });
+  return enc(s) <= GATEWAY_LIMITS.summary ? s : JSON.stringify({ status: String(o.status).slice(0, 32) });
 }

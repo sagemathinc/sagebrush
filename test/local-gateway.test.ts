@@ -850,3 +850,232 @@ test("L25 completion matches whose answer is RESPONSE_MAX + 1 B: 502 answer-too-
     census(t.s);
   } finally { await t.s.close(); }
 });
+
+// ================= 4.6 The binding
+
+/** A run admitted and ended on the scripted Worker (the page's nonce refreshed from each answer). */
+async function runToEnd(t: { s: PairServer; port: Scripted; page: ReturnType<typeof newPage> }, b: string, request: string, code = "x = 1") {
+  const a = await t.page.request("g.run", { b }, { request, epoch: t.s.gateway.binding!.epoch, payload: { code } }).answer();
+  t.page.nonce = a.headers["dpop-nonce"];
+  assert.equal(a.status, 202, `${request}: ${a.body}`);
+  const posted = t.port.posted[t.port.posted.length - 1];
+  t.port.last().onMessage({ id: posted.id, done: true, ms: 1 });
+  await until(() => t.s.gateway.binding!.runs.get(request)?.outcome != null, `${request} ended`);
+}
+test("L26 a second g.bind while bound: 409 in-use", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const a = await t.page.request("g.bind", {}, {}).answer();
+    assert.equal(a.status, 409);
+    assert.equal(bodyOf(a).error, "in-use");
+    assert.equal(t.s.gateway.binding!.id, b, "the binding unchanged");
+  } finally { await t.s.close(); }
+});
+test("L27a the same request and payload: the existing ack; L27b a different payload: 409 conflict", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1", "x = 1");
+    const ex = t.s.gateway.stats.executions;
+    const same = await t.page.request("g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x = 1" } }).answer();
+    assert.equal(same.status, 202);
+    assert.deepEqual(bodyOf(same), { request: "req-1", state: "running" }, "L27a the existing ack");
+    const other = await t.page.request("g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x = 2" } }).answer();
+    assert.equal(other.status, 409);
+    assert.equal(bodyOf(other).error, "conflict", "L27b");
+    assert.equal(t.s.gateway.stats.executions, ex, "neither executed");
+    r.finish();
+  } finally { await t.s.close(); }
+});
+test("L27c the record: the 64-hex digest, no payload; at the widest request id and the largest summary, at most 512 encoded bytes", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const MARK = "PAYLOAD-MARKER-7f3a";
+    const request = "r".repeat(64);
+    await admitRun(t, b, request, `x = "${MARK}"`);
+    // (the largest summary: a Worker exit whose detail is all quotes, each escaped twice in the record)
+    t.port.last().onExit('"'.repeat(300));
+    const run = t.s.gateway.binding!.runs.get(request)!;
+    await until(() => run.outcome !== null, "ended");
+    assert.match(run.digest, /^[0-9a-f]{64}$/);
+    const held = JSON.stringify({ ...run, events: [], listeners: undefined });
+    assert.ok(!held.includes(MARK), "no payload or payload substring in the record");
+    assert.ok(run.recordBytes <= GATEWAY_LIMITS.recordBytes, `${run.recordBytes} <= 512`);
+    // (and every quote-heavy detail length near the summary's cap, the record still within 512)
+    for (let n = 0; n <= 140; n++) {
+      const t2 = await setup();
+      try {
+        const b2 = await bind(t2.page);
+        await admitRun(t2, b2, request);
+        t2.port.last().onExit('"'.repeat(n));
+        const r2 = t2.s.gateway.binding!.runs.get(request)!;
+        await until(() => r2.outcome !== null, "ended");
+        assert.ok(r2.recordBytes <= GATEWAY_LIMITS.recordBytes, `detail of ${n} quotes: ${r2.recordBytes}`);
+      } finally { await t2.s.close(); }
+    }
+  } finally { await t.s.close(); }
+});
+test("L28 a run while one runs: 409 busy", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    const ex = t.s.gateway.stats.executions;
+    const a = await t.page.request("g.run", { b }, { request: "req-2", epoch: 1, payload: { code: "y = 1" } }).answer();
+    assert.equal(a.status, 409);
+    assert.equal(bodyOf(a).error, "busy");
+    assert.equal(t.s.gateway.stats.executions, ex);
+    assert.equal(t.s.gateway.binding!.runs.has("req-2"), false, "no record");
+    r.finish();
+  } finally { await t.s.close(); }
+});
+test("L29a the 10,000th record admitted (L29a+), the 10,001st 429 runs; L29b restarts at the cap: still 429, the count unchanged; L29c recordBytes <= 5,120,000", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    for (let i = 1; i <= GATEWAY_LIMITS.runs; i++) {
+      if (i % 4000 === 0) t.clk.advance(GATEWAY_LIMITS.jtiMs + 1000); // (the replay store's window: its jtis expire)
+      await runToEnd(t, b, `req-${i}`);
+    }
+    const g = t.s.gateway;
+    assert.equal(g.binding!.runs.size, GATEWAY_LIMITS.runs, "L29a+ the 10,000th admitted");
+    const over = await t.page.request("g.run", { b }, { request: "req-over", epoch: 1, payload: { code: "x" } }).answer();
+    t.page.nonce = over.headers["dpop-nonce"];
+    assert.equal(over.status, 429);
+    assert.deepEqual(bodyOf(over), { error: "limit", reason: "runs" });
+    // L29b: a restart (every record a tombstone) at the cap
+    const rs = await t.page.request("g.restart", { b }, { epoch: 1 }).answer();
+    t.page.nonce = rs.headers["dpop-nonce"];
+    assert.equal(rs.status, 200);
+    const again = await t.page.request("g.run", { b }, { request: "req-over2", epoch: 1, payload: { code: "x" } }).answer();
+    assert.equal(again.status, 429, "L29b still 429");
+    assert.equal(g.binding!.runs.size, GATEWAY_LIMITS.runs, "L29b the count unchanged");
+    // L29c
+    assert.ok([...g.binding!.runs.values()].every((r) => r.tomb), "all tombstones");
+    assert.ok(g.stats.recordBytes <= GATEWAY_LIMITS.runs * GATEWAY_LIMITS.recordBytes, `L29c ${g.stats.recordBytes}`);
+    assert.equal(g.stats.recordBytes, [...g.binding!.runs.values()].reduce((n, r) => n + r.recordBytes, 0), "the aggregate is the records' sum");
+  } finally { await t.s.close(); }
+});
+test("L30 after a restart, an old request: its tombstone's terminal, zero executions", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    await runToEnd(t, b, "req-1");
+    const rs = await t.page.request("g.restart", { b }, { epoch: 1 }).answer();
+    assert.equal(rs.status, 200);
+    assert.equal(t.s.gateway.binding!.runs.get("req-1")!.tomb, true);
+    const ex = t.s.gateway.stats.executions;
+    const a = await t.page.request("g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x = 1" } }).answer();
+    assert.equal(a.status, 202);
+    assert.deepEqual(bodyOf(a), { request: "req-1", state: "done" });
+    const rec = await t.page.request("g.record", { b, r: "req-1" }).answer();
+    assert.equal(bodyOf(rec).state, "done", "the record's terminal");
+    assert.equal(t.s.gateway.stats.executions, ex, "zero executions");
+  } finally { await t.s.close(); }
+});
+test("L31 after a new binding (unpair, then pair and bind): the old binding's ids 410 binding-gone; new runs admitted", async () => {
+  const t = await setup();
+  try {
+    const b1 = await bind(t.page);
+    await runToEnd(t, b1, "req-1");
+    t.page.c.feed(maskedText({ unpair: true }));
+    assert.equal(t.s.gateway.binding, null, "unpaired: no binding");
+    const p2 = newPage(t.s, t.clk);
+    const b2 = await bind(p2);
+    assert.notEqual(b2, b1);
+    const old = await p2.request("g.record", { b: b1, r: "req-1" }).answer();
+    assert.equal(old.status, 410);
+    assert.equal(bodyOf(old).error, "binding-gone");
+    const oldRun = await p2.request("g.run", { b: b1 }, { request: "req-9", epoch: 1, payload: { code: "x" } }).answer();
+    assert.equal(oldRun.status, 410);
+    const t2 = { s: t.s, port: t.port, page: p2 };
+    await runToEnd(t2, b2, "req-new");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+
+// ---- event retention [G1]
+/** An event's encoded size, as the gateway counts it (an oracle: the same object, JSON-encoded). */
+const evBytes = (seq: number, ev: any) => Buffer.byteLength(JSON.stringify({ seq, ...ev }), "utf8");
+/** A stream event's text that makes it exactly `n` encoded bytes at `seq` (ASCII, nothing escaped). */
+function textFor(seq: number, n: number) {
+  const base = evBytes(seq, { type: "stream", name: "stdout", text: "" });
+  assert.ok(n >= base, `${n} >= ${base}`);
+  return "a".repeat(n - base);
+}
+test("L32a-count a run's 10,000th event retained (L32a-count+), the 10,001st drops the oldest; L32c the cursor at the first retained event passes, one below 410", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    const run = t.s.gateway.binding!.runs.get("req-1")!;
+    for (let i = run.events.length; i < GATEWAY_LIMITS.eventsPerRun; i++) t.port.last().onMessage({ id: r.workerId, stream: "stdout", text: "x" });
+    assert.equal(run.events.length, GATEWAY_LIMITS.eventsPerRun);
+    assert.equal(run.firstSeq, 1, "L32a-count+ all retained");
+    t.port.last().onMessage({ id: r.workerId, stream: "stdout", text: "x" });
+    assert.equal(run.events.length, GATEWAY_LIMITS.eventsPerRun);
+    assert.equal(run.firstSeq, 2, "the oldest dropped");
+    const at = await t.page.request("g.events", { b, r: "req-1", after: run.firstSeq - 1 }).answer();
+    assert.equal(at.status, 200, "L32c at the first retained event");
+    const below = await t.page.request("g.events", { b, r: "req-1", after: run.firstSeq - 2 }).answer();
+    assert.equal(below.status, 410);
+    assert.equal(bodyOf(below).error, "expired-cursor");
+    r.finish();
+  } finally { await t.s.close(); }
+});
+test("L32a-bytes a run's events at exactly 4 MiB retained (L32a-bytes+); one byte more drops the oldest", async () => {
+  for (const extra of [0, 1]) {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      const r = await admitRun(t, b, "req-1");
+      const run = t.s.gateway.binding!.runs.get("req-1")!;
+      const seq = run.nextSeq;
+      t.port.last().onMessage({ id: r.workerId, stream: "stdout", text: textFor(seq, GATEWAY_LIMITS.runEventBytes - run.eventBytes + extra) });
+      if (extra === 0) {
+        assert.equal(run.eventBytes, GATEWAY_LIMITS.runEventBytes, "exactly 4 MiB");
+        assert.equal(run.firstSeq, 1, "L32a-bytes+ all retained");
+      } else {
+        assert.equal(run.firstSeq, 2, "one byte more: the oldest dropped");
+        assert.ok(run.eventBytes <= GATEWAY_LIMITS.runEventBytes);
+      }
+      r.finish();
+    } finally { await t.s.close(); }
+  }
+});
+test("L32b per binding: at exactly 64 MiB all retained (L32b+); one byte more: the oldest ended run's events go first, its record stays", async () => {
+  for (const extra of [0, 1]) {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      const g = t.s.gateway;
+      // 16 ended runs, each 1 KiB under 4 MiB (its terminal included), then a running one making up the rest
+      const per = GATEWAY_LIMITS.runEventBytes - 1024;
+      for (let i = 1; i <= 16; i++) {
+        const r = await admitRun(t, b, `req-${i}`, `x = ${i}`);
+        const run = g.binding!.runs.get(`req-${i}`)!;
+        const term = evBytes(run.nextSeq + 1, { type: "terminal", outcome: { status: "ok", ms: 1 } });
+        t.port.last().onMessage({ id: r.workerId, stream: "stdout", text: textFor(run.nextSeq, per - run.eventBytes - term) });
+        r.finish();
+        await until(() => run.outcome !== null, `req-${i} ended`);
+        assert.equal(run.eventBytes, per, `req-${i}: ${per} bytes, its terminal included`);
+      }
+      const r17 = await admitRun(t, b, "req-17", "x = 17");
+      const run17 = g.binding!.runs.get("req-17")!;
+      t.port.last().onMessage({ id: r17.workerId, stream: "stdout", text: textFor(run17.nextSeq, GATEWAY_LIMITS.bindingEventBytes - g.binding!.eventBytes + extra) });
+      const first = g.binding!.runs.get("req-1")!;
+      if (extra === 0) {
+        assert.equal(g.binding!.eventBytes, GATEWAY_LIMITS.bindingEventBytes, "exactly 64 MiB");
+        assert.ok([...g.binding!.runs.values()].every((r) => r.firstSeq === 1), "L32b+ all retained");
+      } else {
+        assert.ok(g.binding!.eventBytes <= GATEWAY_LIMITS.bindingEventBytes);
+        assert.ok(first.firstSeq > 1, "the oldest ended run's events went first");
+        assert.ok(g.binding!.runs.has("req-1") && first.outcome !== null, "its record stays");
+        for (let i = 2; i <= 17; i++) assert.equal(g.binding!.runs.get(`req-${i}`)!.firstSeq, 1, `req-${i} untouched`);
+      }
+      r17.finish();
+    } finally { await t.s.close(); }
+  }
+});
