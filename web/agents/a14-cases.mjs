@@ -29,8 +29,10 @@ export const COPY = {
   hint: "Not connected: Connect Claude to send",
 };
 
-// ---- the stand-in for sagebrush-agent: one page at a time (a second upgrade gets 409 before the upgrade, as its
-// verifyClient does), the session secret from a code hello, a session hello checked against it, chats by conversation
+// ---- the stand-in for sagebrush-agent (0.3.0, lib/server.mjs at cc11a8a): one paired page at a time (a second upgrade
+// gets 409 before the upgrade while a page is paired, :136); the session secret from a code hello, a session hello
+// checked against it; a refused hello answered, then the socket closed (:192-193); chats by conversation. Unlike it,
+// the code here stays valid (it's single use there, :188): the cases that pair again use the same one.
 export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {}) {
   const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null, delay: 0 };
   const start = (port) => {
@@ -39,7 +41,8 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
       hostname: "127.0.0.1",
       fetch(req, srv) {
         if (new URL(req.url).pathname !== "/sagebrush") return new Response("not here", { status: 404 });
-        if (A.live.size > 0) { A.rejected++; return new Response("another page is connected", { status: 409 }); }
+        // (as sagebrush-agent 0.3.0's verifyClient, lib/server.mjs:136 at cc11a8a: 409 while a page is PAIRED)
+        if (A.page) { A.rejected++; return new Response("already paired", { status: 409 }); }
         return srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
       },
       websocket: {
@@ -472,11 +475,13 @@ export async function runA14({ site, ok, want = () => true }) {
     // (another page takes sagebrush-agent: an open socket that stays)
     const other = new WebSocket(`ws://127.0.0.1:${A.port}/sagebrush`);
     await new Promise((r, j) => { other.onopen = r; other.onerror = j; });
+    other.send(JSON.stringify({ jsonrpc: "2.0", id: "p1", method: "hello", params: { protocol: 1, code: "123456", page: { origin: "http://127.0.0.1", path: "/other/" } } }));
+    for (const t = Date.now(); !A.page && Date.now() - t < 5000; ) await sleep(20);
     const r0 = A.rejected;
     await lostThenReconnect(P);
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const bar = await P.bar();
-    ok(A.rejected === r0 + 1 && other.readyState === 1 && A.live.size === 1, "A14-7.409: the stand-in counts exactly one rejected upgrade (409), and the other page's socket is still open", { rejected: A.rejected - r0, other: other.readyState });
+    ok(A.rejected === r0 + 1 && other.readyState === 1 && A.live.size === 1 && A.page !== null, "A14-7.409: the stand-in counts exactly one rejected upgrade (409), and the other page, paired, still has its socket open", { rejected: A.rejected - r0, other: other.readyState });
     ok(bar.status === COPY.merged && bar.alert === "", "A14-7.409: the merged copy, by full-string equality", bar);
     other.close();
   });
