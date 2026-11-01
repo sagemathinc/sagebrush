@@ -1,0 +1,18 @@
+True
+False LazyImport
+False True
+True LazyImport False
+True Thing(2)
+6 True mine True
+Twice x.
+Thing(7)
+Thing(4) True False TypeError
+AttributeError
+7
+True True
+True
+(True, True)
+True
+AttributeError
+41
+True
