@@ -709,11 +709,12 @@ try {
       ok(new Set(tops).size === 1, `A4/A8 C-b@${w}: typing at the end, the source stays where it is while the preview catches up`, { tops: [...new Set(tops)] });
       ok(inside.every(Boolean), `A4/A8 C-c@${w}: typing at the end, the caret stays inside the source and in view`, { outside: inside.filter((x) => !x).length });
       const at = await ev(`(() => { const r = ${ED}.querySelector('.tex-src').getBoundingClientRect(); return { x: Math.round(r.left + 40), y: Math.round(Math.min(Math.max(r.top, 0) + 60, innerHeight - 40)) }; })()`);
-      // (C-d: from the source's bottom, as typing at the end left it; one notch at a time, each settled (a frame + 50 ms),
+      // (C-d: from near the source's bottom, as typing at the end left it (the caret-follow stops up to about 70 px short
+      //  of it at a narrow pane: c3); one notch at a time, each settled (a frame + 50 ms),
       //  until scrollTop is 0, or 3 notches in a row change nothing, or 200 notches: the notches logged)
       const scr = `(() => { const ta = ${ED}.querySelector('.tex-src'); return { st: ta.scrollTop, sh: ta.scrollHeight, ch: ta.clientHeight, hlst: ${ED}.querySelector('.tex-hl').scrollTop }; })()`;
       const s0 = await ev(scr);
-      ok(s0.st >= s0.sh - s0.ch - 2, `precondition:C-d@${w}: before the wheel, the source is at its bottom (so C-d starts away from the top)`, s0);
+      ok(s0.st >= s0.sh - s0.ch - s0.ch / 2 && s0.st > 1800, `precondition:C-d@${w}: before the wheel, the source is within half a screen of its bottom and over 1800 px down (so C-d starts away from the top)`, s0);
       let notches = 0, still = 0, last = s0.st, stop = "bound reached";
       while (notches < 200) {
         await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
