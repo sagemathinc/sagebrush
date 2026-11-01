@@ -637,7 +637,7 @@ try {
     // (Undo kept while it holds the focus, past its 10 s)
     await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.focus(); return 1; })()`);
     await sleep(11_000);
-    check(/moved to Trash/.test(await ev(toastTxt)), "B1-keep: the toast stays past 10 s while its Undo holds the focus");
+    check(/"B1 open\.ipynb" moved to Trash/.test(await ev(toastTxt)), "B1-keep: the toast stays past 10 s while its Undo holds the focus");
     await press("Undo");
     const back = await until(`document.querySelector("#nbname").value === "B1 open"`);
     const bk = await ev(`(async () => ({ code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }))()`);
@@ -654,8 +654,9 @@ try {
     check(await until(`document.querySelector("#nbname").value === "inner"`), "B1-folderundo: …and Undo opens the notebook in it again");
     // (astra R1, T2) the path replaced while the hook waits: what is there now is NOT moved, and the conflict is said
     for (const [id, sel, open, moveTo, fresh] of [["T2", "/T2 a.ipynb", "/T2 a.ipynb", "/T2 moved.ipynb", "/T2 a.ipynb"], ["T2.folder", "/T2 dir", "/T2 dir/x.ipynb", "/T2 dir moved", "/T2 dir/new.txt"]]) {
-      await openNb(open, "t2", "t2");
-      await until(`document.querySelector("#nbname").value === "t2"`);
+      const nm = open.split("/").pop().replace(/\.ipynb$/, "");
+      await openNb(open, nm, "t2");
+      await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm)}`);
       await holdAt("switched");
       await trashRow(sel);
       const r0 = await reached();
@@ -684,9 +685,9 @@ try {
     // (astra R2, T4) a page switch in between. T4: while it switched, a notebook INSIDE the folder opened: nothing
     // moves. T4.same: before it switched, another notebook opened: nothing moves, and that one stays open
     {
-      await ev(`${W}.create("/T4 dir/b.ipynb", { content: { name: "t4b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
-      await openNb("/T4 dir/a.ipynb", "t4a", "a");
-      await until(`document.querySelector("#nbname").value === "t4a"`);
+      await ev(`${W}.create("/T4 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T4 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
       await holdAt("switched");
       await trashRow("/T4 dir");
       const r0 = await reached();
@@ -694,11 +695,11 @@ try {
       await release();
       const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
       const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
-      check(r0 && said && t.shown === "t4b" && t.here && !t.inTrash, "T4: a notebook inside the folder opened while it switched: nothing moves, and that notebook stays open: " + JSON.stringify(t));
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T4: a notebook inside the folder opened while it switched: nothing moves, and that notebook stays open: " + JSON.stringify(t));
       await dismissAny();
-      await ev(`${W}.create("/T4 other.ipynb", { content: { name: "t4o", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
-      await openNb("/T4s.ipynb", "t4s", "s");
-      await until(`document.querySelector("#nbname").value === "t4s"`);
+      await ev(`${W}.create("/T4 other.ipynb", { content: { name: "T4 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T4s.ipynb", "T4s", "s");
+      await until(`document.querySelector("#nbname").value === "T4s"`);
       await holdAt("saved");
       await trashRow("/T4s.ipynb");
       const r1 = await reached();
@@ -706,7 +707,7 @@ try {
       await release();
       const said1 = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
       const u = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4s.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4s.ipynb").then((e) => !!e) }))()`);
-      check(r1 && said1 && u.shown === "t4o" && u.here && !u.inTrash, "T4.same: another notebook opened before it switched: nothing moves, and the one opened stays open: " + JSON.stringify(u));
+      check(r1 && said1 && u.shown === "T4 other" && u.here && !u.inTrash, "T4.same: another notebook opened before it switched: nothing moves, and the one opened stays open: " + JSON.stringify(u));
       await dismissAny();
     }
   }
