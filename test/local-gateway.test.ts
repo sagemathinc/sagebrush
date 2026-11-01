@@ -1079,3 +1079,79 @@ test("L32b per binding: at exactly 64 MiB all retained (L32b+); one byte more: t
     } finally { await t.s.close(); }
   }
 });
+
+test("L34a complete with no binding: refused (404), nothing posted", async () => {
+  const t = await setup();
+  try {
+    const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+    const a = await t.page.request("g.complete", { b: "b1" }, { epoch: 1, code: "x" }).answer();
+    assert.equal(a.status, 404);
+    zeroEffects(t.s, t.port, before);
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L34b a second complete in flight: 409 busy", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const first = t.page.request("g.complete", { b }, { epoch: 1, code: "x" });
+    await until(() => t.port.posted.some((m) => m.complete === "x"), "the first posted");
+    const posted = t.port.posted.length;
+    const second = await t.page.request("g.complete", { b }, { epoch: 1, code: "y" }).answer();
+    assert.equal(second.status, 409);
+    assert.equal(bodyOf(second).error, "busy");
+    assert.equal(t.port.posted.length, posted, "the second not posted");
+    const m = t.port.posted.find((m) => m.complete === "x");
+    t.port.last().onMessage({ id: m.id, matches: ["xa"], prefix: "x" });
+    assert.equal((await first.answer()).status, 200);
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+
+// ---- waves [G8]
+const entry = (k: number, code: string, over: any = {}) => ({ cell: `c${k}`, auto: true, est: 0, code, parents: [], desc: [], defs: [], mode: "python", ...over });
+const wave = (entries: any[]) => ({ mode: "python", policy: { all: true, budget: null }, forget: [], entries });
+const waveCases: [string, () => any[]][] = [
+  ["L35a-size an entry's code over its size limit", () => [entry(0, "a = 1"), entry(1, "b".repeat(GATEWAY_LIMITS.cellCode + 1))]],
+  ["L35a-count 257 entries", () => Array.from({ length: 257 }, (_, k) => entry(k, `v${k} = ${k}`))],
+  ["L35a-ref an entry with a bad ref (a parent not before it)", () => [entry(0, "a = 1"), entry(1, "b = 2", { parents: [{ in: 1 }] })]],
+];
+for (const [name, entries] of waveCases) {
+  test(`${name}: 400 malformed, zero admissions and executions for the whole envelope`, async () => {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+      const ex = t.s.gateway.stats.executions;
+      const a = await t.page.request("g.run", { b }, { request: "w1", epoch: 1, kind: "wave", payload: wave(entries()) }).answer();
+      assert.equal(a.status, 400, a.body);
+      assert.equal(bodyOf(a).error, "malformed");
+      assert.equal(t.s.gateway.binding!.runs.size, 0, "zero admissions");
+      assert.equal(t.s.gateway.stats.executions, ex, "zero executions");
+      zeroEffects(t.s, t.port, before);
+      census(t.s);
+    } finally { await t.s.close(); }
+  });
+}
+test("L35b a valid wave: its entries run in order under src/wave-policy.ts", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const codes = ["a = 1", "b = a + 1", "c = b + 1"];
+    const a = await t.page.request("g.run", { b }, { request: "w1", epoch: 1, kind: "wave", payload: wave(codes.map((c, k) => entry(k, c))) }).answer();
+    assert.equal(a.status, 202, a.body);
+    const seen: string[] = [];
+    for (let k = 0; k < codes.length; k++) {
+      await until(() => t.port.posted.filter((m) => typeof m.code === "string" && m.code !== "").length === k + 1, `entry ${k} posted`);
+      const m = t.port.posted.filter((m) => typeof m.code === "string" && m.code !== "")[k];
+      seen.push(m.code);
+      assert.equal(t.port.posted.filter((x) => typeof x.code === "string" && x.code !== "").length, k + 1, "the next not before this one ends");
+      t.port.last().onMessage({ id: m.id, done: true, ms: 1 });
+    }
+    const run = t.s.gateway.binding!.runs.get("w1")!;
+    await until(() => run.outcome !== null, "the wave's terminal");
+    assert.deepEqual(seen, codes, "in order");
+    assert.deepEqual(run.outcome, { status: "done" });
+    census(t.s);
+  } finally { await t.s.close(); }
+});
