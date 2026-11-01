@@ -779,6 +779,11 @@ const PROTOCOL = { mark: "array protocol" };
 function hasArrayProtocol(x: any): boolean {
   return x !== null && typeof x === "object" && !(x instanceof NDArray) && Obj.lookupType(Obj.typeOf(x), "__array__") !== undefined;
 }
+// (an operand that makes a binary operation's result an array: an ndarray, a
+// list, or an object with the protocol)
+function isArrayLike(v: any): boolean {
+  return v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
+}
 function viaArrayProtocol(x: any): any {
   if (isSeq(x)) {
     const items = seqItems(x);
@@ -3390,8 +3395,7 @@ newBuiltinModule("_numpy", (m) => {
       }
     }
     const r = binary(op, x, y);
-    const arrayLike = (v: any) => v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
-    return arrayLike(x) || arrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
+    return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
