@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "sagebrush.limit(name), a public read of one engine limit, and the limit pandas.decoded_bytes (unlimited by default), the first prerequisite of pandas M1 (plan-pandas r7 section E (a)): lib/_limits.py's TABLE entry and lib/sagebrush/__init__.py's accessor, in the core and sage chunk groups, compiled (pre) and as source; the CLI carries both. Measured locally with CI's bun 1.4.4 tool: master fcfdd5df against this head; cli/pyjs.cjs +1244 marked 1286 (42 B for drift), the other rows exact.",
+  "bytes": {
+    "cli/lib.gen.js": 1228,
+    "cli/pyjs.cjs": 1286,
+    "engine/lib/core.pre": 176,
+    "engine/lib/core.src": 409,
+    "engine/lib/sage.pre": 2590,
+    "engine/lib/sage.src": 819
+  }
+}
