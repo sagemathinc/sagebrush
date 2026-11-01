@@ -370,7 +370,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.ev(`document.querySelector('#conn-act').click()`);
     await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.merged)}`);
     const bar2 = await Q.bar();
-    const rt = await A.call("workspace.list", { path: "/" });
+    const rt = await A.call("workspace.list", { folder: "/" });
     ok(A.rejected === r0 + 1 && bar2.status === COPY.merged && bar2.alert === "", "A14-3c: the copy's [Reconnect] is refused once with 409 (counted by the stand-in) and shows the merged copy", { rejected: A.rejected - r0, bar2 });
     ok(A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the first tab stays connected: a round trip on its socket after the failure", { live: A.live.size, rt: rt.result ? "answered" : rt });
   });
