@@ -570,9 +570,12 @@ try {
     // export is cancelled, never left waiting on a panel no one can see
     await ev(`(() => { window.__realPicker ??= window.showSaveFilePicker; window.__pickerNo = null; window.showSaveFilePicker = () => new Promise((_, no) => { window.__pickerNo = () => no(new DOMException("The user aborted a request.", "AbortError")); }); window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
     await startFlow();
-    check(await until(flowHas(`/^Save…$/`), 120000), "own f: an export is ready");
-    await panelButton(/^Save…$/);
-    check(await until(`!!window.__pickerNo`, 10000), "own f: the save picker is open");
+    // (every step bounded, a step that can't happen failing by name, never a throw: an export left owning the page
+    // (a control) leaves no Save… to click)
+    const readyF = await until(flowHas(`/^Save…$/`), 120000);
+    check(readyF, "own f: an export is ready");
+    if (readyF) await panelButton(/^Save…$/);
+    check(readyF && (await until(`!!window.__pickerNo`, 10000)), "own f: the save picker is open");
     await ev(`(() => { ${P}.sbClose(); window.__pickerNo?.(); return 1; })()`);
     check(await settledFree(), "own f: the panel closed while the save picker was open, then the picker closed: the export ends, no owner, no lock, no scratch file left");
     await ev(`(() => { window.showSaveFilePicker = window.__realPicker; return 1; })()`);
