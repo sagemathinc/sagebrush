@@ -158,3 +158,73 @@ t("mismatch, deeper", lambda: np.array([[A(), [1.0, 2.0]], [[1.0, 2.0], [3.0]]])
 for i, v in enumerate([[[3.0, 4.0, 5.0], [1.0, 2.0]], [[1, 2], 3], [1, [2, 3]], [[[1, 2], [3]], [[4, 5], [6, 7]]],
                        [[[1], [2]], [[3], [4, 5]]], [[1, 2], [[3, 4]]]]):
     t("inhomogeneous %d" % i, lambda v=v: np.array(v))
+
+
+# a method without copy= under np.array: NumPy 2's fallback (one retry without
+# copy, a DeprecationWarning, then a copy for copy=True and a refusal for
+# copy=False); the warnings each case raises are printed with it
+def tw(label, f):
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        try:
+            r = f()
+            out = repr(r).replace("\n", "\\n")
+        except Exception as e:
+            out = type(e).__name__ + ": " + str(e).replace("\n", "\\n")
+    print(label, out, [(x.category.__name__, str(x.message)) for x in w])
+
+
+class D:
+    """__array__ with dtype but no copy parameter"""
+
+    def __array__(self, dtype=None):
+        return np.arange(3, dtype=dtype)
+
+
+class Store:
+    """__array__ that returns the array it keeps, accepting copy="""
+
+    def __init__(self):
+        self.data = np.arange(3.0)
+
+    def __array__(self, dtype=None, copy=None):
+        return self.data
+
+
+class StoreLegacy:
+    """__array__ that returns the array it keeps, without copy="""
+
+    def __init__(self):
+        self.data = np.arange(3.0)
+
+    def __array__(self, dtype=None):
+        return self.data
+
+
+class OwnCopyError:
+    """__array__ whose own TypeError isn't the copy keyword's"""
+
+    def __array__(self, dtype=None, copy=None):
+        raise TypeError("my own error about copy")
+
+
+def isolation(cls, f):
+    s = cls()
+    a = f(s)
+    a[0] = 99.0
+    return s.data.tolist(), a is s.data
+
+
+tw("no-copy method, array", lambda: np.array(C()))
+tw("no-copy method, array copy False", lambda: np.array(C(), copy=False))
+tw("no-copy method, asarray", lambda: np.asarray(C()))
+tw("no-copy method in a list", lambda: np.array([C(), C()]))
+tw("dtype-only method, array", lambda: np.array(D()))
+tw("dtype-only method, array dtype", lambda: np.array(D(), dtype=np.float32))
+tw("dtype-only method, asarray dtype", lambda: np.asarray(D(), dtype=np.float32))
+tw("stored data, array (method trusted)", lambda: isolation(Store, np.array))
+tw("stored data, asarray", lambda: isolation(Store, np.asarray))
+tw("stored data, legacy, array copies", lambda: isolation(StoreLegacy, np.array))
+tw("stored data, legacy, asarray shares", lambda: isolation(StoreLegacy, np.asarray))
+tw("own TypeError, no retry", lambda: np.array(OwnCopyError()))
