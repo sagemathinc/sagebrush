@@ -259,9 +259,10 @@ try {
   {
     const [x0, y] = await sepX("sep-side");
     const w0 = await ev(`window.__sbLayout.stats.writes`);
+    // (moves off the handle from the first, 300 to 398 px: pointer capture carries them, and the release)
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: x0, y, button: "left", buttons: 1, clickCount: 1 });
-    for (let i = 0; i < 50; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 260 + i, y, button: "left", buttons: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 309, y, button: "left", buttons: 0, clickCount: 1 });
+    for (let i = 0; i < 50; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300 + 2 * i, y, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 398, y, button: "left", buttons: 0, clickCount: 1 });
     await sleep(200);
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
