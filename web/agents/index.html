@@ -60,6 +60,10 @@
     .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
     @container sb-top (max-width: 488px) {
       .top #who small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      /* (and the name whole: the empty spacer and its gap go, the link keeps the right side, the dot 2 px closer) */
+      .top .spacer { display: none; }
+      .top #howto { margin-left: auto; }
+      .top #who .conn { margin-right: 6px; }
     }
   }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
