@@ -16,6 +16,9 @@ let failAfter = 0, appends = 0, failRe = /-(cd|manifest)$/;
  * itself done at once and the worker going on with the next request: so a Cancel lands with a slice still away, and
  * a fast path meets its slice still away, while everything else the worker does is answered as usual) */
 let appendDelay = 0, appendDelayRe: RegExp | null = null;
+/** (tests only, E1 code R3: the nth append crashes the worker, an uncaught error outside any request, and is never
+ * answered; 0: none) */
+let crashAfter = 0, crashAppends = 0;
 const files = new Map<string, { h: any; size: number }>();
 let dir: any;
 
@@ -75,12 +78,16 @@ async function handle(m: any): Promise<unknown> {
     case "appendDelay":
       appendDelay = m.ms; appendDelayRe = m.re ? new RegExp(m.re) : null;
       return null;
+    case "crashAfter":
+      crashAfter = m.n; crashAppends = 0;
+      return null;
     case "append": {
       // (a slice: its buffer and its valid length; only [0, len) written, and the buffer transferred back in the
       // reply (E1 r2a heap plan r2c §3))
       const f = files.get(m.name);
       if (!f) throw new Error(`${m.name} isn't open`);
       if (failAfter && failRe.test(m.name) && ++appends >= failAfter) throw new Error("the scratch file couldn't be written (a test)");
+      if (crashAfter && ++crashAppends >= crashAfter) { setTimeout(() => { throw new Error("the worker crashed (a test)"); }); return new Promise(() => {}); }
       const data = new Uint8Array(m.data as ArrayBuffer, 0, m.len);
       const n = f.h.write(data, { at: f.size });
       if (n !== data.length) throw new Error(`a short write to ${m.name} (${n} of ${data.length} bytes)`);

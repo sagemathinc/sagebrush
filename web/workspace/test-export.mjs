@@ -484,6 +484,151 @@ try {
     check((await lastAt()) === before, "…and the status line is unchanged");
   });
 
+  // ---- astra's E1 code review R1: one export at a time in a tab.  (a) the Storage panel closed and opened again while
+  // an export is written: that export is cancelled, and a second Export meanwhile is refused in words; (b) Export
+  // again's export running, the panel's own Export button is refused in words.  Every archive made is a valid one.
+  // (Held between members by the test, so the second Export lands while the first owns the page's export state)
+  const HOLD = `async (n) => { if (n === 2 && !window.__held) { window.__held = 1; await new Promise((r) => (window.__resume = r)); } }`;
+  const toastText = () => ev(`document.querySelector(".ftoast")?.textContent ?? ""`);
+  const clearToast = () => ev(`(() => { document.querySelectorAll(".ftoast").forEach((t) => t.remove()); return 1; })()`);
+  const REFUSED = `/^An export is already running in this tab\\. Finish or cancel it first\\./`;
+  const flowHas = (re) => `[...(${P}?.querySelectorAll("button") ?? [])].some((b) => ${re}.test(b.textContent))`;
+  // (whether an export owns this page's export state: the chunk's own exportOwned(), the module the page loaded)
+  const OWNED = `(() => { const e = performance.getEntriesByType("resource").find((x) => /sagebrush-export\\.js/.test(x.name)); return e ? import(e.name).then((m) => m.exportOwned()) : true; })()`;
+  /** after a closed panel: no owner, no export's lock, no scratch file, within the bounds */
+  const settledFree = async () => (await until(`${LOCKS}.then((m) => m === 0)`, 10000)) && (await until(`${OWNED}.then((o) => o === false)`, 5000)) && (await scratchCount()) === 0;
+  /** the archive handed over (window.__exp) saved to `file` and checked: zipfile, unzip -t, every hash, manifest last */
+  const savedValid = async (file) => {
+    const b64 = await ev(`(async () => { const b = new Uint8Array(await window.__exp.blob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); })()`);
+    writeFileSync(file, Buffer.from(b64, "base64"));
+    const z = inspect(file);
+    return !z.error && z.bad === null && z.mismatch?.length === 0 && z.unzip === 0 && z.last_local === "manifest.json" && z.last_central === "manifest.json" ? "" : JSON.stringify({ error: z.error, bad: z.bad, mismatch: z.mismatch, unzip: z.unzip, last: z.last_local }).slice(0, 300);
+  };
+  await scenario("own", async () => {
+    const before = await lastAt();
+    // (a)
+    await ev(`(() => { window.__held = 0; window.__resume = null; return 1; })()`);
+    await hooks(`between: ${HOLD}`);
+    await startFlow();
+    check(await until(flowHas(`/^Save…$/`), 120000), "own a: the first export is ready");
+    await panelButton(/^Save…$/);
+    check(await until(`!!window.__resume`, 60000), "own a: the first export is being written (held between members)");
+    await ev(`(() => { ${P}.sbClose(); return 1; })()`);
+    await clearToast();
+    await startFlow();
+    check(await until(`${REFUSED}.test(document.querySelector(".ftoast")?.textContent ?? "")`, 5000), "own a: the panel closed and opened again mid-export, a second Export is refused in words: " + JSON.stringify(await toastText()));
+    check(!(await ev(flowHas(`/^(Cancel|Save…)$/`))), "own a: …and no second export runs beside it");
+    await ev(`(() => { window.__resume(); return 1; })()`);
+    check(await until(`${LOCKS}.then((m) => m === 0)`, 15000), "own a: the closed panel's export is cancelled: its lock let go");
+    check(!(await ev(`!!window.__exp`)) && (await lastAt()) === before && (await scratchCount()) === 0, "own a: …nothing handed over, the status line unchanged, no scratch file left");
+    await hooks();
+    const a2 = await exportOnce(join(out, "own-a.zip"), { keep: true });
+    const va = a2.stopped ? a2.stopped : await savedValid(join(out, "own-a.zip"));
+    check(va === "", "own a: then an export ends with a valid archive: " + va);
+    await handed();
+    // (b)
+    await ev(`(() => { window.__held = 0; window.__resume = null; return 1; })()`);
+    await hooks(`failSpoolAfter: 1`);
+    await startFlow();
+    await until(flowHas(`/^Save…$/`), 120000);
+    await panelButton(/^Save…$/);
+    check(await until(flowHas(`/^Export again$/`), 60000), "own b: an export stopped (a spool's write failed), with Export again");
+    await ev(`(() => { const t = window.__SB_EXPORT_TEST__; t.failSpoolAfter = 0; t.between = ${HOLD}; window.__exp = null; return 1; })()`);
+    await panelButton(/^Export again$/);
+    check(await until(flowHas(`/^Save…$/`), 120000), "own b: Export again's export is ready");
+    await panelButton(/^Save…$/);
+    check(await until(`!!window.__resume`, 60000), "own b: Export again's export is being written (held between members)");
+    await clearToast();
+    await panelButton(/^Export all current files/);
+    check(await until(`${REFUSED}.test(document.querySelector(".ftoast")?.textContent ?? "")`, 5000), "own b: Export again's export running, the panel's own Export button is refused in words: " + JSON.stringify(await toastText()));
+    await ev(`(() => { window.__resume(); return 1; })()`);
+    check(await until(`!!window.__exp`, 120000), "own b: …then Export again's export ends, handed over");
+    const vb = (await ev(`!!window.__exp`)) ? await savedValid(join(out, "own-b.zip")) : "nothing handed over";
+    check(vb === "", "own b: …with a valid archive: " + vb);
+    await handed();
+    await until(`[...(${P}?.querySelectorAll("p") ?? [])].some((p) => /^Exported /.test(p.textContent))`);
+    await closeFlow();
+    // (c) closed at Ready; (d) closed during the startup (the stale sweep held); (e) closed after the page's own saves,
+    // before preflight: each export ends, owning nothing and holding no lock, before the next one
+    await hooks();
+    await startFlow();
+    check(await until(flowHas(`/^Save…$/`), 120000), "own c: an export is ready");
+    await ev(`(() => { ${P}.sbClose(); return 1; })()`);
+    check(await settledFree(), "own c: the panel closed at Ready: the export ends, no owner, no lock, no scratch file left");
+    await hooks(`sweepPauseMs: 1500`);
+    await startFlow();
+    await sleep(300);
+    await ev(`(() => { ${P}.sbClose(); return 1; })()`);
+    check(await settledFree(), "own d: the panel closed during the startup: the export ends, no owner, no lock, no scratch file left");
+    await hooks(`beforePreflight: () => new Promise((r) => { window.__bp = r; })`);
+    await ev(`(() => { window.__bp = null; return 1; })()`);
+    await startFlow();
+    check(await until(`!!window.__bp`, 30000), "own e: an export is past the page's own saves, before preflight");
+    await ev(`(() => { ${P}.sbClose(); window.__bp?.(); return 1; })()`);
+    check(await settledFree(), "own e: the panel closed before preflight: the export ends, no owner, no lock, no scratch file left");
+    await hooks();
+    const e2 = await exportOnce(join(out, "own-e.zip"), { keep: true });
+    const ve = e2.stopped ? e2.stopped : await savedValid(join(out, "own-e.zip"));
+    check(ve === "", "own e: then an export ends with a valid archive: " + ve);
+    await handed();
+  });
+
+  // ---- astra's E1 code review R2: the OPFS handoff failing before the download starts: the export stops, said as
+  // such; nothing committed or stamped; its scratch removed, its lock let go; no unhandled rejection
+  await scenario("handfail", async () => {
+    await ev(`(() => { if (!window.__unhOn) { window.__unhOn = 1; window.__unh = []; addEventListener("unhandledrejection", (e) => window.__unh.push(String(e.reason?.message ?? e.reason).slice(0, 120))); } window.__unh.length = 0; return 1; })()`);
+    const before = await lastAt();
+    // (the sink witnessed by what it hands over: OPFS hands the scratch file's File, the Blob sink a Blob that isn't one)
+    await hooks(`onHand: (b) => { window.__hfFile = b instanceof File; throw new Error("the download couldn't start (a test)"); }`);
+    await startFlow();
+    await until(flowHas(`/^Save…$/`), 120000);
+    await panelButton(/^Save…$/);
+    await until(`${flowHas(`/^Export again$/`)} || [...(${P}?.querySelectorAll("p") ?? [])].some((p) => /^Exported /.test(p.textContent))`, 60000);
+    const text = await panelText();
+    check(/The export stopped: the download couldn't start \(a test\)\. Nothing was saved\./.test(text), "handfail: a handoff that fails before the download starts stops the export, said as such: " + text.slice(-200));
+    check((await lastAt()) === before, "handfail: …the status line unchanged");
+    check(await until(`${LOCKS}.then((m) => m === 0)`, 10000) && (await scratchCount()) === 0, "handfail: …its lock let go and no scratch file left (" + (await scratchCount()) + ")");
+    await sleep(300);
+    check((await ev(`window.__unh.length`)) === 0, "handfail: …and no unhandled rejection: " + JSON.stringify(await ev(`window.__unh`)));
+    check((await ev(`window.__hfFile === true`)), "handfail: …through the OPFS sink (the case's own precondition: the scratch file's File was handed over): " + (await ev(`String(window.__hfFile)`)));
+    await closeFlow();
+  });
+
+  // ---- astra's E1 code review R3: (a) the worker's module doesn't load: the export stops at once, in words, and the
+  // page's next export runs; (b) the worker crashes during an append: the export stops within its bound, its cleanup
+  // settles and its lock is let go; what the worker couldn't remove, the next export's stale sweep does.  (A live
+  // worker refusing OPFS still falls back to Blobs: "scratch", the probe's failures)
+  await scenario("workerfail", async () => {
+    const before = await lastAt();
+    // (a)
+    await hooks(`workerUrl: "/no-such-export-worker.js"`);
+    await clearToast();
+    await startFlow();
+    check(await until(`/^The export couldn't start its worker \\(/.test(document.querySelector(".ftoast")?.textContent ?? "")`, 15000), "workerfail a: a worker that doesn't load stops the export within 15 s, said in words: " + JSON.stringify(await toastText()));
+    check(await until(`${LOCKS}.then((m) => m === 0)`, 5000) && (await lastAt()) === before, "workerfail a: …its lock let go, the status line unchanged");
+    await hooks();
+    await startFlow();
+    check(await until(flowHas(`/^Save…$/`), 120000), "workerfail a: …and the page's next export runs");
+    await panelButton(/^Cancel$/);
+    // (b)
+    await hooks(`crashAfter: 1`);
+    await clearToast();
+    await startFlow();
+    const readyB = await until(flowHas(`/^Save…$/`), 120000);
+    check(readyB, "workerfail b: an export is ready: " + (readyB ? "" : (await panelText()).slice(-300) + " | toast " + JSON.stringify(await toastText()) + " | owned " + (await ev(OWNED)) + " | locks " + (await ev(LOCKS))));
+    if (!readyB) return;
+    await panelButton(/^Save…$/);
+    const stoppedB = await until(flowHas(`/^Export again$/`), 20000);
+    const tb = await panelText();
+    check(stoppedB && /The export stopped: the export's worker failed: .*Nothing was saved\./.test(tb), "workerfail b: a worker that crashes during an append stops the export within 20 s, said in words: " + tb.slice(-200));
+    check(!(await ev(`!!window.__exp`)) && (await lastAt()) === before, "workerfail b: …nothing handed over, the status line unchanged");
+    check(await until(`${LOCKS}.then((m) => m === 0)`, 10000), "workerfail b: …its cleanup settled: its lock let go");
+    await closeFlow();
+    await hooks();
+    const c = await exportOnce(join(out, "wf.zip"));
+    check(!c.stopped && (await scratchCount()) === 0, "workerfail b: …and the next export ends, its stale sweep having removed what the crashed worker left: " + (c.stopped ?? (await scratchCount()) + " files left"));
+  });
+
   // ---- 6, N-2. Cancel inside a 200 MB member, timed in the page: within 250 ms; nothing left; status unchanged
   await scenario("cancel", async () => {
     await ev(`${W}.create("/big.bin", { content: new Uint8Array(200 * 2 ** 20).map((_, i) => i & 7) }).then(() => 1)`);

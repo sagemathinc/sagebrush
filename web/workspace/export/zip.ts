@@ -57,6 +57,9 @@ export class ExportWorker {
   private n = 0;
   private waiting = new Map<number, [(v: any) => void, (e: Error) => void]>();
   private stopped = false;
+  /** (astra's E1 code R3) why the worker can't be used any more: it failed (its module didn't load, or it threw), and
+   * every request then, and every one after, is refused at once, never left waiting */
+  failed: string | null = null;
   constructor(private w: Worker) {
     w.onmessage = (ev) => {
       const m = ev.data, p = this.waiting.get(m.id);
@@ -64,13 +67,26 @@ export class ExportWorker {
       this.waiting.delete(m.id);
       if (m.ok) p[0](m.value); else p[1](new Error(m.error));
     };
-    w.onerror = (ev) => { for (const [, p] of this.waiting) p[1](new Error(`the export's worker failed: ${ev.message}`)); this.waiting.clear(); };
+    w.onerror = (ev) => { ev.preventDefault?.(); this.fail(`the export's worker failed: ${ev.message || "it couldn't start"}`); };
+    w.onmessageerror = () => this.fail("the export's worker sent a message the page couldn't read");
+  }
+  private fail(why: string) {
+    if (this.failed) return;
+    this.failed = why;
+    try { this.w.terminate(); } catch {}
+    for (const [, p] of this.waiting) p[1](new Error(why));
+    this.waiting.clear();
   }
   ask<T = unknown>(op: string, args: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<T> {
-    // (a stopped worker answers nothing: refused at once, never left waiting (astra's E1-A3))
+    // (a stopped or failed worker answers nothing: refused at once, never left waiting (astra's E1-A3, E1 code R3))
+    if (this.failed) return Promise.reject(new Error(this.failed));
     if (this.stopped) return Promise.reject(new Error("the export's worker was stopped"));
     const id = ++this.n;
-    return new Promise<T>((ok, no) => { this.waiting.set(id, [ok, no]); this.w.postMessage({ id, op, ...args }, transfer); });
+    return new Promise<T>((ok, no) => {
+      this.waiting.set(id, [ok, no]);
+      // (a message the browser refuses to post: this request alone refused, nothing left waiting for it)
+      try { this.w.postMessage({ id, op, ...args }, transfer); } catch (e) { this.waiting.delete(id); no(e as Error); }
+    });
   }
   /** A Cancel ends every request waiting on the worker at once (astra's E1-A4): each rejects as cancelled, and its
    * late answer is ignored.  The worker takes requests one at a time, in order (worker.ts), so a cleanup asked after
@@ -141,7 +157,13 @@ export class OpfsSink implements Sink {
     // (the disk-backed File, handed to the download; the scratch file is removed once the download has its bytes:
     // the promise returned settles then, and the caller keeps the worker (and the export's lock) until it does)
     const file = await this.fileOf();
-    return { later: new Promise<void>((done) => this.onHand(file, name, () => void this.wk.ask("remove", { name: this.file }).catch(() => {}).finally(done))) };
+    // (astra's E1 code R2: the handoff called here, not inside a promise's executor, so a failure before the download
+    // starts rejects close(): nothing is committed and the abort removes the scratch file.  Only once it has started is
+    // the delayed removal what is left to happen)
+    let done!: () => void;
+    const later = new Promise<void>((r) => (done = r));
+    this.onHand(file, name, () => void this.wk.ask("remove", { name: this.file }).catch(() => {}).finally(done));
+    return { later };
   }
   async abort() { await this.wk.ask("remove", { name: this.file }).catch(() => {}); }
 }
