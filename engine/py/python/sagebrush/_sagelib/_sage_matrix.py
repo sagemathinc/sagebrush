@@ -1740,7 +1740,7 @@ class Matrix:
             True
         """
         if self._base is _sa().QQ:
-            H, U = self._hermite_field()
+            H, U = self._hermite_field(transformation)
             return (H, U) if transformation else H
         if transformation:
             raise NotImplementedError("hermite_form(transformation=True) is implemented over QQ only in sagebrush yet")
@@ -1749,7 +1749,7 @@ class Matrix:
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
         return Matrix(_sa().ZZ, h, self._nc)
 
-    def _hermite_field(self):
+    def _hermite_field(self, transformation=False):
         # Sage's hermite_form over a field: for each column, the first row at
         # or below the current one with a nonzero entry is the pivot (a swap
         # takes (r_i, r_j) to (r_j, -r_i)), and each row below loses its
@@ -1758,7 +1758,11 @@ class Matrix:
         K = self._base
         A = [list(r) for r in self._rows]
         m, n = len(A), self.ncols()
-        U = [[K(1) if i == j else K(0) for j in range(m)] for i in range(m)]
+        U = None
+        if transformation:
+            # (U is m x m: checked before it is allocated, and only made when asked for)
+            _shape(m, m)
+            U = _identity_rows(K, m)
         r = 0
         for c in range(n):
             if r >= m:
@@ -1767,15 +1771,18 @@ class Matrix:
             if p is None:
                 continue
             if p != r:
-                A[r], A[p], U[r], U[p] = A[p], [-x for x in A[r]], U[p], [-x for x in U[r]]
+                A[r], A[p] = A[p], [-x for x in A[r]]
+                if U is not None:
+                    U[r], U[p] = U[p], [-x for x in U[r]]
             for i in range(r + 1, m):
                 if A[i][c] != 0:
                     q = K(A[i][c]) / K(A[r][c])
                     A[i] = [x - q * y for x, y in zip(A[i], A[r])]
-                    U[i] = [x - q * y for x, y in zip(U[i], U[r])]
+                    if U is not None:
+                        U[i] = [x - q * y for x, y in zip(U[i], U[r])]
             r += 1
         # (U self = A: the same row operations on the identity)
-        return Matrix(K, A, n), Matrix(K, U, m)
+        return Matrix(K, A, n), (Matrix(K, U, m) if U is not None else None)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).
@@ -2952,6 +2959,11 @@ def _ff_base_of(entries, _left=None):
             if b is not None:
                 return b
     return None
+
+
+def _identity_rows(K, m):
+    # the m x m identity's rows over K (allocates m^2 entries: callers check _shape(m, m) first)
+    return [[K(1) if i == j else K(0) for j in range(m)] for i in range(m)]
 
 
 def _smith_field_shapes(m, n):

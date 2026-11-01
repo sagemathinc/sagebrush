@@ -84,3 +84,20 @@ print(htu([[1, 2, 3], [2, 4, 6], [1, 0, 1]]))
 print(htu([[2, 1], [4, 2]]))
 print(htu([[0]]))
 print(htu([[1], [2], [3]]))
+# U is made only when asked for, after its m x m shape is checked (astra3 R1b): the helper that
+# allocates it is spied (made to raise if reached); never an out-of-memory run
+def spiedf(name, f):
+    orig = getattr(_M, name)
+    def boom(*a, **k):
+        raise RuntimeError("reached " + name)
+    setattr(_M, name, boom)
+    try:
+        return f()
+    except Exception as ex:
+        return type(ex).__name__
+    finally:
+        setattr(_M, name, orig)
+print(spiedf("_identity_rows", lambda: matrix(QQ, 100000, 1).hermite_form().dimensions()))
+print(spiedf("_identity_rows", lambda: matrix(QQ, 100000, 0).hermite_form().dimensions()))
+print(spiedf("_identity_rows", lambda: matrix(QQ, 100000, 1).hermite_form(transformation=True)))
+print(spiedf("_identity_rows", lambda: matrix(QQ, 2048, 0).hermite_form(transformation=True)), spiedf("_identity_rows", lambda: matrix(QQ, 2049, 0).hermite_form(transformation=True)))
