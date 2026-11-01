@@ -237,9 +237,9 @@ test("L2b a token from a closed socket: 401 invalid_token", async () => {
 const headerCases: [string, any, string][] = [
   ["L3a typ missing", { header: { typ: undefined } }, "typ-missing"],
   ["L3b typ not dpop+jwt", { header: { typ: "jwt" } }, "typ"],
-  ["L3c alg none", { header: { alg: "none" } }, "alg"],
-  ["L3c alg HS256", { header: { alg: "HS256" } }, "alg"],
-  ["L3c alg ES384", { header: { alg: "ES384" } }, "alg"],
+  ["L3c-none alg none", { header: { alg: "none" } }, "alg"],
+  ["L3c-HS256 alg HS256", { header: { alg: "HS256" } }, "alg"],
+  ["L3c-ES384 alg ES384", { header: { alg: "ES384" } }, "alg"],
 ];
 for (const [name, over, reason] of headerCases) {
   test(`${name}: 401, refused for ${reason}`, async () => {
@@ -528,8 +528,8 @@ const decodeCases: [string, (b: string) => any][] = [
   ["L13b a ref member failing the ID pattern", () => ({ rpc: "g.run", ref: { b: "b/1" } })],
   ["L13c a ref member the rpc doesn't take (after on g.run)", (b) => ({ rpc: "g.run", ref: { b, after: 0 } })],
   ["L14a-pfx the frame id x1", () => ({ id: "x1" })],
-  ["L14a-lz the frame id t0", () => ({ id: "t0" })],
-  ["L14a-lz the frame id t01", () => ({ id: "t01" })],
+  ["L14a-lz-t0 the frame id t0", () => ({ id: "t0" })],
+  ["L14a-lz-t01 the frame id t01", () => ({ id: "t01" })],
   ["L14a-len the frame id t + 16 digits", () => ({ id: "t" + "1".repeat(16) })],
   ["L14e-type after \"1\"", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: "1" }, body: undefined })],
   ["L14e-int after 1.5", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 1.5 }, body: undefined })],
@@ -1627,7 +1627,7 @@ async function cleanup(t: any, path: Path) {
   else await t.s.close();
 }
 for (const path of ["err", "exit", "unpair", "rebind", "close"] as Path[]) {
-  test(`L36f-${path} (A) a gateway-owned held run and completion: the charge returns to 0`, async () => {
+  test(`L36f-${path}-A a gateway-owned held run and completion: the charge returns to 0`, async () => {
     const H = holder();
     const t: any = await setupReal({ gateway: { authHold: H.hold } });
     try {
@@ -1643,7 +1643,7 @@ for (const path of ["err", "exit", "unpair", "rebind", "close"] as Path[]) {
   });
 }
 for (const path of ["err", "exit", "fb", "unpair", "rebind", "close"] as Path[]) {
-  test(`L36f-${path} (B) a Worker-owned run and a dispatched completion: the charge returns to 0`, async () => {
+  test(`L36f-${path}-B a Worker-owned run and a dispatched completion: the charge returns to 0`, async () => {
     const t: any = await setupReal();
     try {
       const b = await bind(t.page);
@@ -1657,7 +1657,7 @@ for (const path of ["err", "exit", "fb", "unpair", "rebind", "close"] as Path[])
     } finally { await t.s.close(); }
   });
 }
-test("L36f-fb mid-wave: L36e's wave, its entry 100 ignoring the interrupt; the fallback returns the charge to 0", async () => {
+test("L36f-fb-wave mid-wave: L36e's wave, its entry 100 ignoring the interrupt; the fallback returns the charge to 0", async () => {
   const t: any = await setupReal();
   try {
     const b = await bind(t.page);
