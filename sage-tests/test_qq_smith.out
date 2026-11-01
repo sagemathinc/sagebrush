@@ -11,3 +11,9 @@ Rational Field
 [1, 1] [1, 0]
 (True, True, True, [], Rational Field)
 (True, True, True, [(), ()], Rational Field)
+SagebrushMemoryError
+SagebrushMemoryError
+ok SagebrushMemoryError
+ok SagebrushMemoryError
+ok SagebrushMemoryError
+RuntimeError

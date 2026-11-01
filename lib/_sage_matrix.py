@@ -1801,11 +1801,8 @@ class Matrix:
         # the pivot columns first, so U self V = diag(1, ..., 1, 0, ...)
         K = self._base
         m, n = self.nrows(), self.ncols()
-        from sagebrush import linalg
-        aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
-        rows, _ = linalg.rref(aug)
-        R = [list(r[:n]) for r in rows]
-        U = [list(r[n:]) for r in rows]
+        _smith_field_shapes(m, n)
+        R, U = self._smith_field_reduce(K, m, n)
         piv = []
         for r in R:
             j = next((j for j, v in enumerate(r) if v != 0), None)
@@ -1821,6 +1818,13 @@ class Matrix:
         V = [[row[j] for j in order] for row in V]
         D = [[K(1) if i == j and i < len(piv) else K(0) for j in range(n)] for i in range(m)]
         return Matrix(K, D, n), Matrix(K, U, m), Matrix(K, V, n)
+
+    def _smith_field_reduce(self, K, m, n):
+        # the reduced echelon form of [self | I]: (R, U) with U self = R
+        from sagebrush import linalg
+        aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
+        rows, _ = linalg.rref(aug)
+        return [list(r[:n]) for r in rows], [list(r[n:]) for r in rows]
 
     def LLL(self, delta=None, **kwds):
         """The LLL-reduced basis of the lattice spanned by the rows, with
@@ -2913,6 +2917,27 @@ def _ff_base_of(entries, _left=None):
             if b is not None:
                 return b
     return None
+
+
+def _smith_field_shapes(m, n):
+    """The field Smith form's allocations, checked before any is made (as
+    _smith_uv's): the transforms, m x m and n x n, and the augmented
+    [A | I], m x (n + m); beyond what _shape admits, the memory guard's
+    SagebrushMemoryError (a 1 x 100000 matrix would ask for 10^10 entries
+    of V).
+
+    EXAMPLES::
+
+        sage: from _sage_matrix import _smith_field_shapes
+        sage: _smith_field_shapes(2047, 2)
+        sage: _smith_field_shapes(2047, 3)
+        Traceback (most recent call last):
+        ...
+        SagebrushMemoryError: ...
+    """
+    _shape(m, m)
+    _shape(n, n)
+    _shape(m, n + m)
 
 
 def _smith_uv(a, n=None):
