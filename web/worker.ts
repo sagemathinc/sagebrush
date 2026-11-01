@@ -4,7 +4,7 @@
 // the page terminates it.
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
-//           {fsPut: path, data}        a file uploaded (data) or deleted (null) in the page
+//           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -58,7 +58,7 @@ import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
 // library, under /$pyjs, is not a file of the notebook.)
-let reads = new Set<string>(), writes = new Set<string>();
+let reads = new Set<string>(), writes = new Set<string>(), sources = new Set<string>();
 const mine = (p: string) => !p.startsWith("/$pyjs");
 // The init gate: awaiting-init -> validating -> ready | failed.  The session's
 // runtime waits for the init message's limits, and runs nothing before it is
@@ -95,9 +95,10 @@ const session = notebookSession((m) => postMessage(m), {
     begin: (m) => {
       reads = new Set();
       writes = new Set();
+      sources = new Set();
       replayEnv.begin(m.clock);
     },
-    end: () => ({ ...(replayEnv.end() as any), ...(reads.size || writes.size ? { files: { reads: [...reads], writes: [...writes] } } : {}) }),
+    end: () => ({ ...(replayEnv.end() as any), ...(reads.size || writes.size || sources.size ? { files: { reads: [...reads], writes: [...writes], ...(sources.size ? { sources: [...sources] } : {}) } } : {}) }),
   },
 });
 __hooks.write = (fd, text) => session.write(fd, text);
@@ -105,8 +106,10 @@ __hooks.changed = (path, data) => {
   if (mine(path)) writes.add(path);
   postMessage({ fsChanged: path, data });
 };
-__hooks.read = (path) => {
+__hooks.read = (path, origin) => {
   if (mine(path)) reads.add(path);
+  // (the versions of the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
+  if (origin !== undefined) sources.add(origin);
 };
 
 // In the runner (web/runner/index.html) this worker has no network at all:
@@ -218,7 +221,7 @@ self.onmessage = async (ev: MessageEvent) => {
     return;
   }
   if (m.files) return loadFiles(m.files);
-  if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
+  if (m.fsPut !== undefined) return putFile(m.fsPut, m.data, typeof m.tok === "string" ? m.tok : undefined);
   if (m.mount) return mount(m.mount);
   const mode = m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
   if (mode) {

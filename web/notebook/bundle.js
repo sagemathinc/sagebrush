@@ -5,6 +5,7 @@
 // design/workspace-files.md §3), so a .sbreplay becomes a notebook with its
 // history wherever it is uploaded.
 import { bytesHash, putBlob, idb, docIdProblem } from "./stores.js";
+import { bundleHashes } from "./bundle-blobs.mjs";
 
 export const BUNDLE = "sagebrush-notebook-history";
 /** What a bundle may hold, checked before anything of it is kept (daybreak2's LIMIT-4B3-1): its
@@ -32,6 +33,20 @@ async function unpack(bytes, max) {
   let at = 0;
   for (const p of parts) { out.set(p, at); at += p.length; }
   return out;
+}
+
+/** What a bundle of the notebook whose history is `history` holds (index.html makeBundle): the patches TimeTravel
+ * shows, from the history's own store (a synced notebook's are under its synced key, journal/store.js useSynced, not
+ * its id's rows from before it synced: William's B-feedback, Nov 1), and the bytes, had from `getBlob(hash)`, of only
+ * the files its sessions read (bundle-blobs.mjs). */
+export async function bundleContents(history, getBlob) {
+  const envs = (await history.store.loadInitial())?.patches ?? [];
+  const blobs = {};
+  for (const h of bundleHashes(history.records("session"), history.records("run"), history.records("file"))) {
+    const data = await getBlob(h);
+    if (data) blobs[h] = data;
+  }
+  return { history: envs, blobs };
 }
 
 /** The bundle's contents, checked to be one, within BUNDLE_LIMITS: {notebook (without its id, rev or trust), history, blobs}. */
