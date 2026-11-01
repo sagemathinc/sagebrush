@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "reason": "numpy read-only arrays (pandas M1's second prerequisite, plan-pandas r7 section F2): ndarray.flags (NumPy's flagsobj, a snapshot) and setflags, read-only complex components, read-only out= and in-place targets refused, in src/runtime/numpy.ts (the CLI and the worker carry it); lib/numpy's frombuffer/load/asfortranarray, ufunc out= guards and reduce/accumulate out= (sci group, src and pre); scipy-io's loadmat copy (its package chunk; the CLI's packages.gen.js, an exact bundle, has its budgets.json max raised to the measured 278556 instead). Measured locally with CI's bun 1.4.4 tool: master 0e5cbbe5 against this head; cli/pyjs.cjs +6319 marked 6361 (42 B for drift), the other rows exact.",
+  "reason": "numpy read-only arrays (pandas M1's second prerequisite, plan-pandas r7 section F2): ndarray.flags (NumPy's flagsobj, a snapshot) and setflags, read-only complex components, read-only out= and in-place targets refused, in src/runtime/numpy.ts (the CLI and the worker carry it); lib/numpy's frombuffer/load/asfortranarray, ufunc out= guards and reduce/accumulate out= (sci group, src and pre); scipy-io's loadmat copy (its package chunk; the CLI's packages.gen.js, an exact bundle, has its budgets.json max raised to the measured 278556 instead). Measured with CI's bun 1.4.4 tool; renewed after #430's CLI gzip on master f2542880 (daybreak3's merge-tree measure: cli/lib.gen.js +1032 marked 1160, cli/pyjs.cjs +4667 marked 4795, each growth+128); the other rows exact.",
   "bytes": {
-    "cli/lib.gen.js": 2789,
-    "cli/pyjs.cjs": 6361,
+    "cli/lib.gen.js": 1160,
+    "cli/pyjs.cjs": 4795,
     "engine/lib/pkg-scipy-io.pre": 51,
     "engine/lib/pkg-scipy-io.src": 128,
     "engine/lib/sci.pre": 11044,
