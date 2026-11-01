@@ -40,7 +40,10 @@ __all__ = [
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
-    "binomial", "factorial", "fibonacci", "catalan_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
+    "binomial", "factorial", "fibonacci", "catalan_number",
+    # enumerative combinatorics (lib/_sage_combinat.py)
+    "Partition", "Partitions", "Compositions", "Set", "Subsets", "Combinations", "Permutation", "Permutations",
+    "number_of_partitions", "stirling_number1", "stirling_number2", "bell_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
@@ -49,7 +52,7 @@ __all__ = [
     "sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
-    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "real", "imag", "real_part", "imag_part", "conjugate",
+    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "laplace", "inverse_laplace", "real", "imag", "real_part", "imag_part", "conjugate",
     "psi", "log_gamma", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi", "erfinv", "exp_integral_e1", "Ei",
     "exp_integral_ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec", "legendre_P", "gen_legendre_P",
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
@@ -74,7 +77,7 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
                         tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
-                        log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, diff,
+                        log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, laplace, inverse_laplace, diff,
                         psi, log_gamma, zeta, zetaderiv, hurwitz_zeta, beta, erfc, erfi, erfinv, exp_integral_e1,
                         Ei, exp_integral_ei, dilog, polylog, lambert_w, elliptic_kc, elliptic_ec, legendre_P,
                         gen_legendre_P,
@@ -142,6 +145,8 @@ from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles,
 from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
+from _sage_combinat import (Partition, Partitions, Compositions, Set, Subsets, Combinations, Permutation, Permutations,
+                           number_of_partitions, stirling_number1, stirling_number2, bell_number)
 from _sage_polyhedra import Polyhedron, polytopes
 from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
 from _sage_milp import MixedIntegerLinearProgram

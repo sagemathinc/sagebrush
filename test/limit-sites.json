@@ -3635,6 +3635,66 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
+ "lib/_sage_combinat.py :: Partitions :: \"\"\"The partitions of n (keywords length, max_part, min_part). #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__contains__ :: and all(self._min <= v <= self._max for v in p._p)) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: def __init__(self, n, length=None, max_part=None, min_part=None): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: self._max = self._n if max_part is None else _nonneg(max_part, \"max_part\") #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: self._plain = length is None and max_part is None and min_part is None #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__iter__ :: for p in _partitions(self._n, self._max, self._length, self._min): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__repr__ :: conds.append(\"whose parts are at most %d\" % self._max) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__repr__ :: if self._max != self._n: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.cardinality :: return _Z(sum(1 for _ in _partitions(self._n, self._max, self._length, self._min))) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Subsets.__init__ :: raise NotImplementedError(\"Subsets(..., submultiset=True) is not implemented in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "Subsets(..., submultiset=True) is not implemented yet: an unsupported feature, not a cap"
+ },
+ "lib/_sage_combinat.py :: _partitions :: def _partitions(n, maxp, length=None, minp=1): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: _partitions :: for k in range(min(n, maxp), minp - 1, -1): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
  "lib/_sage_ec.py :: _quotient_coords :: E(F_q) is too large to enumerate. P -> m P maps E(F_q) onto its Sylow #0": {
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
@@ -3719,6 +3779,51 @@
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
+ },
+ "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #1": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #2": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _inverse_laplace :: except (NotImplementedError, ValueError, TypeError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: _inverse_laplace :: raise NotImplementedError(\"inverse_laplace: delay %s not known to be nonnegative\" % delay) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _laplace :: raise NotImplementedError(\"laplace: no transform known for %s\" % f) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _laplace :: raise NotImplementedError(\"laplace: no transform known for %s\" % f) #1": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: inverse_laplace :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: laplace :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
  },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",
@@ -4131,6 +4236,11 @@
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "hermite_form(transformation=True) over ZZ: the integer Hermite form's transformation is not computed yet (an unsupported option, not a cap)"
  },
  "lib/_sage_matrix.py :: _bounded_list :: \"\"\"list(obj), reading at most limit + 1 items: more than limit is a #0": {
   "class": "2",
