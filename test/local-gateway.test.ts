@@ -1915,6 +1915,7 @@ const boundaryCases: [string, Record<string, string>, Stub[], string[], RegExp |
   ["L41-fx9 version only: marked 18.0.13 at its root", REVIEWED_IMPORTERS, [{ ...MARKED, dirVersion: "18.0.13", pj: { name: "marked", version: "18.0.13" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked version 18\.0\.13, reviewed 18\.0\.14$/],
   ["L41-fx10 lockfile only: marked@18.0.14 missing from the lockfile", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK.filter((e) => e !== "marked@18.0.14"), /web\/board\/svg\.ts:\d+: marked@18\.0\.14 not in the lockfile$/],
   ["L41-fx13 no masking: a listed package absent from the closure doesn't admit an unlisted one (katex from src/x.ts)", { "src/cli.ts": 'import "./x";\nexport const y = 1;\n', "src/x.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [MARKED, MATHJAX, KATEX], LOCK, /src\/x\.ts:\d+: not a reviewed bundled package: katex$/],
+  ["L41-fx14 root only: node_modules/marked a real directory holding a valid marked 18.0.14, outside .pnpm", { ...REVIEWED_IMPORTERS, "node_modules/marked/package.json": JSON.stringify({ name: "marked", version: "18.0.14", main: "index.js" }), "node_modules/marked/index.js": "module.exports = {};\n" }, [MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
 ];
 for (const [name, files, stubs, lock, refusal] of boundaryCases) {
   test(name, () => {
