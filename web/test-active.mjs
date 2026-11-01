@@ -42,6 +42,8 @@ function bundle(subs = [], extra = "") {
 
 // ---- the stub server's clock and answers
 const stub = { skew: 0, requests: [], mode: null, hold: null, holdArrived: null };
+// (signedOut's deadline, read from active.ts so the cases' bounds follow it; C-7.hang allows it + 2 s, grader 5a5a2551)
+const SIGNOUT_MS = (() => { const m = /SIGNOUT_MS = ([\d_]+);/.exec(readFileSync(join(here, "active.ts"), "utf8")); if (!m) { console.log("FAIL active.ts has no SIGNOUT_MS"); process.exit(2); } return Number(m[1].replace(/_/g, "")); })();
 // (the host clock (grader 61bd935a, 51c26387): ONE constant shift of the epoch, not the rate, for every calendar read --
 // the stub's clock below, the pins, and every page and worker (INSTRUMENT).  ACTIVE_HOST_AT=<ISO> sets the host's
 // effective time at start for the uncounted invariance runs; unset, the shift is 0 and the host clock is real.  Elapsed
@@ -362,7 +364,9 @@ const posts = () => stub.requests.filter((r) => !r.unlisted);
 /** the held POST's arrival, bounded (60 s: a hang guard only, never a measured bound; it covers the tabs' opening,
  * which a loaded host or a first run can make slow) */
 // (marked handled: a case that throws before awaiting it leaves no unhandled rejection 60 s later)
-const heldArrival = () => { const p = Promise.race([new Promise((r) => (stub.holdArrived = r)), sleep(60000).then(() => { throw new Error("the held POST never arrived"); })]); p.catch(() => {}); return p; };
+// (its timeout says how far the case got (grader 5a5a2551 2): the POSTs and requests so far, the stages the caller
+// recorded in `stage.opened`, each tab's page errors, and the time waited -- text only)
+const heldArrival = (stage = {}) => { const t0 = Date.now(); const p = Promise.race([new Promise((r) => (stub.holdArrived = r)), sleep(60000).then(() => { throw new Error(`the held POST never arrived (${Date.now() - t0} ms): ${posts().length} posts, ${stub.requests.length} requests so far; stages ${J(stage.opened ?? [])}; tab errors ${J((stage.tabs ?? []).map((x) => x.errors))}`); })]); p.catch(() => {}); return p; };
 const DAY = 86400;
 async function fresh(pre = "") { const b = new Browser(); await b.start(); const t = await b.tab(pre); return { b, t }; }
 /** the pin took effect: the page's clock reads host time + `skew` (within 2 s); `what` is for the message */
@@ -397,9 +401,9 @@ async function caseC3() {
 /** the C-3 interleaving once, on a fresh profile: tab 1's answer held until tab 2 waits on the lock, then released */
 async function c3Once(pids = false) {
   { reset(); const { b, t } = await fresh(); const t2 = await b.tab();
-    let release; stub.hold = new Promise((r) => (release = r)); const arrived = heldArrival();
-    await t.open(); await t2.open();
-    await t.ev("window.__releaseIdle()"); await arrived; const heldFrom = Date.now();
+    let release; stub.hold = new Promise((r) => (release = r)); const stage = { tabs: [t, t2], opened: [] }; const arrived = heldArrival(stage);
+    await t.open(); stage.opened.push("t opened"); await t2.open(); stage.opened.push("t2 opened");
+    await t.ev("window.__releaseIdle()"); stage.opened.push("t released"); await arrived; const heldFrom = Date.now();
     await t2.ev("window.__releaseIdle()");
     const waiting = await t2.until(`navigator.locks.query().then((q) => q.pending.some((p) => p.name === "sb-active"))`, 5000);
     const heldMs = Date.now() - heldFrom;
@@ -751,7 +755,7 @@ async function cases() {
     await t.ev("__sbHarness.signedOut()");
     const took = Date.now() - t0, after = await t.state();
     return { took, same: J(before) === J(after) };
-  }, (r) => r.took < 13_000 && r.same);
+  }, (r) => r.took < SIGNOUT_MS + 2_000 && r.same); // (grader 5a5a2551 1: 12 s + 1 s had missed by 1 ms under load)
   // C-7.off: consent off, signedOut(): no lock, no IndexedDB, no put (the entry check)
   await pop("C-7.off", async ({ t }) => {
     await t.open(); await t.ev(`localStorage.setItem("sb-consent", "no")`); await sleep(300);
