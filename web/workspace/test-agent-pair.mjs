@@ -3,7 +3,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { AgentPairing, parseStrict, actorOf } from "./agent-pair.ts";
+import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -384,6 +384,50 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const bytes = new TextEncoder().encode(JSON.stringify(a)).length;
   ok(a.error?.data?.code === "limit" && bytes <= 12 * 2 ** 20, `a read whose answer escapes past the frame bound: a limit error, not the frame (${bytes} bytes)`);
   S.srv.stop(true);
+}
+
+// ---- A14: the reload record (plan r3.1 §1-§2 + r3.2): its closed parse (U-3), its decision (U-7, U-8), take/put
+{
+  const scope = { workspace: "sagebrush-ws", page: "http://127.0.0.1:1/agents/" };
+  const good = { v: 1, pairingId: "a".repeat(24), session: "B".repeat(43), port: 4321, agent: { name: "Claude Code", client: "claude-code" }, grant: { folders: ["/notes"], write: true, expires: null }, workspace: scope.workspace, page: scope.page, leftAt: 1000 };
+  const js = (o) => JSON.stringify(o);
+  ok(JSON.stringify(parseReloadRecord(js(good))) === js(good), "U-3.ok: an exact record parses as itself");
+  const { leftAt, ...noLeft } = good;
+  ok(parseReloadRecord(js(noLeft)) !== null, "U-3.noleft: a record without leftAt parses (a page still open)");
+  const bad = {
+    "not-json": "{", "array": "[]", "big": js({ ...good, page: "x".repeat(5000) }), "extra-key": js({ ...good, x: 1 }), "missing-key": js({ ...noLeft, port: undefined }),
+    "v": js({ ...good, v: 2 }), "pairingId": js({ ...good, pairingId: "zz" }), "session": js({ ...good, session: "short" }), "port-0": js({ ...good, port: 0 }), "port-str": js({ ...good, port: "4321" }),
+    "agent-missing": js({ ...good, agent: undefined }), "agent-extra": js({ ...good, agent: { ...good.agent, v: "1" } }), "agent-long": js({ ...good, agent: { name: "n".repeat(81), client: "c" } }),
+    "grant-extra": js({ ...good, grant: { ...good.grant, run: true } }), "folders-empty": js({ ...good, grant: { ...good.grant, folders: [] } }), "folder-relative": js({ ...good, grant: { ...good.grant, folders: ["notes"] } }),
+    "write-str": js({ ...good, grant: { ...good.grant, write: "true" } }), "expires-str": js({ ...good, grant: { ...good.grant, expires: "3600000" } }), "expires-inf": js({ ...good, grant: { ...good.grant, expires: 1 } }).replace('"expires":1', '"expires":1e999'),
+    "leftAt-str": js({ ...good, leftAt: "1000" }), "leftAt-inf": js(good).replace('"leftAt":1000', '"leftAt":1e999'), "workspace-empty": js({ ...good, workspace: "" }), "dup-key": js(good).replace('"v":1', '"v":1,"v":1'),
+  };
+  for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
+  ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
+  const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
+  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
+  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
+  ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
+  ok(d(good, "navigate", 1500) === "click", "U-7.nav: not a reload: kept for one click (R1-a)");
+  ok(d(noLeft, "reload", 1500) === "click", "U-7.noleft: no leftAt (a copy taken while the original lived): kept for one click");
+  ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
+  const timed = { ...good, grant: { ...good.grant, expires: 5000 } };
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 4999) === "silent", "U-8.before: now = expires - 1, fresh: silent");
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
+  ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // take/put/markLeft over a Storage-like map; and storage that throws
+  const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  const taken = takeReloadRecord(s1);
+  ok(taken?.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
+  ok(takeReloadRecord(s1) === null, "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
+  const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2) === null && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is no record");
+  const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
+  ok(takeReloadRecord(thrower) === null && takeReloadRecord(null) === null, "U-3.storage: storage that throws, or none, is no record");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
