@@ -212,7 +212,9 @@ export function createJournal(o) {
         if (e.file) {
           const data = e.file.hash === null ? null : await getBlob(db, e.file.hash);
           if (e.file.hash !== null && !data) report.diverged.push({ n: e.file.n, reason: `the file ${e.file.path} is not in this browser` });
-          o.kernel.post({ fsPut: e.file.path, data: data ?? null });
+          // (with its version's token, so a run of the resumed session that reads it carries it in a later bundle:
+          // notebook/bundle-blobs.mjs; astra's follow-up on #445)
+          o.kernel.post({ fsPut: e.file.path, data: data ?? null, ...(typeof e.file.tok === "string" ? { tok: e.file.tok } : {}) });
           continue;
         }
         const r = e.run;
