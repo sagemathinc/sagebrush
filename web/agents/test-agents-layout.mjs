@@ -114,6 +114,13 @@ try {
     const m = await w();
     ok("L2-chat-419", near(m.chat, 420), "a pane drag that would leave the chat 419 px leaves it 420", m);
   }
+  {
+    // (O-2: the chat at its 420 px minimum: the header's name, help link and Connect button on one line, the name cut
+    //  rather than pushing the buttons out of the header)
+    const h = await ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), top = r('.top'), who = r('#who'), how = r('#howto'), con = r('#connect');
+      return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
+    ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
+  }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
     await drag("sep-pane", 1600 - pane);
     const m = await w();
