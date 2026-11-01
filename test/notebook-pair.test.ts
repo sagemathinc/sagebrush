@@ -1189,3 +1189,36 @@ test("K39d destroy() releases: a half-read message, then a refused pong past the
     assert.deepEqual([c.buf.length, c.parts.length, c.partsLen, c.inMsg, c.fragments], [0, 0, 0, false, 0]);
   } finally { await s.close(); }
 });
+
+// ---- r4: every path that stops reading releases (the socket's abrupt close, and server.close())
+const inputState = (c: any) => [c.buf.length, c.parts.length, c.partsLen, c.inMsg, c.fragments];
+/** A half-read message (a non-empty fragment) and the first 3 bytes of the next header, in one feed. */
+const halfRead = () => Buffer.concat([masked(0x1, Buffer.from("{"), false), Buffer.from([0x81, 0x85, 0x01])]);
+
+test("K39a abrupt close releases: a half-read message and a partial header, then the socket's close (no FIN): dropped with no input kept", async () => {
+  const { s } = await server();
+  try {
+    const st = stubSock(), on: any = {};
+    st.on = (ev: string, fn: () => void) => { (on[ev] ??= []).push(fn); return st; };
+    const c = s.attach(st);
+    c.feed(halfRead());
+    assert.deepEqual(inputState(c), [3, 1, 1, true, 1], "half read");
+    for (const fn of on.close) fn();
+    assert.ok(c.closed && !s.conns.has(c) && !s.closing.has(c), "dropped");
+    assert.deepEqual(inputState(c), [0, 0, 0, false, 0]);
+  } finally { await s.close(); }
+});
+
+test("K39s server close releases: a half-read message and a partial header on an open socket, then server.close(): destroyed with no input kept", async () => {
+  const { s } = await server();
+  let shut = false;
+  try {
+    const { st, c } = unpaired(s);
+    c.feed(halfRead());
+    assert.deepEqual(inputState(c), [3, 1, 1, true, 1], "half read");
+    shut = true;
+    await s.close();
+    assert.ok(st.destroyed, "destroyed");
+    assert.deepEqual(inputState(c), [0, 0, 0, false, 0]);
+  } finally { if (!shut) await s.close(); }
+});
