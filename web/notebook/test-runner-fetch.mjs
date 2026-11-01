@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTzIndex } from "./runner-worker.js";
-import { checkRunnerDefine, runnerFetchList } from "../runner-fetch.mts";
+import { checkRunnerDefine } from "../runner-fetch.mts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
@@ -104,7 +104,9 @@ ok(parseTzIndex(realBytes) !== null, "the real index itself is accepted");
   const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
   const engine = sha(join(here, "..", "..", "wasm", "sagebrush-engine.wasm")), raster = sha(join(here, "..", "..", "wasm", "sagebrush-raster.wasm"));
   const chunks = readdirSync(join(dist, "lib")).filter((f) => /\.[0-9a-f]{16}\.json$/.test(f)).map((f) => `lib/${f}`);
-  const want = runnerFetchList(engine, raster, chunks, { file: `lib/tzdata/${indexFile}`, sha256: sha(join(tzDir, indexFile)) });
+  // (made here, from the files themselves, not by web/runner-fetch.mts: a list the build dropped a chunk from must
+  // differ from this one, C-G9)
+  const want = { files: [`sagebrush-engine.wasm?h=${engine.slice(0, 16)}`, `sagebrush-raster.wasm?h=${raster.slice(0, 16)}`, ...chunks], tzIndex: { file: `lib/tzdata/${indexFile}`, sha256: sha(join(tzDir, indexFile)) } };
   const same = (a, b) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
   ok(same(list.files, want.files) && list.tzIndex?.file === want.tzIndex.file && list.tzIndex?.sha256 === want.tzIndex.sha256, `G9: dist/runner-fetch.json is exactly the built worker's files (${list.files.length} URLs and the index)`);
   // (the bundles that contain runner-worker.js: those with its NOT_RUN text; each must carry every URL of the list,
