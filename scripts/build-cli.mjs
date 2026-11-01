@@ -7,6 +7,9 @@
 //   node scripts/build-cli.mjs --deno    + build/cli/pyjs-deno   (deno compile; --target=<triple> cross-compiles)
 //   node scripts/build-cli.mjs --sandbox + build/cli/pyjs-sandbox (deno compile with no permissions:
 //                                          no files, env, network or subprocesses; programs on stdin)
+//   --out=build/<name>                   instead of build/cli, and no npm package copy (test/sandbox-env.test.ts:
+//                                          a sibling of build/cli, as the generated modules import ../../src)
+//   PYJS_DENO=<path>                     the deno to compile with (the test's stub compiler)
 //
 // The bundle is made by Bun (fast TypeScript bundler); the Python files in
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
@@ -17,26 +20,30 @@ import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
+import { sandboxEntry } from "./sandbox-env.mjs";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
 // `launcher`, the entry is the launcher (packages/sagebrush/bin/sagebrush.cjs,
 // which runs a program in a worker thread so that Ctrl-C reaches it), and the
-// bundle, beside it as pyjs.cjs, is included.
-function denoCompile(flags, exe, launcher = false) {
+// bundle, beside it as pyjs.cjs, is included.  With `entryText`, the entry is that text (the sandbox's).
+function denoCompile(flags, exe, launcher = false, entryText = null) {
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-deno-"));
   if (launcher) {
     copyFileSync(bundle, join(dir, "pyjs.cjs"));
     copyFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), join(dir, "sagebrush.cjs"));
     flags = [...flags, "--include", join(dir, "pyjs.cjs")];
-  } else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
-  run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
+  } else if (entryText !== null) writeFileSync(join(dir, "sagebrush.cjs"), entryText);
+  else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
+  run(process.env.PYJS_DENO || "deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
   // Windows targets get ".exe" appended.
   return existsSync(exe) ? exe : exe + ".exe";
 }
 
 const root = new URL("..", import.meta.url).pathname;
-const out = join(root, "build", "cli");
+const outArg = process.argv.find((a) => a.startsWith("--out="));
+if (outArg && !/^build\/[A-Za-z0-9._-]+$/.test(outArg.slice(6))) throw new Error("build-cli: --out=build/<name> (a sibling of build/cli)");
+const out = join(root, outArg ? outArg.slice(6) : join("build", "cli"));
 mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
 
@@ -139,9 +146,11 @@ writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").rep
 // command): Node's compile cache on, and a program run in a worker thread so
 // that Ctrl-C raises KeyboardInterrupt in it.
 writeFileSync(join(out, "pyjs"), readFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), "utf8"), { mode: 0o755 });
-// The npm package `sagebrush` (packages/sagebrush) ships this bundle.
-mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
-writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
+// The npm package `sagebrush` (packages/sagebrush) ships this bundle.  (not from a --out build)
+if (!outArg) {
+  mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
+  writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
+}
 console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files)`);
 
 // 3a. Node single executable application (node --build-sea, Node >= 25.5).
@@ -171,10 +180,13 @@ if (process.argv.includes("--deno")) {
 // at compile time and --no-prompt makes every denial a PermissionError
 // instead of a question on the terminal.  Programs come on stdin or as the
 // interactive prompt; the embedded library still imports.  Add scoped grants
-// with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."
+// with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."  The entry and its flags are
+// scripts/sandbox-env.mjs's: the bundle with an env adapter first (a key Deno
+// refuses reads as unset), and --no-prompt plus those grants, nothing more.
 if (process.argv.includes("--sandbox")) {
   const target = process.argv.find((a) => a.startsWith("--target="));
-  const extra = (process.env.PYJS_SANDBOX_ALLOW ?? "").split(/\s+/).filter(Boolean);
-  const exe = denoCompile(["--no-prompt", ...extra, ...(target ? [target] : [])], join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : "")));
-  console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${extra.length ? " grants: " + extra.join(" ") : ""}`);
+  const sb = sandboxEntry({ bundleText: readFileSync(bundle, "utf8"), allow: process.env.PYJS_SANDBOX_ALLOW ?? "", target });
+  const exe = denoCompile(sb.flags, join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : "")), false, sb.entryText);
+  const grants = sb.flags.slice(1, target ? -1 : undefined);
+  console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${grants.length ? " grants: " + grants.join(" ") : ""}`);
 }
