@@ -1078,7 +1078,7 @@ renderHeader();
 // (a workspace that can't be opened is said, in words, with its error and a [Retry]: never a silent demo, which hid
 // exactly this; the chats here still work as a preview)
 let retrying = false;
-async function openWorkspace(): Promise<boolean> {
+async function openWorkspace(again = false): Promise<boolean> {
   let why = "";
   try {
     workspace = await Workspace.open();
@@ -1088,7 +1088,16 @@ async function openWorkspace(): Promise<boolean> {
   }
   $("#connect").hidden = !workspace;
   $("#ws-error").hidden = !!workspace;
-  setText($("#ws-error-text"), workspace ? "" : `This browser's storage couldn't be opened, so Claude can't connect on this page: ${why}`);
+  // (the sentence once, then the error's own words in the muted details; a failed [Retry] says so anew, and the same
+  // text is cleared first, so role=alert announces it again)
+  const msg = workspace ? "" : `${again ? "Still couldn't open the storage. " : ""}This browser's storage couldn't be opened, so Claude can't connect on this page. If Sagebrush is open in another tab, close it, then [Retry].`;
+  const t = $("#ws-error-text");
+  if (again && msg && t.textContent === msg) {
+    t.textContent = "";
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  setText(t, msg);
+  setText($("#ws-error-why"), workspace ? "" : `(${why.replace(/^this browser's storage can't be opened: /, "")})`);
   return !!workspace;
 }
 await openWorkspace();
@@ -1227,7 +1236,12 @@ $("#ws-retry").onclick = async () => {
   b.setAttribute("aria-disabled", "true");
   setText(b, "Retrying…");
   try {
-    if ((await openWorkspace()) && workspace) mountPairing(workspace);
+    if ((await openWorkspace(true)) && workspace) {
+      mountPairing(workspace);
+      // (the focused [Retry] was inside the message that just hid: focus goes to the next step, Connect Claude, unless
+      // a dialog (the pairing link's) has taken it)
+      if (document.activeElement === b || document.activeElement === document.body) $("#connect").focus();
+    }
   } finally {
     retrying = false;
     b.removeAttribute("aria-busy");
