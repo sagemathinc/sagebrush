@@ -547,6 +547,22 @@ export function copy(a: NDArray, dt: DType = a.dt): NDArray {
 
 // A view of a keeps a's read-only flag.
 const viewOf = (v: NDArray, a: NDArray): NDArray => ((v.ro = a.ro), v);
+// (frombuffer's array as NumPy's: of bytes, read-only for good, its base
+// the bytes; of a writeable buffer (lib/numpy passes a bytearray as a
+// memoryview, NumPy's base), writeable.  It is a copy here, aligned, where
+// NumPy's shares the buffer's memory.  At module level, so the limit-sites
+// census keeps attributing the lines after frombuffer to their own function)
+function fromBytes(a: NDArray, buffer: any): NDArray {
+  a.bufBase = buffer;
+  // (writeable only over writeable memory: a bytearray, or a memoryview
+  // that isn't read-only)
+  const ro = buffer instanceof Obj.PyByteArray ? false : buffer instanceof Obj.PyBytes ? true : O.truth(Obj.getattr(buffer, "readonly"));
+  if (ro) {
+    a.ro = true;
+    a.fixedRO = true;
+  }
+  return a;
+}
 function writable(a: NDArray) {
   if (a.ro) raise(T.ValueError, "assignment destination is read-only");
 }
@@ -3513,21 +3529,6 @@ newBuiltinModule("_numpy", (m) => {
   fn("ravel", (a: any) => ravel(asarray(a)));
   fn("copy", (a: any) => copy(asarray(a)));
   // raw bytes in and out (little-endian, or '>' dtypes byte-swapped)
-  // (frombuffer's array as NumPy's: of bytes, read-only for good, its base
-  // the bytes; of a writeable buffer (lib/numpy passes a bytearray as a
-  // memoryview, NumPy's base), writeable.  It is a copy here, aligned, where
-  // NumPy's shares the buffer's memory)
-  const fromBytes = (a: NDArray, buffer: any): NDArray => {
-    a.bufBase = buffer;
-    // (writeable only over writeable memory: a bytearray, or a memoryview
-    // that isn't read-only)
-    const ro = buffer instanceof Obj.PyByteArray ? false : buffer instanceof Obj.PyBytes ? true : O.truth(Obj.getattr(buffer, "readonly"));
-    if (ro) {
-      a.ro = true;
-      a.fixedRO = true;
-    }
-    return a;
-  };
   fn("frombuffer", (buffer: any, dtype: any = null, count: any = -1, offset: any = 0) => {
     const spec = typeof dtype === "string" ? dtype : null;
     const big = spec !== null && spec.startsWith(">");
