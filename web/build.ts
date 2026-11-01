@@ -468,9 +468,8 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   const bytes = readFileSync(join(here, "dist", file));
   const mime = MIME[file.split(".").pop()!];
   if (!mime) throw new Error(`sw.js: no type for ${file}`);
-  // (as web/_headers and web/csp.ts give it: every file cross-origin isolated and nosniff (security audit G-3b: the
-  // replay of a kept copy, offline or cache-first, carries what the network response does), a page its policy)
-  const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "X-Content-Type-Options": "nosniff" };
+  // (as web/_headers and web/csp.ts give it: every file cross-origin isolated, a page its policy)
+  const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
   if (file.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": pagePolicy(scriptHashes(bytes.toString("utf8"))), "X-Frame-Options": frameOptions(pagePolicy())! });
   return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
