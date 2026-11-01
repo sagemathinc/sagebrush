@@ -297,6 +297,10 @@ def _hurwitz(x, q):
         if x != _math.floor(x):
             return _NAN
         n = int(_math.floor(-q)) + 1
+        if n > _WORK_MAX:
+            # (_admit refuses this before any element; kept so that the loop
+            # itself never runs past the bound)
+            raise _S.NotCovered("a q at or below -%d (its head sum's work)" % _WORK_MAX)
         head = 0.0
         for k in range(n):
             head += (q + k) ** -x
@@ -625,6 +629,10 @@ def _legendre(n, x):
     n = int(n)
     if n < 0:
         n = -(n + 1)  # (P_{-n-1} = P_n)
+    if n > _WORK_MAX:
+        # (_admit refuses this before any element; kept so that the loop
+        # itself never runs past the bound)
+        raise _S.NotCovered("a degree above %d (its recurrence's work)" % _WORK_MAX)
     if n == 0:
         return 1.0
     if n == 1:
