@@ -562,6 +562,25 @@ export async function runRecoveryTests(check) {
     clean("C9m", clock, live, p);
   });
 
+  await control("C9n", async () => {
+    // (F3's window shorter than its waits: the reconcile itself, given a 700 ms window, on a record that never comes
+    // (not-found at once). Its waits are clipped to what is left, 500 then 200 ms, so the outcome is unknown at
+    // exactly the window's end; unclipped, the second wait would run to 1500 ms)
+    const { p, clock, live } = await clockedPage([["u", "x = 1"]]);
+    let note = null, at = null;
+    const job = { request: "rq.c9n", lc: p.kernel.lc, sink: { stopped: (n) => { note = n; at = clock.now(); } } };
+    p.kernel.current = job;
+    const run = p.kernel.reconcileSubmit(job, new Error("lost"), p.kernel.abortCtl.signal, clock.now() + 700);
+    await clock.advanceTo(699);
+    const early = note !== null;
+    await clock.advanceTo(700);
+    await ended(clock, run);
+    check(!early && note === NOTES.unknown && at === 700, `C9n: the reconcile's waits are clipped to its window: unknown at exactly 700 ms, not later (${at})`);
+    p.kernel.current = null;
+    p.kernel.needsFence = false;
+    clean("C9n", clock, live, p);
+  });
+
   await control("C4-deadline", async () => {
     const { p, clock, log } = await clockedPage([["u", "x = 1"], ["c0", "v0 = 0"]]);
     loseToUnknown(p);
