@@ -631,6 +631,87 @@ try {
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
   }
 
+  // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
+  // (William, Oct 31: typing at the bottom moved the source and its cursor out of view; the source couldn't be
+  // scrolled to its top. The editor had no height in the pane: it took its content's, and each preview render moved
+  // the source.) A long paper, at 1400 and 1000 px: C-a the editor as tall as its box (±1 px); C-b while a character is
+  // typed at the end and the preview catches up (40 samples, 100 ms apart) the source's top doesn't move (0 px); C-c
+  // the caret stays inside the source's box and the viewport (±1 px; the caret's own place, from a hidden copy of the
+  // textarea up to the caret); C-d 60 wheel notches up over the source bring line 1 into view (±1 px); C-e1 the pane's
+  // and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400)
+  if (want("latex") && LATEX) {
+    const path = "/notes/layout.tex";
+    const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
+    const sec = (k) => `\\section{Part ${k}}\n` + Array.from({ length: 30 }, (_, j) => `% a comment line ${k}.${j}`).join("\n") + `\nSome words of part ${k}, with $a_${k}$.\n\n\\begin{align}\n  (a+b)^2 &= a^2 + 2ab + b^2, \\\\\n  \\int_0^1 x^n \\, dx &= \\frac{1}{n+1}.\n\\end{align}\n\n`;
+    const TEXT = "\\documentclass{article}\n\\usepackage{amsmath}\n" + pre + "\n\\begin{document}\n" + Array.from({ length: 25 }, (_, k) => sec(k)).join("") + "The last line.\n\\end{document}\n";
+    await call("workspace.create", { path, content: { text: TEXT } });
+    await artifactTurn(path);
+    await until(`!!document.querySelector('${PANE} .tex-embed .tex-src')`, 20000);
+    await sleep(3000);
+    const ED = `document.querySelector('${PANE} .tex-embed')`;
+    const caretJs = `(() => { const ta = ${ED}.querySelector('.tex-src'), tr = ta.getBoundingClientRect(), cs = getComputedStyle(ta), m = document.createElement('div');
+      for (const k of ['boxSizing','paddingTop','paddingRight','paddingBottom','paddingLeft','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','tabSize','overflowWrap','wordBreak']) m.style[k] = cs[k];
+      Object.assign(m.style, { position: 'absolute', visibility: 'hidden', top: '0', left: '-9999px', width: ta.clientWidth + 'px', boxSizing: 'border-box', whiteSpace: ta.wrap === 'off' ? 'pre' : 'pre-wrap' });
+      m.textContent = ta.value.slice(0, ta.selectionStart); const mk = document.createElement('span'); mk.textContent = '\\u200b'; m.append(mk); document.body.append(m);
+      const y = tr.top + ta.clientTop + mk.offsetTop - ta.scrollTop, h = mk.offsetHeight; m.remove();
+      return y >= Math.max(tr.top + ta.clientTop, 0) - 1 && y + h <= Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight) + 1; })()`;
+    const widths = `(() => ({ pane: Math.round(document.querySelector('#artifacts').getBoundingClientRect().width), chat: Math.round(document.querySelector('main').getBoundingClientRect().width) }))()`;
+    for (const w of [1400, 1000]) {
+      await size(w); await sleep(800);
+      // (C-e1: the widths without this layout's rules, then with them)
+      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      const on = await ev(widths);
+      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
+      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+      // (from the top: the source and every box around it scrolled to 0)
+      await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.scrollTop = 0; for (let e = ta.closest('.tex-embed').parentElement; e; e = e.parentElement) e.scrollTop = 0; return true; })()`);
+      await sleep(300);
+      // (its box, and within the pane's own visible box: without the layout the box grows with the editor too)
+      const ca = await ev(`(() => { const e = ${ED}, r = e.getBoundingClientRect(), b = e.closest('.file-body').getBoundingClientRect(), p = e.closest('.pane-body'), pr = p.getBoundingClientRect();
+        return { editor: Math.round(r.height), box: Math.round(b.height), bottom: Math.round(r.bottom), paneBottom: Math.round(pr.top + p.clientTop + p.clientHeight) }; })()`);
+      ok(Math.abs(ca.editor - ca.box) <= 1 && ca.bottom <= ca.paneBottom + 1, `A4/A8 C-a@${w}: the LaTeX editor as tall as its box and within its pane, not its content's height`, ca);
+      await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.focus(); const e = ta.value.lastIndexOf("The last line."); ta.setSelectionRange(e, e); return true; })()`);
+      await send("Input.insertText", { text: "Z" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "z", code: "KeyZ" });
+      const tops = [], inside = [];
+      for (let k = 0; k < 40; k++) { tops.push(await ev(`Math.round(${ED}.querySelector('.tex-src').getBoundingClientRect().top)`)); inside.push(await ev(caretJs)); await sleep(100); }
+      ok(new Set(tops).size === 1, `A4/A8 C-b@${w}: typing at the end, the source stays where it is while the preview catches up`, { tops: [...new Set(tops)] });
+      ok(inside.every(Boolean), `A4/A8 C-c@${w}: typing at the end, the caret stays inside the source and in view`, { outside: inside.filter((x) => !x).length });
+      const at = await ev(`(() => { const r = ${ED}.querySelector('.tex-src').getBoundingClientRect(); return { x: Math.round(r.left + 40), y: Math.round(Math.min(Math.max(r.top, 0) + 60, innerHeight - 40)) }; })()`);
+      for (let k = 0; k < 60; k++) await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+      await sleep(600);
+      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), tr = ta.getBoundingClientRect(), r = e.querySelector('.tex-hl').children[0].getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)) }; })()`);
+      ok(cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view`, cd);
+    }
+    // (C-f, 1400: a notebook open beside the .tex in the same chat. The pane keeps every artifact's host, the others
+    //  [hidden]. In this order: the notebook's tab shown, only its host has a box (C-f3) and its pane is as without
+    //  this layout's rules (C-f2); then the .tex's tab back, only its host has a box (C-f1))
+    {
+      await size(1400); await sleep(500);
+      const NB = "/notes/side.ipynb";
+      const hosts = `[...document.querySelectorAll('#artifacts .pane-host')].map((h) => { const r = h.getBoundingClientRect(); return { tex: !!h.querySelector('.tex-host'), box: Math.round(r.width) * Math.round(r.height) }; })`;
+      await call("workspace.create", { path: NB, content: docFor(NB, [{ code: "x = 1" }]), mode: "python" });
+      await openNotebook(NB);
+      await ev(`(${tabJs(NB)}.click(), true)`);
+      await until(`!!document.querySelector('${PANE} .nb-root')`, 10000); await sleep(500);
+      const shownNb = await ev(hosts);
+      ok(shownNb.filter((h) => h.box > 0).length === 1 && shownNb.find((h) => h.box > 0)?.tex === false, "A4/A8 C-f3@1400: with the notebook shown, only its host has a box (the .tex's stays hidden)", shownNb);
+      const nbBox = `(() => { const h = document.querySelector('${PANE}'), r = h.getBoundingClientRect(), b = h.closest('.pane-body'); return { w: Math.round(r.width), h: Math.round(r.height), range: b.scrollHeight - b.clientHeight }; })()`;
+      const nbOn = await ev(nbBox);
+      await ev(`(document.getElementById('tex-host-layout').disabled = true, true)`); await sleep(300);
+      const nbOff = await ev(nbBox);
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      ok(Math.abs(nbOn.w - nbOff.w) <= 1 && Math.abs(nbOn.h - nbOff.h) <= 1 && Math.abs(nbOn.range - nbOff.range) <= 1, "A4/A8 C-f2@1400: with the notebook shown, its pane is as without the LaTeX layout", { on: nbOn, off: nbOff });
+      await ev(`(${tabJs(path)}.click(), true)`);
+      await until(`!!document.querySelector('${PANE} .tex-embed')`, 10000); await sleep(500);
+      const shown = await ev(hosts);
+      ok(shown.filter((h) => h.box > 0).length === 1 && shown.find((h) => h.box > 0)?.tex === true, "A4/A8 C-f1@1400: back on the .tex, only its host has a box", shown);
+    }
+    await size(1280); await sleep(300);
+  }
+
   // ======================================================================== ART-C2: the mount, held at its module's load
   if (want("mount")) {
     // (a) the file replaced while the mount waits: the pane lets go once it attaches, and nothing is written
