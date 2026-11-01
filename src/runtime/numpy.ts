@@ -889,10 +889,36 @@ function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
   const m = arrayMethod(x);
   if (m === undefined) return x;
   const pos = dt === null ? [] : [dt];
-  const r = copyKw === undefined ? Obj.callObj(m, pos) : Obj.callKw(m, pos, ["copy"], [copyKw]);
+  let r: any;
+  let legacy = false;
+  if (copyKw === undefined) r = Obj.callObj(m, pos);
+  else {
+    try {
+      r = Obj.callKw(m, pos, ["copy"], [copyKw]);
+    } catch (e) {
+      // (NumPy 2's fallback for a method without copy=: only on the
+      // TypeError naming that keyword, with its DeprecationWarning; any
+      // other error, the method's own, propagates)
+      if (!Obj.isinstance(e, T.TypeError) || !String(Obj.callObj(T.str, [e])).includes(COPY_KW_ERROR)) throw e;
+      Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [LEGACY_COPY_WARNING, T.DeprecationWarning, 2]);
+      r = Obj.callObj(m, pos);
+      legacy = true;
+    }
+  }
   if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
+  if (legacy) {
+    // (a method that can't promise a copy: np.array's copy=True copies its
+    // result, and copy=False is refused, as NumPy's)
+    if (copyKw === false) raise(T.ValueError, NO_COPY_ERROR);
+    if (O.truth(copyKw)) r = copy(r);
+  }
   return r;
 }
+const COPY_KW_ERROR = "__array__() got an unexpected keyword argument 'copy'";
+const LEGACY_COPY_WARNING =
+  "__array__ implementation doesn't accept a copy keyword, so passing copy=False failed. __array__ must implement 'dtype' and 'copy' keyword arguments. To learn more, see the migration guide https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword";
+const NO_COPY_ERROR =
+  "Unable to avoid copy while creating an array as requested.\nIf using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).\nFor more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.";
 export function fromPy(x: any, dtype: any = null, copyKw: any = undefined): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
