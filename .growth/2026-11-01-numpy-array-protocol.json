@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "numpy's __array__ protocol (an object whose type defines __array__ is the array it returns: np.array/asarray, nested lists, ufunc operands, ndarray operators), in src/runtime/numpy.ts, which the CLI and the worker carry. Measured locally with CI's bun 1.4.4 tool: master f2542880 against this head; cli/pyjs.cjs +793 marked 835 (42 B for drift), the worker exact.",
+  "reason": "numpy's __array__ protocol (an object with __array__ is the array it returns: np.array/asarray, nested lists in either order, list/tuple subclasses, ufunc operands, ndarray operators; called as NumPy's: no arguments, the dtype positionally, np.array's copy=), and the inhomogeneous error naming the detected shape, in src/runtime/numpy.ts, which the CLI and the worker carry. Measured locally with CI's bun 1.4.4 tool: master e63e8553 against this head; cli/pyjs.cjs +1461 marked 1503 (42 B for drift), the worker exact.",
   "bytes": {
-    "cli/pyjs.cjs": 835,
-    "engine/sagebrush-worker.js": 560
+    "cli/pyjs.cjs": 1503,
+    "engine/sagebrush-worker.js": 934
   }
 }
