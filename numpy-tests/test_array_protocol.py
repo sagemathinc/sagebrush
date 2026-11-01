@@ -245,3 +245,40 @@ tw("stored data, asarray", lambda: isolation(Store, np.asarray))
 tw("stored data, legacy, array copies", lambda: isolation(StoreLegacy, np.array))
 tw("stored data, legacy, asarray shares", lambda: isolation(StoreLegacy, np.asarray))
 tw("own TypeError, no retry", lambda: np.array(OwnCopyError()))
+
+
+# copy=False with a method without copy=: refused before the method runs again
+class Count:
+    """__array__ without copy= that counts its calls"""
+
+    def __init__(self):
+        self.n = 0
+
+    def __array__(self, dtype=None):
+        self.n += 1
+        return np.arange(3)
+
+
+class RaiseBody:
+    def __array__(self, dtype=None):
+        raise RuntimeError("the body ran")
+
+
+class ListBody:
+    def __array__(self, dtype=None):
+        return [1, 2]
+
+
+def counted(copy):
+    c = Count()
+    try:
+        r = repr(np.array(c, copy=copy))
+    except ValueError as e:
+        r = "ValueError: " + str(e).split("\n")[0]
+    return r, c.n
+
+
+tw("legacy copy False, the method not run again", lambda: counted(False))
+tw("legacy default copy, the method run once", lambda: counted(True))
+tw("legacy copy False, a raising body", lambda: np.array(RaiseBody(), copy=False))
+tw("legacy copy False, a body returning a list", lambda: np.array(ListBody(), copy=False))
