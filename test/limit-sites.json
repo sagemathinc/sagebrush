@@ -3715,6 +3715,11 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
+ "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
+ },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
