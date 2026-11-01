@@ -68,6 +68,8 @@ function stubSock() {
 /** The JSON text frames written to a stub socket, in order (the hello's result first). */
 const texts = (st: any) => st.writes.map((w: Buffer) => serverFrame(w)).filter((f: any) => f.op === 0x1).map((f: any) => JSON.parse(f.payload.toString()));
 const closeOf = (st: any) => { for (const w of st.writes) { const f = serverFrame(w); if (f.op === 0x8) return f.payload.readUInt16BE(0); } return null; };
+/** The close frame's reason text (each 1002 names its own guard). */
+const closeReason = (st: any) => { for (const w of st.writes) { const f = serverFrame(w); if (f.op === 0x8) return f.payload.subarray(2).toString(); } return null; };
 
 // ---- the scripted Worker: what the gateway posts, and the messages the test makes it answer
 type Scripted = SessionPort & { workers: any[]; posted: any[]; last(): any };
@@ -120,7 +122,7 @@ function newPage(s: PairServer, clk: ReturnType<typeof clock>, key = keyPair()) 
     proof(method: string, path: string, over: { header?: any; claims?: any; signer?: any; raw?: string } = {}) {
       if (over.raw !== undefined) return over.raw;
       const header = { typ: "dpop+jwt", alg: "ES256", jwk: key.jwk, ...(over.header ?? {}) };
-      const claims = { jti: b64u(randomBytes(16)), htm: method, htu: SYNTHETIC_BASE + path, iat: Math.floor(clk.now() / 1000), ath: b64u(createHash("sha256").update(page.token).digest()), nonce: page.nonce, ...(over.claims ?? {}) };
+      const claims = { jti: b64u(randomBytes(24)), htm: method, htu: SYNTHETIC_BASE + path, iat: Math.floor(clk.now() / 1000), ath: b64u(createHash("sha256").update(page.token).digest()), nonce: page.nonce, ...(over.claims ?? {}) };
       for (const k of Object.keys(claims)) if ((claims as any)[k] === undefined) delete (claims as any)[k];
       for (const k of Object.keys(header)) if ((header as any)[k] === undefined) delete (header as any)[k];
       const input = `${b64u(JSON.stringify(header))}.${b64u(JSON.stringify(claims))}`;
@@ -386,7 +388,7 @@ test("L8c iat by type: missing, a string, null, true, 1.5, 1e999, 2^53: 401 each
       if (v === "1e999") {
         // (a JSON number that parses to Infinity: the claims segment written by hand)
         const header = b64u(JSON.stringify({ typ: "dpop+jwt", alg: "ES256", jwk: t.page.key.jwk }));
-        const claimsText = `{"jti":"${b64u(randomBytes(16))}","htm":"POST","htu":"${SYNTHETIC_BASE}/bindings","iat":1e999,"ath":"${b64u(createHash("sha256").update(t.page.token).digest())}","nonce":"${t.page.nonce}"}`;
+        const claimsText = `{"jti":"${b64u(randomBytes(24))}","htm":"POST","htu":"${SYNTHETIC_BASE}/bindings","iat":1e999,"ath":"${b64u(createHash("sha256").update(t.page.token).digest())}","nonce":"${t.page.nonce}"}`;
         const input = `${header}.${b64u(claimsText)}`;
         const sig = edSign("sha256", Buffer.from(input), { key: t.page.key.privateKey, dsaEncoding: "ieee-p1363" });
         await refused(t, t.page.request("g.bind", {}, {}, { dpop: `${input}.${b64u(sig)}` }), "iat-type");
@@ -394,14 +396,16 @@ test("L8c iat by type: missing, a string, null, true, 1.5, 1e999, 2^53: 401 each
     }
   } finally { await t.s.close(); }
 });
-test("L9a a jti reused within 120 s: 401; L9a+ the same jti at 121 s: passes", async () => {
+test("L9a a jti reused within 120 s, and at exactly 120 s: 401; L9a+ the same jti 1 ms later: passes", async () => {
   const t = await setup();
   try {
-    const jti = b64u(randomBytes(16));
+    const jti = b64u(randomBytes(24));
     assert.equal((await t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }).answer()).status, 200);
     t.clk.advance(1000);
     await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
-    t.clk.advance(120_000);
+    t.clk.advance(GATEWAY_LIMITS.jtiMs - 1000); // (exactly 120 s after it was stored)
+    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
+    t.clk.advance(1);
     const a = await t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }).answer();
     assert.notEqual(a.status, 401, "L9a+: past 120 s the jti is accepted again (then 409 in-use: bound already)");
     census(t.s);
@@ -508,11 +512,12 @@ function rawFrame(page: ReturnType<typeof newPage>, over: any) {
   return closeOf(page.st);
 }
 /** A decode refusal: close 1002, no answer for the frame, zero effects, nothing authenticated. */
-function closed1002(t: { s: PairServer; port: Scripted; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }, over: any, what: string) {
+function closed1002(t: { s: PairServer; port: Scripted; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }, over: any, what: string, reason: string) {
   const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
   const imports = t.s.gateway.stats.keyImports;
   const n = texts(t.page.st).length;
   assert.equal(rawFrame(t.page, over), 1002, what);
+  assert.equal(closeReason(t.page.st), reason, `${what}: closed by its own guard`);
   assert.equal(texts(t.page.st).length, n, `${what}: no answer`);
   assert.equal(t.s.gateway.stats.keyImports, imports, `${what}: nothing authenticated`);
   zeroEffects(t.s, t.port, before);
@@ -523,25 +528,25 @@ function freshWitness(t: { s: PairServer; clk: ReturnType<typeof clock>; page: R
   const p2 = newPage(t.s, t.clk, t.page.key);
   assert.ok(p2.token && p2.token !== t.page.token, `${what}: a fresh socket pairs again (a new token)`);
 }
-const decodeCases: [string, (b: string) => any][] = [
-  ["L13a an unknown rpc", () => ({ rpc: "g.nope" })],
-  ["L13b a ref member failing the ID pattern", () => ({ rpc: "g.run", ref: { b: "b/1" } })],
-  ["L13c a ref member the rpc doesn't take (after on g.run)", (b) => ({ rpc: "g.run", ref: { b, after: 0 } })],
-  ["L14a-pfx the frame id x1", () => ({ id: "x1" })],
-  ["L14a-lz-t0 the frame id t0", () => ({ id: "t0" })],
-  ["L14a-lz-t01 the frame id t01", () => ({ id: "t01" })],
-  ["L14a-len the frame id t + 16 digits", () => ({ id: "t" + "1".repeat(16) })],
-  ["L14e-type after \"1\"", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: "1" }, body: undefined })],
-  ["L14e-int after 1.5", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 1.5 }, body: undefined })],
-  ["L14e-sign after -1", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: -1 }, body: undefined })],
-  ["L14e-range after 2^53", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 2 ** 53 }, body: undefined })],
+const decodeCases: [string, (b: string) => any, string][] = [
+  ["L13a an unknown rpc", () => ({ rpc: "g.nope" }), "an unknown rpc"],
+  ["L13b a ref member failing the ID pattern", () => ({ rpc: "g.run", ref: { b: "b/1" } }), "a ref member not an id"],
+  ["L13c a ref member the rpc doesn't take (after on g.run)", (b) => ({ rpc: "g.run", ref: { b, after: 0 } }), "a ref member the rpc doesn't take"],
+  ["L14a-pfx the frame id x1", () => ({ id: "x1" }), "a frame id is t and digits"],
+  ["L14a-lz-t0 the frame id t0", () => ({ id: "t0" }), "a frame id has no leading zero"],
+  ["L14a-lz-t01 the frame id t01", () => ({ id: "t01" }), "a frame id has no leading zero"],
+  ["L14a-len the frame id t + 16 digits", () => ({ id: "t" + "1".repeat(16) }), "a frame id is at most 15 digits"],
+  ["L14e-type after \"1\"", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: "1" }, body: undefined }), "after: type"],
+  ["L14e-int after 1.5", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 1.5 }, body: undefined }), "after: int"],
+  ["L14e-sign after -1", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: -1 }, body: undefined }), "after: sign"],
+  ["L14e-range after 2^53", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 2 ** 53 }, body: undefined }), "after: range"],
 ];
-for (const [name, over] of decodeCases) {
+for (const [name, over, reason] of decodeCases) {
   test(`${name}: 1002`, async () => {
     const t = await setup();
     try {
       const b = await bind(t.page);
-      closed1002(t, over(b), name);
+      closed1002(t, over(b), name, reason);
       census(t.s);
     } finally { await t.s.close(); }
   });
@@ -558,14 +563,14 @@ test("L14b a reused frame id: 1002", async () => {
   const t = await setup();
   try {
     assert.equal((await t.page.request("g.bind", {}, {}, { id: "t7" }).answer()).status, 200);
-    closed1002(t, { id: "t7", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t7 again");
+    closed1002(t, { id: "t7", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t7 again", "a frame id reused");
   } finally { await t.s.close(); }
 });
 test("L14c a frame id not above the last one: 1002", async () => {
   const t = await setup();
   try {
     assert.equal((await t.page.request("g.bind", {}, {}, { id: "t5" }).answer()).status, 200);
-    closed1002(t, { id: "t3", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t3 after t5");
+    closed1002(t, { id: "t3", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t3 after t5", "a frame id not above the last");
   } finally { await t.s.close(); }
 });
 
@@ -629,7 +634,7 @@ test("L15 a body of exactly BODY_MAX for its rpc, multibyte: passes (L15+); one 
       assert.equal(a.status, 409, `L15+ complete: decoded and dispatched (${a.body})`); // (the wrong epoch: answered after decode)
       assert.equal(bodyOf(a).error, "epoch");
       census(t.s);
-      closed1002(t, { rpc: "g.complete", ref: { b }, body: bodyOfBytes(BODY_MAX.other + 1, { epoch: 2 }) }, "complete + 1 B");
+      closed1002(t, { rpc: "g.complete", ref: { b }, body: bodyOfBytes(BODY_MAX.other + 1, { epoch: 2 }) }, "complete + 1 B", "a body over its limit");
       census(t.s);
     } finally { await t.s.close(); }
   }
@@ -644,7 +649,7 @@ test("L15 a body of exactly BODY_MAX for its rpc, multibyte: passes (L15+); one 
       assert.equal(t.s.gateway.stats.queuedPayloadBytes, BODY_MAX.run, "charged its bytes");
       t.port.last().onMessage({ id: t.port.posted[t.port.posted.length - 1].id, done: true, ms: 1 });
       await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, "released at its end");
-      closed1002(t, { rpc: "g.run", ref: { b }, body: bodyOfBytes(BODY_MAX.run + 1, { request: "big2", epoch: 1, payload: { code: "x = 1" } }) }, "run + 1 B");
+      closed1002(t, { rpc: "g.run", ref: { b }, body: bodyOfBytes(BODY_MAX.run + 1, { request: "big2", epoch: 1, payload: { code: "x = 1" } }) }, "run + 1 B", "a body over its limit");
       census(t.s);
     } finally { await t.s.close(); }
   }
@@ -656,7 +661,7 @@ test("L16 8 open ids pass (L16+); a 9th open id: 1002", async () => {
     for (let i = 1; i <= GATEWAY_LIMITS.openIds; i++) t.page.request("g.record", { b: "b1", r: "r" + i });
     await until(() => holds.length === GATEWAY_LIMITS.openIds, "8 held");
     assert.equal(closeOf(t.page.st), null, "L16+ 8 open ids pass");
-    closed1002(t, { rpc: "g.record", ref: { b: "b1", r: "r9" }, body: undefined }, "a 9th open id");
+    closed1002(t, { rpc: "g.record", ref: { b: "b1", r: "r9" }, body: undefined }, "a 9th open id", "too many open requests");
     for (const h of holds) h();
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(texts(t.page.st).filter((x: any) => x.status !== undefined).length, 0, "the closed socket's held requests answered nothing");
@@ -715,6 +720,7 @@ test("L19a cancel a never-issued frame id: 1002", async () => {
     await bind(t.page); // (t1)
     t.page.cancel("t9");
     assert.equal(closeOf(t.page.st), 1002);
+    assert.equal(closeReason(t.page.st), "a cancel for an id never sent");
     freshWitness(t, "L19a");
   } finally { await t.s.close(); }
 });
@@ -1250,15 +1256,22 @@ async function heldRequest(H: ReturnType<typeof holder>, page: ReturnType<typeof
   return r;
 }
 const settle = () => new Promise((r) => setTimeout(r, 20));
-async function fenced(name: string, f: (t: any, H: ReturnType<typeof holder>) => Promise<void>) {
+/** A fence case: its held requests refused by the guard it names, each counted (G-open: closed; G-gen: stale). */
+async function fenced(name: string, want: { closed: number; stale: number }, f: (t: any, H: ReturnType<typeof holder>) => Promise<void>) {
   test(name, async () => {
     const H = holder();
     const t: any = await setup({ gateway: { authHold: H.hold } });
-    try { await f(t, H); census(t.s); } finally { await t.s.close(); }
+    try {
+      const before = { ...t.s.gateway.stats.fenced };
+      await f(t, H);
+      assert.deepEqual({ closed: t.s.gateway.stats.fenced.closed - before.closed, stale: t.s.gateway.stats.fenced.stale - before.stale }, want, "refused by its own guard");
+      assert.equal(t.s.gateway.stats.invariantFailures, 0);
+      census(t.s);
+    } finally { await t.s.close(); }
   });
 }
 // across sockets (G-open)
-fenced("L42a a held g.run, then the socket closes: nothing admitted, nothing sent", async (t, H) => {
+fenced("L42a a held g.run, then the socket closes: nothing admitted, nothing sent", { closed: 1, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
   const writes = t.page.st.writes.length, posted = t.port.posted.length;
@@ -1268,7 +1281,7 @@ fenced("L42a a held g.run, then the socket closes: nothing admitted, nothing sen
   assert.equal(t.port.posted.length, posted);
   assert.equal(t.page.st.writes.length, writes, "nothing sent");
 });
-fenced("L42b a held g.run, then an unpair: nothing admitted, nothing sent", async (t, H) => {
+fenced("L42b a held g.run, then an unpair: nothing admitted, nothing sent", { closed: 1, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
   const posted = t.port.posted.length;
@@ -1278,7 +1291,7 @@ fenced("L42b a held g.run, then an unpair: nothing admitted, nothing sent", asyn
   assert.equal(t.port.posted.length, posted, "nothing admitted or posted");
   assert.equal(t.page.st.writes.length, writes, "nothing sent");
 });
-fenced("L42c a held g.run, then a rebind: no admission in the new binding, no answer on the new socket", async (t, H) => {
+fenced("L42c a held g.run, then a rebind: no admission in the new binding, no answer on the new socket", { closed: 1, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
   const { p2, b2 } = await rebind(t);
@@ -1289,7 +1302,7 @@ fenced("L42c a held g.run, then a rebind: no admission in the new binding, no an
   assert.equal(t.port.posted.length, posted);
   assert.equal(p2.st.writes.length, w2, "no answer on the new socket");
 });
-fenced("L42d a held g.interrupt and a held g.restart, then a rebind: the new Worker neither interrupted nor restarted", async (t, H) => {
+fenced("L42d a held g.interrupt and a held g.restart, then a rebind: the new Worker neither interrupted nor restarted", { closed: 2, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const i = await heldRequest(H, t.page, "g.interrupt", { b }, { epoch: 1 });
   const rs = await heldRequest(H, t.page, "g.restart", { b }, { epoch: 1 });
@@ -1301,7 +1314,7 @@ fenced("L42d a held g.interrupt and a held g.restart, then a rebind: the new Wor
   assert.equal(t.s.gateway.stats.workersStarted, started, "not restarted");
   assert.equal(p2.st.writes.length, w2);
 });
-fenced("L42e a held g.complete, then a rebind: nothing delivered into the new binding", async (t, H) => {
+fenced("L42e a held g.complete, then a rebind: nothing delivered into the new binding", { closed: 1, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const c = await heldRequest(H, t.page, "g.complete", { b }, { epoch: 1, code: "x" });
   const { p2 } = await rebind(t);
@@ -1310,14 +1323,14 @@ fenced("L42e a held g.complete, then a rebind: nothing delivered into the new bi
   assert.equal(t.port.posted.length, posted, "no completion posted to the new Worker");
   assert.equal(p2.st.writes.length, w2);
 });
-fenced("L42i a held g.bind, then an unpair: no binding created", async (t, H) => {
+fenced("L42i a held g.bind, then an unpair: no binding created", { closed: 1, stale: 0 }, async (t, H) => {
   const r = await heldRequest(H, t.page, "g.bind", {}, {});
   t.page.c.feed(maskedText({ unpair: true }));
   H.release(r.id); await settle();
   assert.equal(t.s.gateway.binding, null);
   assert.equal(t.s.gateway.stats.workersStarted, 0, "no Worker started");
 });
-fenced("L42j a held g.bind, then a replacement (socket B pairs and binds): A's bind has no effect, B's binding untouched", async (t, H) => {
+fenced("L42j a held g.bind, then a replacement (socket B pairs and binds): A's bind has no effect, B's binding untouched", { closed: 1, stale: 0 }, async (t, H) => {
   const r = await heldRequest(H, t.page, "g.bind", {}, {});
   t.page.st.emit("close");
   const p2 = newPage(t.s, t.clk, t.page.key);
@@ -1329,7 +1342,7 @@ fenced("L42j a held g.bind, then a replacement (socket B pairs and binds): A's b
   assert.equal(t.s.gateway.binding.gen, before.gen);
   assert.equal(t.s.gateway.stats.workersStarted, started);
 });
-fenced("L42k a held g.takeover, then the socket closes: no epoch change", async (t, H) => {
+fenced("L42k a held g.takeover, then the socket closes: no epoch change", { closed: 1, stale: 0 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.takeover", { b }, { from_epoch: 1 });
   t.page.st.emit("close");
@@ -1337,7 +1350,7 @@ fenced("L42k a held g.takeover, then the socket closes: no epoch change", async 
   assert.equal(t.s.gateway.binding.epoch, 1, "no epoch change");
 });
 // on the same open socket (G-gen)
-fenced("L42f a held g.interrupt, then a g.restart completes on the same socket: the interrupt 409 stale, the new Worker not interrupted", async (t, H) => {
+fenced("L42f a held g.interrupt, then a g.restart completes on the same socket: the interrupt 409 stale, the new Worker not interrupted", { closed: 0, stale: 1 }, async (t, H) => {
   const b = await bind(t.page);
   const i = await heldRequest(H, t.page, "g.interrupt", { b }, { epoch: 1 });
   assert.equal((await t.page.request("g.restart", { b }, { epoch: 1 }).answer()).status, 200);
@@ -1348,7 +1361,7 @@ fenced("L42f a held g.interrupt, then a g.restart completes on the same socket: 
   assert.equal(bodyOf(a).error, "stale");
   assert.deepEqual(w2.interrupts, []);
 });
-fenced("L42g a held g.run, then a g.takeover on the same socket: 409 stale, zero admissions", async (t, H) => {
+fenced("L42g a held g.run, then a g.takeover on the same socket: 409 stale, zero admissions", { closed: 0, stale: 1 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
   assert.equal((await t.page.request("g.takeover", { b }, { from_epoch: 1 }).answer()).status, 200);
@@ -1358,7 +1371,7 @@ fenced("L42g a held g.run, then a g.takeover on the same socket: 409 stale, zero
   assert.equal(bodyOf(a).error, "stale");
   assert.equal(t.s.gateway.binding.runs.size, 0);
 });
-fenced("L42h a held g.complete, then the 2 s fallback: 409 stale; nothing delivered, no completion to the new Worker", async (t, H) => {
+fenced("L42h a held g.complete, then the 2 s fallback: 409 stale; nothing delivered, no completion to the new Worker", { closed: 0, stale: 1 }, async (t, H) => {
   const b = await bind(t.page);
   const run = await admitRun(t, b, "req-1");
   const c = await heldRequest(H, t.page, "g.complete", { b }, { epoch: 1, code: "x" });
@@ -1373,7 +1386,7 @@ fenced("L42h a held g.complete, then the 2 s fallback: 409 stale; nothing delive
   assert.ok(!w2.posted.some((m: any) => m.complete !== undefined), "no completion dispatched to the new Worker");
   void run;
 });
-fenced("L42l a held g.takeover, then a g.restart on the same socket: 409 stale, no epoch change", async (t, H) => {
+fenced("L42l a held g.takeover, then a g.restart on the same socket: 409 stale, no epoch change", { closed: 0, stale: 1 }, async (t, H) => {
   const b = await bind(t.page);
   const r = await heldRequest(H, t.page, "g.takeover", { b }, { from_epoch: 1 });
   assert.equal((await t.page.request("g.restart", { b }, { epoch: 1 }).answer()).status, 200);
@@ -1382,6 +1395,22 @@ fenced("L42l a held g.takeover, then a g.restart on the same socket: 409 stale, 
   assert.equal(a.status, 409);
   assert.equal(bodyOf(a).error, "stale");
   assert.equal(t.s.gateway.binding.epoch, 1, "no epoch change");
+});
+test("L42-inv the fence's invariant fails closed: an open conn that is no longer the paired one (forced): no effect, nothing sent, counted", async () => {
+  const H = holder();
+  const t: any = await setup({ gateway: { authHold: H.hold } });
+  try {
+    const b = await bind(t.page);
+    const r = await heldRequest(H, t.page, "g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x" } });
+    const writes = t.page.st.writes.length, posted = t.port.posted.length;
+    t.s.pairedConn = null; // (unreachable in this code: pairedConn is cleared only after closed is set; forced here)
+    H.release(r.id); await settle();
+    assert.equal(t.s.gateway.stats.invariantFailures, 1, "counted");
+    assert.equal(t.s.gateway.binding.runs.size, 0, "no effect");
+    assert.equal(t.port.posted.length, posted);
+    assert.equal(t.page.st.writes.length, writes, "nothing sent");
+    census(t.s);
+  } finally { await t.s.close(); }
 });
 test("L43 old-generation Worker output after a restart and after the fallback: dropped and counted; it reaches no run or answer of the new generation", async () => {
   const t = await setup();
@@ -1430,6 +1459,7 @@ async function setupReal(o: { gateway?: any } = {}) {
     seen.msgs.push([]);
     w.on("message", (m: any) => { seen.msgs[k].push(m); seen.onMsg?.(m, k); });
     w.on("exit", () => seen.exits.push(k));
+    w.unref(); // (a control that leaves a Worker running mustn't keep the run's process alive)
   });
   const s = new PairServer({ timers: clk, err: () => {}, gateway: { port, ...(o.gateway ?? {}) } });
   const page = newPage(s, clk);
@@ -1638,7 +1668,7 @@ for (const path of ["err", "exit", "fb", "unpair", "rebind", "close"] as Path[])
       await startReal(t, b, "held", path === "fb" ? SWALLOW : LOOP);
       t.page.request("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "c" }));
       await until(() => t.s.gateway.completeWaiter !== null, "the completion dispatched");
-      assert.ok(t.s.gateway.stats.queuedPayloadBytes > BODY_MAX.run);
+      assert.ok(t.s.gateway.stats.queuedPayloadBytes > BODY_MAX.other, "the run and the completion charged");
       await cleanup(t, path);
       await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, `${path}: the charge 0`, 30_000);
       census(t.s);
