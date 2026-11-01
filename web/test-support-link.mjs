@@ -36,9 +36,9 @@ function check(file) {
   ok(tag !== "" && menu.includes(tag), `inside: ${file}: #supportlink is inside #moremenu`);
   // (the menu's two external links say so to a screen reader, in the page's own visually hidden .sr class; the visible
   // label is unchanged: @sagebrush, Oct 31)
-  for (const [id, label] of [["supportlink", "Support ↗"], ["howruns", "How cells run ↗"]]) {
+  for (const [id, label] of [["supportlink", "Support"], ["howruns", "How cells run"]]) {
     const body = html.match(new RegExp(`<a\\b[^>]*id="${id}"[^>]*>([\\s\\S]*?)</a>`))?.[1] ?? null;
-    ok(body === `${label}<span class="sr"> (opens in a new tab)</span>`, `new-tab: ${file}: #${id} reads "${label}" and, to a screen reader, "(opens in a new tab)" (${JSON.stringify(body)})`);
+    ok(body === `${label} <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span>`, `new-tab: ${file}: #${id} reads "${label} ↗", the arrow hidden from a screen reader, which hears "(opens in a new tab)" (${JSON.stringify(body)})`);
   }
   ok(/^\s*\.sr \{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset\(50%\); white-space: nowrap; \}$/m.test(html), `sr-class: ${file}: the .sr class is the visually hidden one`);
 }
