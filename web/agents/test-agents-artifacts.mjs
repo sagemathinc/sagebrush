@@ -748,10 +748,13 @@ try {
       await size(1400); await sleep(400);
       await ev(`(() => { const st = document.createElement('style'); st.id = 'sbtest-pane'; st.textContent = 'body.has-artifact:not(.fullscreen) #artifacts { width: ${pw}px !important; }'; document.head.append(st); return true; })()`);
       await sleep(800);
-      const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
-      ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
-      await editorCases(`pane${pw}`);
-      await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);
+      try {
+        const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
+        ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
+        await editorCases(`pane${pw}`);
+      } finally {
+        await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);
+      }
     }
     // (C-f, 1400: a notebook open beside the .tex in the same chat. The pane keeps every artifact's host, the others
     //  [hidden]. In this order: the notebook's tab shown, only its host has a box (C-f3) and its pane is as without
