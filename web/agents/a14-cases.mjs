@@ -165,6 +165,25 @@ const STAGES = `(() => {
   const st = navigator.storage;
   if (st && st.getDirectory) { const gd = st.getDirectory.bind(st); st.getDirectory = () => { add("opfs getDirectory"); return gd().then((d) => (add("opfs directory"), d), (e) => { add("opfs error " + (e && e.name)); throw e; }); }; }
 })()`;
+// (test-only: the page's FIRST open of the workspace store answered `ms` later: the real open is made then and its
+// events passed on; the forced form of a slow first open, A14-22/A14-23)
+const SLOW_WS_OPEN = (ms) => `(() => {
+  const open = indexedDB.open.bind(indexedDB);
+  let first = true;
+  indexedDB.open = (name, ...a) => {
+    if (!first || name !== "sagebrush-workspace") return open(name, ...a);
+    first = false;
+    const fake = new EventTarget(), EV = ["success", "error", "upgradeneeded", "blocked"];
+    let real = null;
+    for (const k of ["result", "transaction", "error", "readyState", "source"]) Object.defineProperty(fake, k, { get: () => (real ? real[k] : undefined) });
+    for (const ev of EV) { let h = null; Object.defineProperty(fake, "on" + ev, { get: () => h, set: (f) => { h = f; } }); }
+    setTimeout(() => {
+      real = open(name, ...a);
+      for (const ev of EV) real.addEventListener(ev, (e) => { const h = fake["on" + ev]; if (h) h.call(fake, e); });
+    }, ${ms});
+    return fake;
+  };
+})()`;
 const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace";
 
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
@@ -207,7 +226,8 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   if (clock) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: CLOCK });
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
-  await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
+  // (the stage log only on request (A14_STAGES=1): it wraps the very calls it watches, so the default runs are unwrapped)
+  if (process.env.A14_STAGES === "1") await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
   P.ev = async (expression, o = {}) => {
     const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o });
     if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
@@ -269,6 +289,11 @@ async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
   // (30 s: under a full counted run's load the page's first load and its dialog can take longer than 15 s)
   await timed("pair-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000));
+  if (process.env.A14_STAGES === "1") {
+    // (the first workspace-store open, requested to success, from the stage log: the margin under its 15 s deadline)
+    const d = await P.ev(`(() => { const L = window.__a14stages || [], at = (s) => { const x = L.find((l) => l.endsWith(s)); return x ? Number(x.split(" ")[0]) : null; }; const a = at("idb open sagebrush-workspace"), b = at("idb success sagebrush-workspace"); return a === null || b === null ? null : b - a; })()`);
+    console.log(`wait ${curCase} ws-open ${d}`);
+  }
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   return allowDialog(P, how, remember, write);
 }
@@ -853,6 +878,33 @@ export async function runA14({ site, ok, want = () => true }) {
     } finally {
       A2.stop();
     }
+  });
+
+  // A14-22 (the hang's cause, forced): the page's first workspace-store open answers after 4 s (over the old 3 s
+  // deadline, well under the store's 15 s): the pairing link's dialog comes, and no storage message is shown
+  await run("A14-22", async (B, A) => {
+    const P = await B.tab();
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(4000) });
+    const t = Date.now();
+    await pair(P, A, site, "page");
+    const st = await P.ev(`({ err: !document.querySelector('#ws-error').hidden, connectHidden: document.querySelector('#connect').hidden })`);
+    ok(Date.now() - t >= 4000 && !st.err && !st.connectHidden, "A14-22: a first workspace open slower than 3 s (4 s, forced) still opens: the pairing dialog comes, no storage message", { ms: Date.now() - t, ...st });
+  });
+
+  // A14-23 (@sagebrush's ruling): a workspace that can't be opened is said in words, with [Retry], never a silent
+  // demo: the first open answers after 16 s (past the 15 s deadline); [Retry] opens it and the pairing link's dialog comes
+  await run("A14-23", async (B, A) => {
+    const P = await B.tab();
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000) });
+    await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
+    await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
+    const shown = await P.ev(`(() => { const e = document.querySelector('#ws-error'), r = document.querySelector('#ws-retry'); return { role: e.getAttribute('role'), text: document.querySelector('#ws-error-text').textContent, retry: r.textContent, retryVisible: r.checkVisibility(), connectHidden: document.querySelector('#connect').hidden, dialogs: document.querySelectorAll('.sbag-dlg').length }; })()`);
+    ok(shown.role === "alert" && /^This browser's storage couldn't be opened, so Claude can't connect on this page: .*did not open in 15 s/.test(shown.text) && shown.retry === "Retry" && shown.retryVisible && shown.connectHidden && shown.dialogs === 0, "A14-23: past the 15 s deadline the page says so in words (role=alert, the error's message) with [Retry]; no pairing, no silent demo", shown);
+    await sleep(1500); // (the late first open has answered by now, and was closed unused)
+    await P.ev(`document.querySelector('#ws-retry').click()`);
+    await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 20000);
+    const after = await P.ev(`({ err: !document.querySelector('#ws-error').hidden, connectHidden: document.querySelector('#connect').hidden })`);
+    ok(!after.err && !after.connectHidden, "A14-23.retry: [Retry] opens the workspace and the pairing link's dialog comes; the message goes", after);
   });
 
   // A14-18 (board C3): Enter on [Reconnect] with the daemon down: activeElement is never body; it stays on the button.

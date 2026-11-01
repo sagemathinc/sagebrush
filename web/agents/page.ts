@@ -1075,12 +1075,23 @@ try {
 }
 renderHeader();
 // The workspace, and the pairing with an agent on this computer (a ?pair=CODE&port=N link opens it at once).
-try {
-  workspace = await Workspace.open();
-} catch {
-  workspace = null; // (no IndexedDB: the scripted demo still works)
+// (a workspace that can't be opened is said, in words, with its error and a [Retry]: never a silent demo, which hid
+// exactly this; the chats here still work as a preview)
+let retrying = false;
+async function openWorkspace(): Promise<boolean> {
+  let why = "";
+  try {
+    workspace = await Workspace.open();
+  } catch (e) {
+    workspace = null;
+    why = String((e as Error)?.message ?? e).slice(0, 300);
+  }
+  $("#connect").hidden = !workspace;
+  $("#ws-error").hidden = !!workspace;
+  setText($("#ws-error-text"), workspace ? "" : `This browser's storage couldn't be opened, so Claude can't connect on this page: ${why}`);
+  return !!workspace;
 }
-$("#connect").hidden = !workspace;
+await openWorkspace();
 // An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
 // opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
 async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknown> {
@@ -1153,12 +1164,12 @@ function hiddenHost(threadId: string, a: Artifact) {
   mountHost(threadId, a, h);
 }
 
-if (workspace) {
-  agentUi = mountAgentPairing(workspace, {
+function mountPairing(ws: Workspace) {
+  agentUi = mountAgentPairing(ws, {
     button: $("#connect"),
     notebookEdit: editNotebook,
     reload: {
-      scope: { workspace: `${WS_DB}/${workspace.identity.workspace}`, page: location.origin + location.pathname },
+      scope: { workspace: `${WS_DB}/${ws.identity.workspace}`, page: location.origin + location.pathname },
       onState: onRestore,
       onRemembered(g) {
         setText($("#who-status"), `connected with remembered access: ${grantScope(g)}`);
@@ -1206,6 +1217,25 @@ if (workspace) {
     },
   });
 }
+if (workspace) mountPairing(workspace);
+// (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
+$("#ws-retry").onclick = async () => {
+  if (retrying) return;
+  retrying = true;
+  const b = $("#ws-retry");
+  b.setAttribute("aria-busy", "true");
+  b.setAttribute("aria-disabled", "true");
+  setText(b, "Retrying…");
+  try {
+    if ((await openWorkspace()) && workspace) mountPairing(workspace);
+  } finally {
+    retrying = false;
+    b.removeAttribute("aria-busy");
+    b.removeAttribute("aria-disabled");
+    setText(b, "Retry");
+    renderHeader();
+  }
+};
 addEventListener("pagehide", () => {
   // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
   if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
