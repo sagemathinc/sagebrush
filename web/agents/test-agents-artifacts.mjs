@@ -754,10 +754,11 @@ try {
       for (const d of right.querySelectorAll('.dmath')) {
         const dr = d.getBoundingClientRect();
         if (dr.height === 0 || dr.top < vr.top || dr.bottom > vr.bottom) continue;
-        const tags = [...d.querySelectorAll('.tag')].map((t) => t.getBoundingClientRect()).filter((t) => t.width > 0);
+        // (the numbers: KaTeX's .katex-tag, an .eqn-num per numbered line (align), or a \\tag's .tag)
+        const tags = [...d.querySelectorAll('.katex-tag .eqn-num, .katex-tag, .tag')].map((t) => t.getBoundingClientRect()).filter((t) => t.width > 0);
         const bases = [...d.querySelectorAll('.katex-html > .base')].map((x) => x.getBoundingClientRect()).filter((x) => x.width > 0);
         const over = tags.some((t) => bases.some((x) => x.right > t.left + 0.5 && x.left < t.right - 0.5 && x.bottom > t.top && x.top < t.bottom));
-        seen.push({ scroll: d.scrollWidth - d.clientWidth, tags: tags.length, over });
+        seen.push({ scroll: d.scrollWidth - d.clientWidth, tags: tags.length, bases: bases.length, over });
       }
       return seen; })()`;
     const stackCases = async (pw) => {
@@ -766,7 +767,7 @@ try {
       else ok(st.side, `B2-1@pane${pw}: at 520 px or more the source and preview are side by side`, st);
       await sleep(300);
       const eq = await ev(eqJs);
-      ok(eq.length > 0 && eq.some((e) => e.tags > 0) && eq.every((e) => e.scroll <= 1 && !e.over), `O-1@pane${pw}: the display equations in view (at least one, with a number) need no sideways scroll, and their numbers don't sit on the formula`, eq);
+      ok(eq.length > 0 && eq.some((e) => e.tags > 0) && eq.every((e) => e.scroll <= 2 && e.bases > 0 && !e.over), `O-1@pane${pw}: the display equations in view (at least one, with a number) need no sideways scroll (2 px of rounding allowed), and their numbers don't sit on the formula`, eq);
     };
     for (const pw of [320, 330, 460, 760]) {
       await size(1400); await sleep(400);
