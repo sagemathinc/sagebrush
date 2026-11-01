@@ -85,8 +85,11 @@ async function forge(page, url) {
 // refused, judged on the requests for this case's resource (`token`, a part of its URL no other request has)
 const refused = (name, what, r, token) => refusedBy(ok, name, what, r, (u) => !String(u).includes(token));
 
+// (each page in a try of its own: a page that doesn't start, or a step that throws, is reported by that page's name
+// and the pages after it still run)
+const page = async (name, f) => { try { await f(); } catch (e) { failures++; console.log(`FAIL ${name} didn't finish: ${e.message}`); } };
 try {
-
+  await page("P1", async () => {
   // ======== P1
   const s1 = await server("p1");
   // (G5: a cookie for the site, which the page's own requests carry and the broker's must not)
@@ -137,6 +140,8 @@ try {
   ok(brokerLines.length >= 3 && brokerLines.every((l) => !l.cookie), `G5: the broker's ${brokerLines.length} requests carry no Cookie` + (brokerLines.some((l) => l.cookie) ? ": " + JSON.stringify(brokerLines.filter((l) => l.cookie).map((l) => l.path)) : ""));
   ok(brokerLines.length >= 3 && brokerLines.every((l) => !l.referer), `G8: the broker's ${brokerLines.length} requests carry no Referer` + (brokerLines.some((l) => l.referer) ? ": " + JSON.stringify(brokerLines.filter((l) => l.referer).map((l) => [l.path, l.referer])) : ""));
 
+  });
+  await page("P2", async () => {
   // ======== P2: G11, the index served with one byte changed (in a copy; dist is not touched)
   const bad = Buffer.from(indexBytes);
   const at = bad.indexOf(Buffer.from(LONDON));
@@ -155,6 +160,8 @@ try {
   // (and directly: a zone the changed index lists, forged after it, is refused)
   refused("G11", "a zone the changed index lists, after it", await forge(p2, new URL(`lib/tzdata/${LONDON}.tzif`, s2.base).href), LONDON);
 
+  });
+  await page("P3", async () => {
   // ======== P3: G14, the barrier held until the zone's answer
   const s3 = await server("p3");
   const p3 = await openPage(s3, { g14: true });
@@ -163,6 +170,7 @@ try {
   const z3 = l3.filter((x) => x.kind === "answer" && x.url.endsWith(`/lib/tzdata/${LONDON}.tzif`));
   ok(g14 === "1:00:00" && z3.length >= 1 && z3.every((x) => x.bytes > 0), `G14: the zone asked for right after the index's reply is fetched (${JSON.stringify(z3.map((x) => x.bytes))} bytes): ${JSON.stringify(g14)}`);
   void p3;
+  });
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
