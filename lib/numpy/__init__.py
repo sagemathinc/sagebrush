@@ -485,7 +485,11 @@ def asfortranarray(a, dtype=None, *, like=None):
     a = asarray(a, dtype)
     if a.ndim == 0:
         a = a.reshape(1)
-    return a if _contiguous(a, True) else a.T.copy().T
+    if _contiguous(a, True):
+        return a
+    # (a Fortran-ordered array of its own, as NumPy's: the copy's transpose
+    # becomes the owner of the copy's data)
+    return _np._own(a.T.copy().T)
 
 
 def copy(a, order="K", subok=False):
@@ -682,6 +686,31 @@ def _wraps_in(op, dt):
     return op == "multiply" and dt.kind in "iu" and dt.itemsize < 8
 
 
+
+def _out_writeable(out):
+    """A ufunc's out=, refused before any computing where it is read-only,
+    in NumPy's words"""
+    for o in (out if isinstance(out, tuple) else (out,)):
+        if isinstance(o, ndarray) and not o.flags.writeable:
+            raise ValueError("output array is read-only")
+
+
+def _one_out(out):
+    """A reduction's out=: an array, or a tuple of one; read-only refused"""
+    if isinstance(out, tuple):
+        if len(out) != 1:
+            raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+        out = out[0]
+    if not isinstance(out, ndarray):
+        raise TypeError("return arrays must be of ArrayType")
+    _out_writeable(out)
+    return out
+
+
+def _shape_text(shape):
+    return "(%s)" % (", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else ""))
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -700,6 +729,7 @@ class ufunc:
                 args = args[:-1]
             else:
                 raise TypeError("%s() takes from %d to %d positional arguments but %d were given" % (self.__name__, self.nin, self.nin + 1, len(args)))
+        _out_writeable(out)
         if casting not in _CASTINGS:
             raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
@@ -804,6 +834,19 @@ class ufunc:
         return res
 
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
+        if out is not None:
+            # (computed in out's dtype unless dtype is given, then written
+            # into out, which must have the result's shape, as NumPy's)
+            out = _one_out(out)
+            r = asarray(self.reduce(a, axis, dtype if dtype is not None else out.dtype, None, keepdims, initial, where))
+            if r.ndim != out.ndim:
+                raise ValueError("output parameter for reduction operation %s has the wrong number of dimensions: Found %d but expected %d"
+                                 % (self.__name__, out.ndim, r.ndim))
+            if r.shape != out.shape:
+                raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s->(%s) %s "
+                                 % (_shape_text(out.shape), ",".join(str(n) for n in out.shape), _shape_text(asarray(a).shape).replace(" ", "")))
+            out[...] = r
+            return out
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -844,6 +887,14 @@ class ufunc:
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
+        if out is not None:
+            # (computed in out's dtype unless dtype is given, as NumPy's)
+            out = _one_out(out)
+            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else out.dtype))
+            if r.shape != out.shape:
+                raise ValueError("provided out is the wrong size for the accumulation.")
+            out[...] = r
+            return out
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -2573,6 +2624,8 @@ def _m_astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
 
 
 def _m_sort(self, axis=-1, kind=None, order=None):
+    if not self.flags.writeable:
+        raise ValueError("sort array is read-only")
     self[...] = sort(self, axis)
 
 
@@ -2686,9 +2739,10 @@ def _m_ravel(self, order="C"):
 
 def frombuffer(buffer, dtype=float, count=-1, offset=0):
     """A 1-D array over a copy of the bytes (little-endian unless the dtype
-    string starts with '>')."""
-    if not isinstance(buffer, bytes):
-        buffer = bytes(buffer)
+    string starts with '>'): read-only over bytes, writeable over a writeable
+    buffer, its base the bytes or a memoryview of the buffer, as NumPy's."""
+    if not isinstance(buffer, (bytes, memoryview)):
+        buffer = memoryview(buffer)
     return _np.frombuffer(buffer, dtype, count, offset)
 
 
@@ -2758,6 +2812,9 @@ def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True, encoding="A
     if kind not in _NPY_TYPES:
         raise ValueError("np.load: dtype %r is not supported" % descr)
     a = frombuffer(body, dtype=(">" if order == ">" else "<") + kind if kind != "b1" else "bool", count=count)
+    # (a writeable array of its own, as NumPy's load reads into one:
+    # frombuffer's of bytes is read-only)
+    a = a.copy()
     if fortran:
         return a.reshape(tuple(reversed(shape))).T.copy() if len(shape) > 1 else a.reshape(shape)
     return a.reshape(shape)
