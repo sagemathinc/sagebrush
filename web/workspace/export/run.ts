@@ -11,7 +11,9 @@
 import type { Entry, Op, Workspace } from "../api";
 import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
-import { BlobSink, ExportStopped, ExportWorker, OpfsSink, PickerSink, SLICE, Spool, ZipWriter, type Sink } from "./zip";
+import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
+import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
+import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, NAME, PATH, putRow, R, readRow, TIME } from "./rows";
 import { boardSlices, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
 // (the serializers: Download's own functions, from the module Download calls (file-bytes.ts), built into this chunk
 // rather than handed over by the page, so that a page carries them only if it uses them itself before any click
@@ -54,7 +56,7 @@ type TestHooks = {
   noOpfs?: boolean;
   noPicker?: boolean;
   onHand?(blob: Blob, name: string): void;
-  stats?: { spoolChunks?: number; members?: number; refs?: Record<string, string> };
+  stats?: Stats;
   slicePause?: number;
   /** after each member is written (its count), between members: the r2d heap checkpoints wait here */
   between?(written: number): Promise<void> | void;
@@ -71,13 +73,22 @@ type TestHooks = {
   duringTreeScan?(): Promise<void> | void;
   /** "Last export prepared" can't be written (E1-A6's test) */
   failStamp?: boolean;
-  /** the worker fails the OPFS spool's nth append (T13) */
+  /** the worker fails the OPFS spool's nth append (T13); (r2c, O-2) the rows spool's nth append, in preflight */
   failSpoolAfter?: number;
+  failRowsAfter?: number;
+  /** (r2c) the rows spool cut by its last byte before writing replays it: the export must stop, "cut short" */
+  cutRows?: boolean;
+  /** (r2c, P-9) after preflight, before writing replays the records: a test edits the workspace there */
+  beforeReplay?(): Promise<void> | void;
+  /** (r2c, "slices") the worker holds each append this long first, so a Cancel lands with a slice in flight */
+  appendDelayMs?: number;
+  /** only the scratch files whose names match it (the archive's, a spool's) */
+  appendDelayRe?: string;
   /** (astra's E1-R2-A2) the stale sweep pauses this long between listing and removing; the probe's write or flush
    * fails; a scratch file's open (truncate) fails */
   sweepPauseMs?: number;
   failProbe?: "write" | "flush";
-  failOpen?: "spool" | "sink";
+  failOpen?: "spool" | "sink" | "rows" | "rows-late";
   /** the instrument's own check (grader's C8): a busy loop of this many ms on the main thread after the first member */
   busyMs?: number;
   /** stream.ts's slice and piece sizes, small, so that cuts land everywhere (the byte-equality tests) */
@@ -87,6 +98,28 @@ type TestHooks = {
   reference?: boolean;
   /** the stalls' profile (E1 r2, @sagebrush's (c)): each wait of the writing loop, its start (0) and end (1) */
   probe?(what: "page" | "capture" | "member" | "spool", edge: 0 | 1): void;
+};
+/** What a test page reads after an export (E1 r2a; r2c R3: the slices, Blob retention, the rows spool's framing). */
+type Stats = {
+  spoolChunks?: number; members?: number; refs?: Record<string, string>;
+  /** chunks flushed per spool, the rows spool's included (spoolChunks: the CD's, the manifest's and the capture log's) */
+  flushes?: { cd: number; manifest: number; capture: number; rows: number };
+  sizes?: { cd: number; manifest: number; capture: number; rows: number };
+  /** (P-6's fixtures) boundaries that waited for a slice still away, per file; and the sink used */
+  waits?: { archive: number; cd: number; manifest: number; capture: number; rows: number }; sink?: string;
+  /** the rows spool: its segments' lengths, the bytes of its records, its size */
+  rowSegs?: number[]; rowBytes?: number; rowSize?: number;
+  /** slices made (each 1 MiB) and their bytes in all; bytes held in Blob parts; read back from them; hash copies;
+   * slices made after a Cancel */
+  slices?: number; sliceBytes?: number; blobBytes?: number; blobReadBytes?: number; hashCopyBytes?: number; slicesAfterStop?: number;
+  /** slices handed over (to the worker or a sink) after a Cancel: none */
+  postsAfterStop?: number;
+  /** a Cancel to the export's stop, ms (its cleanup after) */
+  stopMs?: number;
+  /** (R1) the records writing replayed, and breathe's clock reads meanwhile (one per record boundary at least) */
+  records?: number; clockReads?: number;
+  /** each export's preflight and writing, ms (r2c: elapsed next to b00fb43f's) */
+  preflightMs?: number; writingMs?: number;
 };
 /** A wait of the writing loop, told to the profile's probe when a test page set one. */
 async function timed<R>(what: "page" | "capture" | "member" | "spool", p: () => Promise<R>): Promise<R> {
@@ -108,7 +141,12 @@ const pause = () => new Promise<void>((r) => setTimeout(r, 0));
 /** A yield to the event loop once 8 ms of work have passed since the last one: the loops over entries call it per
  * entry, so no task runs long however the awaits inside resolve (E1 r2c §6: at most 50 ms a task). */
 let lastYield = 0;
-const breathe = async () => { if (performance.now() - lastYield > 8) { await pause(); lastYield = performance.now(); } };
+/** (r2c §2, §4) the clock read at every call, each record boundary; a promise only when a yield is due */
+let clockReads = 0;
+const breathe = (): Promise<void> | undefined => {
+  clockReads++;
+  if (performance.now() - lastYield > 8) return pause().then(() => { lastYield = performance.now(); });
+};
 
 const STORE_EXT = new Set("png jpg jpeg gif webp avif heic heif pdf zip gz tgz bz2 xz zst 7z rar wasm mp4 m4a m4v mov webm mkv avi mp3 ogg oga opus flac aac woff woff2 jar docx xlsx pptx odt ods odp epub sbreplay npz parquet".split(" "));
 const TEXT_EXT = new Set("ipynb json py sage m mag tex bib sty cls md markdown txt csv tsv html htm css js mjs ts xml svg yaml yml toml ini cfg log sql r jl c h cc cpp hpp java rs go sh gp g mpl".split(" "));
@@ -146,6 +184,8 @@ export type Plan = {
   manSpool: number;
   capSpool: number;
   unavailable: Unavailable[];
+  /** preflight's elapsed time, ms (r2c's evidence) */
+  preflightMs?: number;
 };
 export type Progress = { phase: "preflight" | "writing" | "finishing"; files: number; of: number; bytes: number; total: number };
 
@@ -166,34 +206,9 @@ async function* entries(w: Workspace): AsyncGenerator<Entry[]> {
 const zipName = (e: Pick<Entry, "path" | "kind">) => "files/" + e.path.slice(1) + (e.kind === "folder" ? "/" : "");
 const unavailableWhy = (e: Entry): Unavailable["why"] | null => (e.remote ? "remote" : e.missing ? "missing" : null);
 
-/** UTF-8 bytes of `s` as TextEncoder writes it (a lone surrogate as U+FFFD), counted without encoding it. */
-export function utf8Len(s: string): number {
-  let n = 0;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 0x80) n += 1;
-    else if (c < 0x800) n += 2;
-    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
-    else n += 3;
-  }
-  return n;
-}
-/** UTF-8 bytes of JSON.stringify(s), quotes included, counted without building it. */
-export function jsonLen(s: string): number {
-  let n = 2;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c === 0x22 || c === 0x5c) n += 2;
-    else if (c < 0x20) n += c === 8 || c === 9 || c === 10 || c === 12 || c === 13 ? 2 : 6;
-    else if (c < 0x80) n += 1;
-    else if (c < 0x800) n += 2;
-    else if (c >= 0xd800 && c <= 0xdbff) { if (i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; } else n += 6; }
-    else if (c >= 0xdc00 && c <= 0xdfff) n += 6;
-    else n += 3;
-  }
-  return n;
-}
-const numLen = (x: number) => String(x).length;
+// (a number's length as the manifest writes it, JSON.stringify's: NaN and ±Infinity as null (r2c, P-1; String(n) gave
+// "NaN", a byte short))
+const numLen = (x: number) => jsonNumLen(x);
 /** The byte length of manifestEntry(e, captured) with its widest captured fields (preflight's bound), computed
  * without building it: the same fields, in the same order. */
 export function manifestEntryLen(e: Entry, captured: number): number {
@@ -212,7 +227,7 @@ export function manifestEntryLen(e: Entry, captured: number): number {
 }
 
 /** A manifest entry's JSON, with a captured revision and hash (or, for preflight's bound, their widest forms). */
-function manifestEntry(e: Entry, captured: number, got?: { rev: number; size: number; sha256: string }): string {
+export function manifestEntry(e: Entry, captured: number, got?: { rev: number; size: number; sha256: string }): string {
   const o: Record<string, unknown> = { path: e.path, kind: e.kind };
   if (e.ref !== null && e.kind !== "file" && e.kind !== "folder") o.ref = e.ref;
   if (e.fid !== undefined) o.fid = e.fid;
@@ -248,7 +263,7 @@ const capWhy = (path: string, kind: Entry["kind"]) => kind === "notebook" || kin
 export class Missing extends ExportStopped {}
 
 /** The pace of one export: its Cancel, and a yield once 8 ms of work have passed. */
-const paceOf = (signal: AbortSignal): Pace => ({ signal, breathe, stopped: () => { throw new ExportStopped("cancelled"); } });
+const paceOf = (signal: AbortSignal): Pace => ({ signal, breathe: async () => { const p = breathe(); if (p) await p; }, stopped: () => { throw new ExportStopped("cancelled"); } });
 const stopIf = (signal: AbortSignal) => { if (signal.aborted) throw new ExportStopped("cancelled"); };
 
 /** The read that captures one entry (E1 r2c §2 rule 2): its identity, kind and path as enumerated, or stopped.  The
@@ -285,16 +300,30 @@ export function unavailableWhyText(u: Unavailable[]): string {
   return `${n.toLocaleString()} file${n === 1 ? " isn't" : "s aren't"} on this device yet, so nothing can be exported: open ${n === 1 ? "it" : "them"} here, or turn sync on and let ${n === 1 ? "it" : "them"} download, then export again`;
 }
 
-export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void): Promise<Plan> {
+/** The no-OPFS refusal (E1 r2a heap plan r2c P-8; @sagebrush's condition: the cause in plain words): without the
+ * browser's file storage every spool, the rows spool included, is held in memory, up to CAPS.spoolBlob. */
+export const NO_OPFS_WHY = "This workspace is too large to export in this browser without its file storage. Use a browser with file storage (Chrome, Edge) or the desktop app.";
+
+/**
+ * Preflight, and the entries read once (r2c §1): one record per shown, available entry into `rows`, which the caller
+ * owns (created, and removed on every exit, by openExport: astra's obligations), opened here.  `opfs`: false when the
+ * spools are Blob parts, which then count, the records included, toward CAPS.spoolBlob.
+ */
+export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean): Promise<Plan> {
+  const t0 = performance.now();
+  resetCounts();
+  rowStats.rowBytes = 0;
   const s0 = await w.lastSeq();
   const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 0, manSpool: 0, capSpool: 0, unavailable: [] };
   sizesNow();
   const pace = paceOf(signal);
+  await rows.open();
+  if (T().failRowsAfter && rows.wk) await rows.wk.ask("failAfter", { n: T().failRowsAfter, re: "-rows$" });
   let lastPre = 0;
   for await (const page of entries(w)) {
     for (const e of page) {
       stopIf(signal);
-      await breathe();
+      { const y = breathe(); if (y) await y; }
       const name = utf8Len(e.path) + 6 + (e.kind === "folder" ? 1 : 0);
       const flagged = unavailableWhy(e);
       if (flagged) { plan.unavailable.push({ path: e.path, kind: e.kind, why: flagged }); continue; }
@@ -303,7 +332,14 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
       plan.manSpool += manifestEntryLen(e, Date.now()) + 1;
       plan.capSpool += captureLineLen(e);
       plan.bound += 30 + 46 + 16 + 12 + 2 * name;
-      if (e.kind === "folder") { plan.folders++; continue; }
+      if (e.kind === "folder") {
+        plan.folders++;
+        // (P-9: a folder's captured is its observation, here)
+        const p = putRow(rows, e, Date.now(), rowStats);
+        if (p) await p;
+        if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+        continue;
+      }
       plan.files++;
       let size: number;
       if (e.kind === "file") {
@@ -325,18 +361,27 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
       if (size > capOf(e.kind)) throw new ExportStopped(capWhy(e.path, e.kind));
       plan.bytes += size;
       plan.bound += deflateBound(size);
+      { const p = putRow(rows, e, 0, rowStats); if (p) await p; }
+      if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
       if (performance.now() - lastPre > 100) { lastPre = performance.now(); progress({ phase: "preflight", files: plan.files, of: 0, bytes: plan.bytes, total: 0 }); }
       if (plan.bytes > cap("total")) throw new ExportStopped(`the files come to more than ${cap("total") / 2 ** 30} GiB, more than an import takes`);
     }
   }
+  // (the records written out, every slice back: an append's failure is seen here, in preflight)
+  await rows.settle();
   // (the manifest: its entries (manSpool) between its head and tail)
   const manifest = plan.manSpool + MANIFEST_ENDS;
   if (manifest > cap("manifest")) throw new ExportStopped(`the export's index (manifest.json) would be over ${cap("manifest") / 2 ** 20} MiB: too many files with long names`);
   plan.bytes += manifest;
   plan.bound += deflateBound(manifest) + 30 + 46 + 16 + 12 + 2 * 13;
   if (plan.bytes > cap("total")) throw new ExportStopped(`the files come to more than ${cap("total") / 2 ** 30} GiB, more than an import takes`);
+  plan.preflightMs = performance.now() - t0;
   return plan;
 }
+/** The rows spool's record bytes, counted as they are written (the framing's check: no padding). */
+const rowStats = { rowBytes: 0 };
+/** Without OPFS, every spool is held in memory: the spools' bounds and the records so far, past CAPS.spoolBlob (P-8). */
+const blobSpoolsOver = (plan: Plan, rows: Spool) => plan.cdSpool + plan.manSpool + plan.capSpool + rows.size > cap("spoolBlob");
 /** The manifest's head and tail around its entries, at their widest. */
 const MANIFEST_ENDS = 512;
 
@@ -345,12 +390,12 @@ const MANIFEST_ENDS = 512;
  * many entries there are.  The tree check reads back only the lines of the paths it needs. */
 export class CaptureLog {
   constructor(readonly spool: Spool) {}
-  /** One line, written into the spool's buffer at once; a promise only when the buffer is due to be flushed (r2a: at
-   * 100,000 entries, an awaited append per line was 92 MiB of short-lived allocation). */
-  add(path: string, kind: Entry["kind"], ident: string | undefined): Promise<void> | undefined {
-    const rest = this.spool.putText(JSON.stringify([path, kind, ident ?? null]) + "\n");
-    return rest === null ? undefined : this.spool.appendText(rest);
-  }
+  /** A folder's line, copied from its record (rows.ts R): written into the spool's slice at once; a promise only when
+   * the slice is due to be flushed (r2a: at 100,000 entries, an awaited append per line was 92 MiB of short-lived
+   * allocation; r2c: no string per line either). */
+  addFolder(b: Uint8Array): Promise<void> | undefined { return captureFolder(this.spool, b); }
+  /** A captured document's or data file's line, by the direct writer. */
+  add(path: string, kind: Entry["kind"], ident: unknown): Promise<void> { return captureLine(this.spool, path, kind, ident); }
   /** The captured kind and identity of each of `paths` that was captured. */
   async lookup(paths: Set<string>): Promise<Map<string, { kind: string; ident: string | null }>> {
     // (the observation boundary: the lines still in the spool's buffer (at most its 1 MiB slice) written out first, here,
@@ -370,7 +415,7 @@ export class CaptureLog {
         const [p, kind, ident] = JSON.parse(l) as [string, string, string | null];
         if (paths.has(p)) out.set(p, { kind, ident });
       }
-      await breathe();
+      { const y = breathe(); if (y) await y; }
     }
     return out;
   }
@@ -396,7 +441,7 @@ export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, s
     const ops: Op[] = await w.opsPage(after, PAGE);
     if (after === s0) await T().duringTreeScan?.();
     for (const op of ops) {
-      await breathe();
+      { const y = breathe(); if (y) await y; }
       if (op.op === "dropVersions" || op.op === "emptyTrash") continue;
       const a = op.after;
       if (op.op !== "write" || !a || a.trashed || a.name !== nameOf(op.path) || a.kind !== op.kind) stop(op);
@@ -453,25 +498,29 @@ export const LOCK_PREFIX = "sagebrush-export:";
  * any failure, the earliest included, aborts it (astra's E1-A3).  `after(p)`: what must outlive this call (the OPFS
  * scratch's delayed removal), for the caller to keep the worker and the export's lock until it settles.
  */
-export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWorker; opfs: boolean; id: string; picked: any | null; signal: AbortSignal; progress: (p: Progress) => void; site: string; app: string; after(p: Promise<void>): void }): Promise<Result> {
+export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWorker; opfs: boolean; id: string; picked: any | null; signal: AbortSignal; progress: (p: Progress) => void; site: string; app: string; after(p: Promise<void>): void; rows: Spool }): Promise<Result> {
+  const t0 = performance.now();
   let sink: Sink | undefined = opts.picked ? new PickerSink(opts.picked) : undefined;
   let committed = false;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
-  const spoolWk = opts.opfs ? opts.worker : null;
-  const cd = new Spool(`${opts.id}-cd`, spoolWk, plan.cdSpool), man = new Spool(`${opts.id}-manifest`, spoolWk, plan.manSpool);
-  const capSpool = new Spool(`${opts.id}-capture`, spoolWk, plan.capSpool), log = new CaptureLog(capSpool);
+  const spoolWk = opts.opfs ? opts.worker : null, rows = opts.rows;
+  const cd = new Spool(`${opts.id}-cd`, spoolWk, plan.cdSpool, false, opts.signal), man = new Spool(`${opts.id}-manifest`, spoolWk, plan.manSpool, false, opts.signal);
+  const capSpool = new Spool(`${opts.id}-capture`, spoolWk, plan.capSpool, false, opts.signal), log = new CaptureLog(capSpool);
   const pace = paceOf(opts.signal);
+  let zip: ZipWriter | undefined;
+  // (tests: how long the export takes to decide it is stopped after a Cancel, its cleanup apart)
+  let abortAt = 0;
+  opts.signal.addEventListener("abort", () => { abortAt = performance.now(); }, { once: true });
   sizesNow();
   try {
     if (plan.unavailable.length) throw new ExportStopped(unavailableWhyText(plan.unavailable));
-    if (!opts.opfs && plan.cdSpool + plan.manSpool + plan.capSpool > cap("spoolBlob")) throw new ExportStopped("This browser can't hold the export's index; use a browser that can save files, or export a smaller workspace");
     await cd.open();
     await man.open();
     await capSpool.open();
     if (spoolWk && T().failSpoolAfter) await spoolWk.ask("failAfter", { n: T().failSpoolAfter });
     sink ??= await chooseSink(plan, spoolWk, opts.id);
     let written = 0, files = 0, done = 0, total = 0, first = true, phase: Progress["phase"] = "writing";
-    const zip = new ZipWriter(sink, cd, { signal: opts.signal, crc: opts.worker, progress: (n) => { written += n; }, slicePause: T().slicePause });
+    zip = new ZipWriter(sink, cd, { signal: opts.signal, crc: opts.worker, progress: (n) => { written += n; }, slicePause: T().slicePause });
     // (progress: the files and folders written and the archive's bytes so far, its index included; at most every 100
     // ms from the loop, and every 100 ms from a timer too, so the line is rewritten at least every 250 ms whatever
     // the work waits on (E1 r2d §6, @sagebrush's ruling of Oct 31); never an object and a string per entry)
@@ -486,22 +535,40 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
       opts.progress({ phase, files: done, of: plan.files + plan.folders, bytes: written, total: plan.bound });
     };
     progressTimer = setInterval(() => tick(phase, true), 100);
-    for await (const page of entries(w)) {
-      for (const e of page) {
+    await T().beforeReplay?.();
+    if (spoolWk && T().appendDelayMs) await spoolWk.ask("appendDelay", { ms: T().appendDelayMs, re: T().appendDelayRe });
+    clockReads = 0;
+    let records = 0;
+    if (T().cutRows) await rows.cutForTest();
+    const dec = new TextDecoder();
+    // (r2c §1: the records preflight wrote, segment by segment, each segment whole records; nothing read from
+    // IndexedDB again but each document's and data file's own capture)
+    for await (const seg of rows.replay()) {
+      const n = seg.length;
+      for (let at = 0; at < n; ) {
         stopIf(opts.signal);
-        await breathe();
-        // (nothing is left out: anything not on this device now, though it was at preflight, stops the export)
-        if (unavailableWhy(e)) throw new ExportStopped(`${e.path} isn't on this device any more`);
-        let line: string;
-        if (e.kind === "folder") {
-          await zip.folder(zipName(e), e.updated);
-          { const p = log.add(e.path, e.kind, e.ident); if (p) await p; }
-          line = manifestEntry(e, Date.now());
+        { const y = breathe(); if (y) await y; }
+        const end = readRow(seg, at, n);
+        if (end < 0) cutShort();
+        records++;
+        if (R[KIND] === 0) {
+          // (a folder: its record's bytes copied into the archive, the central record, the capture line and the
+          // manifest line; its values as preflight observed them (P-9))
+          let p = zip.folderAt(seg, R[NAME], R[NAME + 1], R[TIME], R[DATE]);
+          if (p) await p;
+          p = log.addFolder(seg);
+          if (p) await p;
+          p = manifestFolder(man, seg, first);
+          if (p) await p;
         } else {
+          const e = { path: JSON.parse(dec.decode(seg.subarray(R[PATH], R[PATH + 1]))), kind: KINDS[R[KIND]], ident: R[IDENT] < 0 ? undefined : JSON.parse(dec.decode(seg.subarray(R[IDENT], R[IDENT + 1]))) } as Entry;
+          const name = seg.subarray(R[NAME], R[NAME + 1]);
           await T().beforeCapture?.(e.path);
           const c = await timed("capture", () => capture(w, e, opts.signal));
           await T().afterCapture?.(e.path);
-          { const p = log.add(e.path, c.entry.kind, c.entry.ident); if (p) await p; }
+          // (nothing is left out: anything not on this device now, though it was at preflight, stops the export)
+          if (unavailableWhy(c.entry)) throw new ExportStopped(`${e.path} isn't on this device any more`);
+          await log.add(e.path, c.entry.kind, c.entry.ident);
           // (the member's cap, or what is left of the total if that is less: both checked on the bytes as they go)
           const left = cap("total") - total, docCap = capOf(e.kind);
           const max = Math.min(docCap, left), why = left < docCap ? `the export passed ${cap("total") / 2 ** 30} GiB while it was written (files grew meanwhile)` : capWhy(e.path, e.kind);
@@ -511,10 +578,11 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           try {
             const src = memberOf(c.entry, c.content, pace, images);
             const deflate = e.kind === "file" ? await deflates(e.path, e.kind, (src as Uint8Array[])[0]) : true;
-            m = await timed("member", () => zip.member(zipName(e), src, deflate, c.entry.updated, max, why));
+            m = await timed("member", () => zip!.member(name, src, deflate, c.entry.updated, max, why));
           } finally { images.dispose(); }
           total += m.usize;
-          line = manifestEntry(c.entry, c.at, { rev: c.rev, size: m.usize, sha256: m.sha256! });
+          const got = { rev: c.rev, size: m.usize, sha256: m.sha256! }, f = first;
+          await timed("spool", () => manifestLine(man, c.entry, c.at, got, f));
           if (T().reference && (e.kind === "notebook" || e.kind === "board")) {
             const ref = e.kind === "notebook" ? notebookFileText(c.content) : await boardFileText(c.content as BoardDoc, new Images());
             const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(ref)));
@@ -523,16 +591,17 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           }
           files++;
         }
-        await timed("spool", async () => { if (!first) await man.appendText(","); await man.appendText(line); });
         first = false;
         done++;
         tick("writing");
-        await T().between?.(zip.members);
+        { const h = T().between; if (h) await h(zip.members); }
         // (grader's C8: a known long task, which the long-task observer must see)
         const busy = T().busyMs;
         if (busy && done === 1) { const t = performance.now(); while (performance.now() - t < busy) {} }
+        at = end;
       }
     }
+    { const st = T().stats; if (st) { st.records = records; st.clockReads = clockReads; } }
     // (rule 1: nothing in the tree moved since S0)
     await treeUnchanged(w, plan.s0, log, opts.signal);
     tick("finishing", true);
@@ -560,6 +629,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     if (st) { st.spoolChunks = cd.chunks + man.chunks + capSpool.chunks; st.members = zip.members; }
     return r;
   } catch (e) {
+    { const st = T().stats; if (st && abortAt) st.stopMs = performance.now() - abortAt; }
     if (!committed) await sink?.abort();
     throw e;
   } finally {
@@ -567,8 +637,73 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     await cd.remove();
     await man.remove();
     await capSpool.remove();
+    await rows.remove();
+    const st = T().stats;
+    if (st) {
+      st.flushes = { cd: cd.chunks, manifest: man.chunks, capture: capSpool.chunks, rows: rows.chunks };
+      st.sizes = { cd: cd.size, manifest: man.size, capture: capSpool.size, rows: rows.size };
+      st.waits = { archive: zip?.waits ?? 0, cd: cd.waits, manifest: man.waits, capture: capSpool.waits, rows: rows.waits };
+      st.sink = sink?.constructor?.name;
+      st.rowSegs = rows.segs.slice(); st.rowBytes = rowStats.rowBytes; st.rowSize = rows.size;
+      st.slices = counts.slices; st.sliceBytes = counts.sliceBytes; st.blobBytes = counts.blobBytes; st.blobReadBytes = counts.blobReadBytes;
+      st.hashCopyBytes = counts.hashCopyBytes; st.slicesAfterStop = counts.afterStop; st.postsAfterStop = counts.postsAfterStop;
+      st.preflightMs = plan.preflightMs; st.writingMs = performance.now() - t0;
+    }
   }
 }
 
 export const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-export { ExportStopped, ExportWorker, SLICE };
+export { ExportStopped, ExportWorker, SLICE, Spool };
+
+/** (tests only: the writer's own test, r2c §2) the direct writer against JSON.stringify and TextEncoder, in this
+ * browser: each string as JSON and as UTF-8, each number as JSON, and each entry's record (written, counted, read
+ * back) and its capture and manifest lines, a folder's copied from its record, against manifestEntry and the
+ * capture line JSON.stringify makes.  The mismatches, as [what, mine, theirs]. */
+export async function writerCheck(strings: string[], numbers: number[], entries: Entry[]): Promise<[string, string, string][]> {
+  const bad: [string, string, string][] = [];
+  const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  const buf = new Uint8Array(1 << 16);
+  const { putJson, putUtf8, putNum, jsonLen, utf8Len, numLen } = await import("./bytes");
+  for (const s of strings) {
+    let a = hex(buf.subarray(0, putJson(buf, 0, s))), b = hex(enc.encode(JSON.stringify(s)));
+    if (a !== b) bad.push(["json " + JSON.stringify(s), a, b]);
+    if (jsonLen(s) !== b.length / 2) bad.push(["jsonLen " + JSON.stringify(s), String(jsonLen(s)), String(b.length / 2)]);
+    a = hex(buf.subarray(0, putUtf8(buf, 0, s))); b = hex(enc.encode(s));
+    if (a !== b) bad.push(["utf8 " + JSON.stringify(s), a, b]);
+    if (utf8Len(s) !== b.length / 2) bad.push(["utf8Len " + JSON.stringify(s), String(utf8Len(s)), String(b.length / 2)]);
+  }
+  for (const n of numbers) {
+    const a = new TextDecoder().decode(buf.subarray(0, putNum(buf, 0, n))), b = JSON.stringify(n);
+    if (a !== b) bad.push(["num " + String(n), a, b]);
+    if (numLen(n) !== b.length) bad.push(["numLen " + String(n), String(numLen(n)), String(b.length)]);
+  }
+  const text = async (s: Spool) => { await s.settle(); let t = ""; for await (const c of s.read()) t += new TextDecoder().decode(c); return t; };
+  for (const e of entries) {
+    const captured = 1761900000123;
+    const rows = new Spool("check-rows", null, Number.MAX_SAFE_INTEGER, true), log = new Spool("check-cap", null, Number.MAX_SAFE_INTEGER), man = new Spool("check-man", null, Number.MAX_SAFE_INTEGER);
+    try {
+      const p = putRow(rows, e, captured, { rowBytes: 0 });
+      if (p) await p;
+      await rows.settle();
+      const got = { rev: 7, size: 12, sha256: "ab".repeat(32) };
+      for await (const seg of rows.read()) {
+        const end = readRow(seg, 0, seg.length);
+        if (end !== seg.length) { bad.push(["record " + e.path, String(end), String(seg.length)]); continue; }
+        const name = new TextDecoder().decode(seg.subarray(R[NAME], R[NAME + 1])), wantName = "files/" + e.path.slice(1) + (e.kind === "folder" ? "/" : "");
+        if (hex(seg.subarray(R[NAME], R[NAME + 1])) !== hex(enc.encode(wantName))) bad.push(["name " + e.path, name, wantName]);
+        if (e.kind === "folder") {
+          const q = captureFolder(log, seg); if (q) await q;
+          const r = manifestFolder(man, seg, true); if (r) await r;
+        } else {
+          await captureLine(log, e.path, e.kind, e.ident);
+          await manifestLine(man, e, captured, got, true);
+        }
+      }
+      const capWant = JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\n", manWant = e.kind === "folder" ? manifestEntry(e, captured) : manifestEntry(e, captured, got);
+      const capGot = await text(log), manGot = await text(man);
+      if (capGot !== capWant) bad.push(["capture " + e.path, capGot, capWant]);
+      if (manGot !== manWant) bad.push(["manifest " + e.path, manGot, manWant]);
+    } catch (err) { bad.push(["threw " + e.path, String(err), ""]); }
+  }
+  return bad;
+}

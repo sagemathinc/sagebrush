@@ -10,8 +10,12 @@ declare const self: any;
 export const SCRATCH = "sagebrush-export";
 
 let crc = crc32Init(), sha = new Sha256();
-/** (tests only: the nth spool append fails, as a full disk would; 0: none) */
-let failAfter = 0, appends = 0;
+/** (tests only: the nth append to a file whose name matches failRe fails, as a full disk would; 0: none) */
+let failAfter = 0, appends = 0, failRe = /-(cd|manifest)$/;
+/** (tests only: the answer to each append to a file whose name matches appendDelayRe held back this long, the append
+ * itself done at once and the worker going on with the next request: so a Cancel lands with a slice still away, and
+ * a fast path meets its slice still away, while everything else the worker does is answered as usual) */
+let appendDelay = 0, appendDelayRe: RegExp | null = null;
 const files = new Map<string, { h: any; size: number }>();
 let dir: any;
 
@@ -66,25 +70,39 @@ async function handle(m: any): Promise<unknown> {
       return null;
     }
     case "failAfter":
-      failAfter = m.n; appends = 0;
+      failAfter = m.n; appends = 0; failRe = m.re ? new RegExp(m.re) : /-(cd|manifest)$/;
+      return null;
+    case "appendDelay":
+      appendDelay = m.ms; appendDelayRe = m.re ? new RegExp(m.re) : null;
       return null;
     case "append": {
+      // (a slice: its buffer and its valid length; only [0, len) written, and the buffer transferred back in the
+      // reply (E1 r2a heap plan r2c §3))
       const f = files.get(m.name);
       if (!f) throw new Error(`${m.name} isn't open`);
-      if (failAfter && /-(cd|manifest)$/.test(m.name) && ++appends >= failAfter) throw new Error("the scratch file couldn't be written (a test)");
-      const data = m.data as Uint8Array;
+      if (failAfter && failRe.test(m.name) && ++appends >= failAfter) throw new Error("the scratch file couldn't be written (a test)");
+      const data = new Uint8Array(m.data as ArrayBuffer, 0, m.len);
       const n = f.h.write(data, { at: f.size });
       if (n !== data.length) throw new Error(`a short write to ${m.name} (${n} of ${data.length} bytes)`);
       f.size += n;
-      return f.size;
+      return m.data;
     }
     case "read": {
+      // (into the lent buffer: [0, n) filled, n and the buffer sent back; n is less than asked only past the file's end)
       const f = files.get(m.name);
       if (!f) throw new Error(`${m.name} isn't open`);
-      const len = Math.max(0, Math.min(m.len, f.size - m.at)), out = new Uint8Array(len);
-      const n = f.h.read(out, { at: m.at });
+      const len = Math.max(0, Math.min(m.len, f.size - m.at));
+      const n = f.h.read(new Uint8Array(m.data as ArrayBuffer, 0, len), { at: m.at });
       if (n !== len) throw new Error(`a short read of ${m.name} (${n} of ${len} bytes)`);
-      return out;
+      return { n, buf: m.data };
+    }
+    case "truncate": {
+      // (tests only: the file cut by its last `by` bytes, as a lost write would leave it)
+      const f = files.get(m.name);
+      if (!f) throw new Error(`${m.name} isn't open`);
+      f.size = Math.max(0, f.size - m.by);
+      f.h.truncate(f.size);
+      return null;
     }
     case "close": {
       const f = files.get(m.name);
@@ -131,7 +149,11 @@ self.onmessage = (ev: MessageEvent) => {
   queue = queue.then(async () => {
     try {
       const value = await handle(m);
-      self.postMessage({ id: m.id, ok: true, value }, value instanceof Uint8Array ? [value.buffer] : []);
+      // (a buffer in the answer goes back by transfer: a slice's, or a read's)
+      const give = value instanceof ArrayBuffer ? [value] : (value as any)?.buf instanceof ArrayBuffer ? [(value as any).buf] : value instanceof Uint8Array ? [value.buffer] : [];
+      const answer = () => self.postMessage({ id: m.id, ok: true, value }, give);
+      if (m.op === "append" && appendDelay && (!appendDelayRe || appendDelayRe.test(m.name))) setTimeout(answer, appendDelay);
+      else answer();
     } catch (e: any) {
       self.postMessage({ id: m.id, ok: false, error: `${e?.name ?? "Error"}: ${e?.message ?? e}` });
     }

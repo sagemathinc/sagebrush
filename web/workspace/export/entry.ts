@@ -5,9 +5,11 @@
 //   Cancel) → a summary, or one plain reason with Export again.  Save… is its own click: the browser's save picker
 //   needs one.
 import type { Workspace } from "../api";
-import { ExportStopped, LOCK_PREFIX, localDate, preflight, setKit, startWorker, unavailableWhyText, write, type Kit, type Plan, type Progress, type Result } from "./run";
+import { ExportStopped, LOCK_PREFIX, localDate, preflight, setKit, Spool, startWorker, unavailableWhyText, write, type Kit, type Plan, type Progress, type Result } from "./run";
 // (the caps in effect: the test page checks a page without its hooks has the real ones, grader's N-3)
 export { capsInEffect } from "./run";
+// (tests only: the direct writer against JSON.stringify, in the page, E1 r2c)
+export { writerCheck } from "./run";
 
 export type ExportHost = {
   say(m: string): void;
@@ -53,19 +55,24 @@ export async function openExport(w: Workspace, host: ExportHost, box: HTMLElemen
   };
   const again = (done: () => void) => [btn("Export again", () => { done(); void openExport(w, host, box); }), " ", btn("Close", () => { box.replaceChildren(); done(); })];
   const stopped = (e: unknown) => {
-    const why = e instanceof ExportStopped ? (e.why === "cancelled" ? "The export was cancelled. Nothing was saved." : `The export stopped: ${e.why}. Nothing was saved.`) : `The export stopped: ${String((e as Error)?.message ?? e)}. Nothing was saved.`;
+    const why = e instanceof ExportStopped ? (e.why === "cancelled" ? "The export was cancelled. Nothing was saved." : e.plain ? `${e.why} Nothing was saved.` : `The export stopped: ${e.why}. Nothing was saved.`) : `The export stopped: ${String((e as Error)?.message ?? e)}. Nothing was saved.`;
     return new Promise<void>((done) => show(el("p", { className: "warn", textContent: why }), ...again(done)));
   };
+  // (the entries' records (E1 r2a heap plan r2c §1; astra's obligations): owned from here, before their file is opened
+  // and before preflight's first record, under this export's lock; removed on every exit before any panel is shown
+  // (the refusal, Cancel at ready, a stop, a Cancel), or by writing's own cleanup once it has them; Ready and a closed
+  // picker keep them, for the Save… that follows)
+  const rows = new Spool(`${id}-rows`, opfs ? worker : null, Number.MAX_SAFE_INTEGER, true, ac.signal);
   try {
     await host.saveOpen?.();
     show(line, " ", cancel);
     // (tests only: the r2d heap baselines are taken here, the worker started and preflight not begun)
     await (globalThis as any).__SB_EXPORT_TEST__?.beforePreflight?.();
-    const plan: Plan = await preflight(w, ac.signal, progress);
-    if (plan.unavailable.length) return await refused(plan);
+    const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs);
+    if (plan.unavailable.length) { await rows.remove(); return await refused(plan); }
     await (globalThis as any).__SB_EXPORT_TEST__?.onPlan?.(plan);
     for (;;) {
-      if ((await ready(plan)) === "cancel") { box.replaceChildren(); return; }
+      if ((await ready(plan)) === "cancel") { await rows.remove(); box.replaceChildren(); return; }
       // (Save…: the picker, on this click, where the browser has one; else OPFS or a Blob, chosen on the bound.  The
       // picker's writable is write()'s from the moment it exists: any failure aborts it)
       let picked: any = null;
@@ -80,12 +87,13 @@ export async function openExport(w: Workspace, host: ExportHost, box: HTMLElemen
         }
       }
       show(line, " ", cancel);
-      const r = await write(w, plan, { worker, opfs, id, picked, signal: ac.signal, progress, site: host.site, app: host.app, after: (p) => { after = p; } });
+      const r = await write(w, plan, { worker, opfs, id, picked, signal: ac.signal, progress, site: host.site, app: host.app, after: (p) => { after = p; }, rows });
       if (!r.stampFailed) host.stamped();
       summary(r);
       return;
     }
   } catch (e) {
+    await rows.remove();
     await stopped(e);
   } finally {
     void after.finally(() => { worker.terminate(); release(); });
