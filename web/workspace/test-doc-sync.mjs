@@ -912,8 +912,9 @@ try {
         // inserted before it, it moves by the insert's length; after it, unmoved; exactly at it, the caret stays before
         // the inserted text (X7's affinity); a selection keeps its ends on its text; without the merge (no sync), the
         // offset is kept, as today.  (The expected carets are from those rules, not from mergeTextAt: W is 30 units;
-        // "my" (2) inserted at 2, before a caret at 30: 32; "!" inserted at the end, after a caret at 2: 2; "?" inserted
+        // "my" (2) inserted at 2, before a caret at 30: 32; "!" inserted at the end, after a caret at 2: 2; "." inserted
         // at the caret, 30: it stays 30; "Big" selected [2, 5], "my" inserted at its start: outside it, [4, 7])
+        // (no "?" in these texts: doc-sync-diag's printer drops a line's rest from one, as a URL's query)
         const W = "# Big integers are sooo exact!";
         const there = async (exact, start, end, remote) => {
           await fake(exact, [["p", W]]);
@@ -925,11 +926,11 @@ try {
         const x13 = {
           before: await there(true, 30, 30, "# myBig integers are sooo exact!"),
           after: await there(true, 2, 2, "# Big integers are sooo exact!!"),
-          at: await there(true, 30, 30, "# Big integers are sooo exact!?"),
+          at: await there(true, 30, 30, "# Big integers are sooo exact!."),
           sel: await there(true, 2, 5, "# myBig integers are sooo exact!"),
           noMerge: await there(false, 30, 30, "# myBig integers are sooo exact!"),
         };
-        check(J(x13) === J({ before: ["# myBig integers are sooo exact!", 32, 32, 0], after: ["# Big integers are sooo exact!!", 2, 2, 0], at: ["# Big integers are sooo exact!?", 30, 30, 0],
+        check(J(x13) === J({ before: ["# myBig integers are sooo exact!", 32, 32, 0], after: ["# Big integers are sooo exact!!", 2, 2, 0], at: ["# Big integers are sooo exact!.", 30, 30, 0],
           sel: ["# myBig integers are sooo exact!", 4, 7, 0], noMerge: ["# myBig integers are sooo exact!", 30, 30, 0] }),
           "X13: the editor: a change made there only moves the caret with the text before it (William's case), not after it or at it; a selection's ends stay on their text; no merge: the offset kept: " + J(x13));
         // X10: a merge whose base this device can't give completely (a version its journal records that its live history
