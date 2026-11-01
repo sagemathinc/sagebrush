@@ -2,7 +2,8 @@
 
 Reached only from Matrix's SR branches in _sage_matrix (never imported at
 the top of a module), so that Sage mode can load it lazily.  Sage's own
-algorithms, with no extra simplification:
+algorithms; the entries are never simplified (only the zero test's proof
+stage reduces a copy, for the test):
 
 - echelon form: classical Gauss-Jordan.  The pivot is the first entry at or
   below the current row that is nonzero (_nonzero: bool(e), then for an
@@ -20,8 +21,6 @@ entry cap) for each, then _sr_guard (at most _SR_MAX rows and columns in a
 symbolic workspace), and the total size of the working expressions is
 checked after each row operation (_SR_MAX_CHARS).
 """
-
-import re
 
 from _sage_matrix import Matrix, FreeModule_, Vector, _shape, _sa, _norm, _bounded_list
 
@@ -61,10 +60,39 @@ def _sr(x):
     return _sa().SR(x)
 
 
-# a sine, cosine, sinh or cosh call in an entry's engine encoding (the tree's
-# own tags, length-prefixed: F3:sin1{...}; arcsin is F6:arcsin, a symbol
-# named sin is s3:sin): the functions the zero-proof stage can rewrite
-_WAVE = re.compile(r"F(?:3:sin|3:cos|4:sinh|4:cosh)\d+\{")
+# the functions the zero-proof stage can rewrite
+_WAVES = ("sin", "cos", "sinh", "cosh")
+
+
+def _has_wave(s):
+    """Whether the engine encoding s has a sine, cosine, sinh or cosh node.
+    A structural scan of the encoding (engine/sym/src/api.rs enc): s<len>:name
+    (a symbol), F<len>:name (a function; a user function's name is @name) and
+    D<len>:name (a derivative) carry a name payload of len UTF-8 BYTES, which
+    is skipped whole, so no part of a name is read as a tag (a function named
+    F3:sin1{ is F9:@F3:sin1{); every other token (numbers, floats in hex,
+    constants, relations, A, M, P, braces) has none of the letters s, F, D.
+    One pass over s, every node at any depth, copying nothing but a name of
+    at most 4 characters to compare."""
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "s" or c == "F" or c == "D":
+            j = i + 1
+            while j < n and "0" <= s[j] <= "9":
+                j += 1
+            if j > i + 1 and j < n and s[j] == ":":
+                need, k = int(s[i + 1:j]), j + 1
+                while need > 0 and k < n:
+                    o = ord(s[k])
+                    need -= 1 if o < 0x80 else 2 if o < 0x800 else 3 if o < 0x10000 else 4
+                    k += 1
+                if c == "F" and k - j - 1 <= 4 and s[j + 1:k] in _WAVES:
+                    return True
+                i = k
+                continue
+        i += 1
+    return False
 
 
 def _reduce_trig(x):
@@ -84,12 +112,12 @@ def _nonzero(e):
     checked against _SR_MAX_CHARS before it is tested.  The entry itself is
     never changed.  Only the reducer's NotImplementedError is undecided,
     so nonzero (as in Sage); any other error propagates.  This bounds the
-    size of what is tested, not the time or peak memory of the reduction
-    (the engine's own guards bound that)."""
+    size of what is tested, not the time or peak memory of the reduction:
+    no such bound is claimed."""
     if not bool(e):
         return False
     s = getattr(e, "_s", None)
-    if s is None or not _WAVE.search(s):
+    if s is None or not _has_wave(s):
         return True
     if len(s) > _SR_MAX_CHARS:
         raise _memory_error("An entry to reduce", len(s), _SR_MAX_CHARS)
