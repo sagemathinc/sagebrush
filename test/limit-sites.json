@@ -6184,6 +6184,274 @@
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
+ "src/local-gateway.ts ::  :: cellCode: MiB, // one cell's code in a wave (the client's per-cell limit) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const BODY_MAX = Object.freeze({ run: 2.25 * MiB, other: 64 * 1024 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const GATEWAY_LIMITS = Object.freeze({ #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const RESPONSE_MAX = MiB; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts ::  :: jtiMax: 64, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: proofMax: 4096, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: segmentMax: 1024, // a proof's decoded header or claims #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: answer :: if (Buffer.byteLength(body, \"utf8\") > RESPONSE_MAX) { status = 502; body = JSON.stringify({ error: \"answer-too-large\" }); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: cellCodeTooLarge :: for (const e of w.entries) if (typeof e.code === \"string\" && Buffer.byteLength(e.code, \"utf8\") > GATEWAY_LIMITS.cellCode) return \"an entry's code over its size limit\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: charge :: this.stats.maxQueuedPayloadBytes = Math.max(this.stats.maxQueuedPayloadBytes, this.stats.queuedPayloadBytes); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: emit :: if (b.eventBytes <= GATEWAY_LIMITS.bindingEventBytes) break; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: emit :: while (r.events.length && b.eventBytes > GATEWAY_LIMITS.bindingEventBytes) this.dropOldest(b, r); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: emit :: while (run.events.length > GATEWAY_LIMITS.eventsPerRun || run.eventBytes > GATEWAY_LIMITS.runEventBytes) this.dropOldest(b, run); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: exit :: queuedPayloadBytes: 0, maxQueuedPayloadBytes: 0, rawBodyRefs: 0, recordBytes: 0, staleOutputs: 0, #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: frame :: if (id.length - 1 > GATEWAY_LIMITS.frameIdDigits) return c.close(1002, \"a frame id is at most 15 digits\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: frame :: if (req.bytes > (rpc === \"g.run\" ? BODY_MAX.run : BODY_MAX.other)) { this.dropRaw(req, msg); return c.close(1002, \"a body over its limit\"); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: frame :: if (s.open.size >= GATEWAY_LIMITS.openIds) return c.close(1002, \"too many open requests\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: numberProblem :: if (v > Number.MAX_SAFE_INTEGER) return \"range\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: postRun :: if (b.runs.size >= GATEWAY_LIMITS.runs) { this.unreserve(req); return this.answer(req, 429, { error: \"limit\", reason: \"runs\" }); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: for (const [j, at] of s.jtis) if (t - at > GATEWAY_LIMITS.jtiMs) s.jtis.delete(j); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.iat < now - GATEWAY_LIMITS.iatPast) return this.refused(\"iat-past\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.iat > now + GATEWAY_LIMITS.iatFuture) return this.refused(\"iat-future\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.jti.length < GATEWAY_LIMITS.jtiMin) return this.refused(\"jti-min\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.jti.length > GATEWAY_LIMITS.jtiMax) return this.refused(\"jti-max\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (hb.length > GATEWAY_LIMITS.segmentMax || cb.length > GATEWAY_LIMITS.segmentMax) return this.refused(\"segment-size\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (proof.length > GATEWAY_LIMITS.proofMax) return this.refused(\"proof-size\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (s.jtis.size >= GATEWAY_LIMITS.jtis) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: return { status: 503, error: \"limit\", headers: { \"retry-after\": \"1\" } }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: rotateNonce :: if (t - this.nonceAt >= GATEWAY_LIMITS.nonceMs) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: socketLost :: this.idleTimer = this.server.timers.setTimeout(() => { this.idleTimer = null; if (!this.server.pairedConn) this.shutdown(); }, GATEWAY_LIMITS.idleMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: start :: const worker = new Worker(entry, { workerData: { sagebrushNotebook: { dir }, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: stopWorker :: }, GATEWAY_LIMITS.fallbackMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: summary :: if (enc(s) <= GATEWAY_LIMITS.summary) return s; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: summary :: return enc(s) <= GATEWAY_LIMITS.summary ? s : JSON.stringify({ status: String(o.status).slice(0, 32) }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
  "src/magma.ts :: arrow :: const MAX_CHAIN = 64; #0": {
   "class": "2",
   "owner": "Magma translator",
@@ -6312,7 +6580,7 @@
   "owner": "sagebrush-remote-compute",
   "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
  },
- "src/notebook-pair.ts :: paired :: c.send({ jsonrpc: \"2.0\", id, result: { protocol: 1, purpose: \"kernel\", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } }); #0": {
+ "src/notebook-pair.ts :: paired :: c.send({ jsonrpc: \"2.0\", id, result: { protocol: 1, purpose: \"kernel\", token: c.token, nonce: this.gateway.currentNonce(), limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } }); #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
   "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
