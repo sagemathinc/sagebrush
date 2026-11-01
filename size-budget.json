@@ -51,6 +51,7 @@
   "engine/lib/mod-sb-check.src": 4356,
   "engine/lib/mod-sbx.src": 48044,
   "engine/lib/mod-scipy.src": 82824,
+  "engine/lib/mod-scipy-special.src": 41877,
   "engine/lib/mod-string.src": 19182,
   "engine/lib/mod-strptime.src": 573,
   "engine/lib/mod-tempfile.src": 2347,
