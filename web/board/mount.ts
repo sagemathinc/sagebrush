@@ -36,7 +36,7 @@
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
-import { boardFileText } from "../workspace/file-bytes";
+import { boardFileText } from "./file-text";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
