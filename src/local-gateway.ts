@@ -197,13 +197,13 @@ interface SocketState {
 export type GatewayOptions = {
   port?: SessionPort; // (tests: a scripted Worker)
   dir?: string; // the notebook's directory (the production port's)
-  authHold?: (id: string) => Promise<void>; // (tests: hold one request at its await; none in production)
+  authHold?: (id: string, conn: Conn) => Promise<void>; // (tests: hold a request, by its socket and id, at its await; none in production)
 };
 
 export class LocalGateway {
   readonly server: PairServer;
   readonly port: SessionPort;
-  readonly authHold: ((id: string) => Promise<void>) | null;
+  readonly authHold: ((id: string, conn: Conn) => Promise<void>) | null;
   binding: Binding | null = null;
   worker: WorkerHandle | null = null;
   workerGen = 0; // the current Worker's generation (L43: any other's messages are dropped)
@@ -364,7 +364,7 @@ export class LocalGateway {
   private async handle(req: Req) {
     let refusal: { status: number; error: string; headers?: Record<string, string> } | null;
     try {
-      if (this.authHold) await this.authHold(req.id);
+      if (this.authHold) await this.authHold(req.id, req.conn);
       refusal = await this.verify(req);
     } catch {
       refusal = { status: 401, error: "invalid_dpop_proof" };
