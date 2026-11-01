@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
@@ -48,16 +48,18 @@ function serverFrame(b: Buffer) {
 }
 
 // ---- a stub socket: every write recorded; writableLength set by the test; its "close" handlers callable
+const allSocks: any[] = []; // (every case's sockets: L20's census over their frame logs)
 function stubSock() {
   const on: Record<string, ((...a: any[]) => void)[]> = {};
   const st: any = {
-    writableLength: 0, destroyed: false, ended: 0, writes: [] as Buffer[], on,
+    writableLength: 0, destroyed: false, ended: 0, writes: [] as Buffer[], on, cancels: new Set<string>(),
     write(b: Buffer) { st.writes.push(Buffer.from(b)); return true; },
     end() { st.ended++; },
     destroy() { st.destroyed = true; },
   };
   st.on = (ev: string, fn: (...a: any[]) => void) => { (on[ev] ??= []).push(fn); return st; };
   st.emit = (ev: string) => { for (const f of on[ev] ?? []) f(); };
+  allSocks.push(st);
   return st;
 }
 /** The JSON text frames written to a stub socket, in order (the hello's result first). */
@@ -118,6 +120,8 @@ function newPage(s: PairServer, clk: ReturnType<typeof clock>, key = keyPair()) 
       const sig = edSign("sha256", Buffer.from(input), { key: over.signer ?? key.privateKey, dsaEncoding: "ieee-p1363" });
       return `${input}.${b64u(sig)}`;
     },
+    /** The page's {cancel: id} notification (recorded: L20). */
+    cancel(id: string) { st.cancels.add(id); c.feed(maskedText({ cancel: id })); },
     /** Send one request frame; resolves to its answer frame (the first frame for its id). */
     request(rpc: string, ref: any, body?: unknown, over: { id?: string; auth?: string; dpop?: string; proof?: any; method?: string; path?: string } = {}) {
       const id = over.id ?? page.nextId();
@@ -642,4 +646,81 @@ test("L16 8 open ids pass (L16+); a 9th open id: 1002", async () => {
     assert.equal(texts(t.page.st).filter((x: any) => x.status !== undefined).length, 0, "the closed socket's held requests answered nothing");
     census(t.s);
   } finally { await t.s.close(); }
+});
+
+// ================= 4.4 Retirement
+
+/** Every frame written for `id`, in order. */
+const framesFor = (st: any, id: string) => texts(st).filter((x: any) => x.id === id);
+test("L17a cancel a pending request: its one answer, then retired as the id's last frame", async () => {
+  const holds: (() => void)[] = [];
+  const t = await setup({ gateway: { authHold: () => new Promise<void>((r) => holds.push(r)) } });
+  try {
+    const r = t.page.request("g.bind", {}, {});
+    await until(() => holds.length === 1, "held");
+    t.page.cancel(r.id);
+    assert.deepEqual(framesFor(t.page.st, r.id), [], "nothing before its answer");
+    holds[0]();
+    await until(() => framesFor(t.page.st, r.id).length === 2, "the answer and retired");
+    const fs = framesFor(t.page.st, r.id);
+    assert.equal(fs[0].status, 200, "its one answer");
+    assert.deepEqual(fs[1], { id: r.id, retired: true }, "then retired");
+    // L17b: after retired, no frame for that id (a census over the frame log after more traffic)
+    await t.page.request("g.record", { b: bodyOf(fs[0]).binding, r: "x" }).answer();
+    const all = framesFor(t.page.st, r.id);
+    assert.equal(all.length, 2, "L17b no frame after retired");
+    assert.equal(all[all.length - 1].retired, true);
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L18 cancel a subscription: the frames already queued, then retired", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const run = await admitRun(t, b, "req-1");
+    t.port.last().onMessage({ id: run.workerId, stream: "stdout", text: "one\n" });
+    const ev = t.page.request("g.events", { b, r: "req-1", after: 0 });
+    assert.equal((await ev.answer()).status, 200);
+    await until(() => framesFor(t.page.st, ev.id).filter((x: any) => x.chunk).length === 2, "start and the stream queued");
+    t.page.cancel(ev.id);
+    const fs = framesFor(t.page.st, ev.id);
+    assert.deepEqual(fs[fs.length - 1], { id: ev.id, retired: true }, "retired last");
+    assert.equal(fs.filter((x: any) => x.chunk).length, 2, "the queued chunks, then retired");
+    t.port.last().onMessage({ id: run.workerId, stream: "stdout", text: "two\n" });
+    run.finish();
+    await until(() => t.s.gateway.binding!.runs.get("req-1")!.outcome !== null, "ended");
+    assert.equal(framesFor(t.page.st, ev.id).length, fs.length, "nothing after retired");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L19a cancel a never-issued frame id: 1002", async () => {
+  const t = await setup();
+  try {
+    await bind(t.page); // (t1)
+    t.page.cancel("t9");
+    assert.equal(closeOf(t.page.st), 1002);
+  } finally { await t.s.close(); }
+});
+test("L19b cancel an already-answered id: retired at once", async () => {
+  const t = await setup();
+  try {
+    const r = t.page.request("g.bind", {}, {});
+    assert.equal((await r.answer()).status, 200);
+    t.page.cancel(r.id);
+    const fs = framesFor(t.page.st, r.id);
+    assert.deepEqual(fs[fs.length - 1], { id: r.id, retired: true });
+    assert.equal(fs.length, 2);
+  } finally { await t.s.close(); }
+});
+// L20: no retired without a cancel, over every case's frame log (this file's sockets, checked after them all)
+after(() => {
+  let n = 0;
+  for (const st of allSocks) {
+    for (const f of texts(st)) {
+      if (f.retired === undefined) continue;
+      n++;
+      assert.ok(st.cancels.has(f.id), `L20 retired ${f.id} without a cancel`);
+    }
+  }
+  assert.ok(n >= 4, `L20 the census saw the retirements (${n})`);
 });
