@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "reason": "scipy.special PR 1 (numerics lane A): lib/scipy/special.py, SciPy's names and conventions over lib/_special.py, in a chunk group of its own (mod-scipy-special, a new bundle with its budgets.json entry) after the split of scipy's submodules into groups (mod-scipy -> mod-scipy-integrate, the same bytes). The CLI carries the new source (lib.gen.js, pyjs.cjs); sci grows only by scipy/__init__.py's new submodule name; the worker and the notebook by the manifest's new entries, and the CLI and the worker by the third-party notices' scipy.special paragraph. Measured locally with CI's bun 1.4.4 tool: master 7b77aac5 against 7cb62e68; cli/pyjs.cjs +15137 marked 15265 (128 B for drift), the other rows exact.",
+  "reason": "scipy.special PR 1 (numerics lane A): lib/scipy/special.py, SciPy's names and conventions over lib/_special.py, in a chunk group of its own (mod-scipy-special, a new bundle with its budgets.json entry) after the split of scipy's submodules into groups (mod-scipy -> mod-scipy-integrate, the same bytes). The CLI carries the new source (lib.gen.js, pyjs.cjs); sci grows only by scipy/__init__.py's new submodule name; the worker and the notebook by the manifest's new entries, and the CLI and the worker by the third-party notices' scipy.special paragraph. Measured locally with CI's bun 1.4.4 tool: master 4b568d5d against the merge fdeec273; cli/pyjs.cjs +16413 marked 16541 (128 B for drift), the other rows exact.",
   "bytes": {
-    "cli/lib.gen.js": 14410,
-    "cli/pyjs.cjs": 15265,
+    "cli/lib.gen.js": 15574,
+    "cli/pyjs.cjs": 16541,
     "engine/lib/sci.pre": 13,
     "engine/lib/sci.src": 31,
     "engine/sagebrush-notebook.js": 60,
