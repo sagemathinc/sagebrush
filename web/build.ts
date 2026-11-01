@@ -138,9 +138,9 @@ const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(he
 const notebookResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "index.js")], outdir: join(here, "dist"), naming: "sagebrush-notebook.js", target: "browser", format: "esm", minify: true });
 // TimeTravel's history (web/notebook/history.js, with patchflow), loaded after the notebook
 const historyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "history.js")], outdir: join(here, "dist"), naming: "sagebrush-history.js", target: "browser", format: "esm", minify: true });
-// the app self-test's COI diagnosis (web/notebook/selftest-diagnose.js), imported by selftest() only when the
-// app's self-test runs; the app copies it (app/build-frontend.mjs), the CLI doesn't serve it
-const selftestResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "selftest-diagnose.js")], outdir: join(here, "dist"), naming: "sagebrush-selftest.js", target: "browser", format: "esm", minify: true });
+// the app self-test's COI diagnosis and the Terminal's checks (web/notebook/selftest-entry.js), imported by
+// selftest() only when the app's self-test runs; the app copies it (app/build-frontend.mjs), the CLI doesn't serve it
+const selftestResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "selftest-entry.js")], outdir: join(here, "dist"), naming: "sagebrush-selftest.js", target: "browser", format: "esm", minify: true });
 // The reactive notebook's analyzer (web/analyze-worker.ts): pyparse and
 // src/dataflow.ts in a worker of their own
 const analyzeResult = await Bun.build(<any>{
@@ -450,7 +450,7 @@ shellHash.update(engineHash + libManifestHash);
 // worker serves a kept copy only if it still has those bytes, and then as a
 // response it makes, with this status and these headers, never the kept
 // response's own; design/security.md, SEC-8D6-1, SEC-522-1)
-const { pagePolicy } = await import("./csp-policy.mts");
+const { pagePolicy, frameOptions } = await import("./csp-policy.mts");
 const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   const file = p === "./" ? "index.html" : p.split("?")[0];
   const bytes = readFileSync(join(here, "dist", file));
@@ -458,7 +458,7 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   if (!mime) throw new Error(`sw.js: no type for ${file}`);
   // (as web/_headers and web/csp.ts give it: every file cross-origin isolated, a page its policy)
   const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
-  if (file.endsWith(".html")) headers["Content-Security-Policy"] = pagePolicy(scriptHashes(bytes.toString("utf8")));
+  if (file.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": pagePolicy(scriptHashes(bytes.toString("utf8"))), "X-Frame-Options": frameOptions(pagePolicy())! });
   return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
 }));
 writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
@@ -511,6 +511,19 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
     mkdirSync(join(siteDir, "public", "shell"), { recursive: true });
     copyFileSync(join(here, "dist", "shell", "preview-set.json"), join(siteDir, "public", "shell", "preview-set.json"));
   }
+}
+// the agents chat preview (web/agents): a full-page chat with artifacts, driven by a scripted agent. Flagged like the
+// questions preview: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_AGENTS=1
+rmSync(join(here, "dist", "agents"), { recursive: true, force: true });
+if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_AGENTS === "1") {
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "page.ts")], outdir: join(here, "dist", "agents"), naming: "agents.js", target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+  copyFileSync(join(here, "agents", "index.html"), join(here, "dist", "agents", "index.html"));
+  // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
+  for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
 }
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });

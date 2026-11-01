@@ -496,6 +496,17 @@ try {
       const st = r2.placed?.statuses ?? {};
       check(r2.ok && r2.placed.work <= C.LIMITS.workBudget && (st.moved ?? 0) > 0 && (st.moved ?? 0) + (st.unresolved ?? 0) === 300 && r2.drawn > 0 && r2.drawn < 200, "comments: exactly 2 MiB, 300 moved anchors: placed within the work budget (each moved or unresolved), drawn near the view", r2);
       timed(r2, 32, "2 MiB, 300 moved anchors");
+      // (the shared pass: the native search below its dispatch bound, 300 needles over 256 KiB; the pass above it, the
+      // same over 2 MiB, its table's bytes reported)
+      check(r1.placed?.pass?.path === "native" && r2.placed?.pass?.path === "pass" && r2.placed.pass.bytes > 0, "comments: the native search at 256 KiB with 300 anchors, the shared pass at 2 MiB (its bytes measured)", { k256: r1.placed?.pass, m2: r2.placed?.pass });
+      // 1,800 moved anchors over exactly 2 MiB: the shared pass re-finds every one within the default work budget,
+      // in slices and drawn near the view (quote-only anchors, as the 2,000 threads below; 1,800 of these quotes keep
+      // the comments file under 2 MiB, about 1 KB a thread)
+      const d5 = C.emptyDoc({});
+      for (let i = 0; i < 1800; i++) { const q = `a phrase numbered ${i * 10}.`, s0 = t2.indexOf(q); if (s0 < 0) throw new Error("no " + q); d5.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-31T00:00Z" }).doc.threads[0]); }
+      const r5 = await measure("m2t1800", t2, d5), s5 = r5.placed?.statuses ?? {};
+      check(r5.ok && r5.placed.pass?.path === "pass" && s5.moved === 1800 && r5.placed.work <= C.LIMITS.workBudget && r5.drawn > 0 && r5.drawn < 300 && r5.list.shown <= 100, "comments: exactly 2 MiB, 1,800 moved anchors: the shared pass re-finds all within the work budget; drawn near the view, the list's first 100", { placed: r5.placed, drawn: r5.drawn, list: r5.list });
+      timed(r5, 32, "2 MiB, 1,800 moved anchors");
       // the admitted 2,000 live threads (astra's fixture: small threads, short times, a file under 2 MiB, though a new one
       // is refused past 1.75 MiB): on a document of 2,000 tokens, each thread re-found (moved) by its token, all placed;
       // drawing only near the view, the list's first 100 a section
@@ -504,7 +515,7 @@ try {
       for (let i = 0; i < 2000; i++) { const q = `w${i},`, s0 = toks.indexOf("item " + q) + 5; d3.threads.push(C.addThread(C.emptyDoc({}), { anchor: { start: s0, end: s0 + q.length, quote: q, prefix: "", suffix: "" }, text: "x", author: "agent:a", time: "2026-10-30T00:00Z" }).doc.threads[0]); }
       const side3 = C.serialize(d3);
       const r3 = await measure("t2000", toks, d3);
-      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
+      check(r3.ok && new TextEncoder().encode(side3).length <= C.LIMITS.sidecarBytes && r3.placed.statuses.moved === 2000 && r3.placed.pass?.path === "native" && r3.drawn > 0 && r3.drawn < 300 && r3.list.shown <= 100, "comments: 2,000 threads (all placed): drawn only near the view (bounded), the list's first 100", { ...r3, bytes: new TextEncoder().encode(side3).length });
       timed(r3, 8, "2,000 threads on a small document");
       // one unit over 2 MiB: refused with the size, nothing drawn or written, the comments file untouched
       const t4 = t2.replace("%", "%%"), d4 = threadsOn(t2, 3, 50, false), side4 = C.serialize(d4);
@@ -898,18 +909,38 @@ try {
   check(await until(`document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000), "the edited large paragraph is re-patched");
   check((await ev(`window.__mixed`)) === 0, "…never an old and a new version of it at once");
 
-  // ---- the patch loop: no Long Task over 50 ms while a large paragraph and list are re-patched. Timing assertions
-  // gate only on a timing box (BOX "timing", VM3/VM4: @sagebrush's ruling, Oct 29); on a build box they are recorded
-  await ev(`(() => { window.__lt = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: "longtask", buffered: false }); return true; })()`);
-  await typeInto(para.replace("CHANGED word", "AGAIN word"));
-  await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN")`, 60000);
+  // ---- the patch loop: no Long Task over 50 ms from the edit's synchronous work (the textarea's setter and the input
+  // handler) or from the scheduler tasks after it (the highlighter, the worker's reply, the re-patch and swap), until
+  // the preview has the edit. It doesn't measure frame rendering (edit-to-paint): headless Chromium on the timing box
+  // doesn't run it in an observed task. Timing assertions gate only on a timing box (BOX "timing", VM3/VM4:
+  // @sagebrush's ruling, Oct 29); on a build box they are recorded.
+  // The window (LR-1, astra's and daybreak3's ruling, Oct 31): the edited 1.5 MiB text is staged in the page first, in
+  // its own task; then a fresh observer; then a small evaluate schedules ONE page task that assigns it and dispatches
+  // input. (A page task, not the evaluate: CDP's evaluate runs as a V8 interrupt, which the Long Task API doesn't see.
+  // The old window's result, from a trigger that didn't change the text, is retired as unattributed.) The edit must land, its marker in the
+  // preview, or this fails: never a timing pass. The observer is checked first: an 80 ms busy loop in a page task,
+  // with an observer of its own, is seen.
+  const edited2 = para.replace("word word", "AGAIN word");
+  const staged = await ev(`(() => { window.__staged = ${JSON.stringify(edited2)}; const v = document.querySelector(".tex-src").value; return { len: window.__staged.length, differs: window.__staged !== v, had: v.includes("CHANGED") }; })()`);
+  check(edited2 !== para && staged.len === edited2.length && staged.differs && staged.had, "the re-patch's edit: staged, and a change of the text the editor has (CHANGED to AGAIN)", staged);
+  const watchLt = `(() => { window.__lt = []; window.__ltOb?.disconnect(); window.__ltOb = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }); window.__ltOb.observe({ type: "longtask", buffered: false }); return true; })()`;
+  await ev(watchLt);
+  await ev(`(() => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 80); }, 0); return true; })()`);
+  await sleep(300);
+  const ltc = await ev(`window.__lt`);
+  check(ltc.some((d) => d >= 75), "the Long Task observer sees an 80 ms busy loop in a page task (the window's sensitivity)", ltc);
+  await sleep(300);
+  await ev(watchLt);
+  await ev(`(() => { setTimeout(() => { const t = document.querySelector(".tex-src"); t.value = window.__staged; t.dispatchEvent(new Event("input")); }, 0); return true; })()`);
+  const landed = await until(`document.querySelector(".tex-preview").textContent.includes("AGAIN") && !document.querySelector(".tex-preview").textContent.includes("CHANGED")`, 60000);
   await sleep(500);
   const lts = await ev(`window.__lt`);
+  check(landed, "the re-patch's edit landed: AGAIN in the preview, CHANGED gone");
   const own = await ev(`({ step: +document.querySelector(".tex-preview").dataset.patchMaxMs, swap: +document.querySelector(".tex-preview").dataset.swapMaxMs, reply: +document.querySelector(".tex-preview").dataset.replyMs })`);
   console.log("long tasks during the re-patch (ms):", JSON.stringify(lts), "patch loop's own longest step and swap (ms):", JSON.stringify(own));
   if (BOX === "timing") {
     check(own.step <= 50 && own.swap <= 50, "the patch loop's own steps and swap each under 50 ms (a timing box)", own);
-    check(lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own });
+    check(landed && lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own, landed });
   } else console.log("timing, reported, not gated (a build box): long tasks over 50 ms:", JSON.stringify(lts.filter((d) => d > 50)), "own step/swap over 50 ms:", own.step > 50 || own.swap > 50);
 
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder

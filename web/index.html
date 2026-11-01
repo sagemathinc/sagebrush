@@ -8,9 +8,9 @@
 <meta name="description" content="Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines, running entirely in your browser. No server.">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#6b8e5a">
+<meta name="theme-color" content="#AE472A">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23AE472A%22/%3E%3Cpath fill=%22%23FADEB6%22 d=%22M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z%22/%3E%3Cpath fill=%22%23BAC49E%22 d=%22M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z%22/%3E%3C/svg%3E">
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
 <!-- the phone layout (a flag while it is new): ?phone=1 turns it on in this browser, ?phone=0 off -->
 <script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); if (localStorage.getItem("sagebrush-phone") === "1") document.documentElement.classList.add("phone"); } catch {}</script>
@@ -399,6 +399,7 @@
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <a role="menuitem" id="howruns" href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener" title="How the notebook runs cells: what reruns when, and why">How cells run ↗</a>
+  <a role="menuitem" id="supportlink" href="https://cocalc.ai/support/new" target="_blank" rel="noopener noreferrer" title="Ask for help: CoCalc's support form, in a new tab">Support ↗</a>
 </div>
 <dialog id="exdlg" aria-labelledby="extitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="extitle">Examples</b><button aria-label="Close">✕</button></form>
@@ -3003,7 +3004,8 @@ async function selftest(path) {
     // (the COI diagnosis's info lines: a module loaded only here, its load
     // bounded at 15 s like the diagnosis itself; if either fails, the reason
     // is logged and the report's judge names every missing line)
-    try { infoLines = await (await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000)).diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
+    let st = null;
+    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
     await nb.runAll();
@@ -3028,6 +3030,8 @@ async function selftest(path) {
     const stopped = await looping;
     check("Stop interrupts a loop", /KeyboardInterrupt/.test(stopped) && !/restarted/.test(stopped), JSON.stringify(stopped.slice(-60)) + (kernel.interruptFlag ? " (the worker shares its interrupt flag)" : " (no shared interrupt flag from the worker)"));
     check("...and keeps the variables", (await exec("print(keep + 1)")).includes("42"));
+    // (the Terminal's shell worker in the real app: its policy, the bridge from the page and none from the worker)
+    for (const [n, o, d] of st ? await st.terminalChecks((c, a) => TAURI.core.invoke(c, a)) : [["the Terminal's checks", false, "no self-test module"]]) check(n, o, d);
     nb.flush();
     await new Promise((r) => setTimeout(r, 500));
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));

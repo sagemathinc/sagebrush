@@ -15,7 +15,7 @@ export async function checkNoticeBrowser() {
   const pending = new Map(), violations = [];
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const source = { branch: 'feature/<img src=x onerror=alert(1)>', commit: 'a'.repeat(40), dirty: true };
-  const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'";
+  const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'";
   writeFileSync(join(dir, 'index.html'), `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><html><head><style>
     *{box-sizing:border-box}body{margin:0}.tex-page{position:fixed;inset:0}.sbfiles{position:fixed;left:0;top:0;bottom:0;width:100%;height:100%;display:flex;flex-direction:column;background:white}.fh{display:flex;justify-content:flex-end;gap:8px;padding:12px}.ftree{flex:1}.ffoot{padding:8px}button{min-height:30px}
     </style><script src="/app.js" defer></script></head><body><div class="tex-page"><aside id="wssidebar" class="sbfiles" aria-label="Files"><div class="fh"><button aria-label="New">New</button><button aria-label="Upload">Upload</button><button aria-label="More">More</button></div><div class="ftree">Files</div><div class="ffoot"><button id="folder-control">Folder controls</button></div></aside></div></body></html>`);

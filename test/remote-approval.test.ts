@@ -79,7 +79,7 @@ function nb(codes: [string, string][], hash: Hash = sha) {
   let cells = codes.map(([id, code]) => ({ id, code }));
   const graph = new NotebookGraph(cells, { analyze: (code, id) => analyzeCell(code, id) });
   const options = new Map<string, ExecOptions>();
-  const ctx: KernelContext = { binding: "b1", epoch: 1, generation: 1, incarnation: 1, ready: true };
+  const ctx: KernelContext = { binding: "b1", own: 1, generation: 1, incarnation: 1, ready: true };
   // the host's adapter: a new spec object only when something in it changed; parents as a stable array
   const specs = new Map<string, { key: string; spec: RunSpec }>();
   const parentsMemo = new Map<string, readonly string[]>();
@@ -225,7 +225,7 @@ test("AP2c: an ancestor's success is from before a restart: the next cell waits"
 });
 
 test("AP3: the kernel changes (takeover, rebind, not ready) while B is queued: skipped", async () => {
-  for (const change of [{ epoch: 2 }, { generation: 9 }, { binding: "b2" }, { ready: false }]) {
+  for (const change of [{ own: 2 }, { generation: 9 }, { binding: "b2" }, { ready: false }]) {
     const n = nb([["a", "x = 1"], ["b", "y = x + 1"]]);
     await n.run("a");
     await n.approve(["b"]);
@@ -698,7 +698,7 @@ test("terminals, batch: an old batch's terminals after a newer single run, or af
 // options as given; the hash counted.
 function raw(parents: Record<string, string[]>, src: (id: string) => string = (id) => `x_${id} = 1`, hash: Hash = sha, opts: (id: string) => ExecOptions = () => ({})) {
   const sources = new Map(Object.keys(parents).map((id) => [id, src(id)]));
-  const ctx: KernelContext = { binding: "b1", epoch: 1, generation: 1, incarnation: 1, ready: true };
+  const ctx: KernelContext = { binding: "b1", own: 1, generation: 1, incarnation: 1, ready: true };
   const specs = new Map<string, RunSpec>();
   const par = new Map<string, readonly string[]>();
   const adapter: ApprovalGraph = {
@@ -1303,7 +1303,7 @@ test("structural caps at the limit and one past it (cells, edges, an id, ids tog
     r.ap.beginAction(all);
     const edges = Object.values(parents).reduce((t, ps) => t + ps.length, 0);
     assert.equal(edges, ok ? 50_000 : 50_001);
-    const v = await r.ap.check({ cells: ["top"], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", epoch: 1, generation: 1, witness: null }, "rq-edges");
+    const v = await r.ap.check({ cells: ["top"], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", own: 1, generation: 1, witness: null }, "rq-edges");
     // (over the cap: refused as too large; at it: refused only because nothing was approved or frozen)
     assert.ok(skipped(v));
     assert.equal(/too large/.test((v as { skip: string }).skip), !ok, `${edges} edges`);
@@ -1312,7 +1312,7 @@ test("structural caps at the limit and one past it (cells, edges, an id, ids tog
   for (const [len, ok] of [[256, true], [257, false]] as const) {
     const id = "i".repeat(len);
     const r = raw({ [id]: [] });
-    const v = await r.ap.check({ cells: [id], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", epoch: 1, generation: 1, witness: null }, "rq-id");
+    const v = await r.ap.check({ cells: [id], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", own: 1, generation: 1, witness: null }, "rq-id");
     assert.equal(/too large/.test((v as { skip: string }).skip), !ok, `${len}`);
   }
   // ids together: 4,096 ids of 256 bytes is exactly 1 MiB; one more id of 1 byte is one past it
@@ -1323,7 +1323,7 @@ test("structural caps at the limit and one past it (cells, edges, an id, ids tog
     for (const id of ids) parents[id] = [];
     parents[ids[0]] = ids.slice(1);
     const r = raw(parents);
-    const v = await r.ap.check({ cells: [ids[0]], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", epoch: 1, generation: 1, witness: null }, "rq-ids");
+    const v = await r.ap.check({ cells: [ids[0]], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", own: 1, generation: 1, witness: null }, "rq-ids");
     assert.equal(/too large/.test((v as { skip: string }).skip), !ok, `${ids.length} ids`);
   }
   // one cell's eid input: 2 MiB, then one byte more
@@ -1373,7 +1373,7 @@ test("structural caps at the limit and one past it (cells, edges, an id, ids tog
     const r = raw({ a: [] }, () => "x = 1", sha, () => o);
     r.ap.beginAction(all);
     assert.equal(r.ap.precount(["a"]).ok, ok, `the precount: ${what}`);
-    const v = await r.ap.check({ cells: ["a"], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", epoch: 1, generation: 1, witness: null }, "rq-opt");
+    const v = await r.ap.check({ cells: ["a"], eids: [""], approvalEpoch: 0, doc: "x", binding: "b1", own: 1, generation: 1, witness: null }, "rq-opt");
     assert.equal(/too large/.test(!v.send && "skip" in v ? v.skip : ""), !ok, `the check's walk: ${what}`);
     assert.equal(r.calls.n, 0, `${what}: nothing hashed`);
   }

@@ -289,7 +289,8 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   const s5 = await run(kernel, "twice-ambiguous");
   check(s5.terminal?.[0] === "done" && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice: reconciled from the request's own record (it ran), runs exactly once");
   fake.faults.oversizeAck = 2;
-  fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
+  // (the record asked 3 times, plan r8 F3: unreachable each time)
+  for (let i = 0; i < 3; i++) fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
   e0 = fake.executions.length;
   const s5b = await run(kernel, "twice-ambiguous-unreconciled");
   check(s5b.terminal?.[1] === NOTES.unknown && kernel.needsFence && fake.executions.length === e0 + 1, "P1A-C3 ambiguous twice and its record unreachable: unknown (not 'Not run'), and fenced before more work");
@@ -596,7 +597,7 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
     const { fake, kernel } = await setup();
     const b = fake.bindings.get(kernel.binding);
     fake.intercept("POST", /\/runs$/, { lose: true, after: () => { b.epoch++; } });
-    fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
+    for (let i = 0; i < 3; i++) fake.intercept("GET", /\/runs\/[^/]+$/, { respond: { status: 503, body: "unavailable" } });
     const e0 = fake.executions.length;
     const s = await run(kernel, "r2c1-epoch-unreconciled");
     check(s.terminal?.[1] === NOTES.unknown && kernel.needsFence && kernel.moved && fake.executions.length === e0 + 1, "P1A-R2-C1 (a') and its record unreachable: unknown (never 'Not run'), fenced, and moved for future work");
@@ -649,6 +650,7 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
     // (each variant from a consistent start: the fake's epoch is the client's, as an invalid takeover
     // answer leaves the client's unchanged while the fake moved on)
     fake.bindings.get(kernel.binding).epoch = kernel.epoch;
+    fake.bindings.get(kernel.binding).applied = []; // (and its retained evidence: plan r8 F2 keeps it until acknowledged)
     let applied = false;
     fake.intercept("POST", /\/restart$/, { lose: true });
     fake.intercept("POST", /\/takeover$/, { mutate: (r) => { applied = (r.applied_before_takeover ?? []).some((a) => a.kind === "restart"); mutate(r); } });
@@ -659,6 +661,8 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
     check(kernel.generation === g && kernel.needsFence && !said.some((t) => /did not happen/.test(t)) && said.some((t) => /could not be checked/.test(t)), `P1A-R2-C2 a restart applied, its answer lost, then a takeover answer with ${what}: nothing concluded, the fence stays`);
   }
   // (an old run still executing, and a ready answer that leaves in_flight out: not taken as "nothing running")
+  fake.bindings.get(kernel.binding).epoch = kernel.epoch;
+  fake.bindings.get(kernel.binding).applied = [];
   fake.kernel = () => new Promise(() => {});
   const sa = sink();
   kernel.execute("still-running", { mode: "python" }, sa);
@@ -804,6 +808,24 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const ran = await runGateTests(check);
   console.log(`remote-gate: ${ran} controls ran`);
   check(ran === 33, `remote-gate: every control ran (${ran} of 33)`);
+}
+// ---- waves: one reactive action, one request (the policy, the gateway, the page, admitWave per attempt)
+{
+  const { runWaveTests } = await import("./test-remote-wave.mjs");
+  const ran = await runWaveTests(check);
+  console.log(`remote-wave: ${ran} controls ran`);
+  check(ran === 31, `remote-wave: every control ran (${ran} of 31)`);
+  // (the loss recovery, plan r8: C2-C9, and C1's seeded loss)
+  const { runRecoveryTests } = await import("./test-remote-recovery.mjs");
+  const rran = await runRecoveryTests(check);
+  console.log(`remote-recovery: ${rran} controls ran`);
+  check(rran === 30, `remote-recovery: every control ran (${rran} of 30)`);
+  // (the preview's Stop: the run ends when its interpreter stops)
+  const { runPreviewStopTests } = await import("./test-remote-preview-stop.mjs");
+  const pran = await runPreviewStopTests(check);
+  check(pran === 3, `remote-preview-stop: every case ran (${pran} of 3)`);
+  const { runLossTests } = await import("./test-remote-loss.mjs");
+  await runLossTests(check);
 }
 // ---- the GPU kernel's preview (remote-ui.js): its simulated gateway and startPreview
 {

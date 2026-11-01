@@ -39,7 +39,10 @@ export function* tokenizeLine(line: string, state: State): Generator<Tok, State,
       else if (cs === "\\(") state = "M"; else if (cs === "\\)" && state === "M") state = "N";
       if (cs === "\\begin" || cs === "\\end") {
         const env = /^\{([^}]*)\}/.exec(line.slice(i + cs.length));
-        yield [inMath() ? "c-math c-cmd" : "c-cmd", cs + (env ? env[0] : "")];
+        // (a math environment's \begin and \end both in math's color, as $ and \[ \] are: the \begin that opens it
+        //  is colored as the math it starts, its \end as the math it closes)
+        const opens = !!env && cs === "\\begin" && MATHENV.has(env[1]) && state === "N";
+        yield [inMath() || opens ? "c-math c-cmd" : "c-cmd", cs + (env ? env[0] : "")];
         i += cs.length + (env ? env[0].length : 0);
         if (env && cs === "\\begin" && VERB.has(env[1])) { const rest = line.slice(i); const endAt = rest.indexOf("\\end{" + env[1] + "}"); if (endAt < 0) { if (rest) yield ["c-verb", rest]; return "V:" + env[1]; } if (endAt) yield ["c-verb", rest.slice(0, endAt)]; i += endAt; continue; }
         if (env && cs === "\\begin" && MATHENV.has(env[1]) && state === "N") state = "E:" + env[1];

@@ -129,6 +129,7 @@ try {
     const h = (await fetch(base + path)).headers;
     const csp = h.get("content-security-policy") ?? "";
     ok(/script-src 'self'/.test(csp) && /object-src 'none'/.test(csp), `${path} has the site's Content-Security-Policy`);
+    ok(/(^|; )frame-ancestors 'self'(;|$)/.test(csp) && h.get("x-frame-options") === "SAMEORIGIN", `${path} is framed only by this site (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)`);
     ok(h.get("cross-origin-opener-policy") === "same-origin" && h.get("cross-origin-embedder-policy") === "require-corp", `${path} is cross-origin isolated, as every static page`);
   }
   await open("/atlas/mf/389.2.a.e");
