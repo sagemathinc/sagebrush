@@ -13,4 +13,6 @@ True
 x^2
 abs(x)
 sqrt(x^2)
+y
+sqrt(x^2)
 []
