@@ -121,14 +121,19 @@ def _arrangements(counts, k):
 
 
 def _count_choices(counts, k):
-    # the coefficient of x^k in prod (1 + x + ... + x^c)
+    # the coefficient of x^k in prod (1 + x + ... + x^c); an impossible k
+    # is 0 before any storage or work
     if k is None:
         r = 1
         for c in counts:
             r *= c + 1
         return r
-    if k < 0:
+    if not 0 <= k <= sum(counts):
         return 0
+    return _choice_poly(counts, k)
+
+
+def _choice_poly(counts, k):
     poly = [1] + [0] * k
     for c in counts:
         new = [0] * (k + 1)
@@ -141,11 +146,24 @@ def _count_choices(counts, k):
 
 
 def _count_arrangements(counts, k):
-    # k! times the coefficient of x^k in prod (sum_{j <= c} x^j/j!)
+    # an impossible k is 0; all of them (k = n) the multinomial
+    # n!/prod(c!) directly; a partial arrangement k! times the coefficient
+    # of x^k in prod (sum_{j <= c} x^j/j!)
+    from math import factorial
+    n = sum(counts)
+    if not 0 <= k <= n:
+        return 0
+    if k == n:
+        r = factorial(n)
+        for c in counts:
+            r //= factorial(c)
+        return r
+    return _arrangement_poly(counts, k)
+
+
+def _arrangement_poly(counts, k):
     from fractions import Fraction
     from math import factorial
-    if not 0 <= k <= sum(counts):
-        return 0
     poly = [Fraction(1)] + [Fraction(0)] * k
     for c in counts:
         new = [Fraction(0)] * (k + 1)
@@ -582,6 +600,14 @@ class Subsets:
         return v._s <= self._set._s and (self._k is None or len(v) == self._k)
 
 
+def _falling(n, k):
+    # n (n - 1) ... (n - k + 1), for 0 <= k <= n
+    r = 1
+    for i in range(k):
+        r *= n - i
+    return r
+
+
 def _binom(n, k):
     if k < 0 or k > n:
         return 0
@@ -810,10 +836,7 @@ class Permutations:
         n = len(self._m)
         k = n if self._k is None else self._k
         if len(self._reps) == n:
-            r = 1
-            for i in range(k):
-                r *= n - i
-            return _Z(r if 0 <= k <= n else 0)
+            return _Z(_falling(n, k) if 0 <= k <= n else 0)
         return _Z(_count_arrangements(self._counts, k))
 
     def __len__(self):
