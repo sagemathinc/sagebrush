@@ -110,9 +110,17 @@ const cellForm = (c) => {
 const cellHash = (c) => createHash("sha256").update(canonical(cellForm(c)), "utf8").digest("hex");
 
 // ---- the browser
+// (when each step of the start and of each pairing happened, ms after the browser's spawn: printed with any failure
+// and at the end, for a slow or stalled first load; c1's F1)
+const t0 = Date.now();
+const stamps = [];
+const stamp = (what) => stamps.push(`${what} +${Date.now() - t0}ms`);
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+// (--password-store=basic: no OS keyring, whose absence can stall Chrome's first load; c1's F1, the grader's hypothesis)
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+stamp("spawned");
 const cdpPort = await devtoolsPort(profile);
+stamp("devtools port");
 let targets;
 for (let i = 0; i < 300; i++) {
   try {
@@ -122,8 +130,10 @@ for (let i = 0; i < 300; i++) {
     await sleep(100);
   }
 }
+stamp("first target");
 const cdp = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (cdp.onopen = r));
+stamp("connected");
 let n = 0;
 const waiting = new Map();
 const requested = []; // (every URL the page or its workers asked for)
@@ -131,12 +141,21 @@ const workers = []; // (every worker started: its URL)
 const liveWorkers = new Map(); // (the workers running now: session -> URL)
 const paused = []; // (requests held by Fetch: their ids)
 const logs = []; // (the page's errors and warnings: shown when something fails)
+const urls = new Map(); // (request id -> URL, to name a failed request)
+const bad = []; // (the failed requests and non-2xx responses: shown when something fails)
+let loads = 0; // (the page's load events so far)
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
-  } else if (m.method === "Network.requestWillBeSent") requested.push(m.params.request.url);
+  } else if (m.method === "Network.requestWillBeSent") {
+    requested.push(m.params.request.url);
+    urls.set(m.params.requestId, m.params.request.url);
+  }
+  else if (m.method === "Network.responseReceived" && !(m.params.response.status >= 200 && m.params.response.status < 300)) bad.push(`${m.params.response.status} ${m.params.response.url}`.slice(0, 300));
+  else if (m.method === "Network.loadingFailed") bad.push(`failed (${m.params.errorText}${m.params.canceled ? ", canceled" : ""}) ${urls.get(m.params.requestId) ?? m.params.requestId}`.slice(0, 300));
+  else if (m.method === "Page.loadEventFired") { loads++; stamp(`load event ${loads}`); }
   else if (m.method === "Target.detachedFromTarget") liveWorkers.delete(m.params.sessionId);
   else if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId);
   else if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") {
@@ -164,8 +183,10 @@ const until = async (expr, ms = 20000) => {
     if (await ev(expr).catch(() => false)) return true;
     await sleep(100);
   }
-  throw new Error("timeout: " + expr);
+  throw new Error("timeout: " + expr + "\n  the page then: " + JSON.stringify(await pageState()));
 };
+/** What the page is showing (for a timeout): its address, load state, the Connect control, title and first text. */
+const pageState = () => ev(`(() => { const c = document.querySelector('#connect'); return { href: location.href, readyState: document.readyState, connect: c ? c.textContent : null, title: document.title, text: (document.body?.innerText ?? "").slice(0, 200) }; })()`).catch((e) => ({ unreadable: String(e).slice(0, 200) }));
 const key = (k, extra = {}) => send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0, ...extra }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0 }));
 const size = (width, height = 900) => send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 await send("Network.enable");
@@ -255,8 +276,14 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 
 /** Open the page with a pairing link, connect, and allow everything (the person's grant dialog). */
 async function pair() {
+  const before = loads;
+  stamp("pair: navigate");
   await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${daemon.port}` });
-  await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
+  // (the page loaded before its Connect is looked for: a load that never comes fails here, with the page's state)
+  const t1 = Date.now();
+  while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
+  await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
   await ev(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
@@ -314,6 +341,11 @@ try {
     await call("workspace.create", { path: "/notes/plot.ipynb", content: docFor("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('OLD')" }, { type: "markdown", code: "Some *text*" }], { autorun: "always" }), mode: "python" });
     const rec0 = await record(await refOf("/notes/plot.ipynb"));
     ok(rec0?.autorun === "always", "the document says autorun: always", rec0 && Object.keys(rec0));
+    // (A10: a code artifact open first, so the pane's width is measured right before and right after the notebook opens)
+    await call("workspace.create", { path: "/notes/w.py", content: { text: "w = 1\n" } });
+    await artifactTurn("/notes/w.py");
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/w.py ")`, 30000);
+    const paneBefore = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
     await openNotebook("/notes/plot.ipynb");
     ok(loaded("sagebrush-notebook.js"), "the notebook component is loaded when the notebook opens");
     await sleep(2500);
@@ -321,7 +353,8 @@ try {
     ok(workerCount() === 0 && !/OLD/.test(o), "opening runs nothing: no kernel worker, no output", { workers, o });
     ok((await shown()).join("|") === "x = 1|print('OLD')|Some *text*", "the cells are shown as written", await shown());
     ok(await ev(`!!document.querySelector('${PANE} .nb-notice') && /Runs here when you click Run/.test(document.querySelector('${PANE} .nb-notice').textContent)`), "the run notice is shown beside the notebook");
-    ok(await ev(`document.body.classList.contains('wide-artifact')`), "a notebook gets the wide pane");
+    const paneAfter = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
+    ok(paneBefore > 0 && Math.abs(paneAfter - paneBefore) < 1, "opening a notebook leaves the pane width as it was (A10)", { paneBefore, paneAfter });
     ok(await ev(`document.activeElement?.closest('#artifacts') === null`), "the artifact the agent opened didn't take the focus");
 
     // ---- written by the agent: the label, and when it goes
@@ -512,7 +545,7 @@ try {
     ok(at1280.chat >= 420 && at1100.chat >= 420, "beside a notebook the chat keeps at least 420 px (1280 and 1100 px windows)", { at1280, at1100 });
     ok(at800.pane === at800.vw, "at 800 px a notebook's pane covers the page", at800);
     await sleep(300);
-    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact.wide-artifact #artifacts { width: 589px !important; }' }))`);
+    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact #artifacts { width: 589px !important; }' }))`);
     await sleep(300);
     const narrow = await gutter();
     ok(narrow[0] <= 640 && narrow[1] === "44px", "the pane at 589 px in a 1280 px window gets the compact layout (@container sbnb-pane)", narrow);
@@ -637,8 +670,11 @@ try {
   // the source.) A long paper, at 1400 and 1000 px: C-a the editor as tall as its box (±1 px); C-b while a character is
   // typed at the end and the preview catches up (40 samples, 100 ms apart) the source's top doesn't move (0 px); C-c
   // the caret stays inside the source's box and the viewport (±1 px; the caret's own place, from a hidden copy of the
-  // textarea up to the caret); C-d 60 wheel notches up over the source bring line 1 into view (±1 px); C-e1 the pane's
-  // and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400)
+  // textarea up to the caret); C-d from the source's bottom (its precondition), wheel notches up over the source until it
+  // stops: at scrollTop 0, line 1 in view (±1 px), the highlight in step, in at most ceil(scrollTop/600) + 2 notches;
+  // C-e1 the pane's and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400).
+  // C-a..C-d again with the pane forced to 320, 330 and 460 px in a 1400 px window (a test-only style; PR 2's F2: a
+  // narrow pane wraps the source to about 37k px, past what a fixed 60 notches reach)
   if (want("latex") && LATEX) {
     const path = "/notes/layout.tex";
     const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
@@ -656,14 +692,8 @@ try {
       const y = tr.top + ta.clientTop + mk.offsetTop - ta.scrollTop, h = mk.offsetHeight; m.remove();
       return y >= Math.max(tr.top + ta.clientTop, 0) - 1 && y + h <= Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight) + 1; })()`;
     const widths = `(() => ({ pane: Math.round(document.querySelector('#artifacts').getBoundingClientRect().width), chat: Math.round(document.querySelector('main').getBoundingClientRect().width) }))()`;
-    for (const w of [1400, 1000]) {
-      await size(w); await sleep(800);
-      // (C-e1: the widths without this layout's rules, then with them)
-      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
-      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
-      const on = await ev(widths);
-      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
-      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+    // (C-a..C-d: from the top, the editor's box; typing at the end; the wheel back up. `w` names the width)
+    const editorCases = async (w) => {
       // (from the top: the source and every box around it scrolled to 0)
       await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.scrollTop = 0; for (let e = ta.closest('.tex-embed').parentElement; e; e = e.parentElement) e.scrollTop = 0; return true; })()`);
       await sleep(300);
@@ -679,11 +709,53 @@ try {
       ok(new Set(tops).size === 1, `A4/A8 C-b@${w}: typing at the end, the source stays where it is while the preview catches up`, { tops: [...new Set(tops)] });
       ok(inside.every(Boolean), `A4/A8 C-c@${w}: typing at the end, the caret stays inside the source and in view`, { outside: inside.filter((x) => !x).length });
       const at = await ev(`(() => { const r = ${ED}.querySelector('.tex-src').getBoundingClientRect(); return { x: Math.round(r.left + 40), y: Math.round(Math.min(Math.max(r.top, 0) + 60, innerHeight - 40)) }; })()`);
-      for (let k = 0; k < 60; k++) await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+      // (C-d: from near the source's bottom, as typing at the end left it (the caret-follow stops up to about 70 px short
+      //  of it at a narrow pane: c3); one notch at a time, each settled (a frame + 50 ms),
+      //  until scrollTop is 0, or 3 notches in a row change nothing, or 200 notches: the notches logged)
+      const scr = `(() => { const ta = ${ED}.querySelector('.tex-src'); return { st: ta.scrollTop, sh: ta.scrollHeight, ch: ta.clientHeight, hlst: ${ED}.querySelector('.tex-hl').scrollTop }; })()`;
+      const s0 = await ev(scr);
+      ok(s0.st >= s0.sh - s0.ch - s0.ch / 2 && s0.st > 1800, `precondition:C-d@${w}: before the wheel, the source is within half a screen of its bottom and over 1800 px down (so C-d starts away from the top)`, s0);
+      let notches = 0, still = 0, last = s0.st, stop = "bound reached";
+      while (notches < 200) {
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+        notches++;
+        const st = await ev(`new Promise((r) => requestAnimationFrame(() => setTimeout(() => r(${ED}.querySelector('.tex-src').scrollTop), 50)))`);
+        if (st === 0) { stop = "at the top"; break; }
+        still = st === last ? still + 1 : 0;
+        last = st;
+        if (still >= 3) { stop = "3 notches changed nothing"; break; }
+      }
       await sleep(600);
-      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), tr = ta.getBoundingClientRect(), r = e.querySelector('.tex-hl').children[0].getBoundingClientRect();
-        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)) }; })()`);
-      ok(cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view`, cd);
+      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), hl = e.querySelector('.tex-hl'), tr = ta.getBoundingClientRect(), r = hl.children[0].getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)), st: ta.scrollTop, hlst: hl.scrollTop }; })()`);
+      const rec = { ...cd, st0: s0.st, hlst0: s0.hlst, notches, stop };
+      // (its parts: (a) the source at its top, (b) line 1 of the highlight in view, (c) the highlight in step with the
+      //  source, at the bottom before the wheel and at the top after it, (d) in at most ceil(st0 / 600) + 2 notches of 600 px; and the 200-notch bound not reached)
+      const parts = { a_top: cd.st === 0, b_line1: cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, c_inStep: s0.st === s0.hlst && cd.st === cd.hlst, d_notches: notches <= Math.ceil(s0.st / 600) + 2, bound: stop !== "bound reached" };
+      ok(Object.values(parts).every(Boolean), `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view` + (parts.bound ? "" : " (bound reached)"), { parts, ...rec });
+    };
+    for (const w of [1400, 1000]) {
+      await size(w); await sleep(800);
+      // (C-e1: the widths without this layout's rules, then with them)
+      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      const on = await ev(widths);
+      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
+      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+      await editorCases(w);
+    }
+    // (the narrow panes: the pane's width forced by a test-only style, in a 1400 px window; removed after)
+    for (const pw of [320, 330, 460]) {
+      await size(1400); await sleep(400);
+      await ev(`(() => { const st = document.createElement('style'); st.id = 'sbtest-pane'; st.textContent = 'body.has-artifact:not(.fullscreen) #artifacts { width: ${pw}px !important; }'; document.head.append(st); return true; })()`);
+      await sleep(800);
+      try {
+        const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
+        ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
+        await editorCases(`pane${pw}`);
+      } finally {
+        await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);
+      }
     }
     // (C-f, 1400: a notebook open beside the .tex in the same chat. The pane keeps every artifact's host, the others
     //  [hidden]. In this order: the notebook's tab shown, only its host has a box (C-f3) and its pane is as without
@@ -1565,6 +1637,7 @@ try {
   console.log("the page said:\n  " + logs.slice(-20).join("\n  "));
   console.log("cells: " + JSON.stringify(await ev(`[...document.querySelectorAll('#artifacts .cell')].map((c) => [c.className, c.querySelector('.n')?.textContent, c.querySelector('.time')?.textContent, c.querySelector('.out')?.textContent.slice(0, 200)])`).catch((x) => String(x))));
   console.log("workers: " + JSON.stringify(workers));
+  console.log("failed or non-2xx: " + JSON.stringify(bad.slice(-20)));
 } finally {
   cdp.close();
   chrome.kill("SIGKILL");
@@ -1573,5 +1646,6 @@ try {
   await sleep(200);
   rmSync(profile, { recursive: true, force: true });
 }
+console.log("timing: " + stamps.join(", "));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

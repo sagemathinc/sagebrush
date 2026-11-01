@@ -20,7 +20,7 @@ import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "./composer";
-import { applyPaneClasses } from "./layout";
+import { applyPaneClasses, mountLayout, relayout } from "./layout";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -540,6 +540,7 @@ function renderArtifacts() {
   const pane = $("#artifacts");
   const a = thread.artifacts.find((x) => x.id === openArtifact);
   applyPaneClasses(a, fullscreen);
+  relayout(); // (the columns re-clamped for the pane now shown or gone: an agent's own open too)
   if (paneThread !== thread.id) {
     void releaseHosts(paneThread);
     paneThread = thread.id;
@@ -1032,6 +1033,7 @@ function renderHeader() {
 
 renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
+mountLayout();
 renderAll();
 scrollToEnd(true);
 editor.focus();
