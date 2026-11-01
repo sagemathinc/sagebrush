@@ -23,6 +23,140 @@ def _key(v):
         return (1, 0, repr(v))
 
 
+def _int(v):
+    """v as an int; a value that is not an integer (2.9, "2") is refused,
+    never truncated."""
+    if isinstance(v, (str, bytes)):
+        raise TypeError("%r is not an integer" % (v,))
+    try:
+        i = int(v)
+    except (TypeError, ValueError):
+        raise TypeError("%r is not an integer" % (v,))
+    if i != v:
+        raise ValueError("%r is not an integer" % (v,))
+    return i
+
+
+def _nonneg(v, name="n"):
+    i = _int(v)
+    if i < 0:
+        raise ValueError("%s must be a non-negative integer, not %d" % (name, i))
+    return i
+
+
+def _is_int(v):
+    # an integer argument (Permutations(3)) rather than a collection
+    if isinstance(v, (str, bytes, list, tuple, set, frozenset, dict, range)):
+        return False
+    try:
+        return int(v) == v
+    except (TypeError, ValueError):
+        return False
+
+
+def _same(a, b):
+    try:
+        return bool(a == b)
+    except Exception:
+        return a is b
+
+
+def _groups(elts):
+    """The distinct elements by equality, in order of first occurrence, and
+    their multiplicities (hashable or not)."""
+    reps, counts = [], []
+    for v in elts:
+        for i, r in enumerate(reps):
+            if _same(r, v):
+                counts[i] += 1
+                break
+        else:
+            reps.append(v)
+            counts.append(1)
+    return reps, counts
+
+
+def _choices(counts, k):
+    """The multiplicity vectors x (sum k, 0 <= x_i <= counts[i]), as many of
+    the first element as possible first: Sage's order, itertools' for
+    distinct elements.  Work is proportional to the output."""
+    n = len(counts)
+    room = [0] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        room[i] = room[i + 1] + counts[i]
+    x = [0] * n
+
+    def rec(i, k):
+        if i == n:
+            yield list(x)
+            return
+        for v in range(min(counts[i], k), max(0, k - room[i + 1]) - 1, -1):
+            x[i] = v
+            yield from rec(i + 1, k - v)
+        x[i] = 0
+    if 0 <= k <= room[0]:
+        yield from rec(0, k)
+
+
+def _arrangements(counts, k):
+    """The sequences of k group indices using index g at most counts[g]
+    times, in lexicographic order (each distinct arrangement once)."""
+    if not 0 <= k <= sum(counts):
+        return
+    left = list(counts)
+    seq = []
+
+    def rec(d):
+        if d == k:
+            yield list(seq)
+            return
+        for g in range(len(left)):
+            if left[g]:
+                left[g] -= 1
+                seq.append(g)
+                yield from rec(d + 1)
+                seq.pop()
+                left[g] += 1
+    yield from rec(0)
+
+
+def _count_choices(counts, k):
+    # the coefficient of x^k in prod (1 + x + ... + x^c)
+    if k is None:
+        r = 1
+        for c in counts:
+            r *= c + 1
+        return r
+    if k < 0:
+        return 0
+    poly = [1] + [0] * k
+    for c in counts:
+        new = [0] * (k + 1)
+        for d in range(k + 1):
+            if poly[d]:
+                for j in range(min(c, k - d) + 1):
+                    new[d + j] += poly[d]
+        poly = new
+    return poly[k]
+
+
+def _count_arrangements(counts, k):
+    # k! times the coefficient of x^k in prod (sum_{j <= c} x^j/j!)
+    from fractions import Fraction
+    from math import factorial
+    if not 0 <= k <= sum(counts):
+        return 0
+    poly = [Fraction(1)] + [Fraction(0)] * k
+    for c in counts:
+        new = [Fraction(0)] * (k + 1)
+        for d in range(k + 1):
+            if poly[d]:
+                for j in range(min(c, k - d) + 1):
+                    new[d + j] += poly[d] / factorial(j)
+        poly = new
+    return int(poly[k] * factorial(k))
+
+
 # --------------------------------------------------------------- counting
 
 def number_of_partitions(n):
@@ -33,7 +167,7 @@ def number_of_partitions(n):
         sage: number_of_partitions(10), number_of_partitions(100)
         (42, 190569292)
     """
-    n = int(n)
+    n = _int(n)
     if n < 0:
         return _Z(0)
     p = [1] + [0] * n
@@ -52,7 +186,9 @@ def stirling_number2(n, k):
         sage: stirling_number2(5, 2), stirling_number2(10, 4)
         (15, 34105)
     """
-    n, k = int(n), int(k)
+    n, k = _nonneg(n), _int(k)
+    if k < 0 or k > n:
+        return _Z(0)
     row = [1] + [0] * k
     for i in range(1, n + 1):
         new = [0] * (k + 1)
@@ -71,7 +207,9 @@ def stirling_number1(n, k):
         sage: stirling_number1(5, 2), stirling_number1(4, 4)
         (50, 1)
     """
-    n, k = int(n), int(k)
+    n, k = _nonneg(n), _int(k)
+    if k < 0 or k > n:
+        return _Z(0)
     row = [1] + [0] * k
     for i in range(1, n + 1):
         new = [0] * (k + 1)
@@ -89,7 +227,7 @@ def bell_number(n):
         sage: [bell_number(n) for n in range(8)]
         [1, 1, 2, 5, 15, 52, 203, 877]
     """
-    n = int(n)
+    n = _nonneg(n)
     row = [1]
     for _ in range(n):
         new = [row[-1]]
@@ -113,7 +251,7 @@ class Partition:
     """
 
     def __init__(self, parts):
-        parts = [int(v) for v in parts]
+        parts = [_int(v) for v in parts]
         while parts and parts[-1] == 0:
             parts.pop()
         if any(parts[i] < parts[i + 1] for i in range(len(parts) - 1)) or any(v < 0 for v in parts):
@@ -127,7 +265,7 @@ class Partition:
         if isinstance(other, Partition):
             return self._p == other._p
         if isinstance(other, (list, tuple)):
-            return self._p == [int(v) for v in other]
+            return self._p == list(other)
         return NotImplemented
 
     def __ne__(self, other):
@@ -192,10 +330,10 @@ class Partitions:
     """
 
     def __init__(self, n, length=None, max_part=None, min_part=None):
-        self._n = int(n)
-        self._length = None if length is None else int(length)
-        self._max = self._n if max_part is None else int(max_part)
-        self._min = 1 if min_part is None else max(1, int(min_part))
+        self._n = _nonneg(n)
+        self._length = None if length is None else _nonneg(length, "length")
+        self._max = self._n if max_part is None else _nonneg(max_part, "max_part")
+        self._min = 1 if min_part is None else max(1, _int(min_part))
         self._plain = length is None and max_part is None and min_part is None
 
     def __repr__(self):
@@ -252,7 +390,7 @@ class Compositions:
     """
 
     def __init__(self, n):
-        self._n = int(n)
+        self._n = _nonneg(n)
 
     def __repr__(self):
         return "Compositions of %d" % self._n
@@ -409,14 +547,10 @@ class Subsets:
     def __init__(self, s, k=None, submultiset=False):
         if submultiset:
             raise NotImplementedError("Subsets(..., submultiset=True) is not implemented in sagebrush yet")
-        try:
-            n = int(s)
-            if n == s:
-                s = range(1, n + 1)
-        except (TypeError, ValueError):
-            pass
+        if _is_int(s):
+            s = range(1, _nonneg(s) + 1)
         self._set = _set(s)
-        self._k = None if k is None else int(k)
+        self._k = None if k is None else _nonneg(k, "k")
 
     def __repr__(self):
         return "Subsets of %s" % self._set + ("" if self._k is None else " of size %d" % self._k)
@@ -470,38 +604,29 @@ class Combinations:
     """
 
     def __init__(self, mset, k=None):
-        try:
-            n = int(mset)
-            if n == mset:
-                mset = list(range(n))
-        except (TypeError, ValueError):
-            pass
+        if _is_int(mset):
+            mset = list(range(_nonneg(mset)))
         self._m = list(mset)
-        self._k = None if k is None else int(k)
+        self._k = None if k is None else _nonneg(k, "k")
+        self._reps, self._counts = _groups(self._m)
 
     def __repr__(self):
         return "Combinations of %s" % (self._m,) + ("" if self._k is None else " of length %d" % self._k)
 
     def __iter__(self):
         sizes = range(len(self._m) + 1) if self._k is None else [self._k]
-        seen = set()
         for k in sizes:
-            for idx in _it.combinations(range(len(self._m)), k):
-                c = [self._m[i] for i in idx]
-                key = repr(c)
-                if key in seen:
-                    continue
-                seen.add(key)
-                yield c
+            for x in _choices(self._counts, k):
+                yield [r for r, m in zip(self._reps, x) for _ in range(m)]
 
     def list(self):
         return list(self)
 
     def cardinality(self):
-        if len(set(map(repr, self._m))) == len(self._m):
+        if len(self._reps) == len(self._m):
             n = len(self._m)
             return _Z(2 ** n if self._k is None else _binom(n, self._k))
-        return _Z(sum(1 for _ in self))
+        return _Z(_count_choices(self._counts, self._k))
 
     def __len__(self):
         return int(self.cardinality())
@@ -527,7 +652,7 @@ class Permutation:
             l = _from_cycle_string(l)
         elif isinstance(l, (list, tuple)) and l and all(isinstance(c, tuple) for c in l):
             l = _from_cycles(l)
-        l = [int(v) for v in l]
+        l = [_int(v) for v in l]
         if sorted(l) != list(range(1, len(l) + 1)):
             raise ValueError("%s is not a permutation of {1, ..., %d}" % (l, len(l)))
         self._l = l
@@ -539,7 +664,7 @@ class Permutation:
         if isinstance(other, Permutation):
             return self._l == other._l
         if isinstance(other, (list, tuple)):
-            return self._l == [int(v) for v in other]
+            return self._l == list(other)
         return NotImplemented
 
     def __ne__(self, other):
@@ -550,7 +675,7 @@ class Permutation:
         return hash(tuple(self._l))
 
     def __call__(self, i):
-        return _Z(self._l[int(i) - 1])
+        return _Z(self._l[_int(i) - 1])
 
     def __iter__(self):
         return (_Z(v) for v in self._l)
@@ -628,7 +753,7 @@ def _from_cycles(cycles):
     l = list(range(1, n + 1))
     for c in cycles:
         for i, v in enumerate(c):
-            l[int(v) - 1] = int(c[(i + 1) % len(c)])
+            l[_int(v) - 1] = _int(c[(i + 1) % len(c)])
     return l
 
 
@@ -637,7 +762,7 @@ def _from_cycle_string(s):
     for part in s.replace(" ", "").split(")"):
         part = part.lstrip("(")
         if part:
-            cycles.append(tuple(int(v) for v in part.split(",")))
+            cycles.append(tuple(_int(int(v)) for v in part.split(",")))
     return _from_cycles(cycles)
 
 
@@ -658,32 +783,24 @@ class Permutations:
 
     def __init__(self, n, k=None):
         self._standard = False
-        try:
-            m = int(n)
-            if m == n:
-                self._standard = k is None
-                n = list(range(1, m + 1))
-        except (TypeError, ValueError):
-            pass
+        if _is_int(n):
+            self._standard = k is None
+            n = list(range(1, _nonneg(n) + 1))
         self._m = list(n)
-        self._k = None if k is None else int(k)
+        self._k = None if k is None else _nonneg(k, "k")
+        self._reps, self._counts = _groups(self._m)
 
     def __repr__(self):
         if self._standard:
             return "Standard permutations of %d" % len(self._m)
         if self._k is None:
-            return "Permutations of the set %s" % (self._m,) if len(set(map(repr, self._m))) == len(self._m) else "Permutations of the multi-set %s" % (self._m,)
+            return "Permutations of the set %s" % (self._m,) if len(self._reps) == len(self._m) else "Permutations of the multi-set %s" % (self._m,)
         return "Permutations of the set %s of length %d" % (self._m, self._k)
 
     def __iter__(self):
         k = len(self._m) if self._k is None else self._k
-        seen = set()
-        for idx in _it.permutations(range(len(self._m)), k):
-            p = [self._m[i] for i in idx]
-            key = repr(p)
-            if key in seen:
-                continue
-            seen.add(key)
+        for seq in _arrangements(self._counts, k):
+            p = [self._reps[g] for g in seq]
             yield Permutation(p) if self._standard else p
 
     def list(self):
@@ -691,13 +808,13 @@ class Permutations:
 
     def cardinality(self):
         n = len(self._m)
-        if len(set(map(repr, self._m))) == n:
-            k = n if self._k is None else self._k
+        k = n if self._k is None else self._k
+        if len(self._reps) == n:
             r = 1
             for i in range(k):
                 r *= n - i
             return _Z(r if 0 <= k <= n else 0)
-        return _Z(sum(1 for _ in self))
+        return _Z(_count_arrangements(self._counts, k))
 
     def __len__(self):
         return int(self.cardinality())
