@@ -29,6 +29,8 @@ const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const CI = process.argv.includes("--ci");
 const N = Number(process.env.N ?? (CI ? 70000 : 100000));
 const MiB = 2 ** 20;
+// (r2e: the trace run's label in its rows, 1..5 or "nogc" for K-nogc, set by the runner)
+const TRACE_RUN = process.env.R2E_CONTROL === "nogc" ? "nogc" : (process.env.TRACE_RUN ?? "1");
 // (the alloc pass: an unminified build of the chunk and the worker, served in place of the built ones, so that the
 // heap profile names their functions)
 const chunk = process.env.CHUNK ? readFileSync(process.env.CHUNK) : null, chunkWorker = process.env.CHUNK_WORKER ? readFileSync(process.env.CHUNK_WORKER) : null;
@@ -118,25 +120,40 @@ async function prepare(c) {
 /** usedSize of the page and of the worker (0 if it isn't running), optionally after two forced collections on each. */
 async function heaps(c, gc) {
   const w = c.worker();
+  const gcs = [];
   if (gc) {
-    for (let i = 0; i < 2; i++) { await c.send("HeapProfiler.collectGarbage"); if (w) await c.send("HeapProfiler.collectGarbage", {}, w); }
+    for (let i = 0; i < 2; i++) { gcs.push(await c.send("HeapProfiler.collectGarbage")); if (w) gcs.push(await c.send("HeapProfiler.collectGarbage", {}, w)); }
   }
   const main = (await c.send("Runtime.getHeapUsage")).usedSize;
   const wk = w ? (await c.send("Runtime.getHeapUsage", {}, w))?.usedSize ?? 0 : 0;
-  return { main, worker: wk };
+  return { main, worker: wk, gcs };
 }
+// (a CDP command's answer: ok unless it is an error object or missing)
+const cdpOk = (r) => !!r && typeof r === "object" && !("code" in r) && !("message" in r);
 
 /** The test hooks: stops at the baseline point (worker started, preflight not begun) and, if `half`, after member `half`. */
+// (r2e (b): page-side stamps, reset here: __t0 at the click or the baseline go, __planT at onPlan (after preflight),
+// __t1 at the Save… click, __expT at onHand; __pause the summed time of non-baseline stops (writing only))
 const hooks = (half) => `(() => {
   window.__exp = null;
   window.__at = null;
-  const stop = (name) => new Promise((go) => { window.__at = name; window.__go = () => { window.__at = null; go(); }; });
-  window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; }, stats: {},
+  window.__t0 = null; window.__planT = null; window.__t1 = null; window.__expT = null; window.__pause = 0; window.__origin = "click";
+  const stop = (name) => new Promise((go) => { window.__at = name; const s = performance.now(); window.__go = () => { window.__at = null; if (name === "baseline") { window.__t0 = performance.now(); window.__origin = "go"; } else window.__pause += performance.now() - s; go(); }; });
+  window.__SB_EXPORT_TEST__ = { noPicker: true, onPlan: () => { window.__planT = performance.now(); }, onHand: (blob, name, then) => { window.__expT = performance.now(); window.__exp = { blob, name, then }; }, stats: {},
     beforePreflight: () => stop("baseline")${half ? `, between: (n) => (n === ${half} ? stop("half") : undefined)` : ""} };
   return 1;
 })()`;
 const at = (c, name, ms = 600000) => c.until(`window.__at === ${JSON.stringify(name)}`, ms);
 const go = (c) => c.ev(`(() => { window.__go(); return 1; })()`);
+// (r2e (b): one fixed-prefix row per export, from the page's stamps, exact math, fail closed: a missing or non-finite
+// stamp, or a negative phase, prints the row with "BAD" and fails the check)
+async function elapsed(c, label) {
+  const e = await c.ev(`({ t0: window.__t0, plan: window.__planT, t1: window.__t1, exp: window.__expT, pause: window.__pause, origin: window.__origin })`);
+  const pre = e.plan - e.t0, wr = e.exp - e.t1 - e.pause;
+  const ok = [e.t0, e.plan, e.t1, e.exp, e.pause].every((x) => typeof x === "number" && Number.isFinite(x)) && pre >= 0 && wr >= 0;
+  console.log(`${label} origin=${e.origin} preflight ${ok ? Math.round(pre) : "BAD"} writing ${ok ? Math.round(wr) : "BAD"}`);
+  check(ok, `${label}: every stamp present and finite, both phases non-negative`);
+}
 
 async function readArchive(c, out) {
   const size = await c.ev(`window.__exp.blob.size`);
@@ -162,7 +179,7 @@ try {
       check((await prepare(c)) === N, `live: the workspace holds ${N} more entries`);
       const half = Math.floor((N + 1) / 2);
       await c.ev(hooks(half));
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       check(await at(c, "baseline", 60000) && !!c.worker(), "live: stopped at the baseline point, the worker started");
       const b = await heaps(c, true);
       await go(c);
@@ -170,11 +187,12 @@ try {
       const live = [];
       const point = async (name) => { const h = await heaps(c, true); const g = (h.main - b.main) + (h.worker - (c.worker() ? b.worker : 0)); live.push([name, g / MiB, (h.main - b.main) / MiB, (h.worker - b.worker) / MiB]); return g; };
       await point("after preflight");
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       check(await at(c, "half"), "live: stopped half-way through the members");
       await point("half-way");
       await go(c);
       check(await c.until(`!!window.__exp || [...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Export again")`, 1200000), "live: the export ends");
+      await elapsed(c, "ELAPSED live 1");
       await sleep(500);
       // (after cleanup: the flow ended, its worker terminated; the page's heap against its baseline)
       await point("after cleanup");
@@ -200,9 +218,13 @@ try {
     try {
       await prepare(c);
       await c.ev(hooks(0));
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await at(c, "baseline", 60000);
+      const pb = await heaps(c, false);
       const b = await heaps(c, true);
+      // (r2e (a): the peak pass's existing baseline GC, witnessed: each collection's answer, the heaps before and after)
+      console.log(`PEAK-BASELINE-GC ${k} collect=${b.gcs.map((r) => (cdpOk(r) ? "ok" : "FAILED")).join(",")} main ${(pb.main / MiB).toFixed(1)} -> ${(b.main / MiB).toFixed(1)} MiB, worker ${(pb.worker / MiB).toFixed(1)} -> ${(b.worker / MiB).toFixed(1)} MiB`);
+      check(b.gcs.length === 4 && b.gcs.every(cdpOk), `peak ${k}: the baseline's four collections ran`);
       let peak = 0, sampling = true;
       const sampler = (async () => {
         while (sampling) {
@@ -214,9 +236,10 @@ try {
       })();
       await go(c);
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       sampling = false;
+      await elapsed(c, `ELAPSED peak ${k}`);
       await sampler;
       peaks.push(peak / MiB);
       check(ended, `peak ${k}: the export ends`);
@@ -244,10 +267,10 @@ try {
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
       check(c8 >= 100, `resp: C8, a 120 ms busy loop shows in the long-task observer (${Math.round(c8)} ms)`);
       await c.ev(`(() => { window.__tasks = []; window.__clickT = performance.now(); return 1; })()`);
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       await c.ev(`(() => { window.__saveT = performance.now(); return 1; })()`);
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       check(await c.until(`!!window.__exp`, 1200000), "resp: the export ends");
       await c.ev(`(() => { window.__endT = performance.now(); return 1; })()`);
       await sleep(1500);
@@ -312,9 +335,9 @@ try {
       await prepare(c);
       await c.ev(`window.sagebrush.workspace.create("/zz-capid.csv", { content: "a\\n" }).then(() => 1)`);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined, afterCapture: async (p) => { if (p === "/zz-capid.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, onLookup: (x) => { window.__lookupAt = x; }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`));
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       const r = await c.ev(`(async () => {
         const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -340,7 +363,7 @@ try {
       await prepare(c);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: () => stop("baseline")`));
       const opts = { samplingInterval: 8192, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true };
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await at(c, "baseline", 60000);
       const w = c.worker();
       await c.send("HeapProfiler.enable"); await c.send("HeapProfiler.startSampling", opts);
@@ -349,9 +372,10 @@ try {
       await go(c);
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       marks.push(Date.now());
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       marks.push(Date.now());
+      await elapsed(c, "ELAPSED alloc 1");
       const main = (await c.send("HeapProfiler.stopSampling")).profile;
       const wk = w ? (await c.send("HeapProfiler.stopSampling", {}, w))?.profile : null;
       check(ended, "alloc: the export ends");
@@ -387,9 +411,9 @@ try {
       })()`);
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
       console.log(`(profile: C8, the long-task observer saw the 120 ms busy loop as ${Math.round(c8)} ms${c8 >= 100 ? "" : ": the run is void (RULES.md)"})`);
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       const r = await c.ev(`(() => {
         clearInterval(window.__hbt);
@@ -442,15 +466,33 @@ try {
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = Math.max(0, ...window.__tasks.map((x) => x[1])); window.__tasks = []; ok(l); }, 400); })`);
       const valid = c8 >= 100;
       console.log(`(trace: C8 ${Math.round(c8)} ms: the run is ${valid ? "valid" : "VOID"})`);
+      // (r2e (a), §R: the harness's own prepare() garbage collected before the trace starts: the main page's heap
+      // sampled, two awaited collections, sampled again (the export worker doesn't exist before the click). Only a failed
+      // or missing collection voids the run; the amount reclaimed is information. R2E_CONTROL=nogc skips it (K-nogc).)
+      {
+        const before = (await c.send("Runtime.getHeapUsage")).usedSize;
+        if (process.env.R2E_CONTROL === "nogc") console.log("TRACE-BASELINE-GC skipped");
+        else {
+          const r1 = await c.send("HeapProfiler.collectGarbage"), r2 = await c.send("HeapProfiler.collectGarbage");
+          const okOf = (r) => !!r && typeof r === "object" && !("code" in r) && !("message" in r);
+          console.log(`TRACE-BASELINE-GC collect=${okOf(r1) ? "ok" : "FAILED"},${okOf(r2) ? "ok" : "FAILED"}`);
+          const after = (await c.send("Runtime.getHeapUsage")).usedSize;
+          console.log(`TRACE-BASELINE-RECLAIM main ${(before / MiB).toFixed(1)} -> ${(after / MiB).toFixed(1)} MiB, reclaimed ${((before - after) / MiB).toFixed(1)} MiB`);
+          check(okOf(r1) && okOf(r2), "trace: both baseline collections ran (else the run is VOID)");
+        }
+      }
       // (the trace from before the click to after the handoff: preflight and writing both in it)
       const done = new Promise((r) => { c.onTrace = (m) => { if (m.method === "Tracing.dataCollected") events.push(...m.params.value); if (m.method === "Tracing.tracingComplete") r(); }; });
       await c.send("Tracing.start", { traceConfig: { includedCategories: ["devtools.timeline", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "toplevel"] }, transferMode: "ReportEvents" });
       const m1 = await c.ev(`performance.mark("sb-sync-1").startTime`);
       const clickT = await c.ev(`performance.now()`);
-      await c.ev(btn("/^Export all current files/"));
+      // (r2e §R2: the heap at the click, every trace run: K-nogc is judged by it)
+      { const h = (await c.send("Runtime.getHeapUsage")).usedSize; console.log(`TRACE-HEAP-AT-CLICK ${TRACE_RUN} ${Number.isFinite(h) ? (h / MiB).toFixed(1) : "BAD"}`); }
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       const ended = await c.until(`!!window.__exp`, 1200000);
+      if (TRACE_RUN !== "nogc") await elapsed(c, `ELAPSED trace ${TRACE_RUN}`);
       await sleep(500);
       const m2 = await c.ev(`performance.mark("sb-sync-2").startTime`);
       await sleep(200);
@@ -459,6 +501,9 @@ try {
       const page = await c.ev(`(() => { clearInterval(window.__hbt); const r = window.__raw, a = r[0], b = window.__expT ?? r[r.length - 1]; return { raw: r, hb: window.__hb.filter((t) => t >= a && t <= b), endT: window.__expT ?? null }; })()`);
       await c.send("Tracing.end");
       await done;
+      // (r2e §R2: the first GC event after the sb-sync-1 mark, information only)
+      { const m = events.find((e) => e.name === "sb-sync-1"), g = m ? events.filter((e) => (e.name === "MajorGC" || e.name === "MinorGC") && e.ts >= m.ts && e.args?.usedHeapSizeBefore != null).sort((a, b) => a.ts - b.ts)[0] : null;
+        console.log(`TRACE-FIRST-GC ${TRACE_RUN} ${g ? (g.args.usedHeapSizeBefore / MiB).toFixed(1) : "none"}`); }
       const mark = (name) => events.find((e) => e.name === name && /user_timing/.test(e.cat ?? ""));
       const t1 = mark("sb-sync-1"), t2 = mark("sb-sync-2");
       const offset = t1 ? t1.ts / 1000 - m1 : NaN, err = t2 ? Math.abs(t2.ts / 1000 - (m2 + offset)) : NaN;
@@ -498,6 +543,24 @@ try {
       if (process.env.TRACE_OUT) { const f = join(process.env.TRACE_OUT, `trace-${Date.now()}.json`); writeFileSync(f, JSON.stringify({ window: win, run: record, events })); console.log("(campaign: the trace saved to " + f + ")"); }
     } finally { await c.close(); }
   }
+  // ---- elapsed (r2e (b), the only head/b00fb43f comparison): an uninstrumented export, the same preconditioning as the
+  // trace pass (prepare(), then two awaited main collections), origin the click; the runner alternates head and the
+  // pinned reference (CHUNK/CHUNK_WORKER) and verifies both chunks' sha256s first
+  if (PASSES.has("elapsed")) {
+    const c = await open();
+    try {
+      await prepare(c);
+      await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
+      const r1 = await c.send("HeapProfiler.collectGarbage"), r2 = await c.send("HeapProfiler.collectGarbage");
+      check(cdpOk(r1) && cdpOk(r2), "elapsed: both precondition collections ran");
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      const ended = await c.until(`!!window.__exp`, 1200000);
+      check(ended, "elapsed: the export ends");
+      await elapsed(c, `ELAPSED-CMP ${process.env.CHUNK ? "b00fb43f" : "head"} ${process.env.CMP_K ?? "1"}`);
+    } finally { await c.close(); }
+  }
   // ---- cancel: in a fresh context, an export cancelled when about half the members are written: the click to the
   // "cancelled" line, timed in the page
   if (PASSES.has("cancel")) {
@@ -506,9 +569,9 @@ try {
       await prepare(c);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
       await c.ev(`(() => { window.__cancelledAt = 0; new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
-      await c.ev(btn("/^Export all current files/"));
+      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
       if (!(await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000))) throw new Error("cancel: no Save…; the panel: " + (await c.ev(`${P}?.textContent ?? ""`)).slice(-300));
-      await c.ev(btn("/^Save…$/"));
+      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
       await c.until(`(() => { const m = /([0-9,]+) of ([0-9,]+) files/.exec(document.querySelector(".sbfprev")?.textContent ?? ""); return !!m && +m[1].replace(/,/g, "") > +m[2].replace(/,/g, "") / 2; })()`, 600000);
       const clicked = await c.ev(`(() => { const t = performance.now(); [...document.querySelectorAll(".sbfprev button")].find((b) => b.textContent === "Cancel").click(); return t; })()`);
       await c.until(`window.__cancelledAt > 0`, 10000);
