@@ -42,7 +42,15 @@ function bundle(subs = [], extra = "") {
 
 // ---- the stub server's clock and answers
 const stub = { skew: 0, requests: [], mode: null, hold: null, holdArrived: null };
-const nowS = () => Math.floor((Date.now() + stub.skew) / 1000);
+// (the host clock (grader 61bd935a, 51c26387): ONE constant shift of the epoch, not the rate, for every calendar read --
+// the stub's clock below, the pins, and every page and worker (INSTRUMENT).  ACTIVE_HOST_AT=<ISO> sets the host's
+// effective time at start for the uncounted invariance runs; unset, the shift is 0 and the host clock is real.  Elapsed
+// measurements (waits, lags, `took`) keep the real Date.now.)
+const PROCESS_T0 = Date.now();
+const HOST_SHIFT = process.env.ACTIVE_HOST_AT ? Date.parse(process.env.ACTIVE_HOST_AT) - PROCESS_T0 : 0;
+if (Number.isNaN(HOST_SHIFT)) { console.log(`FAIL ACTIVE_HOST_AT is not a date: ${process.env.ACTIVE_HOST_AT}`); process.exit(2); }
+const hostNow = () => Date.now() + HOST_SHIFT;
+const nowS = () => Math.floor((hostNow() + stub.skew) / 1000);
 function durations(t = nowS()) {
   const d = new Date(t * 1000);
   const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000;
@@ -50,14 +58,27 @@ function durations(t = nowS()) {
   const nextDay = day + 86400, nextWeek = day + (7 - dow) * 86400, nextMonth = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 1000;
   return { nd: nextDay - t, nw: nextWeek - t, nm: nextMonth - t };
 }
-// (the calendar anchor, for the calendar-sensitive cases only (C-1.tz, C-7.prior; astra 861223bc): the stub's clock and
-// the page's both read real time + A, A = ANCHOR - now at the case's start, so time still runs and every bounded wait
-// stays real; a case's own skews are added to A.  Wednesday 2026-10-14 22:00:00Z: both test zones' local midnights lie
-// after that UTC day's midnight (Kiritimati 10:00Z, Adak 09:00Z), the next day (Thursday) is in the same ISO week and
-// month, and no zone changes its offset near it.  reset() puts the stub's clock back after the case.)
-const ANCHOR = Date.UTC(2026, 9, 14, 22, 0, 0);
-let anchorMs = ANCHOR; // (K-PIN alone sets another, deliberately wrong, pin)
-const anchorAt = () => anchorMs - Date.now();
+// (the semantic pins: the cases whose expectation encodes a calendar fact get their own fixed effective time (and zone),
+// whatever the host clock (astra 861223bc, 1c36fb52; grader 61bd935a).  The stub's clock and the page's both read host
+// time + A, A = pin - hostNow() at the case's start, so time still runs and every bounded wait stays real; a case's own
+// skews are added to A.  Each pinned case asserts its precondition and reports precondition:<case> otherwise.
+//   C-1.tz    Wed 2026-10-14 22:00Z: both test zones' local midnights (Kiritimati 10:00Z, Adak 09:00Z, HDT) lie after
+//             that UTC day's midnight, so a local-midnight due() repeats; 2 h before the next UTC midnight
+//   C-7.prior Wed 2026-10-14 12:00Z: the next stub day (Thursday) is in the same ISO week and month, so the week flag
+//             is checked; 12 h from either midnight
+//   C-1s      Wed 2026-10-14 02:00Z, zone UTC: the case loads every 3 h of stub time; a local-midnight due() with the +2 h
+//             client skew sends twice in one stub day exactly when a load falls in the 2 h before a stub midnight,
+//             i.e. iff (start mod 3 h) is in [1 h, 3 h): the pin's phase is 2 h, asserted in [1 h 5 min, 2 h 55 min]
+//   C-1d      Wed 2026-10-14 12:00Z, zone UTC: the case runs at its stub day's 23:59:59 by construction; a local-midnight
+//             due() then depends on the browser's zone, pinned to UTC and asserted
+// No zone changes its offset near these dates (US DST ends Nov 1).  reset() puts the stub's clock back after the case.)
+const PINS = { "C-1.tz": Date.UTC(2026, 9, 14, 22, 0, 0), "C-7.prior": Date.UTC(2026, 9, 14, 12, 0, 0), "C-1s": Date.UTC(2026, 9, 14, 2, 0, 0), "C-1d": Date.UTC(2026, 9, 14, 12, 0, 0) };
+const PIN_ZONES = { "C-1s": "UTC", "C-1d": "UTC" };
+let pinOverride = null; // (K-PIN alone sets deliberately wrong pins: { pins: {...}, zones: {...} })
+const pinOf = (id) => pinOverride?.pins?.[id] ?? PINS[id];
+const zoneOf = (id) => pinOverride?.zones?.[id] ?? PIN_ZONES[id];
+const anchorAt = (id) => pinOf(id) - hostNow();
+let pinnedCase = false; // (set by a pinned case: one()'s midnight precondition is for host-clock cases only)
 const iso = (ms) => new Date(ms).toISOString();
 const utcMidnight = (ms) => Math.floor(ms / 86400000) * 86400000;
 /** the zone's local midnight, as UTC ms, for the local day containing `ms` */
@@ -117,7 +138,17 @@ const INSTRUMENT = `(() => {
   const realNow = Date.now.bind(Date);
   // (c.clock: the skew each of the page's first 32 clock reads used: C-1j's diagnostics; no case asserts on it)
   c.clock = [];
-  Date.now = () => { const s = window.__skew ?? 0; if (c.clock.length < 32) c.clock.push(s); return realNow() + s; };
+  // (the host shift, one constant for the whole run (0 unless ACTIVE_HOST_AT), then a case's skew)
+  Date.now = () => { const s = window.__skew ?? 0; if (c.clock.length < 32) c.clock.push(s); return realNow() + ${HOST_SHIFT} + s; };
+  // (workers read the same shifted clock: a classic or module worker gets a prelude that shifts its Date.now alike)
+  if (window.Worker) {
+    const W = window.Worker;
+    window.Worker = function (url, opts) {
+      const u = new URL(url, location.href).href, sh = "const __n = Date.now.bind(Date); Date.now = () => __n() + ${HOST_SHIFT} + " + (window.__skew ?? 0) + ";";
+      const src = opts && opts.type === "module" ? sh + "await import(" + JSON.stringify(u) + ");" : sh + "importScripts(" + JSON.stringify(u) + ");";
+      return new W(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), opts);
+    };
+  }
   if (navigator.locks) {
     const req = navigator.locks.request.bind(navigator.locks);
     navigator.locks.request = function (name, ...a) { c.locks++; c.lockNames.push(name); if (window.__lockReject) return Promise.reject(new Error("locks refused")); return req(name, ...a); };
@@ -198,10 +229,14 @@ async function stopAll(id) {
  * runs (grader 6f728d4a B1: one throw had ended every later case); its browsers are stopped (a failed stop records
  * "cleanup:<id>") and the stub and the page mode put back, in finally, either way */
 async function one(id, f) {
-  try { await f(); } catch (e) { c(`threw:${id}`, false, String(e?.stack ?? e).slice(0, 600)); }
+  const day0 = utcMidnight(hostNow()); pinnedCase = false;
+  try { await f(); } catch (e) { c(`threw:${id}`, false, String(e?.stack ?? e).slice(0, 1500)); }
   finally {
+    // (a host-clock case must not straddle a UTC midnight of the host clock: that would make its "same day" loads
+    // different days; an explicit precondition instead of a silently different set.  Pinned cases carry their own.)
+    if (!pinnedCase && utcMidnight(hostNow()) !== day0) c("precondition:midnight", false, `${id} straddled the host clock's UTC midnight ${iso(utcMidnight(hostNow()))}`);
     await stopAll(`cleanup:${id}`);
-    reset(); pageMode = "harness";
+    reset(); pageMode = "harness"; pinnedCase = false;
   }
 }
 class Browser {
@@ -251,16 +286,39 @@ class Tab {
   async attach(pre) {
     this.ws = new WebSocket(this.t.webSocketDebuggerUrl);
     await new Promise((r) => (this.ws.onopen = r));
-    this.ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && this.waiting.has(m.id)) { this.waiting.get(m.id)(m.result ?? m.error); this.waiting.delete(m.id); } if (m.method === "Runtime.exceptionThrown") this.errors.push(m.params.exceptionDetails?.exception?.description?.slice(0, 200) ?? "exception"); };
-    for (const m of ["Page.enable", "Runtime.enable"]) await this.send(m);
+    // (the main frame's navigations, kept for diagnostics (grader 61bd935a item 5): each failed ev() reports them)
+    this.navs = []; const t0 = Date.now(), nav = (what) => { this.navs.push(`+${Date.now() - t0}ms ${what}`); if (this.navs.length > 40) this.navs.shift(); };
+    this.ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && this.waiting.has(m.id)) { this.waiting.get(m.id)(m.result ?? m.error); this.waiting.delete(m.id); } if (m.method === "Runtime.exceptionThrown") this.errors.push(m.params.exceptionDetails?.exception?.description?.slice(0, 200) ?? "exception");
+      const p = m.params ?? {};
+      if (m.method === "Page.frameNavigated" && !p.frame?.parentId) nav(`navigated ${p.frame?.url} loader ${p.frame?.loaderId} origin ${p.frame?.securityOrigin}`);
+      else if (m.method === "Page.navigatedWithinDocument") nav(`within-document ${p.url}`);
+      else if (m.method === "Page.frameStartedLoading") nav("started loading");
+      else if (m.method === "Page.frameStoppedLoading") nav("stopped loading");
+      else if (m.method === "Inspector.targetCrashed") nav("RENDERER CRASHED");
+      else if (m.method === "Inspector.detached") nav(`detached ${p.reason}`); };
+    for (const m of ["Page.enable", "Runtime.enable", "Inspector.enable"]) await this.send(m);
     await this.send("Page.addScriptToEvaluateOnNewDocument", { source: pre + INSTRUMENT });
+  }
+  /** where the tab is, for a failure message: href, origin, readyState, and the main frame's recent navigations */
+  async where() {
+    const r = await this.send("Runtime.evaluate", { expression: "JSON.stringify({ href: location.href, origin: location.origin, readyState: document.readyState })", returnByValue: true }).catch((e) => ({ result: { value: `unreadable: ${e.message}` } }));
+    return `at ${r?.result?.value ?? J(r?.exceptionDetails ?? r)}; navigations ${J(this.navs.slice(-12))}`;
   }
   // (every DevTools call bounded: a stuck case fails with its name instead of hanging the run)
   send(method, params = {}) { return new Promise((r, no) => { const id = ++this.n; const to = setTimeout(() => { this.waiting.delete(id); no(new Error(`DevTools ${method}: no answer in 30 s`)); }, 30000); this.waiting.set(id, (v) => { clearTimeout(to); r(v); }); this.ws.send(J({ id, method, params })); }); }
-  async ev(expression) { const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(J(r.exceptionDetails).slice(0, 300)); return r.result?.value; }
-  // (loaded: the instrument ran and the document's scripts too, so a harness page's __sbHarness exists)
-  async open(url = ORIGIN + "/") { await this.send("Page.navigate", { url }); for (let i = 0; i < 200; i++) { if (await this.ev("!!window.__c && document.readyState === 'complete'").catch(() => false)) return; await sleep(50); } throw new Error("page didn't load"); }
-  async until(expr, ms = 10000) { const t = Date.now(); while (Date.now() - t < ms) { if (await this.ev(expr).catch(() => false)) return true; await sleep(50); } return false; }
+  // (quiet: a poll (until, open) whose failures are expected and swallowed gets no diagnostics, so it adds no evaluate)
+  async ev(expression, quiet = false) { const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(quiet ? J(r.exceptionDetails).slice(0, 300) : `${J(r.exceptionDetails).slice(0, 300)}; ${await this.where()}`); return r.result?.value; }
+  // (loaded: the navigation committed (no error) and the document is of the target's origin -- the initial about:blank,
+  // which carries the instrument too, no longer passes (grader 61bd935a item 5) -- the instrument ran and the
+  // document's scripts too, so a harness page's __sbHarness exists)
+  async open(url = ORIGIN + "/") {
+    const r = await this.send("Page.navigate", { url });
+    if (r?.errorText) throw new Error(`navigation to ${url} failed: ${r.errorText}; ${await this.where()}`);
+    const origin = J(new URL(url).origin);
+    for (let i = 0; i < 200; i++) { if (await this.ev(`location.origin === ${origin} && !!window.__c && document.readyState === 'complete'`, true).catch(() => false)) return; await sleep(50); }
+    throw new Error(`page didn't load: ${url}; ${await this.where()}`);
+  }
+  async until(expr, ms = 10000) { const t = Date.now(); while (Date.now() - t < ms) { if (await this.ev(expr, true).catch(() => false)) return true; await sleep(50); } return false; }
   // (the notes, read on the harness's own uncounted connection; null when absent, else their JSON)
   state() { return this.ev(`window.__notes((st) => { const ga = window.__orig.get.call(st, "a"), gb = window.__orig.get.call(st, "b"); return () => ({ a: ga.result === undefined ? null : JSON.stringify(ga.result), b: gb.result === undefined ? null : JSON.stringify(gb.result), consent: localStorage.getItem("sb-consent") }); })`); }
   /** writes the notes given (a value, or undefined to leave it), on the harness's own connection */
@@ -288,6 +346,12 @@ const posts = () => stub.requests.filter((r) => !r.unlisted);
 const heldArrival = () => { const p = Promise.race([new Promise((r) => (stub.holdArrived = r)), sleep(60000).then(() => { throw new Error("the held POST never arrived"); })]); p.catch(() => {}); return p; };
 const DAY = 86400;
 async function fresh(pre = "") { const b = new Browser(); await b.start(); const t = await b.tab(pre); return { b, t }; }
+/** the pin took effect: the page's clock reads host time + `skew` (within 2 s); `what` is for the message */
+async function pageClock(t, skew) {
+  const want = hostNow() + skew, got = await t.ev("Date.now()").catch(() => null);
+  const ok = typeof got === "number" && Math.abs(got - want) < 2000;
+  return { ok, what: got == null ? "unreadable" : `${iso(got)} (wanted ${iso(want)})` };
+}
 /** a page load with idle held, then released; waits for its ping (or for quiet) */
 // (the page's run has ended: every IndexedDB connection it opened is closed, run()'s and removeNotes()' alike)
 const RUN_ENDED = `(() => { const i = window.__c.idb; return (i.open ?? 0) >= 1 && (i.close ?? 0) >= (i.open ?? 0); })()`;
@@ -299,7 +363,7 @@ async function load(t, { skew = 0, before = "", wait = 5000 } = {}) {
   await t.ev("window.__releaseIdle()");
   // (until a POST arrives or the run has ended, at most `wait`: not a fixed pause, which a loaded host outran)
   const until = Date.now() + wait;
-  while (Date.now() < until && posts().length === n) { if (await t.ev(RUN_ENDED).catch(() => false)) break; await sleep(25); }
+  while (Date.now() < until && posts().length === n) { if (await t.ev(RUN_ENDED, true).catch(() => false)) break; await sleep(25); }
   // (a POST arrived: wait until the page is done with it, its lock released and the answer persisted, before
   // anything navigates; a fixed pause lost the persist on a loaded machine)
   if (posts().length > n) await t.until(`navigator.locks.query().then((q) => !q.held.some((h) => h.name === "sb-active") && !q.pending.some((h) => h.name === "sb-active"))`, 5000);
@@ -331,6 +395,17 @@ async function c3Once(pids = false) {
 // ---- the cases
 async function cases() {
   if (process.env.ONLY === "C-3") { for (let i = 0; i < Number(process.env.REPEAT ?? 20); i++) await caseC3(); return; }
+  // (the host clock took effect (grader 51c26387): the harness, a page and a worker each read it, logged; with
+  // ACTIVE_HOST_AT, all three within 2 s of it plus the elapsed time; without, all three within 2 s of each other)
+  await one("host-time", async () => { reset(); const { b, t } = await fresh();
+    await t.open();
+    const h = hostNow(), pageT = await t.ev("Date.now()");
+    const workerT = await t.ev(`new Promise((ok, no) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage(Date.now())"], { type: "text/javascript" }))); w.onmessage = (e) => { ok(e.data); w.terminate(); }; w.onerror = (e) => no(new Error("worker: " + e.message)); setTimeout(() => no(new Error("worker: no answer")), 5000); })`);
+    const want = process.env.ACTIVE_HOST_AT ? Date.parse(process.env.ACTIVE_HOST_AT) + (Date.now() - PROCESS_T0) : h;
+    const ok = [h, pageT, workerT].every((x) => typeof x === "number" && Math.abs(x - want) < 2000);
+    console.log(`  (info) host clock: ACTIVE_HOST_AT ${process.env.ACTIVE_HOST_AT ?? "(unset: real)"}; harness ${iso(h)}, page ${iso(pageT)}, worker ${iso(workerT)}`);
+    if (!ok) c("precondition:host-time", false, `the host clock did not take effect alike: harness ${iso(h)}, page ${iso(pageT)}, worker ${iso(workerT)}, wanted ${iso(want)}`);
+    await b.stop(); });
   // C-1: due once a day; the next day by the server's durations; week and month flags; time zones change nothing
   await one("C-1", async () => { reset(); const { b, t } = await fresh();
     await load(t);
@@ -348,42 +423,57 @@ async function cases() {
   // the stored UTC boundary, asserted, so a local-midnight due() repeats whatever the real time of day)
   for (const tz of ["Pacific/Kiritimati", "America/Adak"]) await one(`C-1.tz:${tz}`, async () => {
     reset(); const { b, t } = await fresh();
+    pinnedCase = true;
     await t.send("Emulation.setTimezoneOverride", { timezoneId: tz });
-    const A = anchorAt(); stub.skew = A;
-    await load(t, { skew: A }); await load(t, { skew: A });
-    const e2 = Date.now() + A, u = utcMidnight(e2), lm = localMidnight(e2, tz), pre = lm > u;
+    const A = anchorAt("C-1.tz"); stub.skew = A;
+    await load(t, { skew: A }); const pg = await pageClock(t, A);
+    await load(t, { skew: A });
+    const e2 = hostNow() + A, u = utcMidnight(e2), lm = localMidnight(e2, tz), pre = lm > u && pg.ok;
     const d = durations();
     await load(t, { skew: A + (d.nd + 5) * 1000 });
-    const cal = `effective ${iso(e2)}, UTC midnight ${iso(u)}, local midnight ${iso(lm)}; d ${J(d)}`;
+    const cal = `effective ${iso(e2)}, UTC midnight ${iso(u)}, local midnight ${iso(lm)}; page clock ${pg.what}; d ${J(d)}`;
     // (an unmet calendar precondition is reported as such, and the case's own assertion is not made: grader 69f2f06c)
-    if (!pre) c("precondition:C-1.tz", false, `${tz}: the local midnight is not after the UTC midnight (${cal})`);
+    if (!pre) c("precondition:C-1.tz", false, `${tz}: ${pg.ok ? "the local midnight is not after the UTC midnight" : "the pin did not take effect in the page"} (${cal})`);
     else c("C-1.tz", posts().length === 2, `${tz}: ${posts().length} posts (${cal})`);
     await b.stop();
   });
   // C-1s: a skewed client clock: one POST per stub day, the week flag exactly on the stub's Monday
+  // (at its pin: the stub starts at a 2 h phase of its 3 h steps, in zone UTC; both asserted (see PINS))
   for (const skewMs of [2 * 3600_000, -DAY * 1000]) await one(`C-1s:${skewMs}`, async () => {
+    pinnedCase = true;
     reset(); const { b, t } = await fresh();
-    const d0 = durations();
-    stub.skew = 0;
-    const perDay = new Map();
+    const zone = zoneOf("C-1s"); await t.send("Emulation.setTimezoneOverride", { timezoneId: zone });
+    const A = anchorAt("C-1s"); stub.skew = A;
+    const s0 = hostNow() + A, phase = s0 % (3 * 3600_000), d0 = durations();
+    const perDay = new Map(); let pg = null, pz = null;
     for (let h = 0; h < 72; h += 3) {
-      stub.skew = h * 3600_000;
+      stub.skew = A + h * 3600_000;
       await load(t, { skew: skewMs + stub.skew, wait: 700 });
+      if (h === 0) { pg = await pageClock(t, skewMs + stub.skew); pz = await t.ev("Intl.DateTimeFormat().resolvedOptions().timeZone"); }
     }
     for (const p of posts()) { const day = Math.floor(p.at / DAY); perDay.set(day, (perDay.get(day) ?? 0) + 1); }
-    c("C-1s", [...perDay.values()].every((n) => n === 1) && perDay.size >= 3, `skew ${skewMs}: per stub day ${J([...perDay])} (d0 ${J(d0)})`);
+    const cal = `stub start ${iso(s0)}, phase ${(phase / 60000).toFixed(1)} min of 180, page zone ${pz}, page clock ${pg?.what}; d0 ${J(d0)}`;
+    const pre = phase >= 65 * 60000 && phase <= 175 * 60000 && pz === "UTC" && pg?.ok;
+    if (!pre) c("precondition:C-1s", false, `skew ${skewMs}: the pin did not hold (${cal})`);
+    else c("C-1s", [...perDay.values()].every((n) => n === 1) && perDay.size >= 3, `skew ${skewMs}: per stub day ${J([...perDay])} (${cal})`);
     await b.stop();
   });
   // C-1d: an answer sampled at 23:59:59 held 3 s: bd ≈ arrival + 1 s; a load 0.5 s after the arrival sends nothing, 1.5 s after one POST
-  await one("C-1d", async () => { reset(); const { b, t } = await fresh();
-    const d = durations(); stub.skew = (d.nd - 1) * 1000; // stub time 23:59:59
+  // (at its pin: zone UTC, asserted (see PINS); the 23:59:59 is of the pinned stub day)
+  await one("C-1d", async () => { pinnedCase = true; reset(); const { b, t } = await fresh();
+    const zone = zoneOf("C-1d"); await t.send("Emulation.setTimezoneOverride", { timezoneId: zone });
+    const A = anchorAt("C-1d"); stub.skew = A;
+    const d = durations(); stub.skew = A + (d.nd - 1) * 1000; // stub time 23:59:59
     stub.mode = { status: 200, as: "b", sampleAt: nowS() };
     let release; stub.hold = new Promise((r) => (release = r));
     const arrived = heldArrival();
-    await t.open(); await t.ev(`window.__skew = ${stub.skew}`); await t.ev("window.__releaseIdle()");
+    await t.open(); await t.ev(`window.__skew = ${stub.skew}`);
+    const pg = await pageClock(t, stub.skew), pz = await t.ev("Intl.DateTimeFormat().resolvedOptions().timeZone");
+    if (!(pz === "UTC" && pg.ok)) { c("precondition:C-1d", false, `the pin did not hold: page zone ${pz}, page clock ${pg.what}`); release(); await b.stop(); return; }
+    await t.ev("window.__releaseIdle()");
     await arrived; await sleep(3000); stub.hold = null; release();
     await sleep(300);
-    const arrival = Date.now() + stub.skew;
+    const arrival = hostNow() + stub.skew;
     const st = JSON.parse((await t.state()).b ?? "{}");
     stub.mode = null;
     const n = posts().length;
@@ -605,10 +695,10 @@ async function cases() {
   // (C-7.prior at the calendar anchor (astra 861223bc): the next day stays in the same ISO week, asserted, so the week
   // flag is always checked; the anchor offset is composed with the next-day skew)
   // (outside pop(): an unmet precondition records "precondition:C-7.prior" alone, grader 69f2f06c)
-  await one("C-7.prior", async () => { reset(); const { b, t } = await fresh();
-    const A = anchorAt(); stub.skew = A; await load(t, { skew: A }); const s1 = await t.state(); const d = durations();
-    const sameWeek = d.nw > d.nd + 5, cal = `effective ${iso(Date.now() + A)}; d ${J(d)}`;
-    if (!sameWeek) { c("precondition:C-7.prior", false, `the next day is not in the same ISO week (${cal})`); await b.stop(); return; }
+  await one("C-7.prior", async () => { pinnedCase = true; reset(); const { b, t } = await fresh();
+    const A = anchorAt("C-7.prior"); stub.skew = A; await load(t, { skew: A }); const pg = await pageClock(t, A); const s1 = await t.state(); const d = durations();
+    const sameWeek = d.nw > d.nd + 5, cal = `effective ${iso(hostNow() + A)}; page clock ${pg.what}; d ${J(d)}`;
+    if (!sameWeek || !pg.ok) { c("precondition:C-7.prior", false, `${pg.ok ? "the next day is not in the same ISO week" : "the pin did not take effect in the page"} (${cal})`); await b.stop(); return; }
     stub.mode = { status: 200, as: "a" }; await load(t, { skew: A + (d.nd + 5) * 1000 }); const s2 = await t.state(); stub.mode = null; await t.ev("__sbHarness.signedOut()"); const s3 = await t.state(); const n = posts().length; await load(t, { skew: A + (d.nd + 5) * 1000 }); const p = posts()[n];
     const r = { more: posts().length - n, body: p?.body, s1, s2, s3, posts: posts().map((x) => x.body) };
     c("C-7.prior", r.more === 1 && /"week":0/.test(r.body ?? ""), `C-7.prior: ${J(r)} (${cal})`);
@@ -845,11 +935,15 @@ const TREE = [
   // rebuilt (grader 6f728d4a B3); the harness bundle, built from the same tree, is served on a listed origin only)
   ["K-33", { file: "active.ts", sub: ["  if (!MEASURE_ORIGINS.includes(location.origin)) return;\n", ""] }, true, ["C-8.origin"]],
 ];
-// ---- the pin controls: [name, a wrong calendar anchor, the closed FAIL set] (grader 69f2f06c: a deliberately wrong pin
-// must fail only with "precondition:").  Sunday 2026-11-01 02:00:00Z: both zones' local midnights lie before that
-// UTC day's midnight (Kiritimati Oct 31 10:00Z, Adak Oct 31 09:00Z, HDT), and the next day (Monday) starts a new week.
+// ---- the pin controls: [name, deliberately wrong pins, the closed FAIL set] (grader 69f2f06c: a wrong pin must fail
+// only with "precondition:").  Each pinned case gets a pin that breaks its precondition:
+//   C-1.tz, C-7.prior  Sunday 2026-11-01 02:00:00Z: both zones' local midnights lie before that UTC day's midnight
+//                      (Kiritimati Oct 31 10:00Z, Adak Oct 31 09:00Z, HDT), and the next day (Monday) starts a new week
+//   C-1s               Wed 2026-10-14 00:30Z: phase 30 min, outside [65, 175] min
+//   C-1d               zone Pacific/Kiritimati instead of UTC
 const PIN = [
-  ["K-PIN", Date.UTC(2026, 10, 1, 2, 0, 0), ["precondition:C-1.tz", "precondition:C-7.prior"]],
+  ["K-PIN", { pins: { "C-1.tz": Date.UTC(2026, 10, 1, 2, 0, 0), "C-7.prior": Date.UTC(2026, 10, 1, 2, 0, 0), "C-1s": Date.UTC(2026, 9, 14, 0, 30, 0) }, zones: { "C-1d": "Pacific/Kiritimati" } },
+    ["precondition:C-1.tz", "precondition:C-7.prior", "precondition:C-1s", "precondition:C-1d"]],
 ];
 const rebuild = () => { const r = spawnSync("bun", ["web/build.ts"], { cwd: dirname(here), encoding: "utf8", maxBuffer: 1 << 26 }); if (r.status !== 0) throw new Error("the site didn't build: " + (r.stderr || r.stdout).slice(-300)); };
 
@@ -893,7 +987,7 @@ if (process.env.EVIDENCE) {
 }
 // (DUMP_CONTROLS=1: the controls, their exact substitutions and sets, as JSON, then stop: the frozen §5 file's source)
 if (process.env.DUMP_CONTROLS) {
-  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER, LS_ENTRY }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })), tree: TREE.map(([name, edit, build, set]) => ({ name, edit, rebuild: build, set })), pin: PIN.map(([name, pin, set]) => ({ name, pin: new Date(pin).toISOString(), set })), anchor: new Date(ANCHOR).toISOString() }, null, 1));
+  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER, LS_ENTRY }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })), tree: TREE.map(([name, edit, build, set]) => ({ name, edit, rebuild: build, set })), pin: PIN.map(([name, pin, set]) => ({ name, pins: Object.fromEntries(Object.entries(pin.pins ?? {}).map(([k, v]) => [k, new Date(v).toISOString()])), zones: pin.zones ?? {}, set })), pins: Object.fromEntries(Object.entries(PINS).map(([k, v]) => [k, new Date(v).toISOString()])), zones: PIN_ZONES }, null, 1));
   rmSync(tmp, { recursive: true, force: true });
   process.exit(0);
 }
@@ -958,7 +1052,7 @@ if (which !== "none" && !baseFailed.length) {
     if (which && which !== name) continue;
     const t1 = Date.now();
     results.clear(); harnessJs = bundle();
-    try { anchorMs = pin; await guarded(cases); await guarded(() => variantCases()); } finally { anchorMs = ANCHOR; }
+    try { pinOverride = pin; await guarded(cases); await guarded(() => variantCases()); } finally { pinOverride = null; }
     const failed = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
     const ok = failed.length > 0 && failed.join() === w.join();
     console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${failed.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
