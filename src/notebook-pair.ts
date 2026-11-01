@@ -31,6 +31,7 @@ import * as http from "http";
 import type { Duplex } from "stream";
 import { isUtf8 } from "buffer";
 import { createHash, createPublicKey, randomBytes, timingSafeEqual } from "crypto";
+import { LocalGateway, type GatewayOptions } from "./local-gateway";
 
 export const PAIR_PATH = "/sagebrush-kernel";
 export const PAGE_ORIGIN = "https://sagebrush.space";
@@ -59,6 +60,7 @@ export type PairOptions = {
   devOrigin?: string | null; // SAGEBRUSH_KERNEL_DEV_ORIGIN
   timers?: Timers;
   outCaps?: { data: number; total: number }; // (tests: the gate's caps; PAIR_LIMITS.outData and outTotal otherwise)
+  gateway?: GatewayOptions; // (phase 3a: the local gateway's options; tests inject a scripted Worker)
   out?: (s: string) => void; // the link (stdout)
   err?: (s: string) => void; // the code and notes (stderr)
 };
@@ -210,6 +212,16 @@ export class Conn {
     else this.destroy();
     return false;
   }
+  /** Would a frame of `n` bytes (its payload) fit through the gate now?  (A stream asks before each chunk.) */
+  fits(n: number, kind: "data" | "control") {
+    const caps = this.server.outCaps;
+    const frame = n + (n < 126 ? 2 : n < 65536 ? 4 : 10);
+    return !this.closed && this.sock.writableLength + frame <= (kind === "data" ? caps.data : caps.total);
+  }
+  /** A text frame through the gate, of its kind (the local gateway's answers, chunks and control frames). */
+  sendText(text: string, kind: "data" | "control") {
+    return this.write(frameOf(0x81, Buffer.from(text, "utf8")), kind);
+  }
   send(obj: unknown) {
     this.write(frameOf(0x81, Buffer.from(JSON.stringify(obj))), "data");
   }
@@ -335,6 +347,7 @@ export class PairServer {
   readonly queue: unknown[] = []; // (phase 3's runs waiting for the kernel; phase 2 never adds one)
   readonly outCaps: { data: number; total: number };
   stats = { maxBuffered: 0, overflows: 0, thumbprints: 0, destroyedAtCap: 0, maxFragments: 0 };
+  readonly gateway: LocalGateway;
 
   constructor(opts: PairOptions = {}) {
     this.timers = opts.timers ?? REAL;
@@ -343,6 +356,7 @@ export class PairServer {
     this.err = opts.err ?? ((s: string) => process.stderr.write(s));
     this.code = base32(randomBytes(16)); // (128 bits, 26 letters and digits)
     this.codeIssued = this.timers.now();
+    this.gateway = new LocalGateway(this, opts.gateway);
     this.http = http.createServer((_req, res) => { res.writeHead(404); res.end(); });
     this.http.on("upgrade", (req, sock, head) => this.upgrade(req, sock, head));
   }
@@ -359,6 +373,7 @@ export class PairServer {
   link() { return `${this.devOrigin ?? PAGE_ORIGIN}/?kpair=${this.code}&kport=${this.port}`; }
 
   close() {
+    this.gateway.shutdown();
     for (const c of [...this.conns, ...this.closing]) {
       this.timers.clearTimeout(c.helloTimer);
       this.timers.clearTimeout(c.closingTimer);
@@ -414,7 +429,7 @@ export class PairServer {
   dropped(c: Conn) {
     this.timers.clearTimeout(c.helloTimer);
     if (!this.conns.delete(c)) return;
-    if (c.paired) { if (this.pairedConn === c) this.pairedConn = null; c.token = null; }
+    if (c.paired) { if (this.pairedConn === c) this.pairedConn = null; c.token = null; this.gateway.socketLost(c); }
     else this.unpairedCount--;
   }
 
@@ -442,21 +457,16 @@ export class PairServer {
   message(c: Conn, msg: any) {
     if (!c.paired) return this.hello(c, msg);
     // (after the hello: notifications, and requests the kernel will answer, phase 3)
-    if (msg && typeof msg === "object" && !Array.isArray(msg) && msg.unpair === true && Object.keys(msg).length === 1) {
+    const plain = msg && typeof msg === "object" && !Array.isArray(msg);
+    if (plain && msg.unpair === true && Object.keys(msg).length === 1) {
       this.session = null;
       this.sessionWrong = 0;
+      this.gateway.shutdown(); // (an explicit unpair: the Worker terminated, the binding fenced)
       return c.close(1000, "unpaired");
     }
-    if (msg && typeof msg === "object" && typeof msg.id === "string" && /^t\d{1,15}$/.test(msg.id)) {
-      this.pending++;
-      return this.notYet(c, msg.id);
-    }
+    if (plain && Object.keys(msg).length === 1 && "cancel" in msg) return this.gateway.cancel(c, msg.cancel);
+    if (plain && "id" in msg) return this.gateway.frame(c, msg);
     return c.close(1002, "not a message of this protocol");
-  }
-  /** A request's answer in phase 2, written at once (so nothing waits: no queue, no timer, no worker). */
-  private notYet(c: Conn, id: string) {
-    c.send({ id, status: 503, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "not-yet", message: "this computer's kernel isn't available in this version" }) });
-    this.pending--;
   }
 
   private hello(c: Conn, msg: any) {
@@ -516,6 +526,7 @@ export class PairServer {
     c.token = b64url(randomBytes(32)); // (this socket's and this key's; never written anywhere)
     this.unpairedCount--;
     this.pairedConn = c;
+    this.gateway.socketPaired(c);
     this.err("A page is paired.\n");
     c.send({ jsonrpc: "2.0", id, result: { protocol: 1, purpose: "kernel", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } });
   }
