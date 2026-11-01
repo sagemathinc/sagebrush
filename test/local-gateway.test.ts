@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
@@ -728,18 +728,6 @@ test("L19b cancel an already-answered id: retired at once", async () => {
     assert.deepEqual(fs[fs.length - 1], { id: r.id, retired: true });
     assert.equal(fs.length, 2);
   } finally { await t.s.close(); }
-});
-// L20: no retired without a cancel, over every case's frame log (this file's sockets, checked after them all)
-after(() => {
-  let n = 0;
-  for (const st of allSocks) {
-    for (const f of texts(st)) {
-      if (f.retired === undefined) continue;
-      n++;
-      assert.ok(st.cancels.has(f.id), `L20 retired ${f.id} without a cancel`);
-    }
-  }
-  assert.ok(n >= 4, `L20 the census saw the retirements (${n})`);
 });
 
 // ================= 4.5 Streams and output budgets
@@ -1792,4 +1780,17 @@ test("L41w the production Worker: local-gateway.ts constructs it as notebook.ts 
   assert.match(nb, /\.runNotebookPair\(args\);/, "the CLI's one call: no options");
   assert.match(np, /new LocalGateway\(this, opts\.gateway\);/, "the gateway's options are only the caller's");
   assert.doesNotMatch(nb, /authHold|observe|gateway:/, "notebook.ts passes no test hook");
+});
+// L20: no retired without a cancel, over every case's frame log (this file's sockets: its last test, top-level tests
+// running in file order)
+test("L20 no retired without a cancel: a census over every case's frame log", () => {
+  let n = 0;
+  for (const st of allSocks) {
+    for (const f of texts(st)) {
+      if (f.retired === undefined) continue;
+      n++;
+      assert.ok(st.cancels.has(f.id), `L20 retired ${f.id} without a cancel`);
+    }
+  }
+  assert.ok(n >= 4, `L20 the census saw the retirements (${n})`);
 });
