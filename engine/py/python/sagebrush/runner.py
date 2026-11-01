@@ -66,6 +66,7 @@ class _Run:
         self.session_name = name
         self.done = threading.Event()
         self.reply = None
+        self.rid = None  # (its request's id in the session, once submitted: what its interrupts target)
         self.lock = threading.Lock()
 
 
@@ -197,6 +198,7 @@ class Runner:
                         run.sess = sess
                     before = sess.generation
                     gen, q, rid = sess.submit(code, mode=mode)
+                    run.rid = rid
                 except Exception as e:
                     # (the session couldn't start: the run settles at once,
                     # and a slot taken for it goes back, daybreak2 PR120-FIX3-2)
@@ -399,7 +401,7 @@ class Runner:
             # (stamped before the signal: the interrupt it causes can't be
             # timed before its request)
             entry["delivered_at"], entry["result"] = self.clock(), "delivered"
-            run.sess.interrupt()
+            run.sess.interrupt(run.rid)
             rec["requests"].append(entry)
             self._save(rec)
             t = threading.Timer(ESCALATE_S, self._escalate, args=(run, gen, seq, entry))

@@ -30,6 +30,7 @@ class FakeSession:
         self.q = queue.Queue()
         self.pending = None
         self.interrupts = 0
+        self.targets = []  # (each interrupt's target id)
         self.stubborn = False
         self.live = True
         self.restarts = 0
@@ -65,8 +66,9 @@ class FakeSession:
         self.pending = None
         self.q.put(r)
 
-    def interrupt(self):
+    def interrupt(self, rid=None):
         self.interrupts += 1
+        self.targets.append(rid)
         if not self.stubborn and self.pending is not None:
             self.finish(error_info={"type": "interrupted", "exception": "KeyboardInterrupt", "message": "the computation was interrupted",
                                     "traceback": "KeyboardInterrupt", "at": time.time()})
@@ -896,6 +898,7 @@ def test_cancel_contract():
         assert b["result"] == "delivered" and rid.startswith("cancel_") and rid != a["request_id"], b
         assert [x["request_id"] for x in r.record(h)["requests"]] == [rid]
         assert r.cancel(h, "hard", request_id=rid) == b and r.made[0].interrupts == 1  # (a retry: no second interrupt)
+        assert r.made[0].targets == [r.made[0].rid] == [run.rid], "the hard cancel targets the run's own request id"
         refused("invalid", r.cancel, h, "soft", request_id=rid)
         until(run.done.is_set, "the cancel")
         for mode in ("soft", "hard"):

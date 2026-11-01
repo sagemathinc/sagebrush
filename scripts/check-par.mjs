@@ -23,11 +23,16 @@ import { join, relative, sep } from "node:path";
 
 // the wrapper itself
 const WRAPPER = "engine/par/src/";
-// reviewed exemptions: [file, line text or null for the whole file, reason]
+// reviewed exemptions: [file, the exact trimmed line text or null for the whole file, reason]
 export const EXEMPT = [
   ["engine/ledger/src/tests.rs", null, "the ledger's own unit tests (threads that race admissions on purpose)"],
   ["engine/interrupt/src/progress.rs", "let a = std::thread::spawn(move || {", "inside #[cfg(test)] mod tests"],
   ["engine/interrupt/src/progress.rs", "let w = std::thread::spawn(move || {", "inside #[cfg(test)] mod tests"],
+  // Ctrl-C PR B: the worker's control listener (Unix), a blocking reader of the control fd that arms a request and wakes
+  // the main thread with SIGUSR1.  It runs no engine work and carries no ledger context, and it must run concurrently
+  // with the request it interrupts: under sagebrush-par's exclusive (sequential) mode it would run inline, forever.
+  ["engine/py/src/serve.rs", "std::thread::Builder::new()", "the dedicated once-per-process control reader (sagebrush-control): no user or compute work; must stay concurrent with the request loop"],
+  ["engine/py/src/serve.rs", "let t = std::thread::spawn(move || {", "inside #[cfg(test)] mod tests (a pipe writer)"],
 ];
 
 // rules for code, line by line (after stripping)
@@ -121,7 +126,8 @@ export function checkSource(rel, src) {
   const orig = src.split("\n");
   const code = strip(src);
   const lines = code.split("\n");
-  const exempt = (i) => EXEMPT.some(([file, text]) => file === rel && text !== null && orig[i].includes(text));
+  // (the whole trimmed line must equal the entry's text: other code can't ride along on an exempt line)
+  const exempt = (i) => EXEMPT.some(([file, text]) => file === rel && text !== null && orig[i].trim() === text);
   lines.forEach((line, i) => {
     for (const [re, what] of RULES) {
       if (re.test(line) && !exempt(i)) {
