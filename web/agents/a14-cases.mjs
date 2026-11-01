@@ -25,7 +25,7 @@ export const COPY = {
   expired: "Claude's access expired.",
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
-  kept: "Claude was connected to this page before it was opened again.",
+  kept: "Claude was connected to this page earlier.",
   hint: "Not connected: Connect Claude to send",
 };
 
@@ -51,7 +51,11 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
             if (A.silent) return; // (the 10 s bound: an agent that never answers)
             const p = m.params ?? {};
             const good = typeof p.code === "string" ? p.code === "123456" : p.session === A.secret;
-            if (!good) return void ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32001, message: "refused", data: { code: "refused", message: "unknown session: a new code is needed" } } }));
+            if (!good) {
+              // (and the socket closed, as sagebrush-agent does after a refused hello: a new code can then connect)
+              ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32001, message: "refused", data: { code: "refused", message: "unknown session: a new code is needed" } } }));
+              return void ws.close(1008, "refused");
+            }
             A.page = ws;
             const answer = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name, client, version: "0.3.0" }, wants: { folders: ["/"], write: true, run: false }, ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
             // (an answer held for A.delay ms: the attempt lasts past a rendering update, so focus effects are seen)
@@ -203,7 +207,7 @@ async function attach(B, targetId, { clock = false } = {}) {
     for (const t0 = Date.now(); P.loads === before && Date.now() - t0 < 10000; ) await sleep(50);
     await P.ev(`(localStorage.setItem('__sbclock', ${JSON.stringify(String(t))}), true)`);
   };
-  P.sendState = () => P.ev(`(() => { const s = document.querySelector('#send'), h = document.querySelector('#send-hint'); return { ariaDisabled: s.getAttribute('aria-disabled'), disabled: s.disabled, describedby: s.getAttribute('aria-describedby'), hint: h.hidden ? null : h.textContent, active: document.activeElement === s ? 'send' : document.activeElement === document.body ? 'body' : document.activeElement?.closest('#editor') ? 'editor' : document.activeElement?.closest('#conn-bar') ? document.activeElement.id : (document.activeElement?.tagName ?? null) }; })()`);
+  P.sendState = () => P.ev(`(() => { const s = document.querySelector('#send'), h = document.querySelector('#send-hint'); return { ariaDisabled: s.getAttribute('aria-disabled'), disabled: s.disabled, describedby: s.getAttribute('aria-describedby'), hint: h.hidden ? null : document.querySelector('#send-hint-text').textContent, hintAct: h.hidden ? null : document.querySelector('#send-hint-act').textContent, active: document.activeElement === s ? 'send' : document.activeElement === document.body ? 'body' : document.activeElement?.closest('#editor') ? 'editor' : document.activeElement?.closest('#conn-bar') ? document.activeElement.id : (document.activeElement?.tagName ?? null) }; })()`);
   P.bar = () => P.ev(`(() => { const b = document.querySelector('#conn-bar'), a = document.querySelector('#conn-act'); return { on: b.classList.contains('on'), alert: document.querySelector('#conn-alert').textContent, status: document.querySelector('#conn-status').textContent, act: a.hidden ? null : a.textContent, actDisabled: a.disabled, actAriaDisabled: a.getAttribute('aria-disabled'), actBusy: a.getAttribute('aria-busy'), x: !document.querySelector('#conn-x').hidden }; })()`);
   P.users = () => P.ev(`document.querySelectorAll('.user').length`);
   P.turns = () => P.ev(`document.querySelectorAll('.turn').length`);
@@ -402,7 +406,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.reload();
     const quiet = await A.quiet(3000), seen = await P.seen(), bar = await P.bar(), st = await P.sendState();
     ok(after === null && !seen.present && quiet && !bar.on && !(await P.connected()), "A14-4: after Revoke and a reload: no record, nothing reconnects, no bar", { after: !!after, seen: seen.present, quiet, bar });
-    ok(st.ariaDisabled === "true" && st.hint === COPY.hint && st.describedby === "send-hint", "A14-4: the chat Claude was in doesn't go to the demo: Send inert with the hint", st);
+    ok(st.ariaDisabled === "true" && st.hint === COPY.hint && st.describedby === "send-hint-text", "A14-4: the chat Claude was in doesn't go to the demo: Send inert with the hint", st);
   });
 
   // A14-5: a remembered timed grant still reconnects after a tab close (unchanged path), announced once in the header
@@ -530,6 +534,25 @@ export async function runA14({ site, ok, want = () => true }) {
     await sleep(200);
     const back = await P.ev(`[document.querySelectorAll('.sbag-dlg').length, document.activeElement?.id]`);
     ok(back[0] === 0 && back[1] === "conn-act", "A14-8: the Connect dialog, closed without connecting, returns focus to the bar's button", back);
+    // (board's B-A14-1/-2, by keyboard: [Connect] from the bar, a new code, Connect, then Allow: the grant dialog takes
+    //  focus when it opens, and on success focus goes to the composer)
+    await P.key("Enter");
+    await P.until(`document.activeElement?.closest('.sbag-dlg') !== null && document.activeElement?.tagName === 'INPUT'`);
+    await P.send("Input.insertText", { text: "123-456" });
+    await P.key("Tab");
+    await P.send("Input.insertText", { text: String(A.port) });
+    await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').focus()`);
+    await P.key("Enter");
+    await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`);
+    await sleep(200);
+    const inGrant = await P.ev(`(() => { const a = document.activeElement; return { inDialog: !!a?.closest('.sbag-dlg') && !!a.closest('.sbag-dlg').querySelector('h2')?.textContent.startsWith('Allow'), tag: a?.tagName ?? null }; })()`);
+    ok(inGrant.inDialog, "A14-8.allow-focus: the grant dialog (Allow this agent?) has focus when it opens", inGrant);
+    await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').focus()`);
+    await P.key("Enter");
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    await sleep(200);
+    const st3 = await P.sendState();
+    ok(st3.active === "editor", "A14-8.connect-focus: after [Connect] from the bar succeeds (a new code, Allow), focus is in the composer (never body)", st3);
   });
 
   // A14-9: the record's leftAt more than 30 s old (fixed clock), then a reload: no silent attempt; [Reconnect]
@@ -585,7 +608,7 @@ export async function runA14({ site, ok, want = () => true }) {
     for (const type of ["keyDown", "keyUp"]) await P.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
     await sleep(1500);
     const u1 = await P.users(), t1 = await P.turns(), draft = await P.composer();
-    ok(st.ariaDisabled === "true" && st.hint === COPY.hint && st.describedby === "send-hint", "A14-12: in a chat Claude was in, after a failed restore and a second reload: Send aria-disabled, with the hint", st);
+    ok(st.ariaDisabled === "true" && st.hint === COPY.hint && st.describedby === "send-hint-text", "A14-12: in a chat Claude was in, after a failed restore and a second reload: Send aria-disabled, with the hint", st);
     ok(u1 === u0 && t1 === t0 && draft === "to the demo?", "A14-12: Shift+Enter there sends nothing: no message, no demo turn, the draft kept", { u0, u1, t0, t1, draft });
   });
 
@@ -618,7 +641,13 @@ export async function runA14({ site, ok, want = () => true }) {
     await sleep(200);
     const bar = await P.bar(), st = await P.sendState();
     const shown = await P.ev(`(() => { const h = document.querySelector('#send-hint'); const r = h.getBoundingClientRect(); return !h.hidden && r.width > 0 && r.height > 0; })()`);
-    ok(!bar.on && bar.alert === "" && shown && st.hint === COPY.hint && st.describedby === "send-hint" && st.active === "editor", "A14-14: after ×, the bar is gone, the hint is visible by Send and is Send's description; focus in the composer", { bar, st, shown });
+    ok(!bar.on && bar.alert === "" && shown && st.hint === COPY.hint && st.describedby === "send-hint-text" && st.active === "editor", "A14-14: after ×, the bar is gone, the hint is visible by Send and is Send's description; focus in the composer", { bar, st, shown });
+    // (board's B-A14-3: the hint carries the bar's action as a real button, with the same handler and C3 states)
+    const during = await P.ev(`(() => { const a = document.querySelector('#send-hint-act'), t0 = a.textContent; a.focus(); a.click(); return { before: t0, act: a.textContent, disabled: a.disabled, busy: a.getAttribute('aria-busy'), ariaDisabled: a.getAttribute('aria-disabled') }; })()`);
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    await sleep(200);
+    const after = await P.bar(), active = await P.ev(`document.activeElement === document.body ? 'body' : document.activeElement?.id`);
+    ok(during.before === "Reconnect" && during.act === "Reconnecting…" && during.busy === "true" && during.ariaDisabled === "true" && !during.disabled && after.status === COPY.merged && active === "conn-act", "A14-14.hint-act: after ×, the hint's own [Reconnect] runs the bar's action (Reconnecting…, aria-busy, never disabled); its outcome brings the bar back with focus on the bar's button", { during, after, active });
   });
 
   // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace (or page): no attempt, gone, [Connect]

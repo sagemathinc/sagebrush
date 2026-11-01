@@ -145,6 +145,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         } catch (e) { err.textContent = String((e as Error).message ?? e); }
       };
       box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, "Allow it ", how), h("label", {}, remember, "Remember this agent (reconnect without a new code)"), err, h("div", { className: "row" }, cancel, allow));
+      // (focus on its first control when it opens, as the code dialog does: a keyboard path lands in it; board's B-A14-2)
+      setTimeout(() => all.focus());
     });
   }
 
