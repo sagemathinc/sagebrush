@@ -1402,8 +1402,11 @@ async function downloadChecks() {
       await seen(b, cb, p);
       check(await until(() => cb.stats.fetchFailed === failed + 1), `download checks (${m}): the item failed: ` + cb.stats.fetchFailed);
       check((await b.stat(p))?.remote === true && cb.stats.installed === 0 + (["missing", "malformed", "different", "longer"].indexOf(m)), `download checks (${m}): not installed`);
+      // (B5: the failure said on the file's row, never "on another device" in silence)
+      check(await until(async () => typeof (await b.stat(p))?.fetchFailed?.why === "string" && !(await b.stat(p)).fetchFailed.final), `download checks (${m}): the failure noted on its entry, to be tried again: ` + J((await b.stat(p))?.fetchFailed));
       await clock.advance(70_000);
       check(await until(async () => (await b.stat(p))?.remote === undefined), `download checks (${m}): the retry, after its timer, installs the real bytes`);
+      check((await b.stat(p))?.fetchFailed === undefined, `download checks (${m}): …and the note is gone`);
     }
     check(cb.stats.urls === 4, "download checks: each item's signed URL asked for once, reused for its retry: " + cb.stats.urls);
     // (a size past the cap: never reserved or asked for; set apart, listed)
@@ -1413,6 +1416,7 @@ async function downloadChecks() {
     const urls = cb.stats.urls;
     await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq + 1 });
     check(await until(async () => (await metaGet(b.ws, `sync:${ns}:fetchFinal:${big.fid}`))?.why === "too large to sync" && (await b.stat("/big.bin")).fetch === undefined && (await b.stat("/big.bin")).remote), "download checks: a size past 95 MiB set apart, too large to sync (listed, still remote)");
+    check((await b.stat("/big.bin")).fetchFailed?.final === true && (await b.stat("/big.bin")).fetchFailed.why === "too large to sync", "download checks: …said on its entry (final): " + J((await b.stat("/big.bin")).fetchFailed));
     check(cb.stats.urls === urls, "download checks: …with no URL asked for");
   } finally {
     await stop(ca);

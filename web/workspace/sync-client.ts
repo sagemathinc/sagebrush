@@ -41,7 +41,7 @@ import { Halt } from "./sync-overlay";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
-import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem } from "./sync-fetch";
+import { queued, keepUrl, finalize, install, pauseKey, CANONICAL_LENGTH, type FetchItem, noteFetchFailed } from "./sync-fetch";
 import { reserve } from "./reserve";
 import { accountHash, Bucket, VERSION } from "../sync-protocol/protocol";
 import type { DocSync } from "./doc-sync";
@@ -1356,14 +1356,17 @@ export class SyncClient {
         else {
           // (asking for a URL debits the read budget: the 303 followed to the signed URL, which is kept (L1))
           this.stats.urls++;
-          res = await this.fetch(this.origin + `/api/sync/v1/blob/${it.sha256}`, { credentials: "same-origin", headers: this.binding(c), redirect: "follow" });
+          // (no binding headers: the server's GET reads none (it answers by the session alone), and the 303 takes a
+          // request's headers across to the files origin, whose CORS allows none of them: every download failed there,
+          // William's "on another device", Nov 1 2026)
+          res = await this.fetch(this.origin + `/api/sync/v1/blob/${it.sha256}`, { credentials: "same-origin", redirect: "follow" });
           if (res.redirected && res.url) {
             const exp = Number(new URL(res.url).searchParams.get("exp"));
             if (Number.isSafeInteger(exp)) await keepUrl(this.w, c.ns, it, res.url, exp);
           }
         }
       } catch {
-        return this.fetchFail(c, it);
+        return this.fetchFail(c, it, undefined, "the download didn't go through (the network, or the files server refused it)");
       } finally {
         this.stats.fetchesAtOnce--;
       }
@@ -1385,18 +1388,18 @@ export class SyncClient {
         }
         // (a signed URL refused (expired, or not valid): dropped, a fresh one asked for next time)
         if (!fromSite && res.status === 403) await keepUrl(this.w, c.ns, it, undefined, undefined);
-        return this.fetchFail(c, it, ra);
+        return this.fetchFail(c, it, ra, `the ${fromSite ? "site" : "files server"} answered ${res.status}`);
       }
       // (D9: the length declared canonically and equal to the size, before the body is read)
       const cl = res.headers.get("content-length");
       if (cl === null || !CANONICAL_LENGTH.test(cl) || Number(cl) !== it.size) {
         try { await res.body?.cancel(); } catch {}
-        return this.fetchFail(c, it);
+        return this.fetchFail(c, it, undefined, "the download wasn't the file's size");
       }
       const bytes = await this.readCapped(res, it.size);
-      if (!bytes) return this.fetchFail(c, it);
+      if (!bytes) return this.fetchFail(c, it, undefined, "the download was cut short or too long");
       const sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)));
-      if (sha !== it.sha256) return this.fetchFail(c, it);
+      if (sha !== it.sha256) return this.fetchFail(c, it, undefined, "the bytes downloaded weren't the file's");
       const out = await install(this.w, c.ns, it, bytes);
       if (out === "installed") this.stats.installed++;
       else this.stats.stale++;
@@ -1431,8 +1434,10 @@ export class SyncClient {
     return n === size ? out : null;
   }
 
-  private async fetchFail(c: Conn, _it: FetchItem, ra?: number): Promise<"wait"> {
+  private async fetchFail(c: Conn, it: FetchItem, ra?: number, why?: string): Promise<"wait"> {
     this.stats.fetchFailed++;
+    // (said on the file's row, B5: never "on another device" in silence while its downloads fail)
+    if (why) await noteFetchFailed(this.w, c.ns, it, why).catch(() => {});
     const at = await this.timerFail(c.ns, "fetch", ra);
     this.wake(c, "fetch", at, () => this.fetchKick(c));
     return "wait";

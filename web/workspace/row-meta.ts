@@ -19,7 +19,8 @@ export function isElsewhere(e: Entry, here: ContentHere): boolean {
  * own, placed at another name by the server's index, while it stays there), else its size or its language. */
 export function fileRowMeta(e: Entry, here: ContentHere): string {
   if (e.missing) return "missing";
-  if (isElsewhere(e, here)) return "on another device";
+  // (a data file whose downloads fail says so, B5: never "on another device" in silence)
+  if (isElsewhere(e, here)) return e.fetchFailed ? (e.fetchFailed.final ? `not downloaded: ${e.fetchFailed.why}` : "download failed, retrying") : "on another device";
   if (e.renamed?.to === e.path) return "(renamed)";
   if (e.kind === "file") return fmtSize(e.size ?? 0);
   if (e.kind === "folder") return "";
