@@ -586,8 +586,13 @@ function setWriteable(a: NDArray, v: boolean) {
   if (a.fixedRO || (a.base !== null && a.base.ro)) raise(T.ValueError, "cannot set WRITEABLE flag to True of this array");
   a.ro = false;
 }
+// (NumPy's flagsobj is a snapshot: its flags are the array's when it was
+// made; setting a flag through it changes the array, not the snapshot)
 export class FlagsObj {
-  constructor(public a: NDArray) {}
+  num: number;
+  constructor(public a: NDArray) {
+    this.num = flagsNum(a);
+  }
 }
 
 // out[...] = src (an array, broadcast to out's shape), casting as needed.
@@ -1948,18 +1953,25 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
   return r.ndim === 0 && !keepdims ? pyScalarOf(r.dt, r.data, r.offset) : r;
 }
+// (a complex array's components are views of it, read-only where it is,
+// as NumPy's; a real array's imag is a new read-only array of zeros)
 function realPart(a: NDArray): NDArray {
   if (!a.dt.cplx) return a;
   const dt = a.dt === D.complex64 ? D.float32 : D.float64;
-  return new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset, a);
+  const v = new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset, a);
+  v.ro = a.ro;
+  return v;
 }
 function imagPart(a: NDArray): NDArray {
   if (!a.dt.cplx) {
     const z = empty(a.shape, a.dt);
+    z.ro = true;
     return z;
   }
   const dt = a.dt === D.complex64 ? D.float32 : D.float64;
-  return new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset + 1, a);
+  const v = new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset + 1, a);
+  v.ro = a.ro;
+  return v;
 }
 // A real scalar as a JS number: through a NumPy scalar's box and an
 // integral float's FloatBox.
@@ -3094,19 +3106,21 @@ newBuiltinModule("_numpy", (m) => {
   const FT = Ty.builtinTypeFor("flagsobj", FlagsObj, "numpy", () => raise(T.TypeError, "cannot create 'numpy.flagsobj' instances"));
   const FM = (name: string, f: any) => Ty.method(FT, name, f);
   // (each flag: its attribute, its keys, and its value)
-  const FLAG: [string, string[], (a: NDArray) => boolean][] = [
-    ["c_contiguous", ["C", "CONTIGUOUS", "C_CONTIGUOUS"], cContig],
-    ["f_contiguous", ["F", "FORTRAN", "F_CONTIGUOUS"], fContig],
-    ["owndata", ["O", "OWNDATA"], ownsData],
-    ["writeable", ["W", "WRITEABLE"], (a) => !a.ro],
-    ["aligned", ["A", "ALIGNED"], (a) => !a.unaligned],
+  // (each flag from the snapshot's bits n)
+  const has = (n: number, bit: number) => (n & bit) !== 0;
+  const FLAG: [string, string[], (n: number) => boolean][] = [
+    ["c_contiguous", ["C", "CONTIGUOUS", "C_CONTIGUOUS"], (n) => has(n, F_C)],
+    ["f_contiguous", ["F", "FORTRAN", "F_CONTIGUOUS"], (n) => has(n, F_F)],
+    ["owndata", ["O", "OWNDATA"], (n) => has(n, F_OWN)],
+    ["writeable", ["W", "WRITEABLE"], (n) => has(n, F_WRITE)],
+    ["aligned", ["A", "ALIGNED"], (n) => has(n, F_ALIGNED)],
     ["writebackifcopy", ["X", "WRITEBACKIFCOPY"], () => false],
-    ["fnc", ["FNC"], (a) => fContig(a) && !cContig(a)],
-    ["forc", ["FORC"], (a) => fContig(a) || cContig(a)],
-    ["behaved", ["B", "BEHAVED"], (a) => !a.unaligned && !a.ro],
-    ["carray", ["CA", "CARRAY"], (a) => cContig(a) && !a.unaligned && !a.ro],
+    ["fnc", ["FNC"], (n) => has(n, F_F) && !has(n, F_C)],
+    ["forc", ["FORC"], (n) => has(n, F_F) || has(n, F_C)],
+    ["behaved", ["B", "BEHAVED"], (n) => has(n, F_ALIGNED) && has(n, F_WRITE)],
+    ["carray", ["CA", "CARRAY"], (n) => has(n, F_C) && has(n, F_ALIGNED) && has(n, F_WRITE)],
     // (NumPy's farray: any of F, aligned, writeable, and not C contiguous)
-    ["farray", ["FA", "FARRAY"], (a) => (flagsNum(a) & (F_F | F_ALIGNED | F_WRITE)) !== 0 && !cContig(a)],
+    ["farray", ["FA", "FARRAY"], (n) => (n & (F_F | F_ALIGNED | F_WRITE)) !== 0 && !has(n, F_C)],
   ];
   const setFlag = (a: NDArray, name: string, v: any) => {
     if (name === "writeable") setWriteable(a, O.truth(v));
@@ -3115,10 +3129,10 @@ newBuiltinModule("_numpy", (m) => {
   };
   for (const [name, , get] of FLAG) {
     const settable = name === "writeable" || name === "aligned" || name === "writebackifcopy";
-    Ty.getset(FT, name, (f: FlagsObj) => get(f.a), settable ? (f: FlagsObj, v: any) => setFlag(f.a, name, v) : () => raise(T.AttributeError, `attribute '${name}' of 'numpy._core.multiarray.flagsobj' objects is not writable`));
+    Ty.getset(FT, name, (f: FlagsObj) => get(f.num), settable ? (f: FlagsObj, v: any) => setFlag(f.a, name, v) : () => raise(T.AttributeError, `attribute '${name}' of 'numpy._core.multiarray.flagsobj' objects is not writable`));
   }
-  Ty.getset(FT, "num", (f: FlagsObj) => flagsNum(f.a));
-  const keyOf = (k: any): [string, (a: NDArray) => boolean] | undefined => {
+  Ty.getset(FT, "num", (f: FlagsObj) => f.num);
+  const keyOf = (k: any): [string, (n: number) => boolean] | undefined => {
     if (typeof k !== "string") return undefined;
     for (const [name, keys, get] of FLAG) if (keys.includes(k)) return [name, get];
     return undefined;
@@ -3126,7 +3140,7 @@ newBuiltinModule("_numpy", (m) => {
   FM("__getitem__", (f: FlagsObj, k: any) => {
     const hit = keyOf(k);
     if (hit === undefined) throw T.KeyError("Unknown flag");
-    return hit[1](f.a);
+    return hit[1](f.num);
   });
   FM("__setitem__", (f: FlagsObj, k: any, v: any) => {
     const hit = keyOf(k);
@@ -3136,10 +3150,10 @@ newBuiltinModule("_numpy", (m) => {
   });
   const flagsText = (f: FlagsObj) =>
     ["C_CONTIGUOUS", "F_CONTIGUOUS", "OWNDATA", "WRITEABLE", "ALIGNED", "WRITEBACKIFCOPY"]
-      .map((k, i) => `  ${k} : ${FLAG[[0, 1, 2, 3, 4, 5][i]][2](f.a) ? "True" : "False"}`).join("\n") + "\n";
+      .map((k, i) => `  ${k} : ${FLAG[i][2](f.num) ? "True" : "False"}`).join("\n") + "\n";
   FM("__repr__", flagsText);
   FM("__str__", flagsText);
-  FM("__eq__", (f: FlagsObj, g: any) => (g instanceof FlagsObj ? flagsNum(f.a) === flagsNum(g.a) : Obj.NotImplemented));
+  FM("__eq__", (f: FlagsObj, g: any) => (g instanceof FlagsObj ? f.num === g.num : Obj.NotImplemented));
   Ty.getset(A, "real", (a: NDArray) => realPart(a), (a: NDArray, v: any) => assign(realPart(a), asarray(v)));
   Ty.getset(A, "imag", (a: NDArray) => imagPart(a), (a: NDArray, v: any) => assign(imagPart(a), asarray(v)));
   // (a noncontiguous array's .flat is a copy: read-only, so that a write
@@ -3203,6 +3217,8 @@ newBuiltinModule("_numpy", (m) => {
     M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(o, a), o, a)) : NotImplemented)).$fresh = true;
     M(`__i${py}__`, (a: NDArray, o: any) => {
       if (!isOperand(o)) return NotImplemented;
+      // (the target is the output: NumPy's words, before any computing)
+      outWritable(a);
       const f = py === "pow" ? fastScalarPower(a, o) : null;
       if (f !== null) {
         const r = unary(f, a);

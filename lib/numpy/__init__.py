@@ -686,6 +686,15 @@ def _wraps_in(op, dt):
     return op == "multiply" and dt.kind in "iu" and dt.itemsize < 8
 
 
+
+def _out_writeable(out):
+    """A ufunc's out=, refused before any computing where it is read-only,
+    in NumPy's words"""
+    for o in (out if isinstance(out, tuple) else (out,)):
+        if isinstance(o, ndarray) and not o.flags.writeable:
+            raise ValueError("output array is read-only")
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -704,6 +713,7 @@ class ufunc:
                 args = args[:-1]
             else:
                 raise TypeError("%s() takes from %d to %d positional arguments but %d were given" % (self.__name__, self.nin, self.nin + 1, len(args)))
+        _out_writeable(out)
         if casting not in _CASTINGS:
             raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
@@ -808,6 +818,10 @@ class ufunc:
         return res
 
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
+        _out_writeable(out)
+        if out is not None:
+            out[...] = self.reduce(a, axis, dtype, None, keepdims, initial, where)
+            return out
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -848,6 +862,10 @@ class ufunc:
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
+        _out_writeable(out)
+        if out is not None:
+            out[...] = self.accumulate(a, axis, dtype)
+            return out
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -2577,6 +2595,8 @@ def _m_astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
 
 
 def _m_sort(self, axis=-1, kind=None, order=None):
+    if not self.flags.writeable:
+        raise ValueError("sort array is read-only")
     self[...] = sort(self, axis)
 
 
