@@ -96,21 +96,32 @@ class Index(object):
             # 100 B a label and 8 B a position in a duplicate's list)
             b = self._pd_budget
             m = {}
-            for i, v in enumerate(self.tolist()):
-                key = _key(v)
-                old = m.get(key)
-                if old is None:
-                    if b is not None:
-                        b.charge(100, "the index's lookup map")
-                    m[key] = i
-                elif isinstance(old, list):
-                    if b is not None:
-                        b.charge(8, "the index's lookup map")
-                    old.append(i)
-                else:
-                    if b is not None:
-                        b.charge(16, "the index's lookup map")
-                    m[key] = [old, i]
+            charged = 0
+            try:
+                for i, v in enumerate(self.tolist()):
+                    key = _key(v)
+                    old = m.get(key)
+                    if old is None:
+                        if b is not None:
+                            b.charge(100, "the index's lookup map")
+                            charged += 100
+                        m[key] = i
+                    elif isinstance(old, list):
+                        if b is not None:
+                            b.charge(8, "the index's lookup map")
+                            charged += 8
+                        old.append(i)
+                    else:
+                        if b is not None:
+                            b.charge(16, "the index's lookup map")
+                            charged += 16
+                        m[key] = [old, i]
+            except BaseException:
+                # (a refusal leaves no partial map, and returns what the
+                # map had charged)
+                if b is not None:
+                    b.release(charged)
+                raise
             self._pd_map = m
         hit = self._pd_map.get(_key(label))
         if hit is None:
