@@ -1,7 +1,7 @@
-# Laplace transforms (kernel lane 1b).  The .out is HAND-WRITTEN by
-# @sagebrush-sage2, not generated: the local real Sage has no Maxima library
-# mode.  Each line is Sage's documented or well-known output for that input;
-# regenerate from real Sage when the oracle is available.
+# Laplace transforms (kernel lane 1b).  The .out was hand-written by
+# @sagebrush-sage2, then checked against real Sage 10.9 (the VM2 oracle,
+# Nov 1): every line is Sage's output except the recorded, approved
+# deviations in test_laplace.deviations.md (lines 17, 22, 27, 31, 34).
 t, s, a = var('t s a')
 print(laplace(1, t, s))
 print(laplace(t^2, t, s))
@@ -40,5 +40,5 @@ print(laplace(heaviside(t - a), t, s))
 assume(a > 0); print(laplace(heaviside(t - a), t, s)); forget()
 print(laplace(heaviside(t - 2)*sin(t - 2), t, s))
 print(laplace(heaviside(t - a)*t, t, s))
-# sound but incomplete: heaviside(t + 2) is 1 for t >= 0, so this is 1/(s^2 + 1) in Sage; sagebrush leaves it unevaluated
+# heaviside(t + 2) is 1 for t >= 0: 1/(s^2 + 1), as Sage
 print(laplace(heaviside(t + 2)*sin(t), t, s))

@@ -5323,12 +5323,20 @@ def _laplace(f, t, s):
             if kop[0] == "pow" and str(k.operands()[0]) == "e":
                 ab = _lin_in(k.operands()[1], t)
                 if ab is not None:
-                    return e**ab[1] * _laplace(rest, t, s).subs({S: S - ab[0]})
+                    G = _laplace(rest, t, s)
+                    if str(ab[0]) != "0":
+                        # (Sage's form: the shifted transform over its expanded denominator)
+                        G = G.subs({S: S - ab[0]})
+                        G = G.numerator() / G.denominator().expand()
+                    return e**ab[1] * G
             if kop[0] == "fun:heaviside":
                 ab = _lin_in(k.operands()[0], t)
                 if ab is not None and str(ab[0]) == "1" and _known_nonneg(-ab[1]):
                     c = -ab[1]
                     return e**(-c * S) * _laplace(rest.subs({T: T + c}), t, s)
+                if ab is not None and str(ab[0]) == "1" and _known_real(-ab[1]):
+                    # heaviside(t - c) with c < 0 is 1 for t >= 0
+                    return _laplace(rest, t, s)
         for i, k in enumerate(g):
             rest = _prod(g[:i] + g[i + 1:])
             n = 1 if k.is_symbol() else None
