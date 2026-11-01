@@ -1721,7 +1721,7 @@ class Matrix:
             return Matrix(_sa().QQ, self._rows, self._nc).echelon_form()
         return self.echelon_form()
 
-    def hermite_form(self):
+    def hermite_form(self, transformation=False):
         """The Hermite normal form (rows, zero rows at the bottom); over QQ,
         a field, Sage's form: forward elimination with neither pivot scaling
         nor elimination above a pivot, a row swap moving the lower row up and
@@ -1736,9 +1736,14 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).hermite_form()
             [ 1  2]
             [ 0 -2]
+            sage: H, U = matrix(QQ, [[0, 1], [1, 0]]).hermite_form(transformation=True); U * matrix(QQ, [[0, 1], [1, 0]]) == H
+            True
         """
         if self._base is _sa().QQ:
-            return self._hermite_field()
+            H, U = self._hermite_field()
+            return (H, U) if transformation else H
+        if transformation:
+            raise NotImplementedError("hermite_form(transformation=True) is implemented over QQ only in sagebrush yet")
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
@@ -1753,6 +1758,7 @@ class Matrix:
         K = self._base
         A = [list(r) for r in self._rows]
         m, n = len(A), self.ncols()
+        U = [[K(1) if i == j else K(0) for j in range(m)] for i in range(m)]
         r = 0
         for c in range(n):
             if r >= m:
@@ -1761,13 +1767,15 @@ class Matrix:
             if p is None:
                 continue
             if p != r:
-                A[r], A[p] = A[p], [-x for x in A[r]]
+                A[r], A[p], U[r], U[p] = A[p], [-x for x in A[r]], U[p], [-x for x in U[r]]
             for i in range(r + 1, m):
                 if A[i][c] != 0:
                     q = K(A[i][c]) / K(A[r][c])
                     A[i] = [x - q * y for x, y in zip(A[i], A[r])]
+                    U[i] = [x - q * y for x, y in zip(U[i], U[r])]
             r += 1
-        return Matrix(K, A, n)
+        # (U self = A: the same row operations on the identity)
+        return Matrix(K, A, n), Matrix(K, U, m)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).

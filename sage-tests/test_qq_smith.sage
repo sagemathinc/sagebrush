@@ -69,3 +69,18 @@ print(rows(lambda: matrix(QQ, [[2, 4], [1, 3]]).hermite_form()))
 print(rows(lambda: matrix(QQ, [[1, 2, 3], [2, 4, 6], [1, 0, 1]]).hermite_form()))
 print(rows(lambda: matrix(QQ, [[0, 1], [1, 0]]).hermite_form()))
 print(rows(lambda: matrix(QQ, [[6, 4], [4, 6]]).hermite_form()))
+# Sage's transformations too (VM2 oracle, Nov 1): (H rows, U rows) with U A = H
+def htu(A):
+    try:
+        H, U = matrix(QQ, A).hermite_form(transformation=True)
+        return (H.rows(), U.rows())
+    except Exception as ex:
+        return type(ex).__name__
+print(htu([[0, 1], [1, 0]]))
+print(htu([[0, 0, 1], [1, 2, 3]]))
+print(htu([[6, 4], [4, 6]]))
+print(htu([[1, 2, 3], [4, 5, 6], [7, 8, 10]]))
+print(htu([[1, 2, 3], [2, 4, 6], [1, 0, 1]]))
+print(htu([[2, 1], [4, 2]]))
+print(htu([[0]]))
+print(htu([[1], [2], [3]]))
