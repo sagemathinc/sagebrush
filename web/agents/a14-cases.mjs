@@ -31,7 +31,7 @@ export const COPY = {
 // ---- the stand-in for sagebrush-agent: one page at a time (a second upgrade gets 409 before the upgrade, as its
 // verifyClient does), the session secret from a code hello, a session hello checked against it, chats by conversation
 export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {}) {
-  const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null };
+  const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null, delay: 0 };
   const start = (port) => {
     A.server = Bun.serve({
       port,
@@ -52,7 +52,9 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
             const good = typeof p.code === "string" ? p.code === "123456" : p.session === A.secret;
             if (!good) return void ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32001, message: "refused", data: { code: "refused", message: "unknown session: a new code is needed" } } }));
             A.page = ws;
-            ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name, client, version: "0.3.0" }, wants: { folders: ["/"], write: true, run: false }, ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+            const answer = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name, client, version: "0.3.0" }, wants: { folders: ["/"], write: true, run: false }, ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+            // (an answer held for A.delay ms: the attempt lasts past a rendering update, so focus effects are seen)
+            if (A.delay > 0) setTimeout(answer, A.delay); else answer();
           } else if (m.id && A.pending.has(m.id)) {
             A.pending.get(m.id)(m);
             A.pending.delete(m.id);
@@ -439,8 +441,9 @@ export async function runA14({ site, ok, want = () => true }) {
     await chat(P, A);
     A.stop();
     const listening = await A.listening();
-    await lostThenReconnect(P);
-    const during = await P.bar();
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    // (the button's state read in the same evaluation as the click, so it is the attempt's, whatever its length)
+    const during = await P.ev(`(() => { const a = document.querySelector('#conn-act'); a.click(); return { act: a.textContent, actDisabled: a.disabled, actAriaDisabled: a.getAttribute('aria-disabled'), actBusy: a.getAttribute('aria-busy') }; })()`);
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const bar = await P.bar();
     ok(!listening && during.act === "Reconnecting…" && during.actAriaDisabled === "true" && during.actBusy === "true" && during.actDisabled === false, "A14-7.closed: nothing listens (confirmed before the attempt); during it the button reads 'Reconnecting…', aria-disabled and aria-busy, never disabled", { listening, during });
@@ -498,8 +501,10 @@ export async function runA14({ site, ok, want = () => true }) {
     await A.kick();
     await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
     await P.ev(`document.querySelector('#conn-act').focus()`);
+    A.delay = 600; // (the attempt lasts past a rendering update: a focus lost meanwhile would show)
     await P.key("Enter");
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    A.delay = 0;
     await sleep(200);
     const st = await P.sendState();
     ok(st.active === "editor", "A14-8: after a successful Reconnect from the bar, focus is in the composer (never body)", st);
@@ -670,23 +675,27 @@ export async function runA14({ site, ok, want = () => true }) {
     });
   }
 
-  // A14-18 (board C3): Enter on [Reconnect] with the daemon down: activeElement is never body; it stays on the button
-  await run("A14-18", async (B, A) => {
-    const P = await B.tab();
-    await pair(P, A, site, "page");
-    await chat(P, A);
-    A.stop();
-    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
-    await P.ev(`document.querySelector('#conn-act').focus()`);
-    await P.key("Enter");
-    const seen = new Set();
-    for (let t = Date.now(); Date.now() - t < 12000; await sleep(30)) {
-      const a = await P.ev(`document.activeElement === document.body ? 'body' : document.activeElement?.id || document.activeElement?.tagName`);
-      seen.add(a);
-      if (await P.ev(`document.querySelector('#conn-status').textContent !== ''`)) break;
-    }
-    await sleep(300);
-    const end = await P.ev(`document.activeElement?.id`), bar = await P.bar();
-    ok(!seen.has("body") && [...seen].every((a) => a === "conn-act") && end === "conn-act" && bar.status === COPY.merged, "A14-18: from Enter on [Reconnect] through its failure, focus never falls to body; it stays on the button", { seen: [...seen], end, bar });
-  });
+  // A14-18 (board C3): Enter on [Reconnect] with the daemon down: activeElement is never body; it stays on the button.
+  // Two rows: the daemon stopped (a closed port), and one that never answers (the attempt's full 10 s)
+  for (const [id, down] of [["A14-18", "stopped"], ["A14-18.slow", "silent"]]) {
+    await run(id, async (B, A) => {
+      const P = await B.tab();
+      await pair(P, A, site, "page");
+      await chat(P, A);
+      if (down === "stopped") A.stop();
+      else { A.silent = true; await A.kick(); }
+      await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+      await P.ev(`document.querySelector('#conn-act').focus()`);
+      await P.key("Enter");
+      const seen = new Set();
+      for (let t = Date.now(); Date.now() - t < 15000; await sleep(30)) {
+        const a = await P.ev(`document.activeElement === document.body ? 'body' : document.activeElement?.id || document.activeElement?.tagName`);
+        seen.add(a);
+        if (await P.ev(`document.querySelector('#conn-status').textContent !== ''`)) break;
+      }
+      await sleep(300);
+      const end = await P.ev(`document.activeElement?.id`), bar = await P.bar();
+      ok(!seen.has("body") && [...seen].every((a) => a === "conn-act") && end === "conn-act" && bar.status === COPY.merged, `${id}: from Enter on [Reconnect] through its failure (${down === "stopped" ? "a closed port" : "an agent that never answers, 10 s"}), focus never falls to body; it stays on the button`, { seen: [...seen], end, bar });
+    });
+  }
 }
