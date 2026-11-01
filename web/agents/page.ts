@@ -1090,7 +1090,7 @@ async function openWorkspace(again = false): Promise<boolean> {
   $("#ws-error").hidden = !!workspace;
   // (the sentence once, then the error's own words in the muted details; a failed [Retry] says so anew, and the same
   // text is cleared first, so role=alert announces it again)
-  const msg = workspace ? "" : `${again ? "Still couldn't open the storage. " : ""}This browser's storage couldn't be opened, so Claude can't connect on this page. If Sagebrush is open in another tab, close it, then [Retry].`;
+  const msg = workspace ? "" : `${again ? "Still couldn't open the storage. " : ""}This browser's storage couldn't be opened, so Claude can't connect on this page. If Sagebrush is open in another tab, close it, then try again.`;
   const t = $("#ws-error-text");
   if (again && msg && t.textContent === msg) {
     t.textContent = "";
