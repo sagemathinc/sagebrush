@@ -1,0 +1,450 @@
+{
+  "tests": [],
+  "divergences": [
+    {
+      "case": "c3.series-ndarray-copy-false",
+      "message": "pandas.Series(..., copy=False) with an ndarray is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3 ownership: pandas 3 under Copy-on-Write wraps the ndarray without copying, so the result shares its memory; Sagebrush's pandas keeps columns of its own and can't share, so it refuses rather than copy silently"
+    },
+    {
+      "case": "c3.frame-ndarray-copy-false",
+      "message": "pandas.DataFrame(..., copy=False) with an ndarray is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3 ownership: pandas 3 under Copy-on-Write wraps the ndarray without copying, so the result shares its memory; Sagebrush's pandas keeps columns of its own and can't share, so it refuses rather than copy silently"
+    },
+    {
+      "case": "c3.frame-dict-ndarray-copy-false",
+      "message": "pandas.DataFrame(..., copy=False) with an ndarray is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3 ownership: pandas 3 under Copy-on-Write wraps the ndarray without copying, so the result shares its memory; Sagebrush's pandas keeps columns of its own and can't share, so it refuses rather than copy silently"
+    },
+    {
+      "case": "c3.series-str-to_numpy",
+      "message": "pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.series-str-values",
+      "message": "pandas.Series.values of a str column is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.series-str-to_numpy-object",
+      "message": "pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "to_numpy's dtype= and na_value= arguments are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "c3.series-object-to_numpy",
+      "message": "pandas.Series.to_numpy() of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.series-object-values",
+      "message": "pandas.Series.values of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.frame-str-to_numpy",
+      "message": "pandas.DataFrame.to_numpy() of a frame with str/object columns is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.frame-str-values",
+      "message": "pandas.DataFrame.values of a frame with str/object columns is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "c3.frame-numeric-to_numpy-object",
+      "message": "pandas.DataFrame.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "to_numpy's dtype= and na_value= arguments are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "c3.frame-int-bool-to_numpy",
+      "message": "pandas.DataFrame.to_numpy() of a frame with mixed bool columns is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports a frame mixing int and bool columns as an object ndarray; Sagebrush's numpy has no object arrays, so the export is refused"
+    },
+    {
+      "case": "c3.series-array",
+      "message": "pandas.Series.array is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas returns an ExtensionArray (Series.array); Sagebrush's pandas has no extension arrays, and the attribute is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "c3.to_numpy-dtype",
+      "message": "pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "to_numpy's dtype= and na_value= arguments are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "c3.to_numpy-na_value",
+      "message": "pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "to_numpy's dtype= and na_value= arguments are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "c3.series-str-to_numpy-copy",
+      "message": "pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset",
+      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+    },
+    {
+      "case": "dtype.string",
+      "message": "pandas: dtype='string' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "dtype.category",
+      "message": "pandas: dtype='category' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "dtype.Int64",
+      "message": "pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "value.int-beyond-int64",
+      "message": "pandas: an integer outside int64 (9223372036854775808) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas makes a uint64 or object column for an integer outside int64; Sagebrush has neither, so it is refused"
+    },
+    {
+      "case": "value.int64-beyond-2-53",
+      "message": "int64 values beyond 2**53 are not supported yet",
+      "reason": "pandas computes the exact int64; Sagebrush's numpy holds int64 exactly only up to 2**53 so far (a numpy follow-up in this lane), so the value is refused rather than rounded"
+    },
+    {
+      "case": "value.sum-beyond-2-53",
+      "message": "int64 values beyond 2**53 are not supported yet",
+      "reason": "pandas computes the exact int64; Sagebrush's numpy holds int64 exactly only up to 2**53 so far (a numpy follow-up in this lane), so the value is refused rather than rounded"
+    },
+    {
+      "case": "frame.ragged-rows",
+      "message": "pandas.DataFrame of rows of different lengths (deprecated in pandas 3) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas pads rows of different lengths with NaN (deprecated in pandas 3); outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.NA",
+      "message": "pandas.NA is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.NA is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.merge",
+      "message": "pandas.merge is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.merge is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.concat",
+      "message": "pandas.concat is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.concat is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.to_datetime",
+      "message": "pandas.to_datetime is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.to_datetime is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.Categorical",
+      "message": "pandas.Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Categorical is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.MultiIndex",
+      "message": "pandas.MultiIndex is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.MultiIndex is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.read_excel",
+      "message": "pandas.read_excel is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.read_excel is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.pd.get_dummies",
+      "message": "pandas.get_dummies is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.get_dummies is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.groupby",
+      "message": "pandas.DataFrame.groupby is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.groupby: groupby is deferred to M2 (accepted at plan review); outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.merge",
+      "message": "pandas.DataFrame.merge is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.merge is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.describe",
+      "message": "pandas.DataFrame.describe is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.describe is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.sort_values",
+      "message": "pandas.DataFrame.sort_values is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.sort_values is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.drop",
+      "message": "pandas.DataFrame.drop is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.drop is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.rename",
+      "message": "pandas.DataFrame.rename is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.rename is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.apply",
+      "message": "pandas.DataFrame.apply is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.apply is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.plot",
+      "message": "pandas.DataFrame.plot is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.plot is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.info",
+      "message": "pandas.DataFrame.info is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.info is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.value_counts",
+      "message": "pandas.DataFrame.value_counts is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.value_counts is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.to_csv",
+      "message": "pandas.DataFrame.to_csv is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.to_csv is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.DataFrame.where",
+      "message": "pandas.DataFrame.where is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.where is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.str",
+      "message": "pandas.Series.str is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.str is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.dt",
+      "message": "pandas.Series.dt is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.dt is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.groupby",
+      "message": "pandas.Series.groupby is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.groupby: groupby is deferred to M2 (accepted at plan review); outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.value_counts",
+      "message": "pandas.Series.value_counts is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.value_counts is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.apply",
+      "message": "pandas.Series.apply is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.apply is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.map",
+      "message": "pandas.Series.map is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.map is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.astype",
+      "message": "pandas.Series.astype is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.astype is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.plot",
+      "message": "pandas.Series.plot is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.plot is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.unique",
+      "message": "pandas.Series.unique is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.unique is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Series.quantile",
+      "message": "pandas.Series.quantile is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.quantile is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "name.Index.sort_values",
+      "message": "pandas.Index.sort_values is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Index.sort_values is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "op.series-add",
+      "message": "pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "op.series-radd",
+      "message": "pandas.Series.__radd__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "op.series-mul",
+      "message": "pandas.Series.__mul__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "op.series-neg",
+      "message": "pandas.Series.__neg__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "op.frame-add",
+      "message": "pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "op.frame-gt",
+      "message": "pandas.DataFrame.__gt__ (comparison) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+    },
+    {
+      "case": "param.Series.sum-min_count",
+      "message": "pandas.Series.sum(min_count=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.Series.sum-axis",
+      "message": "pandas.Series.sum(axis=1) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.DataFrame.sum-axis1",
+      "message": "pandas.DataFrame.sum(axis=1) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.sample-frac",
+      "message": "pandas.Series.sample(frac=, replace=, weights=, axis=, ignore_index=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.sample-unseeded-random_state",
+      "message": "pandas.Series.sample(random_state=) other than an int or None is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.to_string",
+      "message": "pandas.DataFrame.to_string arguments is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.loc-tuple-label",
+      "message": "pandas: a tuple label is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "param.loc-step-slice",
+      "message": "pandas: a label slice with a step is not in Sagebrush's pandas 0.x subset",
+      "reason": "this argument of a supported method is outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "csv.sep-regex",
+      "message": "pandas.read_csv(sep='\\\\s+' (only a one-character separator)) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.sep-none",
+      "message": "pandas.read_csv(sep=None (only a one-character separator)) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.implicit-index",
+      "message": "pandas.read_csv(an implicit index column (a first row with one more field than the header)) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.names-fewer",
+      "message": "pandas.read_csv(an implicit index column (a first row with one more field than the header)) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.uint64",
+      "message": "pandas.read_csv: the integer 9223372036854775808 is outside int64 (pandas makes uint64 or object), not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas makes a uint64 or object column for an integer outside int64; Sagebrush has neither, so it is refused"
+    },
+    {
+      "case": "csv.below-int64",
+      "message": "pandas.read_csv: the integer -9223372036854775809 is outside int64 (pandas makes uint64 or object), not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas makes a uint64 or object column for an integer outside int64; Sagebrush has neither, so it is refused"
+    },
+    {
+      "case": "csv.int64-beyond-2-53",
+      "message": "int64 values beyond 2**53 are not supported yet",
+      "reason": "pandas computes the exact int64; Sagebrush's numpy holds int64 exactly only up to 2**53 so far (a numpy follow-up in this lane), so the value is refused rather than rounded"
+    },
+    {
+      "case": "csv.skip_blank_lines",
+      "message": "pandas.read_csv(skip_blank_lines=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.engine",
+      "message": "pandas.read_csv(engine=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.encoding",
+      "message": "pandas.read_csv(encoding=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.parse_dates",
+      "message": "pandas.read_csv(parse_dates=True) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.header-list",
+      "message": "pandas.read_csv(header=[0, 1]) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.index_col-list",
+      "message": "pandas.read_csv(index_col=[0, 1] (only one column)) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.na_values-dict",
+      "message": "pandas.read_csv(na_values of type dict) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.dtype-category",
+      "message": "pandas: dtype='category' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+    },
+    {
+      "case": "csv.usecols-mixed",
+      "message": "pandas.read_csv(usecols mixing names and positions) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.binary-file",
+      "message": "pandas.read_csv(a binary file object) is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.quotechar-sep",
+      "message": "pandas.read_csv(quotechar=',') is not in Sagebrush's pandas 0.x subset",
+      "reason": "this read_csv argument value is outside read_csv's frozen parameter list (plan r7 C4, M1 r1 3.2); it raises before reading"
+    },
+    {
+      "case": "csv.url-https",
+      "message": "read_csv from a URL isn't supported; download the file into the project first",
+      "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
+    },
+    {
+      "case": "csv.url-http-upper",
+      "message": "read_csv from a URL isn't supported; download the file into the project first",
+      "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
+    },
+    {
+      "case": "csv.url-s3",
+      "message": "read_csv from a URL isn't supported; download the file into the project first",
+      "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
+    }
+  ]
+}
