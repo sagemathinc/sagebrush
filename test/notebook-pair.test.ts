@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PairServer, PAIR_LIMITS, PAIR_PATH, PAGE_ORIGIN, runNotebookPair } from "../src/notebook-pair";
 import type { Conn } from "../src/notebook-pair";
+import { GATEWAY_LIMITS } from "../src/local-gateway";
 
 // `sagebrush notebook --pair` (src/notebook-pair.ts), phase 2: the pairing alone.  Cases K1–K23 as frozen with the
 // grader (/scratch/sagebrush-reviews/grader-local-kernel-phase2-cases-FROZEN.md), and r2's K24–K36 (the v3 addendum
@@ -802,6 +803,43 @@ test("K31b not canonical: a coordinate with its unused bits set (the same point,
 
 // ---- r2: a live slow reader
 
+/** p3a: K27's driver (and K27n's).  Requests now go to the local gateway, which keeps at most GATEWAY_LIMITS.openIds
+ * open per socket and answers each only after its async auth, so p2's flood of headerless frames from t0 is refused
+ * 1002 at once.  Instead: valid requests (ids t1.. ascending, the full envelope and body) that the gateway refuses by
+ * their token, sent over the real socket in batches of openIds, each batch's answers recorded server-side before the
+ * next is sent; until the pairing closes, the budget is spent, or 30 s.  A batch unanswered for 5 s fails the case. */
+async function refusedBatches(s: PairServer, sock: any, client: net.Socket, budget: number) {
+  const answers: { id: string; status: number; error: string }[] = [];
+  let closed = false, wake = () => {};
+  const inner = sock.write.bind(sock);
+  sock.write = (b: Buffer, ...r: any[]) => {
+    const op = b[0] & 0x0f;
+    if (op === 0x1) {
+      const n = b[1] & 0x7f, at = n === 126 ? 4 : n === 127 ? 10 : 2, a = JSON.parse(b.subarray(at).toString());
+      answers.push({ id: a.id, status: a.status, error: JSON.parse(a.body ?? "{}").error });
+    }
+    if (op === 0x8) closed = true;
+    const ok = inner(b, ...r);
+    wake();
+    return ok;
+  };
+  let sent = 0;
+  const t0 = Date.now();
+  while (!closed && sent < budget && Date.now() - t0 < 30_000) {
+    const target = answers.length + GATEWAY_LIMITS.openIds;
+    const frames: Buffer[] = [];
+    for (let i = 0; i < GATEWAY_LIMITS.openIds; i++) frames.push(maskedText({ id: `t${++sent}`, rpc: "g.run", ref: { b: "b1" }, auth: "DPoP x", dpop: "x", accept: "application/json", body: "{}" }));
+    client.write(Buffer.concat(frames));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => { wake = () => {}; reject(new Error(`the batch up to t${sent} unanswered for 5 s (${answers.length} answers)`)); }, 5000);
+      wake = () => { if (answers.length >= target || closed) { clearTimeout(t); wake = () => {}; resolve(); } };
+      wake();
+    });
+  }
+  return { answers, sent, closed };
+}
+const refusedInOrder = (answers: { id: string; status: number; error: string }[]) => answers.every((a, i) => a.id === `t${i + 1}` && a.status === 401 && a.error === "invalid_token");
+
 test("K27 a live slow reader: every write within 20 KiB, the last the 1013 close past the data boundary, then nothing", async () => {
   const DATA = 16 * 1024, TOTAL = 20 * 1024;
   const { s } = await server({ outCaps: { data: DATA, total: TOTAL } });
@@ -816,9 +854,7 @@ test("K27 a live slow reader: every write within 20 KiB, the last the 1013 close
     sock.write = (b: Buffer, ...r: any[]) => { rec.push({ kind: "write", wl: sock.writableLength, len: b.length, op: b[0] & 0x0f, code: (b[0] & 0x0f) === 0x8 ? b.readUInt16BE(2) : null }); return w(b, ...r); };
     sock.end = (...r: any[]) => { rec.push({ kind: "end", wl: sock.writableLength, len: r[0] ? r[0].length : 0, op: -1, code: null }); return e(...r); };
     h.c.sock.pause();
-    const frames: Buffer[] = [];
-    for (let i = 0; i < 60_000; i++) frames.push(maskedText({ id: `t${i}`, rpc: "g.run", ref: { b: "b1" } }));
-    h.c.sock.write(Buffer.concat(frames));
+    const fed = await refusedBatches(s, sock, h.c.sock, 200_000);
     await until(() => s.pairedConn === null, "the pairing ended", 30_000);
     const writes = rec.filter((r) => r.kind === "write");
     for (const r of writes) assert.ok(r.wl + r.len <= TOTAL, `a write within the total (${r.wl} + ${r.len})`);
@@ -834,6 +870,34 @@ test("K27 a live slow reader: every write within 20 KiB, the last the 1013 close
     for (;;) { const ev = await h.c.next(5000); if (ev.type === "end") break; lastFrame = ev; }
     assert.equal(lastFrame?.type, "close", "the reader's last frame is the close");
     assert.equal((lastFrame as any).code, 1013);
+    // (p3a: the bytes behind the 1013 are the gateway's answers: every data write one, each a 401 invalid_token in
+    // order, for requests this socket sent; and no worker)
+    assert.ok(fed.closed && fed.answers.length >= 1, `the 1013 within the budget (${fed.sent} sent, ${fed.answers.length} answered)`);
+    assert.equal(fed.answers.length, writes.filter((r) => r.op === 0x1).length, "every data write an answer");
+    assert.ok(refusedInOrder(fed.answers), "each answer a 401 invalid_token, in order");
+    assert.equal(s.gateway.stats.workersStarted, 0, "no worker");
+  } finally { h?.c.end(); await s.close(); }
+});
+
+test("K27n the same batches to a reader that drains: no 1013, every answer delivered, the pairing kept", async () => {
+  const DATA = 16 * 1024, TOTAL = 20 * 1024, N = 2_000;
+  const { s } = await server({ outCaps: { data: DATA, total: TOTAL } });
+  let h: any;
+  try {
+    h = await hello(s, codeHello(s));
+    assert.ok(h.result?.token);
+    const sock = ([...s.conns][0] as any).sock;
+    const fed = await refusedBatches(s, sock, h.c.sock, N);
+    assert.equal(fed.closed, false, "no close");
+    assert.equal(fed.sent, N);
+    assert.equal(fed.answers.length, N, "every request answered");
+    assert.ok(refusedInOrder(fed.answers), "each answer a 401 invalid_token, in order");
+    assert.equal(s.stats.overflows, 0, "no overflow");
+    assert.ok(s.pairedConn !== null, "still paired");
+    let texts = 0;
+    for (;;) { const ev = await h.c.next(2000); if (ev.type === "end") break; assert.equal(ev.type, "text", "only answers"); texts++; if (texts === N) break; }
+    assert.equal(texts, N, "the reader got every answer");
+    assert.equal(s.gateway.stats.workersStarted, 0, "no worker");
   } finally { h?.c.end(); await s.close(); }
 });
 
