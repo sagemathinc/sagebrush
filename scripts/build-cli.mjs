@@ -7,9 +7,6 @@
 //   node scripts/build-cli.mjs --deno    + build/cli/pyjs-deno   (deno compile; --target=<triple> cross-compiles)
 //   node scripts/build-cli.mjs --sandbox + build/cli/pyjs-sandbox (deno compile with no permissions:
 //                                          no files, env, network or subprocesses; programs on stdin)
-//   --out=build/<name>                   instead of build/cli, and no npm package copy (test/sandbox-env.test.ts:
-//                                          a sibling of build/cli, as the generated modules import ../../src)
-//   PYJS_DENO=<path>                     the deno to compile with (the test's stub compiler)
 //
 // The bundle is made by Bun (fast TypeScript bundler); the Python files in
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
@@ -35,15 +32,13 @@ function denoCompile(flags, exe, launcher = false, entryText = null) {
     flags = [...flags, "--include", join(dir, "pyjs.cjs")];
   } else if (entryText !== null) writeFileSync(join(dir, "sagebrush.cjs"), entryText);
   else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
-  run(process.env.PYJS_DENO || "deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
+  run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
   // Windows targets get ".exe" appended.
   return existsSync(exe) ? exe : exe + ".exe";
 }
 
 const root = new URL("..", import.meta.url).pathname;
-const outArg = process.argv.find((a) => a.startsWith("--out="));
-if (outArg && !/^build\/[A-Za-z0-9._-]+$/.test(outArg.slice(6))) throw new Error("build-cli: --out=build/<name> (a sibling of build/cli)");
-const out = join(root, outArg ? outArg.slice(6) : join("build", "cli"));
+const out = join(root, "build", "cli");
 mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
 
@@ -146,11 +141,9 @@ writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").rep
 // command): Node's compile cache on, and a program run in a worker thread so
 // that Ctrl-C raises KeyboardInterrupt in it.
 writeFileSync(join(out, "pyjs"), readFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), "utf8"), { mode: 0o755 });
-// The npm package `sagebrush` (packages/sagebrush) ships this bundle.  (not from a --out build)
-if (!outArg) {
-  mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
-  writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
-}
+// The npm package `sagebrush` (packages/sagebrush) ships this bundle.
+mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
+writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
 console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files)`);
 
 // 3a. Node single executable application (node --build-sea, Node >= 25.5).

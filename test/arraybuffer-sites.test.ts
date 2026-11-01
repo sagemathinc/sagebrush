@@ -54,7 +54,7 @@ test("the gate passes on this tree: every record classified, nothing stale, the 
 // (train-16, r9, r10) the tracked tree only: each kind of reference into build/, built and not
 const GEN = "scripts/build-cli.mjs";
 const LM = "build/cli/lib-meta.gen.js";
-const GEN_INPUTS: { path: string; text: string }[] = ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/packages.mjs"].map((path) => ({ path, text: readFileSync(join(ROOT, path), "utf8") }));
+const GEN_INPUTS: { path: string; text: string }[] = ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/packages.mjs", "scripts/sandbox-env.mjs"].map((path) => ({ path, text: readFileSync(join(ROOT, path), "utf8") }));
 const GEN_FILES = Object.fromEntries(GEN_INPUTS.map((i) => [i.path, i.text]));
 const LIB_META = 'globalThis.__SAGEBRUSH_BUILD_ID__ = "b";\nglobalThis.__SAGEBRUSH_VERSION__ = "v";\nglobalThis.__SAGEBRUSH_NOTICES__ = [];\n';
 const FX_OPTS = JSON.parse(readFileSync(join(ROOT, "tsconfig.json"), "utf8")).compilerOptions;
@@ -263,7 +263,7 @@ test("train-16: a generated module is bound to its generator's whole input closu
     writeFileSync(join(dir, GEN), `import "./extra.mjs";\n${main}`);
     writeFileSync(join(dir, "scripts/extra.mjs"), 'import "./deeper.mjs";\n');
     const c = S.generatorClosure(dir, GEN);
-    assert.deepEqual(c.inputs.map((i: any) => i.path), ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/extra.mjs", "scripts/packages.mjs"]);
+    assert.deepEqual(c.inputs.map((i: any) => i.path), ["scripts/build-cli.mjs", "scripts/build-id.mjs", "scripts/extra.mjs", "scripts/packages.mjs", "scripts/sandbox-env.mjs"]);
     assert.deepEqual(c.missing, ["scripts/deeper.mjs"]);
     // an input that's a link into build/ is missing, never read
     mkdirSync(join(dir, "build"));
@@ -278,7 +278,7 @@ test("train-16: a generated module is bound to its generator's whole input closu
   // the gate: each way it fails, and the reviewed one passing
   const cur = (g: object) => ({ header: { generated: [{ path: LM, from: ["web/worker.ts"], generator: GEN, inputs: GEN_INPUTS.map((i) => i.path), generator_sha256: want, contract: null, ...g }] } });
   assert.deepEqual(G.generatedProblems(cur({})), []);
-  assert.match(G.generatedProblems(cur({ generator_sha256: "0".repeat(64) }))[0].detail, /its generator changed \(closure scripts\/build-cli\.mjs, scripts\/build-id\.mjs, scripts\/packages\.mjs: sha256 0+, reviewed \w+\): review it and renew GENERATED/);
+  assert.match(G.generatedProblems(cur({ generator_sha256: "0".repeat(64) }))[0].detail, /its generator changed \(closure scripts\/build-cli\.mjs, scripts\/build-id\.mjs, scripts\/packages\.mjs, scripts\/sandbox-env\.mjs: sha256 0+, reviewed \w+\): review it and renew GENERATED/);
   assert.match(G.generatedProblems(cur({ contract: "x" }))[0].detail, /breaks the contract \(x\)/);
   assert.match(G.generatedProblems(cur({ generator: null }))[0].detail, /with no reviewed generator/);
   assert.match(G.generatedProblems({ header: { generated: [{ path: "build/cli/other.gen.js", from: ["web/worker.ts"], generator: GEN, inputs: [], generator_sha256: want, contract: null }] } })[0].detail, /with no reviewed generator/);
