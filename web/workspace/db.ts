@@ -112,7 +112,12 @@ export type JournalState = { v: 1; active: boolean; activating?: true };
  * the database (none was there), and Chrome's report that it deleted a damaged one (`dataLoss: "total"` on
  * the upgradeneeded event: non-standard, in Blink's IDL). */
 export type OpenInfo = { fresh: boolean; dataLoss?: string; dataLossMessage?: string };
-export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = 3000, info?: OpenInfo): Promise<IDBDatabase> {
+// (the open's deadline, 15 s for the workspace store alone (other stores keep idb-open.ts's 3 s): its FIRST open in a
+// fresh browser profile creates the whole schema below, which under disk load took longer than 3 s (4.4 s measured),
+// and the page then had no workspace at all; the deadline is still there for what it is for, an open queued behind
+// another page's upgrade, which would otherwise wait for good: web/board/idb-open.ts)
+export const WS_OPEN_MS = 15_000;
+export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = WS_OPEN_MS, info?: OpenInfo): Promise<IDBDatabase> {
   return openDb(name, WS_VERSION, (db, old, tx, ev) => {
     if (info) {
       info.fresh = old === 0;
