@@ -643,11 +643,11 @@ export async function runA14({ site, ok, want = () => true }) {
     const shown = await P.ev(`(() => { const h = document.querySelector('#send-hint'); const r = h.getBoundingClientRect(); return !h.hidden && r.width > 0 && r.height > 0; })()`);
     ok(!bar.on && bar.alert === "" && shown && st.hint === COPY.hint && st.describedby === "send-hint-text" && st.active === "editor", "A14-14: after ×, the bar is gone, the hint is visible by Send and is Send's description; focus in the composer", { bar, st, shown });
     // (board's B-A14-3: the hint carries the bar's action as a real button, with the same handler and C3 states)
-    const during = await P.ev(`(() => { const a = document.querySelector('#send-hint-act'), t0 = a.textContent; a.focus(); a.click(); return { before: t0, act: a.textContent, disabled: a.disabled, busy: a.getAttribute('aria-busy'), ariaDisabled: a.getAttribute('aria-disabled') }; })()`);
+    const during = await P.ev(`(() => { const a = document.querySelector('#send-hint-act'), t0 = a.textContent, v = a.checkVisibility(); a.focus(); a.click(); return { visible: v, before: t0, act: a.textContent, disabled: a.disabled, busy: a.getAttribute('aria-busy'), ariaDisabled: a.getAttribute('aria-disabled') }; })()`);
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     await sleep(200);
     const after = await P.bar(), active = await P.ev(`document.activeElement === document.body ? 'body' : document.activeElement?.id`);
-    ok(during.before === "Reconnect" && during.act === "Reconnecting…" && during.busy === "true" && during.ariaDisabled === "true" && !during.disabled && after.status === COPY.merged && active === "conn-act", "A14-14.hint-act: after ×, the hint's own [Reconnect] runs the bar's action (Reconnecting…, aria-busy, never disabled); its outcome brings the bar back with focus on the bar's button", { during, after, active });
+    ok(during.visible && during.before === "Reconnect" && during.act === "Reconnecting…" && during.busy === "true" && during.ariaDisabled === "true" && !during.disabled && after.status === COPY.merged && active === "conn-act", "A14-14.hint-act: after ×, the hint's own [Reconnect] runs the bar's action (Reconnecting…, aria-busy, never disabled); its outcome brings the bar back with focus on the bar's button", { during, after, active });
   });
 
   // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace (or page): no attempt, gone, [Connect]
