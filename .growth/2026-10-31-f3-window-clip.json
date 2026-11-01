@@ -1,0 +1,1 @@
+{"v": 1, "reason": "Remote kernel F3: the reconcile's backoff waits clipped to its 31.5 s window (RemoteKernel.reconcileSubmit in web/notebook/remote-kernel.js, in the CLI bundle's notebook page). Measured LOCALLY with bun 1.4.4 (size-record.sh + size-compare.py) on master 672ba37e and the merge df07bc00: cli/pyjs.cjs +56.", "bytes": {"cli/pyjs.cjs": 100}}
