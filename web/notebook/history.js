@@ -24,9 +24,10 @@
 //    mode, repl?, iid?, values?, t, ms, out (hash of its output), clock?,
 //    overflow?, status?: "interrupted", foreign?, reads?}   (foreign: another
 //    notebook's run in the same interpreter, its code inline; reads: the
-//    page's paths of the files whose own bytes it read, web/shims/fs.ts: a
-//    bundle carries only those files, notebook/bundle-blobs.mjs)
-//   {type: "file", id: sid:n, sid, n, t, path, hash | null}   a file put or deleted
+//    versions of the page's files whose own bytes it read, web/shims/fs.ts
+//    origins ("s:<path>": one its session started with; else a file
+//    record's tok): a bundle carries only those, notebook/bundle-blobs.mjs)
+//   {type: "file", id: sid:n, sid, n, t, path, hash | null, tok?}   a file put or deleted (tok: that version's)
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.

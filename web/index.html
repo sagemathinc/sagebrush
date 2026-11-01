@@ -1639,8 +1639,9 @@ async function openDiskFile(path) {
       total += size;
       diskFiles.push(["/" + e.name, await TAURI.fs.readFile(p)]);
     }
-    for (const k of liveKernels()) k.post({ files: diskFiles });
-    for (const e of kernels.values()) for (const [p, d] of diskFiles) e.journal?.fileEvent(p, d);
+    const toks = diskFiles.map(() => fileTok());
+    for (const k of liveKernels()) k.post({ files: diskFiles.map(([p, d], i) => [p, d, toks[i]]) });
+    for (const e of kernels.values()) diskFiles.forEach(([p, d], i) => e.journal?.fileEvent(p, d, toks[i]));
     statusEl.textContent = `opened ${name}` + (diskFiles.length ? ` (${diskFiles.length} file${diskFiles.length === 1 ? "" : "s"} from its folder)` : "");
   } catch (e) { statusEl.textContent = `could not open ${path}: ${e?.message ?? e}`; }
 }
@@ -2590,10 +2591,14 @@ async function sendFiles(w) {
   w.postMessage({ files });
   return files;
 }
+// (a version of a file the page gives an interpreter while it runs: its token, in the journal's file record too, so a
+// bundle carries the bytes of exactly the versions a run read: notebook/bundle-blobs.mjs)
+const fileTok = () => "f:" + [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 // A file put (data) or deleted (null) in the page: every live interpreter sees it.
 function filePut(path, data) {
-  for (const k of liveKernels()) k.post({ fsPut: path, data });
-  for (const e of kernels.values()) e.journal?.fileEvent(path, data);
+  const tok = fileTok();
+  for (const k of liveKernels()) k.post({ fsPut: path, data, tok });
+  for (const e of kernels.values()) e.journal?.fileEvent(path, data, tok);
   nb.filesChanged([path]); // (the reactive notebook: the cells reading it rerun)
 }
 // Python's writes and deletes, kept one at a time, in a queue that holds

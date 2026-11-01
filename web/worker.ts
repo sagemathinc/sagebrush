@@ -4,7 +4,7 @@
 // the page terminates it.
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
-//           {fsPut: path, data}        a file uploaded (data) or deleted (null) in the page
+//           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -108,7 +108,7 @@ __hooks.changed = (path, data) => {
 };
 __hooks.read = (path, origin) => {
   if (mine(path)) reads.add(path);
-  // (the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
+  // (the versions of the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
   if (origin !== undefined) sources.add(origin);
 };
 
@@ -221,7 +221,7 @@ self.onmessage = async (ev: MessageEvent) => {
     return;
   }
   if (m.files) return loadFiles(m.files);
-  if (m.fsPut !== undefined) return putFile(m.fsPut, m.data);
+  if (m.fsPut !== undefined) return putFile(m.fsPut, m.data, typeof m.tok === "string" ? m.tok : undefined);
   if (m.mount) return mount(m.mount);
   const mode = m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
   if (mode) {
