@@ -2878,7 +2878,8 @@ async function s5Flood() {
   const sentBy = (o) => {
     const post = o.post.bind(o);
     o.post = (m) => {
-      if (m?.t === "status") sends.push({ at: Date.now(), gen: m.gen });
+      // (stamped with the owner's own throttle clock: lastAt, set just before this post, the time its gate measures from)
+      if (m?.t === "status") sends.push({ at: o.lastAt, gen: m.gen });
       return post(m);
     };
     return o;
@@ -2926,10 +2927,11 @@ async function s5Flood() {
   };
   const byGen = {};
   for (const p of pubs) (byGen[p.gen] ??= []).push(p.at);
-  // (the send gap allows Date.now()'s own millisecond: a send stamped just after the tick its lastAt was taken in)
+  // (the send gap on the throttle's own clock, exactly: each gate passes only at lastAt + minGapMs or later, and the next
+  // lastAt is taken after its gate, so no slack; a stamp of our own taken later than lastAt measured short (cloud #78: 498))
   const gap = leastGap(sends), arrivalGap = leastGap(pubs);
   const maxBytes = Math.max(0, ...pubs.map((p) => p.bytes));
-  check(sent === 10_000 && secs < 12 && pubs.length > 0 && sends.length > 0 && gap >= W.STATUS_PUB.minGapMs - 1 && maxBytes <= 512, `flood: ${sent} status? over ${secs.toFixed(1)} s: ${sends.length} publications sent (${pubs.length} arrived), the least gap per holder ${gap} ms at the sends (${W.STATUS_PUB.minGapMs}; ${Math.round(arrivalGap)} ms between arrivals), each at most ${maxBytes} UTF-8 bytes (512)`);
+  check(sent === 10_000 && secs < 12 && pubs.length > 0 && sends.length > 0 && gap >= W.STATUS_PUB.minGapMs && maxBytes <= 512, `flood: ${sent} status? over ${secs.toFixed(1)} s: ${sends.length} publications sent (${pubs.length} arrived), the least gap per holder ${gap} ms at the sends (${W.STATUS_PUB.minGapMs}; ${Math.round(arrivalGap)} ms between arrivals), each at most ${maxBytes} UTF-8 bytes (512)`);
   check(got && got - asked <= 2000, `flood: the follower opened during it got the holder's snapshot ${Math.round(got - asked)} ms after starting (the next slot)`);
   const gens = Object.keys(byGen).map(Number), top = Math.max(...gens);
   check((o2.isHolder() || o3.isHolder()) && gens.length >= 2, "flood: the holder killed mid-flood: a waiting tab took over and published under a newer gen: " + J(gens));
