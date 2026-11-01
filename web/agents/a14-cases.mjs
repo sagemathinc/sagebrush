@@ -165,14 +165,14 @@ const STAGES = `(() => {
   const st = navigator.storage;
   if (st && st.getDirectory) { const gd = st.getDirectory.bind(st); st.getDirectory = () => { add("opfs getDirectory"); return gd().then((d) => (add("opfs directory"), d), (e) => { add("opfs error " + (e && e.name)); throw e; }); }; }
 })()`;
-// (test-only: the page's FIRST open of the workspace store answered `ms` later: the real open is made then and its
-// events passed on; the forced form of a slow first open, A14-22/A14-23)
-const SLOW_WS_OPEN = (ms) => `(() => {
+// (test-only: the page's FIRST `n` opens of the workspace store each answered `ms` later: the real open is made then
+// and its events passed on; the forced form of a slow first open, A14-22..24)
+const SLOW_WS_OPEN = (ms, n = 1) => `(() => {
   const open = indexedDB.open.bind(indexedDB);
-  let first = true;
+  let left = ${n};
   indexedDB.open = (name, ...a) => {
-    if (!first || name !== "sagebrush-workspace") return open(name, ...a);
-    first = false;
+    if (left <= 0 || name !== "sagebrush-workspace") return open(name, ...a);
+    left--;
     const fake = new EventTarget(), EV = ["success", "error", "upgradeneeded", "blocked"];
     let real = null;
     for (const k of ["result", "transaction", "error", "readyState", "source"]) Object.defineProperty(fake, k, { get: () => (real ? real[k] : undefined) });
@@ -891,20 +891,45 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(Date.now() - t >= 4000 && !st.err && !st.connectHidden, "A14-22: a first workspace open slower than 3 s (4 s, forced) still opens: the pairing dialog comes, no storage message", { ms: Date.now() - t, ...st });
   });
 
-  // A14-23 (@sagebrush's ruling): a workspace that can't be opened is said in words, with [Retry], never a silent
-  // demo: the first open answers after 16 s (past the 15 s deadline); [Retry] opens it and the pairing link's dialog comes
+  // A14-23 (@sagebrush's ruling; board's r2.2 R-2, R-3): a workspace that can't be opened is said in words, with
+  // [Retry], never a silent demo. The first two opens answer after 16 s (past the 15 s deadline): the message; a
+  // [Retry] by keyboard that fails again says so anew (the text changes, so role=alert re-announces; focus stays on
+  // [Retry]); a second [Retry] opens it and the pairing link's dialog comes
+  const WS_MSG = "This browser's storage couldn't be opened, so Claude can't connect on this page. If Sagebrush is open in another tab, close it, then [Retry].";
+  const wsShown = `(() => { const e = document.querySelector('#ws-error'), r = document.querySelector('#ws-retry'); return { role: e.getAttribute('role'), text: document.querySelector('#ws-error-text').textContent, why: document.querySelector('#ws-error-why').textContent, retry: r.textContent, busy: r.getAttribute('aria-busy'), retryVisible: r.checkVisibility(), active: document.activeElement?.id || document.activeElement?.tagName, connectHidden: document.querySelector('#connect').hidden, dialogs: document.querySelectorAll('.sbag-dlg').length, changes: window.__a14wsChanges ?? null }; })()`;
   await run("A14-23", async (B, A) => {
     const P = await B.tab();
-    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000) });
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000, 2) });
     await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
     await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
-    const shown = await P.ev(`(() => { const e = document.querySelector('#ws-error'), r = document.querySelector('#ws-retry'); return { role: e.getAttribute('role'), text: document.querySelector('#ws-error-text').textContent, retry: r.textContent, retryVisible: r.checkVisibility(), connectHidden: document.querySelector('#connect').hidden, dialogs: document.querySelectorAll('.sbag-dlg').length }; })()`);
-    ok(shown.role === "alert" && /^This browser's storage couldn't be opened, so Claude can't connect on this page: .*did not open in 15 s/.test(shown.text) && shown.retry === "Retry" && shown.retryVisible && shown.connectHidden && shown.dialogs === 0, "A14-23: past the 15 s deadline the page says so in words (role=alert, the error's message) with [Retry]; no pairing, no silent demo", shown);
+    const shown = await P.ev(wsShown);
+    ok(shown.role === "alert" && shown.text === WS_MSG && shown.why === "(IndexedDB sagebrush-workspace did not open in 15 s)" && shown.retry === "Retry" && shown.retryVisible && shown.connectHidden && shown.dialogs === 0, "A14-23: past the 15 s deadline the page says so in words (role=alert; board's copy, the error's own words in the details) with [Retry]; no pairing, no silent demo", shown);
     await sleep(1500); // (the late first open has answered by now, and was closed unused)
-    await P.ev(`document.querySelector('#ws-retry').click()`);
+    await P.ev(`(() => { window.__a14wsChanges = 0; new MutationObserver((m) => { window.__a14wsChanges += m.length; }).observe(document.querySelector('#ws-error-text'), { childList: true, characterData: true, subtree: true }); document.querySelector('#ws-retry').focus(); return true; })()`);
+    await P.key("Enter");
+    await P.until(`document.querySelector('#ws-retry').getAttribute('aria-busy') === null && document.querySelector('#ws-retry').textContent === 'Retry'`, 30000);
+    const again = await P.ev(wsShown);
+    ok(again.text === "Still couldn't open the storage. " + WS_MSG && again.changes > 0 && again.why === shown.why && again.active === "ws-retry" && again.retryVisible && again.connectHidden && again.dialogs === 0, "A14-23.again: a [Retry] that fails again says so anew (the text changes, so the alert re-announces); focus stays on [Retry]", again);
+    await sleep(1500); // (the second late open has answered by now, and was closed unused)
+    await P.key("Enter");
     await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 20000);
     const after = await P.ev(`({ err: !document.querySelector('#ws-error').hidden, connectHidden: document.querySelector('#connect').hidden })`);
     ok(!after.err && !after.connectHidden, "A14-23.retry: [Retry] opens the workspace and the pairing link's dialog comes; the message goes", after);
+  });
+
+  // A14-24 (board's r2.2 R-1): the same on a page WITHOUT a pairing link: a [Retry] by keyboard that opens the
+  // workspace hides the message it was in, and focus goes to Connect Claude (the next step), never to the body
+  await run("A14-24", async (B, A) => {
+    const P = await B.tab();
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000) });
+    await P.navigate(`${site}/agents/`);
+    await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
+    await sleep(1500); // (the late first open has answered by now, and was closed unused)
+    await P.ev(`(() => { document.querySelector('#ws-retry').focus(); return true; })()`);
+    await P.key("Enter");
+    await P.until(`document.querySelector('#ws-error').hidden`, 20000);
+    const st = await P.ev(`({ active: document.activeElement?.id || document.activeElement?.tagName, connect: document.querySelector('#connect').textContent, connectVisible: document.querySelector('#connect').checkVisibility(), dialogs: document.querySelectorAll('.sbag-dlg').length })`);
+    ok(st.active === "connect" && st.connectVisible && st.dialogs === 0, "A14-24: on a page without a pairing link, a [Retry] that opens the workspace moves focus to Connect Claude, never to the body", st);
   });
 
   // A14-18 (board C3): Enter on [Reconnect] with the daemon down: activeElement is never body; it stays on the button.
