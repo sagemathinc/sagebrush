@@ -110,9 +110,17 @@ const cellForm = (c) => {
 const cellHash = (c) => createHash("sha256").update(canonical(cellForm(c)), "utf8").digest("hex");
 
 // ---- the browser
+// (when each step of the start and of each pairing happened, ms after the browser's spawn: printed with any failure
+// and at the end, for a slow or stalled first load; c1's F1)
+const t0 = Date.now();
+const stamps = [];
+const stamp = (what) => stamps.push(`${what} +${Date.now() - t0}ms`);
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+// (--password-store=basic: no OS keyring, whose absence can stall Chrome's first load; c1's F1, the grader's hypothesis)
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+stamp("spawned");
 const cdpPort = await devtoolsPort(profile);
+stamp("devtools port");
 let targets;
 for (let i = 0; i < 300; i++) {
   try {
@@ -122,8 +130,10 @@ for (let i = 0; i < 300; i++) {
     await sleep(100);
   }
 }
+stamp("first target");
 const cdp = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (cdp.onopen = r));
+stamp("connected");
 let n = 0;
 const waiting = new Map();
 const requested = []; // (every URL the page or its workers asked for)
@@ -131,12 +141,21 @@ const workers = []; // (every worker started: its URL)
 const liveWorkers = new Map(); // (the workers running now: session -> URL)
 const paused = []; // (requests held by Fetch: their ids)
 const logs = []; // (the page's errors and warnings: shown when something fails)
+const urls = new Map(); // (request id -> URL, to name a failed request)
+const bad = []; // (the failed requests and non-2xx responses: shown when something fails)
+let loads = 0; // (the page's load events so far)
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
-  } else if (m.method === "Network.requestWillBeSent") requested.push(m.params.request.url);
+  } else if (m.method === "Network.requestWillBeSent") {
+    requested.push(m.params.request.url);
+    urls.set(m.params.requestId, m.params.request.url);
+  }
+  else if (m.method === "Network.responseReceived" && !(m.params.response.status >= 200 && m.params.response.status < 300)) bad.push(`${m.params.response.status} ${m.params.response.url}`.slice(0, 300));
+  else if (m.method === "Network.loadingFailed") bad.push(`failed (${m.params.errorText}${m.params.canceled ? ", canceled" : ""}) ${urls.get(m.params.requestId) ?? m.params.requestId}`.slice(0, 300));
+  else if (m.method === "Page.loadEventFired") { loads++; stamp(`load event ${loads}`); }
   else if (m.method === "Target.detachedFromTarget") liveWorkers.delete(m.params.sessionId);
   else if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId);
   else if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") {
@@ -164,8 +183,10 @@ const until = async (expr, ms = 20000) => {
     if (await ev(expr).catch(() => false)) return true;
     await sleep(100);
   }
-  throw new Error("timeout: " + expr);
+  throw new Error("timeout: " + expr + "\n  the page then: " + JSON.stringify(await pageState()));
 };
+/** What the page is showing (for a timeout): its address, load state, the Connect control, title and first text. */
+const pageState = () => ev(`(() => { const c = document.querySelector('#connect'); return { href: location.href, readyState: document.readyState, connect: c ? c.textContent : null, title: document.title, text: (document.body?.innerText ?? "").slice(0, 200) }; })()`).catch((e) => ({ unreadable: String(e).slice(0, 200) }));
 const key = (k, extra = {}) => send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0, ...extra }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0 }));
 const size = (width, height = 900) => send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 await send("Network.enable");
@@ -255,7 +276,13 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 
 /** Open the page with a pairing link, connect, and allow everything (the person's grant dialog). */
 async function pair() {
+  const before = loads;
+  stamp("pair: navigate");
   await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${daemon.port}` });
+  // (the page loaded before its Connect is looked for: a load that never comes fails here, with the page's state)
+  const t1 = Date.now();
+  while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
   await ev(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
@@ -1571,6 +1598,7 @@ try {
   console.log("the page said:\n  " + logs.slice(-20).join("\n  "));
   console.log("cells: " + JSON.stringify(await ev(`[...document.querySelectorAll('#artifacts .cell')].map((c) => [c.className, c.querySelector('.n')?.textContent, c.querySelector('.time')?.textContent, c.querySelector('.out')?.textContent.slice(0, 200)])`).catch((x) => String(x))));
   console.log("workers: " + JSON.stringify(workers));
+  console.log("failed or non-2xx: " + JSON.stringify(bad.slice(-20)));
 } finally {
   cdp.close();
   chrome.kill("SIGKILL");
@@ -1579,5 +1607,6 @@ try {
   await sleep(200);
   rmSync(profile, { recursive: true, force: true });
 }
+console.log("timing: " + stamps.join(", "));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
