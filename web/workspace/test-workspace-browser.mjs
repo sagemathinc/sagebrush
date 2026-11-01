@@ -594,6 +594,44 @@ try {
   const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
   check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
   check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
+  // (B1) …an error, said as one: role=alert, styled apart, kept until closed; in the toast's reserved slot, so the
+  // list doesn't move
+  const errToast = await ev(`(() => { const t = document.querySelector("#wssidebar .ftoast"); return { err: !!t?.classList.contains("err"), role: t?.getAttribute("role") ?? null, bg: t ? getComputedStyle(t).backgroundColor : null, close: !![...(t?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "✕") }; })()`);
+  check(errToast.err && errToast.role === "alert" && errToast.bg === "rgb(253, 236, 234)" && errToast.close, "B1: an error is said as one (role=alert, its own colours, a ✕): " + JSON.stringify(errToast));
+  await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "✕")?.click(); return 1; })()`);
+  // (B1, William Nov 1) Move to Trash on the notebook OPEN here: no "open something else first". What it had yet
+  // to save is saved first, so Trash keeps what was last seen; another notebook opens in its place; the toast's
+  // slot keeps its room, so the list doesn't move when it shows; Undo puts it back and opens it again
+  {
+    const b1 = await ev(`${W}.create("/B1 open.ipynb", { content: { name: "B1 open", mode: "python", cells: [{ id: "b", code: "first" }] } }).then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+    check(b1 === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
+    await ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "edited, not saved yet"); return 1; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 open.ipynb"))})`);
+    const top0 = await ev(`document.querySelector("#wssidebar .ftree").getBoundingClientRect().top`);
+    const toast0 = await ev(`!!document.querySelector("#wssidebar .ftoast")`);
+    await click(rowSel("/B1 open.ipynb") + " .more");
+    await menu("Move to Trash");
+    const moved = await until(`/"B1 open\\.ipynb" moved to Trash/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`);
+    const st = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, top: document.querySelector("#wssidebar .ftree").getBoundingClientRect().top, undo: !![...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo"), err: !!document.querySelector("#wssidebar .ftoast.err"), trashed: await ${W}.read("/Trash/B1 open.ipynb").then((r) => r.content?.cells?.[0]?.code ?? null).catch((e) => "unread: " + e), here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e) }))()`);
+    check(moved && !toast0 && st.undo && !st.err && st.shown !== "B1 open" && !st.here, "B1: the open notebook moved to Trash from the file browser, another opened in its place, with Undo: " + JSON.stringify(st));
+    check(st.trashed === "edited, not saved yet", "B1: what it had yet to save was saved first, so Trash has what was last seen: " + JSON.stringify(st.trashed));
+    check(st.top === top0, `B1: the toast showing didn't move the list (its slot keeps its room): ${top0} -> ${st.top}`);
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo").click(); return 1; })()`);
+    const back = await until(`document.querySelector("#nbname").value === "B1 open"`);
+    const bk = await ev(`(async () => ({ code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }))()`);
+    check(back && bk.here && !bk.trash && bk.code === "edited, not saved yet", "B1: Undo puts it back and opens it again, as it was last seen: " + JSON.stringify(bk));
+    // …and a folder the open notebook is in: the same, another opened that isn't in it
+    await ev(`${W}.create("/B1 dir/inner.ipynb", { content: { name: "inner", mode: "python", cells: [{ id: "i", code: "inside" }] } }).then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+    await until(`document.querySelector("#nbname").value === "inner"`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 dir"))})`);
+    await click(rowSel("/B1 dir") + " .more");
+    await menu("Move to Trash");
+    const fmoved = await until(`/"B1 dir" moved to Trash/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`);
+    const fs = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, inTrash: await ${W}.stat("/Trash/B1 dir/inner.ipynb").then((e) => !!e) }))()`);
+    check(fmoved && fs.shown !== "inner" && fs.inTrash, "B1: a folder holding the open notebook goes to Trash too, another (not in it) opened: " + JSON.stringify(fs));
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo").click(); return 1; })()`);
+    check(await until(`document.querySelector("#nbname").value === "inner"`), "B1: …and Undo opens the notebook in it again");
+  }
   // the typed title's rename, its notebook moved and another put at its path
   // while the rename waited for the lock: this notebook gets the name, the
   // other is untouched (CORR-5D2-3)
