@@ -69,3 +69,31 @@ print(err(lambda: Partitions(-1)))
 print(err(lambda: Permutations(-1)))
 print(err(lambda: Subsets(4, -1)))
 print(Partition([2, 1]) == [2.9, 1], Compositions(0).list(), Compositions(0).cardinality(), stirling_number2(0, -1), Subsets(4, 5).cardinality(), Subsets(4, 5).list())
+# structural (astra3 R3a, R3b): a helper that must NOT be reached is made to raise for one call
+import _sage_combinat as _C
+def spied(name, f):
+    orig = getattr(_C, name)
+    def boom(*a, **k):
+        raise RuntimeError("reached " + name)
+    setattr(_C, name, boom)
+    try:
+        return f()
+    except Exception as ex:
+        return "%s: %s" % (type(ex).__name__, ex)
+    finally:
+        setattr(_C, name, orig)
+print(spied("_choice_poly", lambda: Combinations([1, 1], 10**9).cardinality()))
+print(spied("_falling", lambda: Permutations([1, 2], 10**9).cardinality()))
+print(spied("_arrangement_poly", lambda: (Permutations([1, 1, 2, 2, 3]).cardinality(), Permutations([1]*40).cardinality())))
+print(Permutations([1, 1, 2], 2).cardinality(), Permutations([1, 2, 1, 3, 2], 3).cardinality())
+# R1's checklist: equality, not repr, decides the groups (hashable or not)
+print(Combinations([1, 1.0, 2], 2).list())
+class Same:
+    def __init__(self, v):
+        self.v = v
+    def __repr__(self):
+        return "x"
+    def __eq__(self, other):
+        return isinstance(other, Same) and self.v == other.v
+print(Combinations([Same(1), Same(2)], 1).cardinality())
+print(Combinations([[1], [1], [2]], 2).list(), Combinations([[1], [1], [2]], 2).cardinality(), Permutations([[1], [1], [2]]).cardinality())
