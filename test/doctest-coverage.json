@@ -33,5 +33,6 @@
   "_sage_padic_lseries": 20,
   "board_checks": 12,
   "_sage_integer": 51,
-  "_memguard": 5
+  "_memguard": 5,
+  "_sage_combinat": 13
 }
