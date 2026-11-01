@@ -483,3 +483,163 @@ test("L12 a reconnect: a new token; the old token on the new socket 401", async 
     assert.equal((await p2.request("g.bind", {}, {}).answer()).status, 200, "the new token works");
   } finally { await t.s.close(); }
 });
+
+// ================= 4.3 Frames [G1]: refused at decode with close 1002, before any authentication
+
+/** A request frame fed as is (refused before authentication, so its proof is never read); the close code after it. */
+function rawFrame(page: ReturnType<typeof newPage>, over: any) {
+  const frame = { id: page.nextId(), rpc: "g.bind", ref: {}, auth: `DPoP ${page.token}`, dpop: "a.b.c", accept: "application/json", body: "{}", ...over };
+  for (const k of Object.keys(frame)) if (frame[k] === undefined) delete frame[k];
+  page.c.feed(maskedText(frame));
+  return closeOf(page.st);
+}
+/** A decode refusal: close 1002, no answer for the frame, zero effects, nothing authenticated. */
+function closed1002(t: { s: PairServer; port: Scripted; page: ReturnType<typeof newPage> }, over: any, what: string) {
+  const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+  const imports = t.s.gateway.stats.keyImports;
+  const n = texts(t.page.st).length;
+  assert.equal(rawFrame(t.page, over), 1002, what);
+  assert.equal(texts(t.page.st).length, n, `${what}: no answer`);
+  assert.equal(t.s.gateway.stats.keyImports, imports, `${what}: nothing authenticated`);
+  zeroEffects(t.s, t.port, before);
+}
+const decodeCases: [string, (b: string) => any][] = [
+  ["L13a an unknown rpc", () => ({ rpc: "g.nope" })],
+  ["L13b a ref member failing the ID pattern", () => ({ rpc: "g.run", ref: { b: "b/1" } })],
+  ["L13c a ref member the rpc doesn't take (after on g.run)", (b) => ({ rpc: "g.run", ref: { b, after: 0 } })],
+  ["L14a-pfx the frame id x1", () => ({ id: "x1" })],
+  ["L14a-lz the frame id t0", () => ({ id: "t0" })],
+  ["L14a-lz the frame id t01", () => ({ id: "t01" })],
+  ["L14a-len the frame id t + 16 digits", () => ({ id: "t" + "1".repeat(16) })],
+  ["L14e-type after \"1\"", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: "1" }, body: undefined })],
+  ["L14e-int after 1.5", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 1.5 }, body: undefined })],
+  ["L14e-sign after -1", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: -1 }, body: undefined })],
+  ["L14e-range after 2^53", (b) => ({ rpc: "g.events", ref: { b, r: "r1", after: 2 ** 53 }, body: undefined })],
+];
+for (const [name, over] of decodeCases) {
+  test(`${name}: 1002`, async () => {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      closed1002(t, over(b), name);
+      census(t.s);
+    } finally { await t.s.close(); }
+  });
+}
+test("L14a-len+ the frame id t + 15 digits: passes", async () => {
+  const t = await setup();
+  try {
+    const a = await t.page.request("g.bind", {}, {}, { id: "t" + "1".repeat(15) }).answer();
+    assert.equal(a.status, 200);
+    assert.equal(closeOf(t.page.st), null);
+  } finally { await t.s.close(); }
+});
+test("L14b a reused frame id: 1002", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.page.request("g.bind", {}, {}, { id: "t7" }).answer()).status, 200);
+    closed1002(t, { id: "t7", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t7 again");
+  } finally { await t.s.close(); }
+});
+test("L14c a frame id not above the last one: 1002", async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.page.request("g.bind", {}, {}, { id: "t5" }).answer()).status, 200);
+    closed1002(t, { id: "t3", rpc: "g.record", ref: { b: "b1", r: "r1" }, body: undefined }, "t3 after t5");
+  } finally { await t.s.close(); }
+});
+
+/** A single run admitted on the scripted Worker; `finish()` makes the Worker end it. */
+async function admitRun(t: { s: PairServer; port: Scripted; page: ReturnType<typeof newPage> }, b: string, request: string, code = "x = 1", extra: any = {}) {
+  const a = await t.page.request("g.run", { b }, { request, epoch: 1, payload: { code }, ...extra }).answer();
+  assert.equal(a.status, 202, `admitted: ${a.body}`);
+  await until(() => t.port.posted.some((m) => m.code === code), "the run posted");
+  const posted = [...t.port.posted].reverse().find((m) => m.code === code);
+  return { a, workerId: posted.id as number, finish: () => t.port.last().onMessage({ id: posted.id, done: true, ms: 1 }) };
+}
+test("L14d the same request under a new frame id: the prior ack, zero executions", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    r.finish();
+    await until(() => t.s.gateway.binding!.runs.get("req-1")!.outcome !== null, "the run ended");
+    const ex = t.s.gateway.stats.executions, posted = t.port.posted.length;
+    const a = await t.page.request("g.run", { b }, { request: "req-1", epoch: 1, payload: { code: "x = 1" } }).answer();
+    assert.equal(a.status, 202);
+    assert.deepEqual(bodyOf(a), { request: "req-1", state: "done" });
+    assert.equal(t.s.gateway.stats.executions, ex, "zero executions");
+    assert.equal(t.port.posted.length, posted, "nothing posted");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L14e-range+ after 2^53 - 1 and 0: pass (a 200 head each)", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const r = await admitRun(t, b, "req-1");
+    for (const after of [2 ** 53 - 1, 0]) {
+      const a = await t.page.request("g.events", { b, r: "req-1", after }).answer();
+      assert.equal(a.status, 200, `after ${after}`);
+      assert.equal(a.headers["content-type"], "text/event-stream");
+    }
+    assert.equal(closeOf(t.page.st), null);
+    r.finish();
+  } finally { await t.s.close(); }
+});
+
+/** JSON text of exactly n UTF-8 bytes, mostly 3-byte characters, counted by TextEncoder (not the gateway's
+ * Buffer.byteLength): {...extra, pad}. */
+function bodyOfBytes(n: number, extra: any = {}) {
+  const u8 = (s: string) => new TextEncoder().encode(s).length;
+  let room = n - u8(JSON.stringify({ ...extra, pad: "" }));
+  assert.ok(room >= 0);
+  const pad = "€".repeat(Math.floor(room / 3)) + "a".repeat(room % 3);
+  const s = JSON.stringify({ ...extra, pad });
+  assert.equal(u8(s), n, "the oracle's count");
+  return s;
+}
+test("L15 a body of exactly BODY_MAX for its rpc, multibyte: passes (L15+); one byte more: 1002", async () => {
+  // g.complete (BODY_MAX.other)
+  {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      const a = await t.page.request("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 2 })).answer();
+      assert.equal(a.status, 409, `L15+ complete: decoded and dispatched (${a.body})`); // (the wrong epoch: answered after decode)
+      assert.equal(bodyOf(a).error, "epoch");
+      census(t.s);
+      closed1002(t, { rpc: "g.complete", ref: { b }, body: bodyOfBytes(BODY_MAX.other + 1, { epoch: 2 }) }, "complete + 1 B");
+      census(t.s);
+    } finally { await t.s.close(); }
+  }
+  // g.run (BODY_MAX.run)
+  {
+    const t = await setup();
+    try {
+      const b = await bind(t.page);
+      const body = bodyOfBytes(BODY_MAX.run, { request: "big", epoch: 1, payload: { code: "x = 1" } });
+      const a = await t.page.request("g.run", { b }, body).answer();
+      assert.equal(a.status, 202, `L15+ run (${a.body})`);
+      assert.equal(t.s.gateway.stats.queuedPayloadBytes, BODY_MAX.run, "charged its bytes");
+      t.port.last().onMessage({ id: t.port.posted[t.port.posted.length - 1].id, done: true, ms: 1 });
+      await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, "released at its end");
+      closed1002(t, { rpc: "g.run", ref: { b }, body: bodyOfBytes(BODY_MAX.run + 1, { request: "big2", epoch: 1, payload: { code: "x = 1" } }) }, "run + 1 B");
+      census(t.s);
+    } finally { await t.s.close(); }
+  }
+});
+test("L16 8 open ids pass (L16+); a 9th open id: 1002", async () => {
+  const holds: (() => void)[] = [];
+  const t = await setup({ gateway: { authHold: () => new Promise<void>((r) => holds.push(r)) } });
+  try {
+    for (let i = 1; i <= GATEWAY_LIMITS.openIds; i++) t.page.request("g.record", { b: "b1", r: "r" + i });
+    await until(() => holds.length === GATEWAY_LIMITS.openIds, "8 held");
+    assert.equal(closeOf(t.page.st), null, "L16+ 8 open ids pass");
+    closed1002(t, { rpc: "g.record", ref: { b: "b1", r: "r9" }, body: undefined }, "a 9th open id");
+    for (const h of holds) h();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(texts(t.page.st).filter((x: any) => x.status !== undefined).length, 0, "the closed socket's held requests answered nothing");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
