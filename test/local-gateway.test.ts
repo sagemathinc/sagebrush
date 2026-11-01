@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
 import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, workerPort, type SessionPort, type WorkerHandle } from "../src/local-gateway";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 // The local gateway (src/local-gateway.ts), local kernel phase 3a: the frozen cases
 // /scratch/sagebrush-reviews/remote-compute/local-kernel-p3a-cases-v3/cases.md (59dcf129, SUMS dde00911); each test's
@@ -1670,4 +1670,126 @@ test("L36f-fb mid-wave: L36e's wave, its entry 100 ignoring the interrupt; the f
     assert.equal(run.outcome.status, "stopped");
     census(t.s);
   } finally { await t.s.close(); }
+});
+
+// ================= 4.10 The fake census: fail closed [S3, G6]
+
+const tsapi = require("typescript-api");
+const { builtinModules } = require("node:module");
+const REPO = join(__dirname, "..", "..");
+const FAKE = "web/notebook/remote-fake.js";
+const CANON_ENTRY = "require.main?.filename ?? process.argv[1]";
+/** The closure's reviewed dynamic-code sites: the compiler's generated accessors and numpy's kernels, each a
+ * `new Function` over its own parameters with no module in reach; their count per file, exactly (any other fails). */
+const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "src/runtime/numpy.ts": 3, "src/runtime/object.ts": 4 };
+/** The runtime module closure of `entry` under root's tsconfig: every import / export-from, import-equals, require()
+ * and import() edge (type-only imports are not runtime), resolved with ts.resolveModuleName; it fails closed (a
+ * problem) on a non-literal require or import(), eval, createRequire, X.require(), a Worker whose entry isn't the
+ * CLI's own, an unreviewed `new Function`, an unresolved relative specifier, and a bare specifier that is neither a
+ * node builtin nor a package.json dependency. */
+function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}) {
+  const cfg = tsapi.readConfigFile(join(root, "tsconfig.json"), tsapi.sys.readFile);
+  const options = { ...tsapi.parseJsonConfigFileContent(cfg.config ?? {}, tsapi.sys, root).options, allowJs: true };
+  const deps = new Set(Object.keys(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies ?? {}));
+  const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {};
+  const rel = (f: string) => relative(root, f).split(sep).join("/");
+  const queue = [join(root, entry)];
+  const canonDecl = new RegExp(`\\bentry(: string)? = ${CANON_ENTRY.replace(/[.?*+^$()[\]{}|\\]/g, "\\$&")}`);
+  while (queue.length) {
+    const f = queue.shift()!;
+    const r = rel(f);
+    if (files.has(r)) continue;
+    files.add(r);
+    const text = readFileSync(f, "utf8");
+    const sf = tsapi.createSourceFile(f, text, tsapi.ScriptTarget.Latest, true);
+    const at = (n: any) => `${r}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+    const spec = (n: any, x: string) => {
+      if (x.startsWith("node:") || builtinModules.includes(x) || builtinModules.includes(x.split("/")[0])) return;
+      if (!x.startsWith(".") && !x.startsWith("/")) {
+        const pkg = x.startsWith("@") ? x.split("/").slice(0, 2).join("/") : x.split("/")[0];
+        if (!deps.has(pkg)) problems.push(`${at(n)}: a bare specifier outside the dependencies: ${x}`);
+        return;
+      }
+      const res = tsapi.resolveModuleName(x, f, options, tsapi.sys).resolvedModule;
+      if (!res || res.isExternalLibraryImport || /\.d\.[mc]?ts$/.test(res.resolvedFileName)) problems.push(`${at(n)}: unresolved: ${x}`);
+      else queue.push(res.resolvedFileName);
+    };
+    const visit = (n: any): void => {
+      if ((tsapi.isImportDeclaration(n) || tsapi.isExportDeclaration(n)) && n.moduleSpecifier && tsapi.isStringLiteral(n.moduleSpecifier)) {
+        if (!(n.importClause?.isTypeOnly || n.isTypeOnly)) spec(n, n.moduleSpecifier.text);
+      } else if (tsapi.isImportEqualsDeclaration(n) && tsapi.isExternalModuleReference(n.moduleReference)) {
+        const e = n.moduleReference.expression;
+        if (tsapi.isStringLiteral(e)) spec(n, e.text); else problems.push(`${at(n)}: a non-literal import-equals`);
+      } else if (tsapi.isCallExpression(n)) {
+        const c = n.expression;
+        const isReq = tsapi.isIdentifier(c) && c.text === "require", isImp = c.kind === tsapi.SyntaxKind.ImportKeyword;
+        if (isReq || isImp) {
+          const a = n.arguments[0];
+          if (n.arguments.length === 1 && tsapi.isStringLiteralLike(a)) spec(n, a.text);
+          else problems.push(`${at(n)}: a non-literal ${isReq ? "require" : "import()"}`);
+        } else if (tsapi.isIdentifier(c) && (c.text === "eval" || c.text === "createRequire")) problems.push(`${at(n)}: ${c.text}`);
+        else if (tsapi.isPropertyAccessExpression(c) && c.name.text === "require") problems.push(`${at(n)}: ${c.getText(sf)}`);
+      } else if (tsapi.isNewExpression(n) && tsapi.isIdentifier(n.expression)) {
+        if (n.expression.text === "Function") dyn[r] = (dyn[r] ?? 0) + 1;
+        else if (n.expression.text === "Worker") {
+          const a = n.arguments?.[0];
+          const ok = a && (a.getText(sf) === CANON_ENTRY || (tsapi.isIdentifier(a) && a.text === "entry" && canonDecl.test(text)));
+          if (!ok) problems.push(`${at(n)}: a Worker whose entry isn't the CLI's own`);
+        }
+      }
+      tsapi.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  for (const [f, n] of Object.entries(dyn)) if (reviewed[f] !== n) problems.push(`${f}: ${n} new Function site(s), ${reviewed[f] ?? 0} reviewed`);
+  for (const f of Object.keys(reviewed)) if (!(f in dyn)) problems.push(`${f}: its reviewed new Function sites are gone`);
+  return { files, problems };
+}
+const verdict = (c: { files: Set<string>; problems: string[] }) => (c.problems.length === 0 && !c.files.has(FAKE) ? "pass" : "fail");
+
+test("L41 the production CLI's runtime closure: remote-fake.js not in it, nothing in it unaccounted for", () => {
+  const c = runtimeClosure(REPO, "src/cli.ts", DYNAMIC_REVIEWED);
+  assert.deepEqual(c.problems, [], "the census fails closed on nothing");
+  assert.ok(c.files.has("src/local-gateway.ts") && c.files.has("src/notebook-pair.ts"), "the gateway is in it (the positive witness)");
+  assert.equal(c.files.has(FAKE), false, "remote-fake.js is not in the closure");
+  assert.equal(verdict(c), "pass");
+});
+/** A small tree for the census: tsconfig, package.json, the fake, and `files`. */
+function fixtureTree(files: Record<string, string>) {
+  const d = mkdtempSync(join(tmpdir(), "lk-census-"));
+  const all: Record<string, string> = {
+    "tsconfig.json": JSON.stringify({ compilerOptions: { module: "commonjs", target: "es2022", moduleResolution: "node", strict: false } }),
+    "package.json": JSON.stringify({ name: "fx", dependencies: {} }),
+    [FAKE]: "exports.faults = []; exports.intercept = 0; exports.raw = 0; exports.pause = 0; exports.soleAlways = 0; exports.applied = [];\n",
+    ...files,
+  };
+  for (const [p, t] of Object.entries(all)) { mkdirSync(dirname(join(d, p)), { recursive: true }); writeFileSync(join(d, p), t); }
+  return d;
+}
+const fxCases: [string, Record<string, string>, "pass" | "fail"][] = [
+  ["L41-fx1 a production-like file using the words raw, pause and applied passes", { "src/cli.ts": 'import { step } from "./x";\nexport const raw = 1;\nconst pause = () => 0;\nexport const applied = [raw, pause, step];\n', "src/x.ts": "export const step = 2;\n" }, "pass"],
+  ["L41-fx2 a helper reaching remote-fake.js through require fails", { "src/cli.ts": 'import { x } from "./helper";\nexport const y = x;\n', "src/helper.ts": 'declare const require: any;\nconst f = require("../web/notebook/remote-fake.js");\nexport const x = f.faults;\n' }, "fail"],
+  ["L41-fx3 through a re-export chain fails", { "src/cli.ts": 'import { faults } from "./a";\nexport const y = faults;\n', "src/a.ts": 'export * from "./b";\n', "src/b.ts": '// @ts-ignore\nexport { faults } from "../web/notebook/remote-fake.js";\n' }, "fail"],
+  ["L41-fx4 a non-literal require fails", { "src/cli.ts": 'declare const require: any;\nconst p = "./x";\nexport const m = require(p);\n', "src/x.ts": "export const z = 1;\n" }, "fail"],
+  ["L41-fx5 an unresolved relative import fails", { "src/cli.ts": 'import "./missing";\nexport const y = 1;\n' }, "fail"],
+  ["L41-fx6 createRequire(…)(…) fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport const f = createRequire(__filename)("../web/notebook/remote-fake.js");\n' }, "fail"],
+];
+for (const [name, files, want] of fxCases) {
+  test(name, () => {
+    const c = runtimeClosure(fixtureTree(files), "src/cli.ts");
+    assert.equal(verdict(c), want, `${JSON.stringify([...c.files])} ${JSON.stringify(c.problems)}`);
+  });
+}
+test("L41w the production Worker: local-gateway.ts constructs it as notebook.ts does (the CLI's entry, the workerData key); the CLI passes no authHold, port or observer", () => {
+  const gw = readFileSync(join(REPO, "src/local-gateway.ts"), "utf8");
+  const nb = readFileSync(join(REPO, "src/notebook.ts"), "utf8");
+  const np = readFileSync(join(REPO, "src/notebook-pair.ts"), "utf8");
+  for (const [name, t] of [["local-gateway.ts", gw], ["notebook.ts", nb]]) {
+    assert.ok(t.includes(CANON_ENTRY), `${name}: the CLI's own entry`);
+    assert.match(t, /new Worker\(entry, \{ workerData: \{ sagebrushNotebook: \{ dir/, `${name}: the same workerData key`);
+  }
+  assert.match(gw, /this\.port = opts\.port \?\? workerPort\(opts\.dir \?\? process\.cwd\(\)\);/, "the default port: no entry, no observer");
+  assert.match(nb, /\.runNotebookPair\(args\);/, "the CLI's one call: no options");
+  assert.match(np, /new LocalGateway\(this, opts\.gateway\);/, "the gateway's options are only the caller's");
+  assert.doesNotMatch(nb, /authHold|observe|gateway:/, "notebook.ts passes no test hook");
 });
