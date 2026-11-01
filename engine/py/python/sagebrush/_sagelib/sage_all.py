@@ -30,7 +30,7 @@ __all__ = [
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
-    "conway_polynomial", "Hom", "VectorSpace", "random_matrix",
+    "conway_polynomial", "Hom", "VectorSpace", "random_matrix", "jacobian",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
@@ -410,6 +410,24 @@ def random_matrix(base, nrows, ncols=None, **kwds):
 from _sage_matrix import (matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector,
                           block_matrix, block_diagonal_matrix, column_matrix, kernel)
 Matrix = matrix
+
+
+def jacobian(functions, variables):
+    """The Jacobian matrix of functions (one function or a list) in the
+    variables, over SR.
+
+    EXAMPLES::
+
+        sage: var('y')
+        y
+        sage: jacobian([x*y, x + y], [x, y])
+        [y x]
+        [1 1]
+        sage: jacobian(x^2*y, [x, y])
+        [2*x*y   x^2]
+    """
+    import _sage_matrix_sr
+    return _sage_matrix_sr.jacobian(functions, variables)
 
 
 def parent(x):
