@@ -44,7 +44,7 @@ for (const [how, env] of [["a program's worker", {}], ["in-process (SAGEBRUSH_NO
   const missing = join(dir, "missing.json");
   for (const [path, want] of [
     [file("range.json", '{"ff.work": 5}'), "sagebrush: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]\n"],
-    [file("unknown.json", '{"ff.wrok": 5}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, poly.work)\n"],
+    [file("unknown.json", '{"ff.wrok": 5}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, pandas.decoded_bytes, poly.work)\n"],
     [file("json.json", "{"), "is not JSON: Expecting property name enclosed in double quotes"],
     [big, `sagebrush: limits: ${big} is larger than 4096 bytes\n`],
     [missing, `sagebrush: limits: cannot read ${missing}: No such file or directory\n`],

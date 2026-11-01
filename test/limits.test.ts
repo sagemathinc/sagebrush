@@ -43,7 +43,7 @@ test("invalid limits stop the run before its first statement, with status 2 and 
     [file("bom.json", "\ufeff{}"), "is not JSON: Unexpected UTF-8 BOM"],
     [file("array.json", "[1]"), "sagebrush: limits: the limits must be a JSON object, not an array"],
     [file("many.json", JSON.stringify(Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])))), "sagebrush: limits: more than 16 entries"],
-    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, poly.work)"],
+    [file("unknown.json", '{"ff.wrok": 1}'), "sagebrush: limits: ff.wrok is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, pandas.decoded_bytes, poly.work)"],
     [file("bool.json", '{"ff.work": true}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not true'],
     [file("float.json", '{"ff.work": 1e7}'), 'sagebrush: limits: ff.work must be an integer or "unlimited", not 10000000.0'],
     [file("range.json", '{"ff.work": 5}'), "sagebrush: limits: ff.work = 5 is outside the range this engine allows, [100000, 100000000]"],
@@ -176,10 +176,10 @@ test("the sweep's tooling: its fixture cases (test/limit_sweep_cases.py)", () =>
 test("unlimited by default, finite values opt in, mixed settings key by key (plan-c0 r2)", () => {
   const show = "import sys, _sage_ffsub as S; print(S.WORK, S.EMBED_MAX, S.ROOT_BITS, sys._sagebrush_limits)";
   const cases: [string, string][] = [
-    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
-    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.work": 100000}', "100000 1048576 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': 100000, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'pandas.decoded_bytes': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.root_bits": 64}', "inf 10000000 64 Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': 64, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'pandas.decoded_bytes': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.embed_max": 4096}', "inf 4096 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': 4096, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'pandas.decoded_bytes': unlimited, 'poly.work': unlimited})"],
+    ['{"ff.work": "unlimited", "ff.embed_max": "unlimited"}', "inf 10000000 inf Limits({'ff.conway_work': unlimited, 'ff.embed_max': unlimited, 'ff.root_bits': unlimited, 'ff.work': unlimited, 'matlab.lu_work': unlimited, 'nf.certify_index_max': unlimited, 'nf.certify_norm_max': unlimited, 'nf.relation_rounds': unlimited, 'padic.kedlaya_work': unlimited, 'pandas.decoded_bytes': unlimited, 'poly.work': unlimited})"],
   ];
   for (const [text, want] of cases) {
     const r = run(["--limits", file("mixed.json", text), "-c", show]);
@@ -346,4 +346,76 @@ s.ready.then(() => s.handle({ id: 1, code: "${cell}" })).then(() => process.stdo
 `], { encoding: "utf8" });
   assert.equal(go("null"), "False inf\nrefused True\n");
   assert.equal(go(`{ text: '{"ff.work": 400000}', name: null }`), "True 400000\nrefused True\n");
+});
+
+// sagebrush.limit(name), the public read of one limit (plan-pandas r7
+// section E (a)): optional packages may use it (core-api-surface.json),
+// where _limits is private.  One test per case, so that each mutation
+// control's failures name the cases (grader, Nov 1).  In the engine the
+// host has locked the limits before the program runs, so the accessor's own
+// locking shows only under CPython, without that lock: the last two tests
+// load each copy of limit() (lib/sagebrush and the CPython package's) with
+// that copy's _limits, under CI's python3.
+const limitShow = "import sagebrush; print(sagebrush.limit('pandas.decoded_bytes'), sagebrush.limit('ff.work'))";
+const limitError = (arg: string) => run(["-c", `import sagebrush\ntry:\n    sagebrush.limit(${arg})\nexcept Exception as e:\n    print(type(e).__name__, e)`]);
+
+test("sagebrush.limit: unlimited by default (infinity)", () => {
+  assert.equal(run(["-c", limitShow]).stdout, "inf inf\n");
+});
+
+test("sagebrush.limit: the value --limits sets", () => {
+  assert.equal(run(["--limits", file("pandas.json", '{"pandas.decoded_bytes": 33554432}'), "-c", limitShow]).stdout, "33554432 inf\n");
+});
+
+test("sagebrush.limit: the value SAGEBRUSH_LIMITS sets", () => {
+  assert.equal(run(["-c", limitShow], { SAGEBRUSH_LIMITS: file("pandas-env.json", '{"pandas.decoded_bytes": 33554432}') }).stdout, "33554432 inf\n");
+});
+
+test("sagebrush.limit: an unknown name is the validator's ValueError, listing the limits", () => {
+  const r = limitError("'pandas.decoded'");
+  assert.equal(r.stdout, "ValueError limits: pandas.decoded is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, pandas.decoded_bytes, poly.work)\n", r.stderr);
+});
+
+test("sagebrush.limit: a name 1 is a TypeError", () => {
+  const r = limitError("1");
+  assert.equal(r.stdout, "TypeError limit() argument must be a str, not int\n", r.stderr);
+});
+
+test("sagebrush.limit: a name None is a TypeError", () => {
+  const r = limitError("None");
+  assert.equal(r.stdout, "TypeError limit() argument must be a str, not NoneType\n", r.stderr);
+});
+
+test("sagebrush.limit: pandas.decoded_bytes below its range stops the run first, with status 2", () => {
+  const r = run(["--limits", file("small.json", '{"pandas.decoded_bytes": 1000}'), "-c", "print('MARKER')"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /sagebrush: limits: pandas\.decoded_bytes = 1000 is outside the range this engine allows, \[1048576, 1099511627776\]/);
+  assert.doesNotMatch(r.stdout, /MARKER/);
+});
+
+// (under CPython: the copy of _limits beside that limit(), loaded as the
+// module _limits with no host lock, and the file's own limit function)
+const cpythonLock = (limitsPy: string, accessorPy: string) => execFileSync("python3", ["-I", "-c", `
+import ast, importlib.util, sys
+spec = importlib.util.spec_from_file_location("_limits", ${JSON.stringify(limitsPy)})
+L = importlib.util.module_from_spec(spec); sys.modules["_limits"] = L; spec.loader.exec_module(L)
+path = ${JSON.stringify(accessorPy)}
+fn = [n for n in ast.parse(open(path).read()).body if isinstance(n, ast.FunctionDef) and n.name == "limit"]
+g = {"_limits_module": lambda: L}
+exec(compile(ast.Module(fn, []), path, "exec"), g)
+print(L.finalized(), g["limit"]("ff.work"), L.finalized())
+try:
+    L.propose(L.validate({}))
+except RuntimeError as e:
+    print("RuntimeError", e)
+`], { encoding: "utf8" });
+const LOCKED_OUT = "False inf True\nRuntimeError sagebrush limits are read once, at the first use: set them before it\n";
+
+test("sagebrush.limit (lib/sagebrush, under CPython with no host lock): the first read locks the limits", () => {
+  assert.equal(cpythonLock(TEST + "../lib/_limits.py", TEST + "../lib/sagebrush/__init__.py"), LOCKED_OUT);
+});
+
+test("sagebrush.limit (the CPython package's, engine/py): the first read locks the limits", () => {
+  const py = TEST + "../engine/py/python/sagebrush/";
+  assert.equal(cpythonLock(py + "_sagelib/_limits.py", py + "__init__.py"), LOCKED_OUT);
 });
