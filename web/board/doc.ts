@@ -602,7 +602,7 @@ export function* cleanDocSteps(d: any): Steps<BoardDoc> {
       const size = num(n.size), opacity = num(n.opacity);
       const world: number[] = new Array(ps.length);
       for (let i = 0; i < ps.length; i += 65536) { for (let j = i; j < Math.min(ps.length, i + 65536); j++) world[j] = j % 3 === 0 ? ps[j] + n.x : j % 3 === 1 ? ps[j] + n.y : ps[j]; yield; }
-      return inkNode(String(n.id), world, { size: size !== undefined && size > 0 && size <= 200 ? size : undefined, color: safeColor(n.color), opacity: opacity !== undefined && opacity > 0 && opacity < 1 ? opacity : undefined });
+      return yield* inkNodeSteps(String(n.id), world, { size: size !== undefined && size > 0 && size <= 200 ? size : undefined, color: safeColor(n.color), opacity: opacity !== undefined && opacity > 0 && opacity < 1 ? opacity : undefined });
     }
     // (a sticker: one emoji, or an icon's name; else none)
     if (n.kind === "sticker") {
@@ -674,18 +674,30 @@ export function canonical(d: BoardDoc): string {
  * piece by piece; a string is handed over as `{ s }`, for the reader to write as JSON.stringify writes it (a long one
  * in pieces).  **It must agree with boardText byte for byte**: web/workspace/test-export.mjs proves it, the export's
  * stream cut everywhere, against Download. */
-export function* boardTextParts(d: any): Generator<string | { s: string }, void, void> {
+/** A part boardTextParts yields that writes nothing: the reader's checkpoint (the export's out.step(), its pace), after
+ * every BOARD_TEXT_CENSUS elements a long array's census inspects (E1 r2e: a 1.5M-number array's census was one task). */
+export const BOARD_TEXT_STEP: { step: true } = Object.freeze({ step: true as const });
+export const BOARD_TEXT_CENSUS = 65536;
+export function* boardTextParts(d: any): Generator<string | { s: string } | { step: true }, void, void> {
   const c: any = d, out: any = {};
   for (const k of DOC_KEYS) if (c[k] !== undefined) out[k] = c[k];
   for (const k of Object.keys(c)) if (!Object.hasOwn(out, k)) Object.defineProperty(out, k, { value: c[k], enumerable: true, writable: true, configurable: true });
-  const scalar = function* (x: any): Generator<string | { s: string }, void, void> {
+  const scalar = function* (x: any): Generator<string | { s: string } | { step: true }, void, void> {
     if (typeof x === "string") yield { s: x };
     else { const j = JSON.stringify(x); if (j !== undefined) yield j; }
   };
-  const text = function* (v: any, indent: string): Generator<string | { s: string }, void, void> {
+  const text = function* (v: any, indent: string): Generator<string | { s: string } | { step: true }, void, void> {
     if (Array.isArray(v)) {
       if (!v.length) { yield "[]"; return; }
-      if (v.every((x) => typeof x !== "object" || x === null)) {
+      // (boardText's `v.every(x => typeof x !== "object" || x === null)`, counted, with a checkpoint after every
+      // BOARD_TEXT_CENSUS elements inspected)
+      let scalars = true;
+      for (let i = 0; i < v.length; i++) {
+        const x = v[i];
+        if (typeof x === "object" && x !== null) { scalars = false; break; }
+        if ((i + 1) % BOARD_TEXT_CENSUS === 0) yield BOARD_TEXT_STEP;
+      }
+      if (scalars) {
         yield "[";
         for (let i = 0; i < v.length; i++) { if (i) yield ", "; yield* scalar(v[i]); }
         yield "]";
@@ -824,12 +836,29 @@ export const inkSize = (n: DocInk): Box => {
  * corner where its box is, its points measured from there (to a tenth;
  * pressure to a hundredth), as a document keeps it. */
 export function inkNode(id: string, points: ArrayLike<number>, o: { size?: number; color?: string; opacity?: number } = {}): DocInk {
+  // (the same steps as inkNodeSteps, run through at once: one code, so the two can't differ)
+  const g = inkNodeSteps(id, points, o);
+  for (;;) { const r = g.next(); if (r.done) return r.value; }
+}
+/** At most this many of a stroke's numbers between two steps (a multiple of 3, so a block holds whole points). */
+export const INK_STEP = 65535;
+/** inkNode in steps (cleanDocSteps's, driven by the export's pace): both passes over the points, the corner's scan
+ * and the relative points, yield after every INK_STEP numbers (E1 r2e: a 1.5M-point stroke was one ~80 ms task). */
+export function* inkNodeSteps(id: string, points: ArrayLike<number>, o: { size?: number; color?: string; opacity?: number } = {}): Generator<void, DocInk, void> {
   const pad = o.size ?? INK_SIZE;
   let x0 = Infinity, y0 = Infinity;
-  for (let i = 0; i + 2 < points.length; i += 3) { x0 = Math.min(x0, points[i]); y0 = Math.min(y0, points[i + 1]); }
+  for (let b = 0; b < points.length; b += INK_STEP) {
+    const e = Math.min(points.length, b + INK_STEP);
+    for (let i = b; i < e && i + 2 < points.length; i += 3) { x0 = Math.min(x0, points[i]); y0 = Math.min(y0, points[i + 1]); }
+    yield;
+  }
   const r = (v: number, k = 10) => Math.round(v * k) / k;
   const pts: number[] = [];
-  for (let i = 0; i + 2 < points.length; i += 3) pts.push(r(points[i] - x0 + pad), r(points[i + 1] - y0 + pad), r(Math.min(1, Math.max(0, points[i + 2])), 100));
+  for (let b = 0; b < points.length; b += INK_STEP) {
+    const e = Math.min(points.length, b + INK_STEP);
+    for (let i = b; i < e && i + 2 < points.length; i += 3) pts.push(r(points[i] - x0 + pad), r(points[i + 1] - y0 + pad), r(Math.min(1, Math.max(0, points[i + 2])), 100));
+    yield;
+  }
   return { id, kind: "ink", x: r(x0 - pad), y: r(y0 - pad), points: pts, size: pad, ...(o.color ? { color: o.color } : {}), ...(o.opacity !== undefined && o.opacity < 1 ? { opacity: o.opacity } : {}) };
 }
 
