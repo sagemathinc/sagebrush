@@ -99,12 +99,16 @@ function keyPair() {
   const jkt = b64u(createHash("sha256").update(JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y })).digest());
   return { jwk, jkt, privateKey };
 }
+/** (a code pairs once: the first page asks to be remembered, and every later socket pairs with that session) */
+const sessions = new WeakMap<PairServer, string>();
 function newPage(s: PairServer, clk: ReturnType<typeof clock>, key = keyPair()) {
   const st = stubSock();
   const c = s.attach(st);
-  c.feed(maskedText({ jsonrpc: "2.0", id: "h1", method: "hello", params: { protocol: 1, purpose: "kernel", code: s.code, page: { origin: "https://sagebrush.space", path: "/" }, jwk: key.jwk, jkt: key.jkt } }));
+  const sess = sessions.get(s);
+  c.feed(maskedText({ jsonrpc: "2.0", id: "h1", method: "hello", params: { protocol: 1, purpose: "kernel", page: { origin: "https://sagebrush.space", path: "/" }, jwk: key.jwk, jkt: key.jkt, ...(sess ? { session: sess } : { code: s.code, remember: true }) } }));
   const r = texts(st)[0]?.result;
-  assert.ok(r?.token, "paired");
+  assert.ok(r?.token, `paired: ${JSON.stringify(texts(st)[0])}`);
+  if (r.session) sessions.set(s, r.session);
   let n = 0;
   const page = {
     st, c, key, token: r.token as string, nonce: r.nonce as string,
@@ -205,12 +209,10 @@ async function refused(t: { s: PairServer; port: Scripted }, req: { answer(): Pr
   else assert.equal(t.s.gateway.binding, null, "no binding made");
 }
 
-test("L2a another socket's token: 401 invalid_token", async () => {
+test("L2a a token this socket wasn't given (one paired socket at a time: an unknown token of a token's shape): 401 invalid_token", async () => {
   const t = await setup();
   try {
-    const other = newPage(t.s, t.clk);
-    t.s.pairedConn = t.page.c; // (one paired page at a time: the test reinstates the first as the paired one)
-    await refused(t, t.page.request("g.bind", {}, {}, { auth: `DPoP ${other.token}` }), "token", "invalid_token");
+    await refused(t, t.page.request("g.bind", {}, {}, { auth: `DPoP ${b64u(randomBytes(32))}` }), "token", "invalid_token");
   } finally { await t.s.close(); }
 });
 
@@ -498,7 +500,7 @@ function rawFrame(page: ReturnType<typeof newPage>, over: any) {
   return closeOf(page.st);
 }
 /** A decode refusal: close 1002, no answer for the frame, zero effects, nothing authenticated. */
-function closed1002(t: { s: PairServer; port: Scripted; page: ReturnType<typeof newPage> }, over: any, what: string) {
+function closed1002(t: { s: PairServer; port: Scripted; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }, over: any, what: string) {
   const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
   const imports = t.s.gateway.stats.keyImports;
   const n = texts(t.page.st).length;
@@ -506,6 +508,12 @@ function closed1002(t: { s: PairServer; port: Scripted; page: ReturnType<typeof 
   assert.equal(texts(t.page.st).length, n, `${what}: no answer`);
   assert.equal(t.s.gateway.stats.keyImports, imports, `${what}: nothing authenticated`);
   zeroEffects(t.s, t.port, before);
+  freshWitness(t, what);
+}
+/** [G2] a protocol-error close leaves the pairing (the code and the session) to the page: a fresh socket pairs again. */
+function freshWitness(t: { s: PairServer; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }, what: string) {
+  const p2 = newPage(t.s, t.clk, t.page.key);
+  assert.ok(p2.token && p2.token !== t.page.token, `${what}: a fresh socket pairs again (a new token)`);
 }
 const decodeCases: [string, (b: string) => any][] = [
   ["L13a an unknown rpc", () => ({ rpc: "g.nope" })],
@@ -699,6 +707,7 @@ test("L19a cancel a never-issued frame id: 1002", async () => {
     await bind(t.page); // (t1)
     t.page.cancel("t9");
     assert.equal(closeOf(t.page.st), 1002);
+    freshWitness(t, "L19a");
   } finally { await t.s.close(); }
 });
 test("L19b cancel an already-answered id: retired at once", async () => {
