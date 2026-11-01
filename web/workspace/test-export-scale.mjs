@@ -78,6 +78,8 @@ async function open() {
 
 const P = "document.querySelector('.sbfprev')";
 const btn = (re) => `(() => { const b = [...document.querySelectorAll(".sbfprev button")].find((x) => ${re}.test(x.textContent)); if (!b) throw new Error("no button " + ${JSON.stringify(String(re))}); b.click(); return 1; })()`;
+// (r2e (b), astra3's R2: the same button, its stamp taken in the same page callback, immediately before the click)
+const btnAt = (re, stamp) => `(() => { const b = [...document.querySelectorAll(".sbfprev button")].find((x) => ${re}.test(x.textContent)); if (!b) throw new Error("no button " + ${JSON.stringify(String(re))}); window.${stamp} = performance.now(); b.click(); return 1; })()`;
 
 /** The workspace with N more entries, the page reloaded, the Storage panel open, the export's button there. */
 async function prepare(c) {
@@ -179,7 +181,7 @@ try {
       check((await prepare(c)) === N, `live: the workspace holds ${N} more entries`);
       const half = Math.floor((N + 1) / 2);
       await c.ev(hooks(half));
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       check(await at(c, "baseline", 60000) && !!c.worker(), "live: stopped at the baseline point, the worker started");
       const b = await heaps(c, true);
       await go(c);
@@ -187,7 +189,7 @@ try {
       const live = [];
       const point = async (name) => { const h = await heaps(c, true); const g = (h.main - b.main) + (h.worker - (c.worker() ? b.worker : 0)); live.push([name, g / MiB, (h.main - b.main) / MiB, (h.worker - b.worker) / MiB]); return g; };
       await point("after preflight");
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       check(await at(c, "half"), "live: stopped half-way through the members");
       await point("half-way");
       await go(c);
@@ -218,7 +220,7 @@ try {
     try {
       await prepare(c);
       await c.ev(hooks(0));
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await at(c, "baseline", 60000);
       const pb = await heaps(c, false);
       const b = await heaps(c, true);
@@ -236,7 +238,7 @@ try {
       })();
       await go(c);
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       sampling = false;
       await elapsed(c, `ELAPSED peak ${k}`);
@@ -267,10 +269,10 @@ try {
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
       check(c8 >= 100, `resp: C8, a 120 ms busy loop shows in the long-task observer (${Math.round(c8)} ms)`);
       await c.ev(`(() => { window.__tasks = []; window.__clickT = performance.now(); return 1; })()`);
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       await c.ev(`(() => { window.__saveT = performance.now(); return 1; })()`);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       check(await c.until(`!!window.__exp`, 1200000), "resp: the export ends");
       await c.ev(`(() => { window.__endT = performance.now(); return 1; })()`);
       await sleep(1500);
@@ -335,9 +337,9 @@ try {
       await prepare(c);
       await c.ev(`window.sagebrush.workspace.create("/zz-capid.csv", { content: "a\\n" }).then(() => 1)`);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined, afterCapture: async (p) => { if (p === "/zz-capid.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, onLookup: (x) => { window.__lookupAt = x; }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`));
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       const r = await c.ev(`(async () => {
         const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -363,7 +365,7 @@ try {
       await prepare(c);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: () => stop("baseline")`));
       const opts = { samplingInterval: 8192, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true };
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await at(c, "baseline", 60000);
       const w = c.worker();
       await c.send("HeapProfiler.enable"); await c.send("HeapProfiler.startSampling", opts);
@@ -372,7 +374,7 @@ try {
       await go(c);
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       marks.push(Date.now());
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       marks.push(Date.now());
       await elapsed(c, "ELAPSED alloc 1");
@@ -411,9 +413,9 @@ try {
       })()`);
       const c8 = await c.ev(`new Promise((ok) => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 120) {} }, 0); setTimeout(() => { const l = window.__long; window.__long = 0; ok(l); }, 400); })`);
       console.log(`(profile: C8, the long-task observer saw the 120 ms busy loop as ${Math.round(c8)} ms${c8 >= 100 ? "" : ": the run is void (RULES.md)"})`);
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       const r = await c.ev(`(() => {
         clearInterval(window.__hbt);
@@ -488,9 +490,9 @@ try {
       const clickT = await c.ev(`performance.now()`);
       // (r2e §R2: the heap at the click, every trace run: K-nogc is judged by it)
       { const h = (await c.send("Runtime.getHeapUsage")).usedSize; console.log(`TRACE-HEAP-AT-CLICK ${TRACE_RUN} ${Number.isFinite(h) ? (h / MiB).toFixed(1) : "BAD"}`); }
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       if (TRACE_RUN !== "nogc") await elapsed(c, `ELAPSED trace ${TRACE_RUN}`);
       await sleep(500);
@@ -553,9 +555,9 @@ try {
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
       const r1 = await c.send("HeapProfiler.collectGarbage"), r2 = await c.send("HeapProfiler.collectGarbage");
       check(cdpOk(r1) && cdpOk(r2), "elapsed: both precondition collections ran");
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       const ended = await c.until(`!!window.__exp`, 1200000);
       check(ended, "elapsed: the export ends");
       await elapsed(c, `ELAPSED-CMP ${process.env.CHUNK ? "b00fb43f" : "head"} ${process.env.CMP_K ?? "1"}`);
@@ -569,9 +571,9 @@ try {
       await prepare(c);
       await c.ev(hooks(0).replace(`beforePreflight: () => stop("baseline")`, `beforePreflight: undefined`));
       await c.ev(`(() => { window.__cancelledAt = 0; new MutationObserver(() => { const t = document.querySelector(".sbfprev")?.textContent ?? ""; if (/The export was cancelled/.test(t) && !window.__cancelledAt) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
-      await c.ev(`(() => { window.__t0 = performance.now(); return 1; })()`); await c.ev(btn("/^Export all current files/"));
+      await c.ev(btnAt("/^Export all current files/", "__t0"));
       if (!(await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000))) throw new Error("cancel: no Save…; the panel: " + (await c.ev(`${P}?.textContent ?? ""`)).slice(-300));
-      await c.ev(`(() => { window.__t1 = performance.now(); return 1; })()`); await c.ev(btn("/^Save…$/"));
+      await c.ev(btnAt("/^Save…$/", "__t1"));
       await c.until(`(() => { const m = /([0-9,]+) of ([0-9,]+) files/.exec(document.querySelector(".sbfprev")?.textContent ?? ""); return !!m && +m[1].replace(/,/g, "") > +m[2].replace(/,/g, "") / 2; })()`, 600000);
       const clicked = await c.ev(`(() => { const t = performance.now(); [...document.querySelectorAll(".sbfprev button")].find((b) => b.textContent === "Cancel").click(); return t; })()`);
       await c.until(`window.__cancelledAt > 0`, 10000);
