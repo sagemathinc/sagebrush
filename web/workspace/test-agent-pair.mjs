@@ -429,5 +429,114 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(takeReloadRecord(thrower) === null && takeReloadRecord(null) === null, "U-3.storage: storage that throws, or none, is no record");
   putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
 }
+// ---- A14: the record kept by AgentPairing itself (U-1, U-2, U-4, U-5, U-6), against the fake server
+{
+  const SESSION = "A".repeat(42) + "w"; // (43 base64url characters: 32 bytes)
+  const pair43 = (agent = { name: "Claude Code", client: "claude-code" }) => (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { ...agent, version: "2.0" }, wants: { write: true, run: false }, ...("code" in m.params ? { session: SESSION } : {}) } }));
+  const memStore = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
+  const scope = { workspace: "sagebrush-workspace/0123456789abcdef", page: "http://127.0.0.1:1/agents/" };
+  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
+  const held = (store) => parseReloadRecord(store.getItem(RELOAD_KEY));
+  const NOW = 1_800_000_000_000;
+
+  // U-1: written for every unremembered grant (page, 1 hour, 1 day), exactly as allowed; never for a remembered one
+  for (const [id, expires, remember] of [["U-1.page", null, false], ["U-1.hour", NOW + 3_600_000, false], ["U-1.day", NOW + 86_400_000, false], ["U-1.remembered", NOW + 3_600_000, true]]) {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st, { now: () => NOW });
+    await P.paired();
+    await P.allow({ folders: ["/A"], write: true, expires }, remember);
+    const r = held(st);
+    if (remember) ok(r === null && st.m.size === 0 && W.store.size === 1, `${id}: a remembered grant writes no reload record (IndexedDB keeps it, as before)`);
+    else ok(r !== null && r.session === SESSION && r.pairingId === P.id && r.port === S.port && r.agent.name === "Claude Code" && r.agent.client === "claude-code" && r.grant.folders.join() === "/A" && r.grant.write === true && r.grant.expires === expires && r.workspace === scope.workspace && r.page === scope.page && !("leftAt" in r) && W.store.size === 0, `${id}: the record is written, exactly the grant allowed (expires ${expires === null ? "null" : "+" + (expires - NOW)}), with no leftAt while the page lives`);
+    await P.revoke(); S.srv.stop(true);
+  }
+
+  // U-2: what each end does to the record (one id per path)
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired(); await P.allow({ folders: ["/A"], write: false, expires: null }, false);
+    const before = held(st);
+    await P.revoke("revoked by the person");
+    ok(before !== null && st.m.size === 0 && P.lostRecord === null, "U-2.revoke: the person's Revoke removes the record, and keeps none in memory");
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore();
+    let t = NOW;
+    const P = mkR(S, W, st, { now: () => t });
+    await P.paired(); await P.allow({ folders: ["/A"], write: false, expires: NOW + 60 }, false);
+    const before = held(st);
+    await until(() => P.state === "closed", 3000);
+    ok(before !== null && P.closeReason === "the grant expired" && st.m.size === 0 && P.lostRecord === null, "U-2.expiry: an expiry removes the record (timer and record both gone), nothing kept for a click", { reason: P.closeReason });
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+    const before = held(st);
+    S.sock.close(1011, "gone");
+    await until(() => P.state === "closed", 3000);
+    ok(before !== null && st.m.size === 0 && P.lostRecord?.pairingId === before.pairingId && P.lostRecord.session === SESSION, "U-2.loss: an involuntary close takes the record out of storage and keeps it in memory for one [Reconnect]");
+    S.srv.stop(true);
+  }
+  {
+    let leaving = false;
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st, { leaving: () => leaving });
+    await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+    leaving = true; // (pagehide: the page is going, as on a reload)
+    S.sock.close(1001, "going away");
+    await until(() => P.state === "closed", 3000);
+    ok(held(st)?.pairingId === P.id && P.lostRecord === null, "U-2.leaving: a close while the page leaves keeps the record in storage, for the reload's restore");
+    S.srv.stop(true);
+  }
+
+  // U-4: an older pairing (an older gen) touches nothing: neither its late allow() nor its close
+  {
+    const S1 = server(pair43()), S2 = server(pair43()), W = fakeWs(), st = memStore();
+    const P1 = mkR(S1, W, st);
+    await P1.paired();
+    const P2 = mkR(S2, W, st);
+    await P2.paired(); await P2.allow({ folders: ["/B"], write: false, expires: null }, false);
+    const r2 = held(st);
+    await P1.allow({ folders: ["/A"], write: true, expires: null }, false);
+    ok(r2 !== null && held(st)?.pairingId === P2.id && held(st).grant.folders.join() === "/B", "U-4.allow: a stale pairing's late allow() doesn't write the record");
+    S1.sock.close(1011, "gone");
+    await until(() => P1.state === "closed", 3000);
+    ok(held(st)?.pairingId === P2.id && P1.lostRecord === null, "U-4.close: a stale pairing's close doesn't remove the newer pairing's record");
+    await P2.revoke(); S1.srv.stop(true); S2.srv.stop(true);
+  }
+
+  // U-5: a revoke during a restore wins: the attempt ends, a late hello answer does nothing, nothing is written
+  {
+    let late = null;
+    const S = server((ws, m) => (late = () => pair43()(ws, m))), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const settled = P.paired().then(() => "paired", () => "rejected");
+    await until(() => late !== null, 3000);
+    await P.revoke("revoked by the person");
+    try { late(); } catch {}
+    await sleep(200);
+    let allowed = "threw";
+    try { await P.allow({ folders: ["/A"], write: true, expires: null }, false); allowed = "allowed"; } catch {}
+    ok((await settled) === "rejected" && P.state === "closed" && allowed === "threw" && st.m.size === 0, "U-5: a revoke during a restore's hello wins: the attempt is rejected, a late answer and a late allow() do nothing, no record written");
+    S.srv.stop(true);
+  }
+
+  // U-6: identity: a restore's session answered by another agent (name or client) is closed, not paired
+  for (const [id, agent] of [["U-6.name", { name: "Other Agent", client: "claude-code" }], ["U-6.client", { name: "Claude Code", client: "codex" }]]) {
+    const S = server(pair43(agent)), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    await until(() => S.closed !== null, 3000);
+    ok(r === "identity" && P.state === "closed" && S.closed !== null && P.grant === null && st.m.size === 0, `${id}: a hello from another agent's ${id.split(".")[1]} on this page's session is discarded closed`, { r, state: P.state });
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "paired" && P.state === "paired", "U-6.same: the same agent's answer pairs (the identity check isn't a blanket refusal)");
+    await P.revoke(); S.srv.stop(true);
+  }
+}
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

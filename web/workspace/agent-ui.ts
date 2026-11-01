@@ -84,7 +84,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now()); });
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
-  const make = (port: number, how: { code: string } | { session: string; pairingId: string }) =>
+  const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
     new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
   let kept: ReloadRecord | null = null;
@@ -259,14 +259,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   async function restoreWith(r: ReloadRecord): Promise<"ok" | "unreachable" | "refused" | "expired"> {
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return "expired";
     let p: AgentPairing;
-    try { p = make(r.port, { session: r.session, pairingId: r.pairingId }); } catch { return "unreachable"; }
+    try { p = make(r.port, { session: r.session, pairingId: r.pairingId, agent: r.agent }); } catch { return "unreachable"; }
     watch(p);
     const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
     const got = await Promise.race([p.paired().then(() => "paired" as const, (e) => (e instanceof AgentError && e.code !== "refused" ? "refused" : /^the agent refused/.test(p.closeReason) ? "refused" : "unreachable") as "refused" | "unreachable"), timeout]);
     if (got === "timeout") { void p.revoke("no answer from the agent"); return "unreachable"; }
     if (got !== "paired") return got;
-    const h = p.hello!;
-    if (h.agent.name !== r.agent.name || h.agent.client !== r.agent.client) { void p.revoke("another agent answered this page's session"); return "refused"; }
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return "expired"; }
     try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return "refused"; }
     showBar();
