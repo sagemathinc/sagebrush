@@ -31,6 +31,14 @@ print(inverse_laplace(a/(s - 1)^2, s, t))
 print(inverse_laplace(exp(2*s)/(s^2 + 1), s, t))
 print(inverse_laplace(exp(-a*s)/s, s, t))
 assume(a > 0); print(inverse_laplace(exp(-a*s)/s, s, t)); forget()
+# exp(0*s) is 1 when built, so this is the plain ilt(1/s): a zero delay cannot be told apart
 print(inverse_laplace(exp(0*s)/s, s, t))
 print(inverse_laplace(exp(-I*s)/s, s, t))
 print(laplace(heaviside(t + 2), t, s))
+# laplace-side guards: heaviside(t - c) needs c known real (and >= 0 for the delay); else unevaluated
+print(laplace(heaviside(t - a), t, s))
+assume(a > 0); print(laplace(heaviside(t - a), t, s)); forget()
+print(laplace(heaviside(t - 2)*sin(t - 2), t, s))
+print(laplace(heaviside(t - a)*t, t, s))
+# sound but incomplete: heaviside(t + 2) is 1 for t >= 0, so this is 1/(s^2 + 1) in Sage; sagebrush leaves it unevaluated
+print(laplace(heaviside(t + 2)*sin(t), t, s))

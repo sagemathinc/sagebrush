@@ -28,3 +28,8 @@ heaviside(-a + t)
 1
 ilt(e^(-I*s)/s, s, t)
 1/s
+laplace(heaviside(-a + t), t, s)
+e^(-a*s)/s
+e^(-2*s)/(s^2 + 1)
+laplace(t*heaviside(-a + t), t, s)
+laplace(heaviside(t + 2)*sin(t), t, s)
