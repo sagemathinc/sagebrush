@@ -271,9 +271,11 @@ export class LocalGateway {
     if (n < s.last) return c.close(1002, "a frame id not above the last");
     s.last = n;
     for (const k of Object.keys(msg)) if (!FRAME_KEYS.has(k)) return c.close(1002, "an unknown frame member");
-    const rpc = msg.rpc as Rpc;
+    // (the type and own-property guard before any use as a key: a JSON object as `rpc` must not be coerced)
+    const rpcValue: unknown = msg.rpc;
+    if (typeof rpcValue !== "string" || !Object.prototype.hasOwnProperty.call(TABLE, rpcValue)) return c.close(1002, "an unknown rpc");
+    const rpc = rpcValue as Rpc;
     const row = TABLE[rpc];
-    if (typeof rpc !== "string" || !Object.prototype.hasOwnProperty.call(TABLE, rpc)) return c.close(1002, "an unknown rpc");
     const ref = msg.ref;
     if (!ref || typeof ref !== "object" || Array.isArray(ref)) return c.close(1002, "a ref is an object");
     for (const k of Object.keys(ref)) if (!row.ref.includes(k)) return c.close(1002, "a ref member the rpc doesn't take");

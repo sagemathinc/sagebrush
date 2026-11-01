@@ -167,11 +167,26 @@ async function waitFor(st: any, id: string, from = 0) {
   return found;
 }
 const bodyOf = (a: any) => (a?.body ? JSON.parse(a.body) : null);
-/** Every effect a refusal must not have had (cases v3 §4). */
-function zeroEffects(s: PairServer, port: Scripted, before: { posted: number; bytes: number }) {
-  assert.equal(s.gateway.binding === null || before.posted >= 0, true);
-  assert.equal(port.posted.length, before.posted, "no SessionPort call");
-  assert.equal(s.gateway.stats.queuedPayloadBytes, before.bytes, "queuedPayloadBytes unchanged");
+/** Every effect a refusal must not have (cases v3 §4), as a snapshot to compare: each SessionPort call (Worker
+ * starts, posts, interrupts, terminations), the binding (identity, generation, epoch, incarnation, its records, their
+ * order, the busy run, event bytes), both slots, executions and Worker starts, the payload charge, raw bodies and the
+ * records' bytes.  (Taken before the request is sent: a POST's decode reserves its slot synchronously.) */
+function effects(s: PairServer, port: Scripted) {
+  const g = s.gateway, b = g.binding;
+  return {
+    starts: port.workers.length, posted: port.posted.length,
+    interrupts: port.workers.reduce((n: number, w: any) => n + w.interrupts.length, 0),
+    terminated: port.workers.filter((w: any) => w.terminated).length,
+    binding: b ? { id: b.id, gen: b.gen, epoch: b.epoch, incarnation: b.incarnation, runs: b.runs.size, order: b.order.length, busy: b.busy?.request ?? null, eventBytes: b.eventBytes } : null,
+    runSlot: g.runSlot ? ("rpc" in (g.runSlot as any) ? "request" : "run") : null, completeSlot: g.completeSlot !== null,
+    executions: g.stats.executions, workersStarted: g.stats.workersStarted,
+    bytes: g.stats.queuedPayloadBytes, raw: g.stats.rawBodyRefs, recordBytes: g.stats.recordBytes,
+  };
+}
+/** The requests open on every paired or pairing socket (a refused request is answered: its id no longer open). */
+const openRequests = (s: PairServer) => [...((s as any).conns as Set<any>)].reduce((n, c) => n + (s.gateway.sockets.get(c)?.open.size ?? 0), 0);
+function zeroEffects(s: PairServer, port: Scripted, before: ReturnType<typeof effects>) {
+  assert.deepEqual(effects(s, port), before, "zero effects");
   assert.equal(s.gateway.stats.rawBodyRefs, 0, "no raw body held");
 }
 /** The cleanup census every case ends with (cases v3 §4). */
@@ -205,16 +220,18 @@ test("L1 a good g.bind: 200, with dpop-nonce (the positive witness)", async () =
   } finally { await s.close(); }
 });
 
-/** A refusal case: the request answered 401 with `error`, its reason counted, zero effects. */
-async function refused(t: { s: PairServer; port: Scripted }, req: { answer(): Promise<any> }, reason: string, error = "invalid_dpop_proof", o: { bound?: boolean; status?: number } = {}) {
+/** A refusal case: the request (sent by `send`, after the snapshot) answered 401 with `error`, its reason counted,
+ * zero effects, no request left open. */
+async function refused(t: { s: PairServer; port: Scripted }, send: () => { answer(): Promise<any> }, reason: string, error = "invalid_dpop_proof", o: { bound?: boolean; status?: number } = {}) {
   const bindingBefore = t.s.gateway.binding;
-  const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+  const before = effects(t.s, t.port), open = openRequests(t.s);
   const r0 = t.s.gateway.stats.authRefusals[reason] ?? 0;
-  const a = await req.answer();
+  const a = await send().answer();
   assert.equal(a?.status, o.status ?? 401, `${o.status ?? 401} (${a?.body})`);
   assert.equal(bodyOf(a).error, error);
   assert.equal((t.s.gateway.stats.authRefusals[reason] ?? 0) - r0, 1, `refused for its own reason: ${reason} (${JSON.stringify(t.s.gateway.stats.authRefusals)})`);
   zeroEffects(t.s, t.port, before);
+  assert.equal(openRequests(t.s), open, "no request left open");
   if (o.bound) assert.equal(t.s.gateway.binding, bindingBefore, "the binding unchanged");
   else assert.equal(t.s.gateway.binding, null, "no binding made");
 }
@@ -222,7 +239,7 @@ async function refused(t: { s: PairServer; port: Scripted }, req: { answer(): Pr
 test("L2a a token this socket wasn't given (one paired socket at a time: an unknown token of a token's shape): 401 invalid_token", async () => {
   const t = await setup();
   try {
-    await refused(t, t.page.request("g.bind", {}, {}, { auth: `DPoP ${b64u(randomBytes(32))}` }), "token", "invalid_token");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { auth: `DPoP ${b64u(randomBytes(32))}` }), "token", "invalid_token");
   } finally { await t.s.close(); }
 });
 
@@ -232,7 +249,7 @@ test("L2b a token from a closed socket: 401 invalid_token", async () => {
     const old = t.page.token;
     t.page.st.emit("close"); // (the first socket gone)
     const p2 = newPage(t.s, t.clk);
-    await refused({ s: t.s, port: t.port }, p2.request("g.bind", {}, {}, { auth: `DPoP ${old}` }), "token", "invalid_token");
+    await refused({ s: t.s, port: t.port }, () => p2.request("g.bind", {}, {}, { auth: `DPoP ${old}` }), "token", "invalid_token");
   } finally { await t.s.close(); }
 });
 
@@ -246,46 +263,46 @@ const headerCases: [string, any, string][] = [
 for (const [name, over, reason] of headerCases) {
   test(`${name}: 401, refused for ${reason}`, async () => {
     const t = await setup();
-    try { await refused(t, t.page.request("g.bind", {}, {}, { proof: over }), reason); } finally { await t.s.close(); }
+    try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: over }), reason); } finally { await t.s.close(); }
   });
 }
 
 test("L3d a JWK with d (private): 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, d: b64u(randomBytes(32)) } } } }), "jwk-private"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, d: b64u(randomBytes(32)) } } } }), "jwk-private"); } finally { await t.s.close(); }
 });
 test("L3e a JWK with an extra member: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, kid: "k1" } } } }), "jwk-extra"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, kid: "k1" } } } }), "jwk-extra"); } finally { await t.s.close(); }
 });
 test("L3f a JWK missing y: 401", async () => {
   const t = await setup();
-  try { const { y, ...noY } = t.page.key.jwk; await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: noY } } }), "jwk-members"); } finally { await t.s.close(); }
+  try { const { y, ...noY } = t.page.key.jwk; await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: noY } } }), "jwk-members"); } finally { await t.s.close(); }
 });
 test("L3g-kty kty not EC: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, kty: "RSA" } } } }), "kty"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, kty: "RSA" } } } }), "kty"); } finally { await t.s.close(); }
 });
 test("L3g-crv crv not P-256: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, crv: "P-384" } } } }), "crv"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, crv: "P-384" } } } }), "crv"); } finally { await t.s.close(); }
 });
 test("L3h off-curve coordinates: 401", async () => {
   const t = await setup();
   try {
     const x = Buffer.from(t.page.key.jwk.x, "base64url"); x[31] ^= 1; // (a point off the curve, almost surely)
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, x: b64u(x) } } } }), "curve");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, x: b64u(x) } } } }), "curve");
   } finally { await t.s.close(); }
 });
 test("L3i coordinates not 43 characters or not 32 bytes: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, x: b64u(randomBytes(31)) } } } }), "coords"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: { ...t.page.key.jwk, x: b64u(randomBytes(31)) } } } }), "coords"); } finally { await t.s.close(); }
 });
 test("L3j a thumbprint not the socket's jkt (another valid key, validly signed): 401", async () => {
   const t = await setup();
   try {
     const k2 = keyPair();
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { header: { jwk: k2.jwk }, signer: k2.privateKey } }), "thumbprint");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { header: { jwk: k2.jwk }, signer: k2.privateKey } }), "thumbprint");
   } finally { await t.s.close(); }
 });
 test("L4a a bad signature: 401", async () => {
@@ -293,14 +310,14 @@ test("L4a a bad signature: 401", async () => {
   try {
     const p = t.page.proof("POST", "/bindings").split(".");
     const sig = Buffer.from(p[2], "base64url"); sig[5] ^= 0xff;
-    await refused(t, t.page.request("g.bind", {}, {}, { dpop: `${p[0]}.${p[1]}.${b64u(sig)}` }), "signature");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { dpop: `${p[0]}.${p[1]}.${b64u(sig)}` }), "signature");
   } finally { await t.s.close(); }
 });
 test("L4b a signature not 64 bytes: 401", async () => {
   const t = await setup();
   try {
     const p = t.page.proof("POST", "/bindings").split(".");
-    await refused(t, t.page.request("g.bind", {}, {}, { dpop: `${p[0]}.${p[1]}.${b64u(randomBytes(63))}` }), "sig-length");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { dpop: `${p[0]}.${p[1]}.${b64u(randomBytes(63))}` }), "sig-length");
   } finally { await t.s.close(); }
 });
 test("L4c parseJwt, one parse step: 2 parts, 4 parts, non-base64url, non-JSON, a JSON non-object: 401 each", async () => {
@@ -308,19 +325,19 @@ test("L4c parseJwt, one parse step: 2 parts, 4 parts, non-base64url, non-JSON, a
   try {
     const p = t.page.proof("POST", "/bindings").split(".");
     for (const raw of [`${p[0]}.${p[1]}`, `${p[0]}.${p[1]}.${p[2]}.${p[2]}`, `${p[0]}.${p[1]}+.${p[2]}`, `${b64u("{nope")}.${p[1]}.${p[2]}`, `${b64u("[1]")}.${p[1]}.${p[2]}`]) {
-      await refused(t, t.page.request("g.bind", {}, {}, { dpop: raw }), "parse");
+      await refused(t, () => t.page.request("g.bind", {}, {}, { dpop: raw }), "parse");
     }
   } finally { await t.s.close(); }
 });
 test("L4d a proof over 4096 B: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { dpop: "a".repeat(4097) }), "proof-size"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { dpop: "a".repeat(4097) }), "proof-size"); } finally { await t.s.close(); }
 });
 test("L4e a decoded segment over 1024 B: 401, before any key import", async () => {
   const t = await setup();
   try {
     const imports = t.s.gateway.stats.keyImports;
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { pad: "x".repeat(1100) } } }), "segment-size");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { pad: "x".repeat(1100) } } }), "segment-size");
     assert.equal(t.s.gateway.stats.keyImports, imports, "no key imported");
   } finally { await t.s.close(); }
 });
@@ -333,7 +350,7 @@ test("L5 htm not the rpc's method, for each of the 8 rpcs: 401", async () => {
     for (const rpc of Object.keys(ROUTES)) {
       const ref = rpc === "g.bind" ? {} : rpc === "g.record" ? { b: "b1", r: "r1" } : rpc === "g.events" ? { b: "b1", r: "r1", after: 0 } : { b: "b1" };
       const wrong = ROUTES[rpc].method === "GET" ? "POST" : "GET";
-      await refused(t, t.page.request(rpc, ref, ROUTES[rpc].method === "POST" ? {} : undefined, { proof: { claims: { htm: wrong } } }), "htm");
+      await refused(t, () => t.page.request(rpc, ref, ROUTES[rpc].method === "POST" ? {} : undefined, { proof: { claims: { htm: wrong } } }), "htm");
     }
   } finally { await t.s.close(); }
 });
@@ -342,31 +359,31 @@ test("L6a htu a URL taken as-is (another path), for each rpc: 401", async () => 
   try {
     for (const rpc of Object.keys(ROUTES)) {
       const ref = rpc === "g.bind" ? {} : rpc === "g.record" ? { b: "b1", r: "r1" } : rpc === "g.events" ? { b: "b1", r: "r1", after: 0 } : { b: "b1" };
-      await refused(t, t.page.request(rpc, ref, ROUTES[rpc].method === "POST" ? {} : undefined, { proof: { claims: { htu: SYNTHETIC_BASE + "/somewhere/else" } } }), "htu");
+      await refused(t, () => t.page.request(rpc, ref, ROUTES[rpc].method === "POST" ? {} : undefined, { proof: { claims: { htu: SYNTHETIC_BASE + "/somewhere/else" } } }), "htu");
     }
   } finally { await t.s.close(); }
 });
 test("L6b htu with a query: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { htu: SYNTHETIC_BASE + "/bindings?x=1" } } }), "htu"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { htu: SYNTHETIC_BASE + "/bindings?x=1" } } }), "htu"); } finally { await t.s.close(); }
 });
 test("L6c cross-binding substitution: htu names binding B while ref.b = A: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.interrupt", { b: "A" }, {}, { path: "/bindings/B/interrupt" }), "htu"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.interrupt", { b: "A" }, {}, { path: "/bindings/B/interrupt" }), "htu"); } finally { await t.s.close(); }
 });
 test("L6d cross-run substitution: htu names run r2 while ref.r = r1: 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.record", { b: "b1", r: "r1" }, undefined, { path: "/bindings/b1/runs/r2" }), "htu"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.record", { b: "b1", r: "r1" }, undefined, { path: "/bindings/b1/runs/r2" }), "htu"); } finally { await t.s.close(); }
 });
 test("L7 ath not SHA-256(token): 401", async () => {
   const t = await setup();
-  try { await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { ath: b64u(randomBytes(32)) } } }), "ath"); } finally { await t.s.close(); }
+  try { await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { ath: b64u(randomBytes(32)) } } }), "ath"); } finally { await t.s.close(); }
 });
 test("L8a iat 61 s old: 401; L8a+ at exactly 60 s: passes", async () => {
   const t = await setup();
   try {
     const now = Math.floor(t.clk.now() / 1000);
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now - 61 } } }), "iat-past");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now - 61 } } }), "iat-past");
     const a = await t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now - 60 } } }).answer();
     assert.equal(a.status, 200, "L8a+");
   } finally { await t.s.close(); }
@@ -375,7 +392,7 @@ test("L8b iat 6 s ahead: 401; L8b+ at exactly 5 s: passes", async () => {
   const t = await setup();
   try {
     const now = Math.floor(t.clk.now() / 1000);
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now + 6 } } }), "iat-future");
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now + 6 } } }), "iat-future");
     const a = await t.page.request("g.bind", {}, {}, { proof: { claims: { iat: now + 5 } } }).answer();
     assert.equal(a.status, 200, "L8b+");
   } finally { await t.s.close(); }
@@ -391,8 +408,8 @@ test("L8c iat by type: missing, a string, null, true, 1.5, 1e999, 2^53: 401 each
         const claimsText = `{"jti":"${b64u(randomBytes(24))}","htm":"POST","htu":"${SYNTHETIC_BASE}/bindings","iat":1e999,"ath":"${b64u(createHash("sha256").update(t.page.token).digest())}","nonce":"${t.page.nonce}"}`;
         const input = `${header}.${b64u(claimsText)}`;
         const sig = edSign("sha256", Buffer.from(input), { key: t.page.key.privateKey, dsaEncoding: "ieee-p1363" });
-        await refused(t, t.page.request("g.bind", {}, {}, { dpop: `${input}.${b64u(sig)}` }), "iat-type");
-      } else await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { iat: v } } }), "iat-type");
+        await refused(t, () => t.page.request("g.bind", {}, {}, { dpop: `${input}.${b64u(sig)}` }), "iat-type");
+      } else await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { iat: v } } }), "iat-type");
     }
   } finally { await t.s.close(); }
 });
@@ -402,9 +419,9 @@ test("L9a a jti reused within 120 s, and at exactly 120 s: 401; L9a+ the same jt
     const jti = b64u(randomBytes(24));
     assert.equal((await t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }).answer()).status, 200);
     t.clk.advance(1000);
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
     t.clk.advance(GATEWAY_LIMITS.jtiMs - 1000); // (exactly 120 s after it was stored)
-    await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
+    await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }), "jti-reused", "invalid_dpop_proof", { bound: true });
     t.clk.advance(1);
     const a = await t.page.request("g.bind", {}, {}, { proof: { claims: { jti, iat: Math.floor(t.clk.now() / 1000) } } }).answer();
     assert.notEqual(a.status, 401, "L9a+: past 120 s the jti is accepted again (then 409 in-use: bound already)");
@@ -420,20 +437,20 @@ for (const [name, jti, reason, ok] of [
     const t = await setup();
     try {
       if (ok) assert.equal((await t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }).answer()).status, 200);
-      else await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }), reason);
+      else await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }), reason);
     } finally { await t.s.close(); }
   });
 }
 test("L9d jti not a string (missing, 123, null, an array that would coerce): 401 each, nothing stored", async () => {
   const t = await setup();
   try {
-    for (const jti of [undefined, 123, null, ["a".repeat(22)]]) await refused(t, t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }), "jti-type");
+    for (const jti of [undefined, 123, null, ["a".repeat(22)]]) await refused(t, () => t.page.request("g.bind", {}, {}, { proof: { claims: { jti } } }), "jti-type");
   } finally { await t.s.close(); }
 });
 test("L10a a stale nonce: 401 use_dpop_nonce with a fresh DPoP-Nonce", async () => {
   const t = await setup();
   try {
-    const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+    const before = effects(t.s, t.port);
     const a = await t.page.request("g.bind", {}, {}, { proof: { claims: { nonce: "stale" } } }).answer();
     assert.equal(a.status, 401);
     assert.equal(bodyOf(a).error, "use_dpop_nonce");
@@ -482,7 +499,7 @@ test("L11 the replay store: the 4096th jti admitted (L11+), the 4097th 503 limit
       const a = await t.page.request("g.record", { b, r: "x" }, undefined).answer();
       assert.equal(a.status, 404, `jti ${i} admitted`);
     }
-    const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+    const before = effects(t.s, t.port);
     const a = await t.page.request("g.record", { b, r: "x" }, undefined).answer();
     assert.equal(a.status, 503);
     assert.equal(bodyOf(a).error, "limit");
@@ -497,7 +514,7 @@ test("L12 a reconnect: a new token; the old token on the new socket 401", async 
     t.page.st.emit("close");
     const p2 = newPage(t.s, t.clk, t.page.key);
     assert.notEqual(p2.token, old, "a new token");
-    await refused({ s: t.s, port: t.port }, p2.request("g.bind", {}, {}, { auth: `DPoP ${old}` }), "token", "invalid_token");
+    await refused({ s: t.s, port: t.port }, () => p2.request("g.bind", {}, {}, { auth: `DPoP ${old}` }), "token", "invalid_token");
     assert.equal((await p2.request("g.bind", {}, {}).answer()).status, 200, "the new token works");
   } finally { await t.s.close(); }
 });
@@ -513,7 +530,7 @@ function rawFrame(page: ReturnType<typeof newPage>, over: any) {
 }
 /** A decode refusal: close 1002, no answer for the frame, zero effects, nothing authenticated. */
 function closed1002(t: { s: PairServer; port: Scripted; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }, over: any, what: string, reason: string) {
-  const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+  const before = effects(t.s, t.port);
   const imports = t.s.gateway.stats.keyImports;
   const n = texts(t.page.st).length;
   assert.equal(rawFrame(t.page, over), 1002, what);
@@ -530,6 +547,12 @@ function freshWitness(t: { s: PairServer; clk: ReturnType<typeof clock>; page: R
 }
 const decodeCases: [string, (b: string) => any, string][] = [
   ["L13a an unknown rpc", () => ({ rpc: "g.nope" }), "an unknown rpc"],
+  // (S1: a JSON value that isn't a string, never coerced as a key: the guard comes before any TABLE lookup)
+  ["L13a-obj an rpc that is an object with toString null", () => ({ rpc: { toString: null } }), "an unknown rpc"],
+  ["L13a-arr an rpc that is an array", () => ({ rpc: ["g.bind"] }), "an unknown rpc"],
+  ["L13a-num an rpc that is a number", () => ({ rpc: 1 }), "an unknown rpc"],
+  ["L13a-null an rpc that is null", () => ({ rpc: null }), "an unknown rpc"],
+  ["L13a-proto an rpc naming an inherited member (__proto__, toString)", () => ({ rpc: "toString" }), "an unknown rpc"],
   ["L13b a ref member failing the ID pattern", () => ({ rpc: "g.run", ref: { b: "b/1" } }), "a ref member not an id"],
   ["L13c a ref member the rpc doesn't take (after on g.run)", (b) => ({ rpc: "g.run", ref: { b, after: 0 } }), "a ref member the rpc doesn't take"],
   ["L14a-pfx the frame id x1", () => ({ id: "x1" }), "a frame id is t and digits"],
@@ -1099,7 +1122,7 @@ test("L32b per binding: at exactly 64 MiB all retained (L32b+); one byte more: t
 test("L34a complete with no binding: refused (404), nothing posted", async () => {
   const t = await setup();
   try {
-    const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+    const before = effects(t.s, t.port);
     const a = await t.page.request("g.complete", { b: "b1" }, { epoch: 1, code: "x" }).answer();
     assert.equal(a.status, 404);
     zeroEffects(t.s, t.port, before);
@@ -1137,7 +1160,7 @@ for (const [name, entries] of waveCases) {
     const t = await setup();
     try {
       const b = await bind(t.page);
-      const before = { posted: t.port.posted.length, bytes: t.s.gateway.stats.queuedPayloadBytes };
+      const before = effects(t.s, t.port);
       const ex = t.s.gateway.stats.executions;
       const a = await t.page.request("g.run", { b }, { request: "w1", epoch: 1, kind: "wave", payload: wave(entries()) }).answer();
       assert.equal(a.status, 400, a.body);
