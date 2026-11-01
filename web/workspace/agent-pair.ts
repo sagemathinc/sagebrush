@@ -146,11 +146,18 @@ export class AgentPairing {
   private pairingId = "";
   private remember = false;
   private helloSent: Promise<Hello>;
+  // (A14: the session secret this pairing holds, from the hello or the reload record it was restored from; its
+  //  generation, so an older pairing's end can't touch a newer one's record; the record it would restore from after
+  //  an involuntary loss, kept in memory only)
+  private sessionSecret: string | undefined;
+  private readonly gen = ++pairingGen;
+  lostRecord: ReloadRecord | null = null;
+  private revoked = false;
 
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -158,7 +165,7 @@ export class AgentPairing {
     this.refill = now;
     const WS = opts.WebSocketImpl ?? WebSocket;
     this.sock = new WS(`ws://127.0.0.1:${port}/sagebrush`);
-    if ("pairingId" in how) this.pairingId = how.pairingId;
+    if ("pairingId" in how) { this.pairingId = how.pairingId; this.sessionSecret = how.session; }
     this.helloSent = new Promise<Hello>((resolve, reject) => {
       this.sock.onopen = () => {
         const params: Record<string, unknown> = { protocol: 1, page: opts.page };
@@ -191,6 +198,7 @@ export class AgentPairing {
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
           this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [] };
           if (!this.pairingId) this.pairingId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (this.hello.session) this.sessionSecret = this.hello.session;
           this.state = "paired";
           this.emit();
           return resolve(this.hello);
@@ -232,6 +240,7 @@ export class AgentPairing {
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
+    this.keepForReload();
     if (this.timer) clearTimeout(this.timer);
     if (grant.expires !== null) this.timer = setTimeout(() => void this.revoke("the grant expired"), Math.max(0, grant.expires - now));
     this.state = "granted";
@@ -243,9 +252,28 @@ export class AgentPairing {
     if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.hello?.session, port: this.port } satisfies Kept);
   }
 
+  /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
+   * with the grant exactly as allowed; never for a pairing without a session secret. */
+  private keepForReload() {
+    const r = this.opts.reload, g = this.grant, h = this.hello;
+    if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, expires: g.expires }, workspace: r.scope.workspace, page: r.scope.page });
+  }
+  /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
+  private dropReload() {
+    const r = this.opts.reload;
+    if (!r || this.gen !== pairingGen) return;
+    let held: ReloadRecord | null = null;
+    try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
+    if (!held || held.pairingId === this.pairingId) putReloadRecord(r.storage, null);
+  }
+
   /** Revoke: the server told ({}), the socket closed, the kept grant and session forgotten, at once. */
   async revoke(why = "revoked") {
     const id = this.pairingId;
+    this.revoked = true;
+    this.lostRecord = null;
+    this.dropReload();
     this.grant = null;
     this.verbs = null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
@@ -272,6 +300,15 @@ export class AgentPairing {
   private end(why: string) {
     if (this.state === "closed") return;
     this.closeReason ||= why;
+    // (A14: an involuntary loss, while the page stays: the record leaves storage, so a later reload doesn't try a
+    //  session that just failed, and stays in memory for the bar's one [Reconnect]; a revoke dropped it already; the
+    //  page leaving (a reload) keeps it, for the restore)
+    const r = this.opts.reload;
+    if (r && !this.revoked && !r.leaving() && this.gen === pairingGen) {
+      let held: ReloadRecord | null = null;
+      try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
+      if (held && held.pairingId === this.pairingId) { this.lostRecord = held; putReloadRecord(r.storage, null); }
+    }
     this.state = "closed";
     this.grant = null;
     this.verbs = null;
@@ -438,6 +475,8 @@ export class AgentPairing {
 // duplicated or restored tab) is independent: a consume here doesn't reach it, so each page's own checks decide.
 
 export const RELOAD_KEY = "sb-agent-reload-v1";
+// (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
+let pairingGen = 0;
 /** At most this long between the page leaving (pagehide) and its reload for the restore to be silent (R1-b). */
 export const RELOAD_FRESH_MS = 30_000;
 const RELOAD_MAX = 4096;
