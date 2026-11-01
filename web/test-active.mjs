@@ -247,7 +247,10 @@ class Browser {
     this.proc = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${this.profile}`, `--host-resolver-rules=MAP sagebrush.space 127.0.0.1:${front.port}`, "--ignore-certificate-errors",
       // (no OS keyring: where a D-Bus session bus exists without one, Chrome's first run otherwise waits out D-Bus's 25 s
       // timeout before the first page loads (Chrome 155, VM2); found with a minimal repro, auth-msgs/c155-repro.mjs)
-      "--password-store=basic", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+      "--password-store=basic", "about:blank"], { stdio: ["ignore", "ignore", "pipe"],
+      // (the browser's default zone is UTC whatever the host's (grader fca8000e 2): K-31's local midnight follows it;
+      // the zone-pinned cases set their own per tab; asserted in the host-time case as precondition:host-zone)
+      env: { ...process.env, TZ: "UTC" } });
     this.port = await new Promise((ok, no) => { let b = ""; const t = setTimeout(() => no(new Error("no DevTools")), 30000); this.proc.stderr.on("data", (d) => { b += d; const m = /DevTools listening on ws:\/\/[^:]+:(\d+)\//.exec(b); if (m) { clearTimeout(t); ok(Number(m[1])); } }); });
     let ts; for (let i = 0; i < 300 && !ts; i++) { try { ts = await (await fetch(`http://127.0.0.1:${this.port}/json`)).json(); } catch { await sleep(100); } }
     this.first = ts.find((t) => t.type === "page");
@@ -287,10 +290,13 @@ class Tab {
     this.ws = new WebSocket(this.t.webSocketDebuggerUrl);
     await new Promise((r) => (this.ws.onopen = r));
     // (the main frame's navigations, kept for diagnostics (grader 61bd935a item 5): each failed ev() reports them)
-    this.navs = []; const t0 = Date.now(), nav = (what) => { this.navs.push(`+${Date.now() - t0}ms ${what}`); if (this.navs.length > 40) this.navs.shift(); };
-    this.ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && this.waiting.has(m.id)) { this.waiting.get(m.id)(m.result ?? m.error); this.waiting.delete(m.id); } if (m.method === "Runtime.exceptionThrown") this.errors.push(m.params.exceptionDetails?.exception?.description?.slice(0, 200) ?? "exception");
+    // (and the main frame's committed loaders: open() accepts only the document of the loader its own navigate returned)
+    this.navs = []; this.loaders = new Set(); this.mainLoader = null; const t0 = Date.now(), nav = (what) => { this.navs.push(`+${Date.now() - t0}ms ${what}`); if (this.navs.length > 40) this.navs.shift(); };
+    // (a protocol error rejects the call, with its method and the whole error (astra e6fb3af4 1); before, it resolved as
+    // though it were a result)
+    this.ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && this.waiting.has(m.id)) { const w = this.waiting.get(m.id); this.waiting.delete(m.id); if (m.error) w.no(new Error(`DevTools ${w.method}: protocol error ${J(m.error)}`)); else w.ok(m.result); } if (m.method === "Runtime.exceptionThrown") this.errors.push(m.params.exceptionDetails?.exception?.description?.slice(0, 200) ?? "exception");
       const p = m.params ?? {};
-      if (m.method === "Page.frameNavigated" && !p.frame?.parentId) nav(`navigated ${p.frame?.url} loader ${p.frame?.loaderId} origin ${p.frame?.securityOrigin}`);
+      if (m.method === "Page.frameNavigated" && !p.frame?.parentId) { this.loaders.add(p.frame?.loaderId); this.mainLoader = p.frame?.loaderId; nav(`navigated ${p.frame?.url} loader ${p.frame?.loaderId} origin ${p.frame?.securityOrigin}`); }
       else if (m.method === "Page.navigatedWithinDocument") nav(`within-document ${p.url}`);
       else if (m.method === "Page.frameStartedLoading") nav("started loading");
       else if (m.method === "Page.frameStoppedLoading") nav("stopped loading");
@@ -300,23 +306,36 @@ class Tab {
     await this.send("Page.addScriptToEvaluateOnNewDocument", { source: pre + INSTRUMENT });
   }
   /** where the tab is, for a failure message: href, origin, readyState, and the main frame's recent navigations */
+  // (bounded: 3 s, so a gone target still yields the navigation log)
   async where() {
-    const r = await this.send("Runtime.evaluate", { expression: "JSON.stringify({ href: location.href, origin: location.origin, readyState: document.readyState })", returnByValue: true }).catch((e) => ({ result: { value: `unreadable: ${e.message}` } }));
-    return `at ${r?.result?.value ?? J(r?.exceptionDetails ?? r)}; navigations ${J(this.navs.slice(-12))}`;
+    const r = await Promise.race([this.send("Runtime.evaluate", { expression: "JSON.stringify({ href: location.href, origin: location.origin, readyState: document.readyState })", returnByValue: true }), sleep(3000).then(() => { throw new Error("no answer in 3 s"); })]).catch((e) => ({ result: { value: `unreadable: ${e.message}` } }));
+    return `at ${r?.result?.value ?? J(r?.exceptionDetails ?? r)}; main loader ${this.mainLoader}; navigations ${J(this.navs.slice(-12))}`;
   }
   // (every DevTools call bounded: a stuck case fails with its name instead of hanging the run)
-  send(method, params = {}) { return new Promise((r, no) => { const id = ++this.n; const to = setTimeout(() => { this.waiting.delete(id); no(new Error(`DevTools ${method}: no answer in 30 s`)); }, 30000); this.waiting.set(id, (v) => { clearTimeout(to); r(v); }); this.ws.send(J({ id, method, params })); }); }
+  send(method, params = {}) { return new Promise((r, no) => { const id = ++this.n; const to = setTimeout(() => { this.waiting.delete(id); no(new Error(`DevTools ${method}: no answer in 30 s`)); }, 30000); this.waiting.set(id, { method, ok: (v) => { clearTimeout(to); r(v); }, no: (e) => { clearTimeout(to); no(e); } }); this.ws.send(J({ id, method, params })); }); }
   // (quiet: a poll (until, open) whose failures are expected and swallowed gets no diagnostics, so it adds no evaluate)
-  async ev(expression, quiet = false) { const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(quiet ? J(r.exceptionDetails).slice(0, 300) : `${J(r.exceptionDetails).slice(0, 300)}; ${await this.where()}`); return r.result?.value; }
+  // A non-poll failure -- an exception in the page, a protocol error, a transport error or a timeout -- is printed whole,
+  // with where(), as one "(diag)" line in the log (astra e6fb3af4 2), and rethrown with the same text.
+  async ev(expression, quiet = false) {
+    let r;
+    try { r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); }
+    catch (e) { if (quiet) throw e; throw await this.diag(`${e.message} (evaluating ${expression.slice(0, 120)})`); }
+    if (r.exceptionDetails) { if (quiet) throw new Error(J(r.exceptionDetails).slice(0, 300)); throw await this.diag(`${J(r.exceptionDetails)} (evaluating ${expression.slice(0, 120)})`); }
+    return r.result?.value;
+  }
+  async diag(what) { const m = `${what}; ${await this.where()}`; console.log(`  (diag) ev failure: ${m}`); return new Error(m); }
   // (loaded: the navigation committed (no error) and the document is of the target's origin -- the initial about:blank,
   // which carries the instrument too, no longer passes (grader 61bd935a item 5) -- the instrument ran and the
   // document's scripts too, so a harness page's __sbHarness exists)
+  // (and the main frame committed THIS navigation's loader and is still on it: a previous same-origin document no
+  // longer passes either (astra e6fb3af4 1))
   async open(url = ORIGIN + "/") {
-    const r = await this.send("Page.navigate", { url });
-    if (r?.errorText) throw new Error(`navigation to ${url} failed: ${r.errorText}; ${await this.where()}`);
+    const r = await this.send("Page.navigate", { url }).catch(async (e) => { throw await this.diag(`navigation to ${url}: ${e.message}`); });
+    if (r?.errorText) throw await this.diag(`navigation to ${url} failed: ${r.errorText}`);
+    if (!r?.loaderId) throw await this.diag(`navigation to ${url} returned no loader: ${J(r)}`);
     const origin = J(new URL(url).origin);
-    for (let i = 0; i < 200; i++) { if (await this.ev(`location.origin === ${origin} && !!window.__c && document.readyState === 'complete'`, true).catch(() => false)) return; await sleep(50); }
-    throw new Error(`page didn't load: ${url}; ${await this.where()}`);
+    for (let i = 0; i < 200; i++) { if (this.loaders.has(r.loaderId) && this.mainLoader === r.loaderId && await this.ev(`location.origin === ${origin} && !!window.__c && document.readyState === 'complete'`, true).catch(() => false)) return; await sleep(50); }
+    throw await this.diag(`page didn't load: ${url} (loader ${r.loaderId})`);
   }
   async until(expr, ms = 10000) { const t = Date.now(); while (Date.now() - t < ms) { if (await this.ev(expr, true).catch(() => false)) return true; await sleep(50); } return false; }
   // (the notes, read on the harness's own uncounted connection; null when absent, else their JSON)
@@ -403,8 +422,10 @@ async function cases() {
     const workerT = await t.ev(`new Promise((ok, no) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage(Date.now())"], { type: "text/javascript" }))); w.onmessage = (e) => { ok(e.data); w.terminate(); }; w.onerror = (e) => no(new Error("worker: " + e.message)); setTimeout(() => no(new Error("worker: no answer")), 5000); })`);
     const want = process.env.ACTIVE_HOST_AT ? Date.parse(process.env.ACTIVE_HOST_AT) + (Date.now() - PROCESS_T0) : h;
     const ok = [h, pageT, workerT].every((x) => typeof x === "number" && Math.abs(x - want) < 2000);
-    console.log(`  (info) host clock: ACTIVE_HOST_AT ${process.env.ACTIVE_HOST_AT ?? "(unset: real)"}; harness ${iso(h)}, page ${iso(pageT)}, worker ${iso(workerT)}`);
+    const zone = await t.ev("Intl.DateTimeFormat().resolvedOptions().timeZone"), offset = await t.ev("new Date(Date.now()).getTimezoneOffset()");
+    console.log(`  (info) host clock: ACTIVE_HOST_AT ${process.env.ACTIVE_HOST_AT ?? "(unset: real)"}; harness ${iso(h)}, page ${iso(pageT)}, worker ${iso(workerT)}; page zone ${zone} (offset ${offset} min)`);
     if (!ok) c("precondition:host-time", false, `the host clock did not take effect alike: harness ${iso(h)}, page ${iso(pageT)}, worker ${iso(workerT)}, wanted ${iso(want)}`);
+    if (!((zone === "UTC" || zone === "Etc/UTC") && offset === 0)) c("precondition:host-zone", false, `the browser's default zone is ${zone} (offset ${offset} min), not UTC`);
     await b.stop(); });
   // C-1: due once a day; the next day by the server's durations; week and month flags; time zones change nothing
   await one("C-1", async () => { reset(); const { b, t } = await fresh();
