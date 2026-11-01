@@ -1,0 +1,32 @@
+{
+  "name": "@sagebrush/pandas",
+  "version": "0.1.0",
+  "kind": "optional",
+  "sagebrush": ">=0.6.1",
+  "modes": [
+    "python"
+  ],
+  "python": {
+    "root": "py",
+    "modules": [
+      "pandas"
+    ]
+  },
+  "requires": [],
+  "private_prefix": "_pd_",
+  "files": {
+    "py/pandas/__init__.py": "5d091a58c8cbe0286f9031d834fff86358b1b73a93610514a31c2ef4ceb156b9",
+    "py/pandas/_pd_column.py": "7e5fc7a748b57c3342b74d10331b7f91d7c1e9d8e6f2bcf4ad1e385dd4e20d5b",
+    "py/pandas/_pd_csv.py": "666988edfaa46134b18f08e4d2f1ab39c860e66c3fcb27cea220d2a1541a9d2c",
+    "py/pandas/_pd_dtypes.py": "a939a6afb9f4073c2fbbc99cecf2a0b3befa6aa2d888969ab663d47108dcba1a",
+    "py/pandas/_pd_frame.py": "276520c07120eff6840f17ae9bc71a03be64db5a306e31d3efeee2a0640c06a0",
+    "py/pandas/_pd_index.py": "efdb4fe58fe7d1f380907f2fc9858461ab9276cede652093c42046d009b9b4c2",
+    "py/pandas/_pd_indexing.py": "4581e3c9ff5e835c15df007a902a84d3894e73e7a7636ae200c15e2f1f394605",
+    "py/pandas/_pd_options.py": "987fa944a1a839aba59fc3c2ee99c13ac2cf28a63814684b69ef966a1669ee42",
+    "py/pandas/_pd_reduce.py": "45ca5db45fccbc9b9aa6c26d91f894ecb8183cf5d526cf70e788adfd834426f2",
+    "py/pandas/_pd_repr.py": "38db7787c86a49d30795e40cd51d40b68fd9be9557b27ef2ca250caf240227f2",
+    "py/pandas/_pd_series.py": "005f206d3c5e3d6b8c065d0b4a9b08b5102f3ce73d1ba85fc963624f6e429271",
+    "py/pandas/_pd_toplevel.py": "9de1fce9e3d7ea9428d7fc9856371ca96284e79efc5da1d4a7327e1e9bbc1259",
+    "py/pandas/errors.py": "4937168dedde87529b1335c6825c363fce2f04abb9c473d2badb54d9ab283998"
+  }
+}
