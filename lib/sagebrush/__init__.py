@@ -14,7 +14,7 @@ accepted and ignored).
 
 from . import modsym, ap, mf, poly, nf, linalg
 
-__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "stop_points", "progress_snapshot"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "limit", "stop_points", "progress_snapshot"]
 
 
 # ---- the agent API (estimates plan r3 §1.1): what this build provides,
@@ -26,6 +26,21 @@ def capabilities():
     "estimate": True, "deadline": False, ...} (sagebrush.records.capabilities)."""
     from . import records
     return records.capabilities()
+
+
+def limit(name):
+    """This session's value of the engine limit name, such as
+    "pandas.decoded_bytes": an int, or float("inf") where it is unlimited,
+    every limit's default (no limit on your own computation; a grading
+    context sets finite ones).  The limits are read once: the first read
+    locks them, as the first use of a limited layer does.  An unknown name
+    raises ValueError, listing the limits of this engine."""
+    import _limits as L
+    if not isinstance(name, str):
+        raise TypeError("limit() argument must be a str, not %s" % type(name).__name__)
+    if name not in L.TABLE:
+        raise ValueError("limits: %s is not a limit of this engine (its limits: %s)" % (L._key_shown(name), ", ".join(sorted(L.TABLE))))
+    return L.finalize()[name]
 
 
 def stop_points(op):
