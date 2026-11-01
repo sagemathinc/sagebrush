@@ -1,5 +1,5 @@
 """Text and HTML formatting of Series, DataFrame and Index, ported from
-pandas 3.1.0 (BSD-3-Clause, see THIRD-PARTY-NOTICES.txt):
+pandas 3.1.0 (BSD-3-Clause, see _pd_license.py and NOTICE.md):
 
 - pandas/io/formats/format.py: SeriesFormatter, DataFrameFormatter,
   format_array and its array formatters, _make_fixed_width, the zero

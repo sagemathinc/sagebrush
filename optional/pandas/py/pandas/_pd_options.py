@@ -1,6 +1,6 @@
 """Options: get_option, set_option, reset_option, option_context and
 pd.options, ported from pandas 3.1.0 pandas/_config/config.py (BSD-3-Clause,
-see THIRD-PARTY-NOTICES.txt) and the validators of
+see _pd_license.py and NOTICE.md) and the validators of
 pandas/core/config_init.py.
 
 M1 supports six keys (plan-pandas-m1-r1 §4): display.max_rows,
