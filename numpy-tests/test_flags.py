@@ -322,3 +322,37 @@ t("sort", lambda: rout(lambda r: r.sort()))
 t("fill", lambda: rout(lambda r: r.fill(1.0)))
 t("out writeable reduce", lambda: (lambda o: (np.add.reduce(np.ones((2, 3)), axis=0, out=o), o.tolist())[1])(np.zeros(3)))
 t("out writeable accumulate", lambda: (lambda o: (np.multiply.accumulate(np.arange(1.0, 4.0), out=o), o.tolist())[1])(np.zeros(3)))
+
+
+# reduce and accumulate into out=: a tuple of one, computed in out's dtype
+# unless dtype is given, and out's shape checked (a fresh out per case)
+def x32():
+    return np.array([1e8, 1, -1e8], dtype=np.float32)
+
+
+def into(method, a, o, **kw):
+    r = method(a, out=o, **kw)
+    return r is (o[0] if isinstance(o, tuple) else o), o[0].tolist() if isinstance(o, tuple) else o.tolist()
+
+
+t("accumulate f32 into f64", lambda: into(np.add.accumulate, x32(), np.zeros(3)))
+t("accumulate f32 into f64 dtype f32", lambda: into(np.add.accumulate, x32(), np.zeros(3), dtype="float32"))
+t("accumulate f32 into f32", lambda: into(np.add.accumulate, x32(), np.zeros(3, dtype=np.float32)))
+t("reduce f32 into f64", lambda: into(np.add.reduce, x32(), np.zeros(())))
+t("reduce f32 into f64 dtype f32", lambda: into(np.add.reduce, x32(), np.zeros(()), dtype="float32"))
+t("reduce f32 into f32", lambda: into(np.add.reduce, x32(), np.zeros((), dtype=np.float32)))
+t("accumulate multiply f32 into f64", lambda: into(np.multiply.accumulate, np.array([3e30, 3e30, 1e-30], dtype=np.float32), np.zeros(3)))
+t("reduce int into float", lambda: into(np.add.reduce, np.arange(4), np.zeros(())))
+t("reduce maximum into int", lambda: into(np.maximum.reduce, np.array([1, 5, 2]), np.zeros((), dtype=np.int64)))
+t("reduce keepdims into out", lambda: into(np.add.reduce, np.ones((2, 3)), np.zeros((1, 3)), axis=0, keepdims=True))
+t("reduce tuple", lambda: into(np.add.reduce, np.ones((2, 3)), (np.zeros(3),), axis=0))
+t("accumulate tuple", lambda: into(np.add.accumulate, np.ones(3), (np.zeros(3),)))
+t("reduce tuple None", lambda: np.add.reduce(np.ones((2, 3)), axis=0, out=(None,)))
+t("accumulate tuple None", lambda: np.add.accumulate(np.ones(3), out=(None,)))
+t("reduce tuple ro", lambda: rout(lambda r: np.add.reduce(np.ones((2, 4)), axis=0, out=(r,))))
+t("accumulate tuple ro", lambda: rout(lambda r: np.add.accumulate(np.ones(4), out=(r,))))
+t("reduce tuple too long", lambda: np.add.reduce(np.ones(3), out=(np.zeros(()), np.zeros(()))))
+t("reduce wrong shape", lambda: np.add.reduce(np.ones((2, 3)), axis=0, out=np.zeros(2)))
+t("reduce scalar into 1-d", lambda: np.add.reduce(np.ones(3), out=np.zeros(3)))
+t("reduce scalar into (1,)", lambda: np.add.reduce(np.ones(3), out=np.zeros(1)))
+t("accumulate wrong size", lambda: np.add.accumulate(np.ones(3), out=np.zeros(4)))
