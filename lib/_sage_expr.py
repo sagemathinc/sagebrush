@@ -1005,8 +1005,12 @@ class Expression:
 
             sage: (x + x).simplify(), (x^2/x).simplify()
             (2*x, x)
+            sage: assume(x > 0); sqrt(x^2).simplify(), sqrt(x^3).simplify(); forget()
+            (x, x^(3/2))
         """
-        return self  # Sage's simplify() only applies Maxima's simplification
+        # (Sage's simplify() only applies Maxima's simplification, which uses
+        # the assumptions: sqrt(x^2) is x under assume(x > 0))
+        return _assume_simplify(self) if _ASSUMPTIONS else self
 
     def simplify_full(self):
         """Full simplification (also full_simplify).
@@ -1018,7 +1022,8 @@ class Expression:
         """
         if self.is_relational():
             return self._map_rel("simplify_full")
-        return _one("simplify_full", self._s)
+        r = _one("simplify_full", self._s)
+        return _assume_simplify(r) if _ASSUMPTIONS else r
 
     full_simplify = simplify_full
 
@@ -2673,6 +2678,61 @@ def _sign_of(e):
             return 1 if c >= 0 else -1
     return None
 
+
+
+def _abs_assumed(u):
+    """|u| as the assumptions give it: u or -u when u's sign is known, abs(u)
+    when u is a symbol assumed real, else None (|u| is not decided)."""
+    sg = _sign_of(u)
+    if sg is not None:
+        return u if sg >= 0 else -u
+    if u.is_symbol() and _assumed_real(str(u)):
+        return _one("fun", "abs", u._s)
+    return None
+
+
+def _assume_simplify(e):
+    """The assumptions' simplifications, applied through e (Maxima's simplify
+    under assume(), as Sage's simplify() and simplify_full() do):
+    sqrt(u^n) for even n is |u|^(n/2), with |u| = u or -u when u's sign is
+    known and abs(u) when u is only known to be real; sqrt(u^n) for odd n
+    with u > 0 is u^(n/2); abs(u) is u or -u when u's sign is known.
+    sqrt(x^2).simplify() was sqrt(x^2) under assume(x > 0): a wrong answer
+    beside Sage's x (the kernel lane's first item, Nov 1)."""
+    op = e._op()
+    tag = op[0]
+    if tag in ("symbol",) or len(op) == 1 or e.is_numeric():
+        return e
+    kids = [_assume_simplify(Expression(t)) for t in op[1:]]
+    if tag == "pow" and str(kids[1]) == "1/2" and kids[0]._op()[0] == "pow":
+        u, n = kids[0].operands()
+        if str(n).isdigit():
+            n = int(str(n))
+            if n % 2 == 0:
+                a = _abs_assumed(u)
+                if a is not None:
+                    return a ** (n // 2)
+            elif _sign_of(u) == 1:
+                return u ** (kids[1] * n)
+    if tag == "add":
+        out = kids[0]
+        for k in kids[1:]:
+            out = out + k
+        return out
+    if tag == "mul":
+        out = kids[0]
+        for k in kids[1:]:
+            out = out * k
+        return out
+    if tag == "pow":
+        return kids[0] ** kids[1]
+    if tag == "fun:abs":
+        return abs(kids[0])
+    if tag.startswith("rel:"):
+        return e.operator()(kids[0], kids[1])
+    if tag.startswith("fun:"):
+        return e.operator()(*kids)
+    return e
 
 def _const_sign(e):
     """The certified sign of a real constant (1, 0, -1), or None."""
