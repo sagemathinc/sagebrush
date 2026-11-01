@@ -51,11 +51,16 @@
   .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
   .top .link, .top #connect { white-space: nowrap; }
   /* (O-2: beside the pane the chat can be 420 px; the header stays one line there, and the agent's name, not the
-     buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping) */
+     buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping. Where the chat is under 520 px (the
+     header's content box under 488), "on your computer" is visually hidden, kept for screen readers, rather than cut
+     to a letter: board's B-O2-1) */
   @media (min-width: 901px) {
-    .top { flex-wrap: nowrap; }
+    .top { flex-wrap: nowrap; container: sb-top / inline-size; }
     .top #who { display: block; flex: 0 1 auto; }
     .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
+    @container sb-top (max-width: 488px) {
+      .top #who small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    }
   }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
