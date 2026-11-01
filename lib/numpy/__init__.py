@@ -695,6 +695,22 @@ def _out_writeable(out):
             raise ValueError("output array is read-only")
 
 
+def _one_out(out):
+    """A reduction's out=: an array, or a tuple of one; read-only refused"""
+    if isinstance(out, tuple):
+        if len(out) != 1:
+            raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+        out = out[0]
+    if not isinstance(out, ndarray):
+        raise TypeError("return arrays must be of ArrayType")
+    _out_writeable(out)
+    return out
+
+
+def _shape_text(shape):
+    return "(%s)" % (", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else ""))
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -818,9 +834,18 @@ class ufunc:
         return res
 
     def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
-        _out_writeable(out)
         if out is not None:
-            out[...] = self.reduce(a, axis, dtype, None, keepdims, initial, where)
+            # (computed in out's dtype unless dtype is given, then written
+            # into out, which must have the result's shape, as NumPy's)
+            out = _one_out(out)
+            r = asarray(self.reduce(a, axis, dtype if dtype is not None else out.dtype, None, keepdims, initial, where))
+            if r.ndim != out.ndim:
+                raise ValueError("output parameter for reduction operation %s has the wrong number of dimensions: Found %d but expected %d"
+                                 % (self.__name__, out.ndim, r.ndim))
+            if r.shape != out.shape:
+                raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s->(%s) %s "
+                                 % (_shape_text(out.shape), ",".join(str(n) for n in out.shape), _shape_text(asarray(a).shape).replace(" ", "")))
+            out[...] = r
             return out
         a = asarray(a)
         if dtype is not None:
@@ -862,9 +887,13 @@ class ufunc:
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
-        _out_writeable(out)
         if out is not None:
-            out[...] = self.accumulate(a, axis, dtype)
+            # (computed in out's dtype unless dtype is given, as NumPy's)
+            out = _one_out(out)
+            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else out.dtype))
+            if r.shape != out.shape:
+                raise ValueError("provided out is the wrong size for the accumulation.")
+            out[...] = r
             return out
         a = asarray(a)
         if dtype is not None:
