@@ -1722,14 +1722,21 @@ class Matrix:
         return self.echelon_form()
 
     def hermite_form(self):
-        """The Hermite normal form (rows, zero rows at the bottom).
+        """The Hermite normal form (rows, zero rows at the bottom); over QQ,
+        a field, the reduced row echelon form, as Sage (it was the integer
+        Hermite form of an integral QQ matrix: a wrong answer).
 
         EXAMPLES::
 
             sage: matrix(ZZ, [[2, 4, 6], [3, 5, 7]]).hermite_form()
             [1 1 1]
             [0 2 4]
+            sage: matrix(QQ, [[1, 2], [3, 4]]).hermite_form()
+            [1 0]
+            [0 1]
         """
+        if self._base is _sa().QQ:
+            return self.echelon_form()
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
@@ -1766,7 +1773,10 @@ class Matrix:
         return d
 
     def smith_form(self):
-        """(D, U, V) with U self V = D diagonal (the elementary divisors).
+        """(D, U, V) with U self V = D diagonal (the elementary divisors);
+        over QQ, a field, D has a 1 for each unit of the rank, as Sage (it
+        was the integer Smith form of an integral QQ matrix: a wrong
+        answer).
 
         EXAMPLES::
 
@@ -1775,8 +1785,45 @@ class Matrix:
             [0 4]
             sage: U * matrix(ZZ, [[2, 4], [6, 8]]) * V == D
             True
+            sage: A = matrix(QQ, [[1, 2], [3, 4]]); D, U, V = A.smith_form(); D
+            [1 0]
+            [0 1]
+            sage: U * A * V == D
+            True
         """
+        if self._base is _sa().QQ:
+            return self._smith_field()
         return _smith_uv(self._integer_rows(), self._nc)
+
+    def _smith_field(self):
+        # over a field: U from the reduced echelon form of [self | I], then
+        # V clears each non-pivot column with the pivot columns and puts
+        # the pivot columns first, so U self V = diag(1, ..., 1, 0, ...)
+        K = self._base
+        sa = _sa()
+        m, n = self.nrows(), self.ncols()
+        if not m or not n:
+            return sa.zero_matrix(K, m, n), sa.identity_matrix(K, m), sa.identity_matrix(K, n)
+        from sagebrush import linalg
+        aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
+        rows, _ = linalg.rref(aug)
+        R = [list(r[:n]) for r in rows]
+        U = [list(r[n:]) for r in rows]
+        piv = []
+        for r in R:
+            j = next((j for j, v in enumerate(r) if v != 0), None)
+            if j is None:
+                break
+            piv.append(j)
+        V = [[K(1) if i == j else K(0) for j in range(n)] for i in range(n)]
+        for j in range(n):
+            if j not in piv:
+                for i, p in enumerate(piv):
+                    V[p][j] = -R[i][j]
+        order = piv + [j for j in range(n) if j not in piv]
+        V = [[row[j] for j in order] for row in V]
+        D = [[K(1) if i == j and i < len(piv) else K(0) for j in range(n)] for i in range(m)]
+        return Matrix(K, D, n), Matrix(K, U, m), Matrix(K, V, n)
 
     def LLL(self, delta=None, **kwds):
         """The LLL-reduced basis of the lattice spanned by the rows, with
