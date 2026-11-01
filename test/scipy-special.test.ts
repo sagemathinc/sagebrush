@@ -43,6 +43,33 @@ for c in cases:
   ].join("\n"));
 });
 
+test("scipy.special: a variable-work path beyond its bound is refused before its loop", () => {
+  // (the Hurwitz zeta's head sum for a negative q and the Legendre
+  // recurrence: 10**6 terms at most; just past it, and far past it, both
+  // refuse at once, without the work; at the bound they compute,
+  // scipy-tests/test_special.py)
+  const out = py(`
+import time
+import scipy.special as sc
+for f in [lambda: sc.zeta(2, -1000000.5), lambda: sc.zeta(2, -1e12 - 0.5), lambda: sc.eval_legendre(1000001, 0.3),
+          lambda: sc.eval_legendre(1e12, 0.3), lambda: sc.eval_legendre(-1000002, 1e-6)]:
+    t = time.time()
+    try:
+        f()
+        print("no error")
+    except NotImplementedError as e:
+        print("NotImplementedError", e, time.time() - t < 0.5)
+`);
+  assert.equal(out, [
+    "NotImplementedError scipy.special.zeta(2.0, -1000000.5): a q at or below -1000000 (its head sum's work) True",
+    "NotImplementedError scipy.special.zeta(2.0, -1000000000000.5): a q at or below -1000000 (its head sum's work) True",
+    "NotImplementedError scipy.special.eval_legendre(1000001.0, 0.3): a degree above 1000000 (its recurrence's work) True",
+    "NotImplementedError scipy.special.eval_legendre(1000000000000.0, 0.3): a degree above 1000000 (its recurrence's work) True",
+    "NotImplementedError scipy.special.eval_legendre(-1000002.0, 1e-06): a degree above 1000000 (its recurrence's work) True",
+    "",
+  ].join("\n"));
+});
+
 test("scipy.special.y1 for large x, where SciPy's (Cephes's) loses accuracy: mpmath's values", () => {
   // (mpmath.bessely(1, x) at 400 digits for 1e300, 60 elsewhere; SciPy 1.18's
   // y1 is 1.2e-8 off at the second and gives -6.5e-151 at the first)

@@ -35,6 +35,10 @@ def kind(x):
 def show(label, v):
     name = label.split("(")[0].split(" ")[0]
     rtol = RTOL.get(name, 1e-13)
+    # (a float32 or complex64 result agrees to float32's precision: two units
+    # in its last place)
+    if getattr(v, "dtype", None) in (np.float32, np.complex64):
+        rtol = max(rtol, 2.0 ** -22)
     if isinstance(v, tuple):
         for i, x in enumerate(v):
             show("%s[%d]" % (label, i), x)
@@ -122,6 +126,24 @@ for name, pairs in TWO.items():
     for a, b in pairs:
         out("%s(%r, %r)" % (name, a, b), lambda: f(a, b))
 
+# (beta's poles at the nonpositive integers, which cancel for an integer b
+# with 1 - a - b > 0, Cephes's beta_negint; the extremes of rel_entr's and
+# kl_div's ratio; complex log1p and expm1 near 0 and at log1p's pole; the
+# variable-work paths at their bound)
+for a, b in [(-1, 1), (1, -1), (-2, 2), (2, -2), (-3, 1), (-3, 2), (-3, -1), (-1, -1), (-2, 1), (-4, 3), (0, 1), (-1, 3), (-1.0, 1.0)]:
+    out("beta(%r, %r) negint" % (a, b), lambda: sc.beta(a, b))
+    out("betaln(%r, %r) negint" % (a, b), lambda: sc.betaln(a, b))
+for x, y in [(1e-300, 1e300), (1e300, 1e-300), (1, 1 + 1e-10), (1e-310, 1), (2, 1e-308), (5e-324, 1), (3, 2.9)]:
+    out("rel_entr(%r, %r) extreme" % (x, y), lambda: sc.rel_entr(x, y))
+    out("kl_div(%r, %r) extreme" % (x, y), lambda: sc.kl_div(x, y))
+for z in [1e-20 + 0j, 1e-20 + 1e-20j, -1e-20 + 1e-10j, 1e-10j, -1e-8 + 1e-4j, -1 + 0j, complex(-1, -0.0), -2 + 0j, -0.3 + 0.5j, -0.5 + 0j,
+          0j, 1e-300 + 1e-300j, -40.5 + 1j, complex(0.5, math.inf)]:
+    out("log1p(%r) small" % (z,), lambda: sc.log1p(z))
+    out("expm1(%r) small" % (z,), lambda: sc.expm1(z))
+out("zeta(2, -999999.5) bound", lambda: sc.zeta(2, -999999.5))
+out("eval_legendre(1000000, 0.3) bound", lambda: sc.eval_legendre(1000000, 0.3))
+out("eval_legendre(-1000001, 0.3) bound", lambda: sc.eval_legendre(-1000001, 0.3))
+
 for args in [(0, 2, 0.5), (1, 2, 0.3), (2, 3, -0.7), (1, 2, 1.5), (-1, 3, 0.2), (3, 2, 0.4), (0, 0, 0.9)]:
     out("lpmv%r" % (args,), lambda: sc.lpmv(*args))
 for n, x in [(1, 1.0), (1, [1.0, 2.0]), (0, 2.5), (2, 0.0), (1, -1.0), (0.5, 1.0), (3, -2.5), (-1, 2.0)]:
@@ -168,5 +190,17 @@ for label, f in [
     ("logsumexp empty", lambda: sc.logsumexp([])), ("logsumexp scalar", lambda: sc.logsumexp(5.0)),
     ("softmax", lambda: sc.softmax([1, 2, 3])), ("softmax axis", lambda: sc.softmax([[1, 2], [3, 4]], axis=1)),
     ("log_softmax", lambda: sc.log_softmax([1, 2, 3])), ("log_softmax large", lambda: sc.log_softmax([1000.0, 0.0])),
+    # (a floating input keeps its precision; integers become float64)
+    ("logsumexp f32", lambda: sc.logsumexp(np.array([1, 2, 3], dtype=np.float32))),
+    ("logsumexp f32 scalar", lambda: sc.logsumexp(np.float32(2.0))),
+    ("logsumexp f32 b f32", lambda: sc.logsumexp(np.array([1, 2], dtype=np.float32), b=np.array([1, 2], dtype=np.float32))),
+    ("logsumexp f32 b f64", lambda: sc.logsumexp(np.array([1, 2], dtype=np.float32), b=np.array([1, 2]))),
+    ("logsumexp f32 axis keepdims", lambda: sc.logsumexp(np.array([[1, 2], [3, 4]], dtype=np.float32), axis=1, keepdims=True)),
+    ("logsumexp f32 sign", lambda: sc.logsumexp(np.array([1, 2], dtype=np.float32), b=np.array([1, -1], dtype=np.float32), return_sign=True)),
+    ("logsumexp int32", lambda: sc.logsumexp(np.array([1, 2], dtype=np.int32))),
+    ("softmax f32", lambda: sc.softmax(np.array([1, 2, 3], dtype=np.float32))),
+    ("softmax f32 axis", lambda: sc.softmax(np.array([[1, 2], [3, 4]], dtype=np.float32), axis=0)),
+    ("log_softmax f32", lambda: sc.log_softmax(np.array([1, 2, 3], dtype=np.float32))),
+    ("log_softmax int", lambda: sc.log_softmax(np.array([1, 2, 3]))),
 ]:
     out(label, f)
