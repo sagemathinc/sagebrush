@@ -1,7 +1,8 @@
 // The engines route (web/engines.ts) in Miniflare, with web/dist's engine in
 // a simulated R2 bucket: each file comes back byte for byte with its
 // manifest's headers, immutable and readable from anywhere; nothing else
-// does.  Run after bun web/build.ts:   node web/test-engines.mjs
+// does; and every 404/405 says nosniff (security audit G-3a; control C-E).
+// Run after bun web/build.ts:   node web/test-engines.mjs
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,12 +22,16 @@ const ok = (c, what) => { count++; if (!c) { failures++; console.log("FAIL", wha
 const { id } = JSON.parse(readFileSync(join(here, "dist/engine/latest.json"), "utf8"));
 const dir = join(here, "dist/engine", id);
 const man = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
-const entry = `import { handleEngines, handleLibChunk } from ${JSON.stringify(join(here, "engines.ts"))};
-export default { async fetch(req, env, ctx) { return (await handleEngines(req, env, ctx)) ?? (await handleLibChunk(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`;
-const entryFile = join(mkdtempSync(join(tmpdir(), "sb-engines-")), "entry.ts");
-writeFileSync(entryFile, entry);
-const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "engines", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
+// (the route's Worker, from an engines.ts: this one, or a control's mutated copy)
+function workerOf(engines) {
+  const entry = `import { handleEngines, handleLibChunk, handlePkg } from ${JSON.stringify(engines)};
+export default { async fetch(req, env, ctx) { return (await handleEngines(req, env, ctx)) ?? (await handleLibChunk(req, env, ctx)) ?? (await handlePkg(req, env, ctx)) ?? new Response("not mine", { status: 418 }); } };`;
+  const entryFile = join(mkdtempSync(join(tmpdir(), "sb-engines-")), "entry.ts");
+  writeFileSync(entryFile, entry);
+  const script = execFileSync("bun", ["build", entryFile, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+  return new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "engines", modules: true, script, compatibilityDate: "2026-10-01", r2Buckets: ["ENGINES"] }] }));
+}
+const mf = workerOf(join(here, "engines.ts"));
 const bucket = await mf.getR2Bucket("ENGINES");
 // (as scripts/publish-engine.mjs puts it: the zone data only at the shared
 // lib/tzdata/, every other file under engine/<id>/)
@@ -133,6 +138,59 @@ for (const [z, what] of [[zoneD, "another size"], [zoneE, "the same size and oth
 }
 const h = await get(`/engine/${bare}/${zoneC}`, { method: "HEAD" });
 ok(h.status === 200 && h.headers.get("content-length") === String(man.files[zoneC].size), "HEAD of a shared zone file gives its size");
+
+// Every refusal (security audit G-3a): the seven 404/405 sites (engine 405 :57, engine 404 without a manifest entry
+// :69 and without the object :86, lib 405 :113 and 404 :121, pkg 405 :151 and 404 :153) say nosniff, and keep their
+// status, body and headers: a 404 CORS * and no-store, a 405 neither.  A file (200) says it too (COMMON).
+const HEX = "0123456789abcdef".repeat(4);
+const REFUSALS = [
+  ["engine 405", `/engine/${id}/sagebrush-worker.js`, "POST", 405, "method not allowed"],
+  ["engine 404 (no entry)", `/engine/${"0".repeat(20)}/sagebrush-worker.js`, "GET", 404, "no such engine file"],
+  ["engine 404 (no object)", `/engine/${"b".repeat(20)}/sagebrush-worker.js`, "GET", 404, "no such engine file"],
+  ["lib 405", "/lib/x.src.0123456789abcdef.json", "POST", 405, "method not allowed"],
+  ["lib 404", "/lib/nothing.src.0123456789abcdef.json", "GET", 404, "no such library chunk"],
+  ["pkg 405", `/pkg/${HEX}.json`, "POST", 405, "method not allowed"],
+  ["pkg 404", `/pkgset/${HEX}.json`, "GET", 404, "no such package file"],
+];
+// (per case: what lacks nosniff, and anything else not as before)
+async function refusals(w) {
+  const b = await w.getR2Bucket("ENGINES");
+  await b.put(`engine/${"b".repeat(20)}/manifest.json`, readFileSync(join(dir, "manifest.json"))); // (lists the file; no object)
+  const g = (path, init) => w.dispatchFetch(`https://sagebrush.test${path}`, init);
+  const lacking = [], other = [];
+  for (const [name, path, method, status, body] of REFUSALS) {
+    const r = await g(path, { method });
+    const text = await r.text(), acao = r.headers.get("access-control-allow-origin"), cc = r.headers.get("cache-control");
+    const kept = r.status === status && text === body && (status === 404 ? acao === "*" && cc === "no-store" : acao === null && cc === null);
+    if (!kept) other.push(`${name}: ${r.status} ${JSON.stringify(text)} acao=${acao} cache=${cc}`);
+    if (r.headers.get("x-content-type-options") !== "nosniff") lacking.push(name);
+  }
+  return { lacking, other };
+}
+{
+  const { lacking, other } = await refusals(mf);
+  console.log(`G3A-ENGINES refusals ${REFUSALS.length}: lacking nosniff [${lacking.join(", ")}]; not as before [${other.join("; ")}]`);
+  ok(other.length === 0, "every 404/405 keeps its status, body and headers: " + (other.join("; ") || "all"));
+  ok(lacking.length === 0, `every 404/405 (${REFUSALS.length}) says nosniff: ` + (lacking.join(", ") || "none missing"));
+  const file = await get(`/engine/${id}/sagebrush-worker.js`);
+  ok(file.status === 200 && file.headers.get("x-content-type-options") === "nosniff", "a file (200) says nosniff");
+}
 await mf.dispose();
+// Control C-E: text() without nosniff -> exactly the seven refusals lack it, nothing else changes, and the 200 keeps it
+{
+  const src = readFileSync(join(here, "engines.ts"), "utf8"), a = `{ ...headers, "X-Content-Type-Options": "nosniff" }`;
+  ok(src.split(a).length === 2, "control C-E: the change applies to web/engines.ts");
+  const copy = join(mkdtempSync(join(tmpdir(), "sb-engines-ce-")), "engines.ts");
+  writeFileSync(copy, src.replace(a, "{ ...headers }"));
+  const w = workerOf(copy);
+  const wb = await w.getR2Bucket("ENGINES");
+  for (const f of ["sagebrush-worker.js", "manifest.json"]) await wb.put(`engine/${id}/${f}`, readFileSync(join(dir, f)));
+  const { lacking, other } = await refusals(w);
+  const f200 = await w.dispatchFetch(`https://sagebrush.test/engine/${id}/sagebrush-worker.js`);
+  console.log(`G3A-ENGINES control C-E: lacking nosniff [${lacking.join(", ")}]; not as before [${other.join("; ")}]; 200 nosniff ${f200.headers.get("x-content-type-options")}`);
+  ok(JSON.stringify(lacking) === JSON.stringify(REFUSALS.map(([n]) => n)) && other.length === 0 && f200.status === 200 && f200.headers.get("x-content-type-options") === "nosniff",
+    `control C-E: exactly the ${REFUSALS.length} refusals lack nosniff (${lacking.join(", ") || "none"}), nothing else changed (${other.join("; ") || "none"}), the 200 keeps it`);
+  await w.dispose();
+}
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);
