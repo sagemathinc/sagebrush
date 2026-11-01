@@ -179,7 +179,7 @@ const held = [];
 let serverNoticesDropped = 0;
 /** over the whole run: /__files/ GETs answered 200 (the downloads through the redirect), and answers that would have sent
  * the page to another origin (a Location, or a 3xx, not on the front's own) */
-const front = { files200: 0, leaks: [], requests: 0 };
+const front = { files200: 0, leaks: [], requests: 0, filesXSync: [], filesPreflights: 0 };
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
 // ---- 3b's front registry (plan r3 §2, r4 §1, r5 §1): every front await in flight, by label and epoch tag, so the page
@@ -423,13 +423,43 @@ async function control(body) {
 }
 
 /** The headers of an answer passed to the page, without those the front sets itself; a Location (or a 3xx) that isn't
- * on the front's own origin is counted as a leak of another origin, and the run fails on any */
+ * on the front's own origin, or the files origin's /__files/, is counted as a leak of another origin, and the run fails
+ * on any.  The blob GET's 303 to /__files/ is sent to the files origin, as PROD's goes to files.cocalcusercontent.com */
 function pageHeaders(r, path) {
   const h = {};
   r.headers.forEach((v, k) => { if (k !== "set-cookie" && k !== "content-length" && k !== "content-encoding") h[k] = v; });
-  const loc = r.headers.get("location");
-  if ((loc !== null || (r.status >= 300 && r.status < 400)) && !(loc !== null && new URL(loc, origin).origin === origin)) front.leaks.push(`${r.status} ${path} -> ${loc}`);
+  let loc = r.headers.get("location");
+  if (loc !== null && filesOrigin) {
+    const l = new URL(loc, origin);
+    if (l.origin === origin && l.pathname.startsWith("/__files/")) loc = h.location = filesOrigin + l.pathname + l.search;
+  }
+  const at = loc !== null ? new URL(loc, origin) : null;
+  const ours = at !== null && (at.origin === origin || (at.origin === filesOrigin && at.pathname.startsWith("/__files/")));
+  if ((loc !== null || (r.status >= 300 && r.status < 400)) && !ours) front.leaks.push(`${r.status} ${path} -> ${loc}`);
   return h;
+}
+
+// The user-content files on an origin of their own, as on PROD: the blob GET's 303 goes there (pageHeaders), and its
+// CORS is the files Worker's exactly (cloud web/sync/server.ts handleSyncFiles): the page's origin allowed, a preflight
+// allowing only `range`.  So a download whose request carries any other header fails in the browser, as every one of
+// William's did (Nov 1 2026: the client sent its x-sync-* binding headers on the GET, the 303 carried them across, and
+// the preflight refused them; B5).  Any x-sync-* header seen here fails the run.
+let filesServer = null, filesOrigin = "";
+const filesCors = () => ({ "access-control-allow-origin": origin, vary: "origin", "access-control-expose-headers": "content-length, content-range" });
+async function filesServe(req) {
+  const u = new URL(req.url);
+  const sent = [...req.headers.keys()].filter((k) => k.startsWith("x-sync-"));
+  const asked = (req.headers.get("access-control-request-headers") ?? "").toLowerCase();
+  if (sent.length || asked.includes("x-sync-")) front.filesXSync.push(`${req.method} ${u.pathname.slice(0, 20)}: ${sent.join(",") || asked}`);
+  if (!u.pathname.startsWith("/__files/")) return new Response("not found", { status: 404, headers: filesCors() });
+  if (req.method === "OPTIONS") {
+    front.filesPreflights++;
+    return new Response(null, { status: 204, headers: { ...filesCors(), "access-control-allow-methods": "GET, HEAD", "access-control-allow-headers": "range", "access-control-max-age": "600" } });
+  }
+  const r = await serve(new Request(origin + u.pathname + u.search, { method: req.method }));
+  const h = new Headers(r.headers);
+  for (const [k, v] of Object.entries(filesCors())) h.set(k, v);
+  return new Response(r.body, { status: r.status, headers: h });
 }
 
 /** A status that carries no body (the Fetch rule: a body there is a TypeError), as /auth/dev's 204 */
@@ -850,6 +880,11 @@ const cleanup = () => (cleaned ??= runStages([
     const refused = /ConnectionRefused|ECONNREFUSED/.test(probe);
     const ok = refused && pend.requests === 0 && pend.open === 0;
     return { ok, said: ok ? `stopped (proved: the listener refuses (${probe}); no request pending; no page socket open; Bun's pendingWebSockets ${pend.websockets} not awaited)` : `NOT proved stopped: ${J({ ...pend, probe })}` };
+  }],
+  ["files origin", async () => {
+    if (!filesServer) return { ok: true, said: "never started" };
+    const stopped = await Promise.race([filesServer.stop(true).then(() => true), sleep(2000).then(() => false)]);
+    return { ok: stopped, said: stopped ? "stopped" : `NOT stopped: ${filesServer.pendingRequests} requests pending` };
   }],
   ["profile", () => removeDir(profile)],
   ["site", () => removeDir(site)],
@@ -1340,6 +1375,8 @@ try {
   writeFileSync(join(site, "ctl.html"), `<!doctype html><meta charset="utf-8"><title>sync client test: controls</title><script>const p = new URLSearchParams(location.search).get("p"); window.ACCOUNTS = ${J(CTL_ACCOUNTS)}.slice(3 * Math.max(0, ${J(CONTROL_PAGES.map((c) => c.page))}.indexOf(p))); window.FULL = null; window.SMALL = null; window.REQUIRE_CLAIM = true; if (p !== "P7") window.__budgets = ${J(CONTROL_BUDGETS)};</script><script type="module">import { run, runControls } from "./cases.js"; window.run = run; window.runControls = runControls; window.ready = true;</script>`);
   server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: serve, websocket });
   origin = `http://127.0.0.1:${server.port}`;
+  filesServer = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: filesServe });
+  filesOrigin = `http://127.0.0.1:${filesServer.port}`;
 
   let port = Number(process.env.CDP_PORT) || 0;
   chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--js-flags=--expose-gc", "--enable-precise-memory-info", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
@@ -1481,11 +1518,12 @@ try {
   console.log(`  front: the server's own index_changed notices dropped (ctl.serverNotices off): ${serverNoticesDropped}`);
   // (the downloads went through the redirect to the page's own /__files/: required when a download case ran)
   if (DOWNLOADS.some(selected)) {
-    console.log(`  front: downloads through /__files/: ${front.files200}`);
+    console.log(`  front: downloads through /__files/ on the files origin: ${front.files200} (preflights: ${front.filesPreflights})`);
     if (front.files200 === 0) fails.push("no download went through /__files/ (the blob GET's redirect)");
   } else console.log("  front: downloads through /__files/: not required (ONLY names no download case)");
   // (the proxied pairs' closes over the run, for the gate's behaviour on real data; any failure also fails the cleanup)
   console.log(`  front: proxied close failures recorded: ${closeFailures.length}; page sockets already closed, not closed again: ${closeSkips.n}`);
+  if (front.filesXSync.length) fails.push(`x-sync-* headers reached the files origin (its CORS refuses them, so those downloads fail in a browser): ${front.filesXSync.length}: ${front.filesXSync.slice(0, 3).join("; ")}`);
   if (front.leaks.length) fails.push(`the internal origin leaked to the page: ${front.leaks.length} responses: ${front.leaks.slice(0, 5).join("; ")}`);
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
