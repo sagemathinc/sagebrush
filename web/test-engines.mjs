@@ -158,6 +158,11 @@ async function refusals(w) {
   await b.put(`engine/${"b".repeat(20)}/manifest.json`, readFileSync(join(dir, "manifest.json"))); // (lists the file; no object)
   const g = (path, init) => w.dispatchFetch(`https://sagebrush.test${path}`, init);
   const lacking = [], other = [];
+  // (the witness that "engine 404 (no object)" reaches :86, not :69 (both say "no such engine file"): this id's
+  // manifest is served, so the route found its entry)
+  const wit = await g(`/engine/${"b".repeat(20)}/manifest.json`);
+  await wit.arrayBuffer();
+  if (wit.status !== 200) other.push(`witness: /engine/${"b".repeat(20)}/manifest.json ${wit.status}, not 200 (the no-object case wouldn't reach :86)`);
   for (const [name, path, method, status, body] of REFUSALS) {
     const r = await g(path, { method });
     const text = await r.text(), acao = r.headers.get("access-control-allow-origin"), cc = r.headers.get("cache-control");
