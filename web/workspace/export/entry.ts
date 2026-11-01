@@ -160,7 +160,9 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
 
   function ready(plan: Plan): Promise<"save" | "cancel"> {
     return new Promise((done) => {
-      // (the panel closed while it waits: as Cancel)
+      // (the panel closed while it waits: as Cancel; closed before it was shown (while the save picker was open, say):
+      // Cancel at once, the abort having fired already (astra3's E1 code R1a))
+      if (ac.signal.aborted) { done("cancel"); return; }
       ac.signal.addEventListener("abort", () => done("cancel"), { once: true });
       show(
         el("p", { textContent: `Ready: ${plan.files.toLocaleString()} files and ${plan.folders.toLocaleString()} folders, ${fmt(plan.bytes)} before compression.` }),

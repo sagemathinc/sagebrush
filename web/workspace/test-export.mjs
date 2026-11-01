@@ -566,6 +566,16 @@ try {
     check(await until(`!!window.__bp`, 30000), "own e: an export is past the page's own saves, before preflight");
     await ev(`(() => { ${P}.sbClose(); window.__bp?.(); return 1; })()`);
     check(await settledFree(), "own e: the panel closed before preflight: the export ends, no owner, no lock, no scratch file left");
+    // (f) closed while the save picker is open, its AbortError coming after the close (astra3's R1a): back at Ready the
+    // export is cancelled, never left waiting on a panel no one can see
+    await ev(`(() => { window.__realPicker ??= window.showSaveFilePicker; window.__pickerNo = null; window.showSaveFilePicker = () => new Promise((_, no) => { window.__pickerNo = () => no(new DOMException("The user aborted a request.", "AbortError")); }); window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
+    await startFlow();
+    check(await until(flowHas(`/^Save…$/`), 120000), "own f: an export is ready");
+    await panelButton(/^Save…$/);
+    check(await until(`!!window.__pickerNo`, 10000), "own f: the save picker is open");
+    await ev(`(() => { ${P}.sbClose(); window.__pickerNo?.(); return 1; })()`);
+    check(await settledFree(), "own f: the panel closed while the save picker was open, then the picker closed: the export ends, no owner, no lock, no scratch file left");
+    await ev(`(() => { window.showSaveFilePicker = window.__realPicker; return 1; })()`);
     await hooks();
     const e2 = await exportOnce(join(out, "own-e.zip"), { keep: true });
     const ve = e2.stopped ? e2.stopped : await savedValid(join(out, "own-e.zip"));
