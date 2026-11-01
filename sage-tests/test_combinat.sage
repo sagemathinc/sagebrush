@@ -50,3 +50,22 @@ print(Permutation('(1,2,3)'), Permutation([(1, 2, 3)]))
 print(Permutation([2, 1, 4, 3]).order())
 print(Permutation([3, 1, 2]).descents(), Permutation([3, 1, 2]).inversions())
 print(Permutation([3, 1, 2, 5, 4]).cycle_string())
+# multisets by equality, generated from multiplicities (astra3 R1, R3)
+print(Combinations([1, 2, 1], 2).list(), Combinations([1, 2, 1], 2).cardinality())
+print(Permutations([1, 2, 1]).list())
+print(Permutations([1]*20).cardinality(), Combinations([1]*40, 20).cardinality())
+print(Permutations([1, 1, 2], 2).list(), Permutations([1, 1, 2], 2).cardinality())
+# domains: refused, never truncated (astra3 R2); the exception names are sagebrush's
+def err(f):
+    try:
+        return "no error: %s" % (f(),)
+    except Exception as ex:
+        return type(ex).__name__
+print(err(lambda: Partition([2.9, 1])))
+print(err(lambda: Permutation([1.5, 2])))
+print(err(lambda: Partitions(5/2)))
+print(err(lambda: Compositions(-1)))
+print(err(lambda: Partitions(-1)))
+print(err(lambda: Permutations(-1)))
+print(err(lambda: Subsets(4, -1)))
+print(Partition([2, 1]) == [2.9, 1], Compositions(0).list(), Compositions(0).cardinality(), stirling_number2(0, -1), Subsets(4, 5).cardinality(), Subsets(4, 5).list())
