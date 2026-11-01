@@ -1,0 +1,3 @@
+# test_assume_simplify: recorded deviations from Sage 10.9
+Checked against real Sage 10.9 on Nov 1 (the VM2 oracle; COMPARE.txt 24577be7). Lines 1-13 and 15-21 of test_assume_simplify.out are Sage's output. Grader ruled this line (b) (04f715e1) and @sagebrush approved it (sage-oracle-b-approvals.md). #420 is merged; this entry rides in #428, with no revert.
+- Line 14, `(sqrt(x^2) < y).simplify_full()` under `assume(x > 0)`: Sage raises TypeError ("unable to make sense of Maxima expression 'realpart(_SAGE_VAR_x < _SAGE_VAR_y)+...' in Sage", a failure converting Maxima's answer back). Ours returns `x < y`, which is correct: sqrt(x^2) = x for x > 0, applied to each side of the relation.
