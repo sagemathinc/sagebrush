@@ -50,7 +50,10 @@ const notices = ["LICENSE-MIT", "LICENSE-APACHE", "cdn/LICENSE-CPython.txt", "LI
 // cache (src/compile.ts): a hash of src/ and lib/.
 // (scripts/build-id.mjs: the compiler, runtime and library, hashed)
 const buildId = computeBuildId(root, lib);
-writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
+// (the library itself gzipped, base64: src/lib-embed.ts decodes it once, when src/compile.ts first reads
+// __PYJS_LIB__ at startup; a quarter of the bundle otherwise)
+const libGz = gzipSync(Buffer.from(JSON.stringify(lib), "utf8"), { level: 9 }).toString("base64");
+writeFileSync(join(out, "lib.gen.js"), `import { installEmbeddedLib } from "../../src/lib-embed";\nglobalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\ninstallEmbeddedLib(globalThis, ${JSON.stringify(libGz)});\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // (the same without the library, for the browser's worker, which fetches it
 // in chunks: web/lib-lazy.ts)
 writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
