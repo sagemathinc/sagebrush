@@ -896,11 +896,16 @@ const CONN = {
   expired: "Claude's access expired.",
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
-  kept: "Claude was connected to this page before it was opened again.",
+  kept: "Claude was connected to this page earlier.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
-let reconnecting = false; // (the bar's [Reconnect] while its one attempt runs: "Reconnecting…", never disabled, C3)
+let reconnecting = false; // (a [Reconnect] while its one attempt runs: "Reconnecting…", never disabled, C3)
+let busyBtn: HTMLElement | null = null; // (which [Reconnect] started it: the bar's or the hint's)
+let rememberBusy = false; // ("Use remembered access" while its attempt runs: its own "Connecting…", board's N-b)
+// (a Connect dialog opened from the bar or the hint: on success, focus goes to the composer; if the grant is cancelled,
+//  back to that button; board's B-A14-1)
+let connectFrom: HTMLElement | null = null;
 let rememberedGrant: Kept["grant"] | null = null;
 let agentUi: ReturnType<typeof mountAgentPairing> | null = null;
 const setText = (el: HTMLElement, t: string) => { if (el.textContent !== t) el.textContent = t; };
@@ -917,59 +922,82 @@ function grantScope(g: Kept["grant"]) {
 }
 
 function renderConn() {
-  const bar = $("#conn-bar"), b = connShown ? connBar : null;
-  const hadFocus = bar.contains(document.activeElement);
+  const bar = $("#conn-bar"), hint = $("#send-hint"), b = connShown ? connBar : null;
+  const was = document.activeElement instanceof HTMLElement && (bar.contains(document.activeElement) || hint.contains(document.activeElement)) ? document.activeElement : null;
   bar.classList.toggle("on", !!b);
   setText($("#conn-alert"), b?.alert ? CONN[b.kind] : "");
   setText($("#conn-status"), b && !b.alert ? CONN[b.kind] : "");
-  const act = $("#conn-act");
+  // (the action: the bar's, or Connect when there's no bar; on the bar's button, and on the hint's after ×, B-A14-3)
+  const action = connBar?.action ?? "connect";
+  const act = $("#conn-act"), hact = $("#send-hint-act");
   const acts = b !== null && (b.action !== null || b.kind !== "restoring");
   ($(".acts", bar) as HTMLElement).hidden = !acts;
   act.hidden = !b?.action;
-  setText(act, reconnecting ? "Reconnecting…" : b?.action === "connect" ? "Connect" : "Reconnect");
-  for (const k of ["aria-disabled", "aria-busy"]) reconnecting ? act.setAttribute(k, "true") : act.removeAttribute(k);
+  for (const btn of [act, hact]) {
+    const mine = reconnecting && busyBtn === btn;
+    setText(btn, mine ? "Reconnecting…" : action === "connect" ? "Connect" : "Reconnect");
+    mine ? btn.setAttribute("aria-busy", "true") : btn.removeAttribute("aria-busy");
+    reconnecting || rememberBusy ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
+  }
   const rem = !!b && !!rememberedGrant && b.kind !== "restoring" && b.kind !== "lost";
   ($(".remembered", bar) as HTMLElement).hidden = !rem;
   setText($("#conn-scope"), rem && rememberedGrant ? grantScope(rememberedGrant) : "");
+  const rb = $("#conn-remembered");
+  setText(rb, rememberBusy ? "Connecting…" : "Use remembered access");
+  for (const k of ["aria-busy", "aria-disabled"]) rememberBusy ? rb.setAttribute(k, "true") : rb.removeAttribute(k);
   $("#conn-x").hidden = !b || b.kind === "restoring";
   // Send: inert while not connected in a chat the demo may not answer, never `disabled` (C1), described by what says why
   const send = $("#send"), off = inert(current());
-  $("#send-hint").hidden = !(off && !b);
+  hint.hidden = !(off && !b);
   if (off) {
     send.setAttribute("aria-disabled", "true");
-    send.setAttribute("aria-describedby", b ? (b.alert ? "conn-alert" : "conn-status") : "send-hint");
+    send.setAttribute("aria-describedby", b ? (b.alert ? "conn-alert" : "conn-status") : "send-hint-text");
   } else {
     send.removeAttribute("aria-disabled");
     send.removeAttribute("aria-describedby");
   }
-  // (focus never falls to the body: from a bar that went away, to the composer)
-  if (hadFocus && !b) editor.focus();
+  // (focus never falls to the body: from a button that went away, to its twin if it's there (the hint's and the bar's
+  //  are the same action), else to the composer)
+  if (was && !was.checkVisibility()) {
+    const twin = was === hact ? act : was === act ? hact : null;
+    if (!live() && twin && twin.checkVisibility()) twin.focus();
+    else editor.focus();
+  }
 }
 
-$("#conn-act").onclick = async () => {
-  if (reconnecting || !connBar?.action || !agentUi) return;
-  if (connBar.action === "connect") return agentUi.connect("", "", $("#conn-act"));
+/** The action, from the bar's button or the hint's: the same handler and the same states (C3, B-A14-3). */
+async function doAct(btn: HTMLElement) {
+  if (reconnecting || rememberBusy || !agentUi) return;
+  if ((connBar?.action ?? "connect") === "connect") {
+    connectFrom = btn;
+    return agentUi.connect("", "", btn);
+  }
   reconnecting = true;
+  busyBtn = btn;
   renderConn();
   try {
     await agentUi.reconnectKept();
   } finally {
     reconnecting = false;
+    busyBtn = null;
     renderConn();
   }
-};
+}
+$("#conn-act").onclick = () => void doAct($("#conn-act"));
+$("#send-hint-act").onclick = () => void doAct($("#send-hint-act"));
 $("#conn-remembered").onclick = async () => {
-  if (reconnecting || !agentUi) return;
-  reconnecting = true;
+  if (reconnecting || rememberBusy || !agentUi) return;
+  rememberBusy = true;
   renderConn();
   const g = await agentUi.useRemembered().catch(() => null);
-  reconnecting = false;
+  rememberBusy = false;
   if (g) setConn(null);
   else setConn({ kind: "unreachable", alert: false, action: connBar?.action ?? "connect" });
 };
 $("#conn-x").onclick = () => {
   connShown = false;
   renderConn();
+  editor.focus();
 };
 
 function onRestore(s: RestoreState) {
@@ -1146,6 +1174,14 @@ if (workspace) {
         if (p.state === "granted" && !granted) {
           granted = true;
           if (connBar) setConn(null);
+          if (connectFrom) {
+            connectFrom = null;
+            editor.focus();
+          }
+        }
+        if (p.state === "closed" && !granted && p.closeReason === "not allowed" && connectFrom?.checkVisibility()) {
+          connectFrom.focus();
+          connectFrom = null;
         }
         if (p.state === "closed" && pairing === p && granted) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
@@ -1193,6 +1229,8 @@ function renderHeader() {
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    : connBar?.kind === "restoring"
+    ? "Reconnecting to Claude on your computer…"
     : inert(current())
     ? "Claude isn't connected to this page. Chats are kept in this browser only."
     : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";

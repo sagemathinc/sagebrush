@@ -151,7 +151,10 @@
   #queued { font-size: 12px; color: var(--accent); }
   #send { background: var(--ink); color: #fff; border-color: var(--ink); }
   #send[aria-disabled="true"] { opacity: .45; cursor: default; }
-  #send-hint { font-size: 12px; color: var(--bad); }
+  /* (the hint, when shown, on its own line under the row, by Send: neutral, not an error; board's N-a) */
+  .composer .row { flex-wrap: wrap; }
+  #send-hint { order: 99; flex-basis: 100%; text-align: right; font-size: 12px; color: var(--muted); }
+  #send-hint button { font-size: 12px; margin-left: 4px; }
   /* (the connection's bar, A14: after the composer in tab order; its two live regions are always in the page, empty
      when there's nothing to say, so what is put in them is announced) */
   #conn-bar { max-width: 760px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
@@ -294,7 +297,7 @@
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
           <button id="queue" title="Send after the current turn (Alt+Enter)" hidden>Queue</button>
           <button id="stop" title="Stop the agent (Esc)" hidden>Stop</button>
-          <span id="send-hint" hidden>Not connected: Connect Claude to send</span>
+          <span id="send-hint" hidden><span id="send-hint-text">Not connected: Connect Claude to send</span> <button id="send-hint-act">Connect</button></span>
           <button id="send" title="Send (Shift+Enter)">Send</button>
         </div>
       </div>
