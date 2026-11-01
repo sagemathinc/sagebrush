@@ -136,7 +136,9 @@ try {
   // (the notebooks' records: not the workspace's fence, a record of the same store keyed "__sagebrush-workspace__",
   // design/workspace-durability.md A.3b, which sorts first when every notebook's id sorts after it; and any
   // error is the test's failure, never a promise left waiting)
-  const rec = await a.ev(`new Promise((res, no) => { const r = indexedDB.open("sagebrush-history"); r.onerror = () => no(r.error); r.onblocked = () => no(new Error("opening sagebrush-history: blocked")); r.onsuccess = () => { try { const q = r.result.transaction("history").objectStore("history").getAll(); q.onerror = () => no(q.error); q.onsuccess = () => { try { const own = q.result.filter((x) => x.nb !== "__sagebrush-workspace__"); res({ n: own.length, first: JSON.stringify(own[0].env.patch), size: JSON.stringify(own.map((x) => x.env)).length }); } catch (e) { no(e); } }; } catch (e) { no(e); } }; })`);
+  // (only this notebook's rows, by its history's own key, its earliest first: the store also holds the Welcome notebook's,
+  // and the two random ids' order picked which one came first, so the record varied between runs of one tree)
+  const rec = await a.ev(`new Promise((res, no) => { const key = sagebrush.history.store.id; const r = indexedDB.open("sagebrush-history"); r.onerror = () => no(r.error); r.onblocked = () => no(new Error("opening sagebrush-history: blocked")); r.onsuccess = () => { try { const q = r.result.transaction("history").objectStore("history").getAll(); q.onerror = () => no(q.error); q.onsuccess = () => { try { const own = q.result.filter((x) => x.nb === key).sort((x, y) => (x.time < y.time ? -1 : x.time > y.time ? 1 : 0)); res({ n: own.length, first: JSON.stringify(own[0].env.patch), size: JSON.stringify(own.map((x) => x.env)).length }); } catch (e) { no(e); } }; } catch (e) { no(e); } }; })`);
   ok(/"type":"settings","kernel":"python3"/.test(rec.first) && /"type":"cell"/.test(rec.first) && /"cell_type":"code"/.test(rec.first) && /"pos":0/.test(rec.first), `kept in IndexedDB as CoCalc Jupyter records (${rec.n} patches, ${rec.size} bytes): ${rec.first.slice(0, 120)}`);
 
   // a reload keeps the history
