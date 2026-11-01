@@ -139,10 +139,23 @@
   #artifacts { display: none; }
   body.has-artifact #artifacts { display: flex; flex-direction: column; width: min(46vw, 760px); flex: none; border-left: 1px solid var(--line); background: var(--card); }
   body.fullscreen #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; border: 0; }
-  /* (a notebook's pane: wider, but the chat keeps at least 420 px beside the 250 px sidebar; only where the pane is a
-     column (over 900 px), and not in full screen; BAC-2, BAC-3) */
+  /* (the resizable columns, only where they are columns (over 900 px) and not in full screen: the widths are layout.ts's
+     two variables, clamped there so the chat keeps 420 px and the pane 320; a notebook no longer widens its pane, A10.
+     The separators are 24 px hit targets laid over the borders (no space of their own); BAC-2, BAC-3) */
+  .sep { display: none; }
   @media (min-width: 901px) {
-    body.has-artifact.wide-artifact:not(.fullscreen) #artifacts { width: max(360px, min(60vw, 960px, calc(100vw - 250px - 420px))); }
+    nav.side { width: var(--sb-side-w, 250px); }
+    body.has-artifact:not(.fullscreen) #artifacts { width: var(--sb-pane-w, min(46vw, 760px)); }
+    .sep { display: block; flex: none; width: 24px; margin: 0 -12px; position: relative; z-index: 5; cursor: col-resize; touch-action: none; }
+    .sep::after { content: ""; position: absolute; top: 0; bottom: 0; left: 11px; width: 2px; background: transparent; }
+    .sep:hover::after, .sep:focus-visible::after, body.sb-dragging .sep::after { background: var(--accent); }
+    .sep:focus-visible { outline: 2px solid var(--accent); outline-offset: -6px; border-radius: 4px; }
+    body:not(.has-artifact) #sep-pane, body.fullscreen #sep-pane, body.side-collapsed #sep-side { display: none; }
+    body.sb-dragging { user-select: none; cursor: col-resize; }
+    /* (a window too narrow for 180 + 420 + 320 beside an open pane: the chat list becomes the narrow overlay's) */
+    body.side-collapsed nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
+    body.side-collapsed.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
+    body.side-collapsed .top #menu { display: block; }
   }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
@@ -209,12 +222,13 @@
 <body class="agents-host">
 <div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>
 <div class="app">
-  <nav class="side">
+  <nav class="side" id="chats" aria-label="Chats">
     <div class="brand"><svg class="sb-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;border-radius:4px"><rect width="32" height="32" fill="#AE472A"/><path fill="#FADEB6" d="M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z"/><path fill="#BAC49E" d="M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z"/></svg> Sagebrush agents</div>
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
     <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
   </nav>
+  <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
     <div class="top">
       <button id="menu" aria-label="Chats">☰</button>
@@ -256,6 +270,7 @@
       </div>
     </div>
   </main>
+  <div class="sep" id="sep-pane" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the artifact pane" aria-controls="artifacts"></div>
   <aside id="artifacts" aria-label="Artifacts"></aside>
 </div>
 <div id="toast" hidden></div>
