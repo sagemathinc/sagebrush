@@ -33,7 +33,10 @@ import { FILES_RUNNER } from "./files-runner.js";
 // lists them (web/runner-fetch.mts, __SB_RUNNER_FETCH__); and the zone files that index lists, once its bytes
 // have the build's SHA-256 and pass parseTzIndex. A bundle without the list allows nothing.
 /* global __SB_RUNNER_FETCH__ */
-const RUNNER_FETCH = typeof __SB_RUNNER_FETCH__ === "undefined" ? { files: [], tzIndex: null } : __SB_RUNNER_FETCH__;
+// (one reference to the define, so the build writes the list once: a `typeof` guard is a second reference, and the
+// bundler writes the whole list at each; unbuilt, as the unit test imports it, the name is undefined and throws)
+let RUNNER_FETCH;
+try { RUNNER_FETCH = __SB_RUNNER_FETCH__; } catch { RUNNER_FETCH = { files: [], tzIndex: null }; }
 
 /** The zone data's index (web/tzdata-chunks.mts), read by a closed grammar: the set of its zone files' paths
  * (lib/tzdata/<sha>.tzif), or null for anything else. Each bound is its own check (G-10 plan r2.3). */
