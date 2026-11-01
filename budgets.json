@@ -381,9 +381,9 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/lib/mod-scipy.src": {
+  "engine/lib/mod-scipy-integrate.src": {
    "exact": false,
-   "ceiling": 91106,
+   "ceiling": 91117,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -644,7 +644,7 @@
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sb-check.src": 4356,
    "engine/lib/mod-sbx.src": 48044,
-   "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-scipy-integrate.src": 82834,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
