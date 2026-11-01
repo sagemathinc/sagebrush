@@ -156,3 +156,7 @@ print(counted(lambda: matrix([[sin(x)*cos(x), 1], [x, x^2]]).rank()))
 print(outcome(lambda: matrix([[W10]]).rank()))
 print(outcome(lambda: matrix([[W11]]).rank()))
 print(val(lambda: matrix([[(x + 1)^2 - x^2 - 2*x - 1]]).rank()))
+# the gate is structural (astra3's A3-STRUCT-1): a user function named like a tag, a wave nested in an argument, a name in multibyte UTF-8
+print(counted(lambda: matrix([[function('F3:sin1{')(x)]]).rank()))
+print(counted(lambda: matrix([[function('g')(sin(x)*cos(x))]]).rank()))
+print(counted(lambda: matrix([[function('ééé')(sin(x))]]).rank()))
