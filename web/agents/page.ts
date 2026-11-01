@@ -14,7 +14,7 @@ import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
-import { AgentError, type AgentPairing, type Kept } from "../workspace/agent-pair";
+import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
@@ -1037,6 +1037,14 @@ for (const t of state.threads) {
   const r = runningTurn(t);
   if (r) emitTo(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
 }
+// (A14: a reload record waiting for its restore says this page was connected: no demo, even before the workspace is
+// open and the restore decided; only its presence is read here)
+try {
+  if (sessionStorage.getItem(RELOAD_KEY) !== null) connectedHere = true;
+} catch {
+  // (no sessionStorage: no record)
+}
+renderHeader();
 // The workspace, and the pairing with an agent on this computer (a ?pair=CODE&port=N link opens it at once).
 try {
   workspace = await Workspace.open();
