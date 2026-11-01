@@ -19,6 +19,8 @@ import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
+import { mountComposer, renderComposerState, stopLabel } from "./composer";
+import { applyPaneClasses } from "./layout";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -537,9 +539,7 @@ function renderArtifacts() {
   const thread = current();
   const pane = $("#artifacts");
   const a = thread.artifacts.find((x) => x.id === openArtifact);
-  document.body.classList.toggle("has-artifact", !!a);
-  document.body.classList.toggle("fullscreen", !!a && fullscreen);
-  document.body.classList.toggle("wide-artifact", !!a && a.kind === "notebook");
+  applyPaneClasses(a, fullscreen);
   if (paneThread !== thread.id) {
     void releaseHosts(paneThread);
     paneThread = thread.id;
@@ -856,13 +856,7 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
 }
 
 function renderComposer() {
-  const running = isRunning(current());
-  $("#send").textContent = running ? "Send now" : "Send";
-  $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : "Send (Shift+Enter)";
-  $("#queue").hidden = !running;
-  $("#stop").hidden = !running;
-  const q = queues.get(current().id)?.length ?? 0;
-  $("#queued").textContent = q ? `${q} queued` : "";
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
 }
 
 let toastTimer = 0;
@@ -877,23 +871,7 @@ function toast(text: string, ms = 1500) {
 // ---------------------------------------------------------------------------
 // The page
 
-const editor = new BlockEditor("", {
-  render: md,
-  typeset: (el) => typeset(el),
-  placeholder: "Message Claude…  (Shift+Enter to send)",
-  onKey(e) {
-    if (e.key !== "Enter") return false;
-    if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), submit("sent"), true);
-    if (e.altKey) return (e.preventDefault(), submit("queued"), true);
-    if (e.ctrlKey || e.metaKey) return (e.preventDefault(), submit("note"), true);
-    return false;
-  },
-});
-$("#editor").append(editor.el);
-$("#send").onclick = () => submit("sent");
-$("#queue").onclick = () => submit("queued");
-$("#note").onclick = () => submit("note");
-$("#stop").onclick = () => interrupt(current());
+const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   const t = newThread(id(), "New chat");
@@ -1045,7 +1023,7 @@ function renderHeader() {
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
-  $("#stop").textContent = `Stop ${agentName()}`;
+  $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
