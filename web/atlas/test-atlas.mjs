@@ -4,6 +4,7 @@
 // page.  Against the local server (node web/atlas/serve.mjs) or production:
 //   SB_URL=https://sagebrush.space node web/atlas/test-atlas.mjs
 //   SHOTS=/tmp/shots ...      also saves screenshots
+// Exit 0: every check passed; 1: a check failed; 4: no atlas data at SB_URL (build it with scripts/build-atlas.mjs).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,14 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = (process.env.SB_URL ?? "http://127.0.0.1:8766").replace(/\/$/, "");
+// The atlas data (web/dist/atlas/data, about 50 MB) isn't built by `bun web/build.ts` (DEVELOPMENT.md):
+// without it every atlas page is a 404. Say so and exit 4, an environment failure a runner can tell
+// apart from a failing check (exit 1), before starting a browser.
+const stats = await fetch(base + "/atlas/data/stats.json").catch((e) => ({ ok: false, status: String(e.cause?.code ?? e.message) }));
+if (!stats.ok) {
+  console.log(`atlas data not built: run scripts/build-atlas.mjs or set SB_URL (GET ${base}/atlas/data/stats.json: ${stats.status})`);
+  process.exit(4);
+}
 const shots = process.env.SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "sb-atlas-"));
