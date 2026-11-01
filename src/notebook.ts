@@ -65,6 +65,11 @@ export function notebookWorker(data: { dir: string }) {
 interface Session { worker: Worker; intr: Int32Array | null; clients: Set<http.ServerResponse>; backlog: string[]; timer: any }
 
 export async function runNotebookServer(args: string[]) {
+  // (--pair: this computer as the sagebrush.space page's "Your computer (paired)" runner, src/notebook-pair.ts)
+  if (args.includes("--pair")) {
+    await (await import("./notebook-pair")).runNotebookPair(args);
+    return;
+  }
   let dir = process.cwd(), port = 8888, browser = true;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -72,7 +77,7 @@ export async function runNotebookServer(args: string[]) {
     else if (a.startsWith("--port=")) port = Number(a.slice(7));
     else if (a === "--no-browser") browser = false;
     else if (a === "-h" || a === "--help") {
-      process.stdout.write("usage: sagebrush notebook [DIR] [--port N] [--no-browser]\n\nThe Sagebrush notebook in your browser, running Python on this computer.\nNotebooks are the .ipynb files in DIR (default: the current directory).\n");
+      process.stdout.write("usage: sagebrush notebook [DIR] [--port N] [--no-browser]\n       sagebrush notebook --pair [--port N]   (this computer as the sagebrush.space page's \"Your computer (paired)\")\n\nThe Sagebrush notebook in your browser, running Python on this computer.\nNotebooks are the .ipynb files in DIR (default: the current directory).\n");
       return;
     } else dir = resolve(a);
   }

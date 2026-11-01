@@ -71,6 +71,7 @@ import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
+import { pairLink } from "../workspace/pair-link";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
@@ -1400,7 +1401,7 @@ if (openAsFailed && host.store) {
 const mounted = mountBoard(document.getElementById("board")!, host);
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
-if (ws && (q.has("agents") || q.has("pair"))) mountAgentPairing(ws, { button: floatingButton() });
+if (ws && (q.has("agents") || pairLink())) mountAgentPairing(ws, { button: floatingButton() });
 // ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
 // too, on every host as the terminal is (T358-1); and the terminal's ps and top (web/shell/presence.ts): this tab's board,
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory

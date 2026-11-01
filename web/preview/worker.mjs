@@ -9,7 +9,13 @@ export const MIME = Object.freeze(Object.assign(Object.create(null), {
   webmanifest: 'application/manifest+json', pdf: 'application/pdf', tzif: 'application/octet-stream',
 }));
 export const DENY = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-const SCRIPT_POLICY = "default-src 'none'; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'";
+// (a page's X-Frame-Options, for browsers without frame-ancestors: its policy's, as web/csp-policy.mts frameOptions
+// gives it to _headers; none for the embeddable frame's *, which the header would forbid)
+export function frameOptions(policy) {
+  const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*?)\s*(?:;|$)/.exec(policy)?.[1];
+  return fa === "'none'" ? 'DENY' : fa === "'self'" ? 'SAMEORIGIN' : null;
+}
+export const SCRIPT_POLICY = "default-src 'none'; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'";
 
 export function baseHeaders() {
   return new Headers({
@@ -77,6 +83,7 @@ export default {
         const { csp } = await policy.json();
         if (typeof csp !== 'string' || !csp.includes('default-src ') || /[\r\n]/.test(csp)) return error(503);
         headers.set('Content-Security-Policy', csp);
+        if (extension === 'html' && frameOptions(csp)) headers.set('X-Frame-Options', frameOptions(csp));
       }
       headers.set('Content-Length', String(object.size));
       headers.set('ETag', object.httpEtag);

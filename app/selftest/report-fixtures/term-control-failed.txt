@@ -1,0 +1,26 @@
+ok   ready: ready (sagebrush 0.6.4, 300 ms)
+ok   cross-origin isolated (Stop keeps variables)
+ok   opened the notebook from disk: ready
+ok   ran it: Sage and the engines: "274177 * 67280421310721"
+ok   Python read a file in the notebook's folder
+ok   3D graphics
+ok   what Python wrote is in the notebook's folder: "hello from Python"
+ok   Stop interrupts a loop: "KeyboardInterrupt" (the worker shares its interrupt flag)
+ok   ...and keeps the variables
+ok   saved the notebook with its outputs
+ok   the shell worker's policy (lib.rs): "default-src 'none'; script-src 'self' blob:; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'"
+ok   the page reaches the app's bridge: nonce=0b8c2a3e-1f2d-4e5f-8a9b-0c1d2e3f4a5b routes=tauri-internals-invoke:ok,tauri-core-invoke:ok,ipc-postmessage:unavailable,webkit-ipc-postmessage:no-native-effect,webview2-postmessage:unavailable
+ok   the shell worker can't reach the app's bridge: engine=webkit mode=webkit-differential violations=0 events=ipc-scheme:0,ipc-localhost:0,own-origin:0 unmatched=0 differential=own-origin:refused,control:fetched-404 routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused(information)
+info origin: "http://127.0.0.1:41234"
+info secure-context: true
+info top-level: true
+info isolated-document: true
+info sab-document: "function"
+info coi-policy: true
+info kernel-interrupt-shared: true
+info kernel-isolated: true
+info kernel-sab: "function"
+info fetch-page: {"status":200,"ok":true,"requested":"http://127.0.0.1:41234/?sb-diag=1","final":"http://127.0.0.1:41234/?sb-diag=1","redirected":false,"COOP":"same-origin","COEP":"require-corp"}
+info fetch-kernel-script: {"status":200,"ok":true,"requested":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","final":"http://127.0.0.1:41234/sagebrush-worker.js?sb-diag=2","redirected":false,"COOP":"same-origin","COEP":"require-corp","CORP":null}
+info user-agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15"
+all passed

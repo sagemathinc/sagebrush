@@ -206,6 +206,7 @@ jobs:
           bun web/build.ts
           # (the export's lazy chunk and worker, each within its reviewed ceiling, tightly: E1, daybreak2's E1-D2-2)
           node scripts/check-export-size.mjs
+          bun web/test-frame-ancestors.mjs
           git diff --exit-code web/js-dependencies.json
           node scripts/build-cli.mjs
           node build/cli/pyjs.cjs --licenses | grep -q "JavaScript packages in the notebook page"
@@ -214,6 +215,7 @@ jobs:
           node web/test-app-frontend.mjs
           node web/test-llms.mjs
           node web/test-alpha-banner.mjs
+          node web/test-support-link.mjs
           node web/test-ipynb.mjs
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
@@ -490,6 +492,8 @@ jobs:
           node web/test-engines.mjs
           CHROME=google-chrome node web/test-pwa-update.mjs
           CHROME=google-chrome node web/test-pwa-first-visit.mjs
+          # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
+          CHROME=google-chrome node web/test-pwa.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
       # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
@@ -677,6 +681,48 @@ jobs:
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
 
+  # (the Storage panel's lookalike report and its controls, split from web-runner, whose 20 minutes they overran on #408's
+  # first run 41233997009: each control rebuilds the site, about 21 min for all of them on a local 8-CPU run, so this job
+  # has twice that; the same setup and server)
+  web-lookalike:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14"
+      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - name: the lookalike report and its controls
+        run: |
+          python3 web/serve.py 8765 &
+          server_pid=$!
+          cleanup_server() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup_server EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          sleep 1
+          kill -0 "$server_pid"
+          CHROME=google-chrome node web/workspace/test-workspace-lookalike.mjs
+          CHROME=google-chrome node web/workspace/test-workspace-lookalike-controls.mjs
+
   # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the notebook
   # journal and the documents' sync, about 6.5 min of it, run here, in parallel; the same setup and server; @sagebrush,
   # Oct 30.  Never a longer timeout: split again if either job nears its limit)
@@ -718,6 +764,15 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome bun web/notebook/test-journal.mjs
           CHROME=google-chrome bun web/workspace/test-doc-sync.mjs
+      # (the agents chat's notebook and LaTeX artifacts, web/agents (the artifacts plan r2 + r2.1): the agents page built
+      # (SAGEBRUSH_AGENTS=1) without the LaTeX editor and tested, then with it (SAGEBRUSH_LATEX_PREVIEW=test) and tested
+      # again. Last in this job: the second build changes every bundle. The test serves web/dist itself (serve.py, port 0))
+      - name: the agents chat's artifacts
+        run: |
+          SAGEBRUSH_AGENTS=1 bun web/build.ts
+          CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
+          SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts
+          CHROME=google-chrome AGENTS_LATEX=1 bun web/agents/test-agents-artifacts.mjs
 
   # The interrupt matrix's CI set (plan-interrupt-harness r5 section 8): Ctrl-C on the CLI, the
   # interactive prompt and the notebook page's Stop, with the signal trials S1-S4 and the
@@ -882,10 +937,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [notebook, board-a, board-b, board-c, board-unit, terminal]
+        group: [notebook, board-a, board-b, board-c, board-unit, terminal, remote-preview]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25)
-    timeout-minutes: ${{ matrix.group == 'terminal' && 25 || 15 }}
+    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
+    # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
+    timeout-minutes: ${{ (matrix.group == 'terminal' || matrix.group == 'remote-preview') && 25 || 15 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -956,13 +1012,17 @@ jobs:
               # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,
               # as a hosted preview has it)
               bun web/shell/test-panel-render.mjs
+              # (Tab completion, help, compgen and ls colours, the pure functions: plan-term-help-tab)
+              bun web/shell/test-panel-complete.mjs
               bun web/shell/panel-size.mjs
               node web/shell/test-panel-pages-copy.mjs
               SAGEBRUSH_TERMINAL=1 bun web/build.ts
               bun web/shell/test-panel-page.mjs
-              # (the Terminal in the desktop and Android apps: app/dist served as the app serves it, isolated and not)
+              # (the Terminal in the desktop and Android apps: app/dist served as the app serves it, isolated and not;
+              # the app self-test's Terminal checks, their probe and verdicts without an app)
               node app/build-frontend.mjs
               bun web/shell/test-panel-app.mjs
+              bun web/notebook/test-terminal-probe.mjs
               ;;
             board-a)
               node web/board/bench.mjs
@@ -1010,6 +1070,11 @@ jobs:
               board_c_test node web/board/test-cocalc.mjs
               board_c_test node web/board/test-mount.mjs
               board_c_test node web/board/test-xss.mjs
+              ;;
+            remote-preview)
+              # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
+              # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
+              node web/test-remote-preview.mjs
               ;;
             board-unit)
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)
@@ -1479,6 +1544,7 @@ jobs:
       - web-runner
       - web-export
       - web-runner-sync
+      - web-lookalike
       - web-browser
       - interrupt-matrix
       - conformance
@@ -1503,6 +1569,7 @@ jobs:
             ${{ needs.checks.result }} ${{ needs.size-gate.result }}
             ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-export.result }} ${{ needs.web-runner-sync.result }}
+            ${{ needs.web-lookalike.result }}
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}

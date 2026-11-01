@@ -29,7 +29,7 @@ LIMITS = {
     "sidecarBytes": 2 << 20, "newThreadBytes": 1835008, "threadBytes": 256 << 10, "sourceUnits": 2 << 20,
     "liveThreads": 2000, "threads": 4000, "messages": 200, "text": 8000, "author": 100, "id": 64,
     "quoteFull": 600, "quoteHead": 300, "context": 32, "shown": 300, "candidates": 64, "workBudget": 64 << 20,
-    "listThreads": 200, "listBytes": 1 << 20, "summaryUnits": 500, "contextLines": 3, "contextLineUnits": 200,
+    "passKey": 32, "passQuota": 1 << 14, "listThreads": 200, "listBytes": 1 << 20, "summaryUnits": 500, "contextLines": 3, "contextLineUnits": 200,
     "changedWindow": 2000, "attempts": 5, "backoffMs": [50, 100, 200, 400], "deadlineMs": 10000,
 }
 
@@ -411,7 +411,8 @@ class Resolver:
     before it runs; an anchor whose next step doesn't fit is unresolved): the same statuses, offsets and work
     as comments-core.mjs's resolver."""
 
-    def __init__(self, text, budget=None, text_sha=None):
+    def __init__(self, text, budget=None, text_sha=None, force_pass=False):
+        self.force_pass, self.prep, self.stats = force_pass, None, None
         u = self.u = units(text)
         source_fits(u)
         self.budget = LIMITS["workBudget"] if budget is None else budget
@@ -479,6 +480,211 @@ class Resolver:
             i = j
         return h.hexdigest()
 
+    def prepare(self, anchors):
+        """The shared pass (comments-core.mjs prepare, line for line: the same dispatch rule, the same units charged at
+        the same points, the same open-addressing table and hash, so the same work and results): the whole-text
+        searches of the anchors' quotes (heads of long ones) and prefixes in one Aho-Corasick scan. Not a generator
+        here: the JS one yields after every passQuota units, which changes no charge."""
+        if self.starved:
+            return
+        u, KEY, cap1 = self.u, LIMITS["passKey"], LIMITS["candidates"]
+        anchors = [a for a in anchors if not (a.get("textSha") == self.text_sha and a["end"] <= len(u)) and (a.get("quote") or a.get("prefix"))]
+        self.stats = {"path": "native", "n": len(anchors)}
+        if not self.force_pass and len(anchors) * len(u) < 2 * self.budget:
+            return
+        self.stats["path"] = "pass"
+        bud = self.budget
+        mp, recs, keys = {}, [], {}
+        self.prep = mp
+
+        def pay(n):
+            if self.work + n > bud:
+                return False
+            self.work += n
+            return True
+        for a in anchors:
+            for n in (units(a.get("quote") or ""), units(a.get("prefix") or "")):
+                if not n or n in mp:
+                    continue
+                if not pay(len(n)):
+                    return
+                r = {"s": n, "occ": [], "st": 0}
+                mp[n] = r
+                recs.append(r)
+                k = n[:KEY]
+                if k not in keys:
+                    keys[k] = {"k": k, "node": 0}
+                r["key"] = keys[k]
+        if not recs:
+            return
+        N = 1 + sum(len(k) for k in keys)
+        cap = 1024
+        while cap < 2 * N:
+            cap *= 2
+        S, M = min(cap, 65536), cap - 1
+        for _ in range(cap // S):
+            if not pay(S):
+                return
+        K, V = [0] * cap, [0] * cap
+        for _ in range(8):
+            if not pay(N):
+                return
+        fail_, dct, t_start, t_count, queue, first, nxt, unit_of = ([0] * N for _ in range(8))
+        if not pay(65536):
+            return
+        root = [0] * 65536
+        terms = [0] * len(recs)
+        self.stats.update(nodes=N, cap=cap, bytes=cap * 12 + N * 30 + len(recs) * 4 + 4 * 65536)
+        slot = [0]
+
+        def get(n, c):
+            if not n:
+                if not pay(1):
+                    return None
+                return root[c] if root[c] else -1
+            k = n * 65536 + c + 1
+            h = ((n * 0x9E3779B1 & 0xFFFFFFFF) ^ ((c + 1) * 0x85EBCA77 & 0xFFFFFFFF)) & M
+            while True:
+                if not pay(1):
+                    return None
+                kk = K[h]
+                if kk == 0:
+                    slot[0] = h
+                    return -1
+                if kk == k:
+                    return V[h]
+                h = (h + 1) & M
+        nn = 1
+        for r in keys.values():
+            v = 0
+            for ch in r["k"]:
+                c = ord(ch)
+                g = get(v, c)
+                if g is None or not pay(1):
+                    return
+                if g < 0:
+                    if not v:
+                        root[c] = nn
+                    else:
+                        K[slot[0]] = v * 65536 + c + 1
+                        V[slot[0]] = nn
+                    unit_of[nn] = c
+                    nxt[nn] = first[v]
+                    first[v] = nn
+                    v = nn
+                    nn += 1
+                else:
+                    v = g
+            r["node"] = v
+        for r in recs:
+            if not pay(1):
+                return
+            t_count[r["key"]["node"]] += 1
+        acc = 0
+        for v in range(nn):
+            if not pay(1):
+                return
+            t_start[v] = acc
+            acc += t_count[v]
+        for i, r in enumerate(recs):
+            if not pay(1):
+                return
+            v = r["key"]["node"]
+            terms[t_start[v] + queue[v]] = i
+            queue[v] += 1
+        tail = 0
+        c = first[0]
+        while c:
+            if not pay(1):
+                return
+            queue[tail] = c
+            tail += 1
+            c = nxt[c]
+        qi = 0
+        while qi < tail:
+            v = queue[qi]
+            qi += 1
+            c = first[v]
+            while c:
+                if not pay(1):
+                    return
+                f = fail_[v]
+                while True:
+                    g = get(f, unit_of[c])
+                    if g is None:
+                        return
+                    if g >= 0 or f == 0:
+                        break
+                    if not pay(1):
+                        return
+                    f = fail_[f]
+                fc = g if g >= 0 else 0
+                fail_[c] = fc
+                dct[c] = fc if t_count[fc] else dct[fc]
+                queue[tail] = c
+                tail += 1
+                c = nxt[c]
+        L, active, v = len(u), len(recs), 0
+        for i in range(L):
+            if not active:
+                break
+            c = ord(u[i])
+            if not v:
+                if self.work + 2 > bud:
+                    return
+                self.work += 2
+                v = root[c]
+                if not v:
+                    continue
+            elif not pay(1):
+                return
+            else:
+                while True:
+                    g = get(v, c)
+                    if g is None:
+                        return
+                    if g >= 0:
+                        v = g
+                        break
+                    if v == 0:
+                        break
+                    if not pay(1):
+                        return
+                    v = fail_[v]
+            t = v if t_count[v] else dct[v]
+            while t:
+                for j in range(t_start[t], t_start[t] + t_count[t]):
+                    if not pay(1):
+                        return
+                    r = recs[terms[j]]
+                    if r["st"]:
+                        continue
+                    n = r["s"]
+                    start = i + 1 - min(len(n), KEY)
+                    ok = start + len(n) <= L
+                    p = KEY
+                    while ok and p < len(n):
+                        if not pay(1):
+                            return
+                        ok = u[start + p] == n[p]
+                        p += 1
+                    if ok:
+                        r["occ"].append(start)
+                        if len(r["occ"]) > cap1:
+                            r["st"] = 2
+                            active -= 1
+                t = dct[t]
+        for r in recs:
+            if not r["st"]:
+                r["st"] = 1
+
+    def _lookup(self, n):
+        """A needle's occurrences: the shared pass's when it has them (incomplete: _OUT, never searched again)."""
+        r = self.prep.get(n) if self.prep is not None else None
+        if r is None:
+            return self._find(n)
+        return r["occ"] if r["st"] else _OUT
+
     def _span_at(self, a, i, quote_len):
         if "tail" not in a:
             return {"start": i, "end": i + quote_len}
@@ -507,7 +713,7 @@ class Resolver:
         quote, pre, suf = units(a.get("quote", "")), units(a.get("prefix", "")), units(a.get("suffix", ""))
         cand = LIMITS["candidates"]
         if quote:
-            occ = self._find(quote)
+            occ = self._lookup(quote)
             if occ is _OUT:
                 return dict(_UNRESOLVED)
             if len(occ) > cand:
@@ -530,7 +736,7 @@ class Resolver:
                 return {"status": "ambiguous", "candidates": [{"start": x["start"], "end": x["end"]} for x in (fit or spans)]}
         starts = []
         if pre:
-            f = self._find(pre)
+            f = self._lookup(pre)
             if f is _OUT:
                 return dict(_UNRESOLVED)
             starts = [i + len(pre) for i in f]
@@ -587,8 +793,8 @@ class Resolver:
         return "\n".join(out)
 
 
-def resolver(text, budget=None, text_sha=None):
-    return Resolver(text, budget, text_sha)
+def resolver(text, budget=None, text_sha=None, force_pass=False):
+    return Resolver(text, budget, text_sha, force_pass)
 
 
 # ---- the operations: each returns a new document (the input never changed) and checks admission first
@@ -809,6 +1015,8 @@ def list_threads(doc, text, all=False, cursor=None, budget=None):
     ts = sorted([t for t in doc["threads"] if _live(t) and (all or not t["resolved"]["value"])], key=lambda t: u16key(t["id"]))
     if cursor:
         ts = [t for t in ts if u16key(t["id"]) > u16key(cursor["after"])]
+    # (the page's threads, at most listThreads, chosen first, then prepared together, as the JS core's list does)
+    R.prepare([t["anchor"]["value"] for t in ts[:LIMITS["listThreads"]]])
     out, nbytes, i = [], 0, 0
     while i < len(ts) and len(out) < LIMITS["listThreads"]:
         t = ts[i]

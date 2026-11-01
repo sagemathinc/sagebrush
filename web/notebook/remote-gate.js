@@ -17,16 +17,25 @@
 //     terminal applied to exactly that attempt.
 //   - Forgetting names: their cells' records and pending attempts are fenced
 //     right before the request that deletes them is sent.
-//   - The kernel's lifecycle: a new binding or epoch resets approvals and
-//     records; a new generation or incarnation, a move or a close clears the
-//     records.
+//   - The kernel's lifecycle: a new binding or lineage (lc.own: every epoch
+//     change but a fence the gateway attested as continuous) resets approvals
+//     and records; a new generation or incarnation, a move or a close clears
+//     the records.
 //
 //   const gate = new RemoteGate({ kernel, hash, page });
 //   const host = gate.host(baseHost);          // the scheduler's host
 //   const consent = gate.capture(ids);         // in a Run gesture's handler, synchronously
 //   reactive.run(ids, { consent });
 
-import { Approvals, makeSpec, CAPS, TooLarge, TOO_LARGE } from "../../src/remote-approval.ts";
+import { Approvals, makeSpec, CAPS, TooLarge, TOO_LARGE, jcs } from "../../src/remote-approval.ts";
+
+import { payloadOf } from "./remote-kernel.js";
+import { WAVE_CAPS, waveEnvelopeInvalid, jsonUtf8Bytes } from "../../src/wave-policy.ts";
+import { BODY_MAX } from "./remote-client.js";
+
+// (the audit keeps this many waves, each whole: one record per entry, its attempts appended in place)
+const AUDIT_WAVES = 4;
+const AUDIT_ATTEMPTS = 3;
 
 // (the gate of a run asked while its kernel wasn't ready: never sends; it carries no approval)
 const NOT_READY_GATE = Object.freeze({
@@ -44,7 +53,7 @@ const NO_PARENTS = Object.freeze([]);
 // Test-only fault: a cell's parents array kept when the graph's version
 // changes.  Never set outside tests (a census test checks that).
 let testHooks = null;
-/** Tests only: set (or clear, with null) the fault above ({parentsSkip: true}). */
+/** Tests only: set (or clear, with null) the fault above ({parentsSkip: true}), or a wave's preflight skipped ({noWavePreflight: true}). */
 export function setTestHooks(h) {
   testHooks = h;
 }
@@ -60,6 +69,30 @@ function jobRun(code, o) {
     forget: o.forget?.length ? o.forget : null,
     scoped: o.scoped && Object.keys(o.scoped).length ? o.scoped : null,
   };
+}
+
+// The whole request a plan would be sent as, checked before anything is frozen, charged or registered (pure;
+// nothing is built but a skeleton whose strings are the plan's own): valid as an envelope (waveEnvelopeInvalid),
+// and its UTF-8 JSON size, as the client measures it (remote-client.js send), within the client's body limit.  The
+// fields only registration fixes are bounded from above: a seed (a SHA-256, 64 hex digits) and a mangle (true, or at
+// most the cell's id) on every run entry; and the submit's own fields (the request id, the epoch, generation and
+// incarnation, its kind) in WRAPPER_BYTES.  null: no wave (the scheduler runs the action cell by cell, as before);
+// else the bound, in bytes.
+const SEED_BYTES = 1 + jsonUtf8Bytes("seed") + 1 + 66; // (,"seed":"<64 hex>")
+const MANGLE_BYTES = 1 + jsonUtf8Bytes("mangle") + 1; // (,"mangle":) and then the value
+const WRAPPER_BYTES = 512;
+export function wavePreflight(plan, mode) {
+  const entries = plan.entries.map((e) => {
+    const policy = { cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs };
+    if (!e.run) return { ...policy, place: e.place, ...(e.note ? { note: e.note } : {}) };
+    const r = e.run;
+    return { ...policy, code: r.code, mode, ...(r.forget?.length ? { forget: r.forget } : {}), ...(r.scoped && Object.keys(r.scoped).length ? { scoped: r.scoped } : {}) };
+  });
+  const payload = { mode, forget: plan.forget?.names ?? [], policy: { budget: plan.policy.budget, all: plan.policy.all }, entries };
+  if (waveEnvelopeInvalid(payload) !== null) return null;
+  let bytes = jsonUtf8Bytes(payload) + WRAPPER_BYTES;
+  for (const e of entries) if (e.place === undefined) bytes += SEED_BYTES + MANGLE_BYTES + Math.max(4, jsonUtf8Bytes(e.cell));
+  return bytes <= BODY_MAX.run ? bytes : null;
 }
 
 export class RemoteGate {
@@ -86,11 +119,25 @@ export class RemoteGate {
     this.action = 0;
     this.approvals = new Approvals(hash, { spec: (id) => this.spec(id), parents: (id) => this.parents(id) }, () => this.context(), newDoc);
     this.off = kernel.on("lifecycle", (old, lc) => this.lifecycle(old, lc));
+    this.hash = hash;
+    this.waves = []; // the audit (audit())
+    this.askTimes = new WeakMap(); // consent -> when it was captured (capture)
+    this.askedAt = null; // the action's: its consent's time, or now for a run no person asked (prepare)
+  }
+
+  /**
+   * The audit of the last waves, a copy: each group's request, its check's verdict ("pending" until checked, then
+   * "send", "wait", "skip" or "error"), and only for a "send" the digest and, per entry, the hash of what was checked
+   * and of what was sent, whether they match, and its attempts (check, send, resend); the payload's UTF-8 bytes once
+   * built; whether it was admitted.  A group whose verdict isn't "send" has no entry records: it was never sent.
+   */
+  audit() {
+    return this.waves.map((g) => ({ ...g, records: g.records.map((r) => ({ ...r, attempts: r.attempts.map((x) => ({ ...x })) })) }));
   }
 
   context() {
     const lc = this.kernel.lc;
-    return { binding: lc.binding, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, ready: lc.phase === "ready" };
+    return { binding: lc.binding, own: lc.own, generation: lc.generation, incarnation: lc.incarnation, ready: lc.phase === "ready" };
   }
 
   // ------------------------------------------------------------- the adapter
@@ -184,6 +231,13 @@ export class RemoteGate {
     };
   }
 
+  // A wave entry as the kernel sends it (remote-kernel.js runWave): the policy's fields, and for a run the checked
+  // spec's bytes (payloadOf), so that the audit's checked and sent hashes are over the same canonical value.
+  waveEntry(e, spec) {
+    const policy = { cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs ?? [] };
+    return spec ? { ...policy, ...payloadOf(spec) } : { ...policy, place: e.place, ...(e.note ? { note: e.note } : {}) };
+  }
+
   // ------------------------------------------------------------- consent
 
   /**
@@ -199,10 +253,15 @@ export class RemoteGate {
       const displayed = pg.displayed(id), version = pg.version(id);
       if (displayed !== undefined && version) cells.set(id, { displayed, version });
     }
-    return this.approvals.captureConsent(ids, {
+    const consent = this.approvals.captureConsent(ids, {
       cells, repair: (id, text) => pg.repair(id, text), settings: cfg, mode: cfg.mode, seedNamespace: cfg.seedNamespace, reactive: cfg.reactive,
     });
+    // (when the person asked, on the kernel's clock: a loss recovery that ends unproved refuses every Run asked
+    // before its deadline, however long the scheduler held it: plan r8 F4)
+    this.askTimes.set(consent, this.now());
+    return consent;
   }
+  now() { return this.kernel.timers?.now?.() ?? Date.now(); }
 
   /** The notebook was loaded or replaced, or its language changed: approvals and records start over. */
   documentReplaced() {
@@ -214,7 +273,8 @@ export class RemoteGate {
 
   lifecycle(old, lc) {
     const a = this.approvals;
-    if (lc.binding !== old.binding || lc.epoch !== old.epoch) {
+    // (a new lineage resets: every epoch change but a fence the gateway attested as continuous, plan r8 F1)
+    if (lc.binding !== old.binding || lc.own !== old.own) {
       a.reset();
       a.clearRecords();
     } else if (lc.generation !== old.generation || lc.incarnation !== old.incarnation) a.clearRecords();
@@ -245,6 +305,7 @@ export class RemoteGate {
         }
       },
       async prepare({ order, consent }) {
+        gate.askedAt = consent ? gate.askTimes.get(consent) ?? gate.now() : gate.now();
         // (a kernel that isn't ready runs nothing: the person's consent is spent here, never kept for later, nothing is
         // approved, and each cell is asked so that it shows the kernel's note: execute, below)
         if (!gate.kernel.ready) {
@@ -300,6 +361,7 @@ export class RemoteGate {
           admit: (v) => a.admit(v),
           stillAdmitted: (v) => a.stillAdmitted(v),
           admitted: (p) => { planned = p; },
+          askedAt: gate.askedAt ?? gate.now(),
         };
         const r = await base.execute(id, code, forget, scoped, { gate: g });
         // the terminal, to exactly the attempt admitted (nothing, if none was): only a user-phase ok succeeds
@@ -309,6 +371,86 @@ export class RemoteGate {
         }
         return r;
       },
+      /**
+       * One wave (the waves design r3): null if it isn't formed (the kernel isn't ready, over the entry cap, or a
+       * cell that would be sent isn't already approved, or the action's budget wouldn't fit it: decided with no
+       * effect, so the scheduler runs the action cell by cell); else one batch freeze and check (the initial
+       * forget's cells taken as gone), one admission at the fetch (admitWave), and each entry's terminal applied
+       * to exactly the attempt admitted.
+       */
+      // (only where the page can send one: its host has executeWave)
+      executeWave: base.executeWave && (async (plan) => {
+        if (!gate.kernel.ready || plan.entries.length > WAVE_CAPS.entries) return null;
+        const sendIds = plan.entries.filter((e) => e.run).map((e) => e.cell);
+        if (!a.predictSendable(sendIds)) return null;
+        if (!testHooks?.noWavePreflight && wavePreflight(plan, gate.page.config().mode) === null) return null;
+        let frozen;
+        try {
+          frozen = await a.freeze(sendIds);
+        } catch (e) {
+          if (e instanceof TooLarge) return { refused: `\nNot run: ${TOO_LARGE}.\n` };
+          throw e;
+        }
+        const forgetCells = plan.forget?.cells ?? [];
+        const group = { request: null, digest: null, entries: plan.entries.length, bytes: 0, verdict: "pending", admitted: false, at: Date.now(), records: [] };
+        let verdict = null;
+        const g = {
+          askedAt: gate.askedAt ?? gate.now(),
+          check: async (request) => {
+            group.request = request;
+            gate.waves.push(group);
+            if (gate.waves.length > AUDIT_WAVES) gate.waves.shift();
+            let v;
+            try {
+              v = verdict = await a.check(frozen, request, { forgotten: forgetCells });
+            } catch (e) {
+              group.verdict = "error";
+              throw e;
+            }
+            group.verdict = v.send ? "send" : "wait" in v ? "wait" : "skip";
+            if (v.send) {
+              let i = 0;
+              const checked = [];
+              for (const e of plan.entries) {
+                const canon = gate.waveEntry(e, e.run ? v.plan[i++].run : null);
+                const h = await gate.hash(jcs(canon));
+                checked.push(h);
+                group.records.push({ entry: group.records.length, cell: e.cell, checked: h, sent: null, match: false, attempts: [{ kind: "check", at: Date.now(), ok: true }] });
+              }
+              group.digest = await gate.hash(jcs({ request, policy: { budget: Number.isFinite(plan.policy.budget) ? plan.policy.budget : null, all: !!plan.policy.all }, forget: plan.forget?.names ?? [], checked }));
+            }
+            return v;
+          },
+          sameRun: (c, o, spec) => a.sameRun(jobRun(c, o), spec),
+          sending: async (payload) => {
+            group.bytes = jsonUtf8Bytes(payload);
+            for (let k = 0; k < payload.entries.length && k < group.records.length; k++) {
+              const r = group.records[k];
+              r.sent = await gate.hash(jcs(payload.entries[k]));
+              r.match = r.sent === r.checked;
+            }
+          },
+          attempt: (kind, ok) => {
+            if (kind === "send" && ok) group.admitted = true;
+            for (const r of group.records) if (r.attempts.length < AUDIT_ATTEMPTS) r.attempts.push({ kind, at: Date.now(), ok });
+          },
+          admitWave: (v) => a.admitWave(v, forgetCells),
+          stillAdmitted: (v) => a.stillAdmitted(v),
+        };
+        const r = await base.executeWave(plan, { gate: g });
+        // the terminals, to exactly the attempts admitted (none, if the wave wasn't): only a user-phase ok succeeds
+        if (verdict?.send && verdict.token.consumed && r && !("refused" in r)) {
+          let i = 0;
+          plan.entries.forEach((e, k) => {
+            if (!e.run) return;
+            const p = verdict.plan[i++];
+            const d = r.decisions[k], x = r.results[k];
+            if (d?.kind === "run" && x?.ok && !x.stopped && !x.notRun) a.succeeded(p);
+            else a.failed(p);
+          });
+        }
+        return r;
+      }),
       forget(names, cells = []) {
         // (fenced now, and again right before the request is sent)
         a.forgotten(cells);

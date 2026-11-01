@@ -52,6 +52,7 @@
 // (forgetting names) only with its `forgetGuard`.
 
 import { GatewayError, StreamError, NotSentError, AmbiguousError } from "./remote-client.js";
+import { newWaveState, waveDecide, waveRecord, waveRunResult, waveStop, sameDecision, waveEnvelopeInvalid } from "../../src/wave-policy.ts";
 
 const ENVELOPE_MIME = "application/vnd.sagebrush.envelope.v1+json";
 const clip = (s, n = 300) => String(s ?? "").slice(0, n);
@@ -70,7 +71,36 @@ function validTakeover(r) {
   if (!Array.isArray(r.applied_before_takeover) || !r.applied_before_takeover.every(isOpEntry)) return false;
   if (!Array.isArray(r.in_flight) || !r.in_flight.every(isOpEntry)) return false;
   if (r.applied_before_takeover.some((a) => a.kind === "restart" || a.kind === "delete") && !isInt(r.incarnation)) return false;
+  // (continuity, when the gateway sends it: the epoch it was asked from and whether this client was its sole owner since)
+  if (r.continuity !== undefined && !(r.continuity && typeof r.continuity === "object" && isInt(r.continuity.from_epoch) && typeof r.continuity.sole === "boolean")) return false;
   return true;
+}
+
+/**
+ * The loss recovery's bounds (plan r8 F3/F4): a run's record asked at most 3 times, 10 s each, 500 then 1000 ms
+ * apart (31.5 s at most); a fence's takeover POSTs 15 s each, one transaction of 100 s for all of them.
+ */
+export const RECOVERY = Object.freeze({ submitPostMs: 10_000, reconcileGetMs: 10_000, reconcileWaits: Object.freeze([500, 1000]), fencePostMs: 15_000, fenceTotalMs: 100_000 });
+// (F3's window, from the first attempt's lost answer: the resend and the record GETs all end inside it, 31.5 s)
+const RECONCILE_WINDOW_MS = RECOVERY.reconcileWaits.reduce((a, b) => a + b, 0) + (RECOVERY.reconcileWaits.length + 1) * RECOVERY.reconcileGetMs;
+
+// (the page's timers, which don't keep a process alive; tests inject a clock)
+const REAL_TIMERS = Object.freeze({
+  setTimeout: (f, ms) => { const t = setTimeout(f, ms); t?.unref?.(); return t; },
+  clearTimeout: (t) => clearTimeout(t),
+  now: () => Date.now(),
+});
+// (a signal aborted when any of `signals` is; its listeners removed by the returned off())
+function anySignal(signals) {
+  const ctl = new AbortController();
+  const offs = [];
+  for (const s of signals) {
+    if (s.aborted) { ctl.abort(); break; }
+    const f = () => ctl.abort();
+    s.addEventListener("abort", f, { once: true });
+    offs.push(() => s.removeEventListener("abort", f));
+  }
+  return { signal: ctl.signal, off: () => offs.splice(0).forEach((f) => f()) };
 }
 
 /** What the page says when a request ends without running, or is stopped (the plan's §9.4 notes). */
@@ -153,7 +183,7 @@ function once(sink) {
 }
 
 // The run payload of a checked spec (remote-approval.ts RunSpec): exactly its bytes.
-function payloadOf(spec) {
+export function payloadOf(spec) {
   const op = spec.options;
   return {
     code: spec.source,
@@ -182,22 +212,28 @@ export class RemoteKernel {
    * @param {string} [o.kernel] the kernel spec (default python3)
    * @param {string} [o.clientId] this page's id in request ids (default: random)
    * @param {(ms: number) => Promise<void>} [o.sleep] (tests: a faster clock)
+   * @param {{setTimeout, clearTimeout, now}} [o.timers] the loss recovery's clock (tests: a virtual one)
    */
-  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep, requireGate = false }) {
+  constructor({ client, notebook, path = "", kernel = "python3", clientId, sleep, requireGate = false, timers }) {
     this.client = client;
     this.notebook = notebook;
     this.path = path;
     this.kernelName = kernel;
     this.clientId = clientId ?? Math.random().toString(36).slice(2, 10);
     this.sleep = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.timers = timers ?? REAL_TIMERS;
+    this.clocked = !!timers; // (a recovery's waits on the injected clock; else on `sleep`, as before)
     this.requireGate = !!requireGate;
     // phase: "idle" (no binding), "ready", "moved" (another tab took it), "closed"
-    this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, generation: 0, incarnation: null, phase: "idle" });
+    // (own: the page's lineage, changed by every transition but a fence the gateway attests as continuous: plan r8 F1)
+    this.lc = Object.freeze({ serial: 0, binding: null, epoch: null, own: 0, generation: 0, incarnation: null, phase: "idle" });
     // aborted whenever the binding, generation or phase changes: everything begun under the old one
     this.abortCtl = new AbortController();
     this.lifeChain = Promise.resolve();
     this.lifeOps = 0;
-    this.needsFence = false; // after an unknown outcome: take the binding over (fence) before more work
+    this.fenceTx = null; // the loss recovery's fence transaction while needsFence holds (plan r8 F2/F4)
+    this.recoveryEndedAt = null; // when the last one ended unproved (its deadline), until a fence succeeds
+    this.fenceWanted = false;
     this.queue = []; // {code, opts, sink, generation (null: asked before its binding existed)}
     this.current = null; // the job being run: {..., lc, request}
     this.nextN = 1;
@@ -208,6 +244,60 @@ export class RemoteKernel {
     // (what a run asked of this kernel while it is not ready is told: its own note when the page set one, e.g.
     // a preview whose connect failed; NOTES.notReady otherwise)
     this.notReadyNote = null;
+  }
+
+  // After an unknown outcome: take the binding over (fence) before more work.  Setting it opens the fence
+  // transaction (one id, the epoch held, one RECOVERY.fenceTotalMs deadline) that every job taken while it lasts
+  // joins; clearing it closes the transaction.
+  get needsFence() { return this.fenceWanted; }
+  set needsFence(v) {
+    this.fenceWanted = !!v;
+    if (!v) this.recoveryEndedAt = null;
+    // (no transaction for a kernel that is gone: moved to another tab, or closed)
+    if (v && !this.fenceTx && !this.moved && !this.closed) this.openFence();
+    if (!v && this.fenceTx) this.closeFence(this.fenceTx);
+  }
+  openFence() {
+    const tx = { id: `f.${this.clientId}.${Math.random().toString(36).slice(2, 10)}`, from: this.lc.epoch, ctl: new AbortController(), closed: false, deadline: this.timers.now() + RECOVERY.fenceTotalMs, timer: null };
+    tx.timer = this.timers.setTimeout(() => this.expireFence(tx), RECOVERY.fenceTotalMs);
+    this.fenceTx = tx;
+    return tx;
+  }
+  closeFence(tx) {
+    tx.closed = true;
+    this.timers.clearTimeout(tx.timer);
+    if (this.fenceTx === tx) this.fenceTx = null;
+  }
+  // The transaction's deadline, unproved: it is closed and the queue detached first, then every job queued, or
+  // waiting for this fence, is refused together; the fence is still wanted (a later Run opens a new transaction).
+  expireFence(tx) {
+    if (tx.closed) return;
+    this.closeFence(tx);
+    this.recoveryEndedAt = tx.deadline;
+    const queued = this.queue.splice(0);
+    tx.ctl.abort();
+    this.emit("status", "error: the remote kernel could not be reached");
+    for (const j of queued) this.notSent(j, NOTES.unreachable);
+  }
+  // A fence backoff: ended early by the transaction's end or by a lifecycle change, so no timer outlives either.
+  async fenceWait(ms, tx) {
+    const sig = anySignal([this.abortCtl.signal, tx.ctl.signal]);
+    try {
+      await this.wait(ms, sig.signal);
+    } finally {
+      sig.off();
+    }
+  }
+  // A wait that `signal` ends early (resolving); on the injected clock when there is one.
+  wait(ms, signal) {
+    return new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      let t = null;
+      const done = () => { signal?.removeEventListener?.("abort", done); if (t !== null) this.timers.clearTimeout(t); resolve(); };
+      signal?.addEventListener?.("abort", done, { once: true });
+      if (this.clocked) t = this.timers.setTimeout(done, ms);
+      else this.sleep(ms).then(done);
+    });
   }
 
   get generation() { return this.lc.generation; }
@@ -226,10 +316,16 @@ export class RemoteKernel {
   // A new lifecycle record.  If the binding, generation or phase changed:
   // everything begun under the old one is aborted, and the running request
   // is told `note` and released now (its late answers are stale).
-  setLc(patch, note) {
+  setLc(patch, note, { preserve = false } = {}) {
     const old = this.lc;
-    const lc = Object.freeze({ ...old, ...patch, serial: old.serial + 1 });
+    // (the lineage follows the binding and its epoch, where approvals always started over; a fence whose continuity
+    // the gateway attested changes the wire epoch only, and the lineage stays)
+    const moved = ["binding", "epoch"].some((k) => k in patch && patch[k] !== old[k]);
+    const own = moved && !preserve ? old.own + 1 : old.own;
+    const lc = Object.freeze({ ...old, ...patch, own, serial: old.serial + 1 });
     this.lc = lc;
+    // (a kernel that moved away or closed ends its recovery: its deadline would refuse nothing, only tell a stale status)
+    if ((lc.phase === "moved" || lc.phase === "closed") && this.fenceTx) this.closeFence(this.fenceTx);
     // (synchronously, before anything else: approvals and records follow the kernel)
     this.emit("lifecycle", old, lc);
     if (lc.binding !== old.binding || lc.generation !== old.generation || lc.phase !== old.phase) {
@@ -312,8 +408,62 @@ export class RemoteKernel {
     if (this.lc.phase === "idle" && !this.lifeOps) return s.stopped(NOTES.unreachable);
     // (asked while no binding exists, being made: it runs on the kernel that comes next, so its
     // generation is the one current when it is sent, not the one before the binding)
-    this.queue.push({ code, opts: o, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation });
+    this.queue.push({ code, opts: o, sink: s, generation: this.lc.phase === "idle" ? null : this.lc.generation, askedAt: o.gate?.askedAt ?? this.timers.now() });
     this.pump();
+  }
+
+  /**
+   * One wave (the waves design r3; web/notebook/remote-gate.js host.executeWave): the whole action in one request.
+   * `w`: {entries: [{cell, auto, est, parents, desc, defs} and either {place, note?} (a placeholder: never sent) or
+   * {code, opts, sink} (opts as for execute; the sink, the cell's)], policy, forget ({names} or null), mode}; `gate`:
+   * the wave's ({check, sameRun, admitWave, stillAdmitted}).  Resolves to {refused} (checked, nothing sent), or to
+   * {decisions, ran, submits, roundTrips, ms}: each entry's decision as the gateway made it and this page replayed
+   * it (src/wave-policy.ts; a difference is a protocol error: the entries not yet ended are unknown, and the
+   * binding fenced).  Each sendable entry's sink gets its run's events and terminal; one that doesn't run is
+   * skipped, silently (the scheduler shows why).
+   */
+  executeWave(w, gate) {
+    return new Promise((resolve) => {
+      const entries = w.entries.map((e) => (e.place ? { ...e } : { ...e, sink: once(e.sink) }));
+      const sendable = entries.filter((e) => !e.place);
+      let settled = false;
+      const result = { decisions: entries.map(() => undefined), ran: 0, submits: 0, roundTrips: 0, ms: 0 };
+      const t0 = Date.now();
+      const finish = (extra = {}) => {
+        if (settled) return;
+        settled = true;
+        result.ms = Date.now() - t0;
+        resolve({ ...result, ...extra });
+      };
+      // (the job's own sink: what is told to the whole wave goes to every entry not yet ended)
+      const fan = {
+        get ended() { return settled; },
+        start() {},
+        out() {},
+        display() {},
+        interact() {},
+        clear() {},
+        done() { finish(); },
+        stopped(note) {
+          entries.forEach((e, k) => {
+            if (e.place || e.sink.ended) return;
+            result.decisions[k] ??= { kind: "run" };
+            e.sink.stopped(note);
+          });
+          finish();
+        },
+        skipped(info) {
+          for (const e of sendable) e.sink.skipped(info);
+          finish(info?.note ? { refused: info.note } : { refused: "\nNot run.\n" });
+        },
+      };
+      if (!gate) return fan.stopped(NOTES.noGate);
+      if (!this.ready) return fan.skipped({ notRun: "skip", note: this.notReadyNote ?? NOTES.notReady });
+      if (this.closed) return fan.stopped(NOTES.closed);
+      if (this.moved) return fan.stopped(NOTES.moved);
+      this.queue.push({ wave: { ...w, entries }, result, started: t0, code: null, opts: { gate }, sink: fan, generation: this.lc.generation, askedAt: gate.askedAt ?? this.timers.now() });
+      this.pump();
+    });
   }
 
   // the next queued run, once the one before it has its terminal, and no lifecycle operation is pending
@@ -335,6 +485,8 @@ export class RemoteKernel {
     if (job.generation !== null && job.generation !== this.lc.generation) return this.notSent(job, NOTES.restarted);
     if (job.generation === null) job.generation = this.lc.generation;
     if (this.needsFence) {
+      // (asked before a loss recovery's deadline passed unproved: refused with it, never a new transaction's)
+      if (this.recoveryEndedAt !== null && job.askedAt <= this.recoveryEndedAt) return this.notSent(job, NOTES.unreachable);
       const ok = await this.lifecycle(() => this.takeover(job));
       if (!ok || this.current !== job) return;
     }
@@ -342,6 +494,7 @@ export class RemoteKernel {
     const lc = (job.lc = this.lc);
     const signal = this.abortCtl.signal;
     const request = (job.request = `rq.${this.clientId}.${lc.generation}.${this.nextN++}`);
+    if (job.wave) return this.runWave(job, lc, signal, request);
     const o = job.opts;
     let payload, guard;
     if (o.gate) {
@@ -388,6 +541,110 @@ export class RemoteKernel {
     await this.follow(job, signal);
   }
 
+  // A wave's check, its one submit and its stream.  The check is the batch's (every sendable entry, in order, on one
+  // snapshot); the bytes sent are the bytes checked, entry by entry; admission is the gate's one transition
+  // (admitWave), at the first fetch, and a retry of that same send only while stillAdmitted holds.
+  async runWave(job, lc, signal, request) {
+    const w = job.wave, g = job.opts.gate;
+    let v;
+    try {
+      v = await g.check(request);
+    } catch {
+      return this.current === job ? this.notSent(job, NOTES.checkFailed) : undefined;
+    }
+    if (this.current !== job) return;
+    if (this.lc !== lc) return this.notSent(job, NOTES.changed);
+    if (!v.send) return job.sink.skipped({ notRun: "wait" in v ? "wait" : "skip", note: `\nNot run: ${"wait" in v ? v.wait : v.skip}.\n` });
+    const sendable = w.entries.filter((e) => !e.place);
+    if (v.plan.length !== sendable.length || sendable.some((e, i) => !g.sameRun(e.code, e.opts ?? {}, v.plan[i].run))) return this.notSent(job, NOTES.changed);
+    let i = 0;
+    const entries = w.entries.map((e) => {
+      const policy = { cell: e.cell, auto: e.auto, est: e.est, parents: e.parents, desc: e.desc, defs: e.defs ?? [] };
+      return e.place ? { ...policy, place: e.place, ...(e.note ? { note: e.note } : {}) } : { ...policy, ...payloadOf(v.plan[i++].run) };
+    });
+    const body = deepFreeze({
+      request, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, kind: "wave",
+      payload: { mode: w.mode, forget: [...(w.forget?.names ?? [])], policy: { budget: w.policy.budget, all: w.policy.all }, entries }, // (as the scheduler gave them: validated below, never coerced)
+    });
+    // (the whole envelope, as the gateway validates it, before anything is admitted)
+    const bad = waveEnvelopeInvalid(body.payload);
+    if (bad !== null) return this.notSent(job, `\nNot run: the wave was malformed (${bad}).\n`);
+    await g.sending?.(body.payload); // (the audit: the bytes about to be sent)
+    if (this.current !== job) return;
+    if (this.lc !== lc) return this.notSent(job, NOTES.changed);
+    job.st = newWaveState();
+    job.next = 0;
+    const guard = () => {
+      job.result.submits++;
+      job.result.roundTrips++;
+      if (job.admitted) {
+        const ok = g.stillAdmitted(v);
+        g.attempt?.("resend", ok);
+        return ok;
+      }
+      if (!g.admitWave(v)) {
+        g.attempt?.("send", false);
+        return false;
+      }
+      g.attempt?.("send", true);
+      job.admitted = true;
+      g.admitted?.(v);
+      return true;
+    };
+    if (!(await this.submit(job, body, signal, guard))) return;
+    if (this.current !== job) return;
+    await this.follow(job, signal);
+  }
+
+  // One entry's end, in order: replayed (the same decision, from the same state), recorded, and told to its cell.
+  // false: a protocol error (out of order, or another decision than the replay's).
+  waveEnd(job, k, end) {
+    const w = job.wave;
+    if (k !== job.next || !end || typeof end.decision !== "object") return false;
+    const e = w.entries[k];
+    const mine = waveDecide(w.policy, job.st, k, e);
+    if (!sameDecision(mine, end.decision)) return false;
+    job.next++;
+    job.result.decisions[k] = end.decision;
+    if (mine.kind !== "run") {
+      waveRecord(job.st, k, e, mine);
+      e.sink?.skipped({ notRun: "skip" });
+      return true;
+    }
+    const o = end.outcome && typeof end.outcome === "object" && !Array.isArray(end.outcome) ? end.outcome : { status: "unknown" };
+    waveRecord(job.st, k, e, mine, waveRunResult(o));
+    job.result.ran++;
+    const ms = Number.isFinite(o.ms) ? o.ms : 0;
+    if (o.status === "ok") e.sink.done(ms, { error: false });
+    else if (o.status === "error") {
+      if (o.ename === "KeyboardInterrupt" && !e.sawErrorText) e.sink.out("KeyboardInterrupt\n", true);
+      e.sink.done(ms, { error: true, ...(o.ename === "KeyboardInterrupt" ? { interrupted: true } : {}) });
+    } else {
+      e.sink.stopped(outcomeNote(o));
+      if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
+    }
+    return true;
+  }
+
+  // The wave's terminal: done (every entry ended before it), or the run's outcome for whatever hadn't ended.
+  waveTerminal(job, outcome) {
+    const o = outcome && typeof outcome === "object" && !Array.isArray(outcome) ? outcome : { status: "unknown" };
+    if (o.status === "done" && job.next === job.wave.entries.length) {
+      this.emit("status", `ready (remote) · ${job.result.ran} cell${job.result.ran === 1 ? "" : "s"}, ${job.result.submits} submit${job.result.submits === 1 ? "" : "s"}, ${job.result.roundTrips} round trips, ${((Date.now() - job.started) / 1000).toFixed(1)} s`);
+      return job.sink.done();
+    }
+    if (o.status === "done") return this.waveBroken(job);
+    job.sink.stopped(outcomeNote(o));
+    if (!["refused", "stopped", "setup-failed", "restarted-before-run"].includes(o.status)) this.needsFence = true;
+    if (o.status === "restarted-before-run") this.recover(job.lc, isInt(o.incarnation) ? o.incarnation : null);
+  }
+
+  // A wave that answered something this page doesn't agree with: what hadn't ended is unknown, and the binding fenced.
+  waveBroken(job) {
+    this.needsFence = true;
+    job.sink.stopped(NOTES.unknown);
+  }
+
   // POST the run; true once the gateway has it.  On the first attempt: not
   // sent is not run, and a typed refusal is not run (or moved, fenced,
   // replaced).  Sent without a valid answer (lost, unreadable, oversized):
@@ -399,18 +656,22 @@ export class RemoteKernel {
   // (`guard`: the client calls it right before each fetch; both attempts share it)
   async submit(job, body, signal, guard) {
     const path = `/bindings/${job.lc.binding}/runs`;
-    let mayBeAdmitted = false;
+    let mayBeAdmitted = false, windowEnd = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       let err = null;
       try {
-        await this.client.request("POST", path, body, { signal, ...(guard ? { guard } : {}) });
+        // (the POST admits the run, its output comes on the events stream, so no deadline here bounds a user
+        // program: the first attempt has its own, an answer that never comes being a lost one; the resend's is
+        // F3's window, so a resend that never settles can't keep the reconcile from ending)
+        const timeoutMs = attempt === 0 ? RECOVERY.submitPostMs : Math.min(RECOVERY.reconcileGetMs, windowEnd - this.timers.now());
+        await this.client.request("POST", path, body, { signal, timeoutMs, ...(guard ? { guard } : {}) });
       } catch (e) {
         err = e;
       }
       if (this.current !== job) return false; // (stale: the job was already told why)
       if (!err) return true;
       // (a retry's refusal, or a failure to send it, says nothing about the first attempt)
-      if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal);
+      if (mayBeAdmitted) return this.reconcileSubmit(job, err, signal, windowEnd);
       if (err instanceof NotSentError) {
         // (not admitted: not run; admitted, then refused before a retry was sent: stopped)
         if (job.opts.gate && !job.admitted) job.sink.skipped({ notRun: "skip", note: err.stale ? NOTES.changed : `\nNot run: ${clip(err.message)}\n` });
@@ -422,6 +683,7 @@ export class RemoteKernel {
         return false;
       }
       mayBeAdmitted = true;
+      windowEnd = this.timers.now() + RECONCILE_WINDOW_MS;
     }
     return false;
   }
@@ -452,16 +714,29 @@ export class RemoteKernel {
   // it hasn't seen yet can never be admitted later), so the outcome is
   // unknown, and fenced (and if the retry said another tab has the binding,
   // this one stops taking work).
-  async reconcileSubmit(job, retryErr, signal) {
+  async reconcileSubmit(job, retryErr, signal, windowEnd) {
     const path = `/bindings/${job.lc.binding}/runs/${encodeURIComponent(job.request)}`;
-    let r = null, err = null;
-    try {
-      r = await this.client.request("GET", path, undefined, { signal });
-    } catch (e) {
-      err = e;
+    // (plan r8 F3: asked up to 3 times, RECOVERY.reconcileWaits apart, each with its own deadline, all inside the
+    // window the lost answer opened; only a record of this request is proof, and nothing else, a not-found
+    // included, ends the asking early)
+    for (let i = 0; i <= RECOVERY.reconcileWaits.length; i++) {
+      if (i) {
+        // (each wait clipped to the window, so nothing waits past it: the bound holds by construction)
+        await this.wait(Math.min(RECOVERY.reconcileWaits[i - 1], Math.max(0, windowEnd - this.timers.now())), signal);
+        if (this.current !== job || signal.aborted) return false;
+      }
+      const left = windowEnd - this.timers.now();
+      if (left <= 0) break;
+      let r = null, err = null;
+      try {
+        r = await this.client.request("GET", path, undefined, { signal, timeoutMs: Math.min(RECOVERY.reconcileGetMs, left) });
+      } catch (e) {
+        err = e;
+      }
+      if (this.current !== job) return false;
+      if (!err && r?.request === job.request) return true;
+      if (signal.aborted) return false;
     }
-    if (this.current !== job) return false;
-    if (!err && r.request === job.request) return true;
     this.needsFence = true;
     if (retryErr instanceof GatewayError && retryErr.code === "epoch" && this.lc === job.lc) this.movedAway(NOTES.unknown);
     else job.sink.stopped(NOTES.unknown);
@@ -478,12 +753,37 @@ export class RemoteKernel {
     let after = 0, failures = 0, started = false;
     while (this.current === job && !sink.ended) {
       try {
+        if (job.wave) job.result.roundTrips++;
         for await (const ev of this.client.events(path, after, signal)) {
           if (this.current !== job || sink.ended) return;
           if (!Number.isInteger(ev.seq) || ev.seq <= after) continue; // (a replay or a duplicate)
           if (ev.seq !== after + 1) break; // (a gap: reconnect from the last one seen)
           after = ev.seq;
           failures = 0;
+          if (job.wave) {
+            // (a wave's events: each entry's to its cell, in order; its end replayed; the wave's terminal last)
+            if (ev.type === "terminal") return this.waveTerminal(job, ev.outcome);
+            // (a Stop the gateway latched with no entry running: the entries after it are not run, as the policy says)
+            if (ev.type === "stop") {
+              if (!Number.isInteger(ev.before) || ev.before !== job.next) return this.waveBroken(job);
+              waveStop(job.st);
+              continue;
+            }
+            const e = Number.isInteger(ev.entry) ? job.wave.entries[ev.entry] : undefined;
+            // (a placeholder has only its end; any other entry's events are the next one's)
+            if (!e || (ev.type !== "end" && (e.place || ev.entry !== job.next))) return this.waveBroken(job);
+            if (ev.type === "end") {
+              if (!this.waveEnd(job, ev.entry, ev)) return this.waveBroken(job);
+            } else if (ev.type === "start") {
+              if (!e.started) { e.started = true; e.sink.start(); }
+            } else if (ev.type === "stream") {
+              if (ev.name === "stderr") e.sawErrorText = true;
+              e.sink.out(String(ev.text ?? ""), ev.name === "stderr");
+            } else if (ev.type === "display") {
+              if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) e.sink.display(ev.data);
+            } else if (ev.type === "clear") e.sink.clear();
+            continue;
+          }
           if (ev.type === "start") { if (!started) { started = true; sink.start(); } }
           else if (ev.type === "stream") {
             if (ev.name === "stderr") job.sawErrorText = true;
@@ -518,12 +818,25 @@ export class RemoteKernel {
     while (this.current === job && !job.sink.ended) {
       let r = null;
       try {
+        if (job.wave) job.result.roundTrips++;
         r = await this.client.request("GET", path, undefined, { signal });
         failures = 0;
       } catch {
         failures++;
       }
       if (this.current !== job || job.sink.ended) return;
+      if (job.wave && r?.outcome && typeof r.outcome === "object") {
+        // (the entries' ends the stream didn't bring, from the record, without their output; then the terminal)
+        const ends = Array.isArray(r.entries) ? r.entries : [];
+        // (a Stop latched before an entry: replayed there, as the stream's stop event)
+        const stopAt = (k) => { if (r.stop === k && !job.st.stopped) waveStop(job.st); };
+        stopAt(job.next);
+        while (job.next < job.wave.entries.length && ends[job.next]) {
+          if (!this.waveEnd(job, job.next, ends[job.next])) return this.waveBroken(job);
+          stopAt(job.next);
+        }
+        return this.waveTerminal(job, r.outcome);
+      }
       if (r?.outcome && typeof r.outcome === "object") return this.finish(job, r.outcome);
       if (failures > 5) break;
       await this.sleep(wait);
@@ -660,37 +973,68 @@ export class RemoteKernel {
    */
   async takeover(job, lost = null) {
     if (job && this.current !== job) return false;
-    const deadline = Date.now() + 100_000; // (the gateway's own fence wait)
+    // (plan r8 F2/F4: the recovery's one transaction; a job taken while it lasts joins it, never a new one)
+    const tx = this.fenceTx ?? this.openFence();
     let wait = 500;
     for (;;) {
       const lc0 = this.lc;
       if (lc0.phase !== "ready") return false;
-      let r, err = null;
-      try {
-        r = await this.client.request("POST", `/bindings/${lc0.binding}/takeover`, { client: this.clientId }, { signal: this.abortCtl.signal });
-      } catch (e) {
-        err = e;
-      }
-      if (this.lc !== lc0 || (job && this.current !== job)) return false;
-      if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
-      if (!err && !validTakeover(r)) err = new AmbiguousError("the gateway's answer to takeover was incomplete or not valid");
-      if (err) {
-        // (no complete evidence: nothing is concluded, and the fence stays)
-        this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
-        this.needsFence = true;
+      if (tx.closed) {
         if (job) this.notSent(job, NOTES.unreachable);
         return false;
       }
+      const sig = anySignal([this.abortCtl.signal, tx.ctl.signal]);
+      let r, err = null;
+      try {
+        r = await this.client.request("POST", `/bindings/${lc0.binding}/takeover`, { client: this.clientId, fence: tx.id, from_epoch: tx.from }, { signal: sig.signal, timeoutMs: RECOVERY.fencePostMs });
+      } catch (e) {
+        err = e;
+      } finally {
+        sig.off();
+      }
+      if (this.lc !== lc0 || (job && this.current !== job)) return false;
+      // (an answer after the transaction ended, or from an earlier one, is inert)
+      if (tx.closed || this.fenceTx !== tx) {
+        if (job) this.notSent(job, NOTES.unreachable);
+        return false;
+      }
+      if (err instanceof GatewayError && err.code === "quarantined") return this.replace(lc0);
+      const invalid = !err && !validTakeover(r);
+      if (invalid) err = new AmbiguousError("the gateway's answer to takeover was incomplete or not valid");
+      if (err instanceof GatewayError || invalid) {
+        // (a typed refusal, or an answer that isn't valid: nothing is concluded, and the fence stays)
+        this.emit("status", `error: the remote kernel could not be checked: ${clip(err?.message ?? err)}`);
+        if (job) this.notSent(job, NOTES.unreachable);
+        return false;
+      }
+      if (err) {
+        // (no answer at all, or none in time: the same fence again, while the transaction lasts)
+        if (this.timers.now() + wait > tx.deadline) {
+          this.expireFence(tx);
+          if (job) this.notSent(job, NOTES.unreachable);
+          return false;
+        }
+        this.emit("status", "the remote kernel didn't answer; trying again…");
+        await this.fenceWait(wait, tx);
+        if (this.lc !== lc0 || (job && this.current !== job)) return false;
+        wait = Math.min(5000, wait * 2);
+        continue;
+      }
       if (r.state === "quarantined") return this.replace(lc0);
       if (r.state === "ready") {
-        this.needsFence = false;
-        this.setLc({ epoch: r.epoch });
         const applied = r.applied_before_takeover;
+        const controlOps = applied.some((a) => a.kind === "restart" || a.kind === "delete");
+        // (plan r8 F1: the lineage is kept only on the gateway's word: sole since the epoch this transaction held,
+        // the same binding and incarnation, no restart or delete applied, nothing in flight)
+        const preserve = r.continuity?.sole === true && r.continuity.from_epoch === tx.from && this.lc === lc0 && r.incarnation === lc0.incarnation && !controlOps && r.in_flight.length === 0;
+        // (a run still in flight keeps the transaction open: the same fence id and deadline, never renewed)
+        if (controlOps || r.in_flight.length === 0) this.needsFence = false;
+        this.setLc({ epoch: r.epoch }, undefined, { preserve });
         if (lost && applied.some((a) => a.op_id === lost.opId && a.kind === "restart")) {
           this.restarted(lost.message, r.incarnation);
           return false;
         }
-        if (applied.some((a) => a.kind === "restart" || a.kind === "delete")) {
+        if (controlOps) {
           for (const j of this.queue.splice(0)) this.notSent(j, NOTES.kernelReplaced);
           this.setLc({ generation: this.lc.generation + 1, incarnation: r.incarnation }, NOTES.kernelReplaced);
           this.emit("status", "the remote kernel was restarted before this tab took it over; variables are gone");
@@ -699,7 +1043,7 @@ export class RemoteKernel {
         }
         if (r.in_flight.length) {
           this.emit("status", "a run from the previous tab is still executing");
-          this.needsFence = true; // (asked again before the next run)
+          // (asked again before the next run, in the same transaction)
           if (job) this.notSent(job, NOTES.inFlight);
           return false;
         }
@@ -707,8 +1051,8 @@ export class RemoteKernel {
         return true;
       }
       // fencing: the gateway refuses new work until its fence is acknowledged
-      if (Date.now() + wait > deadline) return this.replace(lc0);
-      await this.sleep(wait);
+      if (this.timers.now() + wait > tx.deadline) return this.replace(lc0);
+      await this.fenceWait(wait, tx);
       if (this.lc !== lc0 || (job && this.current !== job)) return false;
       wait = Math.min(5000, wait * 2);
     }
