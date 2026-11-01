@@ -724,3 +724,129 @@ after(() => {
   }
   assert.ok(n >= 4, `L20 the census saw the retirements (${n})`);
 });
+
+// ================= 4.5 Streams and output budgets
+
+/** A text frame's bytes on the wire (RFC 6455, server side: unmasked), for an oracle of the gate's sums. */
+const wireBytes = (text: string) => { const n = Buffer.byteLength(text, "utf8"); return n + (n < 126 ? 2 : n < 65536 ? 4 : 10); };
+test("L21 g.events: exactly a 200 head, the chunks in seq order, then one {id, end: true} at the terminal", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const run = await admitRun(t, b, "req-1");
+    const ev = t.page.request("g.events", { b, r: "req-1", after: 0 });
+    assert.equal((await ev.answer()).status, 200);
+    for (const s of ["a\n", "b\n", "c\n"]) t.port.last().onMessage({ id: run.workerId, stream: "stdout", text: s });
+    run.finish();
+    await until(() => framesFor(t.page.st, ev.id).some((x: any) => x.end), "the end");
+    const fs = framesFor(t.page.st, ev.id);
+    assert.equal(fs[0].status, 200, "the head first");
+    assert.equal(fs.filter((x: any) => x.status !== undefined).length, 1, "exactly one head");
+    const chunks = fs.slice(1, -1);
+    assert.ok(chunks.every((x: any) => typeof x.chunk === "string"), "then chunks only");
+    const seqs = chunks.map((x: any) => Number(/^id: (\d+)\n/.exec(x.chunk)![1]));
+    assert.deepEqual(seqs, seqs.map((_: number, i: number) => i + 1), "seq order from 1, no gap");
+    assert.equal(JSON.parse(chunks[chunks.length - 1].chunk.split("data: ")[1]).type, "terminal", "the terminal last");
+    assert.deepEqual(fs[fs.length - 1], { id: ev.id, end: true }, "one end, last");
+    assert.equal(fs.filter((x: any) => x.end).length, 1);
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L22 a chunk with buffered + frame = exactly 7 MiB is sent (L22+); one byte more: streamError slow, not appended; cancel then retired", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const run = await admitRun(t, b, "req-1");
+    const ev = t.page.request("g.events", { b, r: "req-1", after: 0 });
+    assert.equal((await ev.answer()).status, 200);
+    await until(() => framesFor(t.page.st, ev.id).length === 2, "the start chunk");
+    // (the next chunk, built by the test as an oracle: seq 2, a stream event)
+    const chunkFor = (seq: number, text: string) => JSON.stringify({ id: ev.id, chunk: `id: ${seq}\ndata: ${JSON.stringify({ seq, type: "stream", name: "stdout", text })}\n\n` });
+    const c2 = chunkFor(2, "x\n");
+    t.page.st.writableLength = PAIR_LIMITS.outData - wireBytes(c2);
+    let n = t.page.st.writes.length;
+    t.port.last().onMessage({ id: run.workerId, stream: "stdout", text: "x\n" });
+    assert.equal(t.page.st.writes.length, n + 1, "L22+ sent");
+    assert.equal(serverFrame(t.page.st.writes[n]).payload.toString(), c2, "the oracle's chunk, byte for byte");
+    const c3 = chunkFor(3, "y\n");
+    t.page.st.writableLength = PAIR_LIMITS.outData - wireBytes(c3) + 1;
+    n = t.page.st.writes.length;
+    t.port.last().onMessage({ id: run.workerId, stream: "stdout", text: "y\n" });
+    const after = t.page.st.writes.slice(n).map((w: Buffer) => JSON.parse(serverFrame(w).payload.toString()));
+    assert.deepEqual(after, [{ id: ev.id, streamError: "slow" }], "the chunk not appended; streamError slow (a control frame)");
+    t.page.st.writableLength = 0;
+    t.page.cancel(ev.id);
+    const fs = framesFor(t.page.st, ev.id);
+    assert.deepEqual(fs[fs.length - 1], { id: ev.id, retired: true }, "the cancel gets retired");
+    assert.equal(closeOf(t.page.st), null, "the socket stays open");
+    run.finish();
+  } finally { await t.s.close(); }
+});
+test("L23 an answer at exactly 7 MiB is sent (L23+); one byte more: close 1013, not appended", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page); // t1
+    // (the answer's size, measured on an identical request whose id has as many digits)
+    let n = t.page.st.writes.length;
+    assert.equal((await t.page.request("g.record", { b, r: "x" }).answer()).status, 404); // t2
+    const L = t.page.st.writes[n].length;
+    t.page.st.writableLength = PAIR_LIMITS.outData - L;
+    n = t.page.st.writes.length;
+    const a3 = await t.page.request("g.record", { b, r: "x" }).answer(); // t3
+    assert.equal(a3?.status, 404, "L23+ sent");
+    assert.equal(t.page.st.writes[n].length, L, "the same size");
+    t.page.st.writableLength = PAIR_LIMITS.outData - L + 1;
+    n = t.page.st.writes.length;
+    const r4 = t.page.request("g.record", { b, r: "x" }); // t4
+    await until(() => closeOf(t.page.st) !== null, "closed");
+    assert.equal(closeOf(t.page.st), 1013);
+    assert.equal(framesFor(t.page.st, r4.id).length, 0, "not appended");
+    assert.equal(t.page.st.writes.length, n + 1, "only the close frame written");
+  } finally { await t.s.close(); }
+});
+test("L24a a control frame at exactly 8 MiB is sent (L24+); L24b one byte more: the transport destroyed, nothing appended", async () => {
+  const t = await setup();
+  try {
+    const r = t.page.request("g.bind", {}, {});
+    assert.equal((await r.answer()).status, 200);
+    const retired = JSON.stringify({ id: r.id, retired: true });
+    t.page.st.writableLength = PAIR_LIMITS.outTotal - wireBytes(retired);
+    let n = t.page.st.writes.length;
+    t.page.cancel(r.id);
+    assert.equal(t.page.st.writes.length, n + 1, "L24+ sent");
+    assert.equal(serverFrame(t.page.st.writes[n]).payload.toString(), retired);
+    t.page.st.writableLength = PAIR_LIMITS.outTotal - wireBytes(retired) + 1;
+    n = t.page.st.writes.length;
+    const overflows = t.s.stats.overflows;
+    t.page.cancel(r.id);
+    // (what was written, asserted apart from why: nothing; the transport destroyed)
+    assert.equal(t.page.st.writes.length, n, "L24b nothing written");
+    assert.equal(t.page.st.destroyed, true, "destroyed");
+    assert.equal(t.s.stats.overflows - overflows, 1, "counted as an overflow");
+  } finally { await t.s.close(); }
+});
+test("L25 completion matches whose answer is RESPONSE_MAX + 1 B: 502 answer-too-large instead; L25+ exactly RESPONSE_MAX sent as is", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const base = JSON.stringify({ matches: [""], prefix: "" }).length;
+    for (const [extra, want] of [[0, 200], [1, 502]] as const) {
+      const r = t.page.request("g.complete", { b }, { epoch: 1, code: "x" });
+      await until(() => t.port.posted.some((m) => m.complete === "x" && !m.$answered), "the completion posted");
+      const m = t.port.posted.find((m) => m.complete === "x" && !m.$answered);
+      m.$answered = true;
+      const s = "a".repeat(RESPONSE_MAX - base + extra);
+      t.port.last().onMessage({ id: m.id, matches: [s], prefix: "" });
+      const a = await r.answer();
+      assert.equal(a.status, want, `+${extra}`);
+      if (want === 200) {
+        assert.equal(Buffer.byteLength(a.body, "utf8"), RESPONSE_MAX, "L25+ exactly RESPONSE_MAX, as is");
+        assert.equal(bodyOf(a).matches[0], s);
+      } else {
+        assert.deepEqual(bodyOf(a), { error: "answer-too-large" });
+        assert.ok(Buffer.byteLength(a.body, "utf8") <= RESPONSE_MAX);
+      }
+    }
+    census(t.s);
+  } finally { await t.s.close(); }
+});
