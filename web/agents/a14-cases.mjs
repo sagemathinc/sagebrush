@@ -83,6 +83,9 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
   };
   start(0);
   A.grants = () => A.notes.filter((m) => m.method === "grant.changed" && Object.keys(m.params ?? {}).length > 0).map((m) => m.params);
+  /** The grant after the n-th, once the stand-in has it (bounded): the page shows "Connected" when its allow() is done,
+   * which can be before the stand-in has read that allow()'s grant.changed; null if none came. */
+  A.newGrant = async (n, ms = 10000) => { for (const t = Date.now(); A.grants().length <= n && Date.now() - t < ms; ) await sleep(25); return A.grants().length > n ? A.grants().at(-1) : null; };
   A.messages = () => A.notes.filter((m) => m.method === "chat.message").map((m) => m.params);
   /** A round trip on the paired page's socket (a verb the page answers). */
   A.call = (method, params, ms = 5000) => new Promise((resolve) => {
@@ -224,19 +227,20 @@ async function attach(B, targetId, { clock = false } = {}) {
  * "page", "3600000" or "86400000"); `remember` ticks "Remember this agent"; `write` false grants read only. */
 async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
-  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`);
+  // (30 s: under a full counted run's load the page's first load and its dialog can take longer than 15 s)
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   return allowDialog(P, how, remember, write);
 }
 /** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in), then allow. */
 async function connectDialog(P, A, how = "page", remember = false, write = true) {
   await P.ev(`document.querySelector('#connect').click()`);
-  await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`, 30000);
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c, pt] = d.querySelectorAll('input'); c.value = '123-456'; pt.value = '${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
   return allowDialog(P, how, remember, write);
 }
 async function allowDialog(P, how, remember, write) {
-  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 30000);
   const set = await P.ev(`(() => {
     const d = [...document.querySelectorAll('.sbag-dlg')].at(-1);
     const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input');
@@ -594,10 +598,11 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await P.bar();
     ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-11: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
+    const n11 = A.grants().length;
     await P.ev(`document.querySelector('#conn-act').click()`);
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
-    const g2 = A.grants().at(-1);
-    ok(canon(g1) === canon(g2) && A.hellos === h0 + 1, "A14-11: one click reconnects with the same grant", { g1, g2 });
+    const g2 = await A.newGrant(n11);
+    ok(g2 !== null && canon(g1) === canon(g2) && A.hellos === h0 + 1, "A14-11: one click reconnects with the same grant", { g1, g2 });
   });
 
   // A14-12: the no-demo marker: a failed restore, then a second reload: Send inert with the hint; nothing reaches the demo
@@ -691,8 +696,8 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.ev(`(localStorage.setItem('__sbclock', '${T + 1000}'), true)`);
     await P.reload();
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`, 10000);
-    const g2 = A.grants().at(-1);
-    ok(label === "for 1 hour" && g1.expires === E && A.grants().length === grants + 1 && canon(g1) === canon(g2), "A14-16: 'for 1 hour' chosen explicitly; after the reload, 'Connected' with no click and the full grant equal, expires to the ms", { label, g1, g2 });
+    const g2 = await A.newGrant(grants);
+    ok(label === "for 1 hour" && g1.expires === E && g2 !== null && A.grants().length === grants + 1 && canon(g1) === canon(g2), "A14-16: 'for 1 hour' chosen explicitly; after the reload, 'Connected' with no click and the full grant equal, expires to the ms", { label, g1, g2 });
     await P.ev(`window.__sbAdvance(${E - 1})`);
     await sleep(300);
     const still = await P.connected();
