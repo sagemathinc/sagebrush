@@ -59,13 +59,14 @@ try {
     exceptions = [];
     await send("Page.navigate", { url });
     await sleep(300);
-    // (the layout mounted: its separators wired and valued, as apply() writes aria-valuenow only after mountLayout wires
-    // them; the editor is mounted earlier, before the layout. OR a page exception since this navigate: a mount that
-    // throws never values the separators, and the case's own checks must then fail it, not this wait; 20 s either way)
-    const mounted = `document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`;
+    // (the page loaded with its editor, as before, AND either the layout mounted (its separators wired and valued: apply()
+    // writes aria-valuenow only after mountLayout wires them) OR a page exception since this navigate (a mount that throws
+    // never values the separators; the case's own checks must then fail it, not this wait); 20 s)
+    const loaded = `document.readyState === 'complete' && !!document.querySelector('#editor .mb')`;
+    const mounted = `document.getElementById('sep-side').hasAttribute('aria-valuenow')`;
     for (const t = Date.now(); ; await sleep(50)) {
-      if (exceptions.length > 0 || (await ev(mounted).catch(() => false))) break;
-      if (Date.now() - t > 20000) throw new Error("timeout: the layout's mount (no aria-valuenow and no page exception) at " + url);
+      if ((await ev(loaded).catch(() => false)) && (exceptions.length > 0 || (await ev(mounted).catch(() => false)))) break;
+      if (Date.now() - t > 20000) throw new Error("timeout: the page's load with the layout's mount (or a page exception) at " + url);
     }
     await sleep(300);
   };
