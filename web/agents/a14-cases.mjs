@@ -483,7 +483,8 @@ export async function runA14({ site, ok, want = () => true }) {
     await chat(P, A);
     A.forget();
     await P.reload();
-    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    // (the outcome, not the attempt: "Reconnecting to Claude…" is shown first while the restore runs)
+    await P.until(`!['', ${JSON.stringify(COPY.restoring)}].includes(document.querySelector('#conn-status').textContent)`);
     const seen = await P.seen(), bar = await P.bar(), rec = await recordFacts(P), st = await P.sendState(), who = await P.ev(`document.querySelector('#who').textContent`);
     ok(seen.present && seen.keys === RECORD_KEYS && bar.status === COPY.refused && bar.alert === "" && bar.act === "Connect", "A14-6: the B-refused copy, role=status, offering [Connect]", { seen: seen.keys, bar });
     ok(rec === null && !/scripted/.test(who) && st.ariaDisabled === "true", "A14-6: the record is gone; no demo (the header doesn't say it; Send is inert)", { rec: !!rec, who, st });
