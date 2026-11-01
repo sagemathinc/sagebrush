@@ -22,3 +22,9 @@ cos(2*t)*e^(-t)
 heaviside(t - 2)*sin(t - 2)
 -e^(-t) + 1
 a*t*e^t
+ilt(e^(2*s)/(s^2 + 1), s, t)
+ilt(e^(-a*s)/s, s, t)
+heaviside(-a + t)
+1
+ilt(e^(-I*s)/s, s, t)
+1/s
