@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
+import { runA14 } from "./a14-cases.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const LATEX = process.env.AGENTS_LATEX === "1";
@@ -1667,10 +1668,19 @@ try {
 } finally {
   cdp.close();
   chrome.kill("SIGKILL");
-  server.kill();
   daemon.stop(true);
   await sleep(200);
   rmSync(profile, { recursive: true, force: true });
+  // ======================================================================== A14: reconnect after a reload
+  // (its own Chromes and stand-ins, one per case, on this site; in the plain build only: nothing of it is LaTeX's)
+  if (!LATEX) {
+    try {
+      await runA14({ site, ok, want });
+    } catch (e) {
+      ok(false, "A14: the cases ran to their end: " + (e?.stack ?? e));
+    }
+  }
+  server.kill();
 }
 console.log("timing: " + stamps.join(", "));
 console.log(failures ? `${failures} FAILED` : "all passed");
