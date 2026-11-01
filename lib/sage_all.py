@@ -407,6 +407,24 @@ from _sage_matrix import (matrix, MatrixSpace, identity_matrix, zero_matrix, dia
 Matrix = matrix
 
 
+def jacobian(functions, variables):
+    """The Jacobian matrix of functions (one function or a list) in the
+    variables, over SR.
+
+    EXAMPLES::
+
+        sage: var('y')
+        y
+        sage: jacobian([x*y, x + y], [x, y])
+        [y x]
+        [1 1]
+        sage: jacobian(x^2*y, [x, y])
+        [2*x*y   x^2]
+    """
+    import _sage_matrix_sr
+    return _sage_matrix_sr.jacobian(functions, variables)
+
+
 def parent(x):
     """The parent structure of x: ZZ, QQ, a polynomial ring, ...
 
