@@ -247,15 +247,22 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const { doc } = await this.mergeRemote((({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(rec));
     return this.writeSave({ ...doc, baseRev: rec.rev });
   }
-  /** The merge of the server's patches with `mine` (this device's value: the record's, or what the editor shows): base
-   * the history's value at the record's j, theirs the history's head.  Changes on separate cells, or separate lines of
-   * one cell, are all kept.  A clash (the same cell's same field, a cell deleted on one side and changed on the
-   * other, too much to merge) is decided the same way on every device, so they converge: the side with the later
-   * patch (patch ids: time, then client) is kept whole, and the other side's version stays in TimeTravel (its patches
-   * are stored on both devices), never dropped quietly (astra's A3 on 2c-3).  But a marked record's value (saved with
-   * no room for its version, 2c-1d-iii) is in no version: replacing it would lose it, so its side is kept whole on a
-   * clash (the remote side stays in TimeTravel), and the merge stays marked until its catch-up keeps it as a version,
-   * which then reaches the other devices (astra's CORR-2C3-2).  Resolves {doc, clashes, kept}. */
+  /** The merge of the server's patches with `mine` (this device's value: the record's, or what the editor shows).
+   * Theirs is the history's head; the base is mergeBaseOf's (a notebook's: the merged value of every version at or
+   * below the record's j, or the synced root; a board's: the version at that j).  A base this history can't give
+   * completely refuses: deferMerge, nothing written or sent, and the next arrival tries again (astra3's BASE-1).
+   * The kind merges (its apply), told which side is the later by patch id (`wins`: the side with the later patch,
+   * the same on every device, so they converge):
+   * - a notebook: exact merges (plan-exact-only r1), its records by dbMerge3 with the later side as dbMerge3's `b`.
+   *   Every edit is kept, text merged within a cell; never a clash.
+   * - a board: boardMerge3.  A clash (or a refused merge, which keeps the later side whole) is reported, and the other
+   *   side's version stays in TimeTravel (its patches are stored on both devices), never dropped quietly (astra's A3
+   *   on 2c-3).
+   * A marked record's value (saved with no room for its version, 2c-1d-iii) is in no version, so its side is always
+   * the later one (`shown`): kept whole on a board's clash, dbMerge3's `b` for a notebook.  The merge stays marked
+   * until its catch-up keeps it as a version, which then reaches the other devices (astra's CORR-2C3-2).
+   * Resolves {doc, clashes, kept}: `clashes` is always [] for a notebook, so `kept` is null; for a board, `kept`
+   * names the side kept on a clash ("theirs" or "mine"). */
   async mergeRemote(mine) {
     const rec = await super.loadRecord(), js = await readJournal(this.hdb, this.id);
     let theirsLast = "";
@@ -267,7 +274,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (mb.refuse) throw Object.assign(new Error(`sync: a change from elsewhere waits: ${mb.refuse}`), { deferMerge: true });
     const baseTime = mb.time, base = mb.value ? this.kind.fromRecords(mb.value) : null;
     const head = this.kind.fromRecords(session.value());
-    // (which side a clash keeps: the later one, by patch id; this device's side is its last version's (the record's j))
+    // (which side is the later, by patch id (a notebook's dbMerge3 `b`, a board's clash keeper); this device's side is
+    // its last version's (the record's j))
     const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
     const r = this.kind.apply(base, mine, head, theirsWin ? "remote" : "shown");
     return { doc: this.withValue(rec ?? mine, this.kind.toRecords(r.value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };

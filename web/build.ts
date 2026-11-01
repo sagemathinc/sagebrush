@@ -186,7 +186,9 @@ for (const r of [result, consoleResult, mathResult, graphResult, notebookResult,
   const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
   if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: true, define: LATEX_DEFINE });
+  // (SAGEBRUSH_MEASURE_IDS=keep: the size gate's identifier-stable measuring variant, never shipped: identifiers kept,
+  //  so the DEV page's script is PROD's with the DEV-only code inserted; scripts/line3-measure.mjs)
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: process.env.SAGEBRUSH_MEASURE_IDS === "keep" ? { whitespace: true, syntax: true, identifiers: false } : true, define: LATEX_DEFINE });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);
