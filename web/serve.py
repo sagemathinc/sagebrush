@@ -2,8 +2,14 @@
 (COOP/COEP, from web/_headers): python3 web/serve.py [port]
 
 Port 0: the system picks a free port, and the server prints it (one line, on
-stdout) once it is listening, for a test that starts it and must not race it."""
-import http.server, os, posixpath, sys, urllib.parse
+stdout) once it is listening, for a test that starts it and must not race it.
+
+For a test that must see what reaches the server (G-10, web/test-runner.mjs), two optional variables:
+  SB_SERVE_LOG=<file>         each request appended as a JSON line: method, path, and its Cookie and Referer
+  SB_SERVE_OVERRIDES=<file>   JSON {path: {"file": <a file served instead>} | {"status": 302, "location": <url>}},
+                              read on each request (so a test can change it), for that exact path, query included
+Without them it serves as before."""
+import http.server, json, os, posixpath, sys, urllib.parse
 
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
 
@@ -44,6 +50,50 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+    def _record(self):
+        log = os.environ.get("SB_SERVE_LOG")
+        if log:
+            with open(log, "a") as f:
+                f.write(json.dumps({"method": self.command, "path": self.path, "cookie": self.headers.get("Cookie"),
+                                    "referer": self.headers.get("Referer")}) + "\n")
+
+    def _override(self):
+        o = os.environ.get("SB_SERVE_OVERRIDES")
+        if not o:
+            return False
+        try:
+            rule = json.load(open(o)).get(self.path)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(rule, dict):
+            return False
+        if rule.get("status") == 302:
+            self.send_response(302)
+            self.send_header("Location", rule["location"])
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        if "file" in rule:
+            body = open(rule["file"], "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(self.path.split("?")[0]))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return True
+        return False
+
+    def do_GET(self):
+        self._record()
+        if not self._override():
+            super().do_GET()
+
+    def do_HEAD(self):
+        self._record()
+        if not self._override():
+            super().do_HEAD()
 
 os.chdir(DIST)
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765

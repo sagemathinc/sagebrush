@@ -28,12 +28,52 @@ export const NOT_RUN = "This code wasn't run: the sandboxed runner didn't start,
 
 import { FILES_RUNNER } from "./files-runner.js";
 
-// the files the runner may have the page fetch for its worker: the engine,
-// the PNG module (fetched when Python first writes or reads a PNG), the
-// Python library's chunks (web/lib-lazy.ts) and the pinned zone data's index
-// and zone files (web/tzdata-chunks.mts), each checked by its SHA-256 in the
-// worker
-const OWN = /\/(sagebrush-(engine\.wasm|raster\.wasm)|lib\/[\w.-]+\.[0-9a-f]{16}\.json|lib\/tzdata\/(index-[0-9a-f]{64}\.json|[0-9a-f]{64}\.tzif))$/;
+// the files the runner may have the page fetch for its worker, exactly (G-10): the engine and the PNG module
+// with their ?h=, the Python library's chunks (web/lib-lazy.ts) and the pinned zone data's index, as the build
+// lists them (web/runner-fetch.mts, __SB_RUNNER_FETCH__); and the zone files that index lists, once its bytes
+// have the build's SHA-256 and pass parseTzIndex. A bundle without the list allows nothing.
+/* global __SB_RUNNER_FETCH__ */
+// (one reference to the define, so the build writes the list once: a `typeof` guard is a second reference, and the
+// bundler writes the whole list at each; unbuilt, as the unit test imports it, the name is undefined and throws)
+let RUNNER_FETCH;
+try { RUNNER_FETCH = __SB_RUNNER_FETCH__; } catch { RUNNER_FETCH = { files: [], tzIndex: null }; }
+
+/** The zone data's index (web/tzdata-chunks.mts), read by a closed grammar: the set of its zone files' paths
+ * (lib/tzdata/<sha>.tzif), or null for anything else. Each bound is its own check (G-10 plan r2.3). */
+export function parseTzIndex(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > 262144) return null;
+  let o;
+  try {
+    o = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  } catch {
+    return null;
+  }
+  const plain = (x) => x !== null && typeof x === "object" && !Array.isArray(x) && Object.getPrototypeOf(x) === Object.prototype;
+  if (!plain(o)) return null;
+  const keys = Object.keys(o);
+  if (keys.length !== 3 || !["format", "version", "zones"].every((k) => keys.includes(k))) return null;
+  if (o.format !== "sagebrush-tzdata") return null;
+  if (typeof o.version !== "string") return null;
+  if (o.version.length < 1 || o.version.length > 32) return null;
+  if (!/^[0-9A-Za-z._-]+$/.test(o.version)) return null;
+  if (!plain(o.zones)) return null;
+  const names = Object.keys(o.zones);
+  if (names.length < 1) return null;
+  if (names.length > 2000) return null;
+  const set = new Set();
+  for (const name of names) {
+    if (!/^[A-Za-z0-9_+./-]+$/.test(name)) return null;
+    if (name.length < 1 || name.length > 64) return null;
+    if (name.includes("..")) return null;
+    if (name.startsWith("/")) return null;
+    const v = o.zones[name];
+    if (typeof v !== "string" || !/^[0-9a-f]{64}$/.test(v)) return null;
+    set.add(`lib/tzdata/${v}.tzif`);
+  }
+  return set;
+}
+
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 // Files mode: the runner for a page that has the engine's files itself (a
 // board downloaded as one HTML file).  A file:// page is never cross-origin
@@ -107,6 +147,10 @@ export class RunnerWorker {
     const runner = new URL(src ?? "about:blank", location.href);
     this.base = files ? null : new URL("../", runner).href;
     this.mounted = new Set();
+    // (the exact URLs, each in its canonical form; the zones join once their index has been checked)
+    this.allowed = new Set(this.base ? RUNNER_FETCH.files.map((f) => new URL(f, this.base).href) : []);
+    this.tzIndex = this.base && RUNNER_FETCH.tzIndex ? { url: new URL(RUNNER_FETCH.tzIndex.file, this.base).href, sha256: RUNNER_FETCH.tzIndex.sha256 } : null;
+    this.zones = new Set();
     const ch = new MessageChannel();
     ch.port1.onmessage = (e) => {
       const d = e.data;
@@ -172,13 +216,24 @@ export class RunnerWorker {
   async fetchFor(id, url) {
     let bytes = null;
     try {
-      const u = new URL(String(url));
-      const allowed = !!this.base && (this.mounted.has(u.href) || (u.href.startsWith(this.base) && OWN.test(u.pathname)));
-      if (allowed) {
-        const r = await fetch(u.href);
+      // (only a request already in its canonical form, and exactly one of the allowed URLs, the checked zones or
+      // the mounted files: nothing the interpreter could vary, a query, a fragment, a dot segment, gets through)
+      const raw = String(url);
+      const isIndex = !!this.tzIndex && raw === this.tzIndex.url;
+      if (this.base && raw === new URL(raw).href && (this.allowed.has(raw) || isIndex || this.zones.has(raw) || this.mounted.has(raw))) {
+        const r = await fetch(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" });
         if (r.ok) bytes = await r.arrayBuffer();
+        if (bytes && isIndex) {
+          // (the index: its bytes must be the build's, then its grammar; its zones are admitted all at once, before
+          // the index is answered, so the interpreter's next request, a zone, finds them)
+          const set = hex(await crypto.subtle.digest("SHA-256", bytes)) === this.tzIndex.sha256 ? parseTzIndex(new Uint8Array(bytes)) : null;
+          if (set === null) bytes = null;
+          else for (const f of set) this.zones.add(new URL(f, this.base).href);
+        }
       }
-    } catch {}
+    } catch {
+      bytes = null;
+    }
     if (this.closed) return;
     this.port?.postMessage({ runnerFetched: id, url, bytes }, bytes ? [bytes] : []);
   }
