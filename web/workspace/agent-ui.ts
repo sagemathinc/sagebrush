@@ -319,6 +319,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   if (o.button) o.button.addEventListener("click", () => connect());
   const link = pairLink();
   if (link) connect(link.code, link.port);
-  else void restoreOnLoad();
+  // (in a microtask: the caller has this function's result before any restore state is said to it)
+  else queueMicrotask(() => void restoreOnLoad());
   return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
 }
