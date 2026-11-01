@@ -116,6 +116,8 @@ type Stats = {
   /** slices made (each 1 MiB) and their bytes in all; bytes held in Blob parts; read back from them; hash copies;
    * slices made after a Cancel */
   slices?: number; sliceBytes?: number; blobBytes?: number; blobReadBytes?: number; hashCopyBytes?: number; slicesAfterStop?: number;
+  /** (E1 r2e) the largest one sink.write the archive made, bytes (at most ZIP_OUT) */
+  maxSinkWrite?: number;
   /** slices handed over (to the worker or a sink) after a Cancel: none */
   postsAfterStop?: number;
   /** a Cancel to the export's stop, ms (its cleanup after) */
@@ -656,7 +658,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
       st.sink = sink?.constructor?.name;
       st.rowSegs = rows.segs.slice(); st.rowBytes = rowStats.rowBytes; st.rowSize = rows.size;
       st.slices = counts.slices; st.sliceBytes = counts.sliceBytes; st.blobBytes = counts.blobBytes; st.blobReadBytes = counts.blobReadBytes;
-      st.hashCopyBytes = counts.hashCopyBytes; st.slicesAfterStop = counts.afterStop; st.postsAfterStop = counts.postsAfterStop;
+      st.hashCopyBytes = counts.hashCopyBytes; st.slicesAfterStop = counts.afterStop; st.postsAfterStop = counts.postsAfterStop; st.maxSinkWrite = counts.maxSinkWrite;
       st.preflightMs = plan.preflightMs; st.writingMs = performance.now() - t0;
     }
   }
