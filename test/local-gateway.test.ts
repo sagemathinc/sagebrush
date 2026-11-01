@@ -2,7 +2,10 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
-import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, type SessionPort, type WorkerHandle } from "../src/local-gateway";
+import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, workerPort, type SessionPort, type WorkerHandle } from "../src/local-gateway";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // The local gateway (src/local-gateway.ts), local kernel phase 3a: the frozen cases
 // /scratch/sagebrush-reviews/remote-compute/local-kernel-p3a-cases-v3/cases.md (59dcf129, SUMS dde00911); each test's
@@ -126,17 +129,22 @@ function newPage(s: PairServer, clk: ReturnType<typeof clock>, key = keyPair()) 
     },
     /** The page's {cancel: id} notification (recorded: L20). */
     cancel(id: string) { st.cancels.add(id); c.feed(maskedText({ cancel: id })); },
-    /** Send one request frame; resolves to its answer frame (the first frame for its id). */
-    request(rpc: string, ref: any, body?: unknown, over: { id?: string; auth?: string; dpop?: string; proof?: any; method?: string; path?: string } = {}) {
+    /** One request frame's bytes, not sent (its id, and a real proof). */
+    frameOf(rpc: string, ref: any, body?: unknown, over: { id?: string; auth?: string; dpop?: string; proof?: any; method?: string; path?: string } = {}) {
       const id = over.id ?? page.nextId();
       const row = ROUTES[rpc];
       const method = over.method ?? row.method;
       const path = over.path ?? row.path(ref);
       const frame: any = { id, rpc, ref, auth: over.auth ?? `DPoP ${page.token}`, dpop: over.dpop ?? page.proof(method, path, over.proof), accept: rpc === "g.events" ? "text/event-stream" : "application/json" };
       if (body !== undefined) frame.body = typeof body === "string" ? body : JSON.stringify(body);
+      return { id, bytes: maskedText(frame) };
+    },
+    /** Send one request frame; resolves to its answer frame (the first frame for its id). */
+    request(rpc: string, ref: any, body?: unknown, over: { id?: string; auth?: string; dpop?: string; proof?: any; method?: string; path?: string } = {}) {
+      const f = page.frameOf(rpc, ref, body, over);
       const before = st.writes.length;
-      c.feed(maskedText(frame));
-      return { id, answer: () => waitFor(st, id, before) };
+      c.feed(f.bytes);
+      return { id: f.id, answer: () => waitFor(st, f.id, before) };
     },
   };
   return page;
@@ -1416,5 +1424,250 @@ test("L43 old-generation Worker output after a restart and after the fallback: d
     assert.equal(t.s.gateway.stats.staleOutputs, s2 + 1);
     assert.equal(run3.outcome, null, "the new generation's run untouched");
     r3.finish();
+  } finally { await t.s.close(); }
+});
+
+// ================= the real Worker (cases v3 §6): L33, L36
+
+const CLI_ENTRY = join(__dirname, "..", "src", "cli.js");
+/** A server whose gateway runs the production port (src/notebook.ts's Worker, dist/src/cli.js as the entry), each
+ * Worker's own messages and exit seen by the test (the observer runs before the gateway's listener). */
+async function setupReal(o: { gateway?: any } = {}) {
+  const clk = clock();
+  const seen = { workers: [] as any[], msgs: [] as any[][], exits: [] as number[], onMsg: null as null | ((m: any, k: number) => void) };
+  const dir = mkdtempSync(join(tmpdir(), "lk-real-"));
+  const port = workerPort(dir, CLI_ENTRY, (w) => {
+    const k = seen.workers.length;
+    seen.workers.push(w);
+    seen.msgs.push([]);
+    w.on("message", (m: any) => { seen.msgs[k].push(m); seen.onMsg?.(m, k); });
+    w.on("exit", () => seen.exits.push(k));
+  });
+  const s = new PairServer({ timers: clk, err: () => {}, gateway: { port, ...(o.gateway ?? {}) } });
+  const page = newPage(s, clk);
+  return { s, clk, page, seen, dir };
+}
+const sawMsg = (t: any, pred: (m: any) => boolean) => t.seen.msgs.some((a: any[]) => a.some(pred));
+const LOOP = "import time\nwhile True:\n    time.sleep(0.005)\n";
+const SWALLOW = "import time\nwhile True:\n    try:\n        time.sleep(0.005)\n    except KeyboardInterrupt:\n        pass\n";
+/** A g.run body of exactly n UTF-8 bytes (TextEncoder's count): `code0`, then a comment of 3-byte characters. */
+function runBodyOfBytes(n: number, request: string, code0: string) {
+  const mk = (pad: string) => JSON.stringify({ request, epoch: 1, payload: { code: code0 + "# " + pad + "\n" } });
+  const u8 = (x: string) => new TextEncoder().encode(x).length;
+  const room = n - u8(mk(""));
+  const s = mk("€".repeat(Math.floor(room / 3)) + "a".repeat(room % 3));
+  assert.equal(u8(s), n, "the oracle's count");
+  return s;
+}
+async function startReal(t: any, b: string, request: string, code: string) {
+  const a = await t.page.request("g.run", { b }, typeof code === "string" && code.startsWith("{") ? code : { request, epoch: 1, payload: { code } }).answer();
+  assert.equal(a.status, 202, a.body);
+  const run = t.s.gateway.binding!.runs.get(request)!;
+  await until(() => sawMsg(t, (m) => m.id === run.workerId && m.start), `${request}: the Worker's start`, 60_000);
+  return run;
+}
+
+test("L33a Stop on the real Worker: the run ends when the Worker says it ended", async () => {
+  const t = await setupReal();
+  try {
+    const b = await bind(t.page);
+    const run = await startReal(t, b, "loop", LOOP);
+    assert.equal((await t.page.request("g.interrupt", { b }, { epoch: 1 }).answer()).status, 200);
+    assert.equal(run.outcome, null, "not ended at the request");
+    await until(() => run.outcome !== null, "the run's end", 30_000);
+    assert.ok(sawMsg(t, (m) => m.id === run.workerId && m.done), "the Worker said it ended");
+    assert.notEqual(run.outcome!.status, "stopped", "its own end, not the fallback's");
+    assert.equal(t.s.gateway.stats.fallbacks, 0);
+  } finally { await t.s.close(); }
+});
+test("L33b the fallback on the fake clock, the real Worker ignoring the interrupt: not at 1999 ms; at 2000 ms terminated (its exit) and restarted (a new generation answers a run), the run stopped; all within 60 s", async () => {
+  const t0 = Date.now();
+  const t = await setupReal();
+  try {
+    const b = await bind(t.page);
+    const run = await startReal(t, b, "swallow", SWALLOW);
+    assert.equal((await t.page.request("g.interrupt", { b }, { epoch: 1 }).answer()).status, 200);
+    await new Promise((r) => setTimeout(r, 300)); // (the interrupt delivered, and swallowed)
+    t.clk.advance(GATEWAY_LIMITS.fallbackMs - 1);
+    assert.equal(t.s.gateway.stats.fallbacks, 0, "not at 1999 ms");
+    assert.equal(run.outcome, null);
+    assert.equal(t.seen.workers.length, 1);
+    t.clk.advance(1);
+    assert.equal(t.s.gateway.stats.fallbacks, 1, "at 2000 ms");
+    assert.deepEqual(run.outcome, { status: "stopped", reason: "fallback" });
+    await until(() => t.seen.exits.includes(0), "the old Worker's exit event", 30_000);
+    assert.equal(t.seen.workers.length, 2, "restarted");
+    const next = await startReal(t, b, "after", "x = 41 + 1\n");
+    await until(() => next.outcome !== null, "the new generation's run", 30_000);
+    assert.equal(next.outcome!.status, "ok");
+    assert.ok(Date.now() - t0 < 60_000, "the real-time sanity bound");
+  } finally { await t.s.close(); }
+});
+
+// ================= 4.8 Payload
+
+test("L36a-c on the real Worker: a held run of exactly BODY_MAX.run bytes charged gateway- and Worker-owned, 0 only after its end; L36b a 64 KiB completion: peak 2,424,832; L36c another run and completion busy, uncharged", async () => {
+  const t = await setupReal();
+  try {
+    const b = await bind(t.page);
+    const g = t.s.gateway;
+    const r = t.page.request("g.run", { b }, runBodyOfBytes(BODY_MAX.run, "big", LOOP));
+    // (gateway-owned: read as the frame's decode returns, before the dispatch microtask)
+    assert.equal(g.stats.queuedPayloadBytes, BODY_MAX.run, "gateway-owned: charged its size");
+    assert.equal(g.stats.rawBodyRefs, 0, "no raw body held");
+    assert.ok(g.runSlot && "rpc" in (g.runSlot as any), "held by its request");
+    assert.equal((await r.answer()).status, 202);
+    const run = g.binding!.runs.get("big")!;
+    await until(() => sawMsg(t, (m) => m.id === run.workerId && m.start), "the Worker's start", 60_000);
+    assert.equal(run.owner, "worker");
+    assert.equal(g.stats.queuedPayloadBytes, BODY_MAX.run, "Worker-owned: the same charge (not 0 at postMessage)");
+    assert.equal(g.stats.rawBodyRefs, 0);
+    // L36b
+    const c = t.page.request("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "pri" }));
+    await until(() => g.completeWaiter !== null, "the completion dispatched");
+    assert.equal(g.stats.maxQueuedPayloadBytes, 2_424_832, "the peak: one run and one completion");
+    // L36c
+    const held = g.stats.queuedPayloadBytes;
+    const r2 = await t.page.request("g.run", { b }, { request: "other", epoch: 1, payload: { code: "y = 1" } }).answer();
+    assert.equal(r2.status, 409); assert.equal(bodyOf(r2).error, "busy");
+    const c2 = await t.page.request("g.complete", { b }, { epoch: 1, code: "y" }).answer();
+    assert.equal(c2.status, 409); assert.equal(bodyOf(c2).error, "busy");
+    assert.equal(g.stats.queuedPayloadBytes, held, "neither charged");
+    // the end: the charge is 0 only after the Worker's done for that run
+    let atDone = -1;
+    t.seen.onMsg = (m) => { if (m.id === run.workerId && m.done) atDone = g.stats.queuedPayloadBytes; };
+    assert.equal((await t.page.request("g.interrupt", { b }, { epoch: 1 }).answer()).status, 200);
+    await until(() => run.outcome !== null, "the run's end", 30_000);
+    assert.ok(atDone >= BODY_MAX.run, `still charged when the Worker's done arrived (${atDone})`);
+    assert.equal((await c.answer()).status, 200, "the completion answered after the run");
+    await until(() => g.stats.queuedPayloadBytes === 0, "the charge 0");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+test("L36d one write of 8 max-body g.run frames: one admitted, seven 409 busy after auth, uncharged, the peak one body; likewise 8 g.complete frames", async () => {
+  const t = await setup();
+  try {
+    const b = await bind(t.page);
+    const g = t.s.gateway;
+    const runs = Array.from({ length: 8 }, (_, k) => t.page.frameOf("g.run", { b }, runBodyOfBytes(BODY_MAX.run, `r${k}`, "x = 1\n")));
+    t.page.c.feed(Buffer.concat(runs.map((f) => f.bytes)));
+    const ra = await Promise.all(runs.map((f) => waitFor(t.page.st, f.id)));
+    assert.deepEqual(ra.map((a) => a.status).sort(), [202, 409, 409, 409, 409, 409, 409, 409]);
+    assert.ok(ra.filter((a) => a.status === 409).every((a) => bodyOf(a).error === "busy"), "busy, after authentication");
+    assert.deepEqual(g.stats.authRefusals, {}, "every one authenticated");
+    assert.equal(g.stats.maxQueuedPayloadBytes, BODY_MAX.run, "the peak: one body");
+    assert.equal(g.stats.queuedPayloadBytes, BODY_MAX.run);
+    const comps = Array.from({ length: 8 }, () => t.page.frameOf("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "c" })));
+    t.page.c.feed(Buffer.concat(comps.map((f) => f.bytes)));
+    await until(() => comps.filter((f) => texts(t.page.st).some((x: any) => x.id === f.id && x.status === 409)).length === 7, "seven completions busy");
+    assert.equal(t.port.posted.filter((m) => m.complete !== undefined).length, 1, "one completion admitted");
+    assert.equal(g.stats.maxQueuedPayloadBytes, BODY_MAX.run + BODY_MAX.other);
+    const cm = t.port.posted.find((m) => m.complete !== undefined);
+    t.port.last().onMessage({ id: cm.id, matches: [], prefix: "" });
+    const admitted = runs[ra.findIndex((a) => a.status === 202)];
+    void admitted;
+    const rm = t.port.posted.find((m) => typeof m.code === "string");
+    t.port.last().onMessage({ id: rm.id, done: true, ms: 1 });
+    await until(() => g.stats.queuedPayloadBytes === 0, "released");
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+/** A 256-entry wave whose whole g.run body is exactly `n` bytes (ASCII padding, spread over the entries). */
+function waveBodyOfBytes(n: number, request: string, codeOf: (k: number) => string) {
+  const mk = (pads: string[]) => JSON.stringify({ request, epoch: 1, kind: "wave", payload: wave(pads.map((p, k) => entry(k, codeOf(k) + "# " + p + "\n"))) });
+  const base = Buffer.byteLength(mk(Array(256).fill("")), "utf8");
+  const room = n - base;
+  const pads = Array.from({ length: 256 }, (_, k) => "a".repeat(Math.floor(room / 256) + (k === 255 ? room % 256 : 0)));
+  const s = mk(pads);
+  assert.equal(new TextEncoder().encode(s).length, n);
+  return s;
+}
+test("L36e a 256-entry wave at the body cap, on the real Worker: wave-owned until its terminal; after each dispatch the entry's code gone; no raw body; one charge, 0 at the terminal", async () => {
+  const t = await setupReal();
+  try {
+    const b = await bind(t.page);
+    const g = t.s.gateway;
+    const checks: string[] = [];
+    let run: any = null;
+    t.seen.onMsg = (m) => {
+      if (!run || !m.start || m.id !== run.workerId) return;
+      const k = run.current;
+      if (run.owner !== "wave") checks.push(`entry ${k}: owner ${run.owner}`);
+      for (let j = 0; j <= k; j++) if (run.wave.entries[j].code !== undefined) checks.push(`entry ${k}: entry ${j}'s code kept`);
+      if (g.stats.rawBodyRefs !== 0) checks.push(`entry ${k}: a raw body`);
+      if (g.stats.queuedPayloadBytes !== BODY_MAX.run) checks.push(`entry ${k}: charge ${g.stats.queuedPayloadBytes}`);
+    };
+    const a = await t.page.request("g.run", { b }, waveBodyOfBytes(BODY_MAX.run, "w", (k) => `v${k} = ${k}\n`)).answer();
+    assert.equal(a.status, 202, a.body);
+    run = g.binding!.runs.get("w")!;
+    assert.equal(run.owner, "wave");
+    await until(() => run.outcome !== null, "the wave's terminal", 120_000);
+    assert.deepEqual(checks, [], "at every entry's start");
+    assert.deepEqual(run.outcome, { status: "done" });
+    assert.equal(g.stats.queuedPayloadBytes, 0, "0 at the terminal");
+    assert.equal(run.owner, null);
+    census(t.s);
+  } finally { await t.s.close(); }
+});
+
+// L36f: the charge returns to 0 on every cleanup path [G1]: (A) a held run and a held completion, both
+// gateway-owned (held at authentication), and (B) a Worker-owned run with a dispatched completion
+type Path = "err" | "exit" | "fb" | "unpair" | "rebind" | "close";
+async function cleanup(t: any, path: Path) {
+  const k = t.seen.workers.length - 1;
+  if (path === "err") t.seen.workers[k].emit("error", new Error("an error from the Worker (L36f-err)"));
+  else if (path === "exit") await t.seen.workers[k].terminate();
+  else if (path === "fb") {
+    const b = t.s.gateway.binding.id;
+    assert.equal((await t.page.request("g.interrupt", { b }, { epoch: t.s.gateway.binding.epoch }).answer()).status, 200);
+    await new Promise((r) => setTimeout(r, 200));
+    t.clk.advance(GATEWAY_LIMITS.fallbackMs);
+  } else if (path === "unpair") t.page.c.feed(maskedText({ unpair: true }));
+  else if (path === "rebind") { t.page.st.emit("close"); t.clk.advance(GATEWAY_LIMITS.idleMs); newPage(t.s, t.clk, t.page.key); }
+  else await t.s.close();
+}
+for (const path of ["err", "exit", "unpair", "rebind", "close"] as Path[]) {
+  test(`L36f-${path} (A) a gateway-owned held run and completion: the charge returns to 0`, async () => {
+    const H = holder();
+    const t: any = await setupReal({ gateway: { authHold: H.hold } });
+    try {
+      const b = await bind(t.page);
+      const r = await heldRequest(H, t.page, "g.run", { b }, { request: "held", epoch: 1, payload: { code: "x = 1\n" } });
+      const c = await heldRequest(H, t.page, "g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "c" }));
+      assert.ok(t.s.gateway.stats.queuedPayloadBytes > 0);
+      await cleanup(t, path);
+      H.release(r.id); H.release(c.id);
+      await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, `${path}: the charge 0`, 30_000);
+      census(t.s);
+    } finally { await t.s.close(); }
+  });
+}
+for (const path of ["err", "exit", "fb", "unpair", "rebind", "close"] as Path[]) {
+  test(`L36f-${path} (B) a Worker-owned run and a dispatched completion: the charge returns to 0`, async () => {
+    const t: any = await setupReal();
+    try {
+      const b = await bind(t.page);
+      await startReal(t, b, "held", path === "fb" ? SWALLOW : LOOP);
+      t.page.request("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "c" }));
+      await until(() => t.s.gateway.completeWaiter !== null, "the completion dispatched");
+      assert.ok(t.s.gateway.stats.queuedPayloadBytes > BODY_MAX.run);
+      await cleanup(t, path);
+      await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, `${path}: the charge 0`, 30_000);
+      census(t.s);
+    } finally { await t.s.close(); }
+  });
+}
+test("L36f-fb mid-wave: L36e's wave, its entry 100 ignoring the interrupt; the fallback returns the charge to 0", async () => {
+  const t: any = await setupReal();
+  try {
+    const b = await bind(t.page);
+    const a = await t.page.request("g.run", { b }, waveBodyOfBytes(BODY_MAX.run, "w", (k) => (k === 100 ? SWALLOW : `v${k} = ${k}\n`))).answer();
+    assert.equal(a.status, 202);
+    const run = t.s.gateway.binding.runs.get("w");
+    await until(() => run.current === 100 && sawMsg(t, (m) => m.id === run.workerId && m.start), "entry 100 running", 120_000);
+    await cleanup(t, "fb");
+    await until(() => t.s.gateway.stats.queuedPayloadBytes === 0, "the charge 0", 30_000);
+    assert.equal(run.outcome.status, "stopped");
+    census(t.s);
   } finally { await t.s.close(); }
 });
