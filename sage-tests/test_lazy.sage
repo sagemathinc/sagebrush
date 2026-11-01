@@ -48,3 +48,21 @@ print(copy.copy(D) is fixture.double, copy.deepcopy(D) is fixture.double)
 ns4 = {"double": D}
 bind(ns4)
 print(ns4["double"] is fixture.double)
+# pickle (astra3 R1): dumps resolves through _get, so the cache and the bound slots are set and a
+# missing target fails at dumps (nothing cached; a repair then works); every protocol, through
+# __reduce_ex__, unpickles to the real object
+import pickle
+def safe(f):
+    try:
+        return f()
+    except Exception as ex:
+        return type(ex).__name__
+P2 = LazyImport("_sage_lazy_fixture", "double", {})
+print(safe(lambda: (pickle.loads(pickle.dumps(P2)) is fixture.double, P2._target is fixture.double)))
+S5 = LazyImport("_sage_lazy_fixture", "double", {}); ns5 = {"double": S5}; bind(ns5)
+print(safe(lambda: (pickle.dumps(S5), ns5["double"] is fixture.double)[1]))
+F2 = LazyImport("_sage_lazy_fixture", "later2", {})
+print(safe(lambda: pickle.dumps(F2)))
+fixture.later2 = 41
+print(safe(lambda: pickle.loads(pickle.dumps(F2))))
+print(safe(lambda: all(pickle.loads(pickle.dumps(LazyImport("_sage_lazy_fixture", "double", {}), protocol=p)) is fixture.double for p in range(pickle.HIGHEST_PROTOCOL + 1))))

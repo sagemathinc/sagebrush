@@ -11,3 +11,8 @@ AttributeError
 7
 True True
 True
+(True, True)
+True
+AttributeError
+41
+True
