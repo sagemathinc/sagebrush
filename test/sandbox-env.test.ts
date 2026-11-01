@@ -2,21 +2,31 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync, rmSync, existsSync, symlinkSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // The sandbox's environment (scripts/sandbox-env.mjs, scripts/build-cli.mjs --sandbox; plan deno-sandbox-env r2):
-// build-cli runs for real with a stub compiler (PYJS_DENO) that records the flags and the entry it is given; the
-// behaviour cases then run that captured entry under `deno run` with those captured flags, less only the
-// compile-only ones, so neither is rebuilt here.  The sentinel values are never printed: the program reports
-// names, booleans and a hash.
+// build-cli runs for real, unchanged, with a stub `deno` first on PATH that records the flags and the entry it is
+// given; the behaviour cases then run that captured entry under `deno run` with those captured flags, less only
+// the compile-only ones, so neither is rebuilt here.  It runs in a copy of the tree made of symlinks (FARM: its
+// own build/ and packages/sagebrush/, so this tree's build/cli and npm copy are never written), as
+// node --preserve-symlinks-main sees it.  The sentinel values are never printed: the program reports names,
+// booleans and a hash.
 
 const ROOT = join(__dirname, "..", "..");
 const SB = () => import(join(ROOT, "scripts", "sandbox-env.mjs"));
-const OUT = `build/sbx-test-${process.pid}`;
 const TMP = mkdtempSync(join(tmpdir(), "sbx-test-"));
-const STUB = join(TMP, "deno-stub.sh");
+const FARM = join(TMP, "root");
+const OUT = join(FARM, "build", "cli");
+mkdirSync(join(FARM, "packages", "sagebrush"), { recursive: true });
+for (const f of readdirSync(ROOT)) if (!["build", "packages", ".git"].includes(f)) symlinkSync(join(ROOT, f), join(FARM, f));
+// (the other packages copied: scripts/packages.mjs refuses a package that is a symbolic link; each is small)
+for (const f of readdirSync(join(ROOT, "packages"))) if (f !== "sagebrush") cpSync(join(ROOT, "packages", f), join(FARM, "packages", f), { recursive: true });
+for (const f of readdirSync(join(ROOT, "packages", "sagebrush"))) if (f !== "dist") symlinkSync(join(ROOT, "packages", "sagebrush", f), join(FARM, "packages", "sagebrush", f));
+const STUBDIR = join(TMP, "stub");
+mkdirSync(STUBDIR);
+const STUB = join(STUBDIR, "deno");
 writeFileSync(STUB, [
   "#!/bin/sh",
   "# (a stub deno compile: its argv and its entry kept, the output file made empty)",
@@ -26,9 +36,10 @@ writeFileSync(STUB, [
   "",
 ].join("\n"));
 chmodSync(STUB, 0o755);
-after(() => {
-  rmSync(join(ROOT, OUT), { recursive: true, force: true });
-  rmSync(TMP, { recursive: true, force: true });
+after(() => rmSync(TMP, { recursive: true, force: true }));
+/** build-cli in the farm, with the stub as deno. */
+const buildCli = (allow: string, cap: string) => spawnSync(process.execPath, ["--preserve-symlinks-main", "--preserve-symlinks", join(FARM, "scripts", "build-cli.mjs"), "--sandbox"], {
+  cwd: FARM, encoding: "utf8", env: { ...process.env, PATH: `${STUBDIR}:${process.env.PATH}`, SBX_CAPTURE: cap, PYJS_SANDBOX_ALLOW: allow },
 });
 
 const PROBE = "probe-" + createHash("sha256").update(String(process.pid)).digest("hex").slice(0, 12);
@@ -41,9 +52,7 @@ function build(allow: string) {
   const had = builds.get(allow);
   if (had) return had;
   const cap = mkdtempSync(join(TMP, "cap-"));
-  const r = spawnSync(process.execPath, ["scripts/build-cli.mjs", "--sandbox", `--out=${OUT}`], {
-    cwd: ROOT, encoding: "utf8", env: { ...process.env, PYJS_DENO: STUB, SBX_CAPTURE: cap, PYJS_SANDBOX_ALLOW: allow },
-  });
+  const r = buildCli(allow, cap);
   assert.equal(r.status, 0, `build-cli (${allow}): ${r.stderr.slice(-2000)}`);
   const argv = readFileSync(join(cap, "argv"), "utf8").split("\n").slice(0, -1);
   const b = { argv, entry: readFileSync(join(cap, "entry.cjs"), "utf8"), entryPath: join(cap, "entry.cjs") };
@@ -86,9 +95,9 @@ function report(allow: string, env: Record<string, string> = {}) {
 test("W1 no grant: the flags are exactly --no-prompt; the entry is the bundle with the env adapter after its #! line; nothing granted", async () => {
   const { sandboxEntry } = await SB();
   const b = build("");
-  assert.deepEqual(b.argv.slice(0, -1), ["compile", "--no-check", "--no-config", "--no-prompt", "-o", join(ROOT, OUT, "pyjs-sandbox")]);
+  assert.deepEqual(b.argv.slice(0, -1), ["compile", "--no-check", "--no-config", "--no-prompt", "-o", join(OUT, "pyjs-sandbox")]);
   assert.ok(!b.argv.some((a) => /^(-A|--allow|--deny|-[A-Z])/.test(a)), "no permission flag");
-  const bundle = readFileSync(join(ROOT, OUT, "pyjs.cjs"), "utf8");
+  const bundle = readFileSync(join(OUT, "pyjs.cjs"), "utf8");
   const nl = bundle.indexOf("\n") + 1;
   assert.ok(bundle.startsWith("#!"));
   assert.equal(b.entry.slice(0, nl), bundle.slice(0, nl), "the #! line first");
@@ -106,7 +115,7 @@ test("W2 PYJS_SANDBOX_ALLOW's tokens are the flags, and its env names the adapte
 test("W3 an env grant spelled another way is refused by the build (the flags and the list can't disagree)", () => {
   for (const allow of ["-E", "-E=SBX_PROBE", "--allow-envX", "--allow-env=SBX-PROBE"]) {
     const cap = mkdtempSync(join(TMP, "cap-"));
-    const r = spawnSync(process.execPath, ["scripts/build-cli.mjs", "--sandbox", `--out=${OUT}`], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PYJS_DENO: STUB, SBX_CAPTURE: cap, PYJS_SANDBOX_ALLOW: allow } });
+    const r = buildCli(allow, cap);
     assert.notEqual(r.status, 0, allow);
     assert.match(r.stderr, /PYJS_SANDBOX_ALLOW/, allow);
     assert.equal(existsSync(join(cap, "argv")), false, `${allow}: nothing compiled`);
