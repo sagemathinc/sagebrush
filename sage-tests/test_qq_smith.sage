@@ -36,3 +36,29 @@ print(rows(lambda: matrix(ZZ, [[2, 4, 6], [3, 5, 7]]).hermite_form()))
 print(B.elementary_divisors(), C.elementary_divisors())
 print(check(matrix(QQ, 0, 2)))
 print(check(matrix(QQ, 2, 0)))
+# the allocations are checked before any is made (astra3 R1): a helper that must NOT be reached is
+# made to raise; the boundary pairs on the guard itself (_MAX_ENTRIES = 2^22: 2048^2 = 2^22)
+import _sage_matrix as _M
+def spied(name, f):
+    orig = getattr(_M.Matrix, name)
+    def boom(*a, **k):
+        raise RuntimeError("reached " + name)
+    setattr(_M.Matrix, name, boom)
+    try:
+        return f()
+    except Exception as ex:
+        return type(ex).__name__
+    finally:
+        setattr(_M.Matrix, name, orig)
+def guard(m, n):
+    try:
+        _M._smith_field_shapes(m, n)
+        return "ok"
+    except Exception as ex:
+        return type(ex).__name__
+print(spied("_smith_field_reduce", lambda: matrix(QQ, 1, 100000).smith_form()))
+print(spied("_smith_field_reduce", lambda: matrix(QQ, 100000, 1).smith_form()))
+print(guard(1, 2048), guard(1, 2049))
+print(guard(2048, 0), guard(2049, 0))
+print(guard(2047, 2), guard(2047, 3))
+print(spied("_smith_field_reduce", lambda: matrix(QQ, [[1, 2], [3, 4]]).smith_form()))
