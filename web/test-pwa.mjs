@@ -153,6 +153,16 @@ async function openTab(path) {
   return r;
 }
 await send("Network.enable");
+// (security audit G-3b: offline, every file the service worker serves from its kept copies says nosniff, as the
+// network's response does (web/_headers' /*): each of the build's DIGESTS paths fetched from this page; those served
+// must all carry it, the page among them)
+{
+  const sw = readFileSync(join(here, "dist", "sw.js"), "utf8"), m = /const DIGESTS = (\{.*?\});\n/s.exec(sw);
+  const paths = m ? Object.keys(JSON.parse(m[1])) : [];
+  const got = await ev(`Promise.all(${JSON.stringify(paths)}.map((p) => fetch(p).then((r) => [p, r.status, r.headers.get("x-content-type-options")], () => [p, 0, null])))`);
+  const served = got.filter(([, st]) => st === 200), lacking = served.filter(([, , n]) => n !== "nosniff").map(([p]) => p);
+  ok(paths.length > 0 && served.some(([p]) => p === "./") && lacking.length === 0, `offline, every kept file the service worker serves says nosniff (G-3b): ${served.length} of ${paths.length} served, ${lacking.length} without it` + (lacking.length ? ": " + JSON.stringify(lacking.slice(0, 5)) : ""));
+}
 // (the same answer to a fetch from this page: the service worker's offline
 // fallback, deterministic: refused, or the build's own response)
 // (first: offline, the service worker answers for the page, as built)
