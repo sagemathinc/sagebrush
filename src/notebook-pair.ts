@@ -363,6 +363,7 @@ export class PairServer {
       this.timers.clearTimeout(c.helloTimer);
       this.timers.clearTimeout(c.closingTimer);
       c.closed = true;
+      c.release();
       c.sock.destroy();
     }
     this.conns.clear();
@@ -404,7 +405,7 @@ export class PairServer {
     // (the page gone: its FIN ("end"; an upgraded socket is half-open, so "close" alone would wait for ours) ends
     // the pairing it held, and the socket is closing; the socket's close ends both)
     sock.on("end", () => { if (!c.closed) c.ended(); });
-    sock.on("close", () => { if (!c.closed) { c.closed = true; this.dropped(c); } this.closingDone(c); });
+    sock.on("close", () => { if (!c.closed) { c.closed = true; c.release(); this.dropped(c); } this.closingDone(c); });
     if (head?.length) c.feed(head);
     return c;
   }
