@@ -245,6 +245,9 @@ export class AgentPairing {
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
+    // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
+    //  of this allow() goes on, no record, no timer, no "granted")
+    if ((this.state as AgentPairing["state"]) === "closed" || this.grant !== grant) return;
     this.keepForReload();
     if (this.timer) clearTimeout(this.timer);
     if (grant.expires !== null) this.timer = setTimeout(() => void this.revoke("the grant expired"), Math.max(0, grant.expires - now));
@@ -505,7 +508,8 @@ const keysAre = (o: object, want: string[], optional: string[] = []) => {
 /** A record as kept, or null for anything else: the exact keys, each in its bounds (finite numbers only), its
  * folders as grantFolders gives them back. Fails closed: a record that isn't exactly this is no record. */
 export function parseReloadRecord(raw: string | null): ReloadRecord | null {
-  if (typeof raw !== "string" || raw.length > RELOAD_MAX) return null;
+  // (the bound in UTF-8 bytes, as stored, not UTF-16 code units: a non-ASCII record is counted as it is, S3)
+  if (typeof raw !== "string" || raw.length > RELOAD_MAX || enc.encode(raw).length > RELOAD_MAX) return null;
   let v: any;
   try { v = parseStrict(raw); } catch { return null; }
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -540,18 +544,29 @@ export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType
   return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
 }
 
-/** The record, taken: read, removed at once (consumed before any attempt, R1-c, this page only), then parsed. Storage
- * that's missing or throws is no record. */
-export function takeReloadRecord(s: ReloadStorage | null): ReloadRecord | null {
-  if (!s) return null;
+/** What taking the record found (S1): "none", no storage or no entry (genuinely absent); "bad", an entry this page
+ * may not use: unreadable, not removable (consumed before any attempt, R1-c, or not at all), or not exactly a
+ * record; "ok", the record, already removed. A "bad" take is never silently replaced by another grant. */
+export type ReloadTake = { kind: "none" } | { kind: "bad" } | { kind: "ok"; record: ReloadRecord };
+/** The record, taken: read, removed at once (before any attempt, R1-c, this page only), then parsed. Fails closed: an
+ * entry that can't be read or removed is "bad", never used. */
+export function takeReloadRecord(s: ReloadStorage | null): ReloadTake {
+  if (!s) return { kind: "none" };
   let raw: string | null = null;
-  try { raw = s.getItem(RELOAD_KEY); } catch { return null; }
-  try { s.removeItem(RELOAD_KEY); } catch { /* (a record that can't be removed is still not used twice: it was read once) */ }
-  return parseReloadRecord(raw);
+  try { raw = s.getItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
+  if (raw === null) return { kind: "none" };
+  try { s.removeItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
+  const record = parseReloadRecord(raw);
+  return record ? { kind: "ok", record } : { kind: "bad" };
 }
+/** The record written (or, with null, removed). Only a record the reader would take back exactly is written (its
+ * shape and its byte bound, S3); anything else is not stored, and any older entry goes: the live grant itself is
+ * never cut to fit. */
 export function putReloadRecord(s: ReloadStorage | null, r: ReloadRecord | null): void {
   if (!s) return;
-  try { if (r) s.setItem(RELOAD_KEY, JSON.stringify(r)); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
+  const raw = r ? JSON.stringify(r) : null;
+  const fits = raw !== null && parseReloadRecord(raw) !== null;
+  try { if (fits) s.setItem(RELOAD_KEY, raw!); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
 }
 /** On pagehide: the time the page left, on the record it holds (if it holds a valid one). */
 export function markReloadLeft(s: ReloadStorage | null, now: number): void {
