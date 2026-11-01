@@ -1800,10 +1800,7 @@ class Matrix:
         # V clears each non-pivot column with the pivot columns and puts
         # the pivot columns first, so U self V = diag(1, ..., 1, 0, ...)
         K = self._base
-        sa = _sa()
         m, n = self.nrows(), self.ncols()
-        if not m or not n:
-            return sa.zero_matrix(K, m, n), sa.identity_matrix(K, m), sa.identity_matrix(K, n)
         from sagebrush import linalg
         aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
         rows, _ = linalg.rref(aug)

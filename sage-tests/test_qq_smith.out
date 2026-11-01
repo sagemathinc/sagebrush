@@ -9,3 +9,5 @@ Rational Field
 [(2, 0), (0, 4)]
 [(1, 1, 1), (0, 2, 4)]
 [1, 1] [1, 0]
+(True, True, True, [], Rational Field)
+(True, True, True, [(), ()], Rational Field)
