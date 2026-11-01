@@ -782,7 +782,7 @@ try {
   // on a memory store with the journal store's merge, or, as a page's local store before the journal or the embed's,
   // without one: the older rule kept there, no sync)
   {
-    const XCHECKS = 13;
+    const XCHECKS = 14;
     {
       const before = results.length;
       const ed = (d) => d.call("editor");
@@ -933,6 +933,20 @@ try {
         check(J(x13) === J({ before: ["# myBig integers are sooo exact!", 32, 32, 0], after: ["# Big integers are sooo exact!!", 2, 2, 0], at: ["# Big integers are sooo exact!.", 30, 30, 0],
           sel: ["# myBig integers are sooo exact!", 4, 7, 0], noMerge: ["# myBig integers are sooo exact!", 30, 30, 0] }),
           "X13: the editor: a change made there only moves the caret with the text before it (William's case), not after it or at it; a selection's ends stay on their text; no merge: the offset kept: " + J(x13));
+        // X14: a save's answer moves the editor's base to what it saved, so its own edit coming back inside a change
+        // from elsewhere is not merged in again (the cutover's residual (a): mergeTextAt from a base older than this
+        // device's acked save would double it).  "m" typed and saved (answered), "y" typed after it and not yet saved,
+        // then the store's next revision: the saved "m" and a "!" from elsewhere.  By the rules: base "# mBig…",
+        // here "# myBig…" (caret 4, after "y"), there "# mBig…!": one "m", one "y", the "!", the caret still 4
+        const T0 = "# Big integers are sooo exact";
+        await fake(true, [["p", T0]]);
+        const acked = await A.ev(`(async () => { const c = T.edNb.cells()[0]; T.edNb.setInput(c, "# mBig integers are sooo exact"); T.edNb.flush(); await T.edNb.saved(); return T.edStore.doc.cells[0].code; })()`);
+        await A.call("edType", "p", "# myBig integers are sooo exact", 4, 4);
+        await A.call("edPush", [["p", "# mBig integers are sooo exact!"]]);
+        const s14 = await st();
+        const x14 = { acked, text: s14.texts[0][1], sel: [s14.sel?.start, s14.sel?.end], copies: s14.copies, said: s14.said.length };
+        check(J(x14) === J({ acked: "# mBig integers are sooo exact", text: "# myBig integers are sooo exact!", sel: [4, 4], copies: 0, said: 0 }),
+          "X14: the editor: a save's answer moves its base, so its own saved edit coming back with a change from elsewhere is not doubled: " + J(x14));
         // X10: a merge whose base this device can't give completely (a version its journal records that its live history
         // doesn't hold) waits: the real store's mergeRemote reaches mergeBaseOf's refusal and says so ("a change from
         // elsewhere waits"); nothing written, nothing sent; once the version is here, the next arrival merges (BASE-1;
