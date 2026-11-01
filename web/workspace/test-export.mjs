@@ -13,7 +13,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -32,6 +33,12 @@ await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = []; const consoleLines = [];
 let servedWorker = 0;
 const chunk = process.env.CHUNK ? readFileSync(process.env.CHUNK) : null, chunkWorker = process.env.CHUNK_WORKER ? readFileSync(process.env.CHUNK_WORKER) : null;
+// (r2c "identity", grader's P-5: the reference is b00fb43f's chunk and worker as campaign 3 shipped them (its
+// SHIPPED.sha256), kept beside this test and pinned here; served in place of the built ones while `serve.ref` is set)
+const REF_DIR = join(dirname(fileURLToPath(import.meta.url)), "export-ref-b00fb43f");
+const REF_SHA = { chunk: "052bce74768979feaf9f95210a014bb9367036b90d5dbd5384018ca0b94fd278", worker: "bb991e310357b21d5f4b14859964887aab5433dab330b7f46e5aa5be98ea7d1d" };
+const serve = { ref: false, servedChunk: 0, servedWorker: 0 };
+let REF = null;
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
@@ -40,7 +47,8 @@ ws.onmessage = (ev) => {
   if (m.method === "Runtime.consoleAPICalled") consoleLines.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200));
   // (a control's chunk, in place of the built one)
   if (m.method === "Fetch.requestPaused") {
-    const isWorker = /sagebrush-export-worker\.js/.test(m.params.request.url), body = isWorker ? chunkWorker : chunk;
+    const isWorker = /sagebrush-export-worker\.js/.test(m.params.request.url), body = serve.ref ? (isWorker ? REF.worker : REF.chunk) : isWorker ? chunkWorker : chunk;
+    if (serve.ref) serve[isWorker ? "servedWorker" : "servedChunk"] = (serve[isWorker ? "servedWorker" : "servedChunk"] ?? 0) + 1;
     if (isWorker && chunkWorker) servedWorker++;
     // (paused at the response: the server's own headers kept, the body replaced; a worker's script needs the page's
     // Cross-Origin-Embedder-Policy on it, or the worker isn't started)
@@ -68,6 +76,8 @@ let checks = 0;
 const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
 
 const W = "window.sagebrush?.workspace";
+/** The no-OPFS refusal, word for word (r2c P-8, @sagebrush's condition). */
+const NO_OPFS = "This workspace is too large to export in this browser without its file storage. Use a browser with file storage (Chrome, Edge) or the desktop app. Nothing was saved.";
 const S = "document.querySelector('#wssidebar')";
 const P = "document.querySelector('.sbfprev')";
 const panelButton = (re) => ev(`(() => { const b = [...document.querySelectorAll(".sbfprev button")].find((x) => ${re}.test(x.textContent)); if (!b) throw new Error("no button " + ${JSON.stringify(String(re))}); b.click(); return 1; })()`);
@@ -457,10 +467,11 @@ try {
     const pkc = await exportOnce(join(out, "pkc.zip"), { picked: true });
     check(!!pkc.stopped && /disk is full/.test(pkc.stopped) && (await lastAt()) === before, "a picker whose close fails: the export stops, and the status line is not stamped: " + (pkc.stopped ?? "not stopped").slice(-120));
     await ev(`(() => { window.__aborted = 2; window.showSaveFilePicker = async () => ({ createWritable: async () => { const parts = []; return { write: async (c) => { parts.push(new Uint8Array(c)); }, close: async () => { window.__picked = new Blob(parts); }, abort: async () => { window.__aborted++; } }; } }); return 1; })()`);
-    // (the earliest failure: the spool refused before anything is written, the picker's file already open)
-    await ev(`(() => { window.__picked = null; window.__SB_EXPORT_TEST__ = { noOpfs: true, caps: { spoolBlob: 64 } }; return 1; })()`);
+    // (the earliest failure in writing: its first scratch spool's open, the picker's file already open.  r2c: the
+    // in-memory spools' cap is checked in preflight now, the records counted, before there is a picker)
+    await ev(`(() => { window.__picked = null; window.__SB_EXPORT_TEST__ = { failOpen: "spool" }; return 1; })()`);
     const pk3 = await exportOnce(join(out, "pk3.zip"), { picked: true });
-    check(!!pk3.stopped && /index/.test(pk3.stopped) && (await ev(`window.__picked === null && window.__aborted === 3`)), "a failure before anything is written still aborts the picker's file (astra's E1-A3): " + (pk3.stopped ?? "not stopped").slice(-120));
+    check(!!pk3.stopped && /couldn't be truncated/.test(pk3.stopped) && (await ev(`window.__picked === null && window.__aborted === 3`)), "a failure before anything is written still aborts the picker's file (astra's E1-A3): " + (pk3.stopped ?? "not stopped").slice(-120));
     await ev(`(() => { delete window.showSaveFilePicker; return 1; })()`);
   });
 
@@ -500,6 +511,471 @@ try {
     const bo = await exportOnce(join(out, "bo.zip"));
     check(!!bo.stopped && /grew past/.test(bo.stopped) && !(await ev(`!!window.__exp`)) && (await lastAt()) === before, "an export outgrowing the Blob path after preflight stops cleanly, nothing handed over, status unchanged (T7): " + (bo.stopped ?? "not stopped").slice(-160));
     await ev(`${W}.write("/data/primes.csv", "n,p\\n1,2\\n").then(() => 1)`);
+  });
+
+  // ================================================================== E1 r2a heap plan r2c (frozen e3bd7f07)
+  const SLICE = 1 << 20;
+  const OPFS = (body) => `navigator.storage.getDirectory().then((r) => r.getDirectoryHandle("sagebrush-export", { create: true })).then(async (d) => { ${body} })`;
+  const scratchNames = () => ev(OPFS(`const n = []; for await (const k of d.keys()) n.push(k); return n;`));
+  const rowsFiles = async () => (await scratchNames()).filter((n) => /-rows$/.test(n));
+  let fetching = !!(chunk || chunkWorker), uncached = false;
+  /** The page loaded again (a fresh module map: the chunk served anew), the file browser open. */
+  const reload = async () => { await go(base); await until(`!!${W}`, 90000); await openFiles(); };
+  /** The reference (b00fb43f) or this build, for the next page load. */
+  const useRef = async (on) => {
+    if (on && !REF) {
+      REF = { chunk: readFileSync(join(REF_DIR, "sagebrush-export.js")), worker: readFileSync(join(REF_DIR, "sagebrush-export-worker.js")) };
+      check(sha(REF.chunk) === REF_SHA.chunk && sha(REF.worker) === REF_SHA.worker, "identity: the reference is b00fb43f's shipped chunk and worker, their sha256 as pinned (P-5): " + sha(REF.chunk).slice(0, 16) + " / " + sha(REF.worker).slice(0, 16));
+    }
+    // (the browser's cache off: a chunk or worker taken from it would never reach the interception)
+    if (!fetching) { await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-export*.js*", requestStage: "Response" }] }); fetching = true; }
+    if (!uncached) { await send("Network.enable"); await send("Network.setCacheDisabled", { cacheDisabled: true }); uncached = true; }
+    serve.ref = on;
+    await reload();
+  };
+  /** Two archives compared as r2c's "identity" asks: every member's local header, data and descriptor and every
+   * central record byte-identical, except the manifest's own; manifest.json identical after removing only the
+   * `captured` values and the head's `created`. */
+  const compare = (refFile, newFile) => {
+    const py = String.raw`
+import sys, struct, json, re, zipfile
+def parse(f):
+    d = open(f, "rb").read()
+    e = len(d) - 22
+    assert d[e:e+4] == b"PK\x05\x06"
+    loc = e - 20
+    assert d[loc:loc+4] == b"PK\x06\x07"
+    z = struct.unpack("<Q", d[loc+8:loc+16])[0]
+    n, size, off = struct.unpack("<QQQ", d[z+32:z+56])
+    out, at = [], off
+    for i in range(n):
+        assert d[at:at+4] == b"PK\x01\x02"
+        csize, = struct.unpack("<I", d[at+20:at+24])
+        nl, xl, cl = struct.unpack("<HHH", d[at+28:at+34])
+        lo, = struct.unpack("<I", d[at+42:at+46])
+        rec = d[at:at+46+nl+xl+cl]
+        name = d[at+46:at+46+nl].decode("utf-8", "replace")
+        lnl, lxl = struct.unpack("<HH", d[lo+26:lo+30])
+        fl, = struct.unpack("<H", d[lo+6:lo+8])
+        local = d[lo:lo+30+lnl+lxl+csize+(16 if fl & 8 else 0)]
+        out.append((name, rec, local))
+        at += 46 + nl + xl + cl
+    return out, zipfile.ZipFile(f).read("manifest.json").decode("utf-8")
+a, am = parse(sys.argv[1]); b, bm = parse(sys.argv[2])
+diffs = []
+if [x[0] for x in a] != [x[0] for x in b]: diffs.append("member names differ: %d / %d" % (len(a), len(b)))
+for (n, r1, l1), (_, r2, l2) in zip(a, b):
+    if n == "manifest.json": continue
+    if r1 != r2: diffs.append("central record " + n)
+    if l1 != l2: diffs.append("local member " + n)
+strip = lambda t: re.sub(r'"created":"[^"]*"', '"created":""', re.sub(r',"captured":(null|-?[0-9.eE+]+)', "", t))
+print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "manifest": strip(am) == strip(bm), "manifestLen": [len(am), len(bm)]}))
+`;
+    const r = spawnSync("python3", ["-I", "-c", py, refFile, newFile], { encoding: "utf8", maxBuffer: 1 << 26 });
+    return r.status === 0 ? JSON.parse(r.stdout) : { error: (r.stderr || String(r.error)).slice(0, 400) };
+  };
+  /** The sinks' hooks: OPFS (the default), the picker (a fake writable that copies each write only after a pause, so
+   * a slice reused before its write resolved would show), the Blob sink (no OPFS). */
+  const SINKS = {
+    opfs: { setup: `(() => { delete window.showSaveFilePicker; return 1; })()`, hooks: "", picked: false },
+    picker: { setup: `(() => { window.__picked = null; window.__aborted = 0; window.showSaveFilePicker = async () => ({ createWritable: async () => { const parts = []; return { write: async (c) => { await new Promise((r) => setTimeout(r, 2)); parts.push(new Uint8Array(c)); }, close: async () => { window.__picked = new Blob(parts); }, abort: async () => { window.__aborted++; } }; } }); return 1; })()`, hooks: null, picked: true },
+    blob: { setup: `(() => { delete window.showSaveFilePicker; return 1; })()`, hooks: "noOpfs: true", picked: false },
+  };
+  /** Which chunk the page runs: this build's exports writerCheck, the reference's doesn't. */
+  const WHICH = `import(new URL("sagebrush-export.js", location.href).href).then((m) => (typeof m.writerCheck === "function" ? "this build" : "reference"))`;
+  const sinkExport = async (sink, file, extra = "") => {
+    await ev(SINKS[sink].setup);
+    if (SINKS[sink].hooks === null) await ev(`(() => { window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {}${extra ? ", " + extra : ""} }; return 1; })()`);
+    else await hooks([SINKS[sink].hooks, extra].filter(Boolean).join(", "));
+    return exportOnce(file, { picked: SINKS[sink].picked });
+  };
+
+  // ---- r2c §2, the direct writer's own test: against JSON.stringify and TextEncoder in this browser, byte for byte;
+  // with grader's P-1 numbers and P-3's optional fields through the record and its lines
+  await scenario("writer", async () => {
+    const r = await ev(`(async () => {
+      const m = await import(new URL("sagebrush-export.js", location.href).href);
+      let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+      const pick = () => { const k = rnd(10); return k < 3 ? rnd(0x80) : k < 5 ? 0x80 + rnd(0x780) : k < 7 ? 0x800 + rnd(0xd000) : k < 8 ? 0xd800 + rnd(0x800) : k < 9 ? [0x2028, 0x2029, 0x22, 0x5c, 0x7f, 0][rnd(6)] : 0xe000 + rnd(0x2000); };
+      const strings = ["", "plain", "\\"", "\\\\", "\\u0001\\b\\f\\n\\r\\t\\u001f", "\\u2028\\u2029", "\\ud800", "x\\udc00y", "\\ud83d\\ude00", "\\udbff\\udfff", "caf\\u00e9", "\\uffff"];
+      for (let i = 0; i < 2000; i++) { let s = ""; const n = rnd(40); for (let j = 0; j < n; j++) { const c = pick(); if (c >= 0xd800 && c <= 0xdbff && rnd(2)) s += String.fromCharCode(c, 0xdc00 + rnd(0x400)); else s += String.fromCharCode(c); } strings.push(s); }
+      const numbers = [NaN, Infinity, -Infinity, -0, 0, 1.5, 1e21, -1e-7, Number.MAX_SAFE_INTEGER + 2, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, 1761900000123, 5e-324, 1.7976931348623157e308, 0.1 + 0.2, -42];
+      for (let i = 0; i < 2000; i++) numbers.push(rnd(2) ? rnd(0x7fffffff) * (rnd(2) ? 1 : -1) * 4096 + rnd(4096) : (rnd(1e9) - 5e8) / (1 + rnd(1000)));
+      const t = 1761900000000;
+      const f = (path, extra = {}) => ({ path, kind: "folder", ref: null, created: t, updated: t + 1, fid: "fid" + path.length, ident: "fid" + path.length, ...extra });
+      const entries = [f("/a"), f("/q\\"u\\\\o\\u0001te\\u2028\\u2029"), f("/lone\\ud800x"), f("/nofid", { fid: undefined, ident: undefined }), f("/mode", { mode: "python" }), f("/fidonly", { ident: undefined }),
+        f("/nan", { created: NaN, updated: NaN }), f("/inf", { created: Infinity, updated: -Infinity }), f("/negz", { created: -0, updated: -0 }), f("/frac", { created: 1.5, updated: 1e21 }), f("/noc", { created: undefined }),
+        { path: "/n.ipynb", kind: "notebook", ref: "nbref", created: t, updated: t, ident: "nbref", mode: "sage" }, { path: "/d.csv", kind: "file", ref: "/d.csv", created: 1.5, updated: NaN, fid: "dfid", ident: "dfid", size: 3 },
+        { path: "/b.board.json", kind: "board", ref: "bref\\u2028", created: t, updated: t, ident: "bref\\u2028" }];
+      for (const e of entries) for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
+      return { bad: await m.writerCheck(strings, numbers, entries), n: [strings.length, numbers.length, entries.length] };
+    })()`);
+    check(r.bad.length === 0, `writer: the direct writer is JSON.stringify and TextEncoder byte for byte over ${r.n[0]} strings (BMP, astral, lone surrogates, controls, U+2028/9), ${r.n[1]} numbers (NaN, ±Infinity, -0, 1.5, 1e21, -1e-7, past 2^53, random) and ${r.n[2]} entries' records and lines (with and without fid and mode, NaN, ±Infinity and -0 times): ` + JSON.stringify(r.bad.slice(0, 3)));
+  });
+
+  // ---- r2c "identity" (grader's P-1, P-2, P-3, P-5; H-A2's stale tails through each sink): the same workspace
+  // exported by the reference and by this build, through OPFS, the picker and the Blob sink, compared byte for byte
+  await scenario("identity", async () => {
+    // (P-1: times written straight into IndexedDB, as no API writes them; P-3: folders with and without fid and mode;
+    // P-4/H-A2: a 3 MiB stored file, so the archive takes several recycled slices and a short last one)
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); const f = (path, extra) => s.put({ path, kind: "folder", ref: null, created: t, updated: t, nkey: path.slice(0, path.lastIndexOf("/")) + "\\u0000" + path.slice(path.lastIndexOf("/") + 1), ...extra });
+      f("/p1", { fid: "p1fid", ident: "p1fid" });
+      for (const [n, c, u] of [["nan", NaN, NaN], ["pinf", Infinity, Infinity], ["ninf", -Infinity, -Infinity], ["negz", -0, -0], ["frac", 1.5, 1.5], ["big", 1e21, 1e21], ["small", -1e-7, 1e21]]) f("/p1/" + n, { created: c, updated: u, fid: "p1" + n, ident: "p1" + n });
+      f("/p3", { fid: "p3fid", ident: "p3fid" }); f("/p3/nofid", {}); f("/p3/withmode", { fid: "p3m", ident: "p3m", mode: "python" }); f("/p3/fidonly", { fid: "p3f" }); return null; }`);
+    // (P-2: hard names through the workspace's own API: made, or refused, each)
+    const names = ["q\"uote", "back\\slash", "ctl\u0001", "ls ", "ps ", "lone\ud800"];
+    const made = await ev(`(async () => { const out = []; await ${W}.mkdir("/p2").catch(() => {}); for (const n of ${JSON.stringify(names)}) { try { await ${W}.mkdir("/p2/" + n); out.push([n, "made"]); } catch (e) { out.push([n, "refused: " + String(e?.message ?? e).slice(0, 80)]); } } return out; })()`);
+    check(made.length === names.length && made.every(([, r]) => r === "made" || /^refused: ./.test(r)), "identity P-2: each hard folder name is made, or refused by the workspace with a reason: " + JSON.stringify(made));
+    await ev(`(async () => { const b = new Uint8Array(3 * 2 ** 20 + 12345); for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, Math.min(b.length, i + 65536))); await ${W}.mkdir("/p4").catch(() => {}); await ${W}.create("/p4/big.zip", { content: b }); return 1; })()`);
+    for (const sink of ["opfs", "picker", "blob"]) {
+      await useRef(true);
+      const c0 = serve.servedChunk, w0 = serve.servedWorker;
+      const a = await sinkExport(sink, join(out, `id-ref-${sink}.zip`));
+      const aIs = await ev(WHICH);
+      check(!a.stopped && serve.servedChunk > c0 && serve.servedWorker > w0 && aIs === "reference", `identity (${sink}): the reference exports the workspace, its chunk and its worker both served in place of the build's (${serve.servedChunk - c0} / ${serve.servedWorker - w0}), the page running it (${aIs}): ` + (a.stopped ?? a.name));
+      await useRef(false);
+      const b = await sinkExport(sink, join(out, `id-new-${sink}.zip`));
+      const bIs = await ev(WHICH);
+      check(!b.stopped && bIs === "this build", `identity (${sink}): this build exports it, the page running it (${bIs}): ` + (b.stopped ?? b.name));
+      if (a.stopped || b.stopped) continue;
+      const c = compare(join(out, `id-ref-${sink}.zip`), join(out, `id-new-${sink}.zip`));
+      check(!c.error && c.ndiffs === 0 && c.manifest, `identity (${sink}): every member, local header and central record byte-identical to b00fb43f's, manifest.json identical but for captured and created (${c.members} members): ` + JSON.stringify(c));
+      const man = member(join(out, `id-new-${sink}.zip`), "manifest.json").toString("utf8");
+      const parsed = (() => { try { return JSON.parse(man); } catch { return undefined; } })();
+      check(parsed !== undefined && JSON.stringify(parsed) === man && /"path":"\/p1\/nan","kind":"folder","fid":"p1nan","created":null,"modified":null/.test(man) && /"path":"\/p1\/negz","kind":"folder","fid":"p1negz","created":0,"modified":0/.test(man) && /"created":1e\+21/.test(man), `identity (${sink}) P-1: the manifest is JSON.stringify(JSON.parse(it)) byte for byte, NaN and ±Infinity null, -0 as 0, 1e21 as 1e+21`);
+      check(/"path":"\/p3\/nofid","kind":"folder","created":/.test(man) && /"path":"\/p3\/withmode","kind":"folder","fid":"p3m",[^}]*,"mode":"python"\}/.test(man) && /"path":"\/p3\/fidonly","kind":"folder","fid":"p3f","created"/.test(man), `identity (${sink}) P-3: a folder without fid has none, one with a mode has it last, and nothing absent is written as ""`);
+      if (sink === "opfs") check(b.stats?.blobBytes === 0 && b.stats?.sliceBytes <= 16 * SLICE, "identity (opfs): no byte held in Blob parts, the slices " + (b.stats?.sliceBytes / SLICE) + " MiB in all");
+      if (sink === "blob") console.log("(identity blob: bytes held in Blob parts " + b.stats?.blobBytes + ", read back from them " + b.stats?.blobReadBytes + ", slices " + (b.stats?.sliceBytes / SLICE) + " MiB)");
+    }
+    // (P-1 for the capture log: every line the lookup reads is JSON.stringify(JSON.parse(line)) byte for byte)
+    await ev(SINKS.opfs.setup);
+    await hooks(`afterCapture: async (p) => { if (p === "/data/primes.csv") await window.sagebrush.workspace.write(p, "n,p\\n1,2\\n"); }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`);
+    await ev(`(() => { window.__cap = []; return 1; })()`);
+    const cl = await exportOnce(join(out, "id-cap.zip"));
+    const lines = await ev(`(async () => { const t = await new Blob(window.__cap).text(); const l = t.split("\\n").filter(Boolean); return { n: l.length, bad: l.filter((x) => JSON.stringify(JSON.parse(x)) !== x).slice(0, 3), nan: l.some((x) => x.startsWith('["/p1/nan","folder","p1nan"]')) }; })()`);
+    check(!cl.stopped && lines.n > 20 && lines.bad.length === 0 && lines.nan, "identity P-1: every capture line (" + lines.n + ") is JSON.stringify(JSON.parse(line)) byte for byte: " + JSON.stringify(lines.bad));
+    // (the fixtures taken away again)
+    await idb("sagebrush-workspace", "entries", `(s) => { s.delete(IDBKeyRange.bound("/p1", "/p1/\\uffff")); s.delete(IDBKeyRange.bound("/p3", "/p3/\\uffff")); return null; }`);
+    await ev(`(async () => { for (const n of ${JSON.stringify(names)}) await ${W}.remove("/p2/" + n).catch(() => {}); await ${W}.remove("/p2").catch(() => {}); await ${W}.remove("/p4/big.zip").catch(() => {}); await ${W}.remove("/p4").catch(() => {}); return 1; })()`);
+    await reload();
+  });
+
+  // ---- r2c at 70,000 folders (the CI scale fixture): identity against the reference; R3's aggregate (the slices at
+  // most 16 MiB in all, none in Blob parts), the flushes per spool, P-6's fast paths (the archive's and the central
+  // directory's bytes), R1 (the clock read at every record boundary) and the writing loop's yields (a 20 ms heartbeat)
+  await scenario("identity70k", async () => {
+    const N70 = 70000;
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(), pad = "x".repeat(440), parents = 10, per = Math.ceil((${N70} - parents) / parents); let made = 0;
+      for (let p = 0; p < parents; p++) { const top = "/s70k" + p, fid = "s70kfid" + p; s.put({ path: top, kind: "folder", ref: null, created: t, updated: t, fid, ident: fid, nkey: "/\\u0000" + top.slice(1) }); made++;
+        for (let i = 0; i < per && made < ${N70}; i++, made++) { const path = top + "/" + pad + String(i).padStart(6, "0"), f = "s70kfid" + p + "-" + i; s.put({ path, kind: "folder", ref: null, created: t, updated: t, fid: f, ident: f, nkey: top + "\\u0000" + path.slice(top.length + 1) }); } }
+      return null; }`);
+    await useRef(true);
+    const a = await sinkExport("opfs", join(out, "id70-ref.zip"));
+    const aIs = await ev(WHICH);
+    await useRef(false);
+    await ev(`(() => { window.__hb = []; clearInterval(window.__hbt); window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20); return 1; })()`);
+    const b = await sinkExport("opfs", join(out, "id70-new.zip"), `onPlan: () => { window.__w0 = performance.now(); }, onHand: (blob, name, then) => { window.__w1 = performance.now(); window.__exp = { blob, name, then }; }`);
+    const gap = await ev(`(() => { clearInterval(window.__hbt); const h = window.__hb.filter((t) => t >= window.__w0 && t <= window.__w1); let g = 0; for (let i = 1; i < h.length; i++) g = Math.max(g, h[i] - h[i - 1]); return [Math.round(g), h.length]; })()`);
+    const bIs = await ev(WHICH);
+    check(!a.stopped && !b.stopped && aIs === "reference" && bIs === "this build", `identity70k: both export the 70,000 folders, the reference (${aIs}) and this build (${bIs}): ` + (a.stopped ?? "") + (b.stopped ?? ""));
+    if (!a.stopped && !b.stopped) {
+      const c = compare(join(out, "id70-ref.zip"), join(out, "id70-new.zip"));
+      check(!c.error && c.ndiffs === 0 && c.manifest && c.members >= N70, `identity70k: every member, local header and central record byte-identical to b00fb43f's, manifest.json identical but for captured and created (${c.members} members): ` + JSON.stringify(c));
+      const st = b.stats ?? {};
+      console.log("(identity70k stats: " + JSON.stringify({ ...st, rowSegs: st.rowSegs?.length, refs: undefined }) + ")");
+      check(st.sliceBytes <= 16 * SLICE && st.blobBytes === 0, `identity70k (R3): the slices allocated for all spools, sinks and replays together ${st.sliceBytes / SLICE} MiB (at most 16), bytes held in Blob parts ${st.blobBytes} (0 with OPFS)`);
+      const fl = st.flushes ?? {}, sz = st.sizes ?? {};
+      // (a spool's last partial slice is flushed only if it is read: the capture log's isn't, without a lookup)
+      const within = (k) => fl[k] >= Math.floor(sz[k] / SLICE) && fl[k] <= Math.ceil(sz[k] / (SLICE - 8192));
+      check(["cd", "manifest", "capture", "rows"].every(within), "identity70k: each spool flushed once per slice it fills, no more: " + JSON.stringify({ flushes: fl, sizes: sz }));
+      check(st.records === c.members - 1 && st.clockReads >= st.records, `identity70k (R1): writing read the clock at every record boundary: ${st.clockReads} reads for ${st.records} records`);
+      // (500 ms: the gaps of a loop that yields include the page's own setup-debt collection (about 100-150 ms at this
+      // size, lookalike plan L2's subject); a loop that never yields stops the heartbeat for seconds)
+      check(gap[0] <= 500 && gap[1] > 20, `identity70k: the writing loop yields throughout: a 20 ms heartbeat's longest gap while writing ${gap[0]} ms (${gap[1]} beats; at most 500)`);
+      console.log(`(identity70k elapsed: preflight ${Math.round(st.preflightMs)} ms, writing ${Math.round(st.writingMs)} ms)`);
+    }
+    // (capid at 70k (P-6's spool control): an accepted write after its capture, so the tree check's lookup reads the
+    // whole capture log; as it read it, byte for byte the log an unbuffered writer makes from the raw rows)
+    await ev(`${W}.create("/zz-capid70.csv", { content: "a\\n" }).then(() => 1)`);
+    const cb = await sinkExport("opfs", join(out, "id70-cap.zip"), `afterCapture: async (p) => { if (p === "/zz-capid70.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`);
+    const cr = await ev(`(async () => {
+      const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
+      const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n");
+      const ref = new Blob(lines), got = new Blob(window.__cap ?? []);
+      window.__cap = [];
+      return { lines: lines.length, ref: await hex(ref), got: await hex(got), refBytes: ref.size, gotBytes: got.size };
+    })()`);
+    check(!cb.stopped && cr.lines >= N70 && cr.got === cr.ref && cr.gotBytes === cr.refBytes, `identity70k (capid): the capture log as the lookup read it is byte for byte the unbuffered reference (${cr.gotBytes} bytes, ${cr.lines} lines): ` + (cb.stopped ?? ""));
+    await ev(`${W}.remove("/zz-capid70.csv").then(() => 1, () => 0)`);
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/s70k", "/s70k\\uffff"))`);
+    await reload();
+  });
+
+  // ---- r2c P-6, each fast path's slow path: 10,000 folders exported by the reference, then by this build three times,
+  // each with only one scratch file's appends held 150 ms (longer than a slice takes to fill): the archive's, the
+  // central directory's, the capture log's.  So at that file's slice boundaries the other slice is still away and the
+  // fast path must wait for it; one that drops its slow path's promise shows in the bytes (the archive and the
+  // central directory against the reference; the capture log against the raw rows, read by a lookup)
+  await scenario("fastpaths", async () => {
+    const N10 = 10000;
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(), pad = "w".repeat(400); s.put({ path: "/s10k", kind: "folder", ref: null, created: t, updated: t, fid: "s10kfid", ident: "s10kfid", nkey: "/\\u0000s10k" });
+      for (let i = 0; i < ${N10}; i++) { const name = pad + String(i).padStart(6, "0"), path = "/s10k/" + name, f = "s10kfid-" + i; s.put({ path, kind: "folder", ref: null, created: t, updated: t, fid: f, ident: f, nkey: "/s10k\\u0000" + name }); }
+      return null; }`);
+    await useRef(true);
+    const a = await sinkExport("opfs", join(out, "fp-ref.zip"));
+    check(!a.stopped && (await ev(WHICH)) === "reference", "fastpaths: the reference exports the 10,000 folders: " + (a.stopped ?? a.name));
+    await useRef(false);
+    for (const [label, re] of [["the archive held", "-out.zip$"], ["the central directory held", "-cd$"]]) {
+      const b = await sinkExport("opfs", join(out, "fp-new.zip"), `appendDelayMs: 150, appendDelayRe: ${JSON.stringify(re)}`);
+      const c = !a.stopped && !b.stopped ? compare(join(out, "fp-ref.zip"), join(out, "fp-new.zip")) : { error: b.stopped };
+      // (the hold took effect: that file's boundaries waited for its other slice, so the slow path ran)
+      const key = label.includes("archive") ? "archive" : "cd";
+      console.log(`(fastpaths ${label}: stats ` + JSON.stringify({ ...b.stats, rowSegs: b.stats?.rowSegs?.length }) + ")");
+      check(b.stats?.waits?.[key] > 0, `fastpaths (${label}): the hold made the ${key}'s boundaries wait (${b.stats?.waits?.[key]} times; the slow path ran)`);
+      check(!c.error && c.ndiffs === 0 && c.manifest, `fastpaths (${label}): every member, local header and central record byte-identical to the reference's: ` + JSON.stringify(c).slice(0, 200));
+    }
+    await ev(`${W}.create("/zz-fp.csv", { content: "a\\n" }).then(() => 1)`);
+    await ev(`(() => { window.__cap = []; return 1; })()`);
+    const cb = await sinkExport("opfs", join(out, "fp-cap.zip"), `appendDelayMs: 150, appendDelayRe: "-capture$", afterCapture: async (p) => { if (p === "/zz-fp.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`);
+    const cr = await ev(`(async () => {
+      const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
+      const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n");
+      const ref = new Blob(lines), got = new Blob(window.__cap ?? []);
+      window.__cap = [];
+      return { lines: lines.length, ref: await hex(ref), got: await hex(got), refBytes: ref.size, gotBytes: got.size };
+    })()`);
+    console.log("(fastpaths the capture log held: waits " + JSON.stringify(cb.stats?.waits) + ")");
+    check(cb.stats?.waits?.capture > 0, `fastpaths (the capture log held): the hold made the capture log's flushes wait (${cb.stats?.waits?.capture} times)`);
+    check(!cb.stopped && cr.lines >= N10 && cr.got === cr.ref && cr.gotBytes === cr.refBytes, `fastpaths (the capture log held): the capture log as the lookup read it is byte for byte the unbuffered reference (${cr.gotBytes} bytes, ${cr.lines} lines): ` + (cb.stopped ?? ""));
+    await ev(`${W}.remove("/zz-fp.csv").then(() => 1, () => 0)`);
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/s10k", "/s10k\\uffff"))`);
+    await reload();
+  });
+
+  // ---- r2c P-6 (breathe): without OPFS the spools' flushes and the Blob sink never wait on the worker, so only breathe's
+  // yields let the page run while 20,000 folders are written: a 20 ms heartbeat's longest gap while writing
+  await scenario("yields", async () => {
+    const N20 = 20000;
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(), pad = "y".repeat(200); s.put({ path: "/s20k", kind: "folder", ref: null, created: t, updated: t, fid: "s20kfid", ident: "s20kfid", nkey: "/\\u0000s20k" });
+      for (let i = 0; i < ${N20}; i++) { const name = pad + String(i).padStart(6, "0"), path = "/s20k/" + name, f = "s20kfid-" + i; s.put({ path, kind: "folder", ref: null, created: t, updated: t, fid: f, ident: f, nkey: "/s20k\\u0000" + name }); }
+      return null; }`);
+    await ev(`(() => { window.__hb = []; clearInterval(window.__hbt); window.__hbt = setInterval(() => window.__hb.push(performance.now()), 20); return 1; })()`);
+    await hooks(`noOpfs: true, onPlan: () => { window.__w0 = performance.now(); }, onHand: (blob, name, then) => { window.__w1 = performance.now(); window.__exp = { blob, name, then }; }`);
+    const y = await exportOnce(join(out, "yields.zip"));
+    const gap = await ev(`(() => { clearInterval(window.__hbt); const h = window.__hb.filter((t) => t >= window.__w0 && t <= window.__w1); let g = 0; for (let i = 1; i < h.length; i++) g = Math.max(g, h[i] - h[i - 1]); return [Math.round(g), h.length, Math.round(window.__w1 - window.__w0)]; })()`);
+    check(!y.stopped && gap[0] <= 500 && gap[1] > 10, `yields: without OPFS, 20,000 folders written with the page kept running: a 20 ms heartbeat's longest gap ${gap[0]} ms (${gap[1]} beats over ${gap[2]} ms): ` + (y.stopped ?? y.name));
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/s20k", "/s20k\\uffff"))`);
+  });
+
+  // ---- r2c "slices": Cancel while a slice is in flight (the worker holding each append 1.5 s): the Cancel within
+  // 250 ms, no slice handed over and none made after it, no error from the late replies, scratch and lock gone
+  await scenario("slicecancel", async () => {
+    await ev(`(async () => { const b = new Uint8Array(4 * 2 ** 20); for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, i + 65536)); await ${W}.create("/sc-big.zip", { content: b }); return 1; })()`);
+    const before = await lastAt();
+    await hooks(`appendDelayMs: 1500, onMember: (p) => { if (p !== "/sc-big.zip") return; setTimeout(() => { window.__clickAt = performance.now(); [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel")?.click(); }, 400); }`);
+    await ev(`(() => { window.__cancelledAt = 0; window.__clickAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+    const errs = errors.length;
+    const x = await exportOnce(join(out, "sc.zip"));
+    const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
+    const st = await ev(`window.__SB_EXPORT_TEST__.stats`);
+    check(!!x.stopped && /cancelled/.test(x.stopped) && st?.stopMs >= 0 && st.stopMs <= 250, "slices: Cancel with a slice in the worker's hands stops the export within 250 ms, its late answer not waited for: " + Math.round(st?.stopMs ?? -1) + " ms (the cancelled line after the scratch's removal, queued behind the held appends: " + Math.round(took) + " ms)");
+    check(st?.postsAfterStop === 0 && st?.slicesAfterStop === 0, "slices: after the Cancel no slice is handed over and none is made: " + JSON.stringify({ posts: st?.postsAfterStop, made: st?.slicesAfterStop }));
+    check(await until(`${LOCKS}.then((m) => m === 0)`, 15000) && (await until(OPFS(`let n = 0; for await (const _ of d.keys()) n++; return n === 0;`), 10000)), "slices: …the late replies come and go: no scratch file, no lock");
+    await sleep(500);
+    check(errors.length === errs && (await lastAt()) === before, "slices: …no page error from a late reply, the status line unchanged: " + errors.slice(errs).join(" | ").slice(0, 200));
+    await ev(`${W}.remove("/sc-big.zip").then(() => 1)`);
+  });
+
+  // ---- r2c "rows" (grader's P-7, O-2; astra's obligations): the rows spool removed on every exit, before any panel
+  // is shown; kept through Ready and a closed picker; its faults leave nothing
+  await scenario("rows", async () => {
+    const shows = (re) => until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => ${re}.test(b.textContent))`, 120000);
+    const clickP = (re) => ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((b) => ${re}.test(b.textContent))?.click(); return 1; })()`);
+    const settled = async () => (await until(`${LOCKS}.then((m) => m === 0)`, 15000)) && (await rowsFiles()).length === 0;
+    let before = await lastAt();
+    // (1) the refusal: gone while the panel shows
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/rows-cloud.csv", kind: "file", ref: "/rows-cloud.csv", size: 10, created: t, updated: t, fid: "rcfid", ident: "rcfid", sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
+    await hooks();
+    await startFlow();
+    const refusedShown = (await shows(/^Export again$/)) && /isn't on this device yet/.test(await panelText());
+    const duringRefusal = await rowsFiles();
+    await closeFlow();
+    check(refusedShown && duringRefusal.length === 0 && (await settled()), "rows: refusal: the records are removed before the refusal is shown (none while it shows), and nothing is left after it: " + JSON.stringify(duringRefusal));
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/rows-cloud.csv")`);
+    // (2) Cancel in preflight
+    await hooks(`preflightMember: (p) => new Promise((r) => { if (window.__pm) return r(); window.__pm = 1; setTimeout(() => { [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel")?.click(); setTimeout(r, 300); }, 300); })`);
+    await ev(`(() => { window.__pm = 0; return 1; })()`);
+    await startFlow();
+    const cancelShown = await shows(/^Export again$/);
+    const duringCancel = await rowsFiles();
+    await closeFlow();
+    check(cancelShown && duringCancel.length === 0 && (await settled()), "rows: Cancel in preflight: removed before the stopped panel shows, nothing left: " + JSON.stringify(duringCancel));
+    // (3) Cancel at Ready: kept while Ready shows, removed by its Cancel
+    await hooks();
+    await startFlow();
+    await shows(/^Save…$/);
+    const atReady = await rowsFiles();
+    await clickP(/^Cancel$/);
+    await sleep(300);
+    check(atReady.length === 1 && (await settled()), "rows: Cancel at Ready: the records kept while Ready shows (" + atReady.length + "), removed by its Cancel, nothing left");
+    // (4) the picker closed at Ready (r2c's "Close at ready": the ready panel's only other way back): kept, then Cancel
+    await ev(`(() => { window.__pickerAsked = 0; window.showSaveFilePicker = async () => { window.__pickerAsked++; throw new DOMException("closed (a test)", "AbortError"); }; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
+    await startFlow();
+    await shows(/^Save…$/);
+    await clickP(/^Save…$/);
+    await until(`window.__pickerAsked === 1`, 10000);
+    const backAtReady = (await shows(/^Save…$/)) ? await rowsFiles() : null;
+    await clickP(/^Cancel$/);
+    await sleep(300);
+    check(backAtReady?.length === 1 && (await settled()), "rows: the picker closed at Ready: back at Ready with the records kept (" + backAtReady?.length + "), then Cancel removes them, nothing left");
+    await ev(`(() => { delete window.showSaveFilePicker; return 1; })()`);
+    // (5) writing's own cleanup: a stop in writing (a structural change), and a finished export
+    await hooks(`afterCapture: async (p) => { if (p === "/data/pic.png") await window.sagebrush.workspace.mkdir("/rows-new"); }`);
+    await startFlow();
+    await shows(/^Save…$/);
+    await clickP(/^Save…$/);
+    const stopShown = await shows(/^Export again$/);
+    const duringStop = await rowsFiles();
+    await closeFlow();
+    check(stopShown && duringStop.length === 0 && (await settled()) && (await lastAt()) === before, "rows: a stop in writing: removed by writing's cleanup before the stopped panel shows, nothing left, the status line unchanged: " + JSON.stringify(duringStop));
+    await ev(`${W}.remove("/rows-new").then(() => 1, () => 0)`);
+    await hooks();
+    const done = await exportOnce(join(out, "rows-ok.zip"));
+    check(!done.stopped && (await settled()), "rows: a finished export leaves no records behind");
+    before = await lastAt();
+    // (6) the sweep: an abandoned rows file (its export holds no lock) removed by the next export's
+    const ABANDONED = "00000000-0000-4000-8000-0000000000aa-rows";
+    await ev(OPFS(`const f = await d.getFileHandle(${JSON.stringify(ABANDONED)}, { create: true }); const w = await f.createWritable(); await w.write("abandoned"); await w.close(); return 1;`));
+    await hooks();
+    const sw = await exportOnce(join(out, "rows-sweep.zip"));
+    check(!sw.stopped && !(await scratchNames()).includes(ABANDONED), "rows: an abandoned -rows file is removed by the next export's sweep");
+    // (if it wasn't, the test's own hand takes it out: the cases after this one see only their export's files)
+    await ev(OPFS(`await d.removeEntry(${JSON.stringify(ABANDONED)}).catch(() => {}); return 1;`));
+    before = await lastAt();
+    // (O-2) the rows spool's own faults: its open failing (in the worker; and after its file was made), its append
+    // failing, preflight failing after its records began: no file, no lock, the status line unchanged
+    for (const [label, extra, re] of [["the rows spool's open fails", `failOpen: "rows"`, /couldn't be truncated/], ["the rows spool fails after its file is made", `failOpen: "rows-late"`, /failed after it was made/], ["a rows append fails", `failRowsAfter: 1`, /couldn't be written/], ["preflight fails after its records began", `caps: { file: 50000 }`, /can't be exported/]]) {
+      await hooks(extra);
+      const r = await exportOnce(join(out, "rows-f.zip"));
+      check(!!r.stopped && re.test(r.stopped) && (await settled()) && (await lastAt()) === before, "rows (O-2): " + label + ": the export stops, no rows file, no lock, the status line unchanged: " + String(r.stopped ?? "not stopped").slice(-140));
+    }
+  });
+
+  // ---- r2c P-9 (astra's ruling r1a) and grader's O-3: a folder's metadata and captured as preflight observed them
+  await scenario("metadata", async () => {
+    await ev(`${W}.mkdir("/meta").then(() => 1)`);
+    const old = await ev(`${W}.stat("/meta")`);
+    // (the bracket; and a permitted edit before Save: the folder's row changed in place, no op (the workspace's API
+    // has no non-structural folder edit; this is what the migrator's or sync's metadata writes are), its modified
+    // later and a mode: the archive carries the old values)
+    await hooks(`beforePreflight: () => { window.__t0 = Date.now(); }, onPlan: async () => { window.__t1 = Date.now(); await new Promise((r) => setTimeout(r, 150)); await ${IDB}("sagebrush-workspace", "entries", (s) => { const q = s.get("/meta"); q.onsuccess = () => s.put({ ...q.result, updated: q.result.updated + 86400000 * 3, mode: "edited" }); }); }`);
+    const m = await exportOnce(join(out, "meta.zip"));
+    const t = await ev(`[window.__t0, window.__t1]`);
+    check(!m.stopped, "metadata: an export with a folder's row edited in place before Save completes: " + (m.stopped ?? m.name));
+    if (!m.stopped) {
+      const z = inspect(join(out, "meta.zip"));
+      const folders = z.entries.filter((e) => e.kind === "folder");
+      check(folders.length > 3 && folders.every((e) => e.captured >= t[0] && e.captured <= t[1]), `metadata (P-9): every folder's captured (${folders.length}) lies inside preflight's bracket [${t[0]}, ${t[1]}], none at writing time`);
+      const e = z.entries.find((x) => x.path === "/meta");
+      const dos = spawnSync("python3", ["-I", "-c", "import sys, zipfile; i = zipfile.ZipFile(sys.argv[1]).getinfo('files/meta/'); print(list(i.date_time))", join(out, "meta.zip")], { encoding: "utf8" }).stdout.trim();
+      const want = await ev(`(() => { const d = new Date(${old.updated}); return JSON.stringify([Math.min(2107, Math.max(1980, d.getFullYear())), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds() & ~1]).replace(/,/g, ", "); })()`);
+      check(e && e.modified === old.updated && !("mode" in e) && dos === want, "metadata (P-9): an edit before Save is not exported: the folder's old modified, no mode, its old DOS time: " + JSON.stringify({ modified: e?.modified, was: old.updated, mode: e?.mode, dos, want }));
+    }
+    // (the structural counter-case: the folder renamed before Save stops the export, naming it)
+    const before = await lastAt();
+    await hooks(`onPlan: async () => { await window.sagebrush.workspace.rename("/meta", "/meta-renamed"); }`);
+    const r = await exportOnce(join(out, "meta2.zip"));
+    check(!!r.stopped && /\/meta/.test(r.stopped) && /while exporting/.test(r.stopped) && (await lastAt()) === before, "metadata: a rename of that folder before Save stops the export, naming it: " + String(r.stopped ?? "not stopped").slice(-140));
+    await ev(`${W}.rename("/meta-renamed", "/meta").then(() => 1, () => 0)`);
+    // (an edit the API doesn't support for a folder: refused)
+    const refused = await ev(`${W}.write("/meta", "text").then(() => "accepted", (e) => "refused: " + String(e?.message ?? e).slice(0, 100))`);
+    check(/^refused: ./.test(refused), "metadata: a content write to a folder, an edit the API doesn't support, is refused: " + refused);
+    await ev(`${W}.remove("/meta").then(() => 1, () => 0)`);
+  });
+
+  // ---- r2c "rows-framing" (astra's H-A1, grader's addendum) and P-8 (the no-OPFS threshold), in a workspace of only
+  // their fixtures (the others' rows kept aside and put back)
+  await scenario("framing", async () => {
+    const saved = await idb("sagebrush-workspace", "entries", `(s) => s.getAll()`);
+    const keep = (e) => e.path === "/" || e.path === "/Trash" || e.path.startsWith("/Trash/");
+    const putAll = (rows) => idb("sagebrush-workspace", "entries", `(s) => { s.clear(); for (const e of ${JSON.stringify(rows)}) s.put(e); return null; }`);
+    // (after the page's reload, what it added of its own to a workspace it found nearly empty, listed and taken out
+    // again (from IndexedDB, as the fixture was put in: no op), so the export sees exactly the fixture)
+    const only = async (rows) => {
+      const want = new Set(rows.map((e) => e.path));
+      const extra = (await idb("sagebrush-workspace", "entries", `(s) => s.getAllKeys()`)).filter((k) => !want.has(k) && !keep({ path: k }));
+      if (extra.length) console.log("(framing: entries the page added on its reload, taken out: " + JSON.stringify(extra).slice(0, 300) + ")");
+      await idb("sagebrush-workspace", "entries", `(s) => { for (const k of ${JSON.stringify(extra)}) s.delete(k); return null; }`);
+    };
+    // (a folder's record: 89 + 2 L + 2 F bytes for an ASCII path of L characters, ident and fid of F, 13-digit times)
+    const t = 1761900000000, F = 8;
+    const rec = (L) => 89 + 2 * L + 2 * F;
+    const folder = (path, i) => ({ path, kind: "folder", ref: null, created: t, updated: t, fid: "fr" + String(i).padStart(6, "0"), ident: "fr" + String(i).padStart(6, "0"), nkey: path.slice(0, path.lastIndexOf("/")) + "\u0000" + path.slice(path.lastIndexOf("/") + 1) });
+    try {
+      // (segments of SLICE - r bytes, r = 0..5, each ending on a record boundary; then one record alone)
+      const rows = [folder("/f", 0)];
+      let used = rec(2), i = 1;
+      const pathOf = (L) => "/f/" + String(i).padStart(6, "0") + "y".repeat(L - 9);
+      const segs = [];
+      for (const r of [0, 1, 2, 3, 4, 5]) {
+        let R = SLICE - r - used;
+        // (m records summing to R: 105 + 2 L each, L in [9, 250] (a name at most 255); m has R's parity)
+        let m = Math.ceil(R / rec(240));
+        if ((R - (89 + 2 * F) * m) % 2) m++;
+        let total = (R - (89 + 2 * F) * m) / 2;
+        for (let k = 0; k < m; k++) { const L = Math.floor(total / (m - k)); total -= L; rows.push(folder(pathOf(L), i)); i++; }
+        segs.push(SLICE - r);
+        used = 0;
+      }
+      rows.push(folder(pathOf(40), i));
+      segs.push(rec(40));
+      check(rows.slice(1).every((e) => e.path.length >= 9 && e.path.length <= 1024 && e.path.length - 3 <= 255), "framing: the fixture's paths and names are within the workspace's bounds");
+      await putAll([...saved.filter(keep), ...rows]);
+      await reload();
+      await only(rows);
+      await hooks();
+      const x = await exportOnce(join(out, "framing.zip"));
+      const st = x.stats ?? {};
+      const want = rows.reduce((n, e) => n + rec(e.path.length), 0);
+      check(st.rowBytes === want && st.records === rows.length, `framing: the fixture's records are the sizes the test computed: ${st.rowBytes} bytes (computed ${want}), ${st.records} records (${rows.length})`);
+      check(!x.stopped && JSON.stringify(st.rowSegs) === JSON.stringify(segs), "framing: the rows spool's segments are exactly " + JSON.stringify(segs.map((s) => s === SLICE ? "SLICE" : s >= SLICE - 5 ? "SLICE-" + (SLICE - s) : s)) + " (a record ending at the slice's end; remainders of 1-5 bytes each an early segment short by exactly that; one record alone last): " + JSON.stringify(st.rowSegs) + " " + (x.stopped ?? ""));
+      check(st.rowBytes === st.rowSize && st.rowSegs?.reduce((a, b) => a + b, 0) === st.rowSize, `framing: no padding: the bytes flushed (${st.rowSegs?.reduce((a, b) => a + b, 0)}) are the records' bytes (${st.rowBytes}) and the spool's size (${st.rowSize})`);
+      if (!x.stopped) { const z = inspect(join(out, "framing.zip")); check(!z.error && z.bad === null && z.entries.length === rows.length && z.entries.every((e, k) => e.path === rows[k].path), "framing: every record replayed whole, in order: " + z.entries.length + " entries"); }
+      // (truncation refused: the spool cut by its last byte before writing replays it, with OPFS and without)
+      for (const [label, extra] of [["OPFS", ""], ["Blob parts", "noOpfs: true"]]) {
+        const before = await lastAt();
+        await hooks(["cutRows: true", extra].filter(Boolean).join(", "));
+        const c = await exportOnce(join(out, "cut.zip"));
+        check(!!c.stopped && /scratch data was cut short/.test(c.stopped) && !(await ev(`!!window.__exp`)) && (await until(`${LOCKS}.then((m) => m === 0)`, 15000)) && (await scratchNames()).length === 0 && (await lastAt()) === before, `framing: the rows spool cut short (${label}) is refused, "cut short", nothing handed over, nothing left: ` + String(c.stopped ?? "not stopped").slice(-120));
+      }
+      // (P-8: without OPFS, the spools held in memory, the records counted: refused at the exact threshold, done one
+      // byte below it.  The sum: each folder's central-record bound, manifest bound and comma, capture line, record)
+      const P8 = [folder("/g", 0)];
+      for (let k = 1; k <= 200; k++) P8.push(folder("/g/" + String(k).padStart(6, "0") + "z".repeat(20), k));
+      const bytes = (s) => Buffer.byteLength(s);
+      const cap13 = 1761900000000;
+      const need = P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
+      await putAll([...saved.filter(keep), ...P8]);
+      await reload();
+      await only(P8);
+      // (the test's sum against the export's own accounting: its plan's three bounds and its records, with OPFS)
+      await hooks(`onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`);
+      const pre = await exportOnce(join(out, "p8pre.zip"));
+      const parts = await ev(`window.__plan`);
+      const mine = [P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
+      check(!pre.stopped && JSON.stringify([...parts, pre.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
+      for (const [label, cap, ok] of [["at the threshold", need - 1, false], ["one byte below it", need, true]]) {
+        await hooks(`noOpfs: true, caps: { spoolBlob: ${cap} }`);
+        const p = await exportOnce(join(out, "p8.zip"));
+        if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
+        else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
+      }
+    } finally {
+      await putAll(saved);
+      await reload();
+    }
   });
 
   // (r2a: these three load pages (a second tab, the board page): they run before "structure", whose log-trim cases
@@ -724,7 +1200,7 @@ try {
     const before = await lastAt();
     await hooks("noOpfs: true, caps: { spoolBlob: 64 }");
     const s1 = await exportOnce(join(out, "s1.zip"));
-    check(!!s1.stopped && /can't hold the export's index/.test(s1.stopped) && !(await ev(`!!window.__exp`)), "without OPFS, a spool over its cap is refused before anything is written: " + (s1.stopped ?? "not stopped").slice(-160));
+    check(!!s1.stopped && s1.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), "without OPFS, the spools over their in-memory cap are refused in preflight, before anything is written, in plain words: " + (s1.stopped ?? "not stopped").slice(-200));
     await hooks("failSpoolAfter: 1");
     const s2 = await exportOnce(join(out, "s2.zip"));
     check(!!s2.stopped && /scratch file couldn't be written/.test(s2.stopped) && !(await ev(`!!window.__exp`)) && (await scratchCount()) === 0 && (await lastAt()) === before, "an OPFS scratch write failing midway stops visibly, nothing handed over, scratch removed, status unchanged: " + (s2.stopped ?? "not stopped").slice(-160));
