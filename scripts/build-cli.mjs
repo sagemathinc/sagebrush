@@ -17,19 +17,21 @@ import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
+import { sandboxEntry } from "./sandbox-env.mjs";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
 // `launcher`, the entry is the launcher (packages/sagebrush/bin/sagebrush.cjs,
 // which runs a program in a worker thread so that Ctrl-C reaches it), and the
-// bundle, beside it as pyjs.cjs, is included.
-function denoCompile(flags, exe, launcher = false) {
+// bundle, beside it as pyjs.cjs, is included.  With `entryText`, the entry is that text (the sandbox's).
+function denoCompile(flags, exe, launcher = false, entryText = null) {
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-deno-"));
   if (launcher) {
     copyFileSync(bundle, join(dir, "pyjs.cjs"));
     copyFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), join(dir, "sagebrush.cjs"));
     flags = [...flags, "--include", join(dir, "pyjs.cjs")];
-  } else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
+  } else if (entryText !== null) writeFileSync(join(dir, "sagebrush.cjs"), entryText);
+  else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
   run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
   // Windows targets get ".exe" appended.
   return existsSync(exe) ? exe : exe + ".exe";
@@ -50,7 +52,13 @@ const notices = ["LICENSE-MIT", "LICENSE-APACHE", "cdn/LICENSE-CPython.txt", "LI
 // cache (src/compile.ts): a hash of src/ and lib/.
 // (scripts/build-id.mjs: the compiler, runtime and library, hashed)
 const buildId = computeBuildId(root, lib);
-writeFileSync(join(out, "lib.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__PYJS_LIB__ = ${JSON.stringify(lib)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
+// (the library itself gzipped, base64: src/lib-embed.ts decodes it once, when src/compile.ts first reads
+// __PYJS_LIB__ at startup; a quarter of the bundle otherwise)
+const libGzBytes = gzipSync(Buffer.from(JSON.stringify(lib), "utf8"), { level: 9 });
+// (deterministic: node's gzip header has no file name (FLG 0) and MTIME 0; asserted, as no option sets them)
+if (libGzBytes[3] !== 0 || libGzBytes.readUInt32LE(4) !== 0) throw new Error("lib.gen.js: the library's gzip header has a name or a time");
+const libGz = libGzBytes.toString("base64");
+writeFileSync(join(out, "lib.gen.js"), `import { installEmbeddedLib } from "../../src/lib-embed";\nglobalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\ninstallEmbeddedLib(globalThis, ${JSON.stringify(libGz)});\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // (the same without the library, for the browser's worker, which fetches it
 // in chunks: web/lib-lazy.ts)
 writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
@@ -165,10 +173,13 @@ if (process.argv.includes("--deno")) {
 // at compile time and --no-prompt makes every denial a PermissionError
 // instead of a question on the terminal.  Programs come on stdin or as the
 // interactive prompt; the embedded library still imports.  Add scoped grants
-// with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."
+// with e.g. PYJS_SANDBOX_ALLOW="--allow-read=."  The entry and its flags are
+// scripts/sandbox-env.mjs's: the bundle with an env adapter first (a key Deno
+// refuses reads as unset), and --no-prompt plus those grants, nothing more.
 if (process.argv.includes("--sandbox")) {
   const target = process.argv.find((a) => a.startsWith("--target="));
-  const extra = (process.env.PYJS_SANDBOX_ALLOW ?? "").split(/\s+/).filter(Boolean);
-  const exe = denoCompile(["--no-prompt", ...extra, ...(target ? [target] : [])], join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : "")));
-  console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${extra.length ? " grants: " + extra.join(" ") : ""}`);
+  const sb = sandboxEntry({ bundleText: readFileSync(bundle, "utf8"), allow: process.env.PYJS_SANDBOX_ALLOW ?? "", target });
+  const exe = denoCompile(sb.flags, join(out, "pyjs-sandbox" + (target ? "-" + target.slice(9) : "")), false, sb.entryText);
+  const grants = sb.flags.slice(1, target ? -1 : undefined);
+  console.log(`sandbox executable: ${exe} (${(statSync(exe).size / 1e6).toFixed(1)} MB)${grants.length ? " grants: " + grants.join(" ") : ""}`);
 }

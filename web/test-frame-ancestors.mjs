@@ -13,6 +13,7 @@
 // And scripts (security audit G-2): no rule's script-src names another site, only 'self', its pages' hashes,
 // 'wasm-unsafe-eval', and blob: and 'unsafe-eval' on the rules that have them (the runner's, the frame's, the
 // shell worker's), with a control for each wrong shape.
+// And nosniff (security audit G-3a): the /* rule of every page set, and every atlas response (C-H, C-A).
 //   bun web/test-frame-ancestors.mjs
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,10 +133,20 @@ function previewPolicies(dir, text) {
 const previewKind = (file) => kindOf(file === "shell/worker-boot.js" ? "/shell/worker-boot.js" : "/" + file.split("/")[0] + "/*");
 const previewWrong = (dir, text) => previewPolicies(dir, text).filter(([f, v]) => scriptSrcProblems(previewKind(f), v).length).map(([f]) => f);
 
+// nosniff (security audit G-3a): the /* rule, which every static file gets (the 404 page and the /s/ card's copy of
+// the page headers too), says it, and so every page URL has it; one problem for a site that lacks it anywhere
+export function nosniffProblems(rules, urls) {
+  const has = (h) => h.some(([n, v]) => n === "x-content-type-options" && v.toLowerCase() === "nosniff");
+  const star = rules.find(([p]) => p === "/*");
+  return !star || !has(star[1]) || urls.some((u) => !has(effective(rules, u))) ? ["nosniff missing"] : [];
+}
+
 function checkSite(dir, label) {
   const { urls, wrong } = wrongOf(dir);
   for (const [u, p] of wrong.slice(0, 20)) console.log(`     ${label} ${u}: ${p.join("; ")}`);
   ok(urls.length > 0 && wrong.length === 0, `${label}: all ${urls.length} HTML URLs say who may frame them (${wrong.length} wrong)`);
+  const ns = nosniffProblems(parseHeaders(headersFor(dir)), urls);
+  ok(urls.length > 0 && ns.length === 0, `${label}: the /* rule and all ${urls.length} HTML URLs say nosniff (${ns.join("; ") || "none missing"})`);
   const text = headersFor(dir), n = policiesOf(text).length, w = scriptWrong(text);
   for (const p of w.slice(0, 20)) console.log(`     ${label} ${p}: ${scriptSrcProblems(kindOf(p), policiesOf(text).find(([q]) => q === p)[1]).join("; ")}`);
   ok(n > 0 && w.length === 0, `${label}: all ${n} policies' script-src exactly as allowed, no other site's (${w.length} wrong)`);
@@ -215,10 +226,55 @@ try {
     if (wantMeta) { const wm = previewWrong(fx, t); ok(wantMeta.length > 0 && same(wm, wantMeta), `control ${name}: and exactly the preview metadata of those pages (${wm.length} of ${wantMeta.length})`); }
     m.done();
   }
+  // C-H (G-3a): web/_headers without its nosniff line -> exactly one "nosniff missing" for each page set checked
+  {
+    const m = await mutated((s) => once(s, "  X-Content-Type-Options: nosniff\n", ""), "C-H (nosniff out of web/_headers)", "_headers");
+    for (const [d, label] of [[fx, "fixture"], ...[join(here, "dist"), join(here, "site", "public")].filter((d) => existsSync(d)).map((d) => [d, d.slice(here.length + 1)])]) {
+      const p = nosniffProblems(parseHeaders(m.headersFor(d)), pages(d).flatMap(urlsOf));
+      ok(JSON.stringify(p) === `["nosniff missing"]`, `control C-H: ${label}: exactly one "nosniff missing" (${JSON.stringify(p)})`);
+    }
+    m.done();
+  }
 } finally {
   rmSync(fx, { recursive: true, force: true });
 }
 for (const d of [join(here, "dist"), join(here, "site", "public")]) if (existsSync(d)) checkSite(d, d.slice(here.length + 1));
+
+// The atlas (web/atlas/server.ts, a Worker's responses, which _headers doesn't reach): every body it makes, HTML and
+// JSON, 200 and 404, says nosniff (G-3a).  Its data: a stub serving a minimal stats.json (no atlas data is committed;
+// the 404s need none).  Control C-A: a copy of the atlas with an empty NOSNIFF -> exactly these four lack it.
+const ATLAS_STATS = { commit: "0000000", bound: 1000, built: "2026-11-01", orbits: 1, spaces: 1, lmfdb: { agree: 1, differ: 0 }, weights: { 2: { maxLevel: 11, spaces: 1, orbits: 1, dims: { 1: 1 }, grid: [1] } } };
+const ATLAS_CASES = [["/atlas/", 200, "text/html"], ["/atlas/?format=json", 200, "application/json"], ["/atlas/mf/x", 404, "text/html"], ["/atlas/mf/x.json", 404, "application/json"]];
+const atlasAsset = async (p) => (p === "/atlas/data/stats.json" ? Response.json(ATLAS_STATS) : new Response("", { status: 404 }));
+async function atlasLacking(server) {
+  const { handleAtlas } = await import(server);
+  const seen = [], lacking = [];
+  for (const [u, status, type] of ATLAS_CASES) {
+    const r = await handleAtlas(new Request("https://sagebrush.space" + u), atlasAsset);
+    seen.push([u, r?.status, r?.headers.get("content-type")]);
+    if (r?.status !== status || !r.headers.get("content-type")?.startsWith(type)) lacking.push(`${u}: ${r?.status} ${r?.headers.get("content-type")}`);
+    else if (r.headers.get("x-content-type-options") !== "nosniff") lacking.push(u);
+  }
+  return { seen, lacking };
+}
+{
+  const { seen, lacking } = await atlasLacking(join(here, "atlas", "server.ts"));
+  ok(lacking.length === 0, `atlas: its HTML and JSON, 200 and 404, all say nosniff (${lacking.join(", ") || "none missing"}): ${JSON.stringify(seen)}`);
+  // (the copy beside web/atlas, so its imports (katex) resolve as the original's; removed after)
+  const mut = mkdtempSync(join(here, ".g3a-mut-atlas-"));
+  try {
+    mkdirSync(join(mut, "atlas"));
+    for (const f of ["server.ts", "model.ts", "render.ts", "pages.ts", "plot.ts"]) copyFileSync(join(here, "atlas", f), join(mut, "atlas", f));
+    copyFileSync(join(here, "csp-policy.mts"), join(mut, "csp-policy.mts"));
+    const src = readFileSync(join(here, "atlas", "server.ts"), "utf8"), out = once(src, `const NOSNIFF = { "x-content-type-options": "nosniff" } as const;`, "const NOSNIFF = {} as const;");
+    ok(out !== null, "control C-A: the change applies to web/atlas/server.ts");
+    writeFileSync(join(mut, "atlas", "server.ts"), out ?? src);
+    const c = await atlasLacking(join(mut, "atlas", "server.ts"));
+    ok(same(c.lacking, ATLAS_CASES.map(([u]) => u)), `control C-A (an empty NOSNIFF): exactly the four atlas cases lack it (${c.lacking.join(", ") || "none"} did)`);
+  } finally {
+    rmSync(mut, { recursive: true, force: true });
+  }
+}
 
 // the checker itself, on rules made to be wrong in one way each
 {

@@ -536,7 +536,7 @@ export function kernelWorker(mode: Mode) {
       return null;
     };
     run(GET_IPYTHON, host, "exec", "<init>");
-    if (mode === "sage") run("from sage_all import *\n", main, "exec", "<sage>");
+    if (mode === "sage") run("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", main, "exec", "<sage>");
     return { main, host };
   })();
   const FLUSH = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;

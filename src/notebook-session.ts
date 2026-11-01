@@ -302,7 +302,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
   const loaded = new Set<string>();
   let loads = 0;
   const LOAD: Record<string, [string, "main" | "host"]> = {
-    sage: ["from sage_all import *\n", "main"],
+    sage: ["from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", "main"],
     magma: ["import _magma\n", "host"],
     matlab: ["import _matlab\n", "host"],
   };

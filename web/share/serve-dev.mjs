@@ -53,7 +53,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
   if (limits) for (const [id, l] of Object.entries(limits)) await db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3)").bind(id, JSON.stringify(l), 4e9).run();
   const rules = headerRules();
-  const log = { files: [] };
+  const log = { files: [], site: [] }; // (each request to the files domain, and to the site: G-10's share cases)
 
   async function viaWorker(req, res, url) {
     const chunks = [];
@@ -70,6 +70,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
   }
 
   const siteServer = createServer(async (req, res) => {
+    log.site.push(req.url);
     const url = new URL(req.url, site);
     if (/^\/(api|auth)\//.test(url.pathname)) return viaWorker(req, res, url.href);
     let path = url.pathname;

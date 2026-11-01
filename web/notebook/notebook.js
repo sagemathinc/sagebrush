@@ -2128,7 +2128,12 @@ export function createNotebook(root, opts = {}) {
             ({ text, sel } = merge({ base: b.code, local: L, remote: Rt, sel: [c.ta.selectionStart, c.ta.selectionEnd] }));
             textChanged = text !== L;
           } else { textChanged = true; conflictText = L; }
-        } else textChanged = true; // changed there only
+        } else { // changed there only
+          textChanged = true;
+          // (theirs, the selection mapped onto it as above: text inserted before the caret moves it, as a person
+          // expects; without the merge (no sync, a revert), the caret keeps its offset)
+          if (merge) ({ text, sel } = merge({ base: L, local: L, remote: Rt, sel: [c.ta.selectionStart, c.ta.selectionEnd] }));
+        }
       }
       if (textChanged) {
         const dir = c.ta.selectionDirection;

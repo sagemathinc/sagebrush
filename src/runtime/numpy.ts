@@ -231,8 +231,15 @@ export class NDArray {
     public offset = 0,
     public base: NDArray | null = null,
   ) {}
-  // read-only (broadcast_to's views, and views of them): writes raise
+  // read-only (broadcast_to's views, and views of them; flags.writeable =
+  // False): writes raise
   ro = false;
+  // (a read-only array that can never be made writeable: frombuffer of
+  // bytes, whose memory NumPy may not write; NumPy's base, the bytes)
+  fixedRO = false;
+  bufBase: any = null;
+  // (flags.aligned set False: no effect here but the flag, as NumPy keeps it)
+  unaligned = false;
   get size(): number {
     let n = 1;
     for (const s of this.shape) n *= s;
@@ -540,8 +547,68 @@ export function copy(a: NDArray, dt: DType = a.dt): NDArray {
 
 // A view of a keeps a's read-only flag.
 const viewOf = (v: NDArray, a: NDArray): NDArray => ((v.ro = a.ro), v);
+// (frombuffer's array as NumPy's: of bytes, read-only for good, its base
+// the bytes; of a writeable buffer (lib/numpy passes a bytearray as a
+// memoryview, NumPy's base), writeable.  It is a copy here, aligned, where
+// NumPy's shares the buffer's memory.  At module level, so the limit-sites
+// census keeps attributing the lines after frombuffer to their own function)
+function fromBytes(a: NDArray, buffer: any): NDArray {
+  a.bufBase = buffer;
+  // (writeable only over writeable memory: a bytearray, or a memoryview
+  // that isn't read-only)
+  const ro = buffer instanceof Obj.PyByteArray ? false : buffer instanceof Obj.PyBytes ? true : O.truth(Obj.getattr(buffer, "readonly"));
+  if (ro) {
+    a.ro = true;
+    a.fixedRO = true;
+  }
+  return a;
+}
 function writable(a: NDArray) {
   if (a.ro) raise(T.ValueError, "assignment destination is read-only");
+}
+// (a ufunc's out=, and an in-place operator's target, in NumPy's words)
+function outWritable(a: NDArray) {
+  if (a.ro) raise(T.ValueError, "output array is read-only");
+}
+
+// ------------------------------------------------------------------ flags
+// ndarray.flags, NumPy's flagsobj: the contiguity, ownership and
+// writeability of an array, read live (a flags object follows its array),
+// and writeable, aligned and writebackifcopy set as NumPy's rules allow
+const cContig = (a: NDArray) => a.size === 0 || a.isC();
+function fContig(a: NDArray): boolean {
+  if (a.size === 0) return true;
+  let want = 1;
+  for (let d = 0; d < a.shape.length; d++) {
+    if (a.shape[d] !== 1 && a.strides[d] !== want) return false;
+    want *= a.shape[d];
+  }
+  return true;
+}
+const ownsData = (a: NDArray) => a.base === null && a.bufBase === null;
+// (NumPy's NPY_ARRAY_* bits)
+const F_C = 0x1, F_F = 0x2, F_OWN = 0x4, F_ALIGNED = 0x100, F_WRITE = 0x400;
+function flagsNum(a: NDArray): number {
+  return (cContig(a) ? F_C : 0) | (fContig(a) ? F_F : 0) | (ownsData(a) ? F_OWN : 0) | (a.unaligned ? 0 : F_ALIGNED) | (a.ro ? 0 : F_WRITE);
+}
+// writeable = True only where the memory may be written: not frombuffer's
+// bytes, and not a view of a read-only array (NumPy's check of the base);
+// broadcast_to's views may be made writeable, as in NumPy
+function setWriteable(a: NDArray, v: boolean) {
+  if (!v) {
+    a.ro = true;
+    return;
+  }
+  if (a.fixedRO || (a.base !== null && a.base.ro)) raise(T.ValueError, "cannot set WRITEABLE flag to True of this array");
+  a.ro = false;
+}
+// (NumPy's flagsobj is a snapshot: its flags are the array's when it was
+// made; setting a flag through it changes the array, not the snapshot)
+export class FlagsObj {
+  num: number;
+  constructor(public a: NDArray) {
+    this.num = flagsNum(a);
+  }
 }
 
 // out[...] = src (an array, broadcast to out's shape), casting as needed.
@@ -592,18 +659,29 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     return;
   }
   if (isSeq(x)) {
+    if (protocolSeq(x)) throw PROTOCOL;
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
     if (items.length === 0 && shape.length === depth + 1) return;
     return;
   }
-  if (shape.length > depth) inhomogeneous(depth);
+  if (shape.length > depth) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
+    inhomogeneous(depth, shape);
+  }
   shape.leaf ??= depth;
-  if (shape.leaf !== depth) inhomogeneous(Math.min(depth, shape.leaf));
-  if (shapeOnly && typeof x !== "string") return;
+  if (shape.leaf !== depth) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
+    inhomogeneous(Math.min(depth, shape.leaf), shape);
+  }
+  if (shapeOnly && typeof x !== "string") {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
+    return;
+  }
   const w = pyScalar(x);
   if (w === null) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
     if (typeof x === "string") raise(T.NotImplementedError, "string arrays are not supported by sagebrush's numpy yet");
     const f = Ty.floatCallSafe(x);
     if (f === undefined) raise(T.TypeError, `float() argument must be a string or a real number, not '${typeName(x)}'`);
@@ -620,12 +698,15 @@ function promoteScalar(a: DType, b: DType, w: Weak): DType {
 }
 function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.length === d) shape.push(n);
-  else if (shape.length < d) inhomogeneous(d);
-  else if (shape[d] !== n) inhomogeneous(d);
-  if (shape.leaf !== undefined && d >= shape.leaf) inhomogeneous(shape.leaf);
+  else if (shape.length < d) inhomogeneous(d, shape);
+  else if (shape[d] !== n) inhomogeneous(d, shape);
+  if (shape.leaf !== undefined && d >= shape.leaf) inhomogeneous(shape.leaf, shape);
 }
-function inhomogeneous(d: number): never {
-  return raise(T.ValueError, `setting an array element with a sequence. The requested array has an inhomogeneous shape after ${d} dimensions. The detected shape was ${"(...)"} + inhomogeneous part.`);
+// (NumPy's message names the shape detected up to the inhomogeneous axis)
+function inhomogeneous(d: number, shape: number[]): never {
+  const dims = shape.slice(0, d);
+  const shown = `(${dims.join(", ")}${dims.length === 1 ? "," : ""})`;
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array has an inhomogeneous shape after ${d} dimensions. The detected shape was ${shown} + inhomogeneous part.`);
 }
 
 // Write nested Python data into a fresh array.
@@ -766,11 +847,89 @@ export function asarray(x: any, dtype: any = null): NDArray {
   if (x instanceof NDArray) return dtype === null || toDtype(dtype) === x.dt ? x : copy(x, toDtype(dtype));
   return fromPy(x, dtype);
 }
-export function fromPy(x: any, dtype: any = null): NDArray {
+// NumPy's __array__ protocol: an object with an __array__ method stands for
+// the array that returns, at the top or nested in lists.  discover meets such
+// an object only where it would otherwise refuse it (a leaf that isn't a
+// number, or one whose shape doesn't fit), so plain data pays nothing: then
+// the data is rebuilt with each such object replaced by its array, once, and
+// discovered again.  The method is NumPy's call: no arguments, the requested
+// dtype positionally, and np.array's copy= keyword at the top only.  A list
+// or tuple subclass with __array__ is its array, not a sequence, as NumPy's.
+const PROTOCOL = { mark: "array protocol" };
+const NO_ATTR = { mark: "no __array__" };
+function arrayMethod(x: any): any {
+  if (x === null || typeof x !== "object" || x instanceof NDArray || x instanceof DType || pyScalar(x) !== null) return undefined;
+  const m = Obj.getattr(x, "__array__", NO_ATTR);
+  return m === NO_ATTR ? undefined : m;
+}
+function hasArrayProtocol(x: any): boolean {
+  return arrayMethod(x) !== undefined;
+}
+// (a list or tuple whose type isn't exactly list or tuple, with __array__)
+function protocolSeq(x: any): boolean {
+  const t = Obj.typeOf(x);
+  return t !== T.list && t !== T.tuple && hasArrayProtocol(x);
+}
+// (an operand that makes a binary operation's result an array: an ndarray, a
+// list, or an object with the protocol)
+function isArrayLike(v: any): boolean {
+  return v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
+}
+function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
+  if (isSeq(x) && !protocolSeq(x)) {
+    const items = seqItems(x);
+    let changed = false;
+    const out = items.map((it) => {
+      const v = viaArrayProtocol(it, dt, undefined);
+      if (v !== it) changed = true;
+      return v;
+    });
+    return changed ? out : x;
+  }
+  const m = arrayMethod(x);
+  if (m === undefined) return x;
+  const pos = dt === null ? [] : [dt];
+  let r: any;
+  let legacy = false;
+  if (copyKw === undefined) r = Obj.callObj(m, pos);
+  else {
+    try {
+      r = Obj.callKw(m, pos, ["copy"], [copyKw]);
+    } catch (e) {
+      // (NumPy 2's fallback for a method without copy=: only on the
+      // TypeError naming that keyword, with its DeprecationWarning; any
+      // other error, the method's own, propagates)
+      if (!Obj.isinstance(e, T.TypeError) || !String(Obj.callObj(T.str, [e])).includes(COPY_KW_ERROR)) throw e;
+      Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [LEGACY_COPY_WARNING, T.DeprecationWarning, 2]);
+      // (a method that can't promise no copy: copy=False is refused before
+      // the method runs again, as NumPy's)
+      if (copyKw === false) raise(T.ValueError, NO_COPY_ERROR);
+      r = Obj.callObj(m, pos);
+      legacy = true;
+    }
+  }
+  if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
+  // (a method that can't promise a copy: np.array's copy=True copies its result)
+  if (legacy && O.truth(copyKw)) r = copy(r);
+  return r;
+}
+const COPY_KW_ERROR = "__array__() got an unexpected keyword argument 'copy'";
+const LEGACY_COPY_WARNING =
+  "__array__ implementation doesn't accept a copy keyword, so passing copy=False failed. __array__ must implement 'dtype' and 'copy' keyword arguments. To learn more, see the migration guide https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword";
+const NO_COPY_ERROR =
+  "Unable to avoid copy while creating an array as requested.\nIf using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).\nFor more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.";
+export function fromPy(x: any, dtype: any = null, copyKw: any = undefined): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
   const given = dtype !== null && dtype !== undefined;
-  discover(x, 0, shape, kinds, given);
+  try {
+    discover(x, 0, shape, kinds, given);
+  } catch (e) {
+    if (e !== PROTOCOL) throw e;
+    const y = viaArrayProtocol(x, given ? toDtype(dtype) : null, copyKw);
+    if (y instanceof NDArray) return asarray(y, dtype);
+    return fromPy(y, dtype);
+  }
   const dt = given ? toDtype(dtype) : (kinds.dt ?? D.float64);
   const out = empty(shape, dt);
   fill(out, x);
@@ -1323,7 +1482,7 @@ function stridedKernel(op: string): any {
 // anything is computed.
 export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
   const spec = BIN[op];
-  if (out) writable(out);
+  if (out) outWritable(out);
   const A = operand(x), B = operand(y);
   let ct = resultType(A, B); // type the computation runs in
   if (spec.noBool && ct.kind === "b") raise(T.TypeError, `numpy boolean ${op}, the \`-\` operator, is not supported, use the bitwise_xor, the \`^\` operator, or the logical_xor function instead.`);
@@ -1902,18 +2061,25 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
   return r.ndim === 0 && !keepdims ? pyScalarOf(r.dt, r.data, r.offset) : r;
 }
+// (a complex array's components are views of it, read-only where it is,
+// as NumPy's; a real array's imag is a new read-only array of zeros)
 function realPart(a: NDArray): NDArray {
   if (!a.dt.cplx) return a;
   const dt = a.dt === D.complex64 ? D.float32 : D.float64;
-  return new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset, a);
+  const v = new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset, a);
+  v.ro = a.ro;
+  return v;
 }
 function imagPart(a: NDArray): NDArray {
   if (!a.dt.cplx) {
     const z = empty(a.shape, a.dt);
+    z.ro = true;
     return z;
   }
   const dt = a.dt === D.complex64 ? D.float32 : D.float64;
-  return new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset + 1, a);
+  const v = new NDArray(dt, a.data, a.shape, a.strides.map((s) => 2 * s), 2 * a.offset + 1, a);
+  v.ro = a.ro;
+  return v;
 }
 // A real scalar as a JS number: through a NumPy scalar's box and an
 // integral float's FloatBox.
@@ -3037,7 +3203,65 @@ newBuiltinModule("_numpy", (m) => {
   Ty.getset(A, "strides", (a: NDArray) => tuple(a.strides.map((s) => s * a.dt.itemsize)));
   Ty.getset(A, "T", (a: NDArray) => transpose(a, null));
   Ty.getset(A, "mT", (a: NDArray) => transpose(a, [...a.shape.keys()].map((i) => (i === a.ndim - 1 ? a.ndim - 2 : i === a.ndim - 2 ? a.ndim - 1 : i))));
-  Ty.getset(A, "base", (a: NDArray) => a.base);
+  Ty.getset(A, "base", (a: NDArray) => a.base ?? a.bufBase);
+  Ty.getset(A, "flags", (a: NDArray) => new FlagsObj(a));
+  M("setflags", (a: NDArray, write: any = null, align: any = null, uic: any = null) => {
+    if (uic !== null && uic !== undefined && O.truth(uic)) raise(T.ValueError, "cannot set WRITEBACKIFCOPY flag to True");
+    if (align !== null && align !== undefined) a.unaligned = !O.truth(align);
+    if (write !== null && write !== undefined) setWriteable(a, O.truth(write));
+    return null;
+  }, Obj.sig(["self", "write", "align", "uic"]));
+  const FT = Ty.builtinTypeFor("flagsobj", FlagsObj, "numpy", () => raise(T.TypeError, "cannot create 'numpy.flagsobj' instances"));
+  const FM = (name: string, f: any) => Ty.method(FT, name, f);
+  // (each flag: its attribute, its keys, and its value)
+  // (each flag from the snapshot's bits n)
+  const has = (n: number, bit: number) => (n & bit) !== 0;
+  const FLAG: [string, string[], (n: number) => boolean][] = [
+    ["c_contiguous", ["C", "CONTIGUOUS", "C_CONTIGUOUS"], (n) => has(n, F_C)],
+    ["f_contiguous", ["F", "FORTRAN", "F_CONTIGUOUS"], (n) => has(n, F_F)],
+    ["owndata", ["O", "OWNDATA"], (n) => has(n, F_OWN)],
+    ["writeable", ["W", "WRITEABLE"], (n) => has(n, F_WRITE)],
+    ["aligned", ["A", "ALIGNED"], (n) => has(n, F_ALIGNED)],
+    ["writebackifcopy", ["X", "WRITEBACKIFCOPY"], () => false],
+    ["fnc", ["FNC"], (n) => has(n, F_F) && !has(n, F_C)],
+    ["forc", ["FORC"], (n) => has(n, F_F) || has(n, F_C)],
+    ["behaved", ["B", "BEHAVED"], (n) => has(n, F_ALIGNED) && has(n, F_WRITE)],
+    ["carray", ["CA", "CARRAY"], (n) => has(n, F_C) && has(n, F_ALIGNED) && has(n, F_WRITE)],
+    // (NumPy's farray: any of F, aligned, writeable, and not C contiguous)
+    ["farray", ["FA", "FARRAY"], (n) => (n & (F_F | F_ALIGNED | F_WRITE)) !== 0 && !has(n, F_C)],
+  ];
+  const setFlag = (a: NDArray, name: string, v: any) => {
+    if (name === "writeable") setWriteable(a, O.truth(v));
+    else if (name === "aligned") a.unaligned = !O.truth(v);
+    else if (O.truth(v)) raise(T.ValueError, "cannot set WRITEBACKIFCOPY flag to True");
+  };
+  for (const [name, , get] of FLAG) {
+    const settable = name === "writeable" || name === "aligned" || name === "writebackifcopy";
+    Ty.getset(FT, name, (f: FlagsObj) => get(f.num), settable ? (f: FlagsObj, v: any) => setFlag(f.a, name, v) : () => raise(T.AttributeError, `attribute '${name}' of 'numpy._core.multiarray.flagsobj' objects is not writable`));
+  }
+  Ty.getset(FT, "num", (f: FlagsObj) => f.num);
+  const keyOf = (k: any): [string, (n: number) => boolean] | undefined => {
+    if (typeof k !== "string") return undefined;
+    for (const [name, keys, get] of FLAG) if (keys.includes(k)) return [name, get];
+    return undefined;
+  };
+  FM("__getitem__", (f: FlagsObj, k: any) => {
+    const hit = keyOf(k);
+    if (hit === undefined) throw T.KeyError("Unknown flag");
+    return hit[1](f.num);
+  });
+  FM("__setitem__", (f: FlagsObj, k: any, v: any) => {
+    const hit = keyOf(k);
+    if (hit === undefined || !["writeable", "aligned", "writebackifcopy"].includes(hit[0])) throw T.KeyError("Unknown flag");
+    setFlag(f.a, hit[0], v);
+    return null;
+  });
+  const flagsText = (f: FlagsObj) =>
+    ["C_CONTIGUOUS", "F_CONTIGUOUS", "OWNDATA", "WRITEABLE", "ALIGNED", "WRITEBACKIFCOPY"]
+      .map((k, i) => `  ${k} : ${FLAG[i][2](f.num) ? "True" : "False"}`).join("\n") + "\n";
+  FM("__repr__", flagsText);
+  FM("__str__", flagsText);
+  FM("__eq__", (f: FlagsObj, g: any) => (g instanceof FlagsObj ? f.num === g.num : Obj.NotImplemented));
   Ty.getset(A, "real", (a: NDArray) => realPart(a), (a: NDArray, v: any) => assign(realPart(a), asarray(v)));
   Ty.getset(A, "imag", (a: NDArray) => imagPart(a), (a: NDArray, v: any) => assign(imagPart(a), asarray(v)));
   // (a noncontiguous array's .flat is a copy: read-only, so that a write
@@ -3086,7 +3310,7 @@ newBuiltinModule("_numpy", (m) => {
     ["mod", "remainder"], ["pow", "power"], ["and", "bitwise_and"], ["or", "bitwise_or"], ["xor", "bitwise_xor"],
     ["lshift", "left_shift"], ["rshift", "right_shift"],
   ];
-  const isOperand = (o: any) => o instanceof NDArray || pyScalar(o) !== null || Array.isArray(o);
+  const isOperand = (o: any) => o instanceof NDArray || pyScalar(o) !== null || Array.isArray(o) || hasArrayProtocol(o);
   const boolOp = (op: string) => (op === "bitwise_and" ? "logical_and" : op === "bitwise_or" ? "logical_or" : op === "bitwise_xor" ? "logical_xor" : op);
   for (const [py, op] of BINOPS) {
     const pick = (a: any, b: any) => {
@@ -3101,6 +3325,8 @@ newBuiltinModule("_numpy", (m) => {
     M(`__r${py}__`, (a: NDArray, o: any) => (isOperand(o) ? (O.FRESH.v = binary(pick(o, a), o, a)) : NotImplemented)).$fresh = true;
     M(`__i${py}__`, (a: NDArray, o: any) => {
       if (!isOperand(o)) return NotImplemented;
+      // (the target is the output: NumPy's words, before any computing)
+      outWritable(a);
       const f = py === "pow" ? fastScalarPower(a, o) : null;
       if (f !== null) {
         const r = unary(f, a);
@@ -3180,7 +3406,7 @@ newBuiltinModule("_numpy", (m) => {
 
   // creation
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
-    let r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype);
+    let r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag);
     while (r.ndim < Number(ndmin)) r = reshape(r, [1, ...r.shape]);
     return r;
   });
@@ -3354,7 +3580,7 @@ newBuiltinModule("_numpy", (m) => {
       }
     }
     const r = binary(op, x, y);
-    return x instanceof NDArray || y instanceof NDArray || Array.isArray(x) || Array.isArray(y) ? r : pyScalarOf(r.dt, r.data, 0);
+    return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
@@ -3399,8 +3625,9 @@ newBuiltinModule("_numpy", (m) => {
     const spec = typeof dtype === "string" ? dtype : null;
     const big = spec !== null && spec.startsWith(">");
     const dt = toDtype(dtype, D.float64);
-    if (!(buffer instanceof Obj.PyBytes)) raise(T.TypeError, "a bytes-like object is required");
-    const raw = buffer.a.subarray(0, buffer.n);
+    const raw0 = O.bufferOf(buffer);
+    if (raw0 === undefined) raise(T.TypeError, "a bytes-like object is required");
+    const raw = raw0!;
     const off = Number(offset);
     const isz = dt.itemsize;
     let n = Number(count);
@@ -3417,7 +3644,7 @@ newBuiltinModule("_numpy", (m) => {
       const out = empty([n], dt);
       const dv = new DataView(raw.buffer, raw.byteOffset + off, n * isz);
       for (let i = 0; i < n; i++) out.data[i] = admitWide(dt.name === "int64" ? dv.getBigInt64(8 * i, !big) : dv.getBigUint64(8 * i, !big), dt);
-      return out;
+      return fromBytes(out, buffer);
     }
     admitArray([n], dt);
     const bytes = raw.slice(off, off + n * isz); // aligned copy: the array's own storage
@@ -3425,7 +3652,7 @@ newBuiltinModule("_numpy", (m) => {
       const w = dt.cplx ? isz / 2 : isz;
       for (let i = 0; i < bytes.length; i += w) bytes.subarray(i, i + w).reverse();
     }
-    return new NDArray(dt, new dt.ctor(bytes.buffer), [n], [1]);
+    return fromBytes(new NDArray(dt, new dt.ctor(bytes.buffer), [n], [1]), buffer);
   });
   fn("_tobytes", (a: any) => {
     // (a contiguous copy, a 64-bit integer staging buffer, and the bytes; LIMIT-PR55-3)
@@ -3459,6 +3686,13 @@ newBuiltinModule("_numpy", (m) => {
     return v;
   });
   fn("broadcast_shapes", (...shapes: any[]) => tuple(broadcastShapes(...shapes.map(shapeArg))));
+  // (lib/numpy's: a view over a copy no one else holds, made the owner of
+  // that copy's data, as NumPy's asfortranarray result is)
+  fn("_own", (a: any) => {
+    if (!(a instanceof NDArray)) raise(T.TypeError, "_own: an ndarray is required");
+    a.base = null;
+    return a;
+  });
   fn("where3", (c: any, x: any, y: any) => {
     const C = asarray(c), X = operand(x), Y = operand(y);
     const rt = resultType(X, Y);

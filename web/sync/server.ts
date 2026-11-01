@@ -80,7 +80,8 @@ async function readBounded(req: Request, max: number): Promise<string | null> {
   return new TextDecoder().decode(all);
 }
 
-const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+// (typed and nosniff, as sharing's: security audit G-3a)
+const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => json({ error, ...extra }, status);
 /**
  * A request from this site's own pages: Origin says so, or, for a GET

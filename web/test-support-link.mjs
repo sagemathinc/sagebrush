@@ -1,5 +1,6 @@
 // The Support entry (William, Oct 31): the notebook page's ⋯ menu has one plain link to CoCalc's support form, in a new
-// tab. It adds no query, fragment or page data, and rel withholds the opener and the referrer. No script.
+// tab. It adds no query, fragment or page data, and rel withholds the opener and the referrer. No script. It and
+// "How cells run" tell a screen reader they open in a new tab.
 // The whole tag must equal one exact literal, so any other attribute, in any quoting or case (an on* handler, style,
 // download), fails. Checked in web/index.html and web/dist/index.html; under CI the dist page must exist.
 //   node web/test-support-link.mjs
@@ -33,6 +34,13 @@ function check(file) {
   // (in the ⋯ menu, as a menu item: between its opening tag and its close)
   const menu = html.match(/<div id="moremenu"[\s\S]*?<\/div>/)?.[0] ?? "";
   ok(tag !== "" && menu.includes(tag), `inside: ${file}: #supportlink is inside #moremenu`);
+  // (the menu's two external links say so to a screen reader, in the page's own visually hidden .sr class; the visible
+  // label is unchanged: @sagebrush, Oct 31)
+  for (const [id, label] of [["supportlink", "Support"], ["howruns", "How cells run"]]) {
+    const body = html.match(new RegExp(`<a\\b[^>]*id="${id}"[^>]*>([\\s\\S]*?)</a>`))?.[1] ?? null;
+    ok(body === `${label} <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span>`, `new-tab: ${file}: #${id} reads "${label} ↗", the arrow hidden from a screen reader, which hears "(opens in a new tab)" (${JSON.stringify(body)})`);
+  }
+  ok(/^\s*\.sr \{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset\(50%\); white-space: nowrap; \}$/m.test(html), `sr-class: ${file}: the .sr class is the visually hidden one`);
 }
 
 let pages;

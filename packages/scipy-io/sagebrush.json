@@ -6,7 +6,7 @@
   "python": { "root": "py", "modules": ["scipy.io"] },
   "files": {
     "py/scipy/io/__init__.py": "6a0086e0e1da3c723e81d02e9ea73605b532831a0dd735cf1b1d387983f4d4fe",
-    "py/scipy/io/matlab.py": "c2de4e27db72ec16d86150256dd08f96f88e627dac926dbf8b4a897c6ea591f9"
+    "py/scipy/io/matlab.py": "acc171c217cd26830460835c74daaa9e1c04c0cd4f7df248d631ef94985344b8"
   },
   "requires": [],
   "catalog": null

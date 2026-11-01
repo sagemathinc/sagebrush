@@ -92,6 +92,20 @@ for (const [f, bytes] of tz.files) writeFileSync(join(here, "dist", f), bytes);
 console.log(`zone data: tzdata ${tz.ref.version}, ${tz.files.size - 1} zone files (${([...tz.files.values()].reduce((n, b) => n + b.length, 0) / 1e3).toFixed(0)} kB), index ${(tz.ref.size / 1e3).toFixed(0)} kB`);
 const LIB_CHUNKS = [...libChunkFiles.keys(), ...tz.files.keys()];
 console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
+// What the runner's broker may fetch for its interpreter, exactly (G-10, web/runner-fetch.mts): every bundle is
+// built with it as __SB_RUNNER_FETCH__ (the one that uses it is web/notebook/runner-worker.js), and a bundle
+// containing runner-worker.js without it fails the build; the list is also dist/runner-fetch.json
+{
+  const { runnerFetchList, checkRunnerDefine } = await import("./runner-fetch.mts");
+  const list = runnerFetchList(engineSha256, rasterSha256, libChunkFiles.keys(), tz.ref);
+  writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
+  const build0 = Bun.build.bind(Bun);
+  (Bun as any).build = async (o: any) => {
+    const r = await build0({ ...o, define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
+    if (r.success) checkRunnerDefine(String(o.entrypoints?.[0] ?? "a bundle"), Object.keys(r.metafile?.inputs ?? {}), await Promise.all(r.outputs.map((x: any) => x.text())));
+    return r;
+  };
+}
 // (the manifest, in the worker: web/lib-lazy.ts)
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
 const result = await Bun.build(<any>{
