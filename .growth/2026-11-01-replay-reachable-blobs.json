@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "#445, the replay bundle carries only the versions of files its sessions read (William's B-feedback items 0/0b; astra's R1): the fs shim keeps each page file's version token (origin) through renames and appends and hands it to the read hook, the worker reports a run's sources, the page tokens its puts, and notebook/bundle-blobs.mjs picks the bytes. Figures: scripts/size-measure.mjs --record (bun 1.4.4) of local builds of ca308247 against master 4b568d5d, the same build steps as CI's (master's engine/sagebrush-worker.js measures 1571100 B here, as in CI attempt 1's base): cli/pyjs.cjs +1194 B, engine/sagebrush-worker.js +303 B, engine/sagebrush-notebook.js +54 B; each allowance a little above, within growth + 1024",
+ "bytes": {
+  "cli/pyjs.cjs": 1300,
+  "engine/sagebrush-worker.js": 400,
+  "engine/sagebrush-notebook.js": 150
+ }
+}
