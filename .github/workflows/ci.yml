@@ -524,9 +524,9 @@ jobs:
       - name: sharing, sync, engines and PWA (after the share dialog)
         run: |
           bun web/site/test-preview.mjs
-          bun web/share-client/test-file-deps.mjs
+          bun web/deps/test-file-deps.mjs
           bun web/share-client/test-selection.mjs
-          bun web/share-client/test-deps-client.mjs
+          bun web/deps/test-deps-client.mjs
           bun web/share-client/test-upload.mjs
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
