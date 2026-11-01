@@ -106,7 +106,11 @@ export async function browser() {
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
   if (!cdpPort) cdpPort = await devtoolsPort(profile);
   let targets;
-  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`, { signal: AbortSignal.timeout(2000) })).json(); break; } catch { await sleep(100); } }
+  // (bounded as a whole: 30 s from now, each try given at most what is left)
+  const listBy = Date.now() + 30000;
+  while (!targets && Date.now() < listBy) {
+    try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`, { signal: AbortSignal.timeout(Math.max(1, Math.min(2000, listBy - Date.now()))) })).json(); } catch { await sleep(100); }
+  }
   if (!targets) throw new Error("Chrome's DevTools never listed its targets (30 s)");
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await within(10000, "the DevTools WebSocket", new Promise((r, rej) => { ws.onopen = r; ws.onerror = () => rej(new Error("the DevTools WebSocket failed")); }));
