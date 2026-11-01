@@ -4237,6 +4237,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "hermite_form(transformation=True) over ZZ: the integer Hermite form's transformation is not computed yet (an unsupported option, not a cap)"
+ },
  "lib/_sage_matrix.py :: _bounded_list :: \"\"\"list(obj), reading at most limit + 1 items: more than limit is a #0": {
   "class": "2",
   "owner": "matrices/runtime memory",
