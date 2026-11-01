@@ -135,6 +135,36 @@ const WITNESS = `(() => {
 let curCase = "";
 /** A dialog wait's time, printed on every call (not a check: "wait <case> <what> <ms>"), so its bound is measured. */
 const timed = async (what, p) => { const ms = await p; console.log(`wait ${curCase} ${what} ${ms}`); return ms; };
+// (test-only: the browser calls Workspace.open goes through, logged with their times since the page's start, so a
+// timeout says which stage the open reached: a Web Lock requested and granted, an IndexedDB open and its outcome, the
+// OPFS directory; read by P.state. No product code involved)
+const STAGES = `(() => {
+  const log = (window.__a14stages = []), t = () => Math.round(performance.now()), add = (s) => { if (log.length < 200) log.push(t() + " " + s); };
+  const L = navigator.locks;
+  if (L && L.request) {
+    const req = L.request.bind(L);
+    L.request = (name, ...a) => {
+      const cb = a.length > 1 ? a[1] : a[0], opts = a.length > 1 ? a[0] : {};
+      add("lock requested " + name + (opts && opts.ifAvailable ? " (ifAvailable)" : ""));
+      const wrapped = async (lock) => { add("lock " + (lock ? "granted " : "unavailable ") + name); try { return await cb(lock); } finally { add("lock released " + name); } };
+      return a.length > 1 ? req(name, opts, wrapped) : req(name, wrapped);
+    };
+  }
+  const open = indexedDB.open.bind(indexedDB);
+  indexedDB.open = (name, ...a) => {
+    const r = open(name, ...a);
+    if (!String(name).startsWith("__a14probe")) {
+      add("idb open " + name);
+      r.addEventListener("success", () => add("idb success " + name));
+      r.addEventListener("error", () => add("idb error " + name + " " + (r.error && r.error.name)));
+      r.addEventListener("blocked", () => add("idb blocked " + name));
+      r.addEventListener("upgradeneeded", () => add("idb upgradeneeded " + name));
+    }
+    return r;
+  };
+  const st = navigator.storage;
+  if (st && st.getDirectory) { const gd = st.getDirectory.bind(st); st.getDirectory = () => { add("opfs getDirectory"); return gd().then((d) => (add("opfs directory"), d), (e) => { add("opfs error " + (e && e.name)); throw e; }); }; }
+})()`;
 const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace";
 
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
@@ -177,12 +207,13 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   if (clock) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: CLOCK });
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
+  await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
   P.ev = async (expression, o = {}) => {
     const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o });
     if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r?.result?.value;
   };
-  P.state = () => P.ev(`(async () => ({ href: location.href, readyState: document.readyState, bar: [document.querySelector('#conn-alert')?.textContent, document.querySelector('#conn-status')?.textContent, document.querySelector('#conn-act')?.hidden ? '' : document.querySelector('#conn-act')?.textContent].join(' | '), record: (() => { try { return sessionStorage.getItem(${JSON.stringify(KEY)}) !== null; } catch { return 'unreadable'; } })(), connect: document.querySelector('#connect')?.textContent ?? null, connectHidden: document.querySelector('#connect')?.hidden ?? null, dialogs: [...document.querySelectorAll('.sbag-dlg h2')].map((h) => h.textContent), sinceLoad: Math.round(performance.now()), locks: await navigator.locks?.query?.().then((q) => ({ held: (q.held ?? []).map((l) => l.name + ':' + l.mode), pending: (q.pending ?? []).map((l) => l.name + ':' + l.mode) })).catch((e) => String(e)), dbs: await indexedDB.databases?.().then((d) => d.map((x) => x.name)).catch((e) => String(e)), idbProbe: await Promise.race([new Promise((res) => { try { const r = indexedDB.open('__a14probe_' + Date.now()); r.onsuccess = () => { r.result.close(); res('ok'); }; r.onerror = () => res('error: ' + (r.error?.name ?? '') + ' ' + (r.error?.message ?? '')); r.onblocked = () => res('blocked'); } catch (e) { res('threw: ' + e); } }), new Promise((res) => setTimeout(() => res('no answer in 5 s'), 5000))]), errors: undefined }))()`).then((s) => ({ ...s, errors: P.errors.slice(-3) }), (e) => ({ unreadable: String(e).slice(0, 200) }));
+  P.state = () => P.ev(`(async () => ({ href: location.href, readyState: document.readyState, bar: [document.querySelector('#conn-alert')?.textContent, document.querySelector('#conn-status')?.textContent, document.querySelector('#conn-act')?.hidden ? '' : document.querySelector('#conn-act')?.textContent].join(' | '), record: (() => { try { return sessionStorage.getItem(${JSON.stringify(KEY)}) !== null; } catch { return 'unreadable'; } })(), connect: document.querySelector('#connect')?.textContent ?? null, connectHidden: document.querySelector('#connect')?.hidden ?? null, dialogs: [...document.querySelectorAll('.sbag-dlg h2')].map((h) => h.textContent), sinceLoad: Math.round(performance.now()), locks: await navigator.locks?.query?.().then((q) => ({ held: (q.held ?? []).map((l) => l.name + ':' + l.mode), pending: (q.pending ?? []).map((l) => l.name + ':' + l.mode) })).catch((e) => String(e)), dbs: await indexedDB.databases?.().then((d) => d.map((x) => x.name)).catch((e) => String(e)), stages: (window.__a14stages || []).slice(-40), idbProbe: await Promise.race([new Promise((res) => { try { const r = indexedDB.open('__a14probe_' + Date.now()); r.onsuccess = () => { r.result.close(); res('ok'); }; r.onerror = () => res('error: ' + (r.error?.name ?? '') + ' ' + (r.error?.message ?? '')); r.onblocked = () => res('blocked'); } catch (e) { res('threw: ' + e); } }), new Promise((res) => setTimeout(() => res('no answer in 5 s'), 5000))]), errors: undefined }))()`).then((s) => ({ ...s, errors: P.errors.slice(-3) }), (e) => ({ unreadable: String(e).slice(0, 200) }));
   P.until = async (expr, ms = 15000) => {
     const t = Date.now();
     while (Date.now() - t < ms) { if (await P.ev(expr).catch(() => false)) return Date.now() - t; await sleep(50); }
