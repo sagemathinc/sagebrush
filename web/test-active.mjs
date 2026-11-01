@@ -50,6 +50,21 @@ function durations(t = nowS()) {
   const nextDay = day + 86400, nextWeek = day + (7 - dow) * 86400, nextMonth = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 1000;
   return { nd: nextDay - t, nw: nextWeek - t, nm: nextMonth - t };
 }
+// (the calendar anchor, for the calendar-sensitive cases only (C-1.tz, C-7.prior; astra 861223bc): the stub's clock and
+// the page's both read real time + A, A = ANCHOR - now at the case's start, so time still runs and every bounded wait
+// stays real; a case's own skews are added to A.  Wednesday 2026-10-14 22:00:00Z: both test zones' local midnights lie
+// after that UTC day's midnight (Kiritimati 10:00Z, Adak 09:00Z), the next day (Thursday) is in the same ISO week and
+// month, and no zone changes its offset near it.  reset() puts the stub's clock back after the case.)
+const ANCHOR = Date.UTC(2026, 9, 14, 22, 0, 0);
+let anchorMs = ANCHOR; // (K-PIN alone sets another, deliberately wrong, pin)
+const anchorAt = () => anchorMs - Date.now();
+const iso = (ms) => new Date(ms).toISOString();
+const utcMidnight = (ms) => Math.floor(ms / 86400000) * 86400000;
+/** the zone's local midnight, as UTC ms, for the local day containing `ms` */
+function localMidnight(ms, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return ms - ms % 1000 - (Number(p.hour) * 3600 + Number(p.minute) * 60 + Number(p.second)) * 1000;
+}
 let harnessJs = "";
 let pageMode = "harness";
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".json": "application/json", ".wasm": "application/wasm", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/manifest+json" };
@@ -329,13 +344,20 @@ async function cases() {
     const sameWeek = d.nw > d.nd + 5, sameMonth = d.nm > d.nd + 5;
     c("C-1.next", posts().length === 2 && JSON.parse(p3?.body ?? "{}").week === (sameWeek ? 0 : 1) && JSON.parse(p3?.body ?? "{}").month === (sameMonth ? 0 : 1), `next day: ${J(posts().map((p) => p.body))}`);
     await b.stop(); });
+  // (C-1.tz at the calendar anchor (astra 861223bc): the repeated load is after both zones' local midnight relative to
+  // the stored UTC boundary, asserted, so a local-midnight due() repeats whatever the real time of day)
   for (const tz of ["Pacific/Kiritimati", "America/Adak"]) await one(`C-1.tz:${tz}`, async () => {
     reset(); const { b, t } = await fresh();
     await t.send("Emulation.setTimezoneOverride", { timezoneId: tz });
-    await load(t); await load(t);
+    const A = anchorAt(); stub.skew = A;
+    await load(t, { skew: A }); await load(t, { skew: A });
+    const e2 = Date.now() + A, u = utcMidnight(e2), lm = localMidnight(e2, tz), pre = lm > u;
     const d = durations();
-    await load(t, { skew: (d.nd + 5) * 1000 });
-    c("C-1.tz", posts().length === 2, `${tz}: ${posts().length} posts`);
+    await load(t, { skew: A + (d.nd + 5) * 1000 });
+    const cal = `effective ${iso(e2)}, UTC midnight ${iso(u)}, local midnight ${iso(lm)}; d ${J(d)}`;
+    // (an unmet calendar precondition is reported as such, and the case's own assertion is not made: grader 69f2f06c)
+    if (!pre) c("precondition:C-1.tz", false, `${tz}: the local midnight is not after the UTC midnight (${cal})`);
+    else c("C-1.tz", posts().length === 2, `${tz}: ${posts().length} posts (${cal})`);
     await b.stop();
   });
   // C-1s: a skewed client clock: one POST per stub day, the week flag exactly on the stub's Monday
@@ -580,7 +602,17 @@ async function cases() {
   await pop("C-7.signin", async ({ t }) => { await load(t); const n = posts().length; await load(t); return { more: posts().length - n }; }, (r) => r.more === 0);
   await pop("C-7.abs", async ({ t }) => { await load(t); await t.ev("__sbHarness.signedOut()"); const n = posts().length; await load(t); return { more: posts().length - n }; }, (r) => r.more === 0);
   await pop("C-7.firstweek", async ({ t }) => { stub.mode = { status: 200, as: "a" }; await load(t); stub.mode = null; await t.ev("__sbHarness.signedOut()"); const n = posts().length; await load(t); const p = posts()[n]; return { more: posts().length - n, body: p?.body }; }, (r) => r.more === 1 && /"week":1,"month":1/.test(r.body ?? ""));
-  await pop("C-7.prior", async ({ t }) => { await load(t); const s1 = await t.state(); const d = durations(); stub.mode = { status: 200, as: "a" }; await load(t, { skew: (d.nd + 5) * 1000 }); const s2 = await t.state(); stub.mode = null; await t.ev("__sbHarness.signedOut()"); const s3 = await t.state(); const n = posts().length; await load(t, { skew: (d.nd + 5) * 1000 }); const p = posts()[n]; return { more: posts().length - n, body: p?.body, sameWeek: d.nw > d.nd + 5, d, s1, s2, s3, posts: posts().map((x) => x.body), now: Date.now() }; }, (r) => r.more === 1 && (r.sameWeek ? /"week":0/.test(r.body ?? "") : true));
+  // (C-7.prior at the calendar anchor (astra 861223bc): the next day stays in the same ISO week, asserted, so the week
+  // flag is always checked; the anchor offset is composed with the next-day skew)
+  // (outside pop(): an unmet precondition records "precondition:C-7.prior" alone, grader 69f2f06c)
+  await one("C-7.prior", async () => { reset(); const { b, t } = await fresh();
+    const A = anchorAt(); stub.skew = A; await load(t, { skew: A }); const s1 = await t.state(); const d = durations();
+    const sameWeek = d.nw > d.nd + 5, cal = `effective ${iso(Date.now() + A)}; d ${J(d)}`;
+    if (!sameWeek) { c("precondition:C-7.prior", false, `the next day is not in the same ISO week (${cal})`); await b.stop(); return; }
+    stub.mode = { status: 200, as: "a" }; await load(t, { skew: A + (d.nd + 5) * 1000 }); const s2 = await t.state(); stub.mode = null; await t.ev("__sbHarness.signedOut()"); const s3 = await t.state(); const n = posts().length; await load(t, { skew: A + (d.nd + 5) * 1000 }); const p = posts()[n];
+    const r = { more: posts().length - n, body: p?.body, s1, s2, s3, posts: posts().map((x) => x.body) };
+    c("C-7.prior", r.more === 1 && /"week":0/.test(r.body ?? ""), `C-7.prior: ${J(r)} (${cal})`);
+    await b.stop(); });
   await pop("C-7.repeat", async ({ t }) => { await load(t); await t.ev("__sbHarness.signedOut()"); await load(t); await t.ev("__sbHarness.signedOut()"); const n = posts().length; await load(t); return { more: posts().length - n }; }, (r) => r.more === 0);
   for (const where of ["self", "other"]) await pop(`C-7.held.${where}`, async ({ t, t2 }) => {
     if (where === "other") await t2.open();
@@ -813,6 +845,12 @@ const TREE = [
   // rebuilt (grader 6f728d4a B3); the harness bundle, built from the same tree, is served on a listed origin only)
   ["K-33", { file: "active.ts", sub: ["  if (!MEASURE_ORIGINS.includes(location.origin)) return;\n", ""] }, true, ["C-8.origin"]],
 ];
+// ---- the pin controls: [name, a wrong calendar anchor, the closed FAIL set] (grader 69f2f06c: a deliberately wrong pin
+// must fail only with "precondition:").  Sunday 2026-11-01 02:00:00Z: both zones' local midnights lie before that
+// UTC day's midnight (Kiritimati Oct 31 10:00Z, Adak Oct 31 09:00Z, HDT), and the next day (Monday) starts a new week.
+const PIN = [
+  ["K-PIN", Date.UTC(2026, 10, 1, 2, 0, 0), ["precondition:C-1.tz", "precondition:C-7.prior"]],
+];
 const rebuild = () => { const r = spawnSync("bun", ["web/build.ts"], { cwd: dirname(here), encoding: "utf8", maxBuffer: 1 << 26 }); if (r.status !== 0) throw new Error("the site didn't build: " + (r.stderr || r.stdout).slice(-300)); };
 
 // ---- the ordering evidence (r4c3 §4; a packet run, not CI): EVIDENCE=N runs the C-3 interleaving ABAB on the IDB
@@ -855,7 +893,7 @@ if (process.env.EVIDENCE) {
 }
 // (DUMP_CONTROLS=1: the controls, their exact substitutions and sets, as JSON, then stop: the frozen §5 file's source)
 if (process.env.DUMP_CONTROLS) {
-  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER, LS_ENTRY }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })), tree: TREE.map(([name, edit, build, set]) => ({ name, edit, rebuild: build, set })) }, null, 1));
+  console.log(JSON.stringify({ files: SRC, variants: { ASK, BARRIER, LS_ENTRY }, controls: CONTROLS.map(([name, subs, set]) => ({ name, subs: subs.map(([f, find, replace]) => ({ file: SRC[f], find, replace })), set })), tree: TREE.map(([name, edit, build, set]) => ({ name, edit, rebuild: build, set })), pin: PIN.map(([name, pin, set]) => ({ name, pin: new Date(pin).toISOString(), set })), anchor: new Date(ANCHOR).toISOString() }, null, 1));
   rmSync(tmp, { recursive: true, force: true });
   process.exit(0);
 }
@@ -908,6 +946,19 @@ if (which !== "none" && !baseFailed.length) {
       if (had && hash(readFileSync(f)) !== hash(orig)) { console.log(`FAIL ${name}: ${edit.file} wasn't restored`); bad++; }
       if (build) rebuild();
     }
+    const failed = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
+    const ok = failed.length > 0 && failed.join() === w.join();
+    console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${failed.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
+    if (!ok) bad++;
+  }
+}
+// (the pin controls: the unmodified code, with the calendar anchor set wrong; only the precondition results may fail)
+if (which !== "none" && !baseFailed.length) {
+  for (const [name, pin, want] of PIN) {
+    if (which && which !== name) continue;
+    const t1 = Date.now();
+    results.clear(); harnessJs = bundle();
+    try { anchorMs = pin; await guarded(cases); await guarded(() => variantCases()); } finally { anchorMs = ANCHOR; }
     const failed = [...results].filter(([, v]) => !v).map(([k]) => k).sort(), w = [...want].sort();
     const ok = failed.length > 0 && failed.join() === w.join();
     console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${ok ? "exactly its set" : `failed {${failed.join(", ")}}, wanted {${w.join(", ")}}`} (${((Date.now() - t1) / 1000).toFixed(0)} s)`);
