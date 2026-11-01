@@ -1,10 +1,14 @@
 // The site's asset budget gate for the LaTeX editor (plan sbspace r5 §2 and §5). Run where the builds are (a VM or
 // CI), never as a judge on the project side. It compares built trees, does not build:
 //   node scripts/site-asset-budget.mjs --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]
+//        [--prod-meas F --dev-meas F --prod-meas2 F --dev-meas2 F --env F]
 //     --base-prod  web/ of the tree before the editor, built with SAGEBRUSH_LATEX_PREVIEW unset
 //     --prod       web/ of the tree with the editor, built with it unset (what PROD ships)
 //     --dev        web/ of the tree with the editor, built with SAGEBRUSH_LATEX_PREVIEW=1 (what DEV ships)
 //     --meta       the DEV build's build/latex-metafile.json (every bundle's inputs), for the KaTeX census
+//     --prod-meas, --dev-meas, --prod-meas2, --dev-meas2: line 3's measuring pages, the dist/index.html of the same
+//                  tree as --prod/--dev built with SAGEBRUSH_MEASURE_IDS=keep, each flavour twice (never shipped)
+//     --env        a JSON file {"bun": "<bun --version>"} written by the step that built them
 // Checks (each one printed; the last line is the verdict):
 //   1. PROD: every file of web/dist and web/site/public, by name and SHA-256, the same as before the editor, except
 //      the DECLARED list: board/examples/source.json, the generated board of the repository's own sources (by folder:
@@ -13,8 +17,9 @@
 //      equal; and the reviewed differences (normalizers(): the page policy's loopback WebSockets in _headers and sw.js,
 //      and the commit docs-index-python.json's source links name), each undone exactly before comparing;
 //   2. PROD holds no LaTeX-owned file (named sagebrush-latex*) and no page or script names one;
-//   3. the DEV bootstrap: index.html's growth over PROD, at most DEV_BOOT.raw bytes minified and DEV_BOOT.gzip gzip
-//      (level 9);
+//   3. the DEV bootstrap: its own bytes, measured on the identifier-stable measuring pages and cross-checked against
+//      index.html's shipped growth over PROD (scripts/line3-measure.mjs, line-3 case r4); without the measuring pages
+//      line 3 FAILs as not measured;
 //   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 192 KiB minified and 64 KiB gzip; no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
@@ -23,12 +28,17 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from "
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { checkLine3 } from "./line3-measure.mjs";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
-if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE]"); process.exit(2); }
+const MEAS = { prodMeas: arg("--prod-meas"), devMeas: arg("--dev-meas"), prodMeas2: arg("--prod-meas2"), devMeas2: arg("--dev-meas2") }, ENV = arg("--env");
+if (!BASE || !PROD || !DEV) { console.error("usage: --base-prod DIR --prod DIR --dev DIR [--meta FILE] [--out FILE] [--prod-meas F --dev-meas F --prod-meas2 F --dev-meas2 F --env F]"); process.exit(2); }
+const measGiven = Object.values(MEAS).filter(Boolean).length + (ENV ? 1 : 0);
+if (measGiven !== 0 && measGiven !== 5) { console.error("line 3 needs all of --prod-meas, --dev-meas, --prod-meas2, --dev-meas2 and --env, or none"); process.exit(2); }
 const ROOTS = ["dist", "site/public"];
-const DEV_BOOT = { raw: 2498, gzip: 990 };
 const DECLARED = new Set(["dist/board/examples/source.json", "site/public/board/examples/source.json"]);
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const gz = (b) => gzipSync(b, { level: 9 }).length;
@@ -140,16 +150,24 @@ for (const n of differing.filter((x) => DECLARED.has(x))) {
 const prodLatex = [...prod.keys()].filter((n) => /(^|\/)sagebrush-latex/.test(n));
 const prodRefs = [...prod.entries()].filter(([n]) => /\.(html|js|mjs|json)$/.test(n) || n.endsWith("_headers")).filter(([, p]) => readFileSync(p).includes("sagebrush-latex")).map(([n]) => n);
 check("PROD: no LaTeX-owned file, and nothing names one", prodLatex.length === 0 && prodRefs.length === 0, { prodLatex, prodRefs });
-// 3. the DEV bootstrap. Its ceiling was 1536 B / 717 B gzip; raised for the file browser's "LaTeX file" in New (asked
-//    for by William: the only way to make a .tex was to upload one), whose code is in index.html's bundle in a LaTeX
-//    build only (PROD byte-identical, check 1). The ceiling is the measured delta + 128 B / + 64 B gzip: 2060 B / 722 B
-//    by this check in the I1 run that passed with it (VM2, 2026-10-29), so 2188 B / 786 B. Raised again (@sagebrush's ruling,
-//    2026-10-29) for William's phone requests: "LaTeX document" and "LaTeX example" (ten examples) in the File menu's
-//    New group and on the empty file list, added by the same LaTeX-only boot hook: the measured delta + 128 B / + 64 B
-//    gzip, 2370 B / 926 B (this check's measure, the batch's head merged with master), so 2498 B / 990 B
+// 3. the DEV bootstrap. Until line-3 case r4 this was the shipped index.html growth (at most 2498 B / 990 B gzip, the
+//    last of three raises for William's LaTeX New entries); that delta drifts with the shared page (945-997 B gzip over
+//    26 merges with no DEV change), so line 3 now measures the DEV-only bytes themselves on the identifier-stable
+//    measuring pages, with the shipped delta as a cross-check (scripts/line3-measure.mjs: the frozen block, the cap
+//    2717 B / 1395 B gzip, and the reasons)
 const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get("dist/index.html"));
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
-check(`DEV bootstrap delta (index.html): at most ${DEV_BOOT.raw} B minified and ${DEV_BOOT.gzip} B gzip`, boot.raw <= DEV_BOOT.raw && boot.gzip <= DEV_BOOT.gzip, boot);
+let line3 = null;
+if (measGiven === 5) {
+  const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+  const req = createRequire(join(root, "package.json"));
+  const ts = req("typescript-api"), env = JSON.parse(readFileSync(ENV, "utf8"));
+  line3 = checkLine3(ts, { ...Object.fromEntries(Object.entries(MEAS).map(([k, f]) => [k, readFileSync(f)])), prodShip: pi, devShip: di },
+    { bun: env.bun, typescript: ts.version, node: process.version, zlib: process.versions.zlib });
+  for (const l of line3.lines) console.log(l);
+}
+check("DEV bootstrap (line 3): the DEV-only bytes on the measuring pages, exact to the frozen block, cross-checked with the shipped delta, under the cap",
+  line3 !== null && line3.reasons.length === 0, line3 ? (line3.metrics ? { reasons: line3.reasons, ...line3.metrics } : { reasons: line3.reasons }) : { notMeasured: "no measuring pages given" });
 // 4. the LaTeX group
 // (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
 const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js";
@@ -182,6 +200,6 @@ if (META) {
   check("KaTeX's code in exactly one bundle (the math module), none of the LaTeX editor's", withKatex.length === 1 && withKatex[0] === "math" && !Object.keys(meta).some((w) => /LaTeX/.test(w) && withKatex.includes(w)), { withKatex });
 }
 const failed = results.filter((r) => !r.ok);
-if (OUT) writeFileSync(OUT, JSON.stringify({ results, boot, latex: { js, jsRaw, jsGz } }, null, 1) + "\n");
+if (OUT) writeFileSync(OUT, JSON.stringify({ results, boot, line3: line3 && { reasons: line3.reasons, metrics: line3.metrics, lines: line3.lines }, latex: { js, jsRaw, jsGz } }, null, 1) + "\n");
 console.log(failed.length ? `FAIL: site asset budget, ${failed.length} of ${results.length}: ${failed.map((r) => r.name).join("; ")}` : `ok: site asset budget, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);
