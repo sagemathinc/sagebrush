@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "E1 r2d-4 (daybreak2's size r6 ruling): the export's lazy chunk and worker, each its own reviewed ceiling, at most 1024 bytes over its bun 1.4.4 size (scripts/check-export-size.mjs). Measured with bun 1.4.4 on the CI-shaped probe dcab4488 (master e63e8553 + r2d-3 4ea49472), size run r6: 63387 and 5645 bytes; ceilings +128 and +64. Since r2a's 48921 and 5043 (b00fb43f), the r2c-r2d review fixes grew them +14466 and +602 without a re-measure (no earlier size run reached this check). Bun 1.4.4 metafile attribution (daybreak2): the chunk's source inputs +14350 (rows +4458, run +3308, bytes +3122, zip +2506, entry +936, existing deps +20) and bun's module/export overhead +116 (output minus input 45 -> 161), +14466 in all; the worker's +602 is all worker.ts; no new unrelated or third-party input.",
+  "bytes": {
+    "sagebrush-export.js": 63515,
+    "sagebrush-export-worker.js": 5709
+  }
+}

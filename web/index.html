@@ -471,6 +471,7 @@ import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSe
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
+import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
@@ -2413,7 +2414,7 @@ fileMenu.addEventListener("click", async (e) => {
       await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
-    case "ipynb": download(fileBase() + ".ipynb", toIpynb({ ...nb.snapshot(), name: docName() })); break;
+    case "ipynb": download(fileBase() + ".ipynb", notebookFileText({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
       // (each cell's arguments and return values: the names it reads and defines)
@@ -3405,6 +3406,9 @@ function wsShowFiles(on) {
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
       close: () => wsShowFiles(false),
+      // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
+      exportUrl: (f) => new URL(f, location.href).href,
+      saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
       renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },

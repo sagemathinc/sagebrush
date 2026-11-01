@@ -36,6 +36,7 @@
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
+import { boardFileText } from "../workspace/file-bytes";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
@@ -1559,7 +1560,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("download").onclick = async () => {
     const a = document.createElement("a");
     // (with its pictures)
-    a.href = URL.createObjectURL(new Blob([canonical(await images.inline(doc!))], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([await boardFileText(doc!, images)], { type: "application/json" }));
     a.download = fileName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -2359,7 +2360,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
       /** the board's file (foo.board.json), as Download JSON writes it */
-      json: async () => canonical(await images.inline(doc!)),
+      json: async () => boardFileText(doc!, images),
       /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
       canvas: () => canvasText(),
       /** the page shown as a Mermaid flowchart (with `all`, every page, as Markdown), and what that left out, in words */
