@@ -124,8 +124,10 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const now = () => Math.floor(Date.now() / 1000);
 const enc = new TextEncoder();
 
+// (every JSON body is typed and nosniff, so a same-origin <script src> can't run it: security audit G-3a)
+const NOSNIFF = { "x-content-type-options": "nosniff" } as const;
 const json = (v: unknown, status = 200, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
+  new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers, ...NOSNIFF } });
 const err = (status: number, error: string) => json({ error }, status);
 
 export async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promise<string> {
