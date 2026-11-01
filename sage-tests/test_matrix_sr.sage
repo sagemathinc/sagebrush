@@ -1,10 +1,10 @@
 # Matrices over SR (kernel lane 4b, plan r3 44aaf3ce): Sage's Gauss-Jordan, det for n <= 3, inverse,
 # solve, kernels, adjugate, entrywise maps and jacobian.  One statement per line; an error prints as
-# ERR <type>.  The .out is Sage 10.9's from the counted VM2 run of this exact file, except the lines in
+# ERR <type>, each statement on one line (a matrix's rows joined by ' ; ').  The .out is Sage 10.9's from the counted VM2 run of this exact file, except the lines in
 # test_matrix_sr.deviations.md.  The guard spies are in test_matrix_sr_guards.sage (sagebrush only).
 def show(f):
     try:
-        return f()
+        return str(f()).replace('\n', ' ; ')
     except Exception as e:
         return 'ERR %s' % type(e).__name__
 def zero(f):
@@ -117,3 +117,5 @@ print(show(lambda: S0.rank()))
 print(show(lambda: B.base_ring()))
 print(show(lambda: B.inverse().base_ring()))
 print(show(lambda: R.right_kernel().base_ring()))
+print(show(lambda: matrix([[sin(2*x) - 2*sin(x)*cos(x)]]).rank()))
+print(show(lambda: matrix([[sin(2*x) - 2*sin(x)*cos(x), 1], [x, y]]).echelon_form()))
