@@ -485,7 +485,11 @@ def asfortranarray(a, dtype=None, *, like=None):
     a = asarray(a, dtype)
     if a.ndim == 0:
         a = a.reshape(1)
-    return a if _contiguous(a, True) else a.T.copy().T
+    if _contiguous(a, True):
+        return a
+    # (a Fortran-ordered array of its own, as NumPy's: the copy's transpose
+    # becomes the owner of the copy's data)
+    return _np._own(a.T.copy().T)
 
 
 def copy(a, order="K", subok=False):
@@ -2686,9 +2690,10 @@ def _m_ravel(self, order="C"):
 
 def frombuffer(buffer, dtype=float, count=-1, offset=0):
     """A 1-D array over a copy of the bytes (little-endian unless the dtype
-    string starts with '>')."""
-    if not isinstance(buffer, bytes):
-        buffer = bytes(buffer)
+    string starts with '>'): read-only over bytes, writeable over a writeable
+    buffer, its base the bytes or a memoryview of the buffer, as NumPy's."""
+    if not isinstance(buffer, (bytes, memoryview)):
+        buffer = memoryview(buffer)
     return _np.frombuffer(buffer, dtype, count, offset)
 
 
@@ -2758,6 +2763,9 @@ def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True, encoding="A
     if kind not in _NPY_TYPES:
         raise ValueError("np.load: dtype %r is not supported" % descr)
     a = frombuffer(body, dtype=(">" if order == ">" else "<") + kind if kind != "b1" else "bool", count=count)
+    # (a writeable array of its own, as NumPy's load reads into one:
+    # frombuffer's of bytes is read-only)
+    a = a.copy()
     if fortran:
         return a.reshape(tuple(reversed(shape))).T.copy() if len(shape) > 1 else a.reshape(shape)
     return a.reshape(shape)
