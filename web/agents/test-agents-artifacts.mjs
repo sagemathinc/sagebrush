@@ -670,8 +670,11 @@ try {
   // the source.) A long paper, at 1400 and 1000 px: C-a the editor as tall as its box (±1 px); C-b while a character is
   // typed at the end and the preview catches up (40 samples, 100 ms apart) the source's top doesn't move (0 px); C-c
   // the caret stays inside the source's box and the viewport (±1 px; the caret's own place, from a hidden copy of the
-  // textarea up to the caret); C-d 60 wheel notches up over the source bring line 1 into view (±1 px); C-e1 the pane's
-  // and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400)
+  // textarea up to the caret); C-d from the source's bottom (its precondition), wheel notches up over the source until it
+  // stops: at scrollTop 0, line 1 in view (±1 px), the highlight in step, in at most ceil(scrollTop/600) + 2 notches;
+  // C-e1 the pane's and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400).
+  // C-a..C-d again with the pane forced to 320, 330 and 460 px in a 1400 px window (a test-only style; PR 2's F2: a
+  // narrow pane wraps the source to about 37k px, past what a fixed 60 notches reach)
   if (want("latex") && LATEX) {
     const path = "/notes/layout.tex";
     const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
@@ -689,14 +692,8 @@ try {
       const y = tr.top + ta.clientTop + mk.offsetTop - ta.scrollTop, h = mk.offsetHeight; m.remove();
       return y >= Math.max(tr.top + ta.clientTop, 0) - 1 && y + h <= Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight) + 1; })()`;
     const widths = `(() => ({ pane: Math.round(document.querySelector('#artifacts').getBoundingClientRect().width), chat: Math.round(document.querySelector('main').getBoundingClientRect().width) }))()`;
-    for (const w of [1400, 1000]) {
-      await size(w); await sleep(800);
-      // (C-e1: the widths without this layout's rules, then with them)
-      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
-      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
-      const on = await ev(widths);
-      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
-      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+    // (C-a..C-d: from the top, the editor's box; typing at the end; the wheel back up. `w` names the width)
+    const editorCases = async (w) => {
       // (from the top: the source and every box around it scrolled to 0)
       await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.scrollTop = 0; for (let e = ta.closest('.tex-embed').parentElement; e; e = e.parentElement) e.scrollTop = 0; return true; })()`);
       await sleep(300);
@@ -712,11 +709,49 @@ try {
       ok(new Set(tops).size === 1, `A4/A8 C-b@${w}: typing at the end, the source stays where it is while the preview catches up`, { tops: [...new Set(tops)] });
       ok(inside.every(Boolean), `A4/A8 C-c@${w}: typing at the end, the caret stays inside the source and in view`, { outside: inside.filter((x) => !x).length });
       const at = await ev(`(() => { const r = ${ED}.querySelector('.tex-src').getBoundingClientRect(); return { x: Math.round(r.left + 40), y: Math.round(Math.min(Math.max(r.top, 0) + 60, innerHeight - 40)) }; })()`);
-      for (let k = 0; k < 60; k++) await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+      // (C-d: from the source's bottom, as typing at the end left it; one notch at a time, each settled (a frame + 50 ms),
+      //  until scrollTop is 0, or 3 notches in a row change nothing, or 200 notches: the notches logged)
+      const scr = `(() => { const ta = ${ED}.querySelector('.tex-src'); return { st: ta.scrollTop, sh: ta.scrollHeight, ch: ta.clientHeight, hlst: ${ED}.querySelector('.tex-hl').scrollTop }; })()`;
+      const s0 = await ev(scr);
+      ok(s0.st >= s0.sh - s0.ch - 2, `precondition:C-d@${w}: before the wheel, the source is at its bottom (so C-d starts away from the top)`, s0);
+      let notches = 0, still = 0, last = s0.st, stop = "bound reached";
+      while (notches < 200) {
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+        notches++;
+        const st = await ev(`new Promise((r) => requestAnimationFrame(() => setTimeout(() => r(${ED}.querySelector('.tex-src').scrollTop), 50)))`);
+        if (st === 0) { stop = "at the top"; break; }
+        still = st === last ? still + 1 : 0;
+        last = st;
+        if (still >= 3) { stop = "3 notches changed nothing"; break; }
+      }
       await sleep(600);
-      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), tr = ta.getBoundingClientRect(), r = e.querySelector('.tex-hl').children[0].getBoundingClientRect();
-        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)) }; })()`);
-      ok(cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view`, cd);
+      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), hl = e.querySelector('.tex-hl'), tr = ta.getBoundingClientRect(), r = hl.children[0].getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)), st: ta.scrollTop, hlst: hl.scrollTop }; })()`);
+      const rec = { ...cd, st0: s0.st, hlst0: s0.hlst, notches, stop };
+      // (its parts: (a) the source at its top, (b) line 1 of the highlight in view, (c) the highlight in step with the
+      //  source, at the bottom before the wheel and at the top after it, (d) in at most ceil(st0 / 600) + 2 notches of 600 px; and the 200-notch bound not reached)
+      const parts = { a_top: cd.st === 0, b_line1: cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, c_inStep: s0.st === s0.hlst && cd.st === cd.hlst, d_notches: notches <= Math.ceil(s0.st / 600) + 2, bound: stop !== "bound reached" };
+      ok(Object.values(parts).every(Boolean), `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view` + (parts.bound ? "" : " (bound reached)"), { parts, ...rec });
+    };
+    for (const w of [1400, 1000]) {
+      await size(w); await sleep(800);
+      // (C-e1: the widths without this layout's rules, then with them)
+      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      const on = await ev(widths);
+      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
+      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+      await editorCases(w);
+    }
+    // (the narrow panes: the pane's width forced by a test-only style, in a 1400 px window; removed after)
+    for (const pw of [320, 330, 460]) {
+      await size(1400); await sleep(400);
+      await ev(`(() => { const st = document.createElement('style'); st.id = 'sbtest-pane'; st.textContent = 'body.has-artifact:not(.fullscreen) #artifacts { width: ${pw}px !important; }'; document.head.append(st); return true; })()`);
+      await sleep(800);
+      const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
+      ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
+      await editorCases(`pane${pw}`);
+      await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);
     }
     // (C-f, 1400: a notebook open beside the .tex in the same chat. The pane keeps every artifact's host, the others
     //  [hidden]. In this order: the notebook's tab shown, only its host has a box (C-f3) and its pane is as without
