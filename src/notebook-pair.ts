@@ -341,7 +341,6 @@ export class PairServer {
   unpairedCount = 0;
   conns = new Set<Conn>();
   closing = new Set<Conn>(); // (closed by us or by the page, until the socket closes: at most PAIR_LIMITS.closing)
-  nonce = b64url(randomBytes(16));
   workersStarted = 0; // (phase 3 starts the session's worker for the first run; until then, never)
   pending = 0; // requests not yet answered (phase 2 answers each before its feed() returns: always 0 between frames)
   readonly queue: unknown[] = []; // (phase 3's runs waiting for the kernel; phase 2 never adds one)
@@ -528,7 +527,7 @@ export class PairServer {
     this.pairedConn = c;
     this.gateway.socketPaired(c);
     this.err("A page is paired.\n");
-    c.send({ jsonrpc: "2.0", id, result: { protocol: 1, purpose: "kernel", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } });
+    c.send({ jsonrpc: "2.0", id, result: { protocol: 1, purpose: "kernel", token: c.token, nonce: this.gateway.currentNonce(), limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } });
   }
 }
 

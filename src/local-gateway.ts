@@ -99,12 +99,14 @@ export interface SessionPort {
   start(onMessage: (m: any) => void, onExit: (why: string) => void): WorkerHandle;
 }
 
-/** The production port: the Worker `sagebrush notebook` runs (src/notebook.ts notebookWorker), in `dir`. */
-export function workerPort(dir: string): SessionPort {
-  const entry = require.main?.filename ?? process.argv[1];
+/** The production port: the Worker `sagebrush notebook` runs (src/notebook.ts notebookWorker), in `dir`.  (`entry` is
+ * the CLI's own, as notebook.ts resolves it; tests pass dist/src/cli.js, and `observe` to see each Worker's events.
+ * The CLI passes neither: cases v3 L41w.) */
+export function workerPort(dir: string, entry: string = require.main?.filename ?? process.argv[1], observe?: (w: Worker) => void): SessionPort {
   return {
     start(onMessage, onExit) {
       const worker = new Worker(entry, { workerData: { sagebrushNotebook: { dir }, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false });
+      observe?.(worker);
       let intr: Int32Array | null = null;
       let gone = false;
       worker.on("message", (m: any) => {
@@ -457,6 +459,11 @@ export class LocalGateway {
     return null;
   }
 
+  /** The DPoP nonce a page is given at pairing (the one its first proof must carry). */
+  currentNonce() {
+    this.rotateNonce();
+    return this.nonce;
+  }
   private rotateNonce() {
     const t = this.server.timers.now();
     if (t - this.nonceAt >= GATEWAY_LIMITS.nonceMs) {
