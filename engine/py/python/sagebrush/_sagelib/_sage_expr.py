@@ -5397,7 +5397,7 @@ def laplace(f, t, s):
         sage: laplace(t^2, t, s), laplace(sin(2*t), t, s)
         (2/s^3, 2/(s^2 + 4))
         sage: laplace(t^3*exp(-t), t, s)
-        6/(s + 1)^4
+        6/(s^4 + 4*s^3 + 6*s^2 + 4*s + 1)
     """
     try:
         return _laplace(f, _var_name(t), _var_name(s))
