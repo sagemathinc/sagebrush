@@ -198,6 +198,8 @@ test("U2 any other error propagates unchanged, from every operation", async () =
   assert.throws(() => Object.getOwnPropertyDescriptor(e, "X"), TypeError, "getOwnPropertyDescriptor");
   const listed = makeEnvAdapter(fakeEnv({ vals: { A: "1" }, boom: ["X"], listRefused: true }), Denied, ["X"]);
   assert.throws(() => Object.keys(listed), TypeError, "a granted name's read, while listing");
+  const lb = makeEnvAdapter(fakeEnv({ vals: { A: "1" }, listBoom: true }), Denied, ["A"]);
+  assert.throws(() => Object.keys(lb), TypeError, "a non-refusal while listing, the granted names readable");
 });
 test("U3 writes are not caught: a refused set or delete throws the refusal", async () => {
   const { makeEnvAdapter } = await SB();
