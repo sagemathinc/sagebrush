@@ -46,7 +46,7 @@ export type BrowserHost = {
   /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
    * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
    * moved). None: the page can't, and an open document isn't moved to Trash. */
-  trashing?(e: Entry): Promise<string | void>;
+  trashing?(e: Entry): Promise<string | void | { still?: () => boolean }>;
 };
 
 const OPEN_KEY = "sagebrush-files-open";
@@ -496,10 +496,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // (the document open here, or a folder it is in: the page saves it and opens another in its place first, so what
     // goes to Trash is what was last seen, and Undo opens it again; a page that can't, says so and moves nothing)
     const wasOpen = cur && at && within(at, e.path) ? cur : null;
+    // (the page's own condition for the move, checked by the workspace holding its lock: astra's R2 on #447)
+    let still: (() => boolean) | undefined;
     if (wasOpen) {
       if (!host.trashing) return sayError(`Not moved to Trash: "${nameOf(at!)}" is open on this page, and this page can't close it`);
-      const no = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
-      if (no) return sayError(`Not moved to Trash: ${no}`);
+      const r = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
+      if (typeof r === "string") return sayError(`Not moved to Trash: ${r}`);
+      still = r?.still;
     }
     // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
     if (e.kind === "file" && e.unmoved) {
@@ -513,7 +516,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     try {
       // (by its identity: whatever is at that path now, if not the entry chosen (replaced meanwhile, as across the
       // trashing hook's waits), is refused, astra's R1 on #447)
-      const t = await w.remove(e.path, e);
+      const t = await w.remove(e.path, e, undefined, still ? { still } : {});
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
       // (and the document that was open, open again where Undo put it back)
       const reopen = async () => {
