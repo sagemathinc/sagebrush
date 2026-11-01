@@ -371,8 +371,6 @@ class Set_object_enumerated:
     def an_element(self):
         return self._sorted()[0]
 
-    def cartesian_product(self, other):
-        return Set_object_enumerated(tuple(p) for p in _it.product(self._sorted(), _set(other)._sorted()))
 
 
 def _set(v):
@@ -619,10 +617,6 @@ class Permutation:
         for c in self.cycle_tuples():
             r = r * len(c) // gcd(r, len(c))
         return _Z(r)
-
-    def to_matrix(self):
-        n = len(self._l)
-        return _sa().matrix([[1 if self._l[j] == i + 1 else 0 for j in range(n)] for i in range(n)])
 
     def cycle_string(self):
         cs = self.cycle_tuples(singletons=False)
