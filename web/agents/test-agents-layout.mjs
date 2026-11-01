@@ -120,9 +120,10 @@ try {
     const h = await ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), top = r('.top'), who = r('#who'), how = r('#howto'), con = r('#connect');
       return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
     ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
-    // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole)
+    // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole,
+    //  its own characters measured, not the space after it)
     const l = await ev(`(() => { const who = document.querySelector('#who'), sm = who.querySelector('small'), w = who.getBoundingClientRect(), s = sm.getBoundingClientRect(), cs = getComputedStyle(sm);
-      const name = [...who.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()), rg = document.createRange(); rg.selectNodeContents(name); const nr = rg.getBoundingClientRect();
+      const name = [...who.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()), rg = document.createRange(), t = name.textContent, i0 = t.length - t.trimStart().length; rg.setStart(name, i0); rg.setEnd(name, i0 + t.trim().length); const nr = rg.getBoundingClientRect();
       return { name: name.textContent.trim(), nameRight: nr.right, whoRight: w.right, smallRight: s.right, smallW: s.width, clip: cs.clipPath, display: cs.display, visibility: cs.visibility, smallText: sm.textContent }; })()`);
     const whole = l.smallW > 1 && l.smallRight <= l.whoRight + 0.5, hidden = l.smallW <= 1 && l.clip !== "none" && l.display !== "none" && l.visibility === "visible";
     ok("L2-header-label", (whole || hidden) && l.nameRight <= l.whoRight + 0.5 && l.smallText.trim() !== "", "with the chat at 420 px the agent's name is whole, and the where-it-runs label is either whole or visually hidden (still read by screen readers), never cut", l);
