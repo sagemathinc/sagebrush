@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
 import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, workerPort, type SessionPort, type WorkerHandle } from "../src/local-gateway";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 
@@ -1777,7 +1777,7 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
   const cfg = tsapi.readConfigFile(join(root, "tsconfig.json"), tsapi.sys.readFile);
   const options = { ...tsapi.parseJsonConfigFileContent(cfg.config ?? {}, tsapi.sys, root).options, allowJs: true };
   const locks = lockEntries(root);
-  const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {};
+  const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {}, resolved: string[] = [];
   const rel = (f: string) => relative(root, f).split(sep).join("/");
   const queue = [join(root, entry)];
   const canonDecl = new RegExp(`\\bentry(: string)? = ${CANON_ENTRY.replace(/[.?*+^$()[\]{}|\\]/g, "\\$&")}`);
@@ -1802,6 +1802,7 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
         // its canonical root: the resolved file's real path inside node_modules/.pnpm/<entry>/node_modules/<pkg>/
         const store = realpathSync(join(root, "node_modules")) + sep + ".pnpm" + sep;
         const real = realpathSync(res.resolvedFileName);
+        resolved.push(real);
         const inner = real.startsWith(store) ? real.slice(store.length).split(sep) : [];
         const depth = pkg.split("/").length;
         const pkgDir = inner.length > 2 + depth && inner[1] === "node_modules" && inner.slice(2, 2 + depth).join("/") === pkg ? store + inner.slice(0, 2 + depth).join(sep) : null;
@@ -1844,7 +1845,7 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
   }
   for (const [f, n] of Object.entries(dyn)) if (reviewed[f] !== n) problems.push(`${f}: ${n} new Function site(s), ${reviewed[f] ?? 0} reviewed`);
   for (const f of Object.keys(reviewed)) if (!(f in dyn)) problems.push(`${f}: its reviewed new Function sites are gone`);
-  return { files, problems };
+  return { files, problems, resolved };
 }
 const verdict = (c: { files: Set<string>; problems: string[] }) => (c.problems.length === 0 && !c.files.has(FAKE) ? "pass" : "fail");
 
@@ -1856,8 +1857,8 @@ test("L41 the production CLI's runtime closure: remote-fake.js not in it, nothin
   assert.equal(verdict(c), "pass");
 });
 /** A small tree for the census: tsconfig, package.json, the fake, and `files`. */
-function fixtureTree(files: Record<string, string>) {
-  const d = mkdtempSync(join(tmpdir(), "lk-census-"));
+function fixtureTree(files: Record<string, string>, parent = tmpdir()) {
+  const d = mkdtempSync(join(parent, "lk-census-"));
   const all: Record<string, string> = {
     "tsconfig.json": JSON.stringify({ compilerOptions: { module: "commonjs", target: "es2022", moduleResolution: "node", strict: false } }),
     "package.json": JSON.stringify({ name: "fx", dependencies: {} }),
@@ -1885,20 +1886,40 @@ for (const [name, files, want] of fxCases) {
 // ---- the boundary's fixtures (astra's L41 ruling): each negative violates exactly ONE of the five conditions and
 // satisfies the other four; its refusal is checked by its own words.  Packages are stubbed in pnpm's layout:
 // node_modules/.pnpm/<name>@<dirVersion>/node_modules/<name>/{package.json, files}, and node_modules/<name> a symlink.
+// r3.2 (the r3.1 run's BASE failure): the stubs are TYPED (index.d.ts and `types`; mathjax-full's subpath its own
+// js/mathjax.d.ts), because the resolver tries declarations in every ancestor's node_modules before a JS file: an
+// untyped stub let a typed package above the fixture win.  So every fixture is made inside a parent that holds typed
+// decoys of the same packages (POISON), whatever TMPDIR is, and each case asserts that every resolved file is inside
+// its fixture: the hermeticity witness, on every host.
+const STUB_TYPES = true;
+const typed = (dts: Record<string, string>) => (STUB_TYPES ? dts : {});
+const POISON: Record<string, string> = {
+  "node_modules/marked/package.json": JSON.stringify({ name: "marked", version: "18.0.14", main: "index.js", types: "index.d.ts" }),
+  "node_modules/marked/index.js": "module.exports = {};\n",
+  "node_modules/marked/index.d.ts": "export declare const POISON: true;\n",
+  "node_modules/mathjax-full/package.json": JSON.stringify({ name: "mathjax-full", version: "3.2.2" }),
+  "node_modules/mathjax-full/js/mathjax.js": "exports.mathjax = {};\n",
+  "node_modules/mathjax-full/js/mathjax.d.ts": "export declare const POISON: true;\n",
+  "node_modules/katex/package.json": JSON.stringify({ name: "katex", version: "0.19.0", main: "index.js", types: "index.d.ts" }),
+  "node_modules/katex/index.js": "module.exports = {};\n",
+  "node_modules/katex/index.d.ts": "export declare const POISON: true;\n",
+};
 type Stub = { name: string; dirVersion: string; pj: { name: string; version: string }; files: Record<string, string> };
 function stubbedTree(files: Record<string, string>, stubs: Stub[], lock: string[]) {
-  const d = fixtureTree({ ...files, "pnpm-lock.yaml": "lockfileVersion: '9.0'\n\npackages:\n\n" + lock.map((e) => `  ${e}:\n    resolution: {integrity: sha512-x}\n`).join("\n") });
+  const parent = mkdtempSync(join(tmpdir(), "lk-census-poisoned-"));
+  for (const [p, t] of Object.entries(POISON)) { mkdirSync(dirname(join(parent, p)), { recursive: true }); writeFileSync(join(parent, p), t); }
+  const d = fixtureTree({ ...files, "pnpm-lock.yaml": "lockfileVersion: '9.0'\n\npackages:\n\n" + lock.map((e) => `  ${e}:\n    resolution: {integrity: sha512-x}\n`).join("\n") }, parent);
   for (const st of stubs) {
     const dir = join(d, "node_modules", ".pnpm", `${st.name}@${st.dirVersion}`, "node_modules", st.name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ ...st.pj, main: "index.js" }));
-    for (const [p, t] of Object.entries({ "index.js": "module.exports = {};\n", ...st.files })) { mkdirSync(dirname(join(dir, p)), { recursive: true }); writeFileSync(join(dir, p), t); }
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ ...st.pj, main: "index.js", ...(STUB_TYPES ? { types: "index.d.ts" } : {}) }));
+    for (const [p, t] of Object.entries({ "index.js": "module.exports = {};\n", ...typed({ "index.d.ts": "export {};\n" }), ...st.files })) { mkdirSync(dirname(join(dir, p)), { recursive: true }); writeFileSync(join(dir, p), t); }
     symlinkSync(join(".pnpm", `${st.name}@${st.dirVersion}`, "node_modules", st.name), join(d, "node_modules", st.name));
   }
   return d;
 }
 const MARKED: Stub = { name: "marked", dirVersion: "18.0.14", pj: { name: "marked", version: "18.0.14" }, files: {} };
-const MATHJAX: Stub = { name: "mathjax-full", dirVersion: "3.2.2", pj: { name: "mathjax-full", version: "3.2.2" }, files: { "js/mathjax.js": "exports.mathjax = {};\n" } };
+const MATHJAX: Stub = { name: "mathjax-full", dirVersion: "3.2.2", pj: { name: "mathjax-full", version: "3.2.2" }, files: { "js/mathjax.js": "exports.mathjax = {};\n", ...typed({ "js/mathjax.d.ts": "export {};\n" }) } };
 const KATEX: Stub = { name: "katex", dirVersion: "0.19.0", pj: { name: "katex", version: "0.19.0" }, files: {} };
 const LOCK = ["marked@18.0.14", "mathjax-full@3.2.2", "katex@0.19.0"];
 const REVIEWED_IMPORTERS = {
@@ -1915,11 +1936,19 @@ const boundaryCases: [string, Record<string, string>, Stub[], string[], RegExp |
   ["L41-fx9 version only: marked 18.0.13 at its root", REVIEWED_IMPORTERS, [{ ...MARKED, dirVersion: "18.0.13", pj: { name: "marked", version: "18.0.13" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked version 18\.0\.13, reviewed 18\.0\.14$/],
   ["L41-fx10 lockfile only: marked@18.0.14 missing from the lockfile", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK.filter((e) => e !== "marked@18.0.14"), /web\/board\/svg\.ts:\d+: marked@18\.0\.14 not in the lockfile$/],
   ["L41-fx13 no masking: a listed package absent from the closure doesn't admit an unlisted one (katex from src/x.ts)", { "src/cli.ts": 'import "./x";\nexport const y = 1;\n', "src/x.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [MARKED, MATHJAX, KATEX], LOCK, /src\/x\.ts:\d+: not a reviewed bundled package: katex$/],
-  ["L41-fx14 root only: node_modules/marked a real directory holding a valid marked 18.0.14, outside .pnpm", { ...REVIEWED_IMPORTERS, "node_modules/marked/package.json": JSON.stringify({ name: "marked", version: "18.0.14", main: "index.js" }), "node_modules/marked/index.js": "module.exports = {};\n" }, [MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
+  ["L41-fx14 root only: node_modules/marked a real directory holding a valid marked 18.0.14, outside .pnpm", { ...REVIEWED_IMPORTERS, "node_modules/marked/package.json": JSON.stringify({ name: "marked", version: "18.0.14", main: "index.js", ...(STUB_TYPES ? { types: "index.d.ts" } : {}) }), "node_modules/marked/index.js": "module.exports = {};\n", ...typed({ "node_modules/marked/index.d.ts": "export {};\n" }) }, [MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
 ];
+// (r3.2: how many bare imports each case resolves before its verdict: the reviewed pair in the positive and in the
+// one-fault cases after membership and importer; none where membership or the importer refuses first)
+const RESOLVES: Record<string, number> = { "L41-fx11": 2, "L41-fx7": 0, "L41-fx8": 0, "L41-fx12": 2, "L41-fx9": 2, "L41-fx10": 2, "L41-fx13": 0, "L41-fx14": 2 };
 for (const [name, files, stubs, lock, refusal] of boundaryCases) {
   test(name, () => {
-    const c = runtimeClosure(stubbedTree(files, stubs, lock), "src/cli.ts");
+    const root = stubbedTree(files, stubs, lock);
+    assert.ok(existsSync(join(dirname(root), "node_modules", "marked", "index.d.ts")) && existsSync(join(dirname(root), "node_modules", "mathjax-full", "js", "mathjax.d.ts")), "the poisoning parent is in place");
+    const c = runtimeClosure(root, "src/cli.ts");
+    const inside = realpathSync(root) + sep;
+    for (const f of c.resolved) assert.ok(f.startsWith(inside), `resolved inside its fixture (hermetic): ${f}`);
+    assert.equal(c.resolved.length, RESOLVES[name.split(" ")[0]], `resolved locally: ${JSON.stringify(c.resolved)}`);
     if (refusal === null) assert.deepEqual(c.problems, [], "passes: no problem");
     else {
       assert.equal(c.problems.length, 1, `exactly one refusal: ${JSON.stringify(c.problems)}`);
