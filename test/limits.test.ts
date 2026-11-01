@@ -350,31 +350,72 @@ s.ready.then(() => s.handle({ id: 1, code: "${cell}" })).then(() => process.stdo
 
 // sagebrush.limit(name), the public read of one limit (plan-pandas r7
 // section E (a)): optional packages may use it (core-api-surface.json),
-// where _limits is private.  Unlimited (infinity) by default; a value set by
-// --limits or SAGEBRUSH_LIMITS read back; the first read locks the limits,
-// as the first use of a limited layer does; an unknown name is the
-// validator's ValueError, and a name that isn't a str a TypeError.
-test("sagebrush.limit(name): unlimited by default, the run's value, locking at the first read", () => {
-  const show = "import sagebrush; print(sagebrush.limit('pandas.decoded_bytes'), sagebrush.limit('ff.work'))";
-  assert.equal(run(["-c", show]).stdout, "inf inf\n");
-  const set = file("pandas.json", '{"pandas.decoded_bytes": 33554432}');
-  assert.equal(run(["--limits", set, "-c", show]).stdout, "33554432 inf\n");
-  assert.equal(run(["-c", show], { SAGEBRUSH_LIMITS: set }).stdout, "33554432 inf\n");
-  // (the first read locks: a later proposal is refused)
-  const lock = "import sagebrush, _limits as L\nsagebrush.limit('ff.work')\ntry:\n    L.propose(L.validate({}))\nexcept RuntimeError as e:\n    print('RuntimeError', e)";
-  assert.equal(run(["-c", lock]).stdout, "RuntimeError sagebrush limits are read once, at the first use: set them before it\n");
-  const errors = [
-    ["'pandas.decoded'", "ValueError limits: pandas.decoded is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, pandas.decoded_bytes, poly.work)"],
-    ["1", "TypeError limit() argument must be a str, not int"],
-    ["None", "TypeError limit() argument must be a str, not NoneType"],
-  ];
-  for (const [arg, want] of errors) {
-    const r = run(["-c", `import sagebrush\ntry:\n    sagebrush.limit(${arg})\nexcept Exception as e:\n    print(type(e).__name__, e)`]);
-    assert.equal(r.stdout, want + "\n", r.stderr);
-  }
-  // (an out-of-range value stops the run first, as every key's does)
+// where _limits is private.  One test per case, so that each mutation
+// control's failures name the cases (grader, Nov 1).  In the engine the
+// host has locked the limits before the program runs, so the accessor's own
+// locking shows only under CPython, without that lock: the last two tests
+// load each copy of limit() (lib/sagebrush and the CPython package's) with
+// that copy's _limits, under CI's python3.
+const limitShow = "import sagebrush; print(sagebrush.limit('pandas.decoded_bytes'), sagebrush.limit('ff.work'))";
+const limitError = (arg: string) => run(["-c", `import sagebrush\ntry:\n    sagebrush.limit(${arg})\nexcept Exception as e:\n    print(type(e).__name__, e)`]);
+
+test("sagebrush.limit: unlimited by default (infinity)", () => {
+  assert.equal(run(["-c", limitShow]).stdout, "inf inf\n");
+});
+
+test("sagebrush.limit: the value --limits sets", () => {
+  assert.equal(run(["--limits", file("pandas.json", '{"pandas.decoded_bytes": 33554432}'), "-c", limitShow]).stdout, "33554432 inf\n");
+});
+
+test("sagebrush.limit: the value SAGEBRUSH_LIMITS sets", () => {
+  assert.equal(run(["-c", limitShow], { SAGEBRUSH_LIMITS: file("pandas-env.json", '{"pandas.decoded_bytes": 33554432}') }).stdout, "33554432 inf\n");
+});
+
+test("sagebrush.limit: an unknown name is the validator's ValueError, listing the limits", () => {
+  const r = limitError("'pandas.decoded'");
+  assert.equal(r.stdout, "ValueError limits: pandas.decoded is not a limit of this engine (its limits: ff.conway_work, ff.embed_max, ff.root_bits, ff.work, matlab.lu_work, nf.certify_index_max, nf.certify_norm_max, nf.relation_rounds, padic.kedlaya_work, pandas.decoded_bytes, poly.work)\n", r.stderr);
+});
+
+test("sagebrush.limit: a name 1 is a TypeError", () => {
+  const r = limitError("1");
+  assert.equal(r.stdout, "TypeError limit() argument must be a str, not int\n", r.stderr);
+});
+
+test("sagebrush.limit: a name None is a TypeError", () => {
+  const r = limitError("None");
+  assert.equal(r.stdout, "TypeError limit() argument must be a str, not NoneType\n", r.stderr);
+});
+
+test("sagebrush.limit: pandas.decoded_bytes below its range stops the run first, with status 2", () => {
   const r = run(["--limits", file("small.json", '{"pandas.decoded_bytes": 1000}'), "-c", "print('MARKER')"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /sagebrush: limits: pandas\.decoded_bytes = 1000 is outside the range this engine allows, \[1048576, 1099511627776\]/);
   assert.doesNotMatch(r.stdout, /MARKER/);
+});
+
+// (under CPython: the copy of _limits beside that limit(), loaded as the
+// module _limits with no host lock, and the file's own limit function)
+const cpythonLock = (limitsPy: string, accessorPy: string) => execFileSync("python3", ["-I", "-c", `
+import ast, importlib.util, sys
+spec = importlib.util.spec_from_file_location("_limits", ${JSON.stringify(limitsPy)})
+L = importlib.util.module_from_spec(spec); sys.modules["_limits"] = L; spec.loader.exec_module(L)
+path = ${JSON.stringify(accessorPy)}
+fn = [n for n in ast.parse(open(path).read()).body if isinstance(n, ast.FunctionDef) and n.name == "limit"]
+g = {"_limits_module": lambda: L}
+exec(compile(ast.Module(fn, []), path, "exec"), g)
+print(L.finalized(), g["limit"]("ff.work"), L.finalized())
+try:
+    L.propose(L.validate({}))
+except RuntimeError as e:
+    print("RuntimeError", e)
+`], { encoding: "utf8" });
+const LOCKED_OUT = "False inf True\nRuntimeError sagebrush limits are read once, at the first use: set them before it\n";
+
+test("sagebrush.limit (lib/sagebrush, under CPython with no host lock): the first read locks the limits", () => {
+  assert.equal(cpythonLock(TEST + "../lib/_limits.py", TEST + "../lib/sagebrush/__init__.py"), LOCKED_OUT);
+});
+
+test("sagebrush.limit (the CPython package's, engine/py): the first read locks the limits", () => {
+  const py = TEST + "../engine/py/python/sagebrush/";
+  assert.equal(cpythonLock(py + "_sagelib/_limits.py", py + "__init__.py"), LOCKED_OUT);
 });
