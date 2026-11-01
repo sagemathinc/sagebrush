@@ -9,11 +9,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTzIndex } from "./runner-worker.js";
 import { checkRunnerDefine } from "../runner-fetch.mts";
+import { tamperedIndex } from "../test-tz-fixture.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "..", "dist");
 let failures = 0;
-const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+const seen = new Set(); // (each case id reported: the text before the first colon)
+const ok = (c, msg) => { seen.add(msg.split(":")[0]); console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
 const enc = (o) => new TextEncoder().encode(typeof o === "string" ? o : JSON.stringify(o));
 
 const tzDir = join(dist, "lib", "tzdata");
@@ -25,22 +27,21 @@ const names = Object.keys(real.zones);
 const renamed = (from, to) => ({ ...real, zones: Object.fromEntries(Object.entries(real.zones).map(([k, v]) => [k === from ? to : k, v])) });
 const z0 = names[0];
 
-// G13 (unit): the real index admits exactly its distinct zone files, each of them in dist
+// G13u (unit; the browser's G13 is web/test-runner-broker.mjs): the real index admits exactly its distinct zone files, each of them in dist
 {
   const set = parseTzIndex(realBytes);
   const distinct = new Set(Object.values(real.zones));
   const files = readdirSync(tzDir).filter((f) => f.endsWith(".tzif")).map((f) => `lib/tzdata/${f}`);
-  ok(set !== null && set.size === distinct.size && [...set].every((u) => files.includes(u)) && files.length === set.size, `G13: the real index (${names.length} zones) admits exactly its ${distinct.size} distinct zone files, each in dist/lib/tzdata`);
+  ok(set !== null && set.size === distinct.size && [...set].every((u) => files.includes(u)) && files.length === set.size, `G13u: the real index (${names.length} zones) admits exactly its ${distinct.size} distinct zone files, each in dist/lib/tzdata`);
 }
-// G11u: the tampered index of G11 (one hex digit of ANOTHER zone's value) still parses, and still lists the zone
-// G11 asks for, so in G11 it is the hash check that refuses it
+// G11u: G11's own tampered index (web/test-tz-fixture.mjs: one byte, the first hex digit of ANOTHER zone's value)
+// still parses, and still lists the zone G11 asks for with its real SHA-256, so in G11 it is the hash check that
+// refuses it
 {
-  const asked = "Europe/Paris";
-  const other = names.find((k) => k !== asked && real.zones[k] !== real.zones[asked]);
-  const v = real.zones[other];
-  const t = { ...real, zones: { ...real.zones, [other]: (v[0] === "0" ? "1" : "0") + v.slice(1) } };
-  const set = parseTzIndex(enc(t));
-  ok(set !== null && set.has(`lib/tzdata/${real.zones[asked]}.tzif`), "G11u: G11's tampered index parses, and lists the zone G11 asks for");
+  const t = tamperedIndex(realBytes);
+  const diff = [...t.bytes].filter((x, i) => x !== realBytes[i]).length;
+  const set = parseTzIndex(t.bytes);
+  ok(diff === 1 && set !== null && set.has(`lib/tzdata/${t.askedSha}.tzif`), `G11u: G11's tampered index (1 byte of ${t.other}'s value, ${diff} changed) parses, and lists ${t.asked}'s zone`);
 }
 const refuses = (id, what, bytes) => ok(parseTzIndex(bytes) === null, `${id}: ${what}: refused`);
 // G12a: 262,145 bytes, a valid index padded with spaces
@@ -54,7 +55,7 @@ const refuses = (id, what, bytes) => ok(parseTzIndex(bytes) === null, `${id}: ${
   const vals = Object.values(real.zones);
   const zones = Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`Zz/${String(i).padStart(4, "0")}`, vals[i % vals.length]]));
   const b = enc({ ...real, zones });
-  ok(b.length < 262144, `G12b's fixture is under the byte bound (${b.length} B)`);
+  ok(b.length < 262144, `G12b's fixture: under the byte bound (${b.length} B)`);
   refuses("G12b", "2,001 zones", b);
 }
 refuses("G12c", "a name `../x`", enc(renamed(z0, "../x")));
@@ -85,7 +86,7 @@ refuses("G12l", "no zones", enc({ ...real, zones: {} }));
   b[at] = 0xff; // (one byte that isn't UTF-8, in a name)
   refuses("G12m", "a byte 0xFF in a name", b);
 }
-ok(parseTzIndex(realBytes) !== null, "the real index itself is accepted");
+ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
 
 // G7: the build's check, on a fixture: a bundle with runner-worker.js, built without the list, fails the build
 {
@@ -120,5 +121,10 @@ ok(parseTzIndex(realBytes) !== null, "the real index itself is accepted");
   ok(carriers.length >= 3 && bad.length === 0, `G9: each of the ${carriers.length} built bundles with the runner carries exactly the list${bad.length ? ": not " + bad.map((p) => p.slice(dist.length + 1)).join(", ") : ""}`);
 }
 
+// (every case of this file, by id: one not reported is NOT RUN, which counts as a failure)
+const CASES = ["G13u", "G11u", "G12a", "G12a's edge", "G12b's fixture", "G12b", "G12c", "G12d", "G12e1", "G12e2", "G12f", "G12g", "G12h", "G12h's edge", "G12i", "G12j", "G12k", "G12l", "G12m", "real", "G7", "G9"];
+const notRun = CASES.filter((c) => !seen.has(c));
+failures += notRun.length;
+console.log(`unit: ${CASES.length} cases, ${CASES.length - notRun.length} run; NOT RUN: ${notRun.length ? notRun.join(", ") : "none"}`);
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
