@@ -871,9 +871,9 @@ test("V1, isolated: a () => void function that returns a function installs an ob
   assert.deepEqual(v.obligations.map((o: any) => o.line).sort(), [2, 3, 4], "void, T extends void, number | void; not void 0 (undefined)");
 });
 
-test("E1.1: typescript-api is named only by the gate's script and its test; it has no install scripts", () => {
+test("E1.1: typescript-api is named only by the gates' scripts and their tests (arraybuffer-sites; line 3 of the site asset budget); it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
-  assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "test/arraybuffer-sites.test.ts"]);
+  assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "scripts/site-asset-budget.mjs", "scripts/test-line3-measure.mjs", "scripts/test-line3-size.mjs", "test/arraybuffer-sites.test.ts"]);
   const pkg = JSON.parse(readFileSync(join(ROOT, "node_modules/typescript-api/package.json"), "utf8"));
   assert.equal(pkg.version, "5.9.3");
   for (const k of ["preinstall", "install", "postinstall", "prepare"]) assert.equal(pkg.scripts?.[k], undefined, k);
