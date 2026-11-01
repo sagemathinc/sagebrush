@@ -905,10 +905,62 @@ rel_entr = _ufunc("rel_entr", 2, _guard("rel_entr", _rel_entr))
 kl_div = _ufunc("kl_div", 2, _guard("kl_div", _kl_div))
 exp10 = _ufunc("exp10", 1, _guard("exp10", lambda x: 10.0 ** x, pole=lambda x: _INF))
 exp2 = _ufunc("exp2", 1, _guard("exp2", lambda x: 2.0 ** x, pole=lambda x: _INF))
+_COSCOF = (4.7377507964246204691685e-14, -1.1470284843425359765671e-11, 2.0876754287081521758361e-9,
+           -2.7557319214999787979814e-7, 2.4801587301570552304991e-5, -1.3888888888888872993737e-3,
+           4.1666666666666666609054e-2)
+
+
 def _cosm1(x):
-    # (cos(x) - 1 without its cancellation near 0)
-    s = _math.sin(0.5 * x)
-    return -2.0 * s * s
+    # (cos(x) - 1 without its cancellation near 0: Cephes's cosm1, unity.c,
+    # as SciPy's cexpm1 uses it; +0 at 0)
+    if x < -0.7853981633974483 or x > 0.7853981633974483:
+        return _math.cos(x) - 1.0
+    xx = x * x
+    p = 0.0
+    for c in _COSCOF:
+        p = p * xx + c
+    return -0.5 * xx + xx * xx * p
+
+
+def _c_expm1(x):
+    # (C's expm1: inf where it overflows; Python's raises)
+    try:
+        return _math.expm1(x)
+    except OverflowError:
+        return _INF
+
+
+def _hypot(a, b):
+    # (|a + bi| without overflow or underflow in the squares)
+    a, b = abs(a), abs(b)
+    if a < b:
+        a, b = b, a
+    if a == 0 or a == _INF:
+        return a
+    r = b / a
+    return a * _math.sqrt(1.0 + r * r)
+
+
+_LN2 = 0.6931471805599453
+_CM_LARGE = 4.4942328371557893e+307   # (CPython's CM_LARGE_DOUBLE, DBL_MAX / 4)
+
+
+def _clog(x, y):
+    # (log(x + yi) for finite x, y, as CPython's c_log: scaled where |z|
+    # would overflow, log1p of |z|^2 - 1 where |z| is near 1)
+    ax, ay = abs(x), abs(y)
+    if ax > _CM_LARGE or ay > _CM_LARGE:
+        re = _math.log(_hypot(ax / 2.0, ay / 2.0)) + _LN2
+    else:
+        h = _hypot(ax, ay)
+        if h == 0:
+            re = -_INF
+        elif 0.71 <= h <= 1.73:
+            am, an = (ax, ay) if ax > ay else (ay, ax)
+            re = _math.log1p((am - 1) * (am + 1) + an * an) / 2.0
+        else:
+            re = _math.log(h)
+    return complex(re, _math.atan2(y, x))
 
 
 def _cexpm1(z):
@@ -928,7 +980,7 @@ def _cexpm1(z):
     if zr <= -40:
         x = -1.0
     else:
-        ezr = _math.expm1(zr)
+        ezr = _c_expm1(zr)
         x = ezr * _math.cos(zi) + _cosm1(zi)
     if zr > -1.0:
         y = (ezr + 1.0) * _math.sin(zi)
@@ -946,7 +998,9 @@ def _clog1p(z):
         return _cmath.log(z + 1.0)
     if zi == 0.0 and zr >= -1.0:
         return complex(-_INF if zr == -1.0 else _math.log1p(zr), 0.0)
-    az = abs(z)
+    # (|z| < 0.707 needs both parts below it, so |z| can't overflow there;
+    # elsewhere log(1 + z) is taken without forming |1 + z|'s square)
+    az = _hypot(zr, zi) if abs(zr) < 0.707 and abs(zi) < 0.707 else 1.0
     if az < 0.707:
         azi = abs(zi)
         if zr < 0 and abs(-zr - azi * azi / 2) / (-zr) < 0.5:
@@ -956,7 +1010,7 @@ def _clog1p(z):
         else:
             x = 0.5 * _math.log1p(az * (az + 2 * zr / az))
         return complex(x, _math.atan2(zi, zr + 1.0))
-    return _cmath.log(z + 1.0)
+    return _clog(zr + 1.0, zi)
 
 
 expm1 = _ufunc("expm1", 1, _guard("expm1", _math.expm1, pole=lambda x: _INF), _guard("expm1", _cexpm1))

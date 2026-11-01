@@ -140,6 +140,16 @@ for z in [1e-20 + 0j, 1e-20 + 1e-20j, -1e-20 + 1e-10j, 1e-10j, -1e-8 + 1e-4j, -1
           0j, 1e-300 + 1e-300j, -40.5 + 1j, complex(0.5, math.inf)]:
     out("log1p(%r) small" % (z,), lambda: sc.log1p(z))
     out("expm1(%r) small" % (z,), lambda: sc.expm1(z))
+# (complex log1p and expm1 where |z| or exp(Re z) would overflow, with each
+# part's sign and the signed zeros)
+for z in [complex(1.7e308, 1.7e308), complex(-1.7e308, 1.7e308), complex(1.7e308, -1.7e308), complex(-1.7e308, -1.7e308), complex(1e308, 0.0),
+          complex(-1e308, 0.0), complex(-1e308, -0.0), complex(1e300, 1e-300), complex(0.0, 1.7e308), complex(0.0, -1.7e308), complex(5e307, 5e307),
+          complex(1.5, -2.5), complex(-0.5, -0.0), complex(-3, 0.0), complex(-3, -0.0), complex(-1, 1e-310), complex(0.3, 0.69), complex(-1.7, 0.5)]:
+    out("log1p(%r) large" % (z,), lambda: sc.log1p(z))
+for z in [complex(1000, 1), complex(1000, -1), complex(1000, 0.0), complex(1000, -0.0), complex(-1000, 1), complex(-1000, -1), complex(709, 1),
+          complex(709.8, 1), complex(710, 1), complex(800, math.pi), complex(800, 1e-300), complex(-50, 0.5), complex(2, -0.0), complex(-0.0, 0.0),
+          complex(0.0, -0.0), complex(1e-310, 1e-310)]:
+    out("expm1(%r) large" % (z,), lambda: sc.expm1(z))
 out("zeta(2, -999999.5) bound", lambda: sc.zeta(2, -999999.5))
 out("eval_legendre(1000000, 0.3) bound", lambda: sc.eval_legendre(1000000, 0.3))
 out("eval_legendre(-1000001, 0.3) bound", lambda: sc.eval_legendre(-1000001, 0.3))
