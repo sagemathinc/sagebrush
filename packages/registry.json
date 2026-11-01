@@ -40,10 +40,10 @@
     "@sagebrush/scipy-io@0.1.0": {
       "dir": "scipy-io",
       "root": "py",
-      "manifest_sha256": "22d916cfaf91f7a299ec490fa6a6a977ad3240d6f831ca1ea01d6d93999e44cb",
+      "manifest_sha256": "2c56231c356d25bd66a7102caedc17e7a2488a5a8f15a1309ba6ceeed65ce9b0",
       "files": {
         "py/scipy/io/__init__.py": "6a0086e0e1da3c723e81d02e9ea73605b532831a0dd735cf1b1d387983f4d4fe",
-        "py/scipy/io/matlab.py": "c2de4e27db72ec16d86150256dd08f96f88e627dac926dbf8b4a897c6ea591f9"
+        "py/scipy/io/matlab.py": "acc171c217cd26830460835c74daaa9e1c04c0cd4f7df248d631ef94985344b8"
       }
     }
   }

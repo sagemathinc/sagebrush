@@ -183,7 +183,7 @@ class Browser {
   codes() { return this.ev(`[...document.querySelectorAll("#cells .cell textarea")].map((t) => t.value)`); }
   has(code) { return `[...document.querySelectorAll("#cells .cell textarea")].some((t) => t.value === ${J(code)})`; }
   async type(i, code) {
-    return this.ev(`(() => { while (document.querySelectorAll("#cells .cell").length <= ${i}) document.querySelector("#add").click(); const ta = document.querySelectorAll("#cells .cell textarea")[${i}]; if (ta.readOnly || ta.disabled) return "read-only"; ta.focus(); ta.value = ${J(code)}; ta.dispatchEvent(new Event("input", { bubbles: true })); return "typed"; })()`);
+    return this.ev(`(() => { while (document.querySelectorAll("#cells .cell").length <= ${i}) document.querySelector("#add").click(); const ta = document.querySelectorAll("#cells .cell textarea")[${i}]; if (ta.readOnly || ta.disabled) return "read-only"; window.__typedOver = ta.value; ta.focus(); ta.value = ${J(code)}; ta.dispatchEvent(new Event("input", { bubbles: true })); return "typed"; })()`);
   }
   click(text, sel = "button") { return this.ev(`(() => { const b = [...document.querySelectorAll(${J(sel)})].find((x) => x.textContent.trim() === ${J(text)} && !x.disabled); if (!b) return false; b.click(); return true; })()`); }
   async offline(on) {
@@ -312,12 +312,16 @@ try {
   const both = await A.until(`${A.has("x = 10")} && ${A.has("y = 20")}`, 25_000) && await B.until(`${B.has("x = 10")} && ${B.has("y = 20")}`, 25_000);
   check(both, `different cells edited at once: both kept on both (A ${J(await A.codes())}, B ${J(await B.codes())})`);
   await A.type(0, "x = 100"); await sleep(300); await B.type(0, "x = 200");
+  // (what B typed over, read in the same page task as its edit (type() keeps it), so nothing arrives in between: still
+  // x = 10, the two edits concurrent, which exact merges (#388) keep both of, x = 2000 on both; or A's x = 100 already
+  // there, B's edit made on it, x = 200 on both; anything else is no expectation, and fails)
+  const over = await B.ev("window.__typedOver");
+  const want = over === "x = 10" ? ["x = 2000", "y = 20"] : over === "x = 100" ? ["x = 200", "y = 20"] : null;
   let same = false;
-  for (let i = 0; i < 100 && !same; i++) { const [a, b] = [await A.codes(), await B.codes()]; same = J(a) === J(b) && J(a) === J(["x = 2000", "y = 20"]); if (!same) await sleep(250); }
+  for (let i = 0; i < 100 && !same; i++) { const [a, b] = [await A.codes(), await B.codes()]; same = !!want && J(a) === J(b) && J(a) === J(want); if (!same) await sleep(250); }
   const [a4, b4] = [await A.codes(), await B.codes()];
-  check(same, `the same cell edited in both: the two converge (A ${J(a4)}, B ${J(b4)})`);
-  // (exact merges (#388) keep both edits: from x = 10, A's x = 100 and B's x = 200 merge to x = 2000 on both, the
-  // other cell untouched; what the merge kept is also said whole)
+  check(same, `the same cell edited in both: the two converge (B typed over ${J(over)}, so ${J(want)}; A ${J(a4)}, B ${J(b4)})`);
+  // (what the merge kept, said whole)
   obs("the same cell edited in both: the cells both have", a4);
   // ---- 5. a data file made, renamed and moved to Trash in A; followed in B
   await A.ev(`${W}.create("/data.csv", { content: "1,2,3\\n" })`);

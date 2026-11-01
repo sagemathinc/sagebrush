@@ -9,6 +9,7 @@
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
 //   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,8 @@ const site = `http://127.0.0.1:${sitePort}`;
 // ---- the agent: a stand-in for sagebrush-agent (its hello, its calls, its turn events)
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 let sock = null, nextId = 1, picHits = 0;
+// (whether the stand-in says it edits notebooks by cell, notebook.edit: the A12 section pairs again with it)
+let FEATURES = false;
 const pending = new Map(), notes = [];
 const daemon = Bun.serve({
   port: 0,
@@ -53,7 +56,7 @@ const daemon = Bun.serve({
       if (m.method === "hello") {
         sock = ws;
         // (it asks for run too: the page's grant must say run false whatever it asks)
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true } } }));
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, ...(FEATURES ? { features: ["notebook.edit"] } : {}) } }));
       } else if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id);
         pending.delete(m.id);
@@ -93,11 +96,31 @@ const write = async (path, cells, extra) => {
   return call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
 };
 const readCells = async (path) => (await call("workspace.read", { path })).content.json.cells;
+// (the hash an edit by cell names a cell by, as the helper computes it: web/workspace/notebook-edit.ts cellHash)
+const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+// (in the form the notebook keeps a cell: web/workspace/notebook-edit.ts cellForm)
+const cellForm = (c) => {
+  const type = c?.type ?? "code";
+  const out = { id: c?.id, ...(type === "code" ? {} : { type }), code: c?.code ?? "" };
+  if (type === "code") { out.outputs = Array.isArray(c?.outputs) ? c.outputs : []; out.n = c?.n == null ? null : String(c.n); if (c?.ms != null) out.ms = c.ms; }
+  if (type === "markdown" && c?.attachments) out.attachments = c.attachments;
+  if (c?.metadata) out.metadata = c.metadata;
+  return out;
+};
+const cellHash = (c) => createHash("sha256").update(canonical(cellForm(c)), "utf8").digest("hex");
 
 // ---- the browser
+// (when each step of the start and of each pairing happened, ms after the browser's spawn: printed with any failure
+// and at the end, for a slow or stalled first load; c1's F1)
+const t0 = Date.now();
+const stamps = [];
+const stamp = (what) => stamps.push(`${what} +${Date.now() - t0}ms`);
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+// (--password-store=basic: no OS keyring, whose absence can stall Chrome's first load; c1's F1, the grader's hypothesis)
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+stamp("spawned");
 const cdpPort = await devtoolsPort(profile);
+stamp("devtools port");
 let targets;
 for (let i = 0; i < 300; i++) {
   try {
@@ -107,8 +130,10 @@ for (let i = 0; i < 300; i++) {
     await sleep(100);
   }
 }
+stamp("first target");
 const cdp = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (cdp.onopen = r));
+stamp("connected");
 let n = 0;
 const waiting = new Map();
 const requested = []; // (every URL the page or its workers asked for)
@@ -116,12 +141,21 @@ const workers = []; // (every worker started: its URL)
 const liveWorkers = new Map(); // (the workers running now: session -> URL)
 const paused = []; // (requests held by Fetch: their ids)
 const logs = []; // (the page's errors and warnings: shown when something fails)
+const urls = new Map(); // (request id -> URL, to name a failed request)
+const bad = []; // (the failed requests and non-2xx responses: shown when something fails)
+let loads = 0; // (the page's load events so far)
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
-  } else if (m.method === "Network.requestWillBeSent") requested.push(m.params.request.url);
+  } else if (m.method === "Network.requestWillBeSent") {
+    requested.push(m.params.request.url);
+    urls.set(m.params.requestId, m.params.request.url);
+  }
+  else if (m.method === "Network.responseReceived" && !(m.params.response.status >= 200 && m.params.response.status < 300)) bad.push(`${m.params.response.status} ${m.params.response.url}`.slice(0, 300));
+  else if (m.method === "Network.loadingFailed") bad.push(`failed (${m.params.errorText}${m.params.canceled ? ", canceled" : ""}) ${urls.get(m.params.requestId) ?? m.params.requestId}`.slice(0, 300));
+  else if (m.method === "Page.loadEventFired") { loads++; stamp(`load event ${loads}`); }
   else if (m.method === "Target.detachedFromTarget") liveWorkers.delete(m.params.sessionId);
   else if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId);
   else if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "worker") {
@@ -149,8 +183,10 @@ const until = async (expr, ms = 20000) => {
     if (await ev(expr).catch(() => false)) return true;
     await sleep(100);
   }
-  throw new Error("timeout: " + expr);
+  throw new Error("timeout: " + expr + "\n  the page then: " + JSON.stringify(await pageState()));
 };
+/** What the page is showing (for a timeout): its address, load state, the Connect control, title and first text. */
+const pageState = () => ev(`(() => { const c = document.querySelector('#connect'); return { href: location.href, readyState: document.readyState, connect: c ? c.textContent : null, title: document.title, text: (document.body?.innerText ?? "").slice(0, 200) }; })()`).catch((e) => ({ unreadable: String(e).slice(0, 200) }));
 const key = (k, extra = {}) => send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0, ...extra }).then(() => send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: { Escape: 27, Tab: 9 }[k] ?? 0 }));
 const size = (width, height = 900) => send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 await send("Network.enable");
@@ -240,8 +276,14 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 
 /** Open the page with a pairing link, connect, and allow everything (the person's grant dialog). */
 async function pair() {
+  const before = loads;
+  stamp("pair: navigate");
   await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${daemon.port}` });
-  await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
+  // (the page loaded before its Connect is looked for: a load that never comes fails here, with the page's state)
+  const t1 = Date.now();
+  while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
+  await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
   await ev(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
@@ -299,6 +341,11 @@ try {
     await call("workspace.create", { path: "/notes/plot.ipynb", content: docFor("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('OLD')" }, { type: "markdown", code: "Some *text*" }], { autorun: "always" }), mode: "python" });
     const rec0 = await record(await refOf("/notes/plot.ipynb"));
     ok(rec0?.autorun === "always", "the document says autorun: always", rec0 && Object.keys(rec0));
+    // (A10: a code artifact open first, so the pane's width is measured right before and right after the notebook opens)
+    await call("workspace.create", { path: "/notes/w.py", content: { text: "w = 1\n" } });
+    await artifactTurn("/notes/w.py");
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/w.py ")`, 30000);
+    const paneBefore = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
     await openNotebook("/notes/plot.ipynb");
     ok(loaded("sagebrush-notebook.js"), "the notebook component is loaded when the notebook opens");
     await sleep(2500);
@@ -306,7 +353,8 @@ try {
     ok(workerCount() === 0 && !/OLD/.test(o), "opening runs nothing: no kernel worker, no output", { workers, o });
     ok((await shown()).join("|") === "x = 1|print('OLD')|Some *text*", "the cells are shown as written", await shown());
     ok(await ev(`!!document.querySelector('${PANE} .nb-notice') && /Runs here when you click Run/.test(document.querySelector('${PANE} .nb-notice').textContent)`), "the run notice is shown beside the notebook");
-    ok(await ev(`document.body.classList.contains('wide-artifact')`), "a notebook gets the wide pane");
+    const paneAfter = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
+    ok(paneBefore > 0 && Math.abs(paneAfter - paneBefore) < 1, "opening a notebook leaves the pane width as it was (A10)", { paneBefore, paneAfter });
     ok(await ev(`document.activeElement?.closest('#artifacts') === null`), "the artifact the agent opened didn't take the focus");
 
     // ---- written by the agent: the label, and when it goes
@@ -497,7 +545,7 @@ try {
     ok(at1280.chat >= 420 && at1100.chat >= 420, "beside a notebook the chat keeps at least 420 px (1280 and 1100 px windows)", { at1280, at1100 });
     ok(at800.pane === at800.vw, "at 800 px a notebook's pane covers the page", at800);
     await sleep(300);
-    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact.wide-artifact #artifacts { width: 589px !important; }' }))`);
+    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact #artifacts { width: 589px !important; }' }))`);
     await sleep(300);
     const narrow = await gutter();
     ok(narrow[0] <= 640 && narrow[1] === "44px", "the pane at 589 px in a 1280 px window gets the compact layout (@container sbnb-pane)", narrow);
@@ -614,6 +662,126 @@ try {
     const asked = requested.slice(before).some((u) => u.includes("sagebrush-latex.js"));
     if (LATEX) ok(got.editor && !got.text && asked, "a .tex artifact opens in the LaTeX editor (this build has it)", { got, asked });
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
+  }
+
+  // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
+  // (William, Oct 31: typing at the bottom moved the source and its cursor out of view; the source couldn't be
+  // scrolled to its top. The editor had no height in the pane: it took its content's, and each preview render moved
+  // the source.) A long paper, at 1400 and 1000 px: C-a the editor as tall as its box (±1 px); C-b while a character is
+  // typed at the end and the preview catches up (40 samples, 100 ms apart) the source's top doesn't move (0 px); C-c
+  // the caret stays inside the source's box and the viewport (±1 px; the caret's own place, from a hidden copy of the
+  // textarea up to the caret); C-d from the source's bottom (its precondition), wheel notches up over the source until it
+  // stops: at scrollTop 0, line 1 in view (±1 px), the highlight in step, in at most ceil(scrollTop/600) + 2 notches;
+  // C-e1 the pane's and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400).
+  // C-a..C-d again with the pane forced to 320, 330 and 460 px in a 1400 px window (a test-only style; PR 2's F2: a
+  // narrow pane wraps the source to about 37k px, past what a fixed 60 notches reach)
+  if (want("latex") && LATEX) {
+    const path = "/notes/layout.tex";
+    const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
+    const sec = (k) => `\\section{Part ${k}}\n` + Array.from({ length: 30 }, (_, j) => `% a comment line ${k}.${j}`).join("\n") + `\nSome words of part ${k}, with $a_${k}$.\n\n\\begin{align}\n  (a+b)^2 &= a^2 + 2ab + b^2, \\\\\n  \\int_0^1 x^n \\, dx &= \\frac{1}{n+1}.\n\\end{align}\n\n`;
+    const TEXT = "\\documentclass{article}\n\\usepackage{amsmath}\n" + pre + "\n\\begin{document}\n" + Array.from({ length: 25 }, (_, k) => sec(k)).join("") + "The last line.\n\\end{document}\n";
+    await call("workspace.create", { path, content: { text: TEXT } });
+    await artifactTurn(path);
+    await until(`!!document.querySelector('${PANE} .tex-embed .tex-src')`, 20000);
+    await sleep(3000);
+    const ED = `document.querySelector('${PANE} .tex-embed')`;
+    const caretJs = `(() => { const ta = ${ED}.querySelector('.tex-src'), tr = ta.getBoundingClientRect(), cs = getComputedStyle(ta), m = document.createElement('div');
+      for (const k of ['boxSizing','paddingTop','paddingRight','paddingBottom','paddingLeft','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','tabSize','overflowWrap','wordBreak']) m.style[k] = cs[k];
+      Object.assign(m.style, { position: 'absolute', visibility: 'hidden', top: '0', left: '-9999px', width: ta.clientWidth + 'px', boxSizing: 'border-box', whiteSpace: ta.wrap === 'off' ? 'pre' : 'pre-wrap' });
+      m.textContent = ta.value.slice(0, ta.selectionStart); const mk = document.createElement('span'); mk.textContent = '\\u200b'; m.append(mk); document.body.append(m);
+      const y = tr.top + ta.clientTop + mk.offsetTop - ta.scrollTop, h = mk.offsetHeight; m.remove();
+      return y >= Math.max(tr.top + ta.clientTop, 0) - 1 && y + h <= Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight) + 1; })()`;
+    const widths = `(() => ({ pane: Math.round(document.querySelector('#artifacts').getBoundingClientRect().width), chat: Math.round(document.querySelector('main').getBoundingClientRect().width) }))()`;
+    // (C-a..C-d: from the top, the editor's box; typing at the end; the wheel back up. `w` names the width)
+    const editorCases = async (w) => {
+      // (from the top: the source and every box around it scrolled to 0)
+      await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.scrollTop = 0; for (let e = ta.closest('.tex-embed').parentElement; e; e = e.parentElement) e.scrollTop = 0; return true; })()`);
+      await sleep(300);
+      // (its box, and within the pane's own visible box: without the layout the box grows with the editor too)
+      const ca = await ev(`(() => { const e = ${ED}, r = e.getBoundingClientRect(), b = e.closest('.file-body').getBoundingClientRect(), p = e.closest('.pane-body'), pr = p.getBoundingClientRect();
+        return { editor: Math.round(r.height), box: Math.round(b.height), bottom: Math.round(r.bottom), paneBottom: Math.round(pr.top + p.clientTop + p.clientHeight) }; })()`);
+      ok(Math.abs(ca.editor - ca.box) <= 1 && ca.bottom <= ca.paneBottom + 1, `A4/A8 C-a@${w}: the LaTeX editor as tall as its box and within its pane, not its content's height`, ca);
+      await ev(`(() => { const ta = ${ED}.querySelector('.tex-src'); ta.focus(); const e = ta.value.lastIndexOf("The last line."); ta.setSelectionRange(e, e); return true; })()`);
+      await send("Input.insertText", { text: "Z" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "z", code: "KeyZ" });
+      const tops = [], inside = [];
+      for (let k = 0; k < 40; k++) { tops.push(await ev(`Math.round(${ED}.querySelector('.tex-src').getBoundingClientRect().top)`)); inside.push(await ev(caretJs)); await sleep(100); }
+      ok(new Set(tops).size === 1, `A4/A8 C-b@${w}: typing at the end, the source stays where it is while the preview catches up`, { tops: [...new Set(tops)] });
+      ok(inside.every(Boolean), `A4/A8 C-c@${w}: typing at the end, the caret stays inside the source and in view`, { outside: inside.filter((x) => !x).length });
+      const at = await ev(`(() => { const r = ${ED}.querySelector('.tex-src').getBoundingClientRect(); return { x: Math.round(r.left + 40), y: Math.round(Math.min(Math.max(r.top, 0) + 60, innerHeight - 40)) }; })()`);
+      // (C-d: from near the source's bottom, as typing at the end left it (the caret-follow stops up to about 70 px short
+      //  of it at a narrow pane: c3); one notch at a time, each settled (a frame + 50 ms),
+      //  until scrollTop is 0, or 3 notches in a row change nothing, or 200 notches: the notches logged)
+      const scr = `(() => { const ta = ${ED}.querySelector('.tex-src'); return { st: ta.scrollTop, sh: ta.scrollHeight, ch: ta.clientHeight, hlst: ${ED}.querySelector('.tex-hl').scrollTop }; })()`;
+      const s0 = await ev(scr);
+      ok(s0.st >= s0.sh - s0.ch - s0.ch / 2 && s0.st > 1800, `precondition:C-d@${w}: before the wheel, the source is within half a screen of its bottom and over 1800 px down (so C-d starts away from the top)`, s0);
+      let notches = 0, still = 0, last = s0.st, stop = "bound reached";
+      while (notches < 200) {
+        await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -600 });
+        notches++;
+        const st = await ev(`new Promise((r) => requestAnimationFrame(() => setTimeout(() => r(${ED}.querySelector('.tex-src').scrollTop), 50)))`);
+        if (st === 0) { stop = "at the top"; break; }
+        still = st === last ? still + 1 : 0;
+        last = st;
+        if (still >= 3) { stop = "3 notches changed nothing"; break; }
+      }
+      await sleep(600);
+      const cd = await ev(`(() => { const e = ${ED}, ta = e.querySelector('.tex-src'), hl = e.querySelector('.tex-hl'), tr = ta.getBoundingClientRect(), r = hl.children[0].getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), from: Math.round(Math.max(tr.top + ta.clientTop, 0)), to: Math.round(Math.min(tr.top + ta.clientTop + ta.clientHeight, innerHeight)), st: ta.scrollTop, hlst: hl.scrollTop }; })()`);
+      const rec = { ...cd, st0: s0.st, hlst0: s0.hlst, notches, stop };
+      // (its parts: (a) the source at its top, (b) line 1 of the highlight in view, (c) the highlight in step with the
+      //  source, at the bottom before the wheel and at the top after it, (d) in at most ceil(st0 / 600) + 2 notches of 600 px; and the 200-notch bound not reached)
+      const parts = { a_top: cd.st === 0, b_line1: cd.top >= cd.from - 1 && cd.bottom <= cd.to + 1, c_inStep: s0.st === s0.hlst && cd.st === cd.hlst, d_notches: notches <= Math.ceil(s0.st / 600) + 2, bound: stop !== "bound reached" };
+      ok(Object.values(parts).every(Boolean), `A4/A8 C-d@${w}: a wheel up over the source brings its first line into view` + (parts.bound ? "" : " (bound reached)"), { parts, ...rec });
+    };
+    for (const w of [1400, 1000]) {
+      await size(w); await sleep(800);
+      // (C-e1: the widths without this layout's rules, then with them)
+      const off = await ev(`(() => { document.getElementById('tex-host-layout').disabled = true; return true; })()`).then(() => sleep(300)).then(() => ev(widths));
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      const on = await ev(widths);
+      ok(Math.abs(on.pane - off.pane) <= 1 && Math.abs(on.chat - off.chat) <= 1, `A4/A8 C-e1@${w}: the LaTeX layout leaves the pane's and the chat's widths as they are without it`, { on, off });
+      if (w === 1400) ok(on.chat >= 420, `A4/A8 C-e2@${w}: the chat at least 420 px wide`, on);
+      await editorCases(w);
+    }
+    // (the narrow panes: the pane's width forced by a test-only style, in a 1400 px window; removed after)
+    for (const pw of [320, 330, 460]) {
+      await size(1400); await sleep(400);
+      await ev(`(() => { const st = document.createElement('style'); st.id = 'sbtest-pane'; st.textContent = 'body.has-artifact:not(.fullscreen) #artifacts { width: ${pw}px !important; }'; document.head.append(st); return true; })()`);
+      await sleep(800);
+      try {
+        const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
+        ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
+        await editorCases(`pane${pw}`);
+      } finally {
+        await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);
+      }
+    }
+    // (C-f, 1400: a notebook open beside the .tex in the same chat. The pane keeps every artifact's host, the others
+    //  [hidden]. In this order: the notebook's tab shown, only its host has a box (C-f3) and its pane is as without
+    //  this layout's rules (C-f2); then the .tex's tab back, only its host has a box (C-f1))
+    {
+      await size(1400); await sleep(500);
+      const NB = "/notes/side.ipynb";
+      const hosts = `[...document.querySelectorAll('#artifacts .pane-host')].map((h) => { const r = h.getBoundingClientRect(); return { tex: !!h.querySelector('.tex-host'), box: Math.round(r.width) * Math.round(r.height) }; })`;
+      await call("workspace.create", { path: NB, content: docFor(NB, [{ code: "x = 1" }]), mode: "python" });
+      await openNotebook(NB);
+      await ev(`(${tabJs(NB)}.click(), true)`);
+      await until(`!!document.querySelector('${PANE} .nb-root')`, 10000); await sleep(500);
+      const shownNb = await ev(hosts);
+      ok(shownNb.filter((h) => h.box > 0).length === 1 && shownNb.find((h) => h.box > 0)?.tex === false, "A4/A8 C-f3@1400: with the notebook shown, only its host has a box (the .tex's stays hidden)", shownNb);
+      const nbBox = `(() => { const h = document.querySelector('${PANE}'), r = h.getBoundingClientRect(), b = h.closest('.pane-body'); return { w: Math.round(r.width), h: Math.round(r.height), range: b.scrollHeight - b.clientHeight }; })()`;
+      const nbOn = await ev(nbBox);
+      await ev(`(document.getElementById('tex-host-layout').disabled = true, true)`); await sleep(300);
+      const nbOff = await ev(nbBox);
+      await ev(`(document.getElementById('tex-host-layout').disabled = false, true)`); await sleep(300);
+      ok(Math.abs(nbOn.w - nbOff.w) <= 1 && Math.abs(nbOn.h - nbOff.h) <= 1 && Math.abs(nbOn.range - nbOff.range) <= 1, "A4/A8 C-f2@1400: with the notebook shown, its pane is as without the LaTeX layout", { on: nbOn, off: nbOff });
+      await ev(`(${tabJs(path)}.click(), true)`);
+      await until(`!!document.querySelector('${PANE} .tex-embed')`, 10000); await sleep(500);
+      const shown = await ev(hosts);
+      ok(shown.filter((h) => h.box > 0).length === 1 && shown.find((h) => h.box > 0)?.tex === true, "A4/A8 C-f1@1400: back on the .tex, only its host has a box", shown);
+    }
+    await size(1280); await sleep(300);
   }
 
   // ======================================================================== ART-C2: the mount, held at its module's load
@@ -1059,11 +1227,417 @@ try {
       if (fence0) await putRecord(fence0);
     }
   }
+
+  // ======================================================================== A12 step 1: an agent's edit by cell
+  // (cases E1-E20 of /scratch/sagebrush-reviews/agents-panel/a12-step1-r2.1 + r2.2; whole JSON read from the store)
+  if (want("edit")) {
+    // E17 (page, an old helper): no notebook.edit in its hello, so notebooks are written whole as before, and the page
+    // takes no notebook.edit from it
+    {
+      const P0 = "/notes/e17.ipynb";
+      await call("workspace.create", { path: P0, content: docFor(P0, [{ code: "1" }]), mode: "python" });
+      const w = await write(P0, [{ code: "2" }]).then(() => "written", (e) => e.code ?? e.message);
+      const r0 = await call("workspace.read", { path: P0 });
+      const ed = await call("notebook.edit", { conversation: conv, path: P0, ref: "x", base: r0.rev, set: [{ id: r0.content.json.cells[0].id, source: "3" }], was: {} }).then(() => "answered", (e) => e.message);
+      ok(w === "written" && /not a verb/.test(ed) && r0.ref === undefined, "E17: with an old helper (no notebook.edit) a notebook is written whole as today, no ref is read, and no edit is taken", { w, ed });
+    }
+    FEATURES = true;
+    await ev(`document.querySelector('#new')?.click()`);
+    await sleep(700);
+    await pair();
+    ok(notes.some((m) => m.method === "page.features" && m.params?.features?.includes("notebook.edit")), "with a helper that says notebook.edit, the page offers it once granted (page.features)");
+    await converse();
+    let turn = `t${++turnN}`;
+    event(turn, { type: "turn_started" });
+    // (a new running turn, after one finished: what the following cases' edits come from)
+    const newTurn = () => { turn = `t${++turnN}`; event(turn, { type: "turn_started" }); };
+    // a notebook with outputs: c0 and c1 code (each its output), c2 markdown; ids tagged so its record is found
+    let made = 0;
+    const refs = new Map();
+    // (form: the notebook's own form, cellForm, as a document it saved: so a save keeps it byte for byte)
+    const mk = async (cells0, { form = false } = {}) => {
+      const path = `/notes/edit-${++made}.ipynb`, tag = tagOf(path);
+      const cells0f = (cells0 ?? [
+        { code: "x = 1", outputs: [{ output_type: "stream", name: "stdout", text: "A\n" }], n: 1 },
+        { code: "print(2)", outputs: [{ output_type: "stream", name: "stdout", text: "B\n" }], n: 2 },
+        { type: "markdown", code: "# heading" },
+      ]).map((c, i) => ({ id: `${tag}${i}`, type: c.type ?? "code", ...c }));
+      const cells = form ? cells0f.map(cellForm) : cells0f;
+      await call("workspace.create", { path, content: { json: { mode: "python", cells } }, mode: "python" });
+      refs.set(path, await refOf(path)); // (found by its first cell now: an insert first changes that)
+      return { path, ids: cells.map((c) => c.id) };
+    };
+    const open = (path) => openNotebook(path, { finish: false, turn });
+    // (another tab's long readwrite on a store, holding the page's reads and writes of it for ms: "notebooks" in
+    // "sagebrush", or "entries" in "sagebrush-workspace", the index a stat reads)
+    const holdDb = (db, store, ms) => ev(`(() => { const r = indexedDB.open(${JSON.stringify(db)}); r.onsuccess = () => { const d = r.result, t = d.transaction(${JSON.stringify(store)}, "readwrite"), st = t.objectStore(${JSON.stringify(store)}), end = Date.now() + ${ms}; const spin = () => { if (Date.now() < end) st.get("__hold__").onsuccess = spin; }; spin(); t.oncomplete = () => d.close(); }; return true; })()`);
+    const readOf = async (path) => {
+      const r = await call("workspace.read", { path });
+      return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
+    };
+    // (each answered within 15 s: a control that leaves an edit waiting doesn't hold the run)
+    const edit = (path, r, e) => Promise.race([
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
+    ]);
+    const rec = (path) => record(refs.get(path));
+    const same = (a, b) => canonical(a) === canonical(b);
+    const byId = (cs) => Object.fromEntries(cs.map((c) => [c.id, c]));
+    const untilSaved = () => until(`/^Saved/.test(document.querySelector('${PANE} .saved')?.textContent ?? '')`, 10000);
+
+    // E1, E2, E3, E15: one set: every unnamed cell byte-identical, in order; the set cell's text changed, its output kept
+    // and marked as from before; exactly one new version (a document in the notebook's own form: a save keeps it byte
+    // for byte; one in another form is re-formed by any save, the person's too: E5)
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      const after = await rec(path);
+      const b = byId(before.cells), a = byId(after.cells);
+      ok(res.ok && same(a[ids[0]], b[ids[0]]) && same(a[ids[2]], b[ids[2]]) && after.cells.map((c) => c.id).join() === before.cells.map((c) => c.id).join() && same(a[ids[1]].outputs, b[ids[1]].outputs), "E1: an edit of one cell keeps every other cell byte-identical (whole JSON), in order, and that cell's outputs", { res, a, b });
+      ok(a[ids[1]].code === "print(22)", "E2: the set cell's stored source is the new text (source -> code)", a[ids[1]]);
+      ok(await ev(`/Changed by Claude/.test(${cellJs(1)}.querySelector('.nb-edit-mark')?.textContent ?? '')`), "E3: the changed cell is marked: its output is from before the change");
+    }
+    // E15: one new version for a whole edit, of two cells (so a save per change would make two)
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 3" }, { id: ids[1], source: "print(3)" }] });
+      await sleep(800); // (past the component's save debounce: no late second save)
+      const after = await rec(path);
+      ok(res.ok && after.rev === before.rev + 1 && after.cells[0].code === "x = 3" && after.cells[1].code === "print(3)", "E15: exactly one new version for an edit of two cells", { res, before: before.rev, after: after.rev });
+    }
+    // E4: insert after an id, insert first, remove by id
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const res = await edit(path, r, { insert: [{ source: "y = 2", after: ids[0] }, { source: "top", type: "markdown", after: null }], remove: [ids[2]] });
+      const cs = (await rec(path)).cells;
+      ok(res.ok && cs.length === 4 && cs[0].code === "top" && cs[0].type === "markdown" && cs[1].id === ids[0] && cs[2].code === "y = 2" && cs[3].id === ids[1] && !cs.some((c) => c.id === ids[2]), "E4: an insert after an id, an insert first and a remove by id, each as asked", { res, cs: cs.map((c) => [c.id, c.type, c.code]) });
+    }
+    // E5, E6: three-way: the person changed another cell (applied, the person's change kept), or a named one (refused)
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      await typeInto(0, " # mine");
+      await untilSaved();
+      const mid = await rec(path);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(5)" }] });
+      const a = byId((await rec(path)).cells), m = byId(mid.cells);
+      ok(res.ok && a[ids[1]].code === "print(5)" && same(a[ids[0]], m[ids[0]]) && /# mine/.test(a[ids[0]].code), "E5: the person changed another cell since the read: the edit applies, and the person's change is kept byte-identical", { res, c0: a[ids[0]]?.code });
+      const r2 = await readOf(path);
+      await typeInto(1, " # theirs");
+      await untilSaved();
+      const mid2 = await rec(path);
+      const res2 = await edit(path, r2, { set: [{ id: ids[1], source: "print(6)" }] });
+      ok(!res2.ok && res2.code === "conflict" && /changed since/.test(res2.msg) && same(await rec(path), mid2), "E6: the person changed a named cell since the read: the whole edit is refused, the file byte-identical", res2);
+    }
+    // E7b, E8, E9, E10, E11, E19, E20: refused whole, the file byte-identical (each its own notebook, so one case's
+    // outcome never reaches another's)
+    const fresh = async () => {
+      const n = await mk();
+      await open(n.path);
+      const r = await readOf(n.path), before = await rec(n.path);
+      return { ...n, r, before, unchanged: async () => same(await rec(n.path), before) };
+    };
+    {
+      const f = await fresh();
+      const res = await edit(f.path, { ...f.r, ref: "another" }, { set: [{ id: f.ids[1], source: "z" }] });
+      ok(!res.ok && (await f.unchanged()), "E7b: an edit naming another document (ref) is refused, the file byte-identical", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "z" }, { id: "nosuch", source: "w" }] });
+      await sleep(800); // (past the component's save debounce)
+      ok(!res.ok && (await f.unchanged()) && (await shown())[1] === "print(2)", "E8: a valid change then an unknown id: refused whole, the file byte-identical, nothing changed here", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { remove: ["nosuch"] });
+      ok(!res.ok && (await f.unchanged()), "E9: a remove of an unknown id is refused, not ignored", res);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], type: "markdown" }] });
+      await sleep(800);
+      const ok1 = !res.ok && (await f.unchanged());
+      const g = await fresh();
+      const res2 = await edit(g.path, g.r, { set: [{ id: g.ids[2], type: "code" }] });
+      ok(ok1 && res2.ok && ((await rec(g.path)).cells[2].type ?? "code") === "code", "E10: code -> markdown on a cell with outputs is refused (it would drop them); markdown -> code is applied", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "z", outputs: [] }] });
+      const res2 = await edit(f.path, f.r, { set: [{ id: f.ids[1], type: "raw" }] });
+      await sleep(800);
+      ok(!res.ok && !res2.ok && res.code === "invalid" && (await f.unchanged()), "E11: an extra field, or a type outside the grammar, is refused whole by the page", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "a" }, { id: f.ids[1], source: "b" }] });
+      const res2 = await edit(f.path, f.r, { set: [{ id: f.ids[1], source: "a" }], remove: [f.ids[1]] });
+      await sleep(800);
+      ok(!res.ok && !res2.ok && (await f.unchanged()), "E19: an id named twice (set twice, or set and removed) is refused", [res, res2]);
+    }
+    {
+      const f = await fresh();
+      const res = await edit(f.path, f.r, { insert: Array.from({ length: 201 }, (_, i) => ({ source: `${i}`, after: null })) });
+      await sleep(800);
+      const ok1 = !res.ok && (await f.unchanged());
+      const g = await fresh();
+      const res2 = await edit(g.path, g.r, { insert: Array.from({ length: 200 }, (_, i) => ({ source: `${i}`, after: null })) });
+      ok(ok1 && res2.ok && (await rec(g.path)).cells.length === 203, "E20: 201 changes are refused; 200 in one edit are applied", [res, res2.ok || res2]);
+    }
+    // E12, E13: no notebook is rewritten whole: create on a taken path, a raw write from this helper
+    {
+      const { path } = await mk();
+      const before = await rec(path);
+      const c = await call("workspace.create", { path, content: docFor(path, [{ code: "over" }]), mode: "python" }).then(() => "made", (e) => e.code);
+      ok(c === "exists" && same(await rec(path), before), "E12: create on a taken notebook path is refused, the file byte-identical", c);
+    }
+    {
+      // (its own notebook: what E12 does to its one never reaches this case)
+      const { path } = await mk();
+      const before = await rec(path);
+      const r = await call("workspace.read", { path });
+      const w = await call("workspace.write", { path, content: docFor(path, [{ code: "over" }]), base: r.rev }).then(() => "written", (e) => e.message);
+      ok(/workspace_edit_notebook/.test(w) && same(await rec(path), before), "E13: a whole write of a notebook from a notebook.edit helper is refused", w);
+    }
+    // E14: a notebook not open, the pane closed: the page opens it, then applies
+    {
+      const { path, ids } = await mk();
+      if (await ev(`!!document.querySelector('#close')`)) { await ev(`document.querySelector('#close').click()`); await until(`!document.body.classList.contains('has-artifact')`, 10000); }
+      const r = await readOf(path);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 7" }] });
+      ok(res.ok && (await ev(`!!${tabJs(path)}`)) && (await rec(path)).cells[0].code === "x = 7", "E14: a notebook that isn't open is opened (its tab), then edited", res);
+    }
+    // E18: applyEdits throwing after its first change (a test hook): put back, nothing saved, during or after
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await ev(`(window.__sbTestApplyEdits = (comp, e) => { comp.applyEdits({ set: e.set.slice(0, 1), insert: [], remove: [] }, { run: false }); throw new Error("injected"); }, true)`);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 8" }, { id: ids[1], source: "print(8)" }] });
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      const now = await rec(path);
+      await sleep(1500); // (past the component's save debounce: no late save)
+      const later = await rec(path);
+      ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
+    }
+    // E16a (read only under sync's journal), E16b (closing): refused, nothing changed
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await lockWorkspace();
+      await ev(`document.querySelector('#close').click()`);
+      await sleep(300);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 9" }] });
+      await ev(`window.__release()`);
+      await sleep(500);
+      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
+    }
+    {
+      const fence0 = await record(FENCE);
+      try {
+        const { path, ids } = await mk();
+        const r = await readOf(path);
+        const before = await rec(path);
+        await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 });
+        await open(path);
+        const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 10" }] });
+        ok(!res.ok && /read only/.test(res.msg) && same(await rec(path), before), "E16a: under sync's journal the pane is read only: an edit is refused, nothing changed", res);
+      } finally {
+        if (fence0) await putRecord(fence0);
+      }
+    }
+    // E21 (astra's C1): the authority lost while the edit waits, at each of its waits W1-W4 (r2.6), by the turn
+    // finishing (a) or the person revoking the grant (b); E21c: another turn started meanwhile. Refused, nothing changed.
+    const lose = async (how) => {
+      if (how === "a") event(turn, { type: "turn_finished", outcome: "completed" });
+      else if (how === "c") { event(turn, { type: "turn_finished", outcome: "completed" }); newTurn(); }
+      else await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Revoke')?.click()`);
+    };
+    // (after a revoke: paired again, a new chat and turn, as before this section's first case)
+    const regain = async (how) => {
+      if (how === "b") { await ev(`document.querySelector('#new')?.click()`); await sleep(700); await pair(); await converse(); turn = `t${++turnN}`; event(turn, { type: "turn_started" }); }
+      else if (how === "a") newTurn();
+    };
+    for (const w of ["W1", "W2", "W3", "W4"]) for (const how of w === "W3" ? ["a", "b", "c"] : ["a", "b"]) {
+      const { path, ids } = await mk();
+      if (w !== "W1") await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      if (w === "W1") await holdDb("sagebrush-workspace", "entries", 3000); // (its mount's stat waits)
+      if (w === "W2") { await lockWorkspace(); await typeInto(0, " # mine"); } // (its preliminary save waits for the lock)
+      if (w === "W3") await holdDb("sagebrush", "notebooks", 3000); // (the record read waits)
+      if (w === "W4") await holdDb("sagebrush-workspace", "entries", 3000); // (the document's stat waits; the record read doesn't)
+      const pending = edit(path, r, { set: [{ id: ids[1], source: "print('AGENT')" }] });
+      await sleep(700);
+      await lose(how);
+      if (w === "W2") await ev(`window.__release()`);
+      const res = await pending;
+      await sleep(900);
+      const after = await rec(path);
+      const agentNone = !after.cells.some((c) => /AGENT/.test(c.code ?? ""));
+      const name = how === "c" ? "E21c" : `E21-${w}${how}`;
+      const what = how === "a" ? "the turn finished" : how === "b" ? "the grant was revoked" : "another turn started";
+      ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
+      await regain(how === "c" ? "none" : how);
+    }
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
+    // resolves: never answered ok, nothing applied or written
+    const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      await refuseNone();
+      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await typeInto(0, " # p");
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(23)" }] });
+      await refuseNone();
+      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(await rec(path), before) && /# p/.test((await shown())[0]) && (await shown())[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
+    }
+    // E23, E23b (C3): the rollback keeps the revision it was saved at, so the person's next save conflicts with another
+    // tab's change and merges it: E23 with that change made after the rollback, E23b with it made during the apply
+    const otherTab = (ref, i, text) => ev(`(async () => { const r = await ${IDB}.get(${JSON.stringify(ref)}); r.cells[${i}].code = ${JSON.stringify(text)}; r.rev = (r.rev ?? 0) + 1; await ${IDB}.put(r); return r.rev; })()`);
+    for (const during of [false, true]) {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const ref = refs.get(path);
+      // (during: the hook writes the other tab's change, as that tab would, before it throws)
+      const inPage = `const x = await ${IDB}.get(${JSON.stringify(ref)}); x.cells[2].code = "# other tab"; x.rev = (x.rev ?? 0) + 1; await ${IDB}.put(x);`;
+      await ev(`(window.__sbTestApplyEdits = (comp, e) => { comp.applyEdits({ set: e.set.slice(0, 1), insert: [], remove: [] }, { run: false }); ${during ? `return (async () => { ${inPage} throw new Error("injected"); })();` : `throw new Error("injected");`} }, true)`);
+      const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 8" }, { id: ids[1], source: "print(8)" }] });
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      if (!during) await otherTab(ref, 2, "# other tab");
+      await typeInto(1, " # mine");
+      await sleep(2500); // (its save, its conflict with the other tab's write, the merge and its save)
+      const cs = (await rec(path)).cells;
+      ok(!res.ok && cs[2].code === "# other tab" && /# mine/.test(cs[1].code) && cs[0].code === "x = 1", `${during ? "E23b" : "E23"}: after a rollback, another tab's change (made ${during ? "during the apply" : "after it"}) and the person's next edit both survive`, { res, cs: cs.map((c) => c.code) });
+    }
+    // E25 (grader's D-1): an edit that changes nothing (each cell set to what it is) is answered ok, the record and its
+    // revision unchanged, and nothing saved
+    {
+      const { path, ids } = await mk(null, { form: true });
+      await open(path);
+      const r = await readOf(path);
+      const before = await rec(path);
+      await ev(`(() => { window.__sbSaves = 0; window.__sbTestStoreSave = () => { window.__sbSaves++; return null; }; return true; })()`);
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(2)" }] });
+      await sleep(900);
+      const saves = await ev(`window.__sbSaves`);
+      await refuseNone();
+      const after = await rec(path);
+      ok(res.ok && same(after, before) && after.rev === before.rev && saves === 0, "E25: an edit that changes nothing is answered ok; the record and its revision unchanged, nothing saved", { res, saves, rev: [before.rev, after.rev] });
+    }
+    // E24 (board's BA12-1): the person types in another artifact while the agent edits a notebook, first one not open,
+    // then one open in a hidden tab: the pane stays, the focus and the caret too, and the notebook's tab says it changed
+    {
+      // (in a chat of its own, so what an earlier case left open doesn't reach this one)
+      await converse();
+      newTurn();
+      const draft = "/notes/draft.txt";
+      await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
+      await artifactTurn(draft, { finish: false, turn });
+      await until(`!!document.querySelector('${PANE} textarea')`);
+      // (A, the draft's textarea, tagged when focused: E28's person moves A's caret in A itself, wherever the pane is)
+      const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.dataset.sbA = "1"; t.focus(); t.setSelectionRange(3, 3); return true; })()`);
+      const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      const results = [];
+      for (const hidden of [false, true]) {
+        const { path, ids } = await mk();
+        if (hidden) { await open(path); await ev(`${tabJs(draft)}.click()`); await sleep(300); }
+        await focusDraft();
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: ids[1], source: "print(24)" }] });
+        await sleep(300);
+        const st = await state();
+        const changedTab = await ev(`/changed/.test(${tabJs(path)}?.textContent ?? '')`);
+        const stored = (await rec(path)).cells[1].code === "print(24)";
+        results.push({ hidden, res: res.ok, st, changedTab, stored });
+      }
+      ok(results.every((x) => x.res && x.st.tab === draft && x.st.inDraft && x.st.caret === 3 && x.changedTab && x.stored), "E24: the agent's edit of a notebook (not open, then in a hidden tab) leaves the shown tab, the focus and the caret as they were; its tab says it changed; the edit is stored", results);
+      // E26-E28 (astra's A12-R2-F1, board's ruling): the person's own choice while the edit waits (W1: a notebook not
+      // open, its mount; W4: one in a hidden tab, the document's stat) is kept: E26 they move to input B and put its
+      // caret at 2, the edit ok; E27 the same, the edit refused (the turn finished); E28 they move A's caret 3 -> 5, ok
+      await ev(`(() => { const b = document.createElement('input'); b.id = 'sbtest-b'; b.value = 'bbbbbb'; document.body.append(b); return true; })()`);
+      const stateB = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, id: t?.id, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+      for (const [name, refuse] of [["E26", false], ["E27", true], ["E28", false]]) {
+        const got = [];
+        for (const w of ["W1", "W4"]) {
+          const { path, ids } = await mk();
+          // (the draft shown first, at W1 too: what an earlier case left in the pane doesn't decide this one)
+          if (w === "W4") await open(path);
+          await ev(`${tabJs(draft)}.click()`);
+          await sleep(300);
+          await focusDraft();
+          const r = await readOf(path);
+          await holdDb("sagebrush-workspace", "entries", 3000);
+          const pending = edit(path, r, { set: [{ id: ids[1], source: `print(${name})` }] });
+          await sleep(700);
+          if (name === "E28") await ev(`(() => { const t = document.querySelector('textarea[data-sb-a]'); t.focus(); t.setSelectionRange(5, 5); return true; })()`);
+          else await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
+          if (refuse) await lose("a");
+          const res = await pending;
+          await sleep(300);
+          got.push({ w, res: res.ok, st: await stateB() });
+          if (refuse) newTurn();
+        }
+        const want = (x) => x.res === !refuse && x.st.tab === draft && (name === "E28" ? x.st.inDraft && x.st.caret === 5 : x.st.id === "sbtest-b" && x.st.caret === 2);
+        ok(got.every(want), `${name}: the person ${name === "E28" ? "moves the caret in the draft (3 to 5)" : "moves to another input"} while the edit waits (at W1, at W4), the edit ${refuse ? "refused" : "ok"}: the focus and caret stay where they put them`, got);
+      }
+      // E29: the person, in input B (visible, outside the pane: what a wrong restore could put the focus back on),
+      // shows the notebook while the edit waits (W4) and clicks into its first cell (caret 1): the focus stays there
+      {
+        const { path, ids } = await mk();
+        await open(path);
+        await ev(`${tabJs(draft)}.click()`);
+        await sleep(300);
+        await ev(`(() => { const b = document.getElementById('sbtest-b'); b.focus(); b.setSelectionRange(2, 2); return true; })()`);
+        const r = await readOf(path);
+        await holdDb("sagebrush-workspace", "entries", 3000);
+        const pending = edit(path, r, { set: [{ id: ids[1], source: "print(29)" }] });
+        await sleep(700);
+        await ev(`${tabJs(path)}.click()`);
+        await sleep(300);
+        await ev(`(() => { const t = ${cellJs(0)}.querySelector('textarea'); t.focus(); t.setSelectionRange(1, 1); return true; })()`);
+        const res = await pending;
+        await sleep(300);
+        const st = await ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, inCell: !!t?.closest('#artifacts .cell') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
+        ok(res.ok && st.tab === path && st.inCell && st.caret === 1, "E29: the person, in another input, shows the notebook while the edit waits and clicks into a cell: the focus and caret stay there", { res, st });
+      }
+      await ev(`(document.getElementById('sbtest-b')?.remove(), true)`);
+    }
+    event(turn, { type: "turn_finished", outcome: "completed" });
+  }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
   console.log("the page said:\n  " + logs.slice(-20).join("\n  "));
   console.log("cells: " + JSON.stringify(await ev(`[...document.querySelectorAll('#artifacts .cell')].map((c) => [c.className, c.querySelector('.n')?.textContent, c.querySelector('.time')?.textContent, c.querySelector('.out')?.textContent.slice(0, 200)])`).catch((x) => String(x))));
   console.log("workers: " + JSON.stringify(workers));
+  console.log("failed or non-2xx: " + JSON.stringify(bad.slice(-20)));
 } finally {
   cdp.close();
   chrome.kill("SIGKILL");
@@ -1072,5 +1646,6 @@ try {
   await sleep(200);
   rmSync(profile, { recursive: true, force: true });
 }
+console.log("timing: " + stamps.join(", "));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

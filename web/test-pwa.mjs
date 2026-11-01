@@ -90,6 +90,8 @@ await ready();
 out = await runCode("import fractions\nprint(getattr(fractions, 'POISONED', 'clean'))\nfrom sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("clean") && out.includes("274177 * 67280421310721"), "a rewritten kept copy is not used: the library's own code and the engine run: " + JSON.stringify(out));
 ok(await ev(`(async () => { for (const name of await caches.keys()) { const c = await caches.open(name); const req = (await c.keys()).find((r) => r.url.includes("/lib/core.pre.")); if (req) return !(await (await c.match(req)).text()).includes("cache-poison-ran"); } return false; })()`), "...and the kept copy is the site's again");
+// (and framed only by this site: frame-ancestors 'self' and X-Frame-Options SAMEORIGIN, security audit G-1)
+ok(await ev(`fetch("/", { cache: "no-store" }).then((r) => r.status === 200 && /(^|; )frame-ancestors 'self'(;|$)/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-frame-options") === "SAMEORIGIN", () => false)`), "online, the page says only this site may frame it (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)");
 // offline: no server at all
 server.kill();
 await sleep(500);
@@ -151,9 +153,20 @@ async function openTab(path) {
   return r;
 }
 await send("Network.enable");
+// (security audit G-3b: offline, every file the service worker serves from its kept copies says nosniff, as the
+// network's response does (web/_headers' /*): each of the build's DIGESTS paths fetched from this page; those served
+// must all carry it, the page among them, and at least as many as the shell the service worker keeps at install)
+{
+  const sw = readFileSync(join(here, "dist", "sw.js"), "utf8"), m = /const DIGESTS = (\{.*?\});\n/s.exec(sw), sh = /const SHELL = (\[.*?\]);\n/s.exec(sw);
+  const paths = m ? Object.keys(JSON.parse(m[1])) : [], shell = sh ? JSON.parse(sh[1]).length : Infinity;
+  const got = await ev(`Promise.all(${JSON.stringify(paths)}.map((p) => fetch(p).then((r) => [p, r.status, r.headers.get("x-content-type-options")], () => [p, 0, null])))`);
+  const served = got.filter(([, st]) => st === 200), lacking = served.filter(([, , n]) => n !== "nosniff").map(([p]) => p);
+  ok(paths.length > 0 && served.some(([p]) => p === "./") && served.length >= shell && lacking.length === 0, `offline, every kept file the service worker serves says nosniff (G-3b): ${served.length} of ${paths.length} served (the shell: ${shell}), ${lacking.length} without it` + (lacking.length ? ": " + JSON.stringify(lacking.slice(0, 5)) : ""));
+}
 // (the same answer to a fetch from this page: the service worker's offline
 // fallback, deterministic: refused, or the build's own response)
 // (first: offline, the service worker answers for the page, as built)
+ok(await ev(`fetch("/").then((r) => r.status === 200 && /(^|; )frame-ancestors 'self'(;|$)/.test(r.headers.get("content-security-policy") ?? "") && r.headers.get("x-frame-options") === "SAMEORIGIN", () => false)`), "offline, the service worker's kept page says only this site may frame it (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)");
 ok(await ev(`fetch("/").then((r) => r.status === 200 && r.headers.get("cross-origin-opener-policy") === "same-origin" && !!r.headers.get("content-security-policy"), () => false)`), "offline, the service worker serves the kept page with the build's status and headers");
 const fetchPage = () => ev(`fetch("/", { cache: "no-store", redirect: "manual" }).then((r) => ({ status: r.status, type: r.type, coop: r.headers.get("cross-origin-opener-policy"), csp: !!r.headers.get("content-security-policy"), refresh: r.headers.get("refresh") }), (e) => ({ refused: String(e) }))`);
 const asBuilt = (r) => !!r.refused || (r.status === 200 && r.coop === "same-origin" && r.csp && !r.refresh);
