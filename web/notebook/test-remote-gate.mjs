@@ -33,8 +33,9 @@ const NS = "5eed".repeat(16);
 // scheduler's host over the kernel.  Pauses: the next analyze, seed, hash,
 // token or proof waits until released.
 // (`waves`: the page sends waves, as notebook.js does for a remote kernel: its host has executeWave)
-export async function page(codes, { scoping = false, keepBodies = true, waves = false } = {}) {
-  const fake = new FakeGateway();
+// (`gateway`: another gateway than the fake, e.g. the preview's, test-remote-preview-stop.mjs)
+export async function page(codes, { scoping = false, keepBodies = true, waves = false, net = null, timers = undefined, gateway = null } = {}) {
+  const fake = gateway ?? new FakeGateway();
   const fetches = [];
   const gates = { token: null, proof: null, analyze: null, seed: null, hash: null };
   const wait = async (k, ...a) => {
@@ -48,17 +49,19 @@ export async function page(codes, { scoping = false, keepBodies = true, waves = 
   let probe = null;
   let token = null;
   const client = await RemoteClient.create({
+    timers, // (a virtual clock for the recovery's deadlines: test-remote-recovery.mjs)
     base: fake.base,
     token: async () => { await wait("token"); return token; },
     fetch: (url, init) => {
       fetches.push({ path: new URL(String(url)).pathname, method: init?.method, body: keepBodies ? init?.body : undefined, probeRan: probe ? probe.ran : null });
-      return fake.fetch(url, init);
+      // (`net`: a test's network between the client and the gateway, e.g. test-remote-loss.mjs's seeded loss)
+      return net ? net(fake.fetch.bind(fake))(url, init) : fake.fetch(url, init);
     },
   });
   token = fake.issueToken(client.jkt);
   const proof = client.proof.bind(client);
   client.proof = async (...a) => { await wait("proof"); return proof(...a); };
-  const kernel = new RemoteKernel({ client, notebook: "fid", clientId: "c1", sleep: fast, requireGate: true });
+  const kernel = new RemoteKernel({ client, notebook: "fid", clientId: "c1", sleep: fast, requireGate: true, timers });
   await kernel.start();
   const shown = new Map(codes);
   const versions = new Map(codes.map(([id, t]) => [id, Object.freeze({ text: t })]));
@@ -93,7 +96,7 @@ export async function page(codes, { scoping = false, keepBodies = true, waves = 
   const sinkFor = (resolve) => ({
     start() {}, out() {}, display() {}, interact() {}, clear() {},
     done: (ms, info) => resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}) }),
-    stopped: () => resolve({ ok: false, ms: 0, stopped: true }),
+    stopped: (note) => resolve({ ok: false, ms: 0, stopped: true, ...(typeof note === "string" ? { note } : {}) }),
     skipped: (info) => resolve(info?.notRun ? { ok: false, ms: 0, notRun: info.notRun, note: info.note } : { ok: false, ms: 0, stopped: true }),
   });
   let alter = null; // (a test changes what the job is asked to run)

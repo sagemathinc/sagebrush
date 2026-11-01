@@ -372,6 +372,97 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   check("sha256-known", C.sha256("abc") === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
+// ---- the shared pass (plan shared-pass r2 + addenda): the same results as each anchor's own searches, bounded steps,
+// its dispatch rule, and a budget that runs out in it
+{
+  const BIG = 2 ** 40, Q = C.LIMITS.passQuota;
+  const drain = (g) => { for (;;) { const r = g.next(); if (r.done) return r.value; } };
+  // (stepped: the most work any one step did, allocations apart: each typed array is a step of its own, charged its
+  //  size, at most 2^16; every other step does at most the quota, plus what one unit's walk adds)
+  const stepped = (R, g) => { let w = R.work(), most = 0; for (;;) { const r = g.next(), d = R.work() - w; w = R.work(); if (r.done) return most; if (R.lastStep()?.kind === "alloc") { if (d > 1 << 16) return Infinity; } else most = Math.max(most, d); } };
+  const same = (u, as, budget = BIG) => { const A = C.resolver(u, budget), B = C.resolver(u, budget, { pass: true }); const most = stepped(B, B.prepare(as)); return { eq: as.every((a) => JSON.stringify(A.resolve(a)) === JSON.stringify(B.resolve(a))), most, stats: B.passStats() }; };
+  let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const alph = ["a", "b", "ab", "word ", "\n", " ", "x", "\u{1D4AA}", "é", "% c", "\\item ", "aaaa"];
+  let eqAll = true, n = 0;
+  for (let trial = 0; trial < 60; trial++) {
+    let t = ""; const L = 50 + Math.floor(rnd() * 2500); while (t.length < L) t += alph[Math.floor(rnd() * alph.length)];
+    const as = []; for (let k = 0; k < 1 + Math.floor(rnd() * 25); k++) { const s0 = Math.floor(rnd() * (t.length - 1)); try { as.push(C.makeAnchor(t, s0, Math.min(t.length, s0 + 1 + Math.floor(rnd() * (rnd() < 0.1 ? 900 : 40))))); } catch {} }
+    const p0 = Math.floor(rnd() * t.length), u = t.slice(0, p0) + "INS" + t.slice(p0);
+    const r = same(u, as); eqAll &&= r.eq; n += as.length;
+  }
+  check("shared pass: random texts and anchors, the same results as each anchor's own searches", eqAll, { anchors: n });
+  // (adversarial: many needles with a common 32-unit key and different tails, none found; a repetitive text at the
+  //  candidate cap; short needles; keys that split a surrogate pair)
+  const head = "abcdefghijklmnopqrstuvwxyz012345";
+  const adv = head.repeat(2000), advAs = [];
+  for (let k = 0; k < 400; k++) { const q = head + "tail" + k + "!".repeat(20); advAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
+  const a1 = same(adv, advAs);
+  check("shared pass: 400 needles sharing a 32-unit key, never found: same results, no step over the quota", a1.eq && a1.most <= Q + 64, { most: a1.most, Q });
+  // (more outputs at one scan position than the quota, none verified: 20,000 needles sharing a key that ends the text,
+  //  each longer than what's left of it, so only the output loop's own yield keeps a step within the quota)
+  const endKey = "z".repeat(100) + head, endAs = [];
+  for (let k = 0; k < 20000; k++) { const q = head + "T" + k + "!"; endAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
+  const a5 = same(endKey, endAs);
+  check("shared pass: 20,000 outputs at one scan position, none verified: same results, no step over the quota", endAs.length > Q && a5.eq && a5.most <= Q + 64, { most: a5.most, Q });
+  // (the budget running out while the scan stays at the root: no unit of the text starts a key; the work never over
+  //  the budget, every anchor unresolved and never searched again)
+  const rootT = "abc def ".repeat(5000), rootAs = [];
+  for (let k = 0; k < 20; k++) { const q = "Qneedle" + k; rootAs.push({ start: 0, end: q.length, textSha: "stale", quote: q, prefix: "", suffix: "" }); }
+  const R0 = C.resolver(rootT, BIG, { pass: true }); drain(R0.prepare(rootAs));
+  const rootBudget = R0.work() - 2 * rootT.length + rootT.length + 1;
+  const Rr = C.resolver(rootT, rootBudget, { pass: true }); drain(Rr.prepare(rootAs));
+  const wr = Rr.work(), rr = rootAs.map((a) => Rr.resolve(a));
+  check("shared pass: out of budget at the root of the scan: never over the budget, unresolved, no further search", wr <= rootBudget && rr.every((r) => r.status === "unresolved") && Rr.work() === wr, { work: wr, budget: rootBudget, statuses: [...new Set(rr.map((r) => r.status))] });
+  const rep = "word ".repeat(20000), repAs = []; for (let k = 0; k < 50; k++) repAs.push(C.makeAnchor(rep, k * 100, k * 100 + 10));
+  const a2 = same("x" + rep, repAs);
+  check("shared pass: a repetitive text past the candidate cap: same results", a2.eq);
+  const sh = "ab ba abc ".repeat(300), shAs = []; for (let k = 0; k < 40; k++) shAs.push(C.makeAnchor(sh, k * 7, k * 7 + 1 + (k % 6)));
+  check("shared pass: short needles (1 to 7 units): same results", same("y" + sh, shAs).eq);
+  const ast = ("\u{1D4AA}".repeat(15) + "x").repeat(80), astAs = []; for (let k = 0; k < 30; k++) astAs.push(C.makeAnchor(ast, k * 31, k * 31 + 40));
+  check("shared pass: keys splitting a surrogate pair: same results", same("z" + ast, astAs).eq);
+  // (the suffix stays each start's own window: 65 suffixes before the one prefix, then the prefix, a changed text and
+  //  the suffix: changed, as each anchor's own search finds it)
+  const S = "SUFX", P = "UNIQUEPREFIX";
+  const orig = (S + " ").repeat(65) + P + "old words" + S;
+  const anc = C.makeAnchor(orig, orig.indexOf("old words"), orig.indexOf("old words") + 9);
+  const edited = orig.replace("old words", "new text here");
+  const sx = same(edited, Array.from({ length: 20 }, () => anc));
+  check("shared pass: a suffix found after 65 earlier ones (its own window, not a global list): changed", sx.eq && C.resolver(edited, BIG, { pass: true }).resolve(anc).status !== undefined);
+  // (dispatch: n anchors not exact, with a quote or prefix; the pass when n x L >= 2 x budget: one below, at, one above)
+  const dt = "abcdefghij ".repeat(400), das = []; for (let k = 0; k < 10; k++) das.push(C.makeAnchor(dt, k * 50 + 3, k * 50 + 20));
+  const du = "x" + dt, nL = das.length * du.length;
+  const pathFor = (budget, as = das) => { const R = C.resolver(du, budget); drain(R.prepare(as)); return R.passStats()?.path; };
+  const exact = das.map((a) => C.makeAnchor(du, a.start + 1, a.end + 1));
+  check("shared pass dispatch: at n x L = 2 x budget the pass, one budget unit more the native path", pathFor(nL / 2) === "pass" && pathFor(nL / 2 + 1) === "native" && pathFor(nL / 2 - 1) === "pass", { nL });
+  check("shared pass dispatch: exact anchors and anchors with no quote or prefix don't count", pathFor(nL / 2, [...exact, ...exact]) === "native" && (() => { const R = C.resolver(du, nL / 2); drain(R.prepare([...das.slice(0, 5), ...das.slice(0, 5).map((a) => ({ ...a, quote: "", prefix: "" }))])); return R.passStats().n === 5; })());
+  // (the budget running out in the pass: anchors whose needles weren't finished are unresolved, never searched again,
+  //  and the budget is never exceeded)
+  const bt = "words and more words ".repeat(800), bas = []; for (let k = 0; k < 30; k++) bas.push(C.makeAnchor(bt, k * 300 + 5, k * 300 + 40));
+  const bu = "moved " + bt, budget = 2 * bu.length + bu.length / 2;
+  const R = C.resolver(bu, budget, { pass: true }); drain(R.prepare(bas));
+  const w0 = R.work(), rs = bas.map((a) => R.resolve(a));
+  check("shared pass: out of budget in the pass: unresolved, no further search, never over the budget", rs.every((r) => r.status === "unresolved") && R.work() === w0 && R.work() <= budget, { work: R.work(), budget, statuses: [...new Set(rs.map((r) => r.status))] });
+}
+
+// ---- the shared pass's vectors (comments-vectors.json): "semantic", made once from the core before the pass, and
+// "budget", the pass's finite-budget contract; the Python port checks the same
+{
+  const { readFileSync } = await import("node:fs");
+  const V = JSON.parse(readFileSync(new URL("./comments-vectors.json", import.meta.url), "utf8"));
+  const drain = (g) => { for (;;) { const r = g.next(); if (r.done) return r.value; } };
+  let sem = V.semantic?.length > 0, bud = V.budget?.length > 0;
+  for (const c of V.semantic ?? []) for (const force of [false, true]) {
+    const R = C.resolver(c.text, 2 ** 40, { pass: force }); drain(R.prepare(c.anchors));
+    if (JSON.stringify(c.anchors.map((a) => R.resolve(a))) !== JSON.stringify(c.out)) sem = false;
+  }
+  for (const c of V.budget ?? []) {
+    const R = C.resolver(c.text, c.budget, { pass: c.force }); drain(R.prepare(c.anchors));
+    if (JSON.stringify([c.anchors.map((a) => R.resolve(a)), R.work(), R.passStats()]) !== JSON.stringify([c.out, c.work, c.stats])) bud = false;
+  }
+  check("shared pass vectors: the semantic cases (the core before the pass), on both paths", sem, { n: V.semantic?.length });
+  check("shared pass vectors: the budget cases, results, work and path", bud, { n: V.budget?.length });
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the comments core, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);

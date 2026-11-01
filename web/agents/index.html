@@ -195,6 +195,16 @@
     body.has-artifact #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; }
   }
 </style>
+<!-- (a .tex artifact: the LaTeX editor fills its pane, so its source and preview scroll on their own; without a
+     height it took its content's, tens of thousands of px, the pane scrolled it whole, and every preview render moved
+     the source under the person typing. Only for the SHOWN host: the pane keeps every artifact's host, the others
+     [hidden], and a display here would show them. Its own element: test-agents-artifacts.mjs measures with it disabled) -->
+<style id="tex-host-layout">
+  #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
+  #artifacts .pane-body > .pane-host:not([hidden]):has(.tex-host) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #artifacts .file-body:has(> .tex-host) { flex: 1; min-height: 0; }
+  #artifacts .tex-host { height: 100%; }
+</style>
 </head>
 <body class="agents-host">
 <div class="banner" id="banner">Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). Chats are kept in this browser only.</div>

@@ -68,7 +68,7 @@ export class FakeGateway {
     this.prep = () => "ok";
     this.kernel = async (code) => ({ events: [{ type: "stream", name: "stdout", text: `ran: ${code}\n` }], outcome: { status: "ok", ms: 1 } });
     this.complete = (code) => ({ matches: [code + "_x"], prefix: code });
-    this.faults = { loseReply: 0, oversizeAck: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null, silentStream: false, redirectTo: null, noStopLatch: false };
+    this.faults = { loseReply: 0, oversizeAck: 0, breakStream: 0, bigEvent: false, staleNonceAlways: false, takeover: [], restartRefused: null, silentStream: false, redirectTo: null, noStopLatch: false, soleAlways: false };
     this.pauses = new Map();
     this.intercepts = [];
     this.raws = [];
@@ -232,7 +232,10 @@ export class FakeGateway {
 
   bind(body) {
     const binding = `b${this.nextBinding++}`;
-    this.bindings.set(binding, { binding, epoch: 1, incarnation: 1, restartVersion: 0, state: "ready", busy: null, client: body?.client, applied: [] });
+    // (history: each ownership change, epoch by epoch, for a takeover's continuity; applied: the control ops whose
+    // answers weren't delivered, each with the epoch it was applied in, kept until the owner's next request in a
+    // later epoch acknowledges them)
+    this.bindings.set(binding, { binding, epoch: 1, incarnation: 1, restartVersion: 0, state: "ready", busy: null, client: body?.client, applied: [], history: [{ epoch: 1, client: body?.client, kind: "bind" }] });
     return this.json(200, { binding, epoch: 1, incarnation: 1, state: "ready" });
   }
 
@@ -240,6 +243,7 @@ export class FakeGateway {
     if (b.state === "quarantined") return this.json(410, { error: "quarantined" });
     if (b.state === "fencing") return this.json(409, { error: "fencing" });
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
+    this.acknowledge(b, body);
     const digest = JSON.stringify(body.payload);
     const had = this.runs.get(body.request);
     if (had) {
@@ -435,6 +439,7 @@ export class FakeGateway {
 
   post_interrupt(b, body) {
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
+    this.acknowledge(b, body);
     const run = b.busy && this.runs.get(b.busy);
     // (a wave: the entry running now is interrupted, and the policy stops the rest; with none running (before the
     // first, between two, during its preparation or initial forget), the Stop is latched: no later entry runs)
@@ -450,6 +455,7 @@ export class FakeGateway {
   // then committed at the receiver (a new incarnation; delivered runs killed)
   post_restart(b, body) {
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
+    this.acknowledge(b, body);
     if (this.faults.restartRefused) return this.json(200, { outcome: { status: "refused", reason: this.faults.restartRefused } });
     b.restartVersion++;
     for (const run of this.runs.values()) {
@@ -464,13 +470,33 @@ export class FakeGateway {
     }
     // (an allocated user phase not yet delivered stays: the receiver refuses it when it arrives)
     if (b.busy && this.runs.get(b.busy)?.outcome) b.busy = null;
-    b.applied.push({ op_id: body.op_id, kind: "restart" });
+    b.applied.push({ op_id: body.op_id, kind: "restart", epoch: b.epoch });
     return this.json(200, { outcome: { status: "done", incarnation: b.incarnation } });
   }
 
   post_complete(b, body) {
     if (body.epoch !== b.epoch) return this.json(409, { error: "epoch" });
+    this.acknowledge(b, body);
     return this.json(200, this.complete(String(body.code)));
+  }
+
+  /** Tests: the binding is deleted and made again under the same id (a control op the page never heard of). */
+  deleteBinding(b) {
+    b.applied.push({ op_id: `op.delete.${b.epoch}`, kind: "delete", epoch: b.epoch });
+    b.history.push({ epoch: b.epoch, client: null, kind: "delete" });
+  }
+
+  // A request from the binding's owner in its current epoch acknowledges what a takeover reported before it.
+  acknowledge(b, body) {
+    if (body?.epoch === b.epoch) b.applied = b.applied.filter((a) => a.epoch >= b.epoch);
+  }
+
+  // Continuity (plan r8 F1): since from_epoch, was `client` the sole owner, every change this fence transaction's
+  // takeover, with no bind, rebind or delete?
+  sole(b, client, fence, from) {
+    const owner = [...b.history].reverse().find((h) => h.epoch <= from && h.kind !== "delete");
+    if (!owner || owner.client !== client) return false;
+    return b.history.every((h) => (h.epoch < from || (h.epoch === from && h === owner)) || (h.kind === "takeover" && h.client === client && h.fence === fence && h.epoch > from));
   }
 
   post_takeover(b, body) {
@@ -486,7 +512,15 @@ export class FakeGateway {
     b.state = "ready";
     b.epoch++;
     b.client = body?.client;
-    const applied = this.applied ?? b.applied.splice(0);
-    return this.json(200, { epoch: b.epoch, state: "ready", incarnation: b.incarnation, applied_before_takeover: applied, in_flight: this.inFlight ?? [] });
+    // (a page that sends its fence transaction and the epoch it held gets continuity, and the evidence since that
+    // epoch, retained: a retry of a lost answer sees at least as much; an older page, as before)
+    const from = Number.isInteger(body?.from_epoch) ? body.from_epoch : null, fence = typeof body?.fence === "string" && body.fence ? body.fence : null;
+    b.history.push({ epoch: b.epoch, client: body?.client, kind: "takeover", fence });
+    const evidence = from !== null && fence ? b.applied.filter((a) => a.epoch >= from) : b.applied.splice(0);
+    const applied = this.applied ?? evidence.map(({ op_id, kind }) => ({ op_id, kind }));
+    return this.json(200, {
+      epoch: b.epoch, state: "ready", incarnation: b.incarnation, applied_before_takeover: applied, in_flight: this.inFlight ?? [],
+      ...(from !== null && fence ? { continuity: { from_epoch: from, sole: this.faults.soleAlways || this.sole(b, body.client, fence, from) } } : {}),
+    });
   }
 }

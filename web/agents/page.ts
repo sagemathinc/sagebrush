@@ -14,10 +14,13 @@ import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
-import type { AgentPairing } from "../workspace/agent-pair";
+import { AgentError, type AgentPairing } from "../workspace/agent-pair";
+import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
+import { mountComposer, renderComposerState, stopLabel } from "./composer";
+import { applyPaneClasses } from "./layout";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -392,6 +395,8 @@ type Host = {
   copy: () => string;
   nb?: NotebookHost;
   running: boolean;
+  /** Changed by the agent while another tab was shown: its tab says so until it is shown. */
+  changed?: boolean;
   flush?: () => Promise<void>;
   /** Closing: saved, or kept as a copy, or (false) neither, and then it stays (ART-C2/C4 r3). */
   release?: () => Promise<Released>;
@@ -534,9 +539,7 @@ function renderArtifacts() {
   const thread = current();
   const pane = $("#artifacts");
   const a = thread.artifacts.find((x) => x.id === openArtifact);
-  document.body.classList.toggle("has-artifact", !!a);
-  document.body.classList.toggle("fullscreen", !!a && fullscreen);
-  document.body.classList.toggle("wide-artifact", !!a && a.kind === "notebook");
+  applyPaneClasses(a, fullscreen);
   if (paneThread !== thread.id) {
     void releaseHosts(paneThread);
     paneThread = thread.id;
@@ -548,14 +551,18 @@ function renderArtifacts() {
     renderBar(undefined);
     return;
   }
-  // the head: tabs (a running notebook's name says so), copy, full screen, close
-  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false]), a.id, fullscreen]);
+  // (the tab shown is seen: its "changed" mark goes)
+  const seenHost = hosts.get(hostKey(thread.id, a.id));
+  if (seenHost) seenHost.changed = false;
+  // the head: tabs (a running notebook's name says so, and one the agent changed behind another), copy, full screen, close
+  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false, hosts.get(hostKey(thread.id, x.id))?.changed ?? false]), a.id, fullscreen]);
   if (hk !== headKey) {
     headKey = hk;
     const tabs = thread.artifacts
       .map((x) => {
         const run = hosts.get(hostKey(thread.id, x.id))?.running;
-        return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}</button>`;
+        const changed = hosts.get(hostKey(thread.id, x.id))?.changed;
+        return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}${changed ? ` <span class="tab-changed">· changed</span>` : ""}</button>`;
       })
       .join("");
     // (the control that had the focus has it again after the head is redrawn: a tab, copy, full screen or close, BAC-6)
@@ -849,13 +856,7 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
 }
 
 function renderComposer() {
-  const running = isRunning(current());
-  $("#send").textContent = running ? "Send now" : "Send";
-  $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : "Send (Shift+Enter)";
-  $("#queue").hidden = !running;
-  $("#stop").hidden = !running;
-  const q = queues.get(current().id)?.length ?? 0;
-  $("#queued").textContent = q ? `${q} queued` : "";
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
 }
 
 let toastTimer = 0;
@@ -870,23 +871,7 @@ function toast(text: string, ms = 1500) {
 // ---------------------------------------------------------------------------
 // The page
 
-const editor = new BlockEditor("", {
-  render: md,
-  typeset: (el) => typeset(el),
-  placeholder: "Message Claude…  (Shift+Enter to send)",
-  onKey(e) {
-    if (e.key !== "Enter") return false;
-    if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), submit("sent"), true);
-    if (e.altKey) return (e.preventDefault(), submit("queued"), true);
-    if (e.ctrlKey || e.metaKey) return (e.preventDefault(), submit("note"), true);
-    return false;
-  },
-});
-$("#editor").append(editor.el);
-$("#send").onclick = () => submit("sent");
-$("#queue").onclick = () => submit("queued");
-$("#note").onclick = () => submit("note");
-$("#stop").onclick = () => interrupt(current());
+const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   const t = newThread(id(), "New chat");
@@ -929,9 +914,82 @@ try {
   workspace = null; // (no IndexedDB: the scripted demo still works)
 }
 $("#connect").hidden = !workspace;
+// An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
+// opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
+async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknown> {
+  const thread = state.threads.find((t) => t.id === e.conversation);
+  if (!thread) throw new AgentError("invalid", "no such chat on this page");
+  const turn = runningTurn(thread);
+  if (!turn) throw new AgentError("busy", "this chat has no turn running: an edit comes from a turn");
+  // (a chat that isn't the one shown has no pane here: its notebook isn't opened over the person's view)
+  if (thread.id !== current().id) throw new AgentError("busy", "the person is looking at another chat: this one's notebook isn't open, so it isn't changed (ask them to open this chat)");
+  // (the authority the host checks right before the change: the pairing's grant, and THIS turn still the running one)
+  const turnId = turn.turn_id;
+  const mayHere = () => may() && runningTurn(thread)?.turn_id === turnId;
+  // While the person is in another artifact, the pane stays on it and so does their focus (BAC-6, board's BA12-1): the
+  // notebook's host is mounted hidden (hosts are live while hidden) and its tab says it changed. The pane switches
+  // to it only when it is closed or already shows it.
+  const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== e.path;
+  const keep = openArtifact;
+  // (where the person is: put back only if the edit took it, to the page or into the notebook's host while that is
+  // hidden (board's ruling); a focus or caret the person chose meanwhile, in the notebook too if they showed it, is
+  // theirs, A12-R2-F1)
+  const focused = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  const range = focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement ? [focused.selectionStart, focused.selectionEnd] : null;
+  const inHidden = (n: Node) => {
+    const el = hosts.get(hostKey(thread.id, e.path))?.el;
+    return !!el?.hidden && el.contains(n);
+  };
+  const putFocusBack = () => {
+    const now = document.activeElement;
+    if (!shownOther || !focused?.isConnected || now === focused) return;
+    if (now && now !== document.body && !inHidden(now)) return;
+    focused.focus({ preventScroll: true });
+    if (range && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) && range[0] !== null) focused.setSelectionRange(range[0], range[1]);
+  };
+  if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) emitTo(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
+  const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
+  if (!art) throw new AgentError("busy", "the notebook couldn't be opened here");
+  if (shownOther) {
+    openArtifact = keep;
+    hiddenHost(thread.id, art);
+  } else {
+    openArtifact = e.path;
+    renderArtifacts();
+  }
+  const h = hosts.get(hostKey(thread.id, e.path));
+  if (!h?.nb) throw new AgentError("busy", "the notebook couldn't be opened here");
+  putFocusBack();
+  await h.nb.ready;
+  putFocusBack();
+  const r = await h.nb.edit(e, mayHere);
+  putFocusBack();
+  if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
+  if (shownHost() !== h) {
+    h.changed = true;
+    headKey = "";
+    if (current().id === thread.id) renderArtifacts();
+  }
+  return { ok: true, inserted: r.inserted };
+}
+/** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
+function hiddenHost(threadId: string, a: Artifact) {
+  const key = hostKey(threadId, a.id);
+  if (hosts.has(key)) return;
+  const { body } = paneShell($("#artifacts"));
+  const el = document.createElement("div");
+  el.className = "pane-host";
+  el.hidden = true;
+  body.append(el);
+  const h: Host = { key, el, body: "", copy: () => a.body, running: false, bar: null };
+  hosts.set(key, h);
+  mountHost(threadId, a, h);
+}
+
 if (workspace) {
   mountAgentPairing(workspace, {
     button: $("#connect"),
+    notebookEdit: editNotebook,
     onPairing(p) {
       pairing = p;
       p.onNotification(onAgent);
@@ -965,7 +1023,7 @@ function renderHeader() {
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
-  $("#stop").textContent = `Stop ${agentName()}`;
+  $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
