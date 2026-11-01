@@ -487,9 +487,10 @@ try {
       const done = new Promise((r) => { c.onTrace = (m) => { if (m.method === "Tracing.dataCollected") events.push(...m.params.value); if (m.method === "Tracing.tracingComplete") r(); }; });
       await c.send("Tracing.start", { traceConfig: { includedCategories: ["devtools.timeline", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "toplevel"] }, transferMode: "ReportEvents" });
       const m1 = await c.ev(`performance.mark("sb-sync-1").startTime`);
-      const clickT = await c.ev(`performance.now()`);
-      // (r2e §R2: the heap at the click, every trace run: K-nogc is judged by it)
+      // (r2e §R2: the heap at the click, every trace run: K-nogc is judged by it; sampled BEFORE clickT, so r6's clickT ->
+      // click shape is as frozen (daybreak2))
       { const h = (await c.send("Runtime.getHeapUsage")).usedSize; console.log(`TRACE-HEAP-AT-CLICK ${TRACE_RUN} ${Number.isFinite(h) ? (h / MiB).toFixed(1) : "BAD"}`); }
+      const clickT = await c.ev(`performance.now()`);
       await c.ev(btnAt("/^Export all current files/", "__t0"));
       await c.until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 600000);
       await c.ev(btnAt("/^Save…$/", "__t1"));
