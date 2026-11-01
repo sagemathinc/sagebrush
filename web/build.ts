@@ -171,9 +171,9 @@ const analyzeResult = await Bun.build(<any>{
 });
 // A shared collection's page, /s/<id> (web/share-client/view.ts; design/sharing.md)
 const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
-// the Share dialog's analysis worker (web/share-client/deps-worker.ts, share-ux-plan r2 §3): its own
+// the Share dialog's analysis worker (web/deps/deps-worker.ts, share-ux-plan r2 §3): its own
 // chunk with the parser, loaded only when Share opens
-const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "deps-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-deps.js", target: "browser", format: "iife", minify: true });
+const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "deps", "deps-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-deps.js", target: "browser", format: "iife", minify: true });
 // The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1.  Wherever
 // the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
