@@ -113,7 +113,7 @@ test("W2 PYJS_SANDBOX_ALLOW's tokens are the flags, and its env names the adapte
   assert.match(b.entry, /makeEnvAdapter\(process\.env, Deno\.errors\.NotCapable, \["SBX_PROBE"\]\)/);
 });
 test("W3 an env grant spelled another way is refused by the build (the flags and the list can't disagree)", () => {
-  for (const allow of ["-E", "-E=SBX_PROBE", "--allow-envX", "--allow-env=SBX-PROBE"]) {
+  for (const allow of ["-E", "-E=SBX_PROBE", "-RE=SBX_PROBE", "-ER", "--allow-envX", "--allow-env=SBX-PROBE"]) {
     const cap = mkdtempSync(join(TMP, "cap-"));
     const r = buildCli(allow, cap);
     assert.notEqual(r.status, 0, allow);
@@ -212,5 +212,6 @@ test("U4 parseAllow: each granted name once; the full and deny forms grant no li
   const { parseAllow } = await SB();
   assert.deepEqual(parseAllow("--allow-env=A,B --allow-env=B,C --allow-read=."), { flags: ["--allow-env=A,B", "--allow-env=B,C", "--allow-read=."], granted: ["A", "B", "C"] });
   for (const f of ["--allow-env", "-A", "--allow-all", "--deny-env", "--deny-env=S", ""]) assert.deepEqual(parseAllow(f).granted, [], f);
-  for (const f of ["-E", "-E=A", "--allow-env-x", "--allow-env=A,,B", "--allow-env=1A"]) assert.throws(() => parseAllow(f), /PYJS_SANDBOX_ALLOW/, f);
+  for (const f of ["-E", "-E=A", "-RE=A", "-ER", "-NRE", "--allow-env-x", "--allow-env=A,,B", "--allow-env=1A"]) assert.throws(() => parseAllow(f), /PYJS_SANDBOX_ALLOW/, f);
+  for (const f of ["-R", "-RW", "-N=example.com", "--allow-read=."]) assert.deepEqual(parseAllow(f), { flags: [f], granted: [] }, `${f}: not an env grant, passed through`);
 });
