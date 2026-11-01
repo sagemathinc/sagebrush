@@ -211,8 +211,8 @@ async function attach(B, targetId, { clock = false } = {}) {
 }
 
 /** Open the page with a pairing link, connect, and allow everything for `how` (chosen explicitly, never by default:
- * "page", "3600000" or "86400000"); `remember` ticks "Remember this agent". */
-async function pair(P, A, site, how = "page", remember = false) {
+ * "page", "3600000" or "86400000"); `remember` ticks "Remember this agent"; `write` false grants read only. */
+async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
   await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`);
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
@@ -224,6 +224,8 @@ async function pair(P, A, site, how = "page", remember = false) {
     const sel = d.querySelector('select'); sel.value = ${JSON.stringify(how)}; sel.dispatchEvent(new Event('change'));
     const rem = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Remember')).querySelector('input');
     if (${remember}) { rem.checked = true; rem.dispatchEvent(new Event('change')); }
+    const w = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('may change files')).querySelector('input');
+    w.checked = ${write};
     const label = sel.selectedOptions[0].textContent;
     [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click();
     return label;
@@ -269,11 +271,12 @@ export async function runA14({ site, ok, want = () => true }) {
   // A14-1 (+ A14-10): a reload reconnects silently with the same grant and the same conversation; no secret leaks
   await run("A14-1", async (B, A) => {
     const P = await B.tab();
-    const label = await pair(P, A, site, "page");
+    // (read only, though the agent asks to write: a restore that widened the grant would show, K14-e)
+    const label = await pair(P, A, site, "page", false, false);
     const conv = await chat(P, A);
     const g1 = A.grants().at(-1);
     const pre = await recordFacts(P);
-    ok(label === "while this page is open (a reload keeps it)" && pre && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
+    ok(label === "while this page is open (a reload keeps it)" && g1?.write === false && pre && pre.write === false && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
     const inputs = B.inputs, grants = A.grants().length, resume = A.resume.get(conv);
     const seen = { demo: false, other: [], status: new Set() };
     const t0 = Date.now();
@@ -631,6 +634,9 @@ export async function runA14({ site, ok, want = () => true }) {
     const label = await pair(P, A, site, "3600000");
     await chat(P, A);
     const g1 = A.grants().at(-1), grants = A.grants().length;
+    // (the clock 1 s on before the reload, set without advancing it: a restore that recomputed the expiry from now
+    // would differ from the original, K14-s; the record stays fresh)
+    await P.ev(`(localStorage.setItem('__sbclock', '${T + 1000}'), true)`);
     await P.reload();
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`, 10000);
     const g2 = A.grants().at(-1);
