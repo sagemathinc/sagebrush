@@ -5217,6 +5217,21 @@ def _lin_in(f, v):
     return f.coefficient(v, 1), f.coefficient(v, 0)
 
 
+def _known_real(c):
+    """Whether c is a number known to be real (never a guess)."""
+    c = _expr(c)
+    return c.is_numeric() and str(c.imag()) == "0"
+
+
+def _known_nonneg(c):
+    """Whether c is known to be real and >= 0: a real number, or positive
+    under assume()."""
+    c = _expr(c)
+    if _known_real(c):
+        return bool(c >= 0)
+    return _sign_of(c) == 1
+
+
 def _prod(fs):
     r = _expr(1)
     for f in fs:
@@ -5248,7 +5263,7 @@ def _laplace(f, t, s):
                     return e**ab[1] * _laplace(rest, t, s).subs({S: S - ab[0]})
             if kop[0] == "fun:heaviside":
                 ab = _lin_in(k.operands()[0], t)
-                if ab is not None and str(ab[0]) == "1" and (-ab[1]).is_numeric() and -ab[1] >= 0:
+                if ab is not None and str(ab[0]) == "1" and _known_nonneg(-ab[1]):
                     c = -ab[1]
                     return e**(-c * S) * _laplace(rest.subs({T: T + c}), t, s)
         for i, k in enumerate(g):
@@ -5294,8 +5309,8 @@ def _laplace(f, t, s):
                 return S / (S**2 - a**2)
             if name == "exp":
                 return e**b / (S - a)
-            if name == "heaviside" and str(a) == "1" and (-b).is_numeric():
-                return e**(b * S) / S if -b >= 0 else 1 / S
+            if name == "heaviside" and str(a) == "1" and (_known_real(-b) or _known_nonneg(-b)):
+                return e**(b * S) / S if _known_nonneg(-b) else 1 / S
     raise NotImplementedError("laplace: no transform known for %s" % f)
 
 
@@ -5405,6 +5420,9 @@ def _inverse_laplace(F, s, t):
             H = H.expand()
             g = sum((_ilt_term(Q, s, t) for Q in (H.operands() if H._op()[0] == "add" else [H])), _expr(0))
         if str(delay) != "0":
+            # the delay rule holds for a known real delay c >= 0 only
+            if not _known_nonneg(delay):
+                raise NotImplementedError("inverse_laplace: delay %s not known to be nonnegative" % delay)
             g = heaviside(T - delay) * g.subs({T: T - delay})
         r = r + g
     return r
