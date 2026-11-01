@@ -6,7 +6,7 @@
 //                                       it), and offers to reconnect a remembered agent.
 
 import { pairLink } from "./pair-link";
-import { AgentPairing, type GrantStore, type Kept } from "./agent-pair";
+import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
 
@@ -58,15 +58,36 @@ export function floatingButton(): HTMLElement {
   return b;
 }
 
-/** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> } = {}) {
+/** Where a reload restore stands (A14): the page shows it (its bar, its status line, its composer). `canReconnect`: a
+ * record this page may still use with one click (the same scope and identity, not expired). */
+export type RestoreState =
+  | { kind: "restoring" }
+  | { kind: "restored" }
+  | { kind: "not-restored"; why: "unreachable" | "refused" | "expired" | "discarded" | "not-a-reload"; canReconnect: boolean };
+/** A restore attempt's bound (A14 r3.1 §3: one attempt, 10 s, no retry loop). */
+export const RESTORE_MS = 10_000;
+
+/** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
+ * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
+ * page's own bar (no dialog). */
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void }; quietLoss?: boolean } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
   const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
+  // (the reload record's storage: this tab's sessionStorage, or none if it can't be reached)
+  let storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = null;
+  if (o.reload) { try { storage = o.reload.storage === undefined ? sessionStorage : o.reload.storage; } catch { storage = null; } }
+  let leaving = false;
+  if (o.reload) {
+    addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now()); });
+    addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
+  }
   const make = (port: number, how: { code: string } | { session: string; pairingId: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+  // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
+  let kept: ReloadRecord | null = null;
 
   function dialog(title: string, body: (box: HTMLElement, close: () => void) => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));
@@ -105,7 +126,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       all.onchange = () => { for (const c of boxes) c.disabled = all.checked; };
       const write = h("input", { type: "checkbox" });
       write.checked = !!hello.wants.write;
-      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
+      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
       const remember = h("input", { type: "checkbox" });
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
       how.onchange = syncRemember;
@@ -136,6 +157,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       if (p.state === "paired" || p.state === "granted") was = true;
       // (a refused hello is said in the Connect dialog itself; this is for a pairing that was connected)
       if (was && p.state === "closed" && p.closeReason && !/^revoked by the person$|^not allowed$/.test(p.closeReason)) {
+        if (p.lostRecord) kept = p.lostRecord;
+        if (o.quietLoss) return;
         dialog("The agent is disconnected", (box, close) => {
           box.append(h("div", { className: "err", textContent: p.closeReason }));
           const okb = h("button", { className: "primary", textContent: "OK" });
@@ -220,9 +243,57 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     }
   }
 
+  /** One attempt with a reload record (A14): its session, at most RESTORE_MS; the agent must be the one it was, the
+   * grant not expired; then exactly its grant again (never wider, never longer), which writes the record anew. */
+  async function restoreWith(r: ReloadRecord): Promise<"ok" | "unreachable" | "refused" | "expired"> {
+    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return "expired";
+    let p: AgentPairing;
+    try { p = make(r.port, { session: r.session, pairingId: r.pairingId }); } catch { return "unreachable"; }
+    watch(p);
+    const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
+    const got = await Promise.race([p.paired().then(() => "paired" as const, (e) => (e instanceof AgentError && e.code !== "refused" ? "refused" : /^the agent refused/.test(p.closeReason) ? "refused" : "unreachable") as "refused" | "unreachable"), timeout]);
+    if (got === "timeout") { void p.revoke("no answer from the agent"); return "unreachable"; }
+    if (got !== "paired") return got;
+    const h = p.hello!;
+    if (h.agent.name !== r.agent.name || h.agent.client !== r.agent.client) { void p.revoke("another agent answered this page's session"); return "refused"; }
+    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return "expired"; }
+    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return "refused"; }
+    showBar();
+    return "ok";
+  }
+  const say = (s: RestoreState) => o.reload?.onState?.(s);
+  /** The page's [Reconnect] (A14): the record kept in memory, once. A refusal or an expiry ends it; an unreachable
+   * agent leaves it for the next click. */
+  async function reconnectKept(): Promise<RestoreState> {
+    const r = kept ?? pairing?.lostRecord ?? null;
+    if (!r) { const s: RestoreState = { kind: "not-restored", why: "discarded", canReconnect: false }; say(s); return s; }
+    say({ kind: "restoring" });
+    const res = await restoreWith(r);
+    if (res === "ok") { kept = null; const s: RestoreState = { kind: "restored" }; say(s); return s; }
+    if (res !== "unreachable") kept = null; else kept = r;
+    const s: RestoreState = { kind: "not-restored", why: res, canReconnect: res === "unreachable" };
+    say(s);
+    return s;
+  }
+  /** On load (A14 §1): the reload record, taken (consumed before anything), decided; with no record, the remembered
+   * grants as before. After a record that wasn't restored, a remembered grant is not tried silently. */
+  async function restoreOnLoad() {
+    const r = o.reload ? takeReloadRecord(storage) : null;
+    if (!r) return void reconnect();
+    const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
+    const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
+    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
+    if (d === "click") { kept = r; return say({ kind: "not-restored", why: "not-a-reload", canReconnect: true }); }
+    say({ kind: "restoring" });
+    const res = await restoreWith(r);
+    if (res === "ok") return say({ kind: "restored" });
+    kept = res === "unreachable" ? r : null;
+    say({ kind: "not-restored", why: res, canReconnect: res === "unreachable" });
+  }
+
   if (o.button) o.button.addEventListener("click", () => connect());
   const link = pairLink();
   if (link) connect(link.code, link.port);
-  else void reconnect();
-  return { connect, get pairing() { return pairing; } };
+  else void restoreOnLoad();
+  return { connect, reconnectKept, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
 }
