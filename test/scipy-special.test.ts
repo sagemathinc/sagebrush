@@ -72,7 +72,8 @@ for f in [lambda: sc.zeta(2, -1000000.5), lambda: sc.zeta(2, -1e12 - 0.5), lambd
 
 test("scipy.special: a call's total variable work beyond the bound is refused before any element", () => {
   // (daybreak3's R5 ruling: 10**6 terms over the whole broadcast, admitted
-  // before any element begins; _work_started counts the elements begun, and
+  // before any element begins, non-finite entries charging nothing but
+  // never letting a finite one through; _work_started counts the elements begun, and
   // each refusal must leave it unchanged and come within 0.5 s)
   const out = py(`
 import time
@@ -80,7 +81,10 @@ import numpy as np
 import scipy.special as sc
 for f in [lambda: sc.eval_legendre(np.array([500000, 500001]), 0.3), lambda: sc.zeta(2, np.array([-499999.5, -500000.5])),
           lambda: sc.eval_legendre(np.full(20, 1e6), 0.3), lambda: sc.zeta(2, np.full(20, -999999.5)),
-          lambda: sc.eval_legendre(np.array([-500001, -500002]), 0.3)]:
+          lambda: sc.eval_legendre(np.array([-500001, -500002]), 0.3),
+          lambda: sc.zeta(2, np.array([-np.inf, -1000000.5, np.nan])),
+          lambda: sc.eval_legendre(np.array([np.inf, 500000.0, np.nan, 500001.0]), 0.3),
+          lambda: sc.zeta(np.array([np.inf, 2.0, 2.0]), np.array([-0.5, -499999.5, -500000.5]))]:
     c = getattr(sc, "_work_started", [0])
     s = c[0]
     t = time.time()
@@ -96,6 +100,9 @@ for f in [lambda: sc.eval_legendre(np.array([500000, 500001]), 0.3), lambda: sc.
     "NotImplementedError scipy.special.eval_legendre: the call's variable work, 20000000 terms over its 20 values, is above 1000000 0 True",
     "NotImplementedError scipy.special.zeta: the call's variable work, 20000000 terms over its 20 values, is above 1000000 0 True",
     "NotImplementedError scipy.special.eval_legendre: the call's variable work, 1000001 terms over its 2 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.zeta(2.0, -1000000.5): a q at or below -1000000 (its head sum's work) 0 True",
+    "NotImplementedError scipy.special.eval_legendre: the call's variable work, 1000001 terms over its 4 values, is above 1000000 0 True",
+    "NotImplementedError scipy.special.zeta: the call's variable work, 1000001 terms over its 3 values, is above 1000000 0 True",
     "",
   ].join("\n"));
 });

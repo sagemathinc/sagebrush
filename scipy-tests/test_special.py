@@ -165,6 +165,18 @@ out("eval_legendre(-1000001, 0.3) bound", lambda: sc.eval_legendre(-1000001, 0.3
 out("eval_legendre([500000, 500000], 0.3) aggregate", lambda: sc.eval_legendre(np.array([500000, 500000]), 0.3))
 out("eval_legendre([-500001, -500000], 0.3) aggregate", lambda: sc.eval_legendre(np.array([-500001, -500000]), 0.3))
 out("zeta(2, [-499999.5, -499999.5]) aggregate", lambda: sc.zeta(2, np.array([-499999.5, -499999.5])))
+# (non-finite arguments declare no work and keep their guarded values, alone
+# and mixed into a broadcast)
+for x, q in [(2, -math.inf), (math.inf, -0.5), (math.inf, -math.inf), (math.nan, -0.5), (2, math.nan), (-math.inf, -0.5), (2, math.inf),
+             (math.inf, 0.5), (3, -math.inf), (2.5, -math.inf), (math.inf, 0.25), (math.inf, 1.0), (math.inf, 2.5),
+             (math.inf, 1e8), (math.inf, 2e8), (math.inf, math.inf), (math.inf, -2.0)]:
+    out("zeta(%r, %r) nonfinite" % (x, q), lambda: sc.zeta(x, q))
+out("zeta(2, [-inf, -0.5, nan]) nonfinite", lambda: sc.zeta(2, np.array([-math.inf, -0.5, math.nan])))
+out("zeta([inf, 2], [-0.5, -1.5]) nonfinite", lambda: sc.zeta(np.array([math.inf, 2.0]), np.array([-0.5, -1.5])))
+for n, x in [(math.inf, 0.3), (-math.inf, 0.3), (math.nan, 0.3), (5, math.inf), (5, math.nan),
+             (math.inf, 1.0), (-math.inf, 1.0), (math.inf, -1.0), (math.inf, 0.0), (math.inf, math.inf)]:
+    out("eval_legendre(%r, %r) nonfinite" % (n, x), lambda: sc.eval_legendre(n, x))
+out("eval_legendre([inf, nan, 5], 0.3) nonfinite", lambda: sc.eval_legendre(np.array([math.inf, math.nan, 5.0]), 0.3))
 
 for args in [(0, 2, 0.5), (1, 2, 0.3), (2, 3, -0.7), (1, 2, 1.5), (-1, 3, 0.2), (3, 2, 0.4), (0, 0, 0.9)]:
     out("lpmv%r" % (args,), lambda: sc.lpmv(*args))
