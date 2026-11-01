@@ -541,5 +541,6 @@ function contentOf(n: Entry, v: SyncEntry): boolean {
   n.rev = (n.rev ?? 0) + 1;
   n.remote = true;
   n.fetch = v.sha256;
+  delete n.fetchFailed;
   return true;
 }
