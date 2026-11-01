@@ -592,17 +592,24 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     return;
   }
   if (isSeq(x)) {
+    if (protocolSeq(x)) throw PROTOCOL;
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
     if (items.length === 0 && shape.length === depth + 1) return;
     return;
   }
-  if (shape.length > depth) inhomogeneous(depth);
+  if (shape.length > depth) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
+    inhomogeneous(depth, shape);
+  }
   shape.leaf ??= depth;
-  if (shape.leaf !== depth) inhomogeneous(Math.min(depth, shape.leaf));
+  if (shape.leaf !== depth) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
+    inhomogeneous(Math.min(depth, shape.leaf), shape);
+  }
   if (shapeOnly && typeof x !== "string") {
-    if (pyScalar(x) === null && hasArrayProtocol(x)) throw PROTOCOL;
+    if (hasArrayProtocol(x)) throw PROTOCOL;
     return;
   }
   const w = pyScalar(x);
@@ -624,12 +631,15 @@ function promoteScalar(a: DType, b: DType, w: Weak): DType {
 }
 function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.length === d) shape.push(n);
-  else if (shape.length < d) inhomogeneous(d);
-  else if (shape[d] !== n) inhomogeneous(d);
-  if (shape.leaf !== undefined && d >= shape.leaf) inhomogeneous(shape.leaf);
+  else if (shape.length < d) inhomogeneous(d, shape);
+  else if (shape[d] !== n) inhomogeneous(d, shape);
+  if (shape.leaf !== undefined && d >= shape.leaf) inhomogeneous(shape.leaf, shape);
 }
-function inhomogeneous(d: number): never {
-  return raise(T.ValueError, `setting an array element with a sequence. The requested array has an inhomogeneous shape after ${d} dimensions. The detected shape was ${"(...)"} + inhomogeneous part.`);
+// (NumPy's message names the shape detected up to the inhomogeneous axis)
+function inhomogeneous(d: number, shape: number[]): never {
+  const dims = shape.slice(0, d);
+  const shown = `(${dims.join(", ")}${dims.length === 1 ? "," : ""})`;
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array has an inhomogeneous shape after ${d} dimensions. The detected shape was ${shown} + inhomogeneous part.`);
 }
 
 // Write nested Python data into a fresh array.
@@ -770,37 +780,53 @@ export function asarray(x: any, dtype: any = null): NDArray {
   if (x instanceof NDArray) return dtype === null || toDtype(dtype) === x.dt ? x : copy(x, toDtype(dtype));
   return fromPy(x, dtype);
 }
-// NumPy's __array__ protocol: an object whose type defines __array__ stands
-// for the array that returns, at the top or nested in lists.  discover meets
-// such an object only where it would otherwise refuse it (a leaf that isn't
-// a number), so plain data pays nothing: then the data is rebuilt with each
-// such object replaced by its array, once, and discovered again.
+// NumPy's __array__ protocol: an object with an __array__ method stands for
+// the array that returns, at the top or nested in lists.  discover meets such
+// an object only where it would otherwise refuse it (a leaf that isn't a
+// number, or one whose shape doesn't fit), so plain data pays nothing: then
+// the data is rebuilt with each such object replaced by its array, once, and
+// discovered again.  The method is NumPy's call: no arguments, the requested
+// dtype positionally, and np.array's copy= keyword at the top only.  A list
+// or tuple subclass with __array__ is its array, not a sequence, as NumPy's.
 const PROTOCOL = { mark: "array protocol" };
+const NO_ATTR = { mark: "no __array__" };
+function arrayMethod(x: any): any {
+  if (x === null || typeof x !== "object" || x instanceof NDArray || x instanceof DType || pyScalar(x) !== null) return undefined;
+  const m = Obj.getattr(x, "__array__", NO_ATTR);
+  return m === NO_ATTR ? undefined : m;
+}
 function hasArrayProtocol(x: any): boolean {
-  return x !== null && typeof x === "object" && !(x instanceof NDArray) && Obj.lookupType(Obj.typeOf(x), "__array__") !== undefined;
+  return arrayMethod(x) !== undefined;
+}
+// (a list or tuple whose type isn't exactly list or tuple, with __array__)
+function protocolSeq(x: any): boolean {
+  const t = Obj.typeOf(x);
+  return t !== T.list && t !== T.tuple && hasArrayProtocol(x);
 }
 // (an operand that makes a binary operation's result an array: an ndarray, a
 // list, or an object with the protocol)
 function isArrayLike(v: any): boolean {
   return v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
 }
-function viaArrayProtocol(x: any): any {
-  if (isSeq(x)) {
+function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
+  if (isSeq(x) && !protocolSeq(x)) {
     const items = seqItems(x);
     let changed = false;
     const out = items.map((it) => {
-      const v = viaArrayProtocol(it);
+      const v = viaArrayProtocol(it, dt, undefined);
       if (v !== it) changed = true;
       return v;
     });
     return changed ? out : x;
   }
-  if (!hasArrayProtocol(x) || pyScalar(x) !== null) return x;
-  const r = Obj.callObj(Obj.lookupType(Obj.typeOf(x), "__array__"), [x]);
+  const m = arrayMethod(x);
+  if (m === undefined) return x;
+  const pos = dt === null ? [] : [dt];
+  const r = copyKw === undefined ? Obj.callObj(m, pos) : Obj.callKw(m, pos, ["copy"], [copyKw]);
   if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
   return r;
 }
-export function fromPy(x: any, dtype: any = null): NDArray {
+export function fromPy(x: any, dtype: any = null, copyKw: any = undefined): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
   const given = dtype !== null && dtype !== undefined;
@@ -808,7 +834,7 @@ export function fromPy(x: any, dtype: any = null): NDArray {
     discover(x, 0, shape, kinds, given);
   } catch (e) {
     if (e !== PROTOCOL) throw e;
-    const y = viaArrayProtocol(x);
+    const y = viaArrayProtocol(x, given ? toDtype(dtype) : null, copyKw);
     if (y instanceof NDArray) return asarray(y, dtype);
     return fromPy(y, dtype);
   }
@@ -3221,7 +3247,7 @@ newBuiltinModule("_numpy", (m) => {
 
   // creation
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
-    let r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype);
+    let r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag);
     while (r.ndim < Number(ndmin)) r = reshape(r, [1, ...r.shape]);
     return r;
   });
