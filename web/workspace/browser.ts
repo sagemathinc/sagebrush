@@ -43,6 +43,10 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
+   * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
+   * moved). None: the page can't, and an open document isn't moved to Trash. */
+  trashing?(e: Entry): Promise<string | void>;
 };
 
 const OPEN_KEY = "sagebrush-files-open";
@@ -101,8 +105,13 @@ const STYLE = `
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
-.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.sbfiles .ftoastslot { position: relative; flex: none; height: 38px; }
+.sbfiles .ftoast { position: absolute; z-index: 2; left: 10px; right: 10px; top: 4px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.sbfiles .ftoast span { flex: 1; min-width: 0; }
 .sbfiles .ftoast button { background: none; border: 0; color: #b9e0a5; font: inherit; cursor: pointer; text-decoration: underline; }
+.sbfiles .ftoast.err { background: #fdecea; color: #7a2418; border: 1px solid #e0897c; font-weight: 500; }
+.sbfiles .ftoast.err::before { content: "⚠"; font-weight: 700; }
+.sbfiles .ftoast.err button { color: #7a2418; }
 .sbfmenu { position: fixed; z-index: 1000; background: #fff; border: 1px solid #d4d4cb; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 5px; min-width: 190px; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2421; }
 .sbfmenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 5px; font: inherit; cursor: pointer; color: inherit; }
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
@@ -168,7 +177,7 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean; error?: boolean } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -190,27 +199,31 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
-  const toastEl = h("div");
+  // (the toast's slot keeps its room whether or not there is a toast, so a message never moves the list; a longer one
+  // lies over the list's top rather than pushing it down)
+  const toastEl = h("div", { className: "ftoastslot" });
   const tree = h("div", { className: "ftree", role: "tree" });
   const foot = h("div", { className: "ffoot" });
   const picker = h("input", { type: "file", multiple: true, hidden: true });
   root.append(head, search, toastEl, tree, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void, sticky = false) => {
-    toast = { text, undo, sticky };
+  const say = (text: string, undo?: () => void, sticky = false, error = false) => {
+    toast = { text, undo, sticky, error };
     renderToast();
     if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
-    const t = h("div", { className: "ftoast", role: "status" }, h("span", { textContent: toast.text }));
+    // (an error looks like one, and is announced as one: role=alert, kept until closed)
+    const t = h("div", { className: toast.error ? "ftoast err" : "ftoast", role: toast.error ? "alert" : "status" }, h("span", { textContent: toast.text }));
     if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
     if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
     toastEl.append(t);
   };
-  const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
+  const sayError = (text: string) => say(text, undefined, true, true);
+  const fail = (e: unknown) => sayError(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
   // (sync, step 5: the foot's line, "Synced · 2 min ago", … (role=status); hidden with sync off and nothing to say)
   const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
@@ -459,7 +472,14 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   async function toTrash(e: Entry) {
     const cur = host.current?.(), at = cur ? await w.pathOf(cur.kind, cur.ref).catch(() => undefined) : undefined;
-    if (at && within(at, e.path)) return say("That's open here: open something else first");
+    // (the document open here, or a folder it is in: the page saves it and opens another in its place first, so what
+    // goes to Trash is what was last seen, and Undo opens it again; a page that can't, says so and moves nothing)
+    const wasOpen = cur && at && within(at, e.path) ? cur : null;
+    if (wasOpen) {
+      if (!host.trashing) return sayError(`Not moved to Trash: "${nameOf(at!)}" is open on this page, and this page can't close it`);
+      const no = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
+      if (no) return sayError(`Not moved to Trash: ${no}`);
+    }
     // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
     if (e.kind === "file" && e.unmoved) {
       if (!confirm(`"${nameOf(e.path)}" is too large to put in Trash (${fmtSize(e.size ?? 0)}, kept by an older version of Sagebrush). Delete it for good? To keep it, Download it first.`)) return;
@@ -472,7 +492,14 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     try {
       const t = await w.remove(e.path);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
-      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).catch(fail).then(refresh));
+      // (and the document that was open, open again where Undo put it back)
+      const reopen = async () => {
+        if (!wasOpen) return;
+        const p = await w.pathOf(wasOpen.kind, wasOpen.ref);
+        const back = p ? await w.stat(p) : undefined;
+        if (back) host.open(back, "here");
+      };
+      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).then(reopen).catch(fail).then(refresh));
     } catch (err) { fail(err); }
     refresh();
   }

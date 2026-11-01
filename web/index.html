@@ -3410,6 +3410,24 @@ function wsShowFiles(on) {
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
       renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
+      // (the open notebook, or a folder it is in, going to Trash from the file browser (B1): saved first, all of it,
+      // so Trash keeps what was last seen; then another opened in its place (the most recent one not going with it,
+      // else a new Untitled), and checked to be open. Open for editing in another tab of this browser: refused, said)
+      async trashing(e) {
+        if (current.kind !== "browser") return;
+        if (!pageMay().trash) return "this notebook is open for editing in another tab of this browser: close it there, then try again";
+        const id = current.id, inside = (p) => p === e.path || p.startsWith(e.path.replace(/\/$/, "") + "/");
+        try {
+          saveNow();
+          await nb.saved();
+          await nb.mayLeave();
+        } catch (err) { return `its changes aren't saved yet (${err?.message ?? err}), so it stays open`; }
+        const others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id && !inside(x.path));
+        try { if (others.length) await openId(others[0].ref); else await openNew("Untitled", nb.mode, [""], true); }
+        catch (err) { return String(err?.message ?? err); }
+        wsTrackCurrent();
+        if (current.kind === "browser" && current.id === id) return "it is still open";
+      },
       // (and saved by the notebook, after what it has yet to save: CORR-0B0-2)
       retitles: (e) => e.kind === "notebook" && e.ref === current.id && current.kind === "browser",
       renamed(e) {
