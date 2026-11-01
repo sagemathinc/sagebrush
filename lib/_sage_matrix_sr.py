@@ -5,13 +5,14 @@ the top of a module), so that Sage mode can load it lazily.  Sage's own
 algorithms, with no extra simplification:
 
 - echelon form: classical Gauss-Jordan.  The pivot is the first entry at or
-  below the current row that is nonzero (bool(e), the symbolic zero test,
+  below the current row that is nonzero (_nonzero: bool(e), then for an
+  entry with a sine, cosine, sinh or cosh one trig_reduce proof stage;
   undecided counting as nonzero); its row is scaled by the pivot's inverse
   from the pivot column, swapped into place, and every other row with a
   nonzero entry in that column has -entry times the pivot row added;
 - inverse: the echelon form of [A | I], ZeroDivisionError unless its left
   half is the identity;
-- det: Sage's expansions for n <= 3 (along the first row); larger symbolic
+- det: Sage's expansions for n <= 3 (along the first column); larger symbolic
   determinants (Sage's division-free algorithm) are not available yet.
 
 Every workspace and output is admitted before it is built: _shape (the
@@ -19,6 +20,8 @@ entry cap) for each, then _sr_guard (at most _SR_MAX rows and columns in a
 symbolic workspace), and the total size of the working expressions is
 checked after each row operation (_SR_MAX_CHARS).
 """
+
+import re
 
 from _sage_matrix import Matrix, FreeModule_, Vector, _shape, _sa, _norm, _bounded_list
 
@@ -58,9 +61,46 @@ def _sr(x):
     return _sa().SR(x)
 
 
+# a sine, cosine, sinh or cosh call in an entry's engine encoding (the tree's
+# own tags, length-prefixed: F3:sin1{...}; arcsin is F6:arcsin, a symbol
+# named sin is s3:sin): the functions the zero-proof stage can rewrite
+_WAVE = re.compile(r"F(?:3:sin|3:cos|4:sinh|4:cosh)\d+\{")
+
+
+def _reduce_trig(x):
+    """The zero-proof stage's one call (the engine's reduce_trig, which
+    refuses floating arguments and products past 1024 projected terms with
+    NotImplementedError, before expanding)."""
+    return x.trig_reduce()
+
+
 def _nonzero(e):
-    """Sage's pivot test: bool(e) (the symbolic zero test)."""
-    return bool(e)
+    """Sage's pivot test: nonzero unless it can be shown zero (Sage's shows
+    sin(2*x) - 2*sin(x)*cos(x) zero: the counted oracle, out6 lines 93-94).
+
+    First bool(e), the engine's zero test.  For an entry with a sine,
+    cosine, sinh or cosh (detected structurally), one optional proof stage:
+    bool(e.trig_reduce()), whose input is admitted and whose result is
+    checked against _SR_MAX_CHARS before it is tested.  The entry itself is
+    never changed.  Only the reducer's NotImplementedError is undecided,
+    so nonzero (as in Sage); any other error propagates.  This bounds the
+    size of what is tested, not the time or peak memory of the reduction
+    (the engine's own guards bound that)."""
+    if not bool(e):
+        return False
+    s = getattr(e, "_s", None)
+    if s is None or not _WAVE.search(s):
+        return True
+    if len(s) > _SR_MAX_CHARS:
+        raise _memory_error("An entry to reduce", len(s), _SR_MAX_CHARS)
+    try:
+        r = _reduce_trig(e)
+    except NotImplementedError:
+        return True
+    n = _chars(r)
+    if n > _SR_MAX_CHARS:
+        raise _memory_error("A reduced entry", n, _SR_MAX_CHARS)
+    return bool(r)
 
 
 def _identity_rows(n):
@@ -154,9 +194,10 @@ def det(a):
         return _sr(g[0][0])
     if n == 2:
         return _sr(g[0][0] * g[1][1] - g[1][0] * g[0][1])
+    # (along the first column, Sage's formula: the counted oracle, out6 line 10)
     return _sr(g[0][0] * (g[1][1] * g[2][2] - g[1][2] * g[2][1])
-               - g[0][1] * (g[1][0] * g[2][2] - g[1][2] * g[2][0])
-               + g[0][2] * (g[1][0] * g[2][1] - g[1][1] * g[2][0]))
+               - g[1][0] * (g[0][1] * g[2][2] - g[0][2] * g[2][1])
+               + g[2][0] * (g[0][1] * g[1][2] - g[0][2] * g[1][1]))
 
 
 def inverse(a):
@@ -264,7 +305,8 @@ def adjugate(a):
     if n >= 5:
         raise NotImplementedError("the adjugate of a symbolic matrix larger than 4 x 4 is not available in sagebrush yet")
     if n == 0:
-        return _sr_matrix([], 0)
+        # (Sage's adjugate of a 0 x 0 matrix is a TypeError: the counted oracle, out6 line 82)
+        raise TypeError("the adjugate of a 0 x 0 matrix is not defined")
     if n == 1:
         return _sr_matrix([[1]], 1)
     g = a._rows
