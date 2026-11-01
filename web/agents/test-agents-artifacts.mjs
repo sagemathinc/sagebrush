@@ -756,7 +756,8 @@ try {
         if (dr.height === 0 || dr.top < vr.top || dr.bottom > vr.bottom) continue;
         // (the numbers: KaTeX's .katex-tag, an .eqn-num per numbered line (align), or a \\tag's .tag)
         const tags = [...d.querySelectorAll('.katex-tag .eqn-num, .katex-tag, .tag')].map((t) => t.getBoundingClientRect()).filter((t) => t.width > 0);
-        const bases = [...d.querySelectorAll('.katex-html > .base')].map((x) => x.getBoundingClientRect()).filter((x) => x.width > 0);
+        // (the formula: every leaf element of the rendering outside the number, with a box)
+        const bases = [...d.querySelectorAll('.katex-html *')].filter((x) => x.childElementCount === 0 && !x.closest('.katex-tag, .tag')).map((x) => x.getBoundingClientRect()).filter((x) => x.width > 0 && x.height > 0);
         const over = tags.some((t) => bases.some((x) => x.right > t.left + 0.5 && x.left < t.right - 0.5 && x.bottom > t.top && x.top < t.bottom));
         seen.push({ scroll: d.scrollWidth - d.clientWidth, tags: tags.length, bases: bases.length, over });
       }
