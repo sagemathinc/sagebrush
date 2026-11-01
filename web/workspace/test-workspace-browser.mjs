@@ -605,6 +605,14 @@ try {
   {
     const b1 = await ev(`${W}.create("/B1 open.ipynb", { content: { name: "B1 open", mode: "python", cells: [{ id: "b", code: "first" }] } }).then((e) => sagebrush.open(e.ref)).then(() => 1)`);
     check(b1 === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
+    // (its save failing: not moved, and said so; it stays open, where it was)
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 open.ipynb"))})`);
+    await ev(`(() => { const nb = sagebrush.notebook; window.__b1saved = nb.saved; nb.saved = () => Promise.reject(new Error("disk full")); return 1; })()`);
+    await click(rowSel("/B1 open.ipynb") + " .more");
+    await menu("Move to Trash");
+    const refused = await until(`/its changes aren't saved yet \\(disk full\\), so it stays open/.test(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "")`);
+    const rs = await ev(`(async () => { const nb = sagebrush.notebook; nb.saved = window.__b1saved; return { shown: document.querySelector("#nbname").value, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }; })()`);
+    check(refused && rs.shown === "B1 open" && rs.here && !rs.trash, "B1: its save failing, it isn't moved: said as an error, and it stays open: " + JSON.stringify(rs));
     await ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "edited, not saved yet"); return 1; })()`);
     await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 open.ipynb"))})`);
     const top0 = await ev(`document.querySelector("#wssidebar .ftree").getBoundingClientRect().top`);
@@ -716,7 +724,8 @@ try {
 } finally {
   chrome.kill();
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  // (a profile Chrome is still writing as it exits: tried again, and never allowed to lose the checks' report)
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.error("note: the profile wasn't removed: " + (e?.code ?? e)); }
 }
 if (fails.length) {
   console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));
