@@ -901,17 +901,16 @@ function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
       // other error, the method's own, propagates)
       if (!Obj.isinstance(e, T.TypeError) || !String(Obj.callObj(T.str, [e])).includes(COPY_KW_ERROR)) throw e;
       Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [LEGACY_COPY_WARNING, T.DeprecationWarning, 2]);
+      // (a method that can't promise no copy: copy=False is refused before
+      // the method runs again, as NumPy's)
+      if (copyKw === false) raise(T.ValueError, NO_COPY_ERROR);
       r = Obj.callObj(m, pos);
       legacy = true;
     }
   }
   if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
-  if (legacy) {
-    // (a method that can't promise a copy: np.array's copy=True copies its
-    // result, and copy=False is refused, as NumPy's)
-    if (copyKw === false) raise(T.ValueError, NO_COPY_ERROR);
-    if (O.truth(copyKw)) r = copy(r);
-  }
+  // (a method that can't promise a copy: np.array's copy=True copies its result)
+  if (legacy && O.truth(copyKw)) r = copy(r);
   return r;
 }
 const COPY_KW_ERROR = "__array__() got an unexpected keyword argument 'copy'";
