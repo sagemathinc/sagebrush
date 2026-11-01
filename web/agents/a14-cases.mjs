@@ -155,8 +155,8 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   if (clock) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: CLOCK });
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
-  P.ev = async (expression) => {
-    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+  P.ev = async (expression, o = {}) => {
+    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o });
     if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r?.result?.value;
   };
@@ -191,7 +191,15 @@ async function attach(B, targetId, { clock = false } = {}) {
     await P.ev(`document.querySelector('#editor textarea').focus()`);
     await P.send("Input.insertText", { text });
   };
-  P.composer = () => P.ev(`document.querySelector('#editor textarea')?.value ?? document.querySelector('#editor').textContent`);
+  P.composer = () => P.ev(`(document.querySelector('#editor textarea')?.value ?? document.querySelector('#editor').textContent).trim()`);
+  /** The fixed clock set to t before the page's first load: on a plain document of the site (not the app), so the app
+   * loads once, on that clock. */
+  P.clock = async (site, t) => {
+    const before = P.loads;
+    await P.send("Page.navigate", { url: `${site}/__a14-clock` });
+    for (const t0 = Date.now(); P.loads === before && Date.now() - t0 < 10000; ) await sleep(50);
+    await P.ev(`(localStorage.setItem('__sbclock', ${JSON.stringify(String(t))}), true)`);
+  };
   P.sendState = () => P.ev(`(() => { const s = document.querySelector('#send'), h = document.querySelector('#send-hint'); return { ariaDisabled: s.getAttribute('aria-disabled'), disabled: s.disabled, describedby: s.getAttribute('aria-describedby'), hint: h.hidden ? null : h.textContent, active: document.activeElement === s ? 'send' : document.activeElement === document.body ? 'body' : document.activeElement?.closest('#editor') ? 'editor' : document.activeElement?.closest('#conn-bar') ? document.activeElement.id : (document.activeElement?.tagName ?? null) }; })()`);
   P.bar = () => P.ev(`(() => { const b = document.querySelector('#conn-bar'), a = document.querySelector('#conn-act'); return { on: b.classList.contains('on'), alert: document.querySelector('#conn-alert').textContent, status: document.querySelector('#conn-status').textContent, act: a.hidden ? null : a.textContent, actDisabled: a.disabled, actAriaDisabled: a.getAttribute('aria-disabled'), actBusy: a.getAttribute('aria-busy'), x: !document.querySelector('#conn-x').hidden }; })()`);
   P.users = () => P.ev(`document.querySelectorAll('.user').length`);
@@ -345,7 +353,8 @@ export async function runA14({ site, ok, want = () => true }) {
     const pre = await recordFacts(P);
     const before = new Set((await B.send("Target.getTargets")).targetInfos.map((t) => t.targetId));
     const h0 = A.hellos, u0 = A.upgrades;
-    await P.ev(`(window.open(location.href), true)`);
+    // (a user gesture, as a person's click: headless Chrome blocks a popup without one)
+    await P.ev(`(window.open(location.href), true)`, { userGesture: true });
     let info = null;
     for (let t = Date.now(); !info && Date.now() - t < 10000; await sleep(100)) info = (await B.send("Target.getTargets")).targetInfos.find((t) => t.type === "page" && !before.has(t.targetId)) ?? null;
     if (!info) throw new Error("the copied window never appeared");
@@ -384,8 +393,7 @@ export async function runA14({ site, ok, want = () => true }) {
   await run("A14-5", async (B, A) => {
     const T = 1_900_000_000_000;
     const P = await B.tab({ clock: true });
-    await P.navigate(`${site}/agents/`);
-    await P.ev(`(localStorage.setItem('__sbclock', '${T}'), true)`);
+    await P.clock(site, T);
     await pair(P, A, site, "3600000", true);
     await B.send("Target.closeTarget", { targetId: P.targetId });
     await A.quiet(500);
@@ -509,8 +517,7 @@ export async function runA14({ site, ok, want = () => true }) {
   await run("A14-9", async (B, A) => {
     const T = 1_900_000_000_000;
     const P = await B.tab({ clock: true });
-    await P.navigate(`${site}/agents/`);
-    await P.ev(`(localStorage.setItem('__sbclock', '${T}'), true)`);
+    await P.clock(site, T);
     await pair(P, A, site, "page");
     await chat(P, A);
     await P.ev(`(localStorage.setItem('__sbclockNext', '${T + 30001}'), true)`);
@@ -620,8 +627,7 @@ export async function runA14({ site, ok, want = () => true }) {
   await run("A14-16", async (B, A) => {
     const T = 1_900_000_000_000, E = T + 3_600_000;
     const P = await B.tab({ clock: true });
-    await P.navigate(`${site}/agents/`);
-    await P.ev(`(localStorage.setItem('__sbclock', '${T}'), true)`);
+    await P.clock(site, T);
     const label = await pair(P, A, site, "3600000");
     await chat(P, A);
     const g1 = A.grants().at(-1), grants = A.grants().length;
@@ -643,8 +649,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await run(id, async (B, A) => {
       const T = 1_900_000_000_000, E = T + 3_600_000;
       const P = await B.tab({ clock: true });
-      await P.navigate(`${site}/agents/`);
-      await P.ev(`(localStorage.setItem('__sbclock', '${T}'), true)`);
+      await P.clock(site, T);
       await pair(P, A, site, "3600000");
       await chat(P, A);
       // (the clock set without advancing it, so the page's own expiry timer doesn't fire first: the record stays)
