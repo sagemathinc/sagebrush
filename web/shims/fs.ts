@@ -4,14 +4,16 @@
 // about every change Python makes.  Paths are absolute from "/", which is
 // also the initial working directory.  Output streams go to hooks.write.
 // (read: a file's contents were read, for the reactive notebook's file
-// tracking)  A shared collection's files are mounted (mount()): fetched from
+// tracking; with the version of the page's file whose bytes they are (its
+// origin, below) if they are still those, for the replay bundle:
+// web/notebook/bundle-blobs.mjs)  A shared collection's files are mounted (mount()): fetched from
 // the user-content domain the first time Python reads them, and checked
 // against their SHA-256, so a notebook that reads one file of a large
 // collection downloads only that file.
 const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
-  read: (path: string) => void;
+  read: (path: string, origin?: string) => void;
 } = { write: () => {}, changed: () => {}, read: () => {} };
 export const __hooks = hooks;
 
@@ -30,6 +32,13 @@ interface Entry {
   /** the path that names it now, null once it is unlinked (an open file
    * keeps the entry, as a descriptor keeps an inode: onceOpen) */
   path: string | null;
+  /** a file the page gave (load, put): which version of the page's file its
+   * bytes are, while they are still (or still begin with) that version's:
+   * "s:<path>" for one the session started with, else the token the page gave
+   * with it (a put's, or a load's third element); kept through a rename and an
+   * append, gone once Python writes it over or truncates it, or the page puts
+   * it again (another version) */
+  origin?: string;
 }
 const files = new Map<string, Entry>();
 // (an entry named r; one that r named before is unlinked)
@@ -83,12 +92,13 @@ function ensureDirs(p: string) {
   for (let d = parent(p); !dirs.has(d); d = parent(d)) dirs.set(d, Date.now());
 }
 
-// The page's files (path -> bytes), as a worker starts: no change hooks.
-export function load(entries: [string, Uint8Array][]) {
-  for (const [p, data] of entries) {
+// The page's files (path -> bytes, and a version's token if not one the session
+// starts with), as a worker starts: no change hooks.
+export function load(entries: [string, Uint8Array, string?][]) {
+  for (const [p, data, tok] of entries) {
     const r = resolve(p);
     ensureDirs(r);
-    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r });
+    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: typeof tok === "string" ? tok : "s:" + String(p) });
   }
 }
 // A shared collection's files: [path, {url, sha256, size}], fetched when read.
@@ -134,13 +144,18 @@ function contents(r: string, f: Entry): Uint8Array {
   return f.data;
 }
 
-// Changes the page makes (an upload, a delete in the files panel).
-export function put(p: string, data: Uint8Array | null) {
+// Changes the page makes (an upload, a delete in the files panel), with the
+// new version's token (none: bytes no version of the page's, e.g. another
+// interpreter's write).
+export function put(p: string, data: Uint8Array | null, tok?: string) {
   const r = resolve(p);
   if (data === null) drop(r);
   else {
     ensureDirs(r);
     rewrite(r, new Uint8Array(data));
+    const f = files.get(r)!;
+    if (typeof tok === "string") f.origin = tok;
+    else delete f.origin;
   }
 }
 // (a file's new contents: the same entry if there is one, as a write to an
@@ -182,6 +197,7 @@ export function onceOpen(p: string, append: boolean): OpenFile {
     hooks.changed(r, f.data);
   } else if (!append) {
     delete f.remote;
+    delete f.origin;
     f.data = new Uint8Array(0);
     f.mtime = Date.now();
     hooks.changed(r, f.data);
@@ -220,13 +236,15 @@ export function readFileSync(p: string, enc?: any): any {
   const r = resolve(p);
   const f = files.get(r);
   if (!f) dirs.has(r) ? fail("EISDIR", -21, "read", p) : fail("ENOENT", -2, "open", p);
-  hooks.read(r);
+  hooks.read(r, f!.origin);
   const data = contents(r, f!);
   const encoding = typeof enc === "string" ? enc : enc?.encoding;
   return encoding ? new TextDecoder().decode(data) : data.slice();
 }
 export function writeFileSync(p: string, data: any) {
-  setFile(resolve(p), bytes(data));
+  const r = resolve(p);
+  setFile(r, bytes(data));
+  delete files.get(r)!.origin; // (Python's bytes now, not the page's; an append keeps them: appendFileSync)
 }
 export function appendFileSync(p: string, data: any) {
   const r = resolve(p);

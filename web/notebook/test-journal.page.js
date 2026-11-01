@@ -1972,9 +1972,27 @@ async function startTooLargeAt(real) {
   await close(w);
   hdb.close();
 }
+// A synced notebook's .sbreplay (William's B-feedback, Nov 1: one had only its version of before it synced, not the
+// 14 TimeTravel showed): bundle.js bundleContents takes the patches from the history's own store, under the synced key
+async function bundleSynced() {
+  const { w, hdb } = await active();
+  await synced(async () => {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    let rec = await rawGet(w.main, "notebooks", id);
+    for (const c of ["A1", "A2"]) { await st.save({ ...d, cells: [{ id: "a", code: c }], baseRev: rec.rev }); rec = await rawGet(w.main, "notebooks", id); }
+    const want = (await keyRows(hdb, N.syncedKey(id, 1))).map((r) => r.time).sort(), before = (await keyRows(hdb, id)).map((r) => r.time);
+    const got = await B.bundleContents(st.history, async () => null);
+    const times = got.history.map((e) => e.time).sort(), last = got.history.find((e) => e.time === st.history.head());
+    check(st.patches.id === N.syncedKey(id, 1) && want.length === 3 && J(times) === J(want) && !times.some((t) => before.includes(t)) && !!last, "a synced notebook's bundle has its synced history (the root and both saves, the head among them), not its rows of before: " + J({ key: st.patches.id === N.syncedKey(id, 1), want: want.length, got: times.length, before: before.length, head: !!last }));
+    check(J(got.blobs) === "{}", "…and, with no runs, no files");
+    await close(st);
+  });
+  await close(w);
+  hdb.close();
+}
 const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted, startTooLarge];
+  arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
