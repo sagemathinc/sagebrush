@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 278428
+   "max": 278556
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -565,7 +565,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 228514,
+   "ceiling": 233354,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

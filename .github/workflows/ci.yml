@@ -218,6 +218,7 @@ jobs:
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
           node scripts/test-site-asset-budget.mjs
+          node scripts/test-line3-measure.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
           node scripts/test-core-api-surface.mjs
@@ -493,6 +494,8 @@ jobs:
           # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
           CHROME=google-chrome node web/test-pwa.mjs
           CHROME=google-chrome node web/share/test-share-ui.mjs
+          # (G-10: the runner's fetch broker on the share client, the page that mounts files: G1s, G4, G10)
+          CHROME=google-chrome node web/share/test-share-broker.mjs
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
       # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
       # up; its result and diagnostics go to the job summary and never fail the job.  Made gating in a later PR once it is
@@ -565,6 +568,8 @@ jobs:
           sleep 1
           kill -0 "$server_pid"
           CHROME=google-chrome node web/test-runner.mjs
+          # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
+          CHROME=google-chrome node web/test-runner-broker.mjs
           CHROME=google-chrome node web/test-runner-files.mjs
           CHROME=google-chrome node web/test-runner-pill.mjs
           CHROME=google-chrome node --test web/preview/test-preview.mjs
@@ -618,6 +623,7 @@ jobs:
           bun web/journal/test-merge-base.mjs
           bun web/notebook/test-sync-rows.mjs
           bun web/notebook/test-start-all.mjs
+          bun web/notebook/test-runner-fetch.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
           CHROME=google-chrome node web/workspace/test-workspace-pages.mjs
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
@@ -722,6 +728,8 @@ jobs:
         run: |
           SAGEBRUSH_AGENTS=1 bun web/build.ts
           CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
+          # (the agents page's resizable columns, on the same build: web/agents/test-agents-layout.mjs, the layout plan r3 PR 2)
+          CHROME=google-chrome bun web/agents/test-agents-layout.mjs
           SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts
           CHROME=google-chrome AGENTS_LATEX=1 bun web/agents/test-agents-artifacts.mjs
 

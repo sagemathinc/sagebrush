@@ -67,7 +67,9 @@ def _numbers(t, raw, e):
     code = _MI.get(t)
     if code is None:
         raise MatReadError("unsupported data type %d" % t)
-    return np.frombuffer(raw, dtype=e + code)
+    # (a writeable array of its own, as SciPy's loadmat returns: frombuffer's
+    # of bytes is read-only, as NumPy's)
+    return np.frombuffer(raw, dtype=e + code).copy()
 
 
 def _matrix(payload, e, little, mat_dtype=False):

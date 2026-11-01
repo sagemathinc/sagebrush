@@ -22,6 +22,11 @@ const sha256Hex = async (bytes: ArrayBuffer) => Array.from(new Uint8Array(await 
 const missing = new Map<string, number>();
 const MISSING_MS = 60_000, MISSING_MAX = 1000;
 
+// (a refusal's plain text: its status, its own headers, and nosniff, as COMMON gives every file (security audit G-3a))
+const NOT_FOUND: Record<string, string> = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
+const text = (status: number, body: string, headers: Record<string, string> = {}) =>
+  new Response(body, { status, headers: { ...headers, "X-Content-Type-Options": "nosniff" } });
+
 const COMMON: Record<string, string> = {
   // (no-transform: served exactly as published, nothing added by Cloudflare)
   "Cache-Control": "public, max-age=31536000, immutable, no-transform",
@@ -54,7 +59,7 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   const url = new URL(req.url);
   const m = url.pathname.match(/^\/engine\/([0-9a-f]{20})\/([a-z0-9][a-z0-9./-]*)$/);
   if (!m || !env.ENGINES || m[2].includes("..")) return null;
-  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+  if (req.method !== "GET" && req.method !== "HEAD") return text(405, "method not allowed");
   const [, id, file] = m;
   const cache = (globalThis as any).caches?.default as Cache | undefined;
   const key = new Request(`${url.origin}/engine/${id}/${file}`);
@@ -66,7 +71,7 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   const man = await manifest(env, id);
   // (its own entries only: not "constructor" or the like, SEC-CAC-3)
   const entry = file === "manifest.json" ? { headers: { "Content-Type": "application/json" } } : man && Object.hasOwn(man.files, file) ? man.files[file] : undefined;
-  if (!man || !entry) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  if (!man || !entry) return text(404, "no such engine file", NOT_FOUND);
   // (a zone file or the zone data's index: one copy for every engine, at the
   // library's shared lib/ key, where scripts/publish-engine.mjs puts it once;
   // served if its bytes have the manifest's SHA-256.  An engine published
@@ -83,7 +88,7 @@ export async function handleEngines(req: Request, env: EnginesEnv, ctx: { waitUn
   }
   if (body === null) {
     const o = await env.ENGINES.get(`engine/${id}/${file}`);
-    if (!o) return new Response("no such engine file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+    if (!o) return text(404, "no such engine file", NOT_FOUND);
     [body, size] = [o.body, o.size];
   }
   const res = new Response(req.method === "HEAD" ? null : body, { headers: { ...entry.headers, ...COMMON, "Content-Length": String(size) } });
@@ -110,7 +115,7 @@ export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitU
   const url = new URL(req.url);
   const m = url.pathname.match(CHUNK) ?? url.pathname.match(TZDATA);
   if (!m || !env.ENGINES) return null;
-  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+  if (req.method !== "GET" && req.method !== "HEAD") return text(405, "method not allowed");
   const [, name, hash] = m;
   const cache = (globalThis as any).caches?.default as Cache | undefined;
   const key = new Request(`${url.origin}/lib/${name}`);
@@ -118,7 +123,7 @@ export async function handleLibChunk(req: Request, env: EnginesEnv, ctx: { waitU
     const hit = await cache.match(key);
     if (hit) return req.method === "HEAD" ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
   }
-  const none = () => new Response("no such library chunk", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  const none = () => text(404, "no such library chunk", NOT_FOUND);
   const o = await env.ENGINES.get(`lib/${name}`);
   if (!o) return none();
   const bytes = await new Response(o.body).arrayBuffer();
@@ -148,9 +153,9 @@ export async function handlePkg(req: Request, env: EnginesEnv, ctx: { waitUntil(
   const url = new URL(req.url);
   const m = url.pathname.match(PKG);
   if (!m || !env.ENGINES) return null;
-  if (req.method !== "GET" && req.method !== "HEAD") return new Response("method not allowed", { status: 405 });
+  if (req.method !== "GET" && req.method !== "HEAD") return text(405, "method not allowed");
   const [, kind, hash] = m as unknown as [string, "pkgset" | "pkg", string];
-  const none = () => new Response("no such package file", { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+  const none = () => text(404, "no such package file", NOT_FOUND);
   const name = `${kind}/${hash}.json`;
   const t = pkgMissing.get(name);
   if (t !== undefined && Date.now() - t < MISSING_MS) return none();
