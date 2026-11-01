@@ -307,6 +307,12 @@ def _hurwitz(x, q):
         return head + float(_S.hurwitz_zeta(x, q + n))
     if q == _INF:
         return 0.0
+    if x == _INF:
+        # (Cephes's sum at x = inf: q^-x alone below 1e8, then its asymptotic
+        # 0; its tail correction makes nan of 0 * inf above q = 1)
+        if q > 1e8:
+            return 0.0
+        return _INF if q < 1 else (1.0 if q == 1 else _NAN)
     return float(_S.hurwitz_zeta(x, q))
 
 
@@ -314,8 +320,12 @@ _zeta_1 = _ufunc("zeta", 1, _guard("zeta", _zeta1, pole=lambda x: _INF),
                  _guard("zeta", lambda z: complex(_S.zeta(z)), pole=lambda z: complex(_INF, 0)))
 def _hurwitz_work(x, q):
     # (the head sum's terms, exactly as _hurwitz takes them; 0 where it
-    # returns without the loop)
-    if x != x or q != q or x <= 1 or q > 0 or q == _math.floor(q) or x != _math.floor(x):
+    # returns without the loop.  A non-finite x or q never reaches the loop:
+    # _hurwitz gives nan or, through its guard, the pole; it is classified
+    # first, since floor() of an infinity raises)
+    if not (_math.isfinite(x) and _math.isfinite(q)):
+        return 0, ""
+    if x <= 1 or q > 0 or q == _math.floor(q) or x != _math.floor(x):
         return 0, ""
     return int(_math.floor(-q)) + 1, "a q at or below -%d (its head sum's work)" % _WORK_MAX
 
@@ -624,6 +634,9 @@ y1 = _ufunc("y1", 1, _guard("y1", lambda x: _yv(1.0, x), pole=lambda x: -_INF))
 def _legendre(n, x):
     # (xsf's eval_legendre_l: the power series near 0, else the forward
     # recurrence on values and differences)
+    if _math.isinf(n):
+        # (SciPy's: 1 at x = 1, else nan)
+        return 1.0 if x == 1 else _NAN
     if n != _math.floor(n):
         raise _S.NotCovered("a non-integer degree")
     n = int(n)
