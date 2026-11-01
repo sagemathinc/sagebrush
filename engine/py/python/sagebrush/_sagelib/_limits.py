@@ -86,6 +86,12 @@ TABLE = {
     # triangular solves), in elementary steps (_matlab_sparse, plan-matlab-
     # nocliffs r6 section 2.3); the finite value is the former MAX_LU_WORK
     "matlab.lu_work": (UNLIMITED, 10 ** 5, 2 ** 62),
+    # the bytes pandas' read_csv may decode (optional/pandas, plan-pandas
+    # r7 section E): a budget charged before every allocation of the parse,
+    # read through sagebrush.limit; a grading context sets it so that the
+    # parse stays under the grader child's memory (r7 1b), and 1 MiB is the
+    # least the parser's own buffers need
+    "pandas.decoded_bytes": (UNLIMITED, 2 ** 20, 2 ** 40),
 }
 # the defaults before plan-c0 (a policy's finite values, and the tests')
 FINITE = {"ff.conway_work": 653528895, "ff.embed_max": 2 ** 20, "ff.root_bits": 1024, "ff.work": 10 ** 7,
