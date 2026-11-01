@@ -15,7 +15,10 @@ const base = (process.env.SB_URL ?? "http://127.0.0.1:8766").replace(/\/$/, "");
 // The atlas data (web/dist/atlas/data, about 50 MB) isn't built by `bun web/build.ts` (DEVELOPMENT.md):
 // without it every atlas page is a 404. Say so and exit 4, an environment failure a runner can tell
 // apart from a failing check (exit 1), before starting a browser.
-const stats = await fetch(base + "/atlas/data/stats.json").catch((e) => ({ ok: false, status: String(e.cause?.code ?? e.message) }));
+// (a 200 that isn't JSON, e.g. an HTML fallback page, counts as missing too)
+const stats = await fetch(base + "/atlas/data/stats.json")
+  .then(async (r) => (r.ok ? (await r.json().then(() => r, () => ({ ok: false, status: `${r.status}, not JSON` }))) : r))
+  .catch((e) => ({ ok: false, status: String(e.cause?.code ?? e.message) }));
 if (!stats.ok) {
   console.log(`atlas data not built: run scripts/build-atlas.mjs or set SB_URL (GET ${base}/atlas/data/stats.json: ${stats.status})`);
   process.exit(4);
