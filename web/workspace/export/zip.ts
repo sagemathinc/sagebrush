@@ -29,8 +29,8 @@ export class ExportStopped extends Error {
 /** The page's slice and Blob accounting for one export (r2c R3, information and the CI assertions): slices made (each
  * SLICE bytes), bytes kept in Blob parts (the no-OPFS spools and the Blob sink: held, not recycled), bytes read back
  * from Blob parts, and the 1 MiB copies each member's slices take to the hash worker (unchanged by r2c, reported). */
-export const counts = { slices: 0, sliceBytes: 0, blobBytes: 0, blobReadBytes: 0, hashCopyBytes: 0, afterStop: 0, postsAfterStop: 0, stopped: false };
-export function resetCounts() { counts.slices = counts.sliceBytes = counts.blobBytes = counts.blobReadBytes = counts.hashCopyBytes = counts.afterStop = counts.postsAfterStop = 0; counts.stopped = false; }
+export const counts = { slices: 0, sliceBytes: 0, blobBytes: 0, blobReadBytes: 0, hashCopyBytes: 0, afterStop: 0, postsAfterStop: 0, maxSinkWrite: 0, stopped: false };
+export function resetCounts() { counts.slices = counts.sliceBytes = counts.blobBytes = counts.blobReadBytes = counts.hashCopyBytes = counts.afterStop = counts.postsAfterStop = counts.maxSinkWrite = 0; counts.stopped = false; }
 
 type Slot = { buf: Uint8Array; used: number; back: Promise<void> | null };
 function newSlot(size = SLICE): Slot {
@@ -360,6 +360,7 @@ export class ZipWriter {
     const s = this.a;
     if (!s.used) return;
     this.check();
+    counts.maxSinkWrite = Math.max(counts.maxSinkWrite, s.used);
     handOver(s, this.sink.write(s.buf, s.used));
     this.a = this.b ?? newSlot(ZIP_OUT);
     this.b = s;

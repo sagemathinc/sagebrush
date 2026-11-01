@@ -841,6 +841,8 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       check(!c.error && c.ndiffs === 0 && c.manifest && c.members >= N70, `identity70k: every member, local header and central record byte-identical to b00fb43f's, manifest.json identical but for captured and created (${c.members} members): ` + JSON.stringify(c));
       const st = b.stats ?? {};
       console.log("(identity70k stats: " + JSON.stringify({ ...st, rowSegs: st.rowSegs?.length, refs: undefined }) + ")");
+      // (E1 r2e: every one of the archive's sink.write calls at most 256 KiB; the members above are byte-identical)
+      check(st.maxSinkWrite > 0 && st.maxSinkWrite <= 256 * 1024, `identity70k (E1 r2e): the archive's largest single sink.write is ${st.maxSinkWrite} bytes (at most 262144)`);
       check(st.sliceBytes <= 16 * SLICE && st.blobBytes === 0, `identity70k (R3): the slices allocated for all spools, sinks and replays together ${st.sliceBytes / SLICE} MiB (at most 16), bytes held in Blob parts ${st.blobBytes} (0 with OPFS)`);
       const fl = st.flushes ?? {}, sz = st.sizes ?? {};
       // (a spool's last partial slice is flushed only if it is read: the capture log's isn't, without a lookup)
