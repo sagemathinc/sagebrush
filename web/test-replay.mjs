@@ -26,16 +26,23 @@ if (!port) port = await devtoolsPort(profile);
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
-// ---- which files' bytes a bundle carries (notebook/bundle-blobs.mjs), on records: only those a run of the same
-// session read (William's B-feedback, Nov 1: a bundle had every file in the browser)
+// ---- which files' bytes a bundle carries (notebook/bundle-blobs.mjs), on records: only the versions a run of the same
+// session read (William's B-feedback, Nov 1: a bundle had every file in the browser; astra's R1 on #445: by version,
+// never by path)
 {
   const J = JSON.stringify;
-  const S = [{ id: "s1", files: [["data.txt", "h1"], ["secret.txt", "h2"]] }, { id: "s2", files: [["data.txt", "h1b"]] }];
-  const F = [{ sid: "s1", path: "late.txt", hash: "h3" }, { sid: "s1", path: "unread.txt", hash: "h4" }, { sid: "s2", path: "late.txt", hash: "h5" }, { sid: "s1", path: "late.txt", hash: null }];
+  const S = [{ id: "s1", files: [["/data.txt", "h1"], ["/secret.txt", "h2"]] }, { id: "s2", files: [["/data.txt", "h1b"]] }];
+  const F = [
+    { sid: "s1", path: "/late.txt", hash: "h3", tok: "f:a" }, { sid: "s1", path: "/unread.txt", hash: "h4", tok: "f:b" }, { sid: "s2", path: "/late.txt", hash: "h5", tok: "f:c" },
+    { sid: "s1", path: "/late.txt", hash: null, tok: "f:d" }, { sid: "s1", path: "/data.txt", hash: "h6", tok: "f:e" }, { sid: "s1", path: "/old.txt", hash: "h7" },
+  ];
   const got = (runs) => J([...bundleHashes(S, runs, F)].sort());
-  ok(got([{ sid: "s1", reads: ["/data.txt", "late.txt"] }, { sid: "s2", reads: [] }, { sid: "s3", reads: ["data.txt"] }]) === J(["h1", "h3"]), "bundle files: a session's file and a file put while it ran, each read by one of its runs; never one unread, nor one another session read: " + got([{ sid: "s1", reads: ["/data.txt", "late.txt"] }, { sid: "s2", reads: [] }, { sid: "s3", reads: ["data.txt"] }]));
-  ok(got([{ sid: "s2", foreign: true, at: null, reads: ["data.txt"] }]) === J(["h1b"]), "…a foreign run's reads count (a resume reruns it)");
-  ok(got([{ sid: "s1" }, { sid: "s2", code: "x" }]) === "[]", "…a journal from before reads were kept: no files at all");
+  const u1 = got([{ sid: "s1", reads: ["s:/data.txt", "f:a"] }, { sid: "s2", reads: [] }, { sid: "s3", reads: ["s:/data.txt"] }]);
+  ok(u1 === J(["h1", "h3"]), "[U1] bundle files: the versions its runs read (a session's file, a put), never an unread one, one another session read, a later unread version of a read path (h6), nor a record without a tok: " + u1);
+  ok(got([{ sid: "s2", foreign: true, at: null, reads: ["s:/data.txt"] }]) === J(["h1b"]), "[U2] …a foreign run's reads count (a resume reruns it)");
+  ok(got([{ sid: "s1" }, { sid: "s2", code: "x" }]) === "[]", "[U3] …a journal from before reads were kept: no files at all");
+  ok(got([{ sid: "s1", reads: ["f:e"] }]) === J(["h6"]), "[U4] …a replacement read, the version it replaced not: only the replacement's (time order)");
+  ok(got([{ sid: "s1", reads: ["/data.txt", "data.txt"] }]) === "[]", "[U5] …a path is no version: reads by path carry nothing");
 }
 async function tab(wsUrl) {
   const ws = new WebSocket(wsUrl);
@@ -205,26 +212,52 @@ try {
   const bp = await a.ev("(() => { const h = sagebrush.history; const p = h.replayPlan(h.head()); return { runs: p.runs, blocking: p.blocking, foreign: p.events.filter((e) => e.run?.foreign).length }; })()");
   ok(bp.runs === 1 && bp.foreign === 0 && bp.blocking.length === 0, "...and its plan has only its own run: " + JSON.stringify(bp));
 
-  // ---- a bundle carries the bytes of only the files its sessions read (William's B-feedback, Nov 1: one carried every
-  // file in the browser): a new interpreter is given every file; its code reads one renamed first and data.txt, writes
-  // over another and reads that, and never reads the third
-  const FILES = { "keep.txt": "read after a rename", "secret.txt": "not for the bundle", "over.txt": "overwritten first" };
-  for (const [name, text] of Object.entries(FILES)) await a.ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)})); dispatchEvent(new DragEvent("drop", { dataTransfer: dt, cancelable: true })); return true; })()`);
+  // ---- a bundle carries the bytes of only the versions its sessions read (William's B-feedback, Nov 1; astra's R1 on
+  // #445).  A new interpreter is given every file.  Its first run reads one renamed first (keep.txt), one written over
+  // first (over.txt: open(F, "w").write(S), fs.ts onceOpen), one appended to first (app.txt: a held open(F, "a"),
+  // appendFileSync), one written over by a held open(F, "w") (w6.txt: writeFileSync), one opened "r+" and partly written
+  // (rp.txt), r2.txt and data.txt; it never reads secret.txt nor r1.txt.  Then the page puts late.txt and new versions
+  // of r1.txt and r2.txt (fs.ts put); the second run reads late.txt and r1.txt, never r2.txt's new version.
+  const FILES = { "keep.txt": "read after a rename", "secret.txt": "not for the bundle", "over.txt": "overwritten first", "app.txt": "appended to", "w6.txt": "written over", "rp.txt": "rp original", "r1.txt": "r1 original", "r2.txt": "r2 original" };
+  const drop = (name, text) => a.ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)})); dispatchEvent(new DragEvent("drop", { dataTransfer: dt, cancelable: true })); return true; })()`);
+  for (const [name, text] of Object.entries(FILES)) await drop(name, text);
   await sleep(800);
   await a.ev("sagebrush.kernel.restart(); true");
   await a.until("sagebrush.kernel.ready && document.querySelector('#status').textContent.startsWith('ready')", 15000);
-  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], ${JSON.stringify("import os\nos.rename('keep.txt', 'moved.txt')\nprint(open('moved.txt').read())\nopen('over.txt', 'w').write('mine')\nprint(open('over.txt').read())\nprint(open('data.txt').read())")}); return true; })()`);
+  const CELL1 = "import os\nos.rename('keep.txt', 'moved.txt')\nprint(open('moved.txt').read())\nopen('over.txt', 'w').write('mine')\nprint(open('over.txt').read())\nprint(open('data.txt').read())\nwith open('app.txt', 'a') as h:\n    h.write('+more')\nprint(open('app.txt').read())\nwith open('w6.txt', 'w') as h:\n    h.write('new6')\nprint(open('w6.txt').read())\nwith open('rp.txt', 'r+') as h:\n    h.write('RP')\nprint(open('r2.txt').read())";
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], ${JSON.stringify(CELL1)}); return true; })()`);
   await sleep(700);
   await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
-  ok((await a.ev(outs))[0].trim() === "read after a rename\nmine\nhello, file", "the new session read the renamed file, its own write and data.txt: " + JSON.stringify((await a.ev(outs))[0]));
+  for (const [name, text] of [["late.txt", "put while it ran"], ["r1.txt", "r1 replaced"], ["r2.txt", "r2 secret"]]) await drop(name, text);
+  await sleep(800);
+  await a.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify("print(open('late.txt').read())\nprint(open('r1.txt').read())")}); return true; })()`);
+  await sleep(700);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+  const o2 = (await a.ev(outs)).map((x) => x.trim());
+  ok(o2[0] === "read after a rename\nmine\nhello, file\nappended to+more\nnew6\nr2 original" && o2.at(-1) === "put while it ran\nr1 replaced", "[E1] the new session read the files as they were: " + JSON.stringify([o2[0], o2.at(-1)]));
   await sleep(500);
-  const last = await a.ev("(() => { const s = sagebrush.history.records('session'); return { files: s.at(-1)?.files?.map(([p]) => p).sort() ?? [], reads: sagebrush.history.records('run').at(-1)?.reads ?? null }; })()");
-  ok(["data.txt", "keep.txt", "over.txt", "secret.txt"].every((p) => last.files.some((f) => f.replace(/^\//, "") === p)) && JSON.stringify((last.reads ?? []).map((p) => p.replace(/^\//, "")).sort()) === JSON.stringify(["data.txt", "keep.txt"]), "…given every file; its run's reads: the renamed one by its first name, and data.txt, not the one it wrote over: " + JSON.stringify(last));
+  const jr = await a.ev("(() => { const h = sagebrush.history, s = h.records('session').at(-1); const rs = h.records('run').filter((r) => r.sid === s?.id); return { files: s?.files?.map(([p]) => p) ?? [], reads: rs.map((r) => r.reads ?? null), toks: Object.fromEntries(h.records('file').filter((f) => f.sid === s?.id).map((f) => [f.path, f.tok ?? null])) }; })()");
+  const sorted = (l) => JSON.stringify([...(l ?? [])].sort());
+  ok(["data.txt", "keep.txt", "over.txt", "secret.txt", "app.txt", "w6.txt", "rp.txt", "r1.txt", "r2.txt"].every((p) => jr.files.includes("/" + p)) && sorted(jr.reads[0]) === sorted(["s:/keep.txt", "s:/app.txt", "s:/data.txt", "s:/rp.txt", "s:/r2.txt"]), "[E2] …given every file; its first run's reads: keep.txt (by its first name), app.txt (appended to), rp.txt (opened r+), r2.txt and data.txt, not over.txt or w6.txt (written over): " + JSON.stringify(jr));
+  const lateTok = Object.entries(jr.toks).find(([p]) => p.replace(/^\//, "") === "late.txt")?.[1], r1Tok = Object.entries(jr.toks).find(([p]) => p.replace(/^\//, "") === "r1.txt")?.[1];
+  ok(/^f:[0-9a-f]{16}$/.test(lateTok ?? "") && /^f:[0-9a-f]{16}$/.test(r1Tok ?? "") && sorted(jr.reads[1]) === sorted([lateTok, r1Tok]), "[E3] …its second run's reads: the versions of late.txt and r1.txt the page put (their file records' toks): " + JSON.stringify(jr.reads[1]));
   const raw = await a.ev("sagebrush.bundle().then((u) => { let s = ''; for (const x of u) s += String.fromCharCode(x); return btoa(s); })");
   const bundled = JSON.parse(gunzipSync(Buffer.from(raw, "base64")).toString("utf8"));
   const sha = (t) => createHash("sha256").update(t).digest("hex");
   const has = (t) => Object.prototype.hasOwnProperty.call(bundled.blobs, sha(t));
-  ok(has("read after a rename") && has("hello, file") && !has("not for the bundle") && !has("overwritten first") && Object.keys(bundled.blobs).length === 2, "the bundle carries the two files read, not the unread one nor the one written over before it was read: " + JSON.stringify({ blobs: Object.keys(bundled.blobs).length, secret: has("not for the bundle"), over: has("overwritten first") }));
+  ok(has("read after a rename"), "[B1] the bundle carries keep.txt (renamed, then read)");
+  ok(has("hello, file"), "[B2] …data.txt (read)");
+  ok(has("appended to"), "[B3] …app.txt's bytes (appended to, then read: they are still in it)");
+  ok(has("rp original"), "[B4] …rp.txt's (opened r+: read)");
+  ok(has("put while it ran"), "[B5] …late.txt (put while the session ran, then read)");
+  ok(has("r1 replaced"), "[B6] …r1.txt's new version (put, then read)");
+  ok(has("r2 original"), "[B7] …r2.txt's first version (read before the page put another)");
+  ok(!has("not for the bundle"), "[B8] …not secret.txt (never read)");
+  ok(!has("overwritten first"), "[B9] …not over.txt's bytes (written over before it was read)");
+  ok(!has("written over"), "[B10] …not w6.txt's bytes (written over by a held open(F, \"w\") before it was read)");
+  ok(!has("r1 original"), "[B11] …not r1.txt's first version (never read: only the one put after it was)");
+  ok(!has("r2 secret"), "[B12] …not r2.txt's new version (never read: only the one before it was)");
+  ok(Object.keys(bundled.blobs).length === 7, "[B13] …and nothing else: 7 files: " + Object.keys(bundled.blobs).length);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

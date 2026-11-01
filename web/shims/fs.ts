@@ -4,8 +4,9 @@
 // about every change Python makes.  Paths are absolute from "/", which is
 // also the initial working directory.  Output streams go to hooks.write.
 // (read: a file's contents were read, for the reactive notebook's file
-// tracking; with the page's path of the file whose bytes they are (its origin,
-// below) if they are still those, for the replay bundle: web/notebook/bundle-blobs.mjs)  A shared collection's files are mounted (mount()): fetched from
+// tracking; with the version of the page's file whose bytes they are (its
+// origin, below) if they are still those, for the replay bundle:
+// web/notebook/bundle-blobs.mjs)  A shared collection's files are mounted (mount()): fetched from
 // the user-content domain the first time Python reads them, and checked
 // against their SHA-256, so a notebook that reads one file of a large
 // collection downloads only that file.
@@ -31,9 +32,12 @@ interface Entry {
   /** the path that names it now, null once it is unlinked (an open file
    * keeps the entry, as a descriptor keeps an inode: onceOpen) */
   path: string | null;
-  /** a file the page gave (load, put): the page's path for it, while its bytes
-   * are still (or still begin with) the page's: kept through a rename and an
-   * append, gone once Python writes it over or truncates it */
+  /** a file the page gave (load, put): which version of the page's file its
+   * bytes are, while they are still (or still begin with) that version's:
+   * "s:<path>" for one the session started with, else the token the page gave
+   * with it (a put's, or a load's third element); kept through a rename and an
+   * append, gone once Python writes it over or truncates it, or the page puts
+   * it again (another version) */
   origin?: string;
 }
 const files = new Map<string, Entry>();
@@ -88,12 +92,13 @@ function ensureDirs(p: string) {
   for (let d = parent(p); !dirs.has(d); d = parent(d)) dirs.set(d, Date.now());
 }
 
-// The page's files (path -> bytes), as a worker starts: no change hooks.
-export function load(entries: [string, Uint8Array][]) {
-  for (const [p, data] of entries) {
+// The page's files (path -> bytes, and a version's token if not one the session
+// starts with), as a worker starts: no change hooks.
+export function load(entries: [string, Uint8Array, string?][]) {
+  for (const [p, data, tok] of entries) {
     const r = resolve(p);
     ensureDirs(r);
-    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: String(p) });
+    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: typeof tok === "string" ? tok : "s:" + String(p) });
   }
 }
 // A shared collection's files: [path, {url, sha256, size}], fetched when read.
@@ -139,14 +144,18 @@ function contents(r: string, f: Entry): Uint8Array {
   return f.data;
 }
 
-// Changes the page makes (an upload, a delete in the files panel).
-export function put(p: string, data: Uint8Array | null) {
+// Changes the page makes (an upload, a delete in the files panel), with the
+// new version's token (none: bytes no version of the page's, e.g. another
+// interpreter's write).
+export function put(p: string, data: Uint8Array | null, tok?: string) {
   const r = resolve(p);
   if (data === null) drop(r);
   else {
     ensureDirs(r);
     rewrite(r, new Uint8Array(data));
-    files.get(r)!.origin = String(p);
+    const f = files.get(r)!;
+    if (typeof tok === "string") f.origin = tok;
+    else delete f.origin;
   }
 }
 // (a file's new contents: the same entry if there is one, as a write to an

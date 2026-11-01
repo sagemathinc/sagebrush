@@ -144,19 +144,19 @@ export function createJournal(o) {
       ...(rec.clock ? { clock: rec.clock } : {}),
       ...(rec.overflow ? { overflow: true } : {}),
       ...(rec.status ? { status: rec.status } : {}),
-      // (the page's files whose bytes it read: a bundle carries only those, web/notebook/bundle-blobs.mjs)
+      // (the versions of the page's files whose bytes it read: a bundle carries only those, web/notebook/bundle-blobs.mjs)
       ...(rec.sources?.length ? { reads: rec.sources } : {}),
     };
     s.events.push({ nb: rec.nb, rec: r });
     journalFor(rec.nb, s);
   });
 
-  /** A file was put (data) or deleted (null) in the running interpreter. */
-  async function fileEvent(path, data) {
+  /** A file was put (data) or deleted (null) in the running interpreter (tok: that version's, web/shims/fs.ts origins). */
+  async function fileEvent(path, data, tok) {
     const s = current();
     if (!s) return;
     const hash = data === null ? null : await putBlob(await o.blobs(), data);
-    const f = { type: "file", id: `${s.id}:${++s.n}`, sid: s.id, n: s.n, t: Date.now(), path, hash };
+    const f = { type: "file", id: `${s.id}:${++s.n}`, sid: s.id, n: s.n, t: Date.now(), path, hash, ...(typeof tok === "string" ? { tok } : {}) };
     const nbId = o.notebookId();
     s.events.push({ nb: nbId, rec: f });
     if (s.journaled.has(nbId)) journalFor(nbId, s); // (else with that notebook's first run)
