@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
 import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, workerPort, type SessionPort, type WorkerHandle } from "../src/local-gateway";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 
@@ -1264,11 +1264,12 @@ test("L40 server.close(): the Worker terminated", async () => {
  * across sockets: each page counts from t1), until released. */
 function holder() {
   const ids = new WeakMap<object, Set<string>>(), waiting = new Map<string, () => void>(), names = new WeakMap<object, number>();
+  const all = new Set<string>(); // (every held id, of any socket: only control Y42j-idonly reads it)
   let n = 0;
   const key = (c: object, id: string) => { if (!names.has(c)) names.set(c, ++n); return `${names.get(c)}:${id}`; };
   return {
     hold: (id: string, c: object) => (ids.get(c)?.has(id) ? new Promise<void>((r) => waiting.set(key(c, id), r)) : Promise.resolve()),
-    add: (c: object, id: string) => { let s = ids.get(c); if (!s) ids.set(c, (s = new Set())); s.add(id); },
+    add: (c: object, id: string) => { let s = ids.get(c); if (!s) ids.set(c, (s = new Set())); s.add(id); all.add(id); },
     held: (c: object, id: string) => waiting.has(key(c, id)),
     release: (c: object, id: string) => { const k = key(c, id); const r = waiting.get(k); waiting.delete(k); r?.(); },
   };
@@ -1743,6 +1744,23 @@ test("L36f-fb-wave mid-wave: L36e's wave, its entry 100 ignoring the interrupt; 
 // ================= 4.10 The fake census: fail closed [S3, G6]
 
 const tsapi = require("typescript-api");
+/** The bare packages the CLI bundle may import (astra's ruling on the L41 boundary): reviewed, each pinned to its exact
+ * version and its reviewed importers.  A TRUSTED boundary: the census does not walk into them, and a listed package
+ * could itself import files of this tree, so the list is what the census checks, not proof of all Bun bundles. */
+const BUNDLED_PACKAGES: Record<string, { version: string; importers: string[] }> = {
+  "marked": { version: "18.0.14", importers: ["web/board/svg.ts"] },
+  "mathjax-full": { version: "3.2.2", importers: ["src/board-math.ts"] },
+};
+/** The lockfile's package entries, parsed exactly (the `packages:` section's `name@version:` keys). */
+function lockEntries(root: string) {
+  const out = new Set<string>();
+  let inPackages = false;
+  for (const line of readFileSync(join(root, "pnpm-lock.yaml"), "utf8").split("\n")) {
+    if (/^\S/.test(line)) inPackages = line === "packages:";
+    else if (inPackages) { const m = /^  '?([^\s':]+@[^\s':()]+)'?:\s*$/.exec(line); if (m) out.add(m[1]); }
+  }
+  return out;
+}
 const { builtinModules } = require("node:module");
 const REPO = join(__dirname, "..", "..");
 const FAKE = "web/notebook/remote-fake.js";
@@ -1758,7 +1776,7 @@ const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "s
 function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}) {
   const cfg = tsapi.readConfigFile(join(root, "tsconfig.json"), tsapi.sys.readFile);
   const options = { ...tsapi.parseJsonConfigFileContent(cfg.config ?? {}, tsapi.sys, root).options, allowJs: true };
-  const deps = new Set(Object.keys(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies ?? {}));
+  const locks = lockEntries(root);
   const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {};
   const rel = (f: string) => relative(root, f).split(sep).join("/");
   const queue = [join(root, entry)];
@@ -1774,8 +1792,23 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
     const spec = (n: any, x: string) => {
       if (x.startsWith("node:") || builtinModules.includes(x) || builtinModules.includes(x.split("/")[0])) return;
       if (!x.startsWith(".") && !x.startsWith("/")) {
+        // a bare package: each condition its own refusal, in this order (the boundary's five checks)
         const pkg = x.startsWith("@") ? x.split("/").slice(0, 2).join("/") : x.split("/")[0];
-        if (!deps.has(pkg)) problems.push(`${at(n)}: a bare specifier outside the dependencies: ${x}`);
+        const pol = Object.prototype.hasOwnProperty.call(BUNDLED_PACKAGES, pkg) ? BUNDLED_PACKAGES[pkg] : undefined;
+        if (!pol) { problems.push(`${at(n)}: not a reviewed bundled package: ${x}`); return; }
+        if (!pol.importers.includes(r)) { problems.push(`${at(n)}: ${pkg} from an unreviewed importer`); return; }
+        const res = tsapi.resolveModuleName(x, f, options, tsapi.sys).resolvedModule;
+        if (!res) { problems.push(`${at(n)}: unresolved: ${x}`); return; }
+        // its canonical root: the resolved file's real path inside node_modules/.pnpm/<entry>/node_modules/<pkg>/
+        const store = realpathSync(join(root, "node_modules")) + sep + ".pnpm" + sep;
+        const real = realpathSync(res.resolvedFileName);
+        const inner = real.startsWith(store) ? real.slice(store.length).split(sep) : [];
+        const depth = pkg.split("/").length;
+        const pkgDir = inner.length > 2 + depth && inner[1] === "node_modules" && inner.slice(2, 2 + depth).join("/") === pkg ? store + inner.slice(0, 2 + depth).join(sep) : null;
+        const pj = pkgDir ? JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) : null;
+        if (!pkgDir || pj.name !== pkg) { problems.push(`${at(n)}: ${pkg} resolves outside its reviewed root or is not that package`); return; }
+        if (pj.version !== pol.version) { problems.push(`${at(n)}: ${pkg} version ${pj.version}, reviewed ${pol.version}`); return; }
+        if (!locks.has(`${pkg}@${pol.version}`)) { problems.push(`${at(n)}: ${pkg}@${pol.version} not in the lockfile`); return; }
         return;
       }
       const res = tsapi.resolveModuleName(x, f, options, tsapi.sys).resolvedModule;
@@ -1828,6 +1861,7 @@ function fixtureTree(files: Record<string, string>) {
   const all: Record<string, string> = {
     "tsconfig.json": JSON.stringify({ compilerOptions: { module: "commonjs", target: "es2022", moduleResolution: "node", strict: false } }),
     "package.json": JSON.stringify({ name: "fx", dependencies: {} }),
+    "pnpm-lock.yaml": "lockfileVersion: '9.0'\n\npackages:\n",
     [FAKE]: "exports.faults = []; exports.intercept = 0; exports.raw = 0; exports.pause = 0; exports.soleAlways = 0; exports.applied = [];\n",
     ...files,
   };
@@ -1846,6 +1880,51 @@ for (const [name, files, want] of fxCases) {
   test(name, () => {
     const c = runtimeClosure(fixtureTree(files), "src/cli.ts");
     assert.equal(verdict(c), want, `${JSON.stringify([...c.files])} ${JSON.stringify(c.problems)}`);
+  });
+}
+// ---- the boundary's fixtures (astra's L41 ruling): each negative violates exactly ONE of the five conditions and
+// satisfies the other four; its refusal is checked by its own words.  Packages are stubbed in pnpm's layout:
+// node_modules/.pnpm/<name>@<dirVersion>/node_modules/<name>/{package.json, files}, and node_modules/<name> a symlink.
+type Stub = { name: string; dirVersion: string; pj: { name: string; version: string }; files: Record<string, string> };
+function stubbedTree(files: Record<string, string>, stubs: Stub[], lock: string[]) {
+  const d = fixtureTree({ ...files, "pnpm-lock.yaml": "lockfileVersion: '9.0'\n\npackages:\n\n" + lock.map((e) => `  ${e}:\n    resolution: {integrity: sha512-x}\n`).join("\n") });
+  for (const st of stubs) {
+    const dir = join(d, "node_modules", ".pnpm", `${st.name}@${st.dirVersion}`, "node_modules", st.name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ ...st.pj, main: "index.js" }));
+    for (const [p, t] of Object.entries({ "index.js": "module.exports = {};\n", ...st.files })) { mkdirSync(dirname(join(dir, p)), { recursive: true }); writeFileSync(join(dir, p), t); }
+    symlinkSync(join(".pnpm", `${st.name}@${st.dirVersion}`, "node_modules", st.name), join(d, "node_modules", st.name));
+  }
+  return d;
+}
+const MARKED: Stub = { name: "marked", dirVersion: "18.0.14", pj: { name: "marked", version: "18.0.14" }, files: {} };
+const MATHJAX: Stub = { name: "mathjax-full", dirVersion: "3.2.2", pj: { name: "mathjax-full", version: "3.2.2" }, files: { "js/mathjax.js": "exports.mathjax = {};\n" } };
+const KATEX: Stub = { name: "katex", dirVersion: "0.19.0", pj: { name: "katex", version: "0.19.0" }, files: {} };
+const LOCK = ["marked@18.0.14", "mathjax-full@3.2.2", "katex@0.19.0"];
+const REVIEWED_IMPORTERS = {
+  "src/cli.ts": 'import "./board-math";\nimport "../web/board/svg";\nexport const y = 1;\n',
+  "src/board-math.ts": '// @ts-ignore\nimport { mathjax } from "mathjax-full/js/mathjax.js";\nexport const m = mathjax;\n',
+  "web/board/svg.ts": '// @ts-ignore\nimport { Lexer } from "marked";\nexport const l = Lexer;\n',
+};
+const boundaryCases: [string, Record<string, string>, Stub[], string[], RegExp | null][] = [
+  // [name, files, stubs, lockfile entries, the expected refusal (null: passes)]
+  ["L41-fx11 the reviewed packages, from their reviewed importers, at their versions, in the lockfile: pass", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK, null],
+  ["L41-fx7 membership only: katex, otherwise valid (its stub, its version, the lockfile), is not a reviewed package", { "src/cli.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [KATEX], LOCK, /src\/cli\.ts:\d+: not a reviewed bundled package: katex$/],
+  ["L41-fx8 importer only: marked from src/cli.ts, not its reviewed importer", { "src/cli.ts": '// @ts-ignore\nimport { Lexer } from "marked";\nexport const l = Lexer;\n' }, [MARKED], LOCK, /src\/cli\.ts:\d+: marked from an unreviewed importer$/],
+  ["L41-fx12 identity only: marked's reviewed root holds a package named evil", REVIEWED_IMPORTERS, [{ ...MARKED, pj: { name: "evil", version: "18.0.14" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
+  ["L41-fx9 version only: marked 18.0.13 at its root", REVIEWED_IMPORTERS, [{ ...MARKED, dirVersion: "18.0.13", pj: { name: "marked", version: "18.0.13" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked version 18\.0\.13, reviewed 18\.0\.14$/],
+  ["L41-fx10 lockfile only: marked@18.0.14 missing from the lockfile", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK.filter((e) => e !== "marked@18.0.14"), /web\/board\/svg\.ts:\d+: marked@18\.0\.14 not in the lockfile$/],
+  ["L41-fx13 no masking: a listed package absent from the closure doesn't admit an unlisted one (katex from src/x.ts)", { "src/cli.ts": 'import "./x";\nexport const y = 1;\n', "src/x.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [MARKED, MATHJAX, KATEX], LOCK, /src\/x\.ts:\d+: not a reviewed bundled package: katex$/],
+];
+for (const [name, files, stubs, lock, refusal] of boundaryCases) {
+  test(name, () => {
+    const c = runtimeClosure(stubbedTree(files, stubs, lock), "src/cli.ts");
+    if (refusal === null) assert.deepEqual(c.problems, [], "passes: no problem");
+    else {
+      assert.equal(c.problems.length, 1, `exactly one refusal: ${JSON.stringify(c.problems)}`);
+      assert.match(c.problems[0], refusal, "refused in its own words");
+    }
+    assert.equal(c.files.has(FAKE), false);
   });
 }
 test("L41w the production Worker: local-gateway.ts constructs it as notebook.ts does (the CLI's entry, the workerData key); the CLI passes no authHold, port or observer", () => {
