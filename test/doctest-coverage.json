@@ -34,5 +34,6 @@
   "board_checks": 12,
   "_sage_integer": 51,
   "_memguard": 5,
-  "_sage_combinat": 13
+  "_sage_combinat": 13,
+  "_sage_lazy": 2
 }

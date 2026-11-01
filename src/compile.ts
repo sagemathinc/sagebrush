@@ -265,7 +265,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap, globals: new WeakRef(m) });
   const fn = script.runInThisContext();
   try {
-    if (sage) R.loader.exec("from sage_all import *\n", m, "exec", "<sage>");
+    if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
     pyEntry(fn, m, R, frameState);
   } catch (e) {
     dictDelete(R.sysModules, name);
