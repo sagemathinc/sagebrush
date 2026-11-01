@@ -124,7 +124,14 @@ class LazyImport:
         return self._get()
 
     def __reduce__(self):
+        # (resolves now: a missing target fails at serialization, and the
+        # cache and the slots are as after any first use; unpickling then
+        # gives the real object)
+        self._get()
         return (_resolve, (self._module, self._name))
+
+    def __reduce_ex__(self, protocol):
+        return self.__reduce__()
 
 
 def lazy_import(module, names, namespace):
