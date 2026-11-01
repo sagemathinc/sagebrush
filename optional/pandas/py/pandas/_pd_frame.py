@@ -424,7 +424,93 @@ class DataFrame(object):
         if not name.startswith("_pd_") and not name.startswith("__"):
             if name in self._pd_columns:
                 return self[name]
+            from ._pd_names import DATAFRAME
+            if name in DATAFRAME:
+                raise _unsupported("DataFrame.%s" % name)
         raise AttributeError("'DataFrame' object has no attribute '%s'" % name)
+
+    # (arithmetic is M2's: every operator raises NotImplementedError)
+    def __add__(self, other):
+        raise _unsupported("DataFrame.__add__ (arithmetic)")
+
+    def __radd__(self, other):
+        raise _unsupported("DataFrame.__radd__ (arithmetic)")
+
+    def __sub__(self, other):
+        raise _unsupported("DataFrame.__sub__ (arithmetic)")
+
+    def __rsub__(self, other):
+        raise _unsupported("DataFrame.__rsub__ (arithmetic)")
+
+    def __mul__(self, other):
+        raise _unsupported("DataFrame.__mul__ (arithmetic)")
+
+    def __rmul__(self, other):
+        raise _unsupported("DataFrame.__rmul__ (arithmetic)")
+
+    def __truediv__(self, other):
+        raise _unsupported("DataFrame.__truediv__ (arithmetic)")
+
+    def __rtruediv__(self, other):
+        raise _unsupported("DataFrame.__rtruediv__ (arithmetic)")
+
+    def __floordiv__(self, other):
+        raise _unsupported("DataFrame.__floordiv__ (arithmetic)")
+
+    def __rfloordiv__(self, other):
+        raise _unsupported("DataFrame.__rfloordiv__ (arithmetic)")
+
+    def __mod__(self, other):
+        raise _unsupported("DataFrame.__mod__ (arithmetic)")
+
+    def __rmod__(self, other):
+        raise _unsupported("DataFrame.__rmod__ (arithmetic)")
+
+    def __pow__(self, other):
+        raise _unsupported("DataFrame.__pow__ (arithmetic)")
+
+    def __rpow__(self, other):
+        raise _unsupported("DataFrame.__rpow__ (arithmetic)")
+
+    def __matmul__(self, other):
+        raise _unsupported("DataFrame.__matmul__ (arithmetic)")
+
+    def __rmatmul__(self, other):
+        raise _unsupported("DataFrame.__rmatmul__ (arithmetic)")
+
+    def __divmod__(self, other):
+        raise _unsupported("DataFrame.__divmod__ (arithmetic)")
+
+    def __rdivmod__(self, other):
+        raise _unsupported("DataFrame.__rdivmod__ (arithmetic)")
+
+    def __neg__(self):
+        raise _unsupported("DataFrame.__neg__ (arithmetic)")
+
+    def __pos__(self):
+        raise _unsupported("DataFrame.__pos__ (arithmetic)")
+
+    def __abs__(self):
+        raise _unsupported("DataFrame.__abs__ (arithmetic)")
+
+    # (comparisons of frames are M2's too)
+    def __eq__(self, other):
+        raise _unsupported("DataFrame.__eq__ (comparison)")
+
+    def __ne__(self, other):
+        raise _unsupported("DataFrame.__ne__ (comparison)")
+
+    def __lt__(self, other):
+        raise _unsupported("DataFrame.__lt__ (comparison)")
+
+    def __le__(self, other):
+        raise _unsupported("DataFrame.__le__ (comparison)")
+
+    def __gt__(self, other):
+        raise _unsupported("DataFrame.__gt__ (comparison)")
+
+    def __ge__(self, other):
+        raise _unsupported("DataFrame.__ge__ (comparison)")
 
     def __setitem__(self, key, value):
         if isinstance(key, DataFrame):
@@ -450,10 +536,11 @@ class DataFrame(object):
             col = column_from([value] * n)
         else:
             col = column_from(value)
-            if len(col) != n:
+            if not len(self._pd_cols) and not n:
+                # (the first column of an empty frame sets its length)
+                self._pd_index = default_index(len(col))
+            elif len(col) != n:
                 raise ValueError("Length of values (%d) does not match length of index (%d)" % (len(col), n))
-        if not len(self._pd_cols) and not len(self._pd_index) and not isinstance(value, Series) and not _is_scalar(value):
-            self._pd_index = default_index(len(col))
         try:
             p = self._pd_columns._pd_positions(label)
         except KeyError:
@@ -544,7 +631,8 @@ def _is_all(k):
 def _split(key):
     if isinstance(key, tuple):
         if len(key) != 2:
-            raise _unsupported("an indexer of %d axes" % len(key)) if len(key) > 2 else IndexError("Too many indexers")
+            from .errors import IndexingError
+            raise IndexingError("Too many indexers")
         return key[0], key[1]
     return key, slice(None)
 
@@ -559,14 +647,14 @@ class _FrameILoc(object):
         f = self._pd_obj
         rk, ck = _split(key)
         rows, rs = X.iloc_positions(rk, len(f))
-        cols, cs = X.iloc_positions(ck, len(f._pd_cols))
+        cols, cs = X.iloc_positions(ck, len(f._pd_cols), axis=1)
         return f._pd_select(rows, rs, cols, cs)
 
     def __setitem__(self, key, value):
         f = self._pd_obj
         rk, ck = _split(key)
         rows, rs = X.iloc_positions(rk, len(f))
-        cols, cs = X.iloc_positions(ck, len(f._pd_cols))
+        cols, cs = X.iloc_positions(ck, len(f._pd_cols), axis=1)
         f._pd_set(rows, cols, value)
 
 

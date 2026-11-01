@@ -66,7 +66,10 @@ def reduce_column(col, op, skipna):
         if skipna:
             v = v[~(v != v)]
             if not len(v):
-                # (all missing: NumPy's NaN, not the empty Series' float)
+                # (all missing: the sum 0.0 and min/max NaN are NumPy's; the
+                # mean is a Python float, as for no values)
+                if op == "mean":
+                    return float("nan")
                 return np.float64(0.0 if op == "sum" else float("nan"))
         elif len(v) and bool(_scalar((v != v).any())):
             return np.float64(float("nan"))
@@ -78,6 +81,8 @@ def reduce_column(col, op, skipna):
         return np.float64(float(_scalar(r)))
     # (str and object: Python values)
     vals = col._pd_values
+    if d is STR and op == "mean":
+        raise TypeError("Cannot perform reduction 'mean' with string dtype")
     if skipna:
         vals = [x for x in vals if not is_missing(x)]
     elif any(is_missing(x) for x in vals):

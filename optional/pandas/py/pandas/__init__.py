@@ -21,6 +21,7 @@ __all__ = [
 
 
 def __getattr__(name):
-    if name.startswith("__"):
-        raise AttributeError("module 'pandas' has no attribute '%s'" % name)
-    raise NotImplementedError("pandas.%s is not in Sagebrush's pandas 0.x subset" % name)
+    from ._pd_names import PANDAS
+    if name in PANDAS:
+        raise NotImplementedError("pandas.%s is not in Sagebrush's pandas 0.x subset" % name)
+    raise AttributeError("module 'pandas' has no attribute '%s'" % name)

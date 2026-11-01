@@ -66,13 +66,17 @@ def _is_int(k):
     return isinstance(k, (int, np.integer)) and not isinstance(k, (bool, np.bool_))
 
 
-def iloc_positions(key, n):
-    """Positions for .iloc[key] on an axis of length n."""
+def iloc_positions(key, n, axis=0):
+    """Positions for .iloc[key] on an axis of length n (axis 1: a frame's
+    columns, whose out-of-bounds message is numpy's)."""
     if isinstance(key, tuple):
-        raise IndexError("Too many indexers")
+        from .errors import IndexingError
+        raise IndexingError("Too many indexers")
     if _is_int(key):
         k = int(key)
         if k < -n or k >= n:
+            if axis == 1:
+                raise IndexError("index %d is out of bounds for axis 0 with size %d" % (k, n))
             raise IndexError("single positional indexer is out-of-bounds")
         return [k % n if k < 0 else k], True
     if isinstance(key, slice):
@@ -82,6 +86,9 @@ def iloc_positions(key, n):
                                 % (part, type(part).__name__))
         return list(range(*key.indices(n))), False
     if is_bool_key(key):
+        Index, Series = _ns()
+        if isinstance(key, Series):
+            raise ValueError("iLocation based boolean indexing cannot use an indexable as a mask")
         return mask_positions(key, n, what="iloc"), False
     if is_list_like(key):
         Index, Series = _ns()
@@ -136,7 +143,8 @@ def _slice_bound(index, label, side):
     except TypeError:
         increasing = False
     if not increasing:
-        raise KeyError(label)
+        raise KeyError("Cannot get %s slice bound for non-monotonic index with a missing label %r. "
+                       "Either sort the index or specify an existing label." % (side, label))
     try:
         return bisect.bisect_left(vals, label) if side == "left" else bisect.bisect_right(vals, label)
     except TypeError:

@@ -141,7 +141,7 @@ class Series(object):
             raise _unsupported("Series.to_numpy(dtype=, na_value=)")
         if copy:
             if self._pd_col.is_list:
-                raise _unsupported("Series.to_numpy() of a %s Series" % self._pd_col.dtype)
+                raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if self._pd_col.dtype == "object" else "", self._pd_col.dtype))
             return self._pd_col._pd_values.copy()
         return _export(self._pd_col, "Series.to_numpy()")
 
@@ -278,6 +278,76 @@ class Series(object):
             raise _unsupported("~ on a %s Series" % self._pd_col.dtype)
         return Series._pd_new(Column("bool", ~self._pd_col._pd_values), self._pd_index.copy(), self._pd_name)
 
+    # (arithmetic is M2's: every operator raises NotImplementedError)
+    def __add__(self, other):
+        raise _unsupported("Series.__add__ (arithmetic)")
+
+    def __radd__(self, other):
+        raise _unsupported("Series.__radd__ (arithmetic)")
+
+    def __sub__(self, other):
+        raise _unsupported("Series.__sub__ (arithmetic)")
+
+    def __rsub__(self, other):
+        raise _unsupported("Series.__rsub__ (arithmetic)")
+
+    def __mul__(self, other):
+        raise _unsupported("Series.__mul__ (arithmetic)")
+
+    def __rmul__(self, other):
+        raise _unsupported("Series.__rmul__ (arithmetic)")
+
+    def __truediv__(self, other):
+        raise _unsupported("Series.__truediv__ (arithmetic)")
+
+    def __rtruediv__(self, other):
+        raise _unsupported("Series.__rtruediv__ (arithmetic)")
+
+    def __floordiv__(self, other):
+        raise _unsupported("Series.__floordiv__ (arithmetic)")
+
+    def __rfloordiv__(self, other):
+        raise _unsupported("Series.__rfloordiv__ (arithmetic)")
+
+    def __mod__(self, other):
+        raise _unsupported("Series.__mod__ (arithmetic)")
+
+    def __rmod__(self, other):
+        raise _unsupported("Series.__rmod__ (arithmetic)")
+
+    def __pow__(self, other):
+        raise _unsupported("Series.__pow__ (arithmetic)")
+
+    def __rpow__(self, other):
+        raise _unsupported("Series.__rpow__ (arithmetic)")
+
+    def __matmul__(self, other):
+        raise _unsupported("Series.__matmul__ (arithmetic)")
+
+    def __rmatmul__(self, other):
+        raise _unsupported("Series.__rmatmul__ (arithmetic)")
+
+    def __divmod__(self, other):
+        raise _unsupported("Series.__divmod__ (arithmetic)")
+
+    def __rdivmod__(self, other):
+        raise _unsupported("Series.__rdivmod__ (arithmetic)")
+
+    def __neg__(self):
+        raise _unsupported("Series.__neg__ (arithmetic)")
+
+    def __pos__(self):
+        raise _unsupported("Series.__pos__ (arithmetic)")
+
+    def __abs__(self):
+        raise _unsupported("Series.__abs__ (arithmetic)")
+
+    def __getattr__(self, name):
+        from ._pd_names import SERIES
+        if name in SERIES:
+            raise _unsupported("Series.%s" % name)
+        raise AttributeError("'Series' object has no attribute '%s'" % name)
+
     # --- selection ---------------------------------------------------------
 
     def _pd_take(self, positions):
@@ -308,7 +378,7 @@ class Series(object):
         if isinstance(key, slice):
             return X.getitem_slice_positions(self._pd_index, key), False
         if X.is_bool_key(key):
-            return X.mask_positions(key, len(self), self._pd_index), False
+            return X.mask_positions(key, len(self), self._pd_index, what="Series"), False
         if X.is_list_like(key):
             return X.loc_positions(self._pd_index, key)
         if isinstance(key, tuple):
@@ -416,7 +486,7 @@ def _export(col, what):
     """to_numpy()/.values of one column: a read-only copy of a numeric
     column (r7 §C3's table); str/object are rejected."""
     if col.is_list:
-        raise _unsupported("%s of a %s column" % (what, col.dtype))
+        raise _unsupported("%s of a%s %s column" % (what, "n" if col.dtype == "object" else "", col.dtype))
     a = col._pd_values.copy()
     a.flags.writeable = False
     return a

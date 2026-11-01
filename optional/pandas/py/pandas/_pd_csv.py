@@ -892,6 +892,19 @@ def read_csv(filepath_or_buffer, *, sep=",", header="infer", names=None, index_c
             close()
 
 
+def _range_or_index(col, name):
+    """The index from an index_col column: a RangeIndex for at least two
+    evenly spaced int64 labels (pandas' maybe_sequence_to_range)."""
+    if col.dtype == "int64" and len(col) >= 2:
+        v = col._pd_values.tolist()
+        step = v[1] - v[0]
+        if step != 0 and all(v[i + 1] - v[i] == step for i in range(len(v) - 1)):
+            return RangeIndex(v[0], v[-1] + step, step, name=name)
+    index = Index(None, name=name)
+    index._pd_col = col
+    return index
+
+
 def _parse(read, sep, quotechar, header, names, index_col, usecols, na, dtype, nrows, skip, skip_n, budget):
     reader = _Reader(read, sep, quotechar, budget)
     try:
@@ -957,12 +970,16 @@ def _parse_rows(reader, header, names, index_col, usecols, na, dtype, nrows, ski
     # the header
     first = fline = None
     if header is not None:
+        seen = 0
         for _ in range(header):
             f, _l = src.next_row()
             if f is None:
                 break
+            seen += 1
         hdr, hline = src.next_row()
         if hdr is None:
+            if header and seen:
+                raise ParserError("Passed header=%d but only %d lines in file" % (header, seen))
             raise EmptyDataError("No columns to parse from file")
         labels = list(names) if names is not None else _mangle(list(hdr))
     else:
@@ -1061,9 +1078,7 @@ def _parse_rows(reader, header, names, index_col, usecols, na, dtype, nrows, ski
             if index_col not in kept_labels:
                 raise ValueError("Index %s invalid" % index_col)
             pos = kept_labels.index(index_col)
-        index = Index.__new__(Index)
-        Index.__init__(index, None, name=kept_labels[pos])
-        index._pd_col = cols[pos]
+        index = _range_or_index(cols[pos], kept_labels[pos])
         index._pd_budget = budget
         del cols[pos]
         del kept_labels[pos]

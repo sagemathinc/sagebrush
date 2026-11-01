@@ -150,6 +150,12 @@ class option_context(object):
     __slots__ = ("_pd_ops", "_pd_undo")
 
     def __init__(self, *args):
+        # (checked on entering, as pandas' generator-based context does)
+        self._pd_ops = args
+        self._pd_undo = ()
+
+    def __enter__(self):
+        args = self._pd_ops
         if len(args) == 1 and isinstance(args[0], dict):
             args = tuple(kv for item in args[0].items() for kv in item)
         if len(args) % 2 != 0 or len(args) < 2:
@@ -158,9 +164,6 @@ class option_context(object):
                 "option_context(pat, val, pat, val...)."
             )
         self._pd_ops = tuple(zip(args[::2], args[1::2]))
-        self._pd_undo = ()
-
-    def __enter__(self):
         self._pd_undo = tuple((pat, get_option(pat)) for pat, val in self._pd_ops)
         for pat, val in self._pd_ops:
             _set((pat, val))

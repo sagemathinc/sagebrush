@@ -180,11 +180,24 @@ def column_from(data, dtype=None):
 
 def _cast_list(values, want):
     if want == "int64":
+        # (pandas 3.1's errors, in its order: None, NaN, a fractional
+        # float, then the range)
         out = []
+        fractional = False
         for v in values:
-            if is_missing(v):
-                raise ValueError("Cannot convert non-finite values (NA or inf) to integer")
+            if v is None:
+                raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'NoneType'")
+            if isinstance(v, (float, np.floating)):
+                if v != v:
+                    raise ValueError("cannot convert float NaN to integer")
+                if v in (float("inf"), float("-inf")):
+                    raise OverflowError("cannot convert float infinity to integer")
+                fractional = fractional or not float(v).is_integer()
             out.append(int(v))
+        if fractional:
+            raise ValueError("Trying to coerce float values to integers")
+        if out and (min(out) < -(2 ** 63) or max(out) > 2 ** 63 - 1):
+            raise OverflowError("The elements provided in the data cannot all be casted to the dtype int64")
         return Column("int64", np.array(out, dtype=np.int64))
     if want == "float64":
         return Column("float64", np.array([float("nan") if v is None else float(v) for v in values], dtype=np.float64))

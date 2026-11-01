@@ -147,6 +147,12 @@ class Index(object):
         from ._pd_repr import index_repr
         return index_repr(self)
 
+    def __getattr__(self, name):
+        from ._pd_names import INDEX
+        if not name.startswith("_") and name in INDEX:
+            raise NotImplementedError("pandas.%s.%s is not in Sagebrush's pandas 0.x subset" % (type(self).__name__, name))
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
     __str__ = __repr__
 
     def __setitem__(self, key, value):
