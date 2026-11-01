@@ -1,6 +1,7 @@
 # Smith and Hermite forms over QQ, a field (kernel lane 4a): they were the
 # integer forms of an integral QQ matrix, a silent wrong answer.  The .out
-# is HAND-WRITTEN by @sagebrush-sage2.  D and the Hermite form are determined
+# was HAND-WRITTEN by @sagebrush-sage2; lines 1-13 and 20-23 are Sage 10.9's (the VM2 oracle, Nov 1:
+# hermite_form over QQ is NOT the reduced echelon form, lines 2 and 7 corrected).  D and the Hermite form are determined
 # by the matrix; U and V are not printed, only checked.  One line per item,
 # an error printed as its name.
 def rows(f):
@@ -61,4 +62,10 @@ print(spied("_smith_field_reduce", lambda: matrix(QQ, 100000, 1).smith_form()))
 print(guard(1, 2048), guard(1, 2049))
 print(guard(2048, 0), guard(2049, 0))
 print(guard(2047, 2), guard(2047, 3))
-print(spied("_smith_field_reduce", lambda: matrix(QQ, [[1, 2], [3, 4]]).smith_form()))
+print(spied("_smith_field_reduce", lambda: type(matrix(QQ, [[1, 2], [3, 4]]).smith_form()).__name__))
+# hermite_form over QQ as Sage's (VM2 oracle, Nov 1): every row differs from the RREF; rank-deficient;
+# a swap (the moved row negated); a non-integral pivot quotient
+print(rows(lambda: matrix(QQ, [[2, 4], [1, 3]]).hermite_form()))
+print(rows(lambda: matrix(QQ, [[1, 2, 3], [2, 4, 6], [1, 0, 1]]).hermite_form()))
+print(rows(lambda: matrix(QQ, [[0, 1], [1, 0]]).hermite_form()))
+print(rows(lambda: matrix(QQ, [[6, 4], [4, 6]]).hermite_form()))

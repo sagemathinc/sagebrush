@@ -1,10 +1,10 @@
 (True, True, True, [(1, 0), (0, 1)], Rational Field)
-[(1, 0), (0, 1)]
+[(1, 2), (0, -2)]
 Rational Field
 (True, True, True, [(1, 0, 0), (0, 0, 0)], Rational Field)
 [(1, 2, 3), (0, 0, 0)]
 (True, True, True, [(1, 0), (0, 1)], Rational Field)
-[(1, 0), (0, 1)]
+[(1/2, 1), (0, 1)]
 (True, True, True, [(1, 0, 0), (0, 1, 0), (0, 0, 0)], Rational Field)
 [(2, 0), (0, 4)]
 [(1, 1, 1), (0, 2, 4)]
@@ -17,3 +17,7 @@ ok SagebrushMemoryError
 ok SagebrushMemoryError
 ok SagebrushMemoryError
 RuntimeError
+[(2, 4), (0, 1)]
+[(1, 2, 3), (0, -2, -2), (0, 0, 0)]
+[(1, 0), (0, -1)]
+[(6, 4), (0, 10/3)]

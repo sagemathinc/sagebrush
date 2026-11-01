@@ -1723,8 +1723,10 @@ class Matrix:
 
     def hermite_form(self):
         """The Hermite normal form (rows, zero rows at the bottom); over QQ,
-        a field, the reduced row echelon form, as Sage (it was the integer
-        Hermite form of an integral QQ matrix: a wrong answer).
+        a field, Sage's form: forward elimination with neither pivot scaling
+        nor elimination above a pivot, a row swap moving the lower row up and
+        negating the other (it was the integer Hermite form of an integral QQ
+        matrix: a wrong answer; Sage 10.9's outputs, VM2 oracle Nov 1).
 
         EXAMPLES::
 
@@ -1732,15 +1734,40 @@ class Matrix:
             [1 1 1]
             [0 2 4]
             sage: matrix(QQ, [[1, 2], [3, 4]]).hermite_form()
-            [1 0]
-            [0 1]
+            [ 1  2]
+            [ 0 -2]
         """
         if self._base is _sa().QQ:
-            return self.echelon_form()
+            return self._hermite_field()
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
         return Matrix(_sa().ZZ, h, self._nc)
+
+    def _hermite_field(self):
+        # Sage's hermite_form over a field: for each column, the first row at
+        # or below the current one with a nonzero entry is the pivot (a swap
+        # takes (r_i, r_j) to (r_j, -r_i)), and each row below loses its
+        # multiple of the pivot row; pivots aren't scaled, rows above aren't
+        # touched, and a zero column is skipped
+        K = self._base
+        A = [list(r) for r in self._rows]
+        m, n = len(A), self.ncols()
+        r = 0
+        for c in range(n):
+            if r >= m:
+                break
+            p = next((i for i in range(r, m) if A[i][c] != 0), None)
+            if p is None:
+                continue
+            if p != r:
+                A[r], A[p] = A[p], [-x for x in A[r]]
+            for i in range(r + 1, m):
+                if A[i][c] != 0:
+                    q = K(A[i][c]) / K(A[r][c])
+                    A[i] = [x - q * y for x, y in zip(A[i], A[r])]
+            r += 1
+        return Matrix(K, A, n)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).
