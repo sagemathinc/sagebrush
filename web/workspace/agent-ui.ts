@@ -70,7 +70,7 @@ export const RESTORE_MS = 10_000;
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void }; quietLoss?: boolean } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
@@ -89,11 +89,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
   let kept: ReloadRecord | null = null;
 
-  function dialog(title: string, body: (box: HTMLElement, close: () => void) => void) {
+  function dialog(title: string, body: (box: HTMLElement, close: () => void) => void, onClose?: () => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));
     const dlg = h("div", { className: "sbag-dlg" }, box);
     dlg.setAttribute("role", "dialog");
-    const close = () => dlg.remove();
+    const close = () => { if (!dlg.isConnected) return; dlg.remove(); onClose?.(); };
     dlg.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
     body(box, close);
     document.body.append(dlg);
@@ -169,7 +169,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     });
   }
 
-  function connect(code = "", port = "") {
+  /** The Connect dialog. `back` (A14 §3): where focus returns if it closes without connecting (the page's bar button). */
+  function connect(code = "", port = "", back?: HTMLElement) {
     if (isSafari()) {
       dialog("Connect an agent", (box, close) => { const okb = h("button", { className: "primary", textContent: "OK" }); okb.onclick = close; box.append(h("div", { textContent: SAFARI }), h("div", { className: "row" }, okb)); });
       return;
@@ -224,11 +225,20 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       box.append(h("div", { className: "note", textContent: "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
         h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go));
       setTimeout(() => c.focus());
-    });
+    }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
+  const pairingLive = () => !!pairing && pairing.state !== "closed";
 
-  /** A remembered agent: reconnect with its session, and give it the same grant again (if it hasn't expired). */
-  async function reconnect() {
+  /** The first remembered grant still in force, for the page's "Use remembered access" (A14 N6); null if none. */
+  async function remembered(): Promise<Kept["grant"] | null> {
+    try {
+      const all = (await ws.agentGrants()) as Record<string, Kept>;
+      return Object.values(all).find((k) => k?.grant && k.session && (k.grant.expires === null || Date.now() < k.grant.expires))?.grant ?? null;
+    } catch { return null; }
+  }
+  /** A remembered agent: reconnect with its session, and give it the same grant again (if it hasn't expired). The
+   * grant given, or null. */
+  async function reconnect(): Promise<Kept["grant"] | null> {
     const kept = (await ws.agentGrants()) as Record<string, Kept>;
     for (const [id, k] of Object.entries(kept)) {
       if (!k?.grant || !k.session || (k.grant.expires !== null && !(Date.now() < k.grant.expires))) { await ws.putAgentGrant(id, null); continue; }
@@ -238,9 +248,10 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         await p.paired();
         await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires }, true);
         showBar();
-        return;
+        return k.grant;
       } catch { /* (the server restarted, or the agent is gone: a new code is needed; the grant stays until it expires or is revoked) */ }
     }
+    return null;
   }
 
   /** One attempt with a reload record (A14): its session, at most RESTORE_MS; the agent must be the one it was, the
@@ -279,7 +290,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
    * grants as before. After a record that wasn't restored, a remembered grant is not tried silently. */
   async function restoreOnLoad() {
     const r = o.reload ? takeReloadRecord(storage) : null;
-    if (!r) return void reconnect();
+    if (!r) { const g = await reconnect(); if (g) o.reload?.onRemembered?.(g); return; }
     const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
     if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
@@ -295,5 +306,5 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   const link = pairLink();
   if (link) connect(link.code, link.port);
   else void restoreOnLoad();
-  return { connect, reconnectKept, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
+  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
 }

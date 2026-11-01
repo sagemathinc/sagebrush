@@ -14,10 +14,11 @@ import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
-import { AgentError, type AgentPairing } from "../workspace/agent-pair";
+import { AgentError, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
-import { mountAgentPairing } from "../workspace/agent-ui";
+import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
+import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "./composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
@@ -106,6 +107,8 @@ function submit(mode: UserEntry["mode"]) {
   const text = editor.value.trim();
   if (!text) return;
   const thread = current();
+  // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
+  if (mode !== "note" && inert(thread)) return;
   const busy = isRunning(thread);
   if (mode === "queued" && !busy) mode = "sent";
   const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
@@ -150,14 +153,20 @@ function next(thread: Thread) {
 
 function send(thread: Thread, entry: UserEntry) {
   if (live()) {
+    mark(thread);
     liveRunning.add(thread.id);
     if (!pairing!.notify("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text })) {
       liveRunning.delete(thread.id);
       toast("The agent is disconnected");
     }
     renderComposer();
-  } else {
+  } else if (mayDemo(thread)) {
     startTurn(thread, entry.text);
+  } else {
+    // (a chat Claude was in never goes to the demo: the message waits, pending, until Claude is connected again)
+    entry.mode = "queued";
+    queues.set(thread.id, [entry, ...(queues.get(thread.id) ?? [])]);
+    save();
   }
 }
 
@@ -179,6 +188,7 @@ function onAgent(method: string, params: unknown) {
   const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+  mark(thread);
   emitTo(thread, p.turn_id, p.event as Draft);
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
   if (turn && !turn.agent) turn.agent = pairing?.hello?.agent.name ?? "agent";
@@ -858,6 +868,125 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
 
 function renderComposer() {
   renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
+  renderConn();
+}
+
+// ---------------------------------------------------------------------------
+// The connection (A14): a reload reconnects; a lost connection is never silent; a chat Claude was in never falls back
+// to the scripted demo.
+
+// (the no-demo marker: a real agent was in this chat. It holds no credential; it is kept with the chats)
+const marked = (t: Thread) => !!(t as Thread & { agent?: boolean }).agent;
+function mark(t: Thread) {
+  if (marked(t)) return;
+  (t as Thread & { agent?: boolean }).agent = true;
+  save();
+}
+// (connected on this page, or a reload record found: a chat made since isn't the demo's either)
+let connectedHere = false;
+const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
+const inert = (t: Thread) => !live() && !mayDemo(t);
+
+type ConnBar = { kind: keyof typeof CONN; alert: boolean; action: "reconnect" | "connect" | null };
+const CONN = {
+  lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
+  restoring: "Reconnecting to Claude…",
+  unreachable: "Couldn't connect to sagebrush-agent on this computer. It may have stopped, this browser may need permission to reach it, or another page may be connected to it.",
+  refused: "sagebrush-agent didn't accept this page's last connection, so it needs a new code. If sagebrush-agent was restarted, Claude's earlier context for these chats is gone; your chats are still here.",
+  expired: "Claude's access expired.",
+  discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
+  kept: "Claude was connected to this page before it was opened again.",
+};
+let connBar: ConnBar | null = null;
+let connShown = false; // (the bar's ×: hidden until the next change)
+let reconnecting = false; // (the bar's [Reconnect] while its one attempt runs: "Reconnecting…", never disabled, C3)
+let rememberedGrant: Kept["grant"] | null = null;
+let agentUi: ReturnType<typeof mountAgentPairing> | null = null;
+const setText = (el: HTMLElement, t: string) => { if (el.textContent !== t) el.textContent = t; };
+
+function setConn(b: ConnBar | null) {
+  connBar = b;
+  connShown = !!b;
+  renderConn();
+}
+
+function grantScope(g: Kept["grant"]) {
+  const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
+  return `${g.write ? "read and write" : "read only"} ${where}${g.expires !== null ? ", until " + new Date(g.expires).toLocaleString() : ""}`;
+}
+
+function renderConn() {
+  const bar = $("#conn-bar"), b = connShown ? connBar : null;
+  const hadFocus = bar.contains(document.activeElement);
+  bar.classList.toggle("on", !!b);
+  setText($("#conn-alert"), b?.alert ? CONN[b.kind] : "");
+  setText($("#conn-status"), b && !b.alert ? CONN[b.kind] : "");
+  const act = $("#conn-act");
+  const acts = b !== null && (b.action !== null || b.kind !== "restoring");
+  ($(".acts", bar) as HTMLElement).hidden = !acts;
+  act.hidden = !b?.action;
+  setText(act, reconnecting ? "Reconnecting…" : b?.action === "connect" ? "Connect" : "Reconnect");
+  for (const k of ["aria-disabled", "aria-busy"]) reconnecting ? act.setAttribute(k, "true") : act.removeAttribute(k);
+  const rem = !!b && !!rememberedGrant && b.kind !== "restoring" && b.kind !== "lost";
+  ($(".remembered", bar) as HTMLElement).hidden = !rem;
+  setText($("#conn-scope"), rem && rememberedGrant ? grantScope(rememberedGrant) : "");
+  $("#conn-x").hidden = !b || b.kind === "restoring";
+  // Send: inert while not connected in a chat the demo may not answer, never `disabled` (C1), described by what says why
+  const send = $("#send"), off = inert(current());
+  $("#send-hint").hidden = !(off && !b);
+  if (off) {
+    send.setAttribute("aria-disabled", "true");
+    send.setAttribute("aria-describedby", b ? (b.alert ? "conn-alert" : "conn-status") : "send-hint");
+  } else {
+    send.removeAttribute("aria-disabled");
+    send.removeAttribute("aria-describedby");
+  }
+  // (focus never falls to the body: from a bar that went away, to the composer)
+  if (hadFocus && !b) editor.focus();
+}
+
+$("#conn-act").onclick = async () => {
+  if (reconnecting || !connBar?.action || !agentUi) return;
+  if (connBar.action === "connect") return agentUi.connect("", "", $("#conn-act"));
+  reconnecting = true;
+  renderConn();
+  try {
+    await agentUi.reconnectKept();
+  } finally {
+    reconnecting = false;
+    renderConn();
+  }
+};
+$("#conn-remembered").onclick = async () => {
+  if (reconnecting || !agentUi) return;
+  reconnecting = true;
+  renderConn();
+  const g = await agentUi.useRemembered().catch(() => null);
+  reconnecting = false;
+  if (g) setConn(null);
+  else setConn({ kind: "unreachable", alert: false, action: connBar?.action ?? "connect" });
+};
+$("#conn-x").onclick = () => {
+  connShown = false;
+  renderConn();
+};
+
+function onRestore(s: RestoreState) {
+  connectedHere = true;
+  if (s.kind === "restoring") {
+    // (the bar's own [Reconnect] keeps its button, and focus on it, while it runs: C3)
+    if (!reconnecting) setConn({ kind: "restoring", alert: false, action: null });
+  } else if (s.kind === "restored") {
+    setConn(null);
+  } else {
+    setConn({ kind: s.why === "not-a-reload" ? "kept" : s.why, alert: false, action: s.canReconnect ? "reconnect" : "connect" });
+    // (after a record that wasn't restored, a remembered grant is offered, never tried silently)
+    void agentUi?.remembered().then((g) => {
+      rememberedGrant = g;
+      renderConn();
+    });
+  }
+  renderHeader();
 }
 
 let toastTimer = 0;
@@ -988,13 +1117,34 @@ function hiddenHost(threadId: string, a: Artifact) {
 }
 
 if (workspace) {
-  mountAgentPairing(workspace, {
+  agentUi = mountAgentPairing(workspace, {
     button: $("#connect"),
     notebookEdit: editNotebook,
+    reload: {
+      scope: { workspace: `${WS_DB}/${workspace.identity.workspace}`, page: location.origin + location.pathname },
+      onState: onRestore,
+      onRemembered(g) {
+        setText($("#who-status"), `connected with remembered access: ${grantScope(g)}`);
+      },
+    },
+    quietLoss: true,
     onPairing(p) {
       pairing = p;
       p.onNotification(onAgent);
+      let granted = false;
       p.onChange(() => {
+        if (p.state === "paired" || p.state === "granted") connectedHere = true;
+        if (p.state === "granted" && !granted) {
+          granted = true;
+          if (connBar) setConn(null);
+        }
+        if (p.state === "closed" && pairing === p && granted) {
+          // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
+          const why = p.closeReason;
+          if (why === "revoked by the person") setConn(null);
+          else if (why === "the grant expired") setConn({ kind: "expired", alert: true, action: "connect" });
+          else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
+        }
         if (p.state === "closed" && pairing === p) {
           // (turns the agent can no longer finish end here, as interrupted)
           for (const tid of [...liveRunning]) {
@@ -1011,6 +1161,10 @@ if (workspace) {
     },
   });
 }
+addEventListener("pagehide", () => {
+  // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
+  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
+});
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
 function renderHeader() {
@@ -1019,6 +1173,8 @@ function renderHeader() {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
+  } else if (inert(current())) {
+    who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
@@ -1028,6 +1184,8 @@ function renderHeader() {
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    : inert(current())
+    ? "Claude isn't connected to this page. Chats are kept in this browser only."
     : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
 }
 
