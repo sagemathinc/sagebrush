@@ -14,7 +14,7 @@ export const LIMITS = {
   sidecarBytes: 2 << 20, newThreadBytes: 1.75 * (1 << 20), threadBytes: 256 << 10, sourceUnits: 2 << 20,
   liveThreads: 2000, threads: 4000, messages: 200, text: 8000, author: 100, id: 64,
   quoteFull: 600, quoteHead: 300, context: 32, shown: 300, candidates: 64, workBudget: 64 << 20,
-  listThreads: 200, listBytes: 1 << 20, summaryUnits: 500, contextLines: 3, contextLineUnits: 200, changedWindow: 2000,
+  passKey: 32, passQuota: 1 << 14, listThreads: 200, listBytes: 1 << 20, summaryUnits: 500, contextLines: 3, contextLineUnits: 200, changedWindow: 2000,
   attempts: 5, backoffMs: [50, 100, 200, 400], deadlineMs: 10000,
 };
 
@@ -175,7 +175,7 @@ export function lineIndex(text) {
  * exact | moved | changed | ambiguous | orphaned | unresolved (never a guess). steps(anchor) is the same as a generator
  * that yields between bounded steps (a window of the text searched, a piece of a long span hashed), so the page can
  * give the main thread back between them; its return value is resolve's. */
-export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onCopy } = {}) {
+export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onCopy, pass } = {}) {
   sourceFits(text);
   // (the text's hash, the caller's when it hashed the text already in slices (the page), and its line index, built
   // when first needed: both charged here, the same either way)
@@ -238,13 +238,150 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     return h === OUT ? OUT : h === a.sha ? { start: i, end: e } : null;
   }
   const ctxExact = (a, s, e) => { work += a.prefix.length + a.suffix.length; return copy(Math.max(0, s - a.prefix.length), s) === a.prefix && copy(e, Math.min(text.length, e + a.suffix.length)) === a.suffix; };
+  // ---- the shared pass (plan shared-pass r2 and its addenda): the whole-text searches of many anchors, each one's
+  // quote (the head of a long one) and prefix, done in ONE scan by an Aho–Corasick automaton over each needle's first
+  // passKey units (a longer needle verified past its key, in place). prepare(anchors) is a generator: every unit of its
+  // work (a needle collected, a table slot allocated, a node made, a probe of the table, an edge walked, a text unit
+  // scanned, an output visited, a unit compared) is checked against the budget and charged before it is done, and after
+  // passQuota units it yields. Its needles end "complete" (every occurrence, up to the cap + 1), "cap" (more than the cap
+  // + 1: too many, which is all an anchor needs to know) or, if the budget ran out first, incomplete: an anchor that needs
+  // an incomplete needle is unresolved (budget), and is never searched again. The suffix isn't shared: each start's own
+  // window is searched as before. Which path runs is a conservative, deterministic rule on the worst-case charged volume
+  // of the anchors' own whole-text searches: with n the anchors not exact here that have a quote or a prefix, the pass
+  // runs when n x text length >= 2 x this resolver's budget, else each anchor's own searches run (native, and able to
+  // stop early: they may well fit, so this is a dispatch heuristic, not a proof). pass: true forces it (the tests). The scan ends early once
+  // every needle has passed the cap. The root's children are a direct table (65,536 entries), not the hash: a step at the
+  // root costs one unit, whether or not the unit starts a key.
+  const KEY = LIMITS.passKey, Q = LIMITS.passQuota, SEG = 1 << 16;
+  let prep = null, stats = null;
+  function* prepare(anchors) {
+    if (starved) return;
+    anchors = anchors.filter((a) => !(a.textSha === textSha && a.end <= text.length) && (a.quote || a.prefix));
+    stats = { path: "native", n: anchors.length };
+    if (!pass && anchors.length * text.length < 2 * budget) return;
+    stats.path = "pass";
+    const map = new Map(), recs = [], keys = new Map();
+    prep = map;
+    let q = 0;
+    const pay = (n) => { if (!can(n)) return false; work += n; q += n; return true; };
+    // (collect: each needle once; its key, its first KEY units, once)
+    for (const a of anchors) {
+      for (const n of [a.quote, a.prefix]) {
+        if (!n || map.has(n)) continue;
+        if (!pay(n.length)) return;
+        const r = { s: n, occ: [], st: 0, key: null };
+        map.set(n, r); recs.push(r);
+        const k = n.length > KEY ? n.slice(0, KEY) : n;
+        r.key = keys.get(k) ?? { k, node: 0 }; keys.set(k, r.key);
+      }
+      if (q >= Q) { q = 0; last = { kind: "collect", size: Q }; yield; }
+    }
+    if (!recs.length) return;
+    let N = 1; for (const k of keys.keys()) N += k.length;
+    let cap = 1024; while (cap < 2 * N) cap *= 2;
+    const S = Math.min(cap, SEG), M = cap - 1, K = [], V = [];
+    // (alloc: each typed array its own step; the transition table in segments of at most 2^16 slots)
+    for (let i = 0; i < cap / S; i++) { if (!pay(S)) return; K.push(new Float64Array(S)); V.push(new Int32Array(S)); q = 0; last = { kind: "alloc", size: S }; yield; }
+    const node = () => { if (!pay(N)) return null; const x = new Int32Array(N); q = 0; last = { kind: "alloc", size: N }; return x; };
+    const arrs = [];
+    for (let i = 0; i < 7; i++) { const x = node(); if (!x) return; arrs.push(x); yield; }
+    const [fail, dict, tStart, tCount, queue, first, next] = arrs;
+    if (!pay(N)) return;
+    const unitOf = new Uint16Array(N), terms = new Int32Array(recs.length);
+    q = 0; last = { kind: "alloc", size: N }; yield;
+    if (!pay(65536)) return;
+    const root = new Int32Array(65536);
+    q = 0; last = { kind: "alloc", size: 65536 }; yield;
+    Object.assign(stats, { nodes: N, cap, bytes: cap * 12 + N * 30 + recs.length * 4 + 4 * 65536 });
+    // the child of (n, u) or -1, each slot inspected charged (null: the budget ran out); slot: the empty one found
+    let slot = 0;
+    const get = (n, u) => {
+      if (!n) { if (!pay(1)) return null; return root[u] ? root[u] : -1; }
+      const k = n * 65536 + u + 1;
+      for (let h = (Math.imul(n, 0x9e3779b1) ^ Math.imul(u + 1, 0x85ebca77)) & M; ; h = (h + 1) & M) {
+        if (!pay(1)) return null;
+        const kk = K[h >>> 16][h & 0xffff];
+        if (kk === 0) { slot = h; return -1; }
+        if (kk === k) return V[h >>> 16][h & 0xffff];
+      }
+    };
+    // (insert each key, a node per new unit; children kept as first/next links for the failure pass)
+    let nn = 1;
+    for (const r of keys.values()) {
+      let v = 0;
+      for (let i = 0; i < r.k.length; i++) {
+        const u = r.k.charCodeAt(i), c = get(v, u);
+        if (c === null || !pay(1)) return;
+        if (c < 0) { if (!v) root[u] = nn; else { K[slot >>> 16][slot & 0xffff] = v * 65536 + u + 1; V[slot >>> 16][slot & 0xffff] = nn; } unitOf[nn] = u; next[nn] = first[v]; first[v] = nn; v = nn++; }
+        else v = c;
+        if (q >= Q) { q = 0; last = { kind: "insert", size: Q }; yield; }
+      }
+      r.node = v;
+    }
+    // (the terminals, by node: counted, summed, filled; queue serves as the fill cursor)
+    for (const r of recs) { if (!pay(1)) return; tCount[r.key.node]++; if (q >= Q) { q = 0; last = { kind: "terminals", size: Q }; yield; } }
+    for (let v = 0, acc = 0; v < nn; v++) { if (!pay(1)) return; tStart[v] = acc; acc += tCount[v]; if (q >= Q) { q = 0; last = { kind: "terminals", size: Q }; yield; } }
+    for (let i = 0; i < recs.length; i++) { if (!pay(1)) return; const v = recs[i].key.node; terms[tStart[v] + queue[v]++] = i; if (q >= Q) { q = 0; last = { kind: "terminals", size: Q }; yield; } }
+    // (failure and dictionary links, breadth first along the child links)
+    let tail = 0;
+    for (let c = first[0]; c; c = next[c]) { if (!pay(1)) return; queue[tail++] = c; }
+    for (let qi = 0; qi < tail; qi++) {
+      const v = queue[qi];
+      for (let c = first[v]; c; c = next[c]) {
+        if (!pay(1)) return;
+        let f = fail[v], g;
+        for (;;) { g = get(f, unitOf[c]); if (g === null) return; if (g >= 0 || f === 0) break; if (!pay(1)) return; f = fail[f]; }
+        const fc = g >= 0 ? g : 0;
+        fail[c] = fc; dict[c] = tCount[fc] ? fc : dict[fc]; queue[tail++] = c;
+        if (q >= Q) { q = 0; last = { kind: "fail", size: Q }; yield; }
+      }
+    }
+    // (the scan: one unit at a time; at each, the needles whose keys end there, through the dictionary links, each
+    //  visited charged, a longer one verified past its key in place)
+    const L = text.length, cap1 = LIMITS.candidates;
+    let active = recs.length;
+    for (let i = 0, v = 0; i < L && active; i++) {
+      const u = text.charCodeAt(i);
+      // (at the root, inline: the scan unit and the root's lookup, two units, as pay and get would charge them)
+      if (!v) {
+        if (work + 2 > budget) return;
+        work += 2; q += 2; v = root[u];
+        if (!v) { if (q >= Q) { q = 0; last = { kind: "scan", size: Q }; yield; } continue; }
+      } else if (!pay(1)) return;
+      else for (;;) { const g = get(v, u); if (g === null) return; if (g >= 0) { v = g; break; } if (v === 0) break; if (!pay(1)) return; v = fail[v]; }
+      for (let t = tCount[v] ? v : dict[v]; t; t = dict[t]) {
+        for (let j = tStart[t], je = j + tCount[t]; j < je; j++) {
+          if (!pay(1)) return;
+          if (q >= Q) { q = 0; last = { kind: "output", size: Q }; yield; }
+          const r = recs[terms[j]];
+          if (r.st) continue;
+          const n = r.s, start = i + 1 - Math.min(n.length, KEY);
+          let ok = start + n.length <= L;
+          for (let p = KEY; ok && p < n.length; p++) {
+            if (!pay(1)) return;
+            ok = text.charCodeAt(start + p) === n.charCodeAt(p);
+            if (q >= Q) { q = 0; last = { kind: "verify", size: Q }; yield; }
+          }
+          if (ok) { r.occ.push(start); if (r.occ.length > cap1) { r.st = 2; active--; } }
+        }
+      }
+      if (q >= Q) { q = 0; last = { kind: "scan", size: Q }; yield; }
+    }
+    for (const r of recs) if (!r.st) r.st = 1;
+  }
+  // a needle's occurrences: the shared pass's when it has them (incomplete: OUT, never searched again), else searched
+  function* lookup(n) {
+    const r = prep?.get(n);
+    if (!r) return yield* find(n);
+    return r.st ? r.occ : OUT;
+  }
   const UNRESOLVED = { status: "unresolved", reason: "budget" };
   function* steps(a) {
     if (starved) return UNRESOLVED;
     if (a.textSha === textSha && a.end <= text.length) return { status: "exact", start: a.start, end: a.end };
     // moved: one occurrence of the whole quote, or one whose prefix and suffix both still match; several: ambiguous
     if (a.quote) {
-      const occ = yield* find(a.quote);
+      const occ = yield* lookup(a.quote);
       if (occ === OUT) return UNRESOLVED;
       if (occ.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] };
       const spans = [];
@@ -261,7 +398,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     // empty prefix means the file's start only, an empty suffix the file's end only; one pair with text between them:
     // changed; more: ambiguous; only white space between them: orphaned (the text was deleted)
     let starts = [];
-    if (a.prefix) { const f = yield* find(a.prefix); if (f === OUT) return UNRESOLVED; starts = f.map((i) => i + a.prefix.length); }
+    if (a.prefix) { const f = yield* lookup(a.prefix); if (f === OUT) return UNRESOLVED; starts = f.map((i) => i + a.prefix.length); }
     else if (a.start === 0) starts = [0];
     if (starts.length > LIMITS.candidates) return { status: "ambiguous", reason: "too many", candidates: [] };
     const pairs = [];
@@ -293,7 +430,7 @@ export function resolver(text, budget = LIMITS.workBudget, { textSha: known, onC
     }
     return out.join("\n");
   };
-  return { textSha, get lines() { return lines(); }, resolve, steps, context, work: () => work, lastStep: () => last };
+  return { textSha, get lines() { return lines(); }, resolve, steps, prepare, context, work: () => work, lastStep: () => last, passStats: () => stats };
 }
 
 // ---- the operations: each returns a new document (the input is never changed) and checks admission first
@@ -429,6 +566,9 @@ export function list(doc, text, { all = false, cursor = null, budget } = {}) {
   if (cursor && cursor.snapshot !== snapshot) fail("stale", "the comments or the file changed: list again from the start");
   const R = resolver(text, budget);
   const ts = doc.threads.filter((t) => live(t) && (all || !t.resolved.value)).sort((p, q) => (p.id < q.id ? -1 : 1)).filter((t) => !cursor || t.id > cursor.after);
+  // (the page's threads, at most listThreads of them, chosen first, then prepared together: the shared pass when they
+  //  call for it)
+  for (const _ of R.prepare(ts.slice(0, LIMITS.listThreads).map((t) => t.anchor.value)));
   const out = []; let bytes = 0, i = 0;
   for (; i < ts.length && out.length < LIMITS.listThreads; i++) {
     const t = ts[i], ms = t.messages.filter((m) => !m.deleted.value), a = t.anchor.value;

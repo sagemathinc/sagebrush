@@ -1,6 +1,7 @@
 // Deferred runtime checks: run on an authorized VM/CI, not the shared project.
 import test from 'node:test';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +47,51 @@ test('Worker headers, policy, HEAD and no cookie/metadata reflection', async () 
   assert.equal(head.status, 200);
   assert.equal(await head.text(), '');
 });
+test("a page's X-Frame-Options is its policy's frame-ancestors (security audit G-1): DENY, SAMEORIGIN, none for *", async () => {
+  const page = (csp) => ({ 'agents/x/index.html': '<html></html>', 'agents/.preview/headers/x/index.html.json': { csp } });
+  for (const [fa, want] of [["'none'", 'DENY'], ["'self'", 'SAMEORIGIN'], ['*', null]]) {
+    const csp = `default-src 'self'; script-src 'self'; frame-ancestors ${fa}`;
+    const r = await worker.fetch(new Request('https://agents.sagebrush.cloud/x/'), { PREVIEWS: bucket(page(csp)) });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-security-policy'), csp);
+    assert.equal(r.headers.get('x-frame-options'), want, `frame-ancestors ${fa}`);
+  }
+  // (a policy without frame-ancestors gets none either: _headers, test-frame-ancestors.mjs, is where that is refused)
+  const r = await worker.fetch(new Request('https://agents.sagebrush.cloud/x/'), { PREVIEWS: bucket(page("default-src 'self'")) });
+  assert.equal(r.headers.get('x-frame-options'), null);
+  // (the Worker's twin of web/csp-policy.mts frameOptions: the same answer for every shape)
+  const { frameOptions: site } = await import('../csp-policy.mts');
+  const { frameOptions: twin } = await import('./worker.mjs');
+  for (const p of ["frame-ancestors 'none'", "a; frame-ancestors 'self'", "a; frame-ancestors 'self'; b", "frame-ancestors *", "frame-ancestors 'self' https://x.example", "a", "a; frame-ancestors  'none' ", "xframe-ancestors 'none'"]) assert.equal(twin(p), site(p), p);
+});
+
+test("the publisher's page policies keep web/csp.ts's framing, and the Worker serves them so (G-1)", async () => {
+  // (the agents host's HTML policy is what prepare writes, from the build's _headers: through both, as published)
+  // (web/csp.ts is TypeScript that node runs as CommonJS: bun writes its _headers, as web/build.ts does)
+  const headersFor = d => execFileSync('bun', ['-e', `process.stdout.write((await import(${JSON.stringify(join(import.meta.dirname, '..', 'csp.ts'))})).headersFor(${JSON.stringify(d)}))`], { encoding: 'utf8' });
+  const dir = mkdtempSync(join(tmpdir(), 'preview-frame-'));
+  try {
+    for (const p of ['index.html', 'agents/index.html', 'frame/board/index.html']) {
+      mkdirSync(join(dir, p, '..'), { recursive: true });
+      writeFileSync(join(dir, p), '<!doctype html><html><head><title>t</title></head><body><p>x</p></body></html>');
+    }
+    writeFileSync(join(dir, '_headers'), headersFor(dir));
+    const output = prepare(dir, 'agents.sagebrush.cloud', []);
+    const entries = {};
+    for (const [p, f] of output.files) entries[`agents/${p}`] = f.bytes.toString('utf8');
+    for (const [path, fa, xfo] of [['/', "'self'", 'SAMEORIGIN'], ['/agents/', "'none'", 'DENY'], ['/frame/board/', '*', null]]) {
+      const r = await worker.fetch(new Request('https://agents.sagebrush.cloud' + path), { PREVIEWS: bucket(entries) });
+      assert.equal(r.status, 200, path);
+      const fas = r.headers.get('content-security-policy').split(';').map(d => d.trim()).filter(d => d.startsWith('frame-ancestors'));
+      assert.deepEqual(fas, [`frame-ancestors ${fa}`], path);
+      assert.equal(r.headers.get('x-frame-options'), xfo, path);
+    }
+    // (and the publisher refuses a page whose policy doesn't say: the control)
+    writeFileSync(join(dir, '_headers'), headersFor(dir).replace(/; frame-ancestors 'none'/, ''));
+    assert.throws(() => prepare(dir, 'agents.sagebrush.cloud', []), /lacks frame-ancestors/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('missing policy fails closed; invalid host/method has no R2 calls', async () => {
   const store = bucket({ 'latex/index.html': '<html></html>' });
   assert.equal((await worker.fetch(new Request('https://latex.sagebrush.cloud/'), { PREVIEWS: store })).status, 503);
@@ -71,7 +117,7 @@ test('prepare preserves hashed engine HTML, injects banner/config and disables S
     const page = '<html><head><script>example()</script></head><body>page</body></html>';
     writeFileSync(join(dir, 'index.html'), page);
     writeFileSync(join(dir, 'engine/id/runner/index.html'), page);
-    writeFileSync(join(dir, '_headers'), "/index.html\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-fixture'; connect-src 'self' https:\n/engine/*\n  Content-Security-Policy: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'\n");
+    writeFileSync(join(dir, '_headers'), "/index.html\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-fixture'; connect-src 'self' https:; frame-ancestors 'self'\n/engine/*\n  Content-Security-Policy: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'; frame-ancestors 'self'\n");
     const output = prepare(dir, 'latex.sagebrush.cloud', ['sagetex']);
     const bytes = p => output.files.get(p).bytes.toString();
     assert.match(bytes('index.html'), /id="sb-preview-notice"/);
@@ -140,7 +186,7 @@ function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'preview-caps-'));
   const page = '<html><head></head><body>page</body></html>';
   writeFileSync(join(dir, 'index.html'), page);
-  writeFileSync(join(dir, '_headers'), "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'\n");
+  writeFileSync(join(dir, '_headers'), "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; frame-ancestors 'self'\n");
   return { dir, page, build: () => prepare(dir, 'latex.sagebrush.cloud', []) };
 }
 test('final buffers survive changed/deleted sources and their exact sizes/hashes are recorded', () => {
@@ -203,7 +249,7 @@ test('200 MiB total includes transformed HTML, policy/config/SW and binary bodie
 test('_headers refuses 201 rules including non-CSP slash records, and 64 KiB plus one', () => {
   const f = fixture();
   try {
-    const policy = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'\n";
+    const policy = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; frame-ancestors 'self'\n";
     const rules = Array.from({ length: 199 }, (_, i) => `/unused${i}\n`).join('');
     writeFileSync(join(f.dir, '_headers'), policy + rules);
     assert.equal(f.build().files.size, 4);

@@ -17,9 +17,10 @@
 //     terminal applied to exactly that attempt.
 //   - Forgetting names: their cells' records and pending attempts are fenced
 //     right before the request that deletes them is sent.
-//   - The kernel's lifecycle: a new binding or epoch resets approvals and
-//     records; a new generation or incarnation, a move or a close clears the
-//     records.
+//   - The kernel's lifecycle: a new binding or lineage (lc.own: every epoch
+//     change but a fence the gateway attested as continuous) resets approvals
+//     and records; a new generation or incarnation, a move or a close clears
+//     the records.
 //
 //   const gate = new RemoteGate({ kernel, hash, page });
 //   const host = gate.host(baseHost);          // the scheduler's host
@@ -120,6 +121,8 @@ export class RemoteGate {
     this.off = kernel.on("lifecycle", (old, lc) => this.lifecycle(old, lc));
     this.hash = hash;
     this.waves = []; // the audit (audit())
+    this.askTimes = new WeakMap(); // consent -> when it was captured (capture)
+    this.askedAt = null; // the action's: its consent's time, or now for a run no person asked (prepare)
   }
 
   /**
@@ -134,7 +137,7 @@ export class RemoteGate {
 
   context() {
     const lc = this.kernel.lc;
-    return { binding: lc.binding, epoch: lc.epoch, generation: lc.generation, incarnation: lc.incarnation, ready: lc.phase === "ready" };
+    return { binding: lc.binding, own: lc.own, generation: lc.generation, incarnation: lc.incarnation, ready: lc.phase === "ready" };
   }
 
   // ------------------------------------------------------------- the adapter
@@ -250,10 +253,15 @@ export class RemoteGate {
       const displayed = pg.displayed(id), version = pg.version(id);
       if (displayed !== undefined && version) cells.set(id, { displayed, version });
     }
-    return this.approvals.captureConsent(ids, {
+    const consent = this.approvals.captureConsent(ids, {
       cells, repair: (id, text) => pg.repair(id, text), settings: cfg, mode: cfg.mode, seedNamespace: cfg.seedNamespace, reactive: cfg.reactive,
     });
+    // (when the person asked, on the kernel's clock: a loss recovery that ends unproved refuses every Run asked
+    // before its deadline, however long the scheduler held it: plan r8 F4)
+    this.askTimes.set(consent, this.now());
+    return consent;
   }
+  now() { return this.kernel.timers?.now?.() ?? Date.now(); }
 
   /** The notebook was loaded or replaced, or its language changed: approvals and records start over. */
   documentReplaced() {
@@ -265,7 +273,8 @@ export class RemoteGate {
 
   lifecycle(old, lc) {
     const a = this.approvals;
-    if (lc.binding !== old.binding || lc.epoch !== old.epoch) {
+    // (a new lineage resets: every epoch change but a fence the gateway attested as continuous, plan r8 F1)
+    if (lc.binding !== old.binding || lc.own !== old.own) {
       a.reset();
       a.clearRecords();
     } else if (lc.generation !== old.generation || lc.incarnation !== old.incarnation) a.clearRecords();
@@ -296,6 +305,7 @@ export class RemoteGate {
         }
       },
       async prepare({ order, consent }) {
+        gate.askedAt = consent ? gate.askTimes.get(consent) ?? gate.now() : gate.now();
         // (a kernel that isn't ready runs nothing: the person's consent is spent here, never kept for later, nothing is
         // approved, and each cell is asked so that it shows the kernel's note: execute, below)
         if (!gate.kernel.ready) {
@@ -351,6 +361,7 @@ export class RemoteGate {
           admit: (v) => a.admit(v),
           stillAdmitted: (v) => a.stillAdmitted(v),
           admitted: (p) => { planned = p; },
+          askedAt: gate.askedAt ?? gate.now(),
         };
         const r = await base.execute(id, code, forget, scoped, { gate: g });
         // the terminal, to exactly the attempt admitted (nothing, if none was): only a user-phase ok succeeds
@@ -384,6 +395,7 @@ export class RemoteGate {
         const group = { request: null, digest: null, entries: plan.entries.length, bytes: 0, verdict: "pending", admitted: false, at: Date.now(), records: [] };
         let verdict = null;
         const g = {
+          askedAt: gate.askedAt ?? gate.now(),
           check: async (request) => {
             group.request = request;
             gate.waves.push(group);

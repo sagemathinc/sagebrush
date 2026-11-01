@@ -240,6 +240,10 @@ export function askToKeep() {
 const CHANNEL = "sagebrush-workspace";
 // (the Storage panel's list of names that look the same: groups, and paths in each, shown)
 const LOOKALIKE_GROUPS = 100, LOOKALIKE_MEMBERS = 10;
+/** The lookalike report's page of index rows (plan L2b). */
+const LOOKALIKE_PAGE = 500;
+/** (tests only) the lookalike report's hook (window.__SB_LOOKALIKE_TEST__), inert unless a test page sets it. */
+type LookalikeTest = { deliver?(path: string): void; request?(kind: "getAll" | "count" | "cursor"): void; mark?(kind: "page" | "count" | "resume" | "value"): void; result?(r: unknown): void; afterCount?(k: string): void; countFor?(k: string, n: number): number };
 // (the stores a version is kept in, with the change that keeps it)
 const VERSION_STORES = ["versions", "versionBytes", "prunable", "meta"];
 // (a change's stores with sync's: its pending note and pins in its own transaction (design/sync-client.md C2))
@@ -1927,12 +1931,8 @@ export class Workspace {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).count());
   }
   async usage(): Promise<{ documents: number; files: { count: number; bytes: number }; versions: { count: number; bytes: number; maxId: number }; trash: { count: number; bytes: number }; migration: { left: number }; lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
-    const all = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
+    let all: Entry[] | undefined = await inTx(this.ws, "entries", "readonly", async (tx) => (await entriesOf(tx)).all());
     const out = { documents: 0, files: { count: 0, bytes: 0 }, versions: await this.versionsUsage("/"), trash: { count: 0, bytes: 0 }, migration: { left: 0 }, lookalikes: [] as string[][], lookalikesMore: { groups: 0, members: 0 } };
-    // (names that look the same in one folder, made before they were refused: by a cursor over the index
-    // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
-    // the rest counted, never all of them held: LIMIT-CAP1B-1)
-    Object.assign(out, await this.lookalikeGroups());
     for (const e of all) {
       // (data files whose bytes the migrator hasn't moved yet, Trash's too: capabilities §2b)
       if (e.kind === "file" && !e.migrated && !e.unmoved && !e.missing && e.ref !== null) out.migration.left++;
@@ -1942,13 +1942,30 @@ export class Workspace {
       } else if (e.kind === "file") { out.files.count++; out.files.bytes += e.size ?? 0; }
       else if (e.kind === "notebook" || e.kind === "board") out.documents++;
     }
+    // (every entry let go before the walk below, so its pages aren't read while all of them are held: lookalike
+    // plan L2b r2 code, A4)
+    all = undefined;
+    // (names that look the same in one folder, made before they were refused: by a cursor over the index
+    // byNfc, where they are next to one another; at most LOOKALIKE_GROUPS groups of LOOKALIKE_MEMBERS shown,
+    // the rest counted, never all of them held: LIMIT-CAP1B-1)
+    Object.assign(out, await this.lookalikeGroups());
     return out;
   }
 
   /** Names that look the same in one folder: at most `groups` groups of at most `members` paths each, and
    * how many beyond those weren't listed: `groups`, the groups left out; `members`, every path not listed,
-   * whether its group was listed or left out (daybreak2). */
+   * whether its group was listed or left out (daybreak2).
+   * (Plan L2b: the entries' byNfc index read by VALUES in fixed pages, each row's own nkey and path, never a key
+   * getter: an index key or primary key is a string the browser makes for each row (about 200,000 at 100,000
+   * entries), an external string with a weak handle that the page's next full collection paid for, about 100 ms,
+   * after the Storage panel opened.  The index's keyPath is nkey and the store's path, so the values give that key and
+   * primary key exactly.  A full page's trailing group may go on past it: it is taken by key, its size by count(), its
+   * first rows (beyond those in hand) by a value cursor advanced past them; the next page starts after it.  So every
+   * row's value is read at most once, one page is held at a time, and all of it is one read-only transaction.) */
   async lookalikeGroups(groups = LOOKALIKE_GROUPS, members = LOOKALIKE_MEMBERS): Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }> {
+    // (tests only, inert unless a test page sets it: each value read, each request, a mark in each callback, the
+    // result; and, for its fixtures, a hook after the count and a count to use instead)
+    const T = (globalThis as any).__SB_LOOKALIKE_TEST__ as LookalikeTest | undefined;
     return inTx(this.ws, "entries", "readonly", async (tx) => {
       const ev = await entriesOf(tx);
       return new Promise<{ lookalikes: string[][]; lookalikesMore: { groups: number; members: number } }>((ok, no) => {
@@ -1960,16 +1977,69 @@ export class Workspace {
           else { more.groups++; more.members += n; }
         }
       };
-      const c = tx.objectStore("entries").index("byNfc").openKeyCursor();
-      c.onsuccess = () => {
-        const r = c.result;
-        if (!r) { flush(); return ok({ lookalikes: out, lookalikesMore: more }); }
-        if (r.key !== key) { flush(); key = r.key as string; cur = []; n = 0; }
+      const shown = (p: string) => (ev.active ? ev.ms.logicalOf(p).L : p);
+      const take = (e: Entry) => {
+        if (e.nkey !== key) { flush(); key = e.nkey as string; cur = []; n = 0; }
         n++;
-        if (cur.length < members) cur.push(ev.active ? ev.ms.logicalOf(r.primaryKey as string).L : (r.primaryKey as string));
-        r.continue();
+        if (cur.length < members) cur.push(shown(e.path));
       };
-      c.onerror = () => no(c.error);
+      const done = () => { flush(); const v = { lookalikes: out, lookalikesMore: more }; T?.result?.(v); ok(v); };
+      const ix = tx.objectStore("entries").index("byNfc");
+      const page = (lower: IDBKeyRange | undefined) => {
+        T?.request?.("getAll");
+        const q = ix.getAll(lower, LOOKALIKE_PAGE);
+        q.onerror = () => no(q.error);
+        q.onsuccess = () => {
+          T?.mark?.("page");
+          const rows = q.result as Entry[], len = rows.length;
+          if (len < LOOKALIKE_PAGE) {
+            // (the index's end)
+            for (let i = 0; i < len; i++) { T?.deliver?.(rows[i].path); take(rows[i]); }
+            return done();
+          }
+          // (a full page: its trailing run of one key may go on past it)
+          const k = rows[len - 1].nkey as string;
+          let j = len - 1;
+          while (j > 0 && rows[j - 1].nkey === k) j--;
+          for (let i = 0; i < j; i++) { T?.deliver?.(rows[i].path); take(rows[i]); }
+          flush();
+          key = null; cur = []; n = 0;
+          const m = len - j, paths: string[] = [];
+          for (let i = j; i < len; i++) { T?.deliver?.(rows[i].path); if (paths.length < members) paths.push(shown(rows[i].path)); }
+          T?.request?.("count");
+          const c = ix.count(IDBKeyRange.only(k));
+          c.onerror = () => no(c.error);
+          c.onsuccess = () => {
+            T?.mark?.("count");
+            T?.afterCount?.(k);
+            const total = T?.countFor ? T.countFor(k, c.result as number) : (c.result as number);
+            const group = () => { key = k; cur = paths; n = total; flush(); key = null; cur = []; n = 0; page(IDBKeyRange.lowerBound(k, true)); };
+            const want = Math.min(members, total) - m;
+            if (want <= 0) return group();
+            // (the group's next rows, past the m in hand: the cursor's first answer advanced past them unread)
+            T?.request?.("cursor");
+            const r = ix.openCursor(IDBKeyRange.only(k));
+            let first = true, got = 0;
+            r.onerror = () => no(r.error);
+            r.onsuccess = () => {
+              const x = r.result;
+              if (first) {
+                T?.mark?.("resume");
+                first = false;
+                if (!x) return no(new Error("the lookalike report's rows were fewer than counted"));
+                return x.advance(m);
+              }
+              T?.mark?.("value");
+              if (!x) return no(new Error("the lookalike report's rows were fewer than counted"));
+              const e = x.value as Entry;
+              T?.deliver?.(e.path);
+              paths.push(shown(e.path));
+              if (++got < want) x.continue(); else group();
+            };
+          };
+        };
+      };
+      page(undefined);
       });
     });
   }
