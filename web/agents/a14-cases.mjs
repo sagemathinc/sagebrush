@@ -24,6 +24,7 @@ export const COPY = {
   refused: "sagebrush-agent didn't accept this page's last connection, so it needs a new code. If sagebrush-agent was restarted, Claude's earlier context for these chats is gone; your chats are still here.",
   expired: "Claude's access expired.",
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
+  unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page before it was opened again.",
   hint: "Not connected: Connect Claude to send",
 };
@@ -218,6 +219,16 @@ async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
   await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`);
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
+  return allowDialog(P, how, remember, write);
+}
+/** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in), then allow. */
+async function connectDialog(P, A, how = "page", remember = false, write = true) {
+  await P.ev(`document.querySelector('#connect').click()`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c, pt] = d.querySelectorAll('input'); c.value = '123-456'; pt.value = '${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
+  return allowDialog(P, how, remember, write);
+}
+async function allowDialog(P, how, remember, write) {
   await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`);
   const set = await P.ev(`(() => {
     const d = [...document.querySelectorAll('.sbag-dlg')].at(-1);
@@ -318,9 +329,9 @@ export async function runA14({ site, ok, want = () => true }) {
       const ss = []; for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); if (has(sessionStorage.getItem(k))) ss.push(k); }
       return { dom: has(document.documentElement.outerHTML), url: has(location.href) || performance.getEntriesByType('navigation').some((e) => has(e.name)) || has(JSON.stringify(history.state)), localStorage: has(ls.join('\\n')), sessionKeys: ss };
     })()`);
-    const consoleHas = P.console.some((t) => t.includes(A.secret));
+    const consoleHas = P.console.some((t) => t.includes(A.secret)) || P.errors.some((t) => t.includes(A.secret));
     // (an export of the chat: the page has none today; the chats' only form outside the page is localStorage, checked)
-    ok(!where.dom && !where.url && !where.localStorage && !consoleHas && where.sessionKeys.length === 1 && where.sessionKeys[0] === KEY, "A14-10: the session secret is in none of the serialized DOM (attributes too), the console, the URL and history, localStorage (the chats); only in the one sessionStorage record", { ...where, console: consoleHas });
+    ok(!where.dom && !where.url && !where.localStorage && !consoleHas && where.sessionKeys.length === 1 && where.sessionKeys[0] === KEY, "A14-10: the session secret is in none of the serialized DOM (attributes too), the console and the page's exceptions, the URL and history, localStorage (the chats); only in the one sessionStorage record", { ...where, console: consoleHas });
   });
 
   // A14-2: the daemon stops: the disconnected bar (alert); the draft and the focus stay; Send inert, described by the bar
@@ -674,6 +685,92 @@ export async function runA14({ site, ok, want = () => true }) {
       ok(quiet && A.hellos === h0 && A.upgrades === u0 && rec === null && bar.status === COPY.expired && bar.act === "Connect", `${id}: no attempt (no WebSocket opened); the record gone; nothing kept for a click: "Claude's access expired. [Connect]"`, { quiet, rec: !!rec, bar });
     });
   }
+
+  // A14-19 (astra S1): a record the page may not use (malformed; or exact but not removable) beside a remembered grant:
+  // no silent attempt with either; "unusable", [Connect], and the remembered grant only offered, used on its click
+  for (const [id, kind] of [["A14-19.malformed", "malformed"], ["A14-19.remove", "remove"]]) {
+    await run(id, async (B, A) => {
+      const P = await B.tab();
+      let facts = null;
+      if (kind === "remove") {
+        // (an exact record's scope, from a page grant; then Revoke, and a remembered grant from the Connect dialog)
+        await pair(P, A, site, "page");
+        facts = await recordFacts(P);
+        await P.ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Revoke').click()`);
+        await P.until(`document.querySelector('#connect').textContent !== 'Connected'`);
+        await connectDialog(P, A, "3600000", true);
+      } else {
+        await pair(P, A, site, "3600000", true);
+      }
+      await chat(P, A);
+      if (kind === "malformed") await P.ev(`(sessionStorage.setItem(${JSON.stringify(KEY)}, '{bad'), true)`);
+      else {
+        // (exact, with the live session: if it were used despite its failed removal, it would reconnect silently)
+        const rec = { v: 1, pairingId: "0123456789abcdef01234567", session: A.secret, port: A.port, agent: { name: "Claude", client: "claude-agent-sdk" }, grant: { folders: ["/"], write: true, expires: null }, workspace: facts.workspace, page: facts.page };
+        await P.ev(`(sessionStorage.setItem(${JSON.stringify(KEY)}, ${JSON.stringify(JSON.stringify(rec))}), true)`);
+        await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const rm = Storage.prototype.removeItem; Storage.prototype.removeItem = function (k) { if (k === ${JSON.stringify(KEY)}) throw new Error("denied"); return rm.call(this, k); }; })()` });
+      }
+      const h0 = A.hellos;
+      await P.reload();
+      const seen = await P.seen(), nav = await P.nav();
+      ok(seen.present && (kind === "malformed" ? seen.keys === null : seen.keys === RECORD_KEYS && seen.now - seen.leftAt >= 0 && seen.now - seen.leftAt <= 30000 && seen.page === facts.page) && nav === "reload", `${id} precondition: a remembered grant is kept, and the record is there at load (${kind === "malformed" ? "not JSON" : "exact, fresh, the same scope, a reload; its removal throws"})`, { present: seen.present, keys: seen.keys, nav });
+      await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+      await P.until(`!document.querySelector('#conn-bar .remembered').hidden`, 10000).catch(() => {});
+      const quiet = await A.quiet(3000), bar = await P.bar();
+      const rem = await P.ev(`(() => { const r = document.querySelector('#conn-bar .remembered'); return { shown: !r.hidden, scope: document.querySelector('#conn-scope').textContent }; })()`);
+      ok(quiet && A.hellos === h0 && !(await P.connected()) && bar.status === COPY.unusable && bar.act === "Connect" && rem.shown && /^read and write everywhere, until /.test(rem.scope), `${id}: no attempt with the record or the remembered grant; "unusable" with [Connect], and "Use remembered access" offered with its scope`, { quiet, bar, rem });
+      await P.ev(`document.querySelector('#conn-remembered').click()`);
+      await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+      ok(A.hellos === h0 + 1, `${id}: the remembered grant is used on its own click, once`, { hellos: A.hellos - h0 });
+    });
+  }
+
+  // A14-20 (astra S2): A lost (its record kept for [Reconnect]), then B connected with a remembered grant, then B lost:
+  // the bar offers [Connect], never A's [Reconnect]; A is never contacted again
+  await run("A14-20", async (B, A) => {
+    const A2 = fakeAgent();
+    try {
+      const P = await B.tab();
+      await pair(P, A, site, "page");
+      await chat(P, A);
+      await A.kick();
+      await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+      const before = await P.bar();
+      await connectDialog(P, A2, "3600000", true);
+      const hA = A.hellos;
+      await A2.kick();
+      await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+      const bar = await P.bar();
+      await P.ev(`document.querySelector('#conn-act').click()`);
+      await sleep(300);
+      const dialog = await P.ev(`[...document.querySelectorAll('.sbag-dlg h2')].map((h) => h.textContent).join()`);
+      const quiet = await A.quiet(2000);
+      ok(before.act === "Reconnect" && bar.act === "Connect" && dialog === "Connect an agent" && quiet && A.hellos === hA, "A14-20: after B (remembered) replaced A and was lost, the bar offers [Connect], which opens the dialog; A's session is never tried", { before: before.act, after: bar.act, dialog, aHellos: A.hellos - hA });
+    } finally {
+      A2.stop();
+    }
+  });
+
+  // A14-21 (astra S2, revoke): A lost; B connected (this page only), then B revoked: no bar, no [Reconnect]; A untouched
+  await run("A14-21", async (B, A) => {
+    const A2 = fakeAgent();
+    try {
+      const P = await B.tab();
+      await pair(P, A, site, "page");
+      await chat(P, A);
+      await A.kick();
+      await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+      await connectDialog(P, A2, "page");
+      const hA = A.hellos;
+      await P.ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Revoke').click()`);
+      await P.until(`document.querySelector('#connect').textContent !== 'Connected'`);
+      await sleep(500);
+      const bar = await P.bar(), st = await P.sendState(), quiet = await A.quiet(2000);
+      ok(!bar.on && bar.act === null && st.hint === COPY.hint && quiet && A.hellos === hA, "A14-21: after B's Revoke, no bar and no [Reconnect] (the hint by Send); A's session is never tried", { bar, hint: st.hint, aHellos: A.hellos - hA });
+    } finally {
+      A2.stop();
+    }
+  });
 
   // A14-18 (board C3): Enter on [Reconnect] with the daemon down: activeElement is never body; it stays on the button.
   // Two rows: the daemon stopped (a closed port), and one that never answers (the attempt's full 10 s)

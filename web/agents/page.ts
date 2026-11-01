@@ -895,6 +895,7 @@ const CONN = {
   refused: "sagebrush-agent didn't accept this page's last connection, so it needs a new code. If sagebrush-agent was restarted, Claude's earlier context for these chats is gone; your chats are still here.",
   expired: "Claude's access expired.",
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
+  unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page before it was opened again.",
 };
 let connBar: ConnBar | null = null;

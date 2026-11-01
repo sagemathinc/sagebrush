@@ -63,7 +63,7 @@ export function floatingButton(): HTMLElement {
 export type RestoreState =
   | { kind: "restoring" }
   | { kind: "restored" }
-  | { kind: "not-restored"; why: "unreachable" | "refused" | "expired" | "discarded" | "not-a-reload"; canReconnect: boolean };
+  | { kind: "not-restored"; why: "unreachable" | "refused" | "expired" | "discarded" | "unusable" | "not-a-reload"; canReconnect: boolean };
 /** A restore attempt's bound (A14 r3.1 §3: one attempt, 10 s, no retry loop). */
 export const RESTORE_MS = 10_000;
 
@@ -155,9 +155,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     p.onChange(() => {
       showBar();
       if (p.state === "paired" || p.state === "granted") was = true;
+      // (S2: the kept record belongs to the lifetime it came from: a newer pairing granted, or this one's own Revoke
+      //  or expiry, ends it; only this pairing's own loss puts its own record there)
+      if (p.state === "granted" && pairing === p) kept = null;
+      if (p.state === "closed" && pairing === p && /^revoked by the person$|^the grant expired$/.test(p.closeReason)) kept = null;
       // (a refused hello is said in the Connect dialog itself; this is for a pairing that was connected)
       if (was && p.state === "closed" && p.closeReason && !/^revoked by the person$|^not allowed$/.test(p.closeReason)) {
-        if (p.lostRecord) kept = p.lostRecord;
+        if (pairing === p && p.closeReason !== "the grant expired") kept = p.lostRecord;
         if (o.quietLoss) return;
         dialog("The agent is disconnected", (box, close) => {
           box.append(h("div", { className: "err", textContent: p.closeReason }));
@@ -255,31 +259,36 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   }
 
   /** One attempt with a reload record (A14): its session, at most RESTORE_MS; the agent must be the one it was, the
-   * grant not expired; then exactly its grant again (never wider, never longer), which writes the record anew. */
-  async function restoreWith(r: ReloadRecord): Promise<"ok" | "unreachable" | "refused" | "expired"> {
-    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return "expired";
+   * grant not expired; then exactly its grant again (never wider, never longer), which writes the record anew. With
+   * the pairing it made (null if none), so a caller can tell whether a newer pairing replaced it meanwhile (S2). */
+  async function restoreWith(r: ReloadRecord): Promise<{ res: "ok" | "unreachable" | "refused" | "expired"; p: AgentPairing | null }> {
+    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return { res: "expired", p: null };
     let p: AgentPairing;
-    try { p = make(r.port, { session: r.session, pairingId: r.pairingId, agent: r.agent }); } catch { return "unreachable"; }
+    try { p = make(r.port, { session: r.session, pairingId: r.pairingId, agent: r.agent }); } catch { return { res: "unreachable", p: null }; }
     watch(p);
     const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
     const got = await Promise.race([p.paired().then(() => "paired" as const, (e) => (e instanceof AgentError && e.code !== "refused" ? "refused" : /^the agent refused/.test(p.closeReason) ? "refused" : "unreachable") as "refused" | "unreachable"), timeout]);
-    if (got === "timeout") { void p.revoke("no answer from the agent"); return "unreachable"; }
-    if (got !== "paired") return got;
-    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return "expired"; }
-    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return "refused"; }
+    if (got === "timeout") { void p.revoke("no answer from the agent"); return { res: "unreachable", p }; }
+    if (got !== "paired") return { res: got, p };
+    if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return { res: "expired", p }; }
+    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
     showBar();
-    return "ok";
+    return { res: "ok", p };
   }
   const say = (s: RestoreState) => o.reload?.onState?.(s);
   /** The page's [Reconnect] (A14): the record kept in memory, once. A refusal or an expiry ends it; an unreachable
    * agent leaves it for the next click. */
+  /** Whether an attempt's result may still speak: no newer pairing was adopted after the one it made (S2). */
+  const current = (p: AgentPairing | null) => p === null || p === pairing;
   async function reconnectKept(): Promise<RestoreState> {
     const r = kept ?? pairing?.lostRecord ?? null;
     if (!r) { const s: RestoreState = { kind: "not-restored", why: "discarded", canReconnect: false }; say(s); return s; }
     say({ kind: "restoring" });
-    const res = await restoreWith(r);
+    const { res, p } = await restoreWith(r);
+    // (a late result, after a newer pairing replaced this attempt, says nothing and keeps nothing)
+    if (!current(p)) return { kind: "not-restored", why: "discarded", canReconnect: false };
     if (res === "ok") { kept = null; const s: RestoreState = { kind: "restored" }; say(s); return s; }
-    if (res !== "unreachable") kept = null; else kept = r;
+    kept = res === "unreachable" ? r : null; // (unreachable: the SAME record stays for the next click)
     const s: RestoreState = { kind: "not-restored", why: res, canReconnect: res === "unreachable" };
     say(s);
     return s;
@@ -287,14 +296,19 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   /** On load (A14 §1): the reload record, taken (consumed before anything), decided; with no record, the remembered
    * grants as before. After a record that wasn't restored, a remembered grant is not tried silently. */
   async function restoreOnLoad() {
-    const r = o.reload ? takeReloadRecord(storage) : null;
-    if (!r) { const g = await reconnect(); if (g) o.reload?.onRemembered?.(g); return; }
+    const t = o.reload ? takeReloadRecord(storage) : ({ kind: "none" } as const);
+    // (genuinely no record: the remembered reconnect, as before; an unusable one (unreadable, not removable, malformed)
+    //  is said, and a remembered grant is only offered, never tried in its place, S1)
+    if (t.kind === "none") { const g = await reconnect(); if (g) o.reload?.onRemembered?.(g); return; }
+    if (t.kind === "bad") return say({ kind: "not-restored", why: "unusable", canReconnect: false });
+    const r = t.record;
     const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
     if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
     if (d === "click") { kept = r; return say({ kind: "not-restored", why: "not-a-reload", canReconnect: true }); }
     say({ kind: "restoring" });
-    const res = await restoreWith(r);
+    const { res, p } = await restoreWith(r);
+    if (!current(p)) return;
     if (res === "ok") return say({ kind: "restored" });
     kept = res === "unreachable" ? r : null;
     say({ kind: "not-restored", why: res, canReconnect: res === "unreachable" });
