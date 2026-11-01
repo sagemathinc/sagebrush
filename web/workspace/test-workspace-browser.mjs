@@ -613,6 +613,9 @@ try {
     const reached = () => until(`window.__b1at !== null`, 30000);
     const release = () => ev(`(() => { window.__b1go?.(); return 1; })()`);
     const dismissAny = () => press("✕");
+    // (each T case starts on a freshly loaded page, so nothing one leaves (a save that failed and is still pending) can
+    // reach the next: the grader's ruling (d)(i) on #447 r2)
+    const fresh = async () => { await go(base); await until(`!!${W}`, 60000); if (await ev(`${S}.hidden`)) await click("#wsfilesbtn"); await until(`!${S}.hidden`); };
     // (its save failing: not moved, and said so, in board's words; it stays open, where it was)
     check((await openNb("/B1 open.ipynb", "B1 open", "first")) === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
     await ev(`(() => { const nb = sagebrush.notebook; window.__b1saved = nb.saved; nb.saved = () => Promise.reject(new Error("disk full")); return 1; })()`);
@@ -655,6 +658,7 @@ try {
     // (astra R1, T2) the path replaced while the hook waits: what is there now is NOT moved, and the conflict is said
     for (const [id, sel, open, moveTo, fresh] of [["T2", "/T2 a.ipynb", "/T2 a.ipynb", "/T2 moved.ipynb", "/T2 a.ipynb"], ["T2.folder", "/T2 dir", "/T2 dir/x.ipynb", "/T2 dir moved", "/T2 dir/new.txt"]]) {
       const nm = open.split("/").pop().replace(/\.ipynb$/, "");
+      await fresh();
       await openNb(open, nm, "t2");
       await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm)}`);
       await holdAt("switched");
@@ -669,6 +673,7 @@ try {
     }
     // (astra R2, T3) an edit after the save, and ITS save failing: nothing moves, the edit is kept, it stays open
     {
+      await fresh();
       await openNb("/T3.ipynb", "T3", "t3");
       await until(`document.querySelector("#nbname").value === "T3"`);
       await holdAt("saved");
@@ -685,6 +690,7 @@ try {
     // (astra R2, T4) a page switch in between. T4: while it switched, a notebook INSIDE the folder opened: nothing
     // moves. T4.same: before it switched, another notebook opened: nothing moves, and that one stays open
     {
+      await fresh();
       await ev(`${W}.create("/T4 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
       await openNb("/T4 dir/a.ipynb", "a", "a");
       await until(`document.querySelector("#nbname").value === "a"`);
@@ -697,6 +703,7 @@ try {
       const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
       check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T4: a notebook inside the folder opened while it switched: nothing moves, and that notebook stays open: " + JSON.stringify(t));
       await dismissAny();
+      await fresh();
       await ev(`${W}.create("/T4 other.ipynb", { content: { name: "T4 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
       await openNb("/T4s.ipynb", "T4s", "s");
       await until(`document.querySelector("#nbname").value === "T4s"`);
@@ -708,6 +715,40 @@ try {
       const said1 = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
       const u = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4s.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4s.ipynb").then((e) => !!e) }))()`);
       check(r1 && said1 && u.shown === "T4 other" && u.here && !u.inTrash, "T4.same: another notebook opened before it switched: nothing moves, and the one opened stays open: " + JSON.stringify(u));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T5) another notebook opened while Trash's OWN switch waits inside open(), after every check of the
+    // hook: that switch is dropped before it detaches anything; nothing moves, and the notebook opened stays open
+    {
+      await fresh();
+      await ev(`${W}.create("/T5 other.ipynb", { content: { name: "T5 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T5.ipynb", "T5", "t5");
+      await until(`document.querySelector("#nbname").value === "T5"`);
+      await holdAt("beforeDetach");
+      await trashRow("/T5.ipynb");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T5 other.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T5.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T5.ipynb").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "T5 other" && t.here && !t.inTrash, "T5: another notebook opened while Trash's own switch waited (after its checks): that switch is dropped, nothing moves, the one opened stays open: " + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T6) a notebook INSIDE the folder opened after the hook's last check, before the move: the
+    // workspace's own check, holding its lock, refuses it; nothing moves, and that notebook stays open
+    {
+      await fresh();
+      await ev(`${W}.create("/T6 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T6 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
+      await holdAt("checked");
+      await trashRow("/T6 dir");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T6 dir/b.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T6 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T6 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T6: a notebook inside the folder opened after the last check, before the move: the workspace refuses under its lock, nothing moves: " + JSON.stringify(t));
       await dismissAny();
     }
   }
