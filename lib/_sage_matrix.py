@@ -32,6 +32,11 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _is_sr_scalar(x):
+    """A symbolic expression (not a relation): a scalar of M + c, c - M."""
+    return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
+
+
 def _qq_entry(x):
     """x as an element of QQ when it is an integer: an integral entry of a
     QQ container is stored as an int (_norm), but Sage hands it out with
@@ -1431,14 +1436,14 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g + other
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+") + self
         return NotImplemented
 
@@ -1446,14 +1451,14 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g - other
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-") - self
         return NotImplemented
 
