@@ -375,7 +375,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // change meanwhile, here or elsewhere, would take the half-typed name
   // away; it is drawn once the name is done)
   let renamingNow = false;
+  // (a row that had the focus keeps it across a redraw: the same path's new row takes it, so a refresh (a file
+  // opened, a change from elsewhere) never drops the focus to the body)
   function render() {
+    const a = document.activeElement as HTMLElement | null;
+    const fp = a && tree.contains(a) ? a.dataset.path : undefined;
+    renderTree();
+    if (fp !== undefined && !tree.contains(document.activeElement)) tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(fp)}"]`)?.focus();
+  }
+  function renderTree() {
     if (renamingNow) return;
     drawnRows = [];
     tree.replaceChildren();
