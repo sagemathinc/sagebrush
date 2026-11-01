@@ -85,7 +85,12 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
   A.grants = () => A.notes.filter((m) => m.method === "grant.changed" && Object.keys(m.params ?? {}).length > 0).map((m) => m.params);
   /** The grant after the n-th, once the stand-in has it (bounded): the page shows "Connected" when its allow() is done,
    * which can be before the stand-in has read that allow()'s grant.changed; null if none came. */
-  A.newGrant = async (n, ms = 10000) => { for (const t = Date.now(); A.grants().length <= n && Date.now() - t < ms; ) await sleep(25); return A.grants().length > n ? A.grants().at(-1) : null; };
+  A.newGrant = async (n, ms = 10000) => {
+    const t = Date.now(), at0 = A.grants().length;
+    while (A.grants().length <= n && Date.now() - t < ms) await sleep(25);
+    console.log(`wait ${curCase} new-grant ${Date.now() - t} (had ${at0 - n} new at Connected)`);
+    return A.grants().length > n ? A.grants().at(-1) : null;
+  };
   A.messages = () => A.notes.filter((m) => m.method === "chat.message").map((m) => m.params);
   /** A round trip on the paired page's socket (a verb the page answers). */
   A.call = (method, params, ms = 5000) => new Promise((resolve) => {
@@ -126,6 +131,10 @@ const WITNESS = `(() => {
   const keys = r && typeof r === "object" ? Object.keys(r).sort().join() : null;
   window.__a14seen = { present: raw !== null, keys, leftAt: r?.leftAt ?? null, expires: r?.grant?.expires, workspace: r?.workspace ?? null, page: r?.page ?? null, now: Date.now() };
 })()`;
+// (the case running now, for the timing lines below)
+let curCase = "";
+/** A dialog wait's time, printed on every call (not a check: "wait <case> <what> <ms>"), so its bound is measured. */
+const timed = async (what, p) => { const ms = await p; console.log(`wait ${curCase} ${what} ${ms}`); return ms; };
 const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace";
 
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
@@ -228,19 +237,19 @@ async function attach(B, targetId, { clock = false } = {}) {
 async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
   // (30 s: under a full counted run's load the page's first load and its dialog can take longer than 15 s)
-  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
+  await timed("pair-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000));
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   return allowDialog(P, how, remember, write);
 }
 /** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in), then allow. */
 async function connectDialog(P, A, how = "page", remember = false, write = true) {
   await P.ev(`document.querySelector('#connect').click()`);
-  await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`, 30000);
+  await timed("connect-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`, 30000));
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c, pt] = d.querySelectorAll('input'); c.value = '123-456'; pt.value = '${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
   return allowDialog(P, how, remember, write);
 }
 async function allowDialog(P, how, remember, write) {
-  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 30000);
+  await timed("allow-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 30000));
   const set = await P.ev(`(() => {
     const d = [...document.querySelectorAll('.sbag-dlg')].at(-1);
     const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input');
@@ -278,6 +287,7 @@ export async function runA14({ site, ok, want = () => true }) {
   const only = process.env.A14 ? new Set(process.env.A14.split(",")) : null;
   const run = async (id, body) => {
     if (only && !only.has(id)) return;
+    curCase = id;
     let B = null, A = null;
     try {
       A = fakeAgent();
