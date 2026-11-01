@@ -89,3 +89,70 @@ print(limited(10**6, lambda: matrix([[x, 1, 2], [3, x, 4], [5, 6, x]]).echelon_f
 print(spied('_echelon', lambda: matrix(SR, 4, 4, lambda i, j: x^(i + j)).det()))
 print(spied('det', lambda: matrix(SR, 5, 5, lambda i, j: x^(i + j)).adjugate()))
 print(spied('det', lambda: matrix(SR, 4, 4, lambda i, j: x^(i + j)).adjugate()))
+# the zero-proof stage's contract (astra3's A3 ruling 17cfbcee): G40-52; the reducer's one call is S._reduce_trig
+def val(f):
+    try:
+        return str(f())
+    except Exception as e:
+        return type(e).__name__
+def counted(f):
+    orig, n = S._reduce_trig, [0]
+    def spy(x):
+        n[0] += 1
+        return orig(x)
+    S._reduce_trig = spy
+    try:
+        return '%s %d' % (which(f), n[0])
+    finally:
+        S._reduce_trig = orig
+def raising(exc, f):
+    orig = S._reduce_trig
+    def spy(x):
+        raise exc
+    S._reduce_trig = spy
+    try:
+        f()
+        return 'ok'
+    except BaseException as e:
+        return type(e).__name__
+    finally:
+        S._reduce_trig = orig
+def outcome(f):
+    orig, log = S._reduce_trig, []
+    def spy(x):
+        try:
+            r = orig(x)
+        except NotImplementedError:
+            log.append('refused')
+            raise
+        log.append('reduced')
+        return r
+    S._reduce_trig = spy
+    try:
+        return '%s %s' % (which(f), ' '.join(log))
+    finally:
+        S._reduce_trig = orig
+def before(chars, f):
+    orig = S._reduce_trig
+    def boom(x):
+        raise RuntimeError('reached _reduce_trig')
+    S._reduce_trig = boom
+    try:
+        return limited(chars, f)
+    finally:
+        S._reduce_trig = orig
+var('a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10')
+W10 = prod(sin(v) for v in [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9]); W11 = W10 * sin(a10)
+print(val(lambda: matrix([[sin(0.1*x)*cos(x)]]).rank()))
+print(raising(S._memory_error('a spy', 2, 1), lambda: matrix([[sin(x)*cos(x)]]).rank()))
+print(raising(KeyboardInterrupt(), lambda: matrix([[sin(x)*cos(x)]]).rank()))
+print(raising(ValueError('a spy'), lambda: matrix([[sin(x)*cos(x)]]).rank()))
+print(limited(len(SR(sin(x)^2)._s), lambda: matrix([[sin(x)^2]]).rank()))
+print(before(len(SR(sin(x)^2)._s) - 1, lambda: matrix([[sin(x)^2]]).rank()))
+print(counted(lambda: matrix([[x, 1], [1, x^2]]).rank()))
+print(counted(lambda: matrix([[sinh(x)*cosh(x)]]).rank()))
+print(counted(lambda: matrix([[arcsin(x)]]).rank()))
+print(counted(lambda: matrix([[sin(x)*cos(x), 1], [x, x^2]]).rank()))
+print(outcome(lambda: matrix([[W10]]).rank()))
+print(outcome(lambda: matrix([[W11]]).rank()))
+print(val(lambda: matrix([[(x + 1)^2 - x^2 - 2*x - 1]]).rank()))

@@ -4367,6 +4367,71 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
  },
+ "lib/_sage_matrix_sr.py :: _nonzero :: checked against _SR_MAX_CHARS before it is tested. The entry itself is #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: if len(s) > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: if n > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: never changed. Only the reducer's NotImplementedError is undecided, #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: raise _memory_error(\"A reduced entry\", n, _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: raise _memory_error(\"An entry to reduce\", len(s), _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _reduce_trig :: NotImplementedError, before expanding).\"\"\" #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
  "lib/_sage_matrix_sr.py :: _size_check :: \"\"\"The working rows after a row operation: refused past _SR_MAX_CHARS.\"\"\" #0": {
   "class": "2",
   "disposition": {
