@@ -66,9 +66,12 @@ Untrusted content reaches the page in these ways:
    pages' inline scripts; the build fails if a page is left without a policy
    allowing its scripts), and the atlas's Worker-rendered pages set it
    themselves (web/atlas/server.ts; its search box may submit to the site). It allows
-   scripts only from the site and from Cloudflare's Web Analytics beacon
-   (which the site's host adds to its pages), and the pages' own inline
-   scripts by their hashes, with no inline handlers, plugins, `<base>` or forms. Should markup
+   scripts only from the site, never another site's (no analytics beacon:
+   security audit G-2), and the pages' own inline scripts by their hashes,
+   with no inline handlers, plugins, `<base>` or forms. It says who may frame
+   a page: only the site itself, and no one for the agents page, `/agents/`
+   (G-1), with a matching `X-Frame-Options`; only the frame other sites show
+   a board in (`/frame/board/`) may be framed by any page. Should markup
    ever get past rules 1–4, no script it brought could run. The Python
    worker's script has its own response, so it has no such policy: it
    compiles Python to JavaScript.

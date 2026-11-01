@@ -6138,6 +6138,161 @@
   "owner": "Magma translator",
   "row": "src-15"
  },
+ "src/notebook-pair.ts ::  :: export const PAIR_LIMITS = Object.freeze({ #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts ::  :: frame: 2.25 * 1024 * 1024 + 64 * 1024, // a message after it: a run's body (BODY_MAX.run, remote-client.js) and its envelope #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts ::  :: outCaps?: { data: number; total: number }; // (tests: the gate's caps; PAIR_LIMITS.outData and outTotal otherwise) #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: attach :: c.helloTimer = this.timers.setTimeout(() => { if (!c.paired) c.close(1008, \"no hello in time\"); }, PAIR_LIMITS.helloMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: closingAdd :: c.closingTimer = this.timers.setTimeout(() => { c.closingTimer = null; this.closing.delete(c); c.sock.destroy(); }, PAIR_LIMITS.closingMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: closingAdd :: if (this.closing.size >= PAIR_LIMITS.closing) { this.stats.destroyedAtCap++; c.sock.destroy(); return; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: constructor :: this.outCaps = opts.outCaps ?? { data: PAIR_LIMITS.outData, total: PAIR_LIMITS.outTotal }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: count :: if (this.unpairedCount >= PAIR_LIMITS.unpaired) return this.refuseHttp(sock, 503, \"Service Unavailable\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: destroy :: cap() { return this.paired ? PAIR_LIMITS.frame : PAIR_LIMITS.preHello; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: feed :: closing = new Set<Conn>(); // (closed by us or by the page, until the socket closes: at most PAIR_LIMITS.closing) #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: feed :: if (!control && this.partsLen + len > this.cap()) return this.close(1009, \"message too big\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: feed :: if (++this.fragments > PAIR_LIMITS.fragments) return this.close(1009, \"too many fragments\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: feed :: if (big > BigInt(PAIR_LIMITS.frame) * 2n) return this.close(1009, \"too big\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: feed :: stats = { maxBuffered: 0, overflows: 0, thumbprints: 0, destroyedAtCap: 0, maxFragments: 0 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: feed :: this.server.stats.maxFragments = Math.max(this.server.stats.maxFragments, this.fragments); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: frameOf :: fragments = 0; // (its fragments so far, empty ones included: at most PAIR_LIMITS.fragments) #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: paired :: c.send({ jsonrpc: \"2.0\", id, result: { protocol: 1, purpose: \"kernel\", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } }); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
+ "src/notebook-pair.ts :: retireIfSpent :: if (this.wrong >= PAIR_LIMITS.wrongAttempts) this.codeRetired = true; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: tooLong :: const tooLong = (v: unknown) => typeof v === \"string\" && v.length > PAIR_LIMITS.keyChars; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: tooLong :: if (++this.sessionWrong >= PAIR_LIMITS.wrongAttempts) { this.session = null; this.sessionWrong = 0; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: tooLong :: if (this.timers.now() - this.codeIssued > PAIR_LIMITS.codeMs) return this.refuse(c, msg.id, \"refused\", \"this code expired: run the command again for a new one\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server (notebook --pair) protocol bounds: hello timeout, code life and wrong attempts, session wrong attempts, key sizes, unpaired sockets, frame and fragment caps, closing sockets, output gate. Over one, that socket, code or session is refused or closed; nothing else is affected."
+ },
+ "src/notebook-pair.ts :: write :: this.server.stats.maxBuffered = Math.max(this.server.stats.maxBuffered, buffered + frame.length); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
+ },
  "src/notebook-reactive.ts ::  :: | { state: \"stale\"; why: \"budget\" | \"manual\" | \"ancestor\" | \"loaded\" | \"restart\" | \"interrupted\" | \"approval\"; note?: string } #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",

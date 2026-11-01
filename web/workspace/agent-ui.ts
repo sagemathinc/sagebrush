@@ -8,6 +8,7 @@
 import { pairLink } from "./pair-link";
 import { AgentPairing, type GrantStore, type Kept } from "./agent-pair";
 import { TRASH } from "./paths";
+import type { NotebookEdit } from "./notebook-edit";
 
 /** What the page needs of its workspace. */
 export type PairingWorkspace = GrantStore & {
@@ -58,14 +59,14 @@ export function floatingButton(): HTMLElement {
 }
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> } = {}) {
   style();
   let pairing: AgentPairing | null = null;
   let bar: HTMLElement | null = null;
   const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
   const make = (port: number, how: { code: string } | { session: string; pairingId: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page });
+    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}) });
 
   function dialog(title: string, body: (box: HTMLElement, close: () => void) => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));
