@@ -2573,6 +2573,16 @@
   "class": "3",
   "owner": "p-adic/L-series + configuration"
  },
+ "lib/_limits.py ::  :: \"pandas.decoded_bytes\": (UNLIMITED, 2 ** 20, 2 ** 40), #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "limits": "pandas.decoded_bytes"
+   }
+  },
+  "owner": "pandas + configuration",
+  "reason": "pandas.decoded_bytes: the opt-in budget of optional/pandas' read_csv decoded bytes (plan-pandas r7 section E), unlimited by default; a grading context sets a finite value in [1 MiB, 2^40], read through sagebrush.limit."
+ },
  "lib/_limits.py ::  :: \"poly.work\": (UNLIMITED, 2 ** 20, 2 ** 40), #0": {
   "class": "3",
   "owner": "polynomial factorization + configuration"
@@ -6080,9 +6090,10 @@
   "class": "none",
   "owner": "configuration"
  },
- "src/cli.ts ::  :: nf.certify_index_max, padic.kedlaya_work, matlab.lu_work) is #0": {
+ "src/cli.ts ::  :: nf.certify_index_max, padic.kedlaya_work, matlab.lu_work, #0": {
   "class": "none",
-  "owner": "configuration"
+  "owner": "configuration",
+  "reason": "the CLI's --help text listing the limit keys; it refuses nothing."
  },
  "src/cli.ts ::  :: poly.work, nf.relation_rounds, nf.certify_norm_max, #0": {
   "class": "none",
