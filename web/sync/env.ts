@@ -66,8 +66,10 @@ export function setGate(env: SyncEnv, name: string, on: boolean): void {
   else gates.delete(name);
 }
 
-/** Whether `account` may sync here (§11): only those listed, in SYNC_ACCOUNTS or (DEV) SYNC_TEST_ACCOUNTS. */
+/** Whether `account` may sync here (§11): only those listed, in SYNC_ACCOUNTS or, on DEV only (SHARE_DEV 1),
+ * SYNC_TEST_ACCOUNTS: production binds neither SHARE_DEV nor the test list, and even a stray test list there admits
+ * nobody (astra's PROD sync r1 ruling, open point 1: the code's gate, not the config's alone). */
 export function allowed(env: SyncEnv, account: string): boolean {
   const listed = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
-  return listed(env.SYNC_ACCOUNTS) || listed(env.SYNC_TEST_ACCOUNTS);
+  return listed(env.SYNC_ACCOUNTS) || (env.SHARE_DEV === "1" && listed(env.SYNC_TEST_ACCOUNTS));
 }
