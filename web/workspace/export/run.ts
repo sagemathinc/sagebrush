@@ -54,6 +54,8 @@ type TestHooks = {
   afterCapture?(path: string): Promise<void> | void;
   caps?: Partial<typeof CAPS>;
   noOpfs?: boolean;
+  /** (E1 code R3) the worker started from this address instead (one that doesn't load) */
+  workerUrl?: string;
   noPicker?: boolean;
   onHand?(blob: Blob, name: string): void;
   stats?: Stats;
@@ -84,6 +86,8 @@ type TestHooks = {
   appendDelayMs?: number;
   /** only the scratch files whose names match it (the archive's, a spool's) */
   appendDelayRe?: string;
+  /** (E1 code R3) the worker crashes at its nth append (never answering it) */
+  crashAfter?: number;
   /** (astra's E1-R2-A2) the stale sweep pauses this long between listing and removing; the probe's write or flush
    * fails; a scratch file's open (truncate) fails */
   sweepPauseMs?: number;
@@ -486,9 +490,14 @@ export async function chooseSink(plan: Plan, wk: ExportWorker | null, id: string
 /** The worker (the hashes', always), and whether OPFS gives it a usable scratch file (§6): earlier exports' leftover
  * scratch removed first, but never a running or handing-off export's (its lock, held, keeps its files: astra's E1-A3). */
 export async function startWorker(url: string, id: string): Promise<{ worker: ExportWorker; opfs: boolean }> {
-  const worker = new ExportWorker(new Worker(url, { type: "module" }));
+  const worker = new ExportWorker(new Worker(T().workerUrl ?? url, { type: "module" }));
   if (T().noOpfs) return { worker, opfs: false };
-  try { await worker.ask("removeStale", { lockPrefix: LOCK_PREFIX, pauseMs: T().sweepPauseMs ?? 0 }); await worker.ask("probe", { name: `${id}-probe`, fail: T().failProbe }); return { worker, opfs: true }; } catch { return { worker, opfs: false }; }
+  try { await worker.ask("removeStale", { lockPrefix: LOCK_PREFIX, pauseMs: T().sweepPauseMs ?? 0 }); await worker.ask("probe", { name: `${id}-probe`, fail: T().failProbe }); return { worker, opfs: true }; } catch {
+    // (astra's E1 code R3: a live worker that can't use OPFS falls back to Blobs; a worker that failed (it didn't load,
+    // or it threw) can't hash either: the export stops, in words, before anything is read)
+    if (worker.failed) { worker.terminate(); throw new ExportStopped(`The export couldn't start its worker (${worker.failed}). Reload the page and try again.`, true); }
+    return { worker, opfs: false };
+  }
 }
 /** Each export holds the Web Lock LOCK_PREFIX + its id from its start until its last scratch file is removed. */
 export const LOCK_PREFIX = "sagebrush-export:";
@@ -537,6 +546,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     progressTimer = setInterval(() => tick(phase, true), 100);
     await T().beforeReplay?.();
     if (spoolWk && T().appendDelayMs) await spoolWk.ask("appendDelay", { ms: T().appendDelayMs, re: T().appendDelayRe });
+    if (spoolWk && T().crashAfter) await spoolWk.ask("crashAfter", { n: T().crashAfter });
     clockReads = 0;
     let records = 0;
     if (T().cutRows) await rows.cutForTest();

@@ -412,6 +412,9 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     const status = h("p", { className: "note" }), flow = h("div");
     const stamp = () => w.lastExport().then((l) => { status.textContent = exportStatus(l); }, () => { status.textContent = ""; });
     let running = false;
+    // (closing the panel cancels the export it shows: entry.ts)
+    const closed = new AbortController();
+    onClose(() => closed.abort());
     const go = button("Export all current files (.zip)", async () => {
       if (running) return;
       running = true;
@@ -419,7 +422,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       try {
         const m = await import(host.exportUrl!("sagebrush-export.js"));
         const kit = { isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
-        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit }, flow);
+        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit, closed: closed.signal }, flow);
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
     });
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
