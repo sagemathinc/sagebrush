@@ -984,23 +984,28 @@ test("L30 after a restart, an old request: its tombstone's terminal, zero execut
     assert.equal(t.s.gateway.stats.executions, ex, "zero executions");
   } finally { await t.s.close(); }
 });
-test("L31 after a new binding (unpair, then pair and bind): the old binding's ids 410 binding-gone; new runs admitted", async () => {
+/** A new binding (cases v3's "rebind"): the socket lost, the Worker's 10 idle minutes (the binding fenced, the
+ * session kept: an unpair would forget it, and a code pairs once), then the page pairs again by its session. */
+async function rebind(t: { s: PairServer; clk: ReturnType<typeof clock>; page: ReturnType<typeof newPage> }) {
+  t.page.st.emit("close");
+  t.clk.advance(GATEWAY_LIMITS.idleMs);
+  assert.equal(t.s.gateway.binding, null, "the idle Worker gone, the binding fenced");
+  const p2 = newPage(t.s, t.clk, t.page.key);
+  return { p2, b2: await bind(p2) };
+}
+test("L31 after a new binding (the socket lost, the idle exit, then pair and bind): the old binding's ids 410 binding-gone; new runs admitted", async () => {
   const t = await setup();
   try {
     const b1 = await bind(t.page);
     await runToEnd(t, b1, "req-1");
-    t.page.c.feed(maskedText({ unpair: true }));
-    assert.equal(t.s.gateway.binding, null, "unpaired: no binding");
-    const p2 = newPage(t.s, t.clk);
-    const b2 = await bind(p2);
+    const { p2, b2 } = await rebind(t);
     assert.notEqual(b2, b1);
     const old = await p2.request("g.record", { b: b1, r: "req-1" }).answer();
     assert.equal(old.status, 410);
     assert.equal(bodyOf(old).error, "binding-gone");
     const oldRun = await p2.request("g.run", { b: b1 }, { request: "req-9", epoch: 1, payload: { code: "x" } }).answer();
     assert.equal(oldRun.status, 410);
-    const t2 = { s: t.s, port: t.port, page: p2 };
-    await runToEnd(t2, b2, "req-new");
+    await runToEnd({ s: t.s, port: t.port, page: p2 }, b2, "req-new");
     census(t.s);
   } finally { await t.s.close(); }
 });
