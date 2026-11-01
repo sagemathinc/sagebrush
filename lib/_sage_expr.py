@@ -1020,9 +1020,12 @@ class Expression:
             sage: (sin(x)^2 + cos(x)^2).simplify_full()
             1
         """
+        # (a relation too: its sides through the assumption pass, which
+        # (sqrt(x^2) == y).simplify_full() skipped: astra3's REVISE 349ff797)
         if self.is_relational():
-            return self._map_rel("simplify_full")
-        r = _one("simplify_full", self._s)
+            r = self._map_rel("simplify_full")
+        else:
+            r = _one("simplify_full", self._s)
         return _assume_simplify(r) if _ASSUMPTIONS else r
 
     full_simplify = simplify_full

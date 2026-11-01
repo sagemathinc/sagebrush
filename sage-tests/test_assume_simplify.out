@@ -9,6 +9,9 @@ x^(3/2)
 x + 1
 sin(x)
 True
+x == y
+x == y
+x < y
 -x
 x^2
 abs(x)
