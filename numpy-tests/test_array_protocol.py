@@ -209,6 +209,22 @@ class OwnCopyError:
         raise TypeError("my own error about copy")
 
 
+class DRec:
+    """__array__ without copy= that records the dtype it is given"""
+
+    def __init__(self):
+        self.calls = []
+
+    def __array__(self, dtype=None):
+        self.calls.append(dtype)
+        return np.arange(3.0)
+
+
+def drec(f):
+    d = DRec()
+    return f(d).dtype, d.calls
+
+
 def isolation(cls, f):
     s = cls()
     a = f(s)
@@ -223,6 +239,7 @@ tw("no-copy method in a list", lambda: np.array([C(), C()]))
 tw("dtype-only method, array", lambda: np.array(D()))
 tw("dtype-only method, array dtype", lambda: np.array(D(), dtype=np.float32))
 tw("dtype-only method, asarray dtype", lambda: np.asarray(D(), dtype=np.float32))
+tw("dtype-only method, the retry keeps the dtype", lambda: drec(lambda d: np.array(d, dtype=np.float32)))
 tw("stored data, array (method trusted)", lambda: isolation(Store, np.array))
 tw("stored data, asarray", lambda: isolation(Store, np.asarray))
 tw("stored data, legacy, array copies", lambda: isolation(StoreLegacy, np.array))
