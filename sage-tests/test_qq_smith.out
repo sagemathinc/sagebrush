@@ -1,0 +1,11 @@
+(True, True, True, [(1, 0), (0, 1)], Rational Field)
+[(1, 0), (0, 1)]
+Rational Field
+(True, True, True, [(1, 0, 0), (0, 0, 0)], Rational Field)
+[(1, 2, 3), (0, 0, 0)]
+(True, True, True, [(1, 0), (0, 1)], Rational Field)
+[(1, 0), (0, 1)]
+(True, True, True, [(1, 0, 0), (0, 1, 0), (0, 0, 0)], Rational Field)
+[(2, 0), (0, 4)]
+[(1, 1, 1), (0, 2, 4)]
+[1, 1] [1, 0]
