@@ -50,6 +50,13 @@
   .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
   .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
   .top .link, .top #connect { white-space: nowrap; }
+  /* (O-2: beside the pane the chat can be 420 px; the header stays one line there, and the agent's name, not the
+     buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping) */
+  @media (min-width: 901px) {
+    .top { flex-wrap: nowrap; }
+    .top #who { display: block; flex: 0 1 auto; }
+    .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
+  }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
   .msg, .doc { overflow-wrap: anywhere; }
