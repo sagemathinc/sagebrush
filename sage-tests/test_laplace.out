@@ -1,0 +1,24 @@
+1/s
+2/s^3
+2/(s^2 + 4)
+s/(s^2 + 1)
+1/(s - 3)
+1/(s^2 - 1)
+6/(s + 1)^4
+(s - 1)^(-2)
+2*s/(s^2 + 1)^2
+e^(-2*s)/s
+laplace(tan(t), t, s)
+e^(3*t)
+sin(t)
+cos(2*t)
+t^2
+t*e^t
+heaviside(t - 2)
+t^3*e^(-t)
+ilt(log(s), s, t)
+1/2*sqrt(pi)/s^(3/2)
+cos(2*t)*e^(-t)
+heaviside(t - 2)*sin(t - 2)
+-e^(-t) + 1
+a*t*e^t

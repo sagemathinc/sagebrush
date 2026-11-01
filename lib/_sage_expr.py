@@ -5207,6 +5207,209 @@ def _dvar(dvar, ivar=None):
     return tag[0][4:], _var_name(ivar)
 
 
+def _lin_in(f, v):
+    """(a, b) with f == a*v + b, or None."""
+    f = _expr(f)
+    if v not in f._names():
+        return _expr(0), f
+    if not f.is_polynomial(v) or f.degree(v) != 1:
+        return None
+    return f.coefficient(v, 1), f.coefficient(v, 0)
+
+
+def _prod(fs):
+    r = _expr(1)
+    for f in fs:
+        r = r * f
+    return r
+
+
+def _laplace(f, t, s):
+    f = _expr(f)
+    T = Expression(_sym_s(t)); S = Expression(_sym_s(s))
+    if t not in f._names():
+        return f / S
+    op = f._op(); tag = op[0]
+    if tag == "add":
+        return sum((_laplace(k, t, s) for k in f.operands()), _expr(0))
+    if tag == "symbol":
+        return 1 / S**2
+    if tag == "mul":
+        ks = f.operands()
+        g = [k for k in ks if t in k._names()]
+        if len(g) < len(ks):
+            return _prod(k for k in ks if t not in k._names()) * _laplace(_prod(g), t, s)
+        for i, k in enumerate(g):
+            rest = _prod(g[:i] + g[i + 1:])
+            kop = k._op()
+            if kop[0] == "pow" and str(k.operands()[0]) == "e":
+                ab = _lin_in(k.operands()[1], t)
+                if ab is not None:
+                    return e**ab[1] * _laplace(rest, t, s).subs({S: S - ab[0]})
+            if kop[0] == "fun:heaviside":
+                ab = _lin_in(k.operands()[0], t)
+                if ab is not None and str(ab[0]) == "1" and (-ab[1]).is_numeric() and -ab[1] >= 0:
+                    c = -ab[1]
+                    return e**(-c * S) * _laplace(rest.subs({T: T + c}), t, s)
+        for i, k in enumerate(g):
+            rest = _prod(g[:i] + g[i + 1:])
+            n = 1 if k.is_symbol() else None
+            if k._op()[0] == "pow" and k.operands()[0].is_symbol() and str(k.operands()[1]).isdigit():
+                n = int(str(k.operands()[1]))
+            if n is not None:
+                return (-1)**n * _laplace(rest, t, s).diff(S, n)
+        raise NotImplementedError("laplace: no transform known for %s" % f)
+    if tag == "pow":
+        b, x = f.operands()
+        if str(b) == "e":
+            ab = _lin_in(x, t)
+            if ab is not None:
+                return e**ab[1] / (S - ab[0])
+        if b.is_symbol() and t not in x._names() and x.is_numeric() and x > -1:
+            if str(x).isdigit():
+                return _m.factorial(int(str(x))) / S**(x + 1)
+            return gamma(x + 1) / S**(x + 1)
+        if str(x).isdigit():
+            g = f.expand()
+            if str(g) != str(f):
+                return _laplace(g, t, s)
+    if tag.startswith("fun:"):
+        name = tag[4:]
+        ab = _lin_in(f.operands()[0], t)
+        if ab is not None:
+            a, b = ab
+            if name in ("sin", "cos", "sinh", "cosh") and str(b) != "0":
+                # the addition formulas
+                fa, fb = {"sin": (sin, cos), "cos": (cos, sin), "sinh": (sinh, cosh), "cosh": (cosh, sinh)}[name]
+                sg = -1 if name == "cos" else 1
+                return fa(b) * _laplace(fb(a * T) if name in ("sin", "sinh") else fa(a * T), t, s) + \
+                    sg * fb(b) * _laplace(fa(a * T) if name in ("sin", "sinh") else fb(a * T), t, s)
+            if name == "sin":
+                return a / (S**2 + a**2)
+            if name == "cos":
+                return S / (S**2 + a**2)
+            if name == "sinh":
+                return a / (S**2 - a**2)
+            if name == "cosh":
+                return S / (S**2 - a**2)
+            if name == "exp":
+                return e**b / (S - a)
+            if name == "heaviside" and str(a) == "1" and (-b).is_numeric():
+                return e**(b * S) / S if -b >= 0 else 1 / S
+    raise NotImplementedError("laplace: no transform known for %s" % f)
+
+
+def laplace(f, t, s):
+    """The Laplace transform of f(t), as a function of s, from a table:
+    t^n, e^(a*t), sin, cos, sinh, cosh of a*t + b, heaviside(t - c), sums
+    and constant multiples, the shifts e^(a*t)*g and heaviside(t - c)*g,
+    and t^n*g; anything else stays unevaluated, laplace(f, t, s), as in Sage.
+
+    EXAMPLES::
+
+        sage: t, s = var('t s')
+        sage: laplace(t^2, t, s), laplace(sin(2*t), t, s)
+        (2/s^3, 2/(s^2 + 4))
+        sage: laplace(t^3*exp(-t), t, s)
+        6/(s + 1)^4
+    """
+    try:
+        return _laplace(f, _var_name(t), _var_name(s))
+    except NotImplementedError:
+        return function("laplace")(_expr(f), _expr(t), _expr(s))
+
+
+def _ilt_term(F, s, t):
+    """The inverse transform of one partial-fraction term."""
+    S = Expression(_sym_s(s)); T = Expression(_sym_s(t))
+    ks = F.operands() if F._op()[0] == "mul" else [F]
+    c, num, den, k = _expr(1), _expr(1), None, 1
+    for f in ks:
+        if s not in f._names():
+            c = c * f
+        elif f._op()[0] == "pow" and str(f.operands()[1]).startswith("-") and f.operands()[1].is_numeric():
+            nu = -f.operands()[1]
+            if f.operands()[0].is_symbol() and not str(nu).isdigit() and len(ks) == 1 + sum(1 for g in ks if s not in g._names()):
+                # c/s^nu, nu > 0 not an integer
+                return _prod(g for g in ks if s not in g._names()) * T**(nu - 1) / gamma(nu)
+            if den is not None or not str(nu).isdigit():
+                raise NotImplementedError("inverse_laplace: no inverse known for %s" % F)
+            den, k = f.operands()[0], int(str(-f.operands()[1]))
+        else:
+            num = num * f
+    if den is None or not num.is_polynomial(S) or not den.is_polynomial(S):
+        raise NotImplementedError("inverse_laplace: no inverse known for %s" % F)
+    d = den.degree(S)
+    if d == 1 and s not in num._names():
+        b1, b0 = den.coefficient(S, 1), den.coefficient(S, 0)
+        a = -b0 / b1
+        return c * num / b1**k * T**(k - 1) * e**(a * T) / _m.factorial(k - 1)
+    if d == 2 and k == 1 and num.degree(S) <= 1:
+        lc = den.coefficient(S, 2)
+        beta, gam = den.coefficient(S, 1) / lc, den.coefficient(S, 0) / lc
+        p, q = num.coefficient(S, 1) / lc, num.coefficient(S, 0) / lc
+        h = beta / 2; w2 = gam - h**2; r = q - p * h
+        if str(w2) == "0":
+            # (p*s + q)/(s + h)^2
+            return c * e**(-h * T) * (p + r * T)
+        if w2.is_numeric() and w2 < 0:
+            w = _expr(-w2).sqrt(); cs, sn = cosh, sinh
+        else:
+            w = _expr(w2).sqrt(); cs, sn = cos, sin
+        return c * e**(-h * T) * (p * cs(w * T) + r / w * sn(w * T))
+    raise NotImplementedError("inverse_laplace: no inverse known for %s" % F)
+
+
+def inverse_laplace(F, s, t):
+    """The inverse Laplace transform of F(s), as a function of t: rational
+    functions of s through their partial fractions (c/(s - a)^k and
+    (p*s + q)/(s^2 + b*s + c)), with e^(-c*s) giving the delay
+    heaviside(t - c)*f(t - c); anything else stays unevaluated,
+    ilt(F, s, t), as in Sage.
+
+    EXAMPLES::
+
+        sage: t, s = var('t s')
+        sage: inverse_laplace(1/(s - 3), s, t), inverse_laplace(1/(s^2 + 1), s, t)
+        (e^(3*t), sin(t))
+        sage: inverse_laplace(2/s^3, s, t)
+        t^2
+    """
+    try:
+        return _inverse_laplace(_expr(F), _var_name(s), _var_name(t))
+    except NotImplementedError:
+        return function("ilt")(_expr(F), _expr(s), _expr(t))
+
+
+def _inverse_laplace(F, s, t):
+    S = Expression(_sym_s(s)); T = Expression(_sym_s(t))
+    F = F.expand()
+    groups = {}
+    for G in (F.operands() if F._op()[0] == "add" else [F]):
+        delay, rest = _expr(0), []
+        for k in (G.operands() if G._op()[0] == "mul" else [G]):
+            ab = _lin_in(k.operands()[1], s) if k._op()[0] == "pow" and str(k.operands()[0]) == "e" else None
+            if ab is not None and str(ab[1]) == "0":
+                delay = delay - ab[0]
+            else:
+                rest.append(k)
+        d, H = groups.get(str(delay), (delay, _expr(0)))
+        groups[str(delay)] = (d, H + _prod(rest))
+    r = _expr(0)
+    for delay, H in groups.values():
+        try:
+            P = H.partial_fraction(s)
+            g = sum((_ilt_term(Q, s, t) for Q in (P.operands() if P._op()[0] == "add" else [P])), _expr(0))
+        except (NotImplementedError, ValueError, TypeError):
+            # symbolic coefficients: term by term
+            H = H.expand()
+            g = sum((_ilt_term(Q, s, t) for Q in (H.operands() if H._op()[0] == "add" else [H])), _expr(0))
+        if str(delay) != "0":
+            g = heaviside(T - delay) * g.subs({T: T - delay})
+        r = r + g
+    return r
+
+
 def desolve(de, dvar, ics=None, ivar=None, show_method=False, contrib_ode=False, algorithm="maxima"):
     """Solve an ordinary differential equation for y = function('y')(x):
     desolve(diff(y, x) + y == x, y) = (_C + (x - 1)*e^x)*e^(-x).  First
