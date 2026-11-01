@@ -1,14 +1,15 @@
-# NumPy's __array__ protocol: an object whose type defines __array__ stands
-# for the array it returns, in np.array/np.asarray, nested in lists, as a
+# NumPy's __array__ protocol: an object with an __array__ method stands for
+# the array it returns, in np.array/np.asarray, nested in lists, as a
 # ufunc operand and on either side of an ndarray operator.  Every printed
-# line is one t() case, and each case builds its own objects.
+# line is one t() case (a repr's newlines escaped), and each case builds its
+# own objects.
 import numpy as np
 
 
 def t(label, f):
     try:
         r = f()
-        print(label, repr(r), getattr(r, "dtype", ""))
+        print(label, repr(r).replace("\n", "\\n"), getattr(r, "dtype", ""))
     except Exception as e:
         print(label, type(e).__name__ + ":", e)
 
