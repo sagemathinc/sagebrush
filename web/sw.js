@@ -57,7 +57,9 @@ async function verified(res, pathname) {
   const bytes = await res.clone().arrayBuffer();
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   if ([...h].map((b) => b.toString(16).padStart(2, "0")).join("") !== want.sha256) return null;
-  return new Response(bytes, { status: 200, headers: want.headers });
+  // (security audit G-3b: a kept copy's replay, offline or cache-first, says nosniff as the network's response does
+  // (web/_headers' /*): added here, the one place a kept response is rebuilt, not stored in every DIGESTS entry)
+  return new Response(bytes, { status: 200, headers: { ...want.headers, "X-Content-Type-Options": "nosniff" } });
 }
 
 // this version's kept copy of a request, verified; a bad one is dropped
