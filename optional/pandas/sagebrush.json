@@ -9,7 +9,20 @@
   "python": {
     "root": "py",
     "modules": [
-      "pandas"
+      "pandas",
+      "pandas._pd_column",
+      "pandas._pd_csv",
+      "pandas._pd_dtypes",
+      "pandas._pd_frame",
+      "pandas._pd_index",
+      "pandas._pd_indexing",
+      "pandas._pd_names",
+      "pandas._pd_options",
+      "pandas._pd_reduce",
+      "pandas._pd_repr",
+      "pandas._pd_series",
+      "pandas._pd_toplevel",
+      "pandas.errors"
     ]
   },
   "requires": [],
