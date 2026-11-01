@@ -59,8 +59,14 @@ try {
     exceptions = [];
     await send("Page.navigate", { url });
     await sleep(300);
-    // (the layout mounted: its separators wired and valued; the editor is mounted earlier, before the layout)
-    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`);
+    // (the layout mounted: its separators wired and valued, as apply() writes aria-valuenow only after mountLayout wires
+    // them; the editor is mounted earlier, before the layout. OR a page exception since this navigate: a mount that
+    // throws never values the separators, and the case's own checks must then fail it, not this wait; 20 s either way)
+    const mounted = `document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`;
+    for (const t = Date.now(); ; await sleep(50)) {
+      if (exceptions.length > 0 || (await ev(mounted).catch(() => false))) break;
+      if (Date.now() - t > 20000) throw new Error("timeout: the layout's mount (no aria-valuenow and no page exception) at " + url);
+    }
     await sleep(300);
   };
   /** The scripted agent's turn that opens a code artifact (through the page's own artifact path, renderArtifacts). */
