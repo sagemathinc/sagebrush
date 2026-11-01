@@ -601,9 +601,13 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
   if (shape.length > depth) inhomogeneous(depth);
   shape.leaf ??= depth;
   if (shape.leaf !== depth) inhomogeneous(Math.min(depth, shape.leaf));
-  if (shapeOnly && typeof x !== "string") return;
+  if (shapeOnly && typeof x !== "string") {
+    if (pyScalar(x) === null && hasArrayProtocol(x)) throw PROTOCOL;
+    return;
+  }
   const w = pyScalar(x);
   if (w === null) {
+    if (hasArrayProtocol(x)) throw PROTOCOL;
     if (typeof x === "string") raise(T.NotImplementedError, "string arrays are not supported by sagebrush's numpy yet");
     const f = Ty.floatCallSafe(x);
     if (f === undefined) raise(T.TypeError, `float() argument must be a string or a real number, not '${typeName(x)}'`);
@@ -766,11 +770,43 @@ export function asarray(x: any, dtype: any = null): NDArray {
   if (x instanceof NDArray) return dtype === null || toDtype(dtype) === x.dt ? x : copy(x, toDtype(dtype));
   return fromPy(x, dtype);
 }
+// NumPy's __array__ protocol: an object whose type defines __array__ stands
+// for the array that returns, at the top or nested in lists.  discover meets
+// such an object only where it would otherwise refuse it (a leaf that isn't
+// a number), so plain data pays nothing: then the data is rebuilt with each
+// such object replaced by its array, once, and discovered again.
+const PROTOCOL = { mark: "array protocol" };
+function hasArrayProtocol(x: any): boolean {
+  return x !== null && typeof x === "object" && !(x instanceof NDArray) && Obj.lookupType(Obj.typeOf(x), "__array__") !== undefined;
+}
+function viaArrayProtocol(x: any): any {
+  if (isSeq(x)) {
+    const items = seqItems(x);
+    let changed = false;
+    const out = items.map((it) => {
+      const v = viaArrayProtocol(it);
+      if (v !== it) changed = true;
+      return v;
+    });
+    return changed ? out : x;
+  }
+  if (!hasArrayProtocol(x) || pyScalar(x) !== null) return x;
+  const r = Obj.callObj(Obj.lookupType(Obj.typeOf(x), "__array__"), [x]);
+  if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
+  return r;
+}
 export function fromPy(x: any, dtype: any = null): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
   const given = dtype !== null && dtype !== undefined;
-  discover(x, 0, shape, kinds, given);
+  try {
+    discover(x, 0, shape, kinds, given);
+  } catch (e) {
+    if (e !== PROTOCOL) throw e;
+    const y = viaArrayProtocol(x);
+    if (y instanceof NDArray) return asarray(y, dtype);
+    return fromPy(y, dtype);
+  }
   const dt = given ? toDtype(dtype) : (kinds.dt ?? D.float64);
   const out = empty(shape, dt);
   fill(out, x);
@@ -3086,7 +3122,7 @@ newBuiltinModule("_numpy", (m) => {
     ["mod", "remainder"], ["pow", "power"], ["and", "bitwise_and"], ["or", "bitwise_or"], ["xor", "bitwise_xor"],
     ["lshift", "left_shift"], ["rshift", "right_shift"],
   ];
-  const isOperand = (o: any) => o instanceof NDArray || pyScalar(o) !== null || Array.isArray(o);
+  const isOperand = (o: any) => o instanceof NDArray || pyScalar(o) !== null || Array.isArray(o) || hasArrayProtocol(o);
   const boolOp = (op: string) => (op === "bitwise_and" ? "logical_and" : op === "bitwise_or" ? "logical_or" : op === "bitwise_xor" ? "logical_xor" : op);
   for (const [py, op] of BINOPS) {
     const pick = (a: any, b: any) => {
@@ -3354,7 +3390,8 @@ newBuiltinModule("_numpy", (m) => {
       }
     }
     const r = binary(op, x, y);
-    return x instanceof NDArray || y instanceof NDArray || Array.isArray(x) || Array.isArray(y) ? r : pyScalarOf(r.dt, r.data, 0);
+    const arrayLike = (v: any) => v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
+    return arrayLike(x) || arrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
