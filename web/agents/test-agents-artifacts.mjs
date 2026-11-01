@@ -314,6 +314,11 @@ try {
     await call("workspace.create", { path: "/notes/plot.ipynb", content: docFor("/notes/plot.ipynb", [{ code: "x = 1" }, { code: "print('OLD')" }, { type: "markdown", code: "Some *text*" }], { autorun: "always" }), mode: "python" });
     const rec0 = await record(await refOf("/notes/plot.ipynb"));
     ok(rec0?.autorun === "always", "the document says autorun: always", rec0 && Object.keys(rec0));
+    // (A10: a code artifact open first, so the pane's width is measured right before and right after the notebook opens)
+    await call("workspace.create", { path: "/notes/w.py", content: { text: "w = 1\n" } });
+    await artifactTurn("/notes/w.py");
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/w.py ")`, 30000);
+    const paneBefore = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
     await openNotebook("/notes/plot.ipynb");
     ok(loaded("sagebrush-notebook.js"), "the notebook component is loaded when the notebook opens");
     await sleep(2500);
@@ -321,7 +326,8 @@ try {
     ok(workerCount() === 0 && !/OLD/.test(o), "opening runs nothing: no kernel worker, no output", { workers, o });
     ok((await shown()).join("|") === "x = 1|print('OLD')|Some *text*", "the cells are shown as written", await shown());
     ok(await ev(`!!document.querySelector('${PANE} .nb-notice') && /Runs here when you click Run/.test(document.querySelector('${PANE} .nb-notice').textContent)`), "the run notice is shown beside the notebook");
-    ok(await ev(`document.body.classList.contains('wide-artifact')`), "a notebook gets the wide pane");
+    const paneAfter = await ev(`document.querySelector('#artifacts').getBoundingClientRect().width`);
+    ok(paneBefore > 0 && Math.abs(paneAfter - paneBefore) < 1, "opening a notebook leaves the pane width as it was (A10)", { paneBefore, paneAfter });
     ok(await ev(`document.activeElement?.closest('#artifacts') === null`), "the artifact the agent opened didn't take the focus");
 
     // ---- written by the agent: the label, and when it goes
@@ -512,7 +518,7 @@ try {
     ok(at1280.chat >= 420 && at1100.chat >= 420, "beside a notebook the chat keeps at least 420 px (1280 and 1100 px windows)", { at1280, at1100 });
     ok(at800.pane === at800.vw, "at 800 px a notebook's pane covers the page", at800);
     await sleep(300);
-    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact.wide-artifact #artifacts { width: 589px !important; }' }))`);
+    await ev(`document.head.append(Object.assign(document.createElement('style'), { id: 'narrow', textContent: 'body.has-artifact #artifacts { width: 589px !important; }' }))`);
     await sleep(300);
     const narrow = await gutter();
     ok(narrow[0] <= 640 && narrow[1] === "44px", "the pane at 589 px in a 1280 px window gets the compact layout (@container sbnb-pane)", narrow);
