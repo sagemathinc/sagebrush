@@ -29,7 +29,7 @@ import sys as _sys
 
 from . import _compat  # noqa: E402,F401  (first: Python 3.10/3.11 get what the Sage layer uses of 3.12's)
 
-__all__ = ["ap", "capabilities", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]
+__all__ = ["ap", "capabilities", "limit", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]
 
 
 def _limits_module():
@@ -64,6 +64,21 @@ def set_limits(limits):
     if L.finalized():
         raise RuntimeError(L.LOCKED)
     L.propose(L.validate(limits))
+
+
+def limit(name):
+    """This session's value of the engine limit name, such as
+    "pandas.decoded_bytes": an int, or float("inf") where it is unlimited,
+    every limit's default (set_limits sets finite ones).  The limits are read
+    once: the first read locks them, as the first use of a limited layer
+    does (set_limits after it raises RuntimeError).  An unknown name raises
+    ValueError, listing the limits of this engine."""
+    L = _limits_module()
+    if not isinstance(name, str):
+        raise TypeError("limit() argument must be a str, not %s" % type(name).__name__)
+    if name not in L.TABLE:
+        raise ValueError("limits: %s is not a limit of this engine (its limits: %s)" % (L._key_shown(name), ", ".join(sorted(L.TABLE))))
+    return L.finalize()[name]
 
 
 def _capacity_module():

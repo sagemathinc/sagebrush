@@ -723,6 +723,8 @@ jobs:
         run: |
           SAGEBRUSH_AGENTS=1 bun web/build.ts
           CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
+          # (the agents page's resizable columns, on the same build: web/agents/test-agents-layout.mjs, the layout plan r3 PR 2)
+          CHROME=google-chrome bun web/agents/test-agents-layout.mjs
           SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts
           CHROME=google-chrome AGENTS_LATEX=1 bun web/agents/test-agents-artifacts.mjs
 
