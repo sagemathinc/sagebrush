@@ -160,6 +160,11 @@ for z in [complex(1000, 1), complex(1000, -1), complex(1000, 0.0), complex(1000,
 out("zeta(2, -999999.5) bound", lambda: sc.zeta(2, -999999.5))
 out("eval_legendre(1000000, 0.3) bound", lambda: sc.eval_legendre(1000000, 0.3))
 out("eval_legendre(-1000001, 0.3) bound", lambda: sc.eval_legendre(-1000001, 0.3))
+# (the call's total variable work at the bound: daybreak3's R5 ruling; a
+# negative degree is charged after P_{-n-1} = P_n, so 500000 + 499999)
+out("eval_legendre([500000, 500000], 0.3) aggregate", lambda: sc.eval_legendre(np.array([500000, 500000]), 0.3))
+out("eval_legendre([-500001, -500000], 0.3) aggregate", lambda: sc.eval_legendre(np.array([-500001, -500000]), 0.3))
+out("zeta(2, [-499999.5, -499999.5]) aggregate", lambda: sc.zeta(2, np.array([-499999.5, -499999.5])))
 
 for args in [(0, 2, 0.5), (1, 2, 0.3), (2, 3, -0.7), (1, 2, 1.5), (-1, 3, 0.2), (3, 2, 0.4), (0, 0, 0.9)]:
     out("lpmv%r" % (args,), lambda: sc.lpmv(*args))

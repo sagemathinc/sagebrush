@@ -92,8 +92,31 @@ def _loop(name, args, complex_ok):
     raise _unsupported(name)
 
 
-def _ufunc(name, nin, real, cplx=None):
-    """A SciPy-like ufunc from scalar functions real(*floats) and cplx(*complexes)."""
+# (elements of a work-bounded ufunc whose evaluation has begun: tests observe
+# that a refused call begins none)
+_work_started = [0]
+
+
+def _admit(name, work, cols):
+    # (daybreak3's R5 ruling: each value's declared variable work, and the
+    # call's total over the broadcast, at most _WORK_MAX terms; checked for
+    # every value before any is computed, so a call is refused whole)
+    total = 0
+    count = 0
+    for vals in zip(*cols):
+        w, why = work(*vals)
+        if w > _WORK_MAX:
+            raise NotImplementedError("scipy.special.%s%r: %s" % (name, tuple(vals), why))
+        total += w
+        count += 1
+    if total > _WORK_MAX:
+        raise NotImplementedError("scipy.special.%s: the call's variable work, %d terms over its %d values, is above %d"
+                                  % (name, total, count, _WORK_MAX))
+
+
+def _ufunc(name, nin, real, cplx=None, work=None):
+    """A SciPy-like ufunc from scalar functions real(*floats) and cplx(*complexes);
+    work(*floats) -> (terms, reason) declares a real loop's variable work."""
 
     def f(*args, **kw):
         if kw:
@@ -107,7 +130,13 @@ def _ufunc(name, nin, real, cplx=None):
         one = cplx if is_c else real
         conv = complex if is_c else float
         cols = [x.astype("D" if is_c else "d").ravel().tolist() for x in b]
-        out = [one(*[conv(v) for v in vals]) for vals in zip(*cols)] if cols else []
+        if work is not None and not is_c:
+            _admit(name, work, cols)
+        out = []
+        for vals in (zip(*cols) if cols else ()):
+            if work is not None:
+                _work_started[0] += 1
+            out.append(one(*[conv(v) for v in vals]))
         res = np.array(out, dtype=c).reshape(shape)
         return res[()] if shape == () else res
 
@@ -268,8 +297,6 @@ def _hurwitz(x, q):
         if x != _math.floor(x):
             return _NAN
         n = int(_math.floor(-q)) + 1
-        if n > _WORK_MAX:
-            raise _S.NotCovered("a q at or below -%d (its head sum's work)" % _WORK_MAX)
         head = 0.0
         for k in range(n):
             head += (q + k) ** -x
@@ -281,7 +308,15 @@ def _hurwitz(x, q):
 
 _zeta_1 = _ufunc("zeta", 1, _guard("zeta", _zeta1, pole=lambda x: _INF),
                  _guard("zeta", lambda z: complex(_S.zeta(z)), pole=lambda z: complex(_INF, 0)))
-_zeta_2 = _ufunc("zeta", 2, _guard("zeta", _hurwitz, pole=lambda x, q: _INF))
+def _hurwitz_work(x, q):
+    # (the head sum's terms, exactly as _hurwitz takes them; 0 where it
+    # returns without the loop)
+    if x != x or q != q or x <= 1 or q > 0 or q == _math.floor(q) or x != _math.floor(x):
+        return 0, ""
+    return int(_math.floor(-q)) + 1, "a q at or below -%d (its head sum's work)" % _WORK_MAX
+
+
+_zeta_2 = _ufunc("zeta", 2, _guard("zeta", _hurwitz, pole=lambda x, q: _INF), work=_hurwitz_work)
 
 
 def zeta(x, q=None, out=None):
@@ -590,8 +625,6 @@ def _legendre(n, x):
     n = int(n)
     if n < 0:
         n = -(n + 1)  # (P_{-n-1} = P_n)
-    if n > _WORK_MAX:
-        raise _S.NotCovered("a degree above %d (its recurrence's work)" % _WORK_MAX)
     if n == 0:
         return 1.0
     if n == 1:
@@ -630,7 +663,19 @@ def _lpmv(m, v, x):
     return float(_S.assoc_legendre_p(int(v), int(m), x))
 
 
-eval_legendre = _ufunc("eval_legendre", 2, _guard("eval_legendre", _legendre))
+def _legendre_work(n, x):
+    # (the degree after P_{-n-1} = P_n, which bounds both the recurrence's
+    # n - 1 steps and the series' n // 2 + 1 terms; 0 where _legendre
+    # doesn't loop)
+    if n != n or x != x or _math.isinf(n) or n != _math.floor(n):
+        return 0, ""
+    n = int(n)
+    if n < 0:
+        n = -(n + 1)
+    return (n if n >= 2 else 0), "a degree above %d (its recurrence's work)" % _WORK_MAX
+
+
+eval_legendre = _ufunc("eval_legendre", 2, _guard("eval_legendre", _legendre), work=_legendre_work)
 lpmv = _ufunc("lpmv", 3, _guard("lpmv", _lpmv))
 
 
