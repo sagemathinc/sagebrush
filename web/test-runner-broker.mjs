@@ -16,17 +16,16 @@
 //
 //   bun web/build.ts && node web/test-runner-broker.mjs      (CHROME=... for another browser)
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { devtoolsPort } from "./test-port.mjs";
+import { browser, runnerWorker, forge as forgeIn, refused as refusedBy, sleep, until } from "./test-broker-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
 const work = mkdtempSync(join(tmpdir(), "sb-broker-"));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
 
@@ -57,118 +56,17 @@ async function server(name, overrides = {}) {
   return { name, base, lines };
 }
 
-// ---- the browser, and its sessions (the page, each frame in a process of its own, each worker)
-const profile = mkdtempSync(join(tmpdir(), "sb-broker-chrome-"));
-let cdpPort = Number(process.env.CDP_PORT) || 0;
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-if (!cdpPort) cdpPort = await devtoolsPort(profile);
-let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
-const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let n = 0;
-const waiting = new Map();
-const attached = new Map(); // sessionId -> {type, targetId, parentFrameId, parentSession, detached}
-const requests = []; // every Network.requestWillBeSent, in every session: {sessionId, url}
-const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
-ws.onmessage = (e) => {
-  const m = JSON.parse(e.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? { error: m.error }); waiting.delete(m.id); }
-  if (m.method === "Network.requestWillBeSent") requests.push({ sessionId: m.sessionId, url: m.params.request.url });
-  if (m.method === "Target.attachedToTarget") {
-    const sid = m.params.sessionId, ti = m.params.targetInfo;
-    attached.set(sid, { sessionId: sid, type: ti.type, targetId: ti.targetId, url: ti.url, parentFrameId: ti.parentFrameId, parentSession: m.sessionId, detached: false });
-    for (const [method, params] of [["Runtime.enable", {}], ["Network.enable", {}], ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId: sid }));
-  }
-  if (m.method === "Target.detachedFromTarget") { const t = attached.get(m.params.sessionId); if (t) t.detached = true; }
-};
-async function ev(expression, sessionId) {
-  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
-  if (r.error || r.exceptionDetails) throw new Error(JSON.stringify(r.error ?? r.exceptionDetails).slice(0, 300));
-  return r.result?.value;
-}
-async function until(fn, ms, what) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn().catch(() => null);
-    if (v) return v;
-    if (Date.now() > end) return null;
-    await sleep(50);
-  }
-}
-
-// ---- the recorder: in the page only (not the frames), before anything of the page runs. MessagePort keeps its
-// semantics: the handler the page sets is the one it reads back, and every message is passed on unchanged; the
-// recorder only reads them (an answer's byte length is read before its buffer is transferred)
-const recorder = (g14) => `(() => {
-  if (window.top !== window) return;
-  const log = [];
-  Object.defineProperty(window, "__sbBrokerLog", { value: log });
-  let open;
-  Object.defineProperty(globalThis, "__g14Barrier", { value: new Promise((r) => (open = r)) });
-  const G14 = ${g14 ? "true" : "false"};
-  if (!G14) open();
-  const ZONE = /\\/lib\\/tzdata\\/[0-9a-f]{64}\\.tzif$/;
-  const P = MessagePort.prototype, post = P.postMessage;
-  P.postMessage = function (m, ...rest) {
-    let zoneAnswer = false;
-    try {
-      if (m && typeof m === "object" && typeof m.runnerFetched === "number") {
-        log.push({ kind: "answer", id: m.runnerFetched, url: String(m.url), bytes: m.bytes instanceof ArrayBuffer ? m.bytes.byteLength : null, t: performance.now() });
-        zoneAnswer = ZONE.test(String(m.url));
-      }
-      if (m && typeof m === "object" && Array.isArray(m.mount)) log.push({ kind: "mount-out", urls: m.mount.map((x) => x && x[1] && x[1].url), t: performance.now() });
-    } catch {}
-    const r = post.call(this, m, ...rest);
-    if (G14 && zoneAnswer) open(); // (after the answer has been posted: the zone request has been answered)
-    return r;
-  };
-  const d = Object.getOwnPropertyDescriptor(P, "onmessage");
-  const orig = new WeakMap();
-  Object.defineProperty(P, "onmessage", {
-    configurable: true, enumerable: d.enumerable,
-    get() { const g = d.get.call(this); return g && orig.has(g) ? orig.get(g) : g; },
-    set(f) {
-      if (typeof f !== "function") return d.set.call(this, f);
-      const g = function (e) {
-        try {
-          const x = e.data;
-          if (x && typeof x === "object" && typeof x.runnerFetch === "number") log.push({ kind: "request", id: x.runnerFetch, url: String(x.url), t: performance.now() });
-          if (x && typeof x === "object" && Array.isArray(x.mount)) log.push({ kind: "mount-in", urls: x.mount.map((y) => y && y[1] && y[1].url), t: performance.now() });
-        } catch {}
-        return f.call(this, e);
-      };
-      orig.set(g, f);
-      d.set.call(this, g);
-    },
-  });
-})();`;
-
+const b = await browser();
+const { ev, send } = b;
 // ---- a page: its recorder, then the notebook, then its runner's frame and worker
-let scriptId = null;
 const forged = new Set(); // (the ids of this page's forged requests: the valid path's records leave them out)
 async function openPage(srv, { g14 = false } = {}) {
   forged.clear(); // (ids are each runner's own)
-  if (scriptId) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: scriptId });
-  scriptId = (await send("Page.addScriptToEvaluateOnNewDocument", { source: recorder(g14) })).identifier;
+  await b.record(g14);
   await send("Page.navigate", { url: srv.base });
   const ready = await until(() => ev("document.querySelector('#status')?.textContent.startsWith('ready')"), 60000);
   if (!ready) throw new Error(`${srv.name}: the notebook page never got ready`);
-  const fid = await until(async () => {
-    const el = await send("Runtime.evaluate", { expression: "(() => { const fs = document.querySelectorAll('iframe[sandbox]'); return fs.length === 1 ? fs[0] : null; })()" });
-    if (!el.result?.objectId) return null;
-    const dn = await send("DOM.describeNode", { objectId: el.result.objectId });
-    return dn.node?.frameId ?? null;
-  }, 20000);
-  if (!fid) throw new Error(`${srv.name}: no runner frame`);
-  const wk = await until(async () => {
-    const ws_ = [...attached.values()].filter((t) => t.type === "worker" && !t.detached && t.parentFrameId === fid);
-    return ws_.length === 1 ? ws_[0].sessionId : null;
-  }, 20000);
-  if (!wk) throw new Error(`${srv.name}: no single worker of the runner frame`);
-  const brokered = await ev("self.__SB_BROKERED__ === true", wk);
-  if (!brokered) throw new Error(`${srv.name}: the bound worker isn't the runner's (no __SB_BROKERED__)`);
-  return { srv, wk };
+  return { srv, wk: await runnerWorker(b, srv.name) };
 }
 async function run(code) {
   await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, bubbles: true})); })()`);
@@ -176,38 +74,18 @@ async function run(code) {
   await until(() => ev("(() => { const c = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1); return !c.classList.contains('running') && !c.classList.contains('queued') && /\\[\\d+\\]/.test(c.querySelector('.n').textContent); })()"), 90000);
   return ev("[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1).querySelector('.out').textContent");
 }
-const brokerLog = () => ev("window.__sbBrokerLog.slice()");
+const brokerLog = () => b.log();
 const pathOf = (u) => { const x = new URL(u); return x.pathname + x.search; };
-
-// A forged request from the runner's worker: the frame's relayed request (witnessed in the page), the page's answer
-// to it (the same id and URL), and every request any session or the server saw meanwhile
+// (a forged request, with the server's own log as what it saw)
 async function forge(page, url) {
-  const mark = { log: (await brokerLog()).length, net: requests.length, srv: page.srv.lines().length };
-  await ev(`(postMessage({ brokerFetch: ${JSON.stringify(url)}, offset: 0 }), true)`, page.wk);
-  const got = await until(async () => {
-    const l = (await brokerLog()).slice(mark.log);
-    const req = l.find((x) => x.kind === "request" && x.url === url);
-    const ans = req && l.find((x) => x.kind === "answer" && x.id === req.id && x.url === url);
-    return ans ? { req, ans } : null;
-  }, 5000);
-  if (got) forged.add(got.req.id);
-  await sleep(300); // (anything the answer set off has time to reach the server)
-  return { ...(got ?? {}), net: requests.slice(mark.net).map((r) => r.url), srv: page.srv.lines().slice(mark.srv).map((l) => l.path) };
+  const r = await forgeIn(b, page.wk, url, () => page.srv.lines().map((l) => l.path));
+  if (r.req) forged.add(r.req.id);
+  return r;
 }
-// refused: relayed, answered null, and nothing reached anywhere
-function refused(name, what, r, quiet = () => true) {
-  const noNet = r.net.filter((u) => !quiet(u));
-  const noSrv = r.srv.filter((p) => !quiet(p));
-  ok(!!r.req && !!r.ans && r.ans.bytes === null && noNet.length === 0 && noSrv.length === 0,
-    `${name}: ${what}: relayed (${r.req ? "id " + r.req.id : "NOT SEEN"}), answered ${r.ans ? (r.ans.bytes === null ? "null" : r.ans.bytes + " bytes") : "NEVER"}, ${noNet.length} request(s) seen by CDP, ${noSrv.length} by the server${noNet.length + noSrv.length ? ": " + JSON.stringify([...noNet, ...noSrv]).slice(0, 300) : ""}`);
-}
+// refused, judged on the requests for this case's resource (`token`, a part of its URL no other request has)
+const refused = (name, what, r, token) => refusedBy(ok, name, what, r, (u) => !String(u).includes(token));
 
 try {
-  await send("Page.enable");
-  await send("Runtime.enable");
-  await send("DOM.enable");
-  await send("Network.enable");
-  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 
   // ======== P1
   const s1 = await server("p1");
@@ -218,22 +96,23 @@ try {
   ok(!s1.lines().some((l) => l.path.includes("/lib/tzdata/")), "P1: no zone data fetched before the interpreter asks (G2c's precondition): " + JSON.stringify(s1.lines().filter((l) => l.path.includes("tzdata")).map((l) => l.path)));
 
   // G2c: a zone the index lists, asked for before the index was fetched
-  refused("G2c", "a listed zone before the index", await forge(p1, E(`lib/tzdata/${LONDON}.tzif`)));
+  refused("G2c", "a listed zone before the index", await forge(p1, E(`lib/tzdata/${LONDON}.tzif`)), LONDON);
   // G1: an allowed file with a query of the interpreter's own
-  refused("G1", "the engine with ?leak=SENTINEL", await forge(p1, E("sagebrush-engine.wasm?leak=SENTINEL-G1")));
+  refused("G1", "the engine with ?leak=SENTINEL", await forge(p1, E("sagebrush-engine.wasm?leak=SENTINEL-G1")), "SENTINEL-G1");
   // G2a: a chunk-shaped name that isn't in the list
-  refused("G2a", "a chunk-shaped name not in the list", await forge(p1, E("lib/SENTINEL.0123456789abcdef.json")));
+  refused("G2a", "a chunk-shaped name not in the list", await forge(p1, E("lib/SENTINEL.0123456789abcdef.json")), "SENTINEL.0123456789abcdef");
   // G6: forms of allowed URLs that aren't the canonical, exact member (nothing may reach the engine or the chunk)
   const engine = E(engineFile), chunk = E(chunkFile);
+  // (G6: no request for the engine or the chunk at all, in any spelling)
   const touches = (u) => u.includes("sagebrush-engine.wasm") || u.includes(chunkFile.slice(4));
-  const quietUnlessTouches = (u) => !touches(u);
-  refused("G6-i", "the engine's URL relative (./…)", await forge(p1, "./" + engineFile), quietUnlessTouches);
+  const refusedG6 = (name, what, r) => refusedBy(ok, name, what, r, (u) => !touches(String(u)));
+  refusedG6("G6-i", "the engine's URL relative (./…)", await forge(p1, "./" + engineFile));
   // (as a raw string: new URL() would remove the encoded dot segment and so make it the member itself)
-  refused("G6-ii", "an encoded dot segment before a listed chunk", await forge(p1, s1.base + "lib/%2e/" + chunkFile.slice(4)), quietUnlessTouches);
-  refused("G6-iii", "an allowed URL plus #x", await forge(p1, engine + "#x"), quietUnlessTouches);
+  refusedG6("G6-ii", "an encoded dot segment before a listed chunk", await forge(p1, s1.base + "lib/%2e/" + chunkFile.slice(4)));
+  refusedG6("G6-iii", "an allowed URL plus #x", await forge(p1, engine + "#x"));
   const h = engineFile.split("?")[1];
-  refused("G6-iv", "the engine with its ?h= twice", await forge(p1, `${engine}&${h}`), quietUnlessTouches);
-  refused("G6-v", "an allowed URL with the scheme in capitals", await forge(p1, engine.replace(/^http:/, "HTTP:")), quietUnlessTouches);
+  refusedG6("G6-iv", "the engine with its ?h= twice", await forge(p1, `${engine}&${h}`));
+  refusedG6("G6-v", "an allowed URL with the scheme in capitals", await forge(p1, engine.replace(/^http:/, "HTTP:")));
 
   // G3: the valid path, through the broker: 1+1, a library chunk, a time zone (the index, then its zone), a PNG
   const g3 = (await run("import heapq, zoneinfo, datetime\nimport matplotlib.pyplot as plt\nplt.plot([1, 2]); plt.savefig('g3.png'); a = plt.imread('g3.png')\nprint(1 + 1, heapq.nsmallest(1, [3, 1]), zoneinfo.ZoneInfo('Europe/London').utcoffset(datetime.datetime(2026, 7, 1)), a.shape)")).trim();
@@ -248,7 +127,7 @@ try {
   ok(idxAns.length >= 1 && idxAns.every((x) => x.bytes === indexBytes.length) && zoneAns.some((x) => x.bytes > 0) && s1.lines().some((l) => l.path === `/lib/tzdata/${LONDON}.tzif`),
     `G13: the index answered whole (${JSON.stringify(idxAns.map((x) => x.bytes))} of ${indexBytes.length} bytes), then Europe/London's zone fetched and answered (${JSON.stringify(zoneAns.map((x) => x.bytes))} bytes)`);
   // G2b: after the index, a 64-hex zone file it doesn't list
-  refused("G2b", "an unlisted zone after the index", await forge(p1, E(`lib/tzdata/${notInIndex}.tzif`)));
+  refused("G2b", "an unlisted zone after the index", await forge(p1, E(`lib/tzdata/${notInIndex}.tzif`)), notInIndex);
   // G5 and G8: the broker's own requests carry no Cookie and no Referer (the server's log), while the page's do carry
   // the cookie (so the cookie was there to send)
   const brokered = new Set(l1.filter((x) => x.kind === "answer" && x.bytes !== null).map((x) => pathOf(x.url)));
@@ -274,7 +153,7 @@ try {
   ok(i2.length >= 1 && i2.every((x) => x.bytes === null) && z2.every((x) => x.bytes === null) && z2srv.length === 0 && /^refused/.test(g11),
     `G11: the index with one byte changed is answered null (${JSON.stringify(i2.map((x) => x.bytes))}), and its zone gets no request (${z2srv.length}) and null (${JSON.stringify(z2.map((x) => x.bytes))}): ${JSON.stringify(g11)}`);
   // (and directly: a zone the changed index lists, forged after it, is refused)
-  refused("G11", "a zone the changed index lists, after it", await forge(p2, new URL(`lib/tzdata/${LONDON}.tzif`, s2.base).href));
+  refused("G11", "a zone the changed index lists, after it", await forge(p2, new URL(`lib/tzdata/${LONDON}.tzif`, s2.base).href), LONDON);
 
   // ======== P3: G14, the barrier held until the zone's answer
   const s3 = await server("p3");
@@ -288,10 +167,8 @@ try {
   failures++;
   console.log("FAIL", e.message);
 } finally {
-  chrome.kill();
+  await b.close();
   for (const s of servers) s.kill();
-  await sleep(300);
-  rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
   rmSync(work, { recursive: true, force: true });
 }
 console.log(failures ? `${failures} failed` : "all passed");
