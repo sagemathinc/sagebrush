@@ -44,11 +44,13 @@ test("a failed decode throws its own error and installs nothing: the getter and 
   assert.throws(() => g.__PYJS_LIB__, (e: any) => e && /header|gzip|incorrect/i.test(String(e.message ?? e)));
   assert.equal(typeof g.__PYJS_LIB_GZ__, "string", "the compressed string kept");
   assert.equal(typeof Object.getOwnPropertyDescriptor(g, "__PYJS_LIB__")!.get, "function", "still the getter");
-  // (not UTF-8 inside a valid gzip: refused too, nothing installed)
+  // (not UTF-8 inside a valid gzip: the decoder's TypeError, nothing installed.  The bytes are valid JSON but for
+  // the 0xff inside the string, so a lossy decode would parse and install {"a.py": "\ufffd"}: this pins fatal: true)
   const h: any = {};
-  installEmbeddedLib(h, gzipSync(Buffer.from([0x7b, 0xff, 0x7d])).toString("base64"));
-  assert.throws(() => h.__PYJS_LIB__);
-  assert.equal(typeof h.__PYJS_LIB_GZ__, "string");
+  installEmbeddedLib(h, gzipSync(Buffer.concat([Buffer.from('{"a.py":"', "utf8"), Buffer.from([0xff]), Buffer.from('"}', "utf8")])).toString("base64"));
+  assert.throws(() => h.__PYJS_LIB__, TypeError);
+  assert.equal(typeof h.__PYJS_LIB_GZ__, "string", "the compressed string kept");
+  assert.equal(typeof Object.getOwnPropertyDescriptor(h, "__PYJS_LIB__")!.get, "function", "still the getter");
 });
 
 test("an assignment before any read replaces the getter with the value, as a plain global would", () => {
