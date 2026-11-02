@@ -1577,6 +1577,12 @@ async function syncWireRows() {
 // docSyncReload (web/page/session.ts, the ones index.html runs), with what they use given to them; and the switch over a
 // real workspace
 async function switchFunctions(deps) {
+  // (navLease: the page's navigation lease (B1, #447 r5c), defined outside this slice; here a lease with no Move to
+  // Trash hold, as in these tests: its end a no-op, nothing went to Trash meanwhile. A test's own deps may override it.
+  // Set on the test's own object: the functions read deps live (web/page/session.ts's p), and the tests change them as they go)
+  if (!("navLease" in deps)) deps.navLease = async () => Object.assign(() => {}, { after: null });
+  // (trashTest: the page's Move to Trash test hooks (B1), none here: no pauses)
+  if (!("trashTest" in deps)) deps.trashTest = {};
   const { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating } = G.pageSession(deps);
   return { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating };
 }
