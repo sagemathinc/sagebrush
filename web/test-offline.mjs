@@ -163,6 +163,19 @@ ok(progress.length >= 1 && progress.length <= Math.ceil((two[0].got.length + 4) 
 st = (await api({ offline: "status", build }, 10000)).last;
 ok(st.present.length === inv.totals.files && st.verified.length >= inv.totals.files, `B: after download all, every LAZY file is present and verified: ${st.present.length}/${inv.totals.files}`);
 
+// (the MyST documents item, @sagebrush's ruling (a): download all fetched the renderer; removing the item removes
+// only it, and fetching it brings it back)
+{
+  ok(st.present.includes("sagebrush-myst.js"), "myst: download all fetched sagebrush-myst.js");
+  const before = st.present.length;
+  const rm = await api({ offline: "remove", build, items: ["myst"] }, 30000);
+  const after = (await api({ offline: "status", build }, 10000)).last;
+  ok(rm.last?.done === true && !after.present.includes("sagebrush-myst.js") && after.present.length === before - 1, `myst: removing the item removes only sagebrush-myst.js (${before} -> ${after.present.length})`);
+  const back = await api({ offline: "fetch", build, items: ["myst"] });
+  st = (await api({ offline: "status", build }, 10000)).last;
+  ok(back.last?.done === true && st.present.includes("sagebrush-myst.js"), "myst: fetching the item brings it back");
+}
+
 // D: remove an item: its files are gone, nothing of SHELL is touched
 r = await api({ offline: "remove", build, items: ["magma"] }, 30000);
 st = (await api({ offline: "status", build }, 10000)).last;

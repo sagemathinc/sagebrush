@@ -136,7 +136,7 @@ async function deploy(settings = {}, edit = (t) => t) {
 // a path of an item, and the item's paths (the inventory's rules, as the service worker applies them)
 const itemPaths = (id) => {
   const it = inv.items.find((x) => x.id === id), gs = new Set(it.groups ?? []);
-  return LAZY.filter((p) => it.rule === "engine" ? p === "/sagebrush-engine.wasm" : it.rule === "docs" ? /^\/docs-index(-[a-z]+)?\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("/lib/tzdata/") : gs.has(/\/lib\/([a-z0-9-]+)\.(?:src|pre)\.[0-9a-f]{16}\.json$/.exec(p)?.[1]));
+  return LAZY.filter((p) => it.rule === "engine" ? p === "/sagebrush-engine.wasm" : it.rule === "myst" ? p === "/sagebrush-myst.js" : it.rule === "docs" ? /^\/docs-index(-[a-z]+)?\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("/lib/tzdata/") : gs.has(/\/lib\/([a-z0-9-]+)\.(?:src|pre)\.[0-9a-f]{16}\.json$/.exec(p)?.[1]));
 };
 const bound = (c) => {
   // (§13 R3-2: at most one copy of a path outside... one in flight: at most one path with two copies; bytes within
