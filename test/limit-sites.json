@@ -4027,6 +4027,26 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError message for a GF(q) vector times a rational: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), o.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5' #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
@@ -4406,6 +4426,11 @@
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
@@ -5388,6 +5413,36 @@
   "class": "3",
   "owner": "special functions",
   "row": "inv-19"
+ },
+ "lib/_special_ibeta.py ::  :: _BETAINC_MAX = 1e8 #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betainc_check :: if max(a, b) > _BETAINC_MAX and a < _math.inf and b < _math.inf: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betainc_check :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betaincinv_outer :: if max(a, b) > _BETAINC_MAX: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betaincinv_outer :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: betainc :: scipy's limits: 0 at x = 0, 1 at x = 1, 1 at a = 0 and 0 at b = 0 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "docstring text naming SciPy's limiting values at the domain's ends; it refuses nothing"
  },
  "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
   "class": "1",

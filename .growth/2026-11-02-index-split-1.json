@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "index.html split 1 (pure move): the page's session functions (startHistory, takeOver, DEV's switch) move to web/page/session.ts and reach the page's variables through a context object of getters and setters, with one-line wrappers keeping every call site. The context and wrappers add to the page's script, which the CLI embeds: cli/pyjs.cjs +2912 in CI1's size-gate on 73e51028 (the marker allows for the merge with #466, whose navLease and trashTest join the context).",
+ "bytes": {
+  "cli/pyjs.cjs": 3300
+ }
+}
