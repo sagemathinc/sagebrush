@@ -47,7 +47,14 @@ import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname, root = join(here, "../..");
 const site = mkdtempSync(join(tmpdir(), "sb-hcost-site-")), base = mkdtempSync(join(tmpdir(), "sb-hcost-base-")), delay = mkdtempSync(join(tmpdir(), "sb-hcost-delay-"));
-const die = (m) => { console.error("BAD: " + m); process.exit(2); };
+// (T-1, the grader and daybreak3: once the run has begun, a BAD or a crash still writes the report so far (every
+// completed run with its raw latencies, the workload in progress, the reason) to --out, marked partial, before exit)
+const OUT = (() => { const i = process.argv.indexOf("--out"); return i > 0 ? process.argv[i + 1] : null; })();
+let partial = null;
+const writePartial = (reason) => { if (OUT && partial) try { writeFileSync(OUT, JSON.stringify({ ...partial, partial: true, reason })); } catch {} };
+const die = (m) => { console.error("BAD: " + m); writePartial("BAD: " + m); process.exit(2); };
+// (a bound's SIGTERM or an interrupt: the report so far too, then the conventional status)
+for (const [sig, code] of [["SIGTERM", 143], ["SIGINT", 130]]) process.on(sig, () => { console.error(`BAD: ${sig}`); writePartial(`BAD: ${sig} (a bound or an interrupt)`); process.exit(code); });
 // (BASE: origin/master's web/ and src/, as a pinned build is made in test-workspace-journal.mjs)
 let master;
 if (process.env.HCOST_BASE_DIR) {
@@ -205,6 +212,47 @@ for (const [ms, want, what] of [
   [0.101, true, "101 us: past"],
   [1, true, "1 ms (Firefox's default rounding): past"],
 ]) if (resStop(ms) !== want) die(`the resolution STOP's boundary control: ${what} (${ms})`);
+// (one run's structural check, every configuration tail included (daybreak3's L-2): null when well formed, else what's
+// wrong; a fault is BAD.  Every raw latency a finite number >= 0 (JSON would turn NaN or Infinity into null), every
+// reported statistic finite, the wall time positive, q in [0, 1], exactly the declared save count.  Its unit rows:)
+const STATS = ["p50", "p90", "p95", "p99", "max", "q", "res", "wall"];
+const runFault = (x, want) => {
+  if (!x || typeof x !== "object") return "no run record";
+  if (x.n !== want || !Array.isArray(x.lat) || x.lat.length !== want) return `${x?.n} saves measured (${Array.isArray(x.lat) ? x.lat.length : "no"} raw), ${want} declared`;
+  if (!x.lat.every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)) return "a raw latency isn't a finite number >= 0";
+  for (const k of STATS) if (typeof x[k] !== "number" || !Number.isFinite(x[k])) return `${k} isn't a finite number`;
+  if (!(x.wall > 0)) return "the wall time isn't positive";
+  if (!(x.q >= 0 && x.q <= 1)) return "q isn't in [0, 1]";
+  return null;
+};
+{
+  const good = { n: 3, lat: [1, 2.5, 0], p50: 1, p90: 2, p95: 2.5, p99: 2.5, max: 2.5, q: 0, res: 0.02, wall: 10 };
+  if (runFault(good, 3) !== null) die("the structural check's unit row: a well-formed run is refused");
+  for (const [over, what] of [
+    [{ lat: [1, NaN, 0] }, "a NaN latency"], [{ lat: [1, Infinity, 0] }, "an Infinity latency"], [{ lat: [1, -Infinity, 0] }, "a -Infinity latency"],
+    [{ lat: [1, null, 0] }, "a null latency"], [{ lat: [1, "2", 0] }, "a string latency"], [{ lat: [1, -0.001, 0] }, "a negative latency"],
+    [{ lat: [1, 2] }, "fewer raw latencies than declared"], [{ n: 4 }, "a save count other than declared"], [{ lat: undefined }, "no raw latencies"],
+    [{ p90: NaN }, "p90 NaN"], [{ max: Infinity }, "max Infinity"], [{ p50: null }, "p50 null"], [{ res: NaN }, "res NaN"],
+    [{ wall: 0 }, "wall 0"], [{ wall: NaN }, "wall NaN"], [{ q: 1.01 }, "q over 1"], [{ q: -0.01 }, "q under 0"], [{ p99: undefined }, "p99 missing"],
+  ]) if (runFault({ ...good, ...over }, 3) === null) die(`the structural check's unit row: ${what} isn't refused`);
+}
+// (the median; and q'(tail) with D_q' (the grader's G-T1 and T-2): per round, the tail run's saves over 3 x the SAME
+// round's base p50, less that base run's q; D_q' = their median.  Its unit rows; the selftest's mutants use tail's own
+// p50, another round's base, or drop the subtraction of base's q)
+const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+const qAnchored = (tail, base) => {
+  const qa = tail.map((x, r) => x.lat.filter((v) => v > 3 * base[r].p50).length / x.lat.length);
+  const QA = qa.map((v, r) => v - base[r].q);
+  return { qa, QA, DQA: med(QA) };
+};
+{
+  const base = [{ p50: 10, q: 0.1 }, { p50: 20, q: 0.2 }, { p50: 30, q: 0.3 }];
+  const tail = [[5, 5, 5, 5, 5, 5, 20, 20, 35, 100], [5, 5, 5, 5, 5, 5, 50, 50, 70, 100], [5, 5, 5, 5, 5, 5, 5, 80, 95, 100]].map((lat) => ({ lat, p50: 5, q: 0.4 }));
+  const { qa, QA, DQA } = qAnchored(tail, base), near = (a, b) => a.length === b.length && a.every((x, i) => Math.abs(x - b[i]) < 1e-12);
+  if (!near(qa, [0.2, 0.2, 0.2])) die(`q'(tail)'s unit row: q' counts each round's tail saves over 3 x that round's base p50 (${qa})`);
+  if (!near(QA, [0.1, 0, -0.1]) || Math.abs(DQA) > 1e-12) die(`q'(tail)'s unit row: less that round's base q, their median (${QA}; ${DQA})`);
+  if (med([3, 1, 2]) !== 2 || med([4, 1, 3, 2]) !== 2.5) die("the median's unit row");
+}
 // (the two mutants' anchors, preflighted: DELAY's patch landed exactly once; TAIL's hook is in the page exactly once)
 {
   const d = readFileSync(join(delay, "web/history/tokens.ts"), "utf8"), b = readFileSync(join(site, "bench.js"), "utf8");
@@ -243,17 +291,20 @@ const verdictOf = (stop, m) => {
 }
 const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
-const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const report = { master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
 console.log(`declared: ${report.declared}; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
+partial = report;
+let crash = null;
 try {
   for (const [bname, open] of [["chromium", chromium], ["firefox", firefox]]) {
     if (!LEGS.includes(bname)) continue;
     const b = await open(), rows = {};
     console.log(`${bname}: ${b.version}`);
+    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
     for (const workload of ["files", "notebooks", "concurrent"]) {
       const runs = Object.fromEntries(CONFIGS.map((c) => [c, []])), order = [];
+      report.inProgress = { browser: bname, workload, order, runs };
       for (let r = 0; r < ROUNDS; r++) {
         const turn = CONFIGS.map((_, k) => CONFIGS[(k + r) % CONFIGS.length]);
         order.push(turn);
@@ -261,17 +312,12 @@ try {
       }
       // (structural, every configuration tail included: exactly the declared save count, finite statistics and wall time)
       const scale = bname === "firefox" ? FF_SCALE : 1, want = (workload === "concurrent" ? 4 * 200 : 500) * scale;
-      for (const c of CONFIGS) for (const x of runs[c]) {
-        if (x.n !== want || x.lat.length !== want) die(`${bname} ${workload} ${c}: ${x.n} saves measured, ${want} declared`);
-        if (![x.p50, x.p95, x.p99, x.q, x.res, x.wall].every(Number.isFinite) || !(x.wall > 0)) die(`${bname} ${workload} ${c}: a statistic or the wall time isn't finite`);
-      }
+      for (const c of CONFIGS) runs[c].forEach((x, r) => { const fault = runFault(x, want); if (fault !== null) die(`${bname} ${workload} ${c} round ${r + 1}: ${fault}`); });
       const of = (c, k) => runs[c].map((x) => x[k]);
       const B50 = med(of("base", "p50")), T50 = Math.min(1, Math.max(0.5, 0.05 * B50));
       const pairedOf = (k) => Object.fromEntries(["aa", "head", "delay", "set", "tail"].map((c) => [c, runs[c].map((x, r) => x[k] - runs.base[r][k])]));
       const P50 = pairedOf("p50"), Q = pairedOf("q");
-      // (q'(tail): the tail run's saves over 3 x the same round's base p50)
-      const qa = runs.tail.map((x, r) => x.lat.filter((v) => v > 3 * runs.base[r].p50).length / x.lat.length);
-      const QA = qa.map((v, r) => v - runs.base[r].q), DQA = med(QA);
+      const { qa, QA, DQA } = qAnchored(runs.tail, runs.base);
       const D = Object.fromEntries(Object.entries(P50).map(([c, d]) => [c, med(d)])), DQ = Object.fromEntries(Object.entries(Q).map(([c, d]) => [c, med(d)]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...of(c, "p99"))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => of(c, "res")));
@@ -280,20 +326,22 @@ try {
       const m = { T50, aaP50: D.aa, aaQ: DQ.aa, delayP50: D.delay, tailQ: DQ.tail, tailQa: DQA, headP50: D.head, headQ: DQ.head, headP99: p99.head };
       const verdict = verdictOf(stop, m), backstop = p99.head <= 250;
       verdicts.push(verdict);
+      delete report.inProgress;
       rows[workload] = { verdict, stop, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
       console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
-    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
     await b.close();
   }
+} catch (e) {
+  crash = e;
 } finally {
   server.stop(true);
   for (const d of [site, base, delay]) rmSync(d, { recursive: true, force: true });
 }
-const oi = process.argv.indexOf("--out");
-if (oi > 0) writeFileSync(process.argv[oi + 1], JSON.stringify(report));
+if (crash) die(`crash: ${String(crash?.stack ?? crash).slice(0, 2000)}`);
+if (OUT) writeFileSync(OUT, JSON.stringify(report));
 const v = verdicts.includes("STOP") ? "STOP" : verdicts.includes("VOID") ? "VOID" : verdicts.includes("FAIL") ? "FAIL" : "PASS";
 console.log(`HCOST: ${v} (${LEGS.join(" + ")}; ${verdicts.join(" ")})`);
 process.exit({ PASS: 0, FAIL: 1, STOP: 3, VOID: 76 }[v]);
