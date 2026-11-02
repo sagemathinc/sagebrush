@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, lstatSync } from "node:fs";
@@ -61,31 +61,24 @@ function fifoIn(dir: string): string {
   throw new Error(`no FIFO under ${dir}`);
 }
 
-// (H2: exactly one realm, the main thread's, where this CLI runs Python;
-// H3: one positive record per realm; H4: no network record)
-function checkSpy(id: string, spy: any[], realms: (t: number) => boolean) {
-  const ids = [...new Set(spy.map((r) => r.threadId))];
-  assert.ok(ids.length >= 1 && ids.every(realms), `${id}: spy realms ${JSON.stringify(ids)}`);
-  for (const t of ids) {
-    assert.equal(spy.filter((r) => r.threadId === t && r.kind === "installed").length, 1, `${id}: installed in realm ${t}`);
-    assert.equal(spy.filter((r) => r.threadId === t && r.kind === "positive").length, 1, `${id}: one positive control in realm ${t}`);
-  }
-  assert.deepEqual(spy.filter((r) => r.kind === "network"), [], `${id}: no network`);
-}
+// (the spy's records of every run, for H2-H4 after the rows)
+const spyRuns: { id: string; spy: any[]; worker: boolean }[] = [];
+const ids = (spy: any[]) => [...new Set(spy.map((r) => r.threadId))];
 
+// (rows run 6 at a time: each is its own process, tree and spy directory)
+describe("sbdata rows", { concurrency: 6 }, () => {
 for (const [id, r] of Object.entries(rows)) {
-  test(`sbdata ${id} (${r.family})`, async () => {
+  it(`sbdata ${id} (${r.family})`, async () => {
     const base = join(fx, id);
     const writer: [string, string] | undefined = r.fifo_writer !== undefined ? [r.fifo_writer, fifoIn(join(base, "root"))] : undefined;
     const run = await runRow(id, ["--require", SPY, CLI, "--data-root", join(base, r.root), "-c", r.program], join(base, r.cwd), writer);
     assert.ok(!run.timedOut, `${id}: over the ${DEADLINE_MS} ms deadline (${run.ms} ms)`);
     const lines = run.out.split("\n").filter((l) => l !== "");
     assert.equal(lines[lines.length - 1] ?? "", r.expect, `${id}: stderr ${run.err.slice(-400)}`);
-    checkSpy(id, run.spy, (t) => t === 0);
-    if (ids(run.spy).length !== 1) assert.fail(`${id}: H2 one realm`);
+    spyRuns.push({ id, spy: run.spy, worker: false });
   });
 }
-const ids = (spy: any[]) => [...new Set(spy.map((r) => r.threadId))];
+});
 
 const pyCheck = (code: string) => spawnSync("python3", ["-I", "-c", code, ROOT], { encoding: "utf8" });
 
@@ -144,6 +137,30 @@ w.on("exit", (c) => { process.exitCode = c; });`;
   assert.ok(!run.timedOut, "H2b deadline");
   const lines = run.out.split("\n").filter((l) => l !== "");
   assert.equal(lines[lines.length - 1] ?? "", r.expect, run.err.slice(-400));
+  spyRuns.push({ id: "H2b", spy: run.spy, worker: true });
   assert.ok(ids(run.spy).some((t) => t >= 1), `H2b: a worker realm, got ${JSON.stringify(ids(run.spy))}`);
-  checkSpy("H2b", run.spy, () => true);
+});
+
+test("sbdata H2: each row's CLI run records exactly one realm, its main thread", () => {
+  const rowsRuns = spyRuns.filter((r) => !r.worker);
+  assert.equal(rowsRuns.length, Object.keys(rows).length);
+  const bad = rowsRuns.filter((r) => JSON.stringify(ids(r.spy)) !== "[0]").map((r) => r.id);
+  assert.deepEqual(bad, []);
+});
+
+test("sbdata H3: every expected realm has the spy installed and exactly one positive control", () => {
+  const bad: string[] = [];
+  for (const r of spyRuns) {
+    const realms = r.worker ? [0, ...ids(r.spy).filter((t) => t >= 1)] : [0];
+    if (r.worker && realms.length < 2) bad.push(`${r.id}: no worker realm`);
+    for (const t of realms) {
+      if (r.spy.filter((x) => x.threadId === t && x.kind === "installed").length !== 1) bad.push(`${r.id}/${t}: installed`);
+      if (r.spy.filter((x) => x.threadId === t && x.kind === "positive").length !== 1) bad.push(`${r.id}/${t}: positive`);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
+test("sbdata H4: no run recorded any network use", () => {
+  assert.deepEqual(spyRuns.flatMap((r) => r.spy.filter((x) => x.kind === "network").map((x) => `${r.id}: ${x.what}`)), []);
 });
