@@ -1,0 +1,337 @@
+{
+ "//": "history's static census (web/history/census.mjs): every readwrite site with a source store in scope, classified. A site is keyed by its file, ordinal and line text, so an edited site must be classified again.",
+ "sites": {
+  "workspace/api.ts|1|const tx = db.transaction(store, \"readwrite\"), st = tx.objectStore(store), g = st.get(key);": {
+   "class": "EXEMPT",
+   "why": "the fence record (FENCE key) written in the notebooks' store and their histories: no document, no content"
+  },
+  "workspace/api.ts|1|const n = await inTx(db, withVersions ? [store, \"versions\"] : store, \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a reset to a new workspace: every store emptied a page at a time, the history stores with them (RESET_STORES, purge): a new workspace identity, so a new history namespace"
+  },
+  "workspace/api.ts|1|const e = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "mkdir: log() for each folder made"
+  },
+  "workspace/api.ts|1|rev = await inTx(this.ws, withBoard(), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a board's CAS save: boardRowWrite"
+  },
+  "workspace/api.ts|1|const entry = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "write of an entry: log()"
+  },
+  "workspace/api.ts|1|const r = await inTx(this.ws, withBoard(\"meta\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a board's journal T2: boardRowWrite (its markOnly stamp: metadata only, value and rev kept)"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "write: log()"
+  },
+  "workspace/api.ts|1|entry = await inTx(this.ws, withSync(\"entries\", \"ops\", \"fileBytes\", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...RELEASE_STORES), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a data file's write: its bytes and log() in one transaction"
+  },
+  "workspace/api.ts|1|freed += await inTx(this.ws, stores, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "versions, versionBytes, prunable only (dropping kept versions): no source store written"
+  },
+  "workspace/api.ts|2|freed += await inTx(this.ws, stores, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "versions, versionBytes, prunable only (dropping kept versions): no source store written"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => { await this.log(tx, ops, { op: \"dropVersions\", path: q, kind }); });": {
+   "class": "EXEMPT",
+   "why": "ops only (dropVersions logged): no source row changed"
+  },
+  "workspace/api.ts|1|const gone: Entry[] = await inTx(this.ws, withSync(...RELEASE_STORES, \"entries\", \"ops\", \"fileBytes\", \"trash\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "emptyTrash: log() per entry removed; its bytes released in the same transaction"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, withBoard(), \"readwrite\", async (tx) => { await boardRowWrite(tx, e.ref!, null, 0); });": {
+   "class": "TOKEN",
+   "why": "a board's row deleted on purge: boardRowWrite(null)"
+  },
+  "workspace/api.ts|2|await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "remove: log()"
+  },
+  "workspace/api.ts|3|await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "forget: log()"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, VERSION_STORES, \"readwrite\", (tx) => this.putVersion(tx, v, bytes));": {
+   "class": "NOT-SOURCE",
+   "why": "VERSION_STORES: a version kept (versions, versionBytes, prunable)"
+  },
+  "workspace/api.ts|1|return inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "fillIdentity (the migrator): a folder's fid and an nkey given, content unchanged"
+  },
+  "workspace/api.ts|2|return inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "fillHash (the migrator): sha256/size recorded from the bytes already there, content unchanged"
+  },
+  "workspace/api.ts|1|const mark = async (size: number) => (await inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "migrateOne's mark: the entry marked migrated, its bytes unchanged"
+  },
+  "workspace/api.ts|1|const now: Entry | undefined = await inTx(this.ws, [\"entries\", \"fileBytes\", \"meta\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "migrateOne: legacy bytes moved into fileBytes byte-identical (behaviour-checked: a one-byte mutant fails)"
+  },
+  "workspace/api.ts|1|ref = await inTx(this.ws, withBoard(), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a board created: boardRowWrite(add)"
+  },
+  "workspace/api.ts|1|undo = () => inTx(this.ws, withBoard(), \"readwrite\", async (tx) => boardRowWrite(tx, ref, null, 0));": {
+   "class": "TOKEN",
+   "why": "a board create rolled back: boardRowWrite(null)"
+  },
+  "workspace/api.ts|1|const entry = await inTx(this.ws, withSync(\"entries\", \"ops\", ...(fileBytes ? [\"fileBytes\"] : [])), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "create/adopt of an entry: log()"
+  },
+  "workspace/api.ts|1|const entry = await inTx(this.ws, withSync(...stores), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "adopt with a board's row: boardRowWrite and log()"
+  },
+  "workspace/api.ts|1|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "rename/move (small): log() per entry"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's record, unpublished: the logical tree unchanged"
+  },
+  "workspace/api.ts|1|const drop = () => inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's record dropped: unpublished, nothing visible changed"
+  },
+  "workspace/api.ts|2|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a local large move published: log() for its top in the publication's transaction"
+  },
+  "workspace/api.ts|3|return inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's rewrite page: rows moved physically, every logical path unchanged (D11 sweep; behaviour-checked)"
+  },
+  "workspace/api.ts|1|const rec = await inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's record: its fail counter"
+  },
+  "workspace/api.ts|1|await this.locked(() => inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's unpublished record dropped at open: nothing visible changed"
+  },
+  "workspace/api.ts|1|if (rec.stuck) await inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a local large move's record: one more try (stuck cleared)"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, withBoard(), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a board's title kept with its file's name: boardRowWrite"
+  },
+  "workspace/migrate.ts|1|await inTx(w.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the migrator: an entry's legacy fields brought up to date, content unchanged"
+  },
+  "workspace/migrate.ts|2|await inTx(w.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the migrator: an entry's legacy fields brought up to date, content unchanged"
+  },
+  "workspace/migrate.ts|3|await inTx(w.ws, \"entries\", \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the migrator: an entry's legacy fields brought up to date, content unchanged"
+  },
+  "workspace/sync-rebuild.ts|1|return inTx(w.ws, [META, \"syncIndex\", \"adoptJournal\"], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "syncIndex, adoptJournal, meta: sync's own state"
+  },
+  "workspace/sync-rebuild.ts|1|return inTx(w.ws, [META, \"outbox\"], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "outbox, meta: sync's own state"
+  },
+  "workspace/sync-rebuild.ts|1|await inTx(w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-rebuild.ts|1|await w.locked(() => inTx(w.ws, [META, \"ops\"], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta and ops read (the watermark): no source store"
+  },
+  "workspace/sync-rebuild.ts|1|return inTx(w.ws, [META, \"outbox\", \"entries\", \"adoptJournal\", \"ops\"], \"readwrite\", async (tx) => {": {
+   "class": "READ-ONLY",
+   "why": "the rebuild's capture: entries READ into its journal, never written"
+  },
+  "workspace/sync-rebuild.ts|1|return inTx(w.ws, [META, \"entries\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the rebuild's done: D11 control rows only (RW, MAPS, queue) in entries, no entry row"
+  },
+  "workspace/sync-rebuild.ts|1|return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a rebuild's view page: applyView, each change with logServer()"
+  },
+  "workspace/sync-rebuild.ts|1|const r = await inTx(w.ws, [\"outbox\", \"adoptJournal\", \"syncLedger\", ...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "RELEASE_STORES: pins released; only orphaned bytes (no entry names them) deleted"
+  },
+  "workspace/sync-rebuild.ts|2|return inTx(w.ws, [META, \"entries\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the announce's ack: the D11 RW reservation row only"
+  },
+  "workspace/sync-rebuild.ts|2|await inTx(w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-ledger.ts|1|const tx = w.ws.transaction(stores, \"readwrite\");": {
+   "class": "NOT-SOURCE",
+   "why": "the ledger's seeding: syncLedger and meta"
+  },
+  "workspace/sync-replay.ts|1|await inTx(w.ws, [\"entries\", META], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a replay's plan dropped: D11 control rows only (RW, MAPS, queue)"
+  },
+  "workspace/sync-replay.ts|1|await inTx(w.ws, META, \"readwrite\", async (tx) => { tx.objectStore(META).put(n, markerKey(ns)); });": {
+   "class": "NOT-SOURCE",
+   "why": "meta only (the replay's marker)"
+  },
+  "workspace/sync-replay.ts|1|return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a replay's pass: only the plan's control rows written, nothing visible"
+  },
+  "workspace/sync-replay.ts|1|return w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx0) => {": {
+   "class": "EXEMPT",
+   "why": "a replay's closure: control rows only"
+  },
+  "workspace/sync-replay.ts|1|return inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx0) => {": {
+   "class": "TOKEN",
+   "why": "a replay's validation and PUBLICATION: tokens for every mapping's top at publication (the logical tree changes here)"
+  },
+  "workspace/sync-replay.ts|1|const r = await inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a replay's sweeps: physical moves (logical unchanged) and sweep 2's top op with logServer()"
+  },
+  "workspace/sync-replay.ts|1|const r = await w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a replay's place page: applyView, each change with logServer()"
+  },
+  "workspace/sync-replay.ts|2|const r = await w.locked(() => inTx(w.ws, [...new Set([...VIEW_STORES, \"syncIndex\", META])], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a replay's place page: applyView, each change with logServer()"
+  },
+  "workspace/sync-adopt.ts|1|await inTx(w.ws, [META, \"ops\"], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta and ops read: the adoption's start"
+  },
+  "workspace/sync-adopt.ts|1|await inTx(w.ws, [META, \"entries\", \"adoptJournal\", \"pins\"], \"readwrite\", async (tx) => {": {
+   "class": "READ-ONLY",
+   "why": "the adoption's walk: entries read into adoptJournal, pins taken"
+  },
+  "workspace/sync-adopt.ts|1|await w.locked(() => inTx(w.ws, [META, \"ops\"], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta and ops read: the adoption's close"
+  },
+  "workspace/sync-adopt.ts|1|await inTx(w.ws, [META, \"ops\", \"entries\", \"adoptJournal\"], \"readwrite\", async (tx) => {": {
+   "class": "READ-ONLY",
+   "why": "the adoption's replay: entries read into adoptJournal"
+  },
+  "workspace/sync-confirmed.ts|1|const done = await inTx(w.ws, [\"syncIndex\", META], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "syncIndex and meta: the confirmed index"
+  },
+  "workspace/sync-confirmed.ts|1|r = await inTx(w.ws, [\"syncIndex\", META], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "syncIndex and meta: the confirmed index"
+  },
+  "workspace/sync-confirmed.ts|1|const rec = await inTx(w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-confirmed.ts|1|const again = await inTx(w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-confirmed.ts|1|const step = await held(() => inTx(w.ws, stores, \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "a confirmed page applied through applyView: each change with logServer()"
+  },
+  "workspace/sync-client.ts|1|await inTx(this.w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-client.ts|1|return inTx(this.w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-client.ts|1|await inTx(this.w.ws, META, \"readwrite\", async (tx) => { await obligate(tx.objectStore(META), ns, why, detail); });": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-client.ts|2|await inTx(this.w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only"
+  },
+  "workspace/sync-outbox.ts|1|const r = await inTx(this.w.ws, [\"ops\", \"outbox\", \"syncIndex\", \"syncLedger\", ...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "RELEASE_STORES: an ack's pins released; only orphaned bytes deleted"
+  },
+  "workspace/sync-outbox.ts|1|const r = await inTx(this.w.ws, [\"outbox\", \"adoptJournal\", \"entries\", \"syncIndex\", ...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the drain of a journal: entries read; pins released, only orphaned bytes deleted"
+  },
+  "workspace/sync-outbox.ts|1|await inTx(this.w.ws, [\"outbox\", \"syncIndex\", \"syncLedger\", ...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "RELEASE_STORES: pins released; only orphaned bytes deleted"
+  },
+  "workspace/sync-outbox.ts|2|await inTx(this.w.ws, [\"outbox\", \"syncIndex\", \"syncLedger\", ...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "RELEASE_STORES: pins released; only orphaned bytes deleted"
+  },
+  "workspace/sync-fetch.ts|1|await w.locked(() => inTx(w.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "finalize: fetchFailed recorded on the entry, content unchanged"
+  },
+  "workspace/sync-fetch.ts|1|await w.locked(() => inTx(w.ws, [\"entries\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "noteFetchFailed: fetchFailed recorded on the entry, content unchanged"
+  },
+  "workspace/sync-fetch.ts|1|inTx(w.ws, [\"entries\", \"fileBytes\", \"meta\", ...HIST_STORES], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "install: the fetched bytes present, its token (noteToken)"
+  },
+  "workspace/sync-pins.ts|1|const end = await inTx(w.ws, [...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the versions backfill: prunable rows only, under RELEASE_STORES' scope"
+  },
+  "workspace/sync-pins.ts|1|return inTx(w.ws, [...RELEASE_STORES, \"versionBytes\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "the cleanup: kept versions pruned; only orphaned bytes (no entry names them) deleted"
+  },
+  "board/outcache.ts|1|const db = await this.open(), t = db.transaction([\"entries\", \"docs\"], \"readwrite\"), es = t.objectStore(\"entries\"), now = Date.now();": {
+   "class": "NOT-SOURCE",
+   "why": "the board output cache's own database (its own entries/docs stores), not the workspace's"
+  },
+  "board/outcache.ts|1|const db = await this.open(), t = db.transaction([\"entries\", \"docs\"], \"readwrite\"), es = t.objectStore(\"entries\"), ds = t.objectStore(\"docs\"), now = Date.now();": {
+   "class": "NOT-SOURCE",
+   "why": "the board output cache's own database (its own entries/docs stores), not the workspace's"
+  },
+  "board/outcache.ts|1|const t = db.transaction([\"entries\", \"docs\"], \"readwrite\"), es = t.objectStore(\"entries\"), ds = t.objectStore(\"docs\");": {
+   "class": "NOT-SOURCE",
+   "why": "the board output cache's own database (its own entries/docs stores), not the workspace's"
+  },
+  "board/outcache.ts|1|const db = await this.open(), t = db.transaction([\"entries\", \"docs\"], \"readwrite\"), es = t.objectStore(\"entries\");": {
+   "class": "NOT-SOURCE",
+   "why": "the board output cache's own database (its own entries/docs stores), not the workspace's"
+  },
+  "notebook/stores.js|1|const tx = db.transaction(notebookScope(db), \"readwrite\");": {
+   "class": "TOKEN",
+   "why": "deleteNotebookRecord: the delete and its token"
+  },
+  "notebook/stores.js|1|const tx = this.db.transaction(notebookScope(this.db), \"readwrite\"), st = tx.objectStore(\"notebooks\");": {
+   "class": "TOKEN",
+   "why": "IdbStore.save: the record and its token (its markOnly stamp: metadata only)"
+  }
+ }
+}

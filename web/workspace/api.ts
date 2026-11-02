@@ -1015,7 +1015,8 @@ export class Workspace {
       return "reset";
     }
     if (purge) {
-      if (this.main) for (const st of ["files", "notebooks"]) if (await this.deletePage(this.main, st)) return "purge";
+      // (history's stores too where this database has them (web/history/tokens.ts): the next workspace's lineage starts empty)
+      if (this.main) for (const st of ["files", "notebooks", ...(HIST_STORES.every((h) => this.main!.objectStoreNames.contains(h)) ? HIST_STORES : [])]) if (await this.deletePage(this.main, st)) return "purge";
       // (then the notebooks' history database, every row but its fence (2c-1d-iii §6): unknown while it can't be had,
       // so the marker stays, writers stay refused, and the next open tries again)
       const h = await this.purgeHistoryPage();
