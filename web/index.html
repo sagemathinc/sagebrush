@@ -483,7 +483,7 @@ import { mountBrowser } from "./workspace/browser.ts";
 import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
-import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
@@ -2776,7 +2776,8 @@ async function uploadHere(list, folder) {
     return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
   }
   if (single && r.kept.length === 1 && !r.made.length) {
-    const e = r.kept[0], as = openableAs(nameOf(e.path));
+    // (a Jupytext MyST .md is a notebook by its first 4 KiB: web/notebook/myst.js)
+    const e = r.kept[0], as = openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await blobHead([...list][0]) : null);
     if (as && confirm(`Open "${nameOf(e.path)}" as a ${as}?\n\nA converted copy, "${splitExt(nameOf(e.path))[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${nameOf(e.path)}" stays as it is.`)) await openAs(e, as);
   }
   if (r.kept.length || r.made.length || refused) wsShowFiles(true);
@@ -2788,9 +2789,13 @@ async function uploadHere(list, folder) {
 async function openAs(e, as) {
   if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
   try {
-    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode });
+    let said = "";
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, said: (m) => { said = m; } });
     wsBrowser?.refresh();
-    openEntry(made);
+    // (what was said, after the notebook opened: its own status lines come first)
+    if (!said) return openEntry(made);
+    saveNow();
+    await openId(made.ref).then(() => { wsTrackCurrent(); statusEl.textContent = said; }, sayNotLeft);
   } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
 }
 filesBtn.onclick = () => {
