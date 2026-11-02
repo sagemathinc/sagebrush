@@ -20,6 +20,8 @@
 .sbnb .cells { position: relative; }
 .sbnb .cell { position: relative; display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); padding: 8px 8px 8px 0; border-left: 3px solid transparent; outline: none; }
 .sbnb .cell.active { border-left-color: var(--accent2); }
+/* (B2n: the cells of a range, the active one among them) */
+.sbnb .cell.inrange { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .sbnb .cell.active:focus, .sbnb .cell.active:has(.mdout:focus) { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .sbnb .cell.active:has(textarea:focus) { border-left-color: var(--accent); }
 .sbnb .cell .gutter { position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 8px 10px 0 0; cursor: grab; user-select: none; -webkit-user-select: none; }

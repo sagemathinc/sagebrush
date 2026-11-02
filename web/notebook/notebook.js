@@ -234,7 +234,8 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <tr><td>${k("↑")} ${k("↓")} or ${k("K")} ${k("J")}</td><td>select the cell above or below</td></tr>
 <tr><td>${k("A")} ${k("B")}</td><td>insert a cell above, below</td></tr>
 <tr><td>${k("D")} ${k("D")}</td><td>delete the cell</td></tr>
-<tr><td>${k("Z")}</td><td>undo the cell deletion</td></tr>
+<tr><td>${k("Z")}</td><td>undo the last deletion or move</td></tr>
+<tr><td>${k("Shift", "↑")} ${k("Shift", "↓")} or ${k("Shift")}-click</td><td>select a range of cells (copy, cut, paste, delete and drag act on all of it; ${k("Esc")} ends it)</td></tr>
 <tr><td>${k("X")} ${k("C")} ${k("V")}</td><td>cut, copy, paste below (${k("Shift", "V")}: above)</td></tr>
 <tr><td>${k("M")} ${k("Y")}</td><td>to Markdown, to code</td></tr>
 <tr><td>${k("Shift", "M")}</td><td>merge with the cell below</td></tr>
@@ -1349,7 +1350,10 @@ export function createNotebook(root, opts = {}) {
     q('[data-a="addcode"]').onclick = () => addCell("", { after: el }, true);
     q('[data-a="addmd"]').onclick = () => addCell("", { after: el }, true, "markdown");
     // a click on the gutter or the cell's margin selects it (command mode)
-    el.addEventListener("click", (e) => { if (e.target === el || (e.target.closest(".gutter") && !e.target.closest("button"))) select(cell); });
+    el.addEventListener("click", (e) => {
+      if (e.shiftKey && active && active !== cell && active.el.isConnected) { e.preventDefault(); setRange(cell); refocus(); return; }
+      if (e.target === el || (e.target.closest(".gutter") && !e.target.closest("button"))) select(cell);
+    });
     if (where?.before) where.before.before(el);
     else if (where?.after) where.after.after(el);
     else if (where?.first) cellsEl.prepend(el);
@@ -1369,9 +1373,35 @@ export function createNotebook(root, opts = {}) {
     active?.el.classList.remove("active");
     active = cell ?? null;
     active?.el.classList.add("active");
+    setRange(null);
   }
+  // B2n (William): a contiguous range of cells, from the active one to `rangeTo` (a shift-click, Shift+↑/↓); copy,
+  // cut, paste, delete and a drag act on all of it. Selecting another cell the plain way ends it. (The marks are
+  // classes, which the save's observer doesn't watch: selecting never saves)
+  let rangeTo = null;
+  function range() {
+    if (!active) return [];
+    if (!rangeTo || rangeTo === active || !rangeTo.el.isConnected || !active.el.isConnected) return [active];
+    const all = cells(), i = all.indexOf(active), j = all.indexOf(rangeTo);
+    return i < 0 || j < 0 ? [active] : all.slice(Math.min(i, j), Math.max(i, j) + 1);
+  }
+  function setRange(to) {
+    rangeTo = to ?? null;
+    for (const el of cellsEl.querySelectorAll(".cell.inrange")) el.classList.remove("inrange");
+    const r = range();
+    if (r.length > 1) for (const c of r) c.el.classList.add("inrange");
+  }
+  // (the active cell focused again in command mode, where it is: a shift-click keeps the range's start)
+  const refocus = () => active && (active.el.classList.contains("rendered") ? active.md : active.el).focus({ preventScroll: true });
   cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
-  cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) { activate(c); if (e.isTrusted && c.type === "code") warm(); } });
+  cellsEl.addEventListener("pointerdown", (e) => {
+    const c = e.target.closest(".cell")?.cell;
+    if (!c) return;
+    // (a shift-click on another cell: the range to it; the focus stays on the active cell, no editor opened)
+    if (e.shiftKey && active && c !== active && active.el.isConnected) { e.preventDefault(); return; }
+    activate(c);
+    if (e.isTrusted && c.type === "code") warm();
+  });
   // X1: the language's environment loaded at the user's first action in a
   // code cell (pointing at it, typing in it, moving onto it with the
   // keyboard) or their choice of the language (nb.warm, index.html's menu),
@@ -1537,10 +1567,16 @@ export function createNotebook(root, opts = {}) {
   let lastKey = "", lastKeyAt = 0, clip = null;
   const trash = [];
   const twice = (key) => { const t = performance.now(), hit = lastKey === key && t - lastKeyAt < 800; lastKey = hit ? "" : key; lastKeyAt = t; return hit; };
+  // (Z's undo stack: a deletion or a move of a run of cells, with where the run was; B2n: a cut or moved range is one
+  // entry, so one Z puts all of it back)
+  function remember(kind, list) {
+    const els = list.map((c) => c.el);
+    trash.push({ kind, els, next: els.at(-1).nextElementSibling, prev: els[0].previousElementSibling });
+    if (trash.length > 50) trash.shift();
+  }
   function remove(cell, command = false) {
     const next = nextCell(cell) ?? prevCell(cell);
-    trash.push({ el: cell.el, next: cell.el.nextElementSibling, prev: cell.el.previousElementSibling });
-    if (trash.length > 50) trash.shift();
+    remember("delete", [cell]);
     if (comp?.cell === cell) closeCompleter();
     cell.el.remove();
     if (active === cell) activate(null);
@@ -1552,26 +1588,56 @@ export function createNotebook(root, opts = {}) {
     // its names go; the cells reading them rerun
     if (reactive() && cell.type === "code") engine().remove([cell.id]);
   }
+  // (a range of cells deleted as one: Z puts all of it back)
+  function removeRange(list) {
+    if (list.length < 2) return list[0] && remove(list[0], true);
+    const next = nextCell(list.at(-1)) ?? prevCell(list[0]);
+    remember("delete", list);
+    for (const c of list) {
+      if (comp?.cell === c) closeCompleter();
+      c.el.remove();
+    }
+    activate(null);
+    if (!cells().length) addCell("", null, true);
+    else select(next);
+    relabel();
+    announce(`${list.length} cells deleted; Z undoes`);
+    const code = list.filter((c) => c.type === "code").map((c) => c.id);
+    if (reactive() && code.length) engine().remove(code);
+  }
+  // (Z: the last deletion or move undone: its cells back where they were, selected)
   function undelete() {
     const t = trash.pop();
     if (!t) return;
-    if (t.next?.isConnected) t.next.before(t.el);
-    else if (t.prev?.isConnected) t.prev.after(t.el);
-    else cellsEl.appendChild(t.el);
+    const els = t.els.filter((el) => t.kind === "delete" || el.isConnected);
+    if (!els.length) return;
+    if (t.next?.isConnected && !els.includes(t.next)) t.next.before(...els);
+    else if (t.prev?.isConnected && !els.includes(t.prev)) t.prev.after(...els);
+    else cellsEl.append(...els);
     relabel();
-    select(t.el.cell);
-    announce("Cell restored");
+    select(els[0].cell);
+    if (els.length > 1) setRange(els.at(-1).cell);
+    announce(t.kind === "move" ? (els.length > 1 ? `${els.length} cells moved back` : "Move undone") : els.length > 1 ? `${els.length} cells restored` : "Cell restored");
     reactiveSync();
+  }
+  // (what a copy keeps of each cell: as it would be saved, outputs, counts and attachments too, without its id)
+  function clipOf(list) {
+    const ids = new Set(list.map((c) => c.id));
+    return snapshot().cells.filter((d) => ids.has(d.id)).map(({ id: _id, ...d }) => d);
   }
   function paste(cell, above) {
     if (!clip) return;
-    let at = cell, first = null;
+    let at = cell, first = null, last = null;
     for (const c of above ? [...clip].reverse() : clip) {
       const n = addCell(c.code, above ? { before: (first ?? at).el } : { after: at.el }, false, c.type);
-      if (n.type === "markdown") renderMd(n);
-      if (above) first = n; else at = n;
+      fill(n, c);
+      if (above) first = n; else { at = n; first ??= n; }
+      last ??= n;
     }
-    select(above ? first : at);
+    // (the pasted cells selected, in their order)
+    const [a, b] = above ? [first, last] : [first, at];
+    select(a);
+    if (a !== b) setRange(b);
   }
   cellsEl.addEventListener("keydown", (e) => {
     const cell = e.target.closest?.(".cell")?.cell;
@@ -1593,11 +1659,20 @@ export function createNotebook(root, opts = {}) {
       if (!ro && (key === "ArrowUp" || key === "ArrowDown")) { e.preventDefault(); move(cell, key === "ArrowUp" ? -1 : 1); }
       return;
     }
+    // (B2n: Shift+↑/↓ extends the range; Esc ends it)
+    if (e.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
+      e.preventDefault();
+      const from = rangeTo ?? cell, to = key === "ArrowUp" ? prevCell(from) : nextCell(from);
+      if (to) { setRange(to); to.el.scrollIntoView({ block: "nearest" }); }
+      return;
+    }
+    if (key === "Escape" && range().length > 1) { e.preventDefault(); setRange(null); return; }
+    const sel = range().length > 1 ? range() : [cell];
     switch (key) {
       case "Enter": if (ro) return; if (cell.el.classList.contains("rendered")) editMd(cell); else edit(cell); break;
       case "ArrowUp": case "k": select(prevCell(cell) ?? cell); break;
       case "ArrowDown": case "j": select(nextCell(cell) ?? cell); break;
-      case "c": clip = [{ type: cell.type, code: cell.ta.value }]; announce("Cell copied"); break;
+      case "c": clip = clipOf(sel); announce(sel.length > 1 ? `${sel.length} cells copied` : "Cell copied"); break;
       case "i": if (twice("i")) interrupt(); break;
       case "0": if (twice("0")) api.restart(); break;
       case "h": keysDlg.showModal(); break;
@@ -1606,10 +1681,10 @@ export function createNotebook(root, opts = {}) {
         switch (key) {
           case "a": select(addCell("", { before: cell.el })); break;
           case "b": select(addCell("", { after: cell.el })); break;
-          case "d": if (twice("d")) remove(cell, true); break;
+          case "d": if (twice("d")) removeRange(sel); break;
           case "z": undelete(); break;
-          case "x": clip = [{ type: cell.type, code: cell.ta.value }]; remove(cell, true); break;
-          case "v": paste(cell, e.shiftKey); break;
+          case "x": clip = clipOf(sel); removeRange(sel); break;
+          case "v": paste(e.shiftKey ? sel[0] : sel.at(-1), e.shiftKey); break;
           case "m": if (e.shiftKey) merge(cell); else if (cell.type !== "markdown") { setType(cell, "markdown"); schedule(); select(cell); } break;
           case "y": if (cell.type !== "code") { setType(cell, "code"); schedule(); select(cell); } break;
           case "r": if (cell.type !== "raw") { setType(cell, "raw"); schedule(); select(cell); } break;
@@ -1619,25 +1694,29 @@ export function createNotebook(root, opts = {}) {
     e.preventDefault();
   });
 
-  // Drag a cell by its prompt (or the ⠿ in its toolbar) to move it.
-  let dragCell = null;
+  // Drag a cell by its prompt (or the ⠿ in its toolbar) to move it; a cell in the range drags all of the range (B2n).
+  let dragCell = null, dragList = [];
   function dropBefore(y) {
     for (const c of cells()) { const r = c.el.getBoundingClientRect(); if (y < r.top + r.height / 2) return c.el; }
     return null;
   }
   function endDrag() {
-    dragCell?.el.classList.remove("dragging");
+    for (const c of dragList) c.el.classList.remove("dragging");
     dragCell = null;
+    dragList = [];
     dropline.hidden = true;
   }
   cellsEl.addEventListener("dragstart", (e) => {
     const cell = !opts.readOnly && e.target.closest?.(".gutter, .drag") && e.target.closest(".cell")?.cell;
     if (!cell) return; // e.g. text dragged out of an editor
     dragCell = cell;
+    const r = range();
+    dragList = r.length > 1 && r.includes(cell) ? r : [cell];
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", cell.ta.value);
+    e.dataTransfer.setData("text/plain", dragList.map((c) => c.ta.value).join("\n\n"));
     e.dataTransfer.setDragImage(cell.el, 30, 16);
-    requestAnimationFrame(() => cell.el.classList.add("dragging"));
+    const list = dragList;
+    requestAnimationFrame(() => { for (const c of list) c.el.classList.add("dragging"); });
   });
   cellsEl.addEventListener("dragover", (e) => {
     if (!dragCell) return;
@@ -1652,14 +1731,17 @@ export function createNotebook(root, opts = {}) {
     if (!dragCell) return;
     e.preventDefault();
     e.stopPropagation();
-    const cell = dragCell, before = dropBefore(e.clientY);
+    const list = dragList, before = dropBefore(e.clientY), els = list.map((c) => c.el);
     endDrag();
-    if (before === cell.el || before === cell.el.nextElementSibling) return;
-    if (before) before.before(cell.el); else cellsEl.appendChild(cell.el);
+    // (dropped onto itself, or just below itself: nothing moves)
+    if (els.includes(before) || before === els.at(-1).nextElementSibling) return;
+    remember("move", list);
+    if (before) before.before(...els); else cellsEl.append(...els);
     relabel();
     reactiveSync();
-    select(cell);
-    announce(`Moved to position ${index(cell) + 1}`);
+    select(list[0]);
+    if (list.length > 1) setRange(list.at(-1));
+    announce(list.length > 1 ? `${list.length} cells moved to position ${index(list[0]) + 1}; Z undoes` : `Moved to position ${index(list[0]) + 1}`);
   });
   cellsEl.addEventListener("dragend", endDrag);
 
@@ -1779,6 +1861,7 @@ export function createNotebook(root, opts = {}) {
     const sib = d < 0 ? cell.el.previousElementSibling : cell.el.nextElementSibling;
     if (!sib) return;
     const hadFocus = cell.el.contains(document.activeElement) ? document.activeElement : null;
+    remember("move", [cell]);
     if (d < 0) sib.before(cell.el); else sib.after(cell.el);
     hadFocus?.focus();
     cell.el.scrollIntoView({ block: "nearest" });

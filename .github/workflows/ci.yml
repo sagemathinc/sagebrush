@@ -1008,6 +1008,7 @@ jobs:
               node web/test-reactive.mjs
               node web/test-warm.mjs
               node web/test-notebook-blocks.mjs
+              node web/notebook/test-cell-range.mjs
               node web/test-doclang.mjs
               node web/test-big-pictures.mjs
               node web/test-png.mjs
