@@ -93,7 +93,7 @@ At base a931ee43, every A–F row fails at import (`ModuleNotFoundError: No modu
 
 ## The review fixes on 5da953fe (family R, 51 rows)
 
-The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 51, for **213 CLI rows**. The H rows are H1–H6. That makes 219 tests.
+The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 51, for **213 CLI rows**. The H tests are seven: H1, H2, H2b, H3, H4, H5 and H6. That makes **220 tests**, and the DEV TAP's `# tests` line must show exactly that.
 
 - **R1–R5:** `_fs.lstat_kind` is `none` only for ENOENT. Any other error is `error`.
   - R1 is EACCES: a directory with no search permission. It holds only for a non-root user. As root, the row FAILS; it never skips.
