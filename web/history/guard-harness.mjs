@@ -22,6 +22,8 @@ export const guardFiles = GUARDED ? ["/guard.js", "/guard-install.js"] : [];
 /** After the run: the guard's verdict, as failure lines (none when not guarded). */
 export async function guardFails(ev) {
   if (!GUARDED) return [];
+  // (the guard's post-commit reads (the exact-rev check) settled first)
+  await ev("new Promise((r) => { const f = () => ((window.__historyGuard?.pending ?? 0) === 0 ? r(true) : setTimeout(f, 20)); f(); })");
   const g = JSON.parse(await ev("JSON.stringify({ v: window.__historyGuard?.violations ?? null, checked: window.__historyGuard?.checked ?? 0, txs: window.__historyGuard?.txs ?? 0 })"));
   if (g.v === null) return ["history guard: not installed in the page"];
   const out = g.v.slice(0, 50).map((x) => `history guard: ${x.db}/${x.store} changed ${x.ident} (${x.why}) with no token in its transaction`);

@@ -20,6 +20,9 @@ export const HIST_STORES = ["htokens", "hmeta"] as const;
  * token's own size bound; and the last seq ever used (exhaustion, @sagebrush's final ruling: never a wrap, a reuse or
  * a repeat). */
 export const TOKEN_LIMITS = Object.freeze({ rows: 50_000, bytes: 16 * 2 ** 20, rowBytes: 4096, maxSeq: 2 ** 53 - 1 });
+/** A chain's most ancestors: web/workspace/paths.ts MAX_DEPTH (32 names) less the identity's own (tree-asserted equal:
+ * this module is a leaf, so the constant is its own).  More is a broken chain, never a longer walk (A1.2). */
+export const MAX_ANCESTORS = 31;
 
 export type TokenKind = "file" | "folder" | "notebook" | "board";
 /** The identity's folder ancestry by fid, root first, after the save; null when it is gone or in Trash; "broken" when
@@ -103,7 +106,7 @@ export async function chainOf(path: string | null, inTrash: boolean, getEntry: (
   const out: string[] = [];
   // (each folder above, nearest first; the root "/" has no entry and no identity)
   for (let p = parentOf(path), guard = 0; p !== "/"; p = parentOf(p), guard++) {
-    if (guard > 4096) return "broken";
+    if (guard >= MAX_ANCESTORS) return "broken";
     const e = await getEntry(p);
     if (!e || e.kind !== "folder" || !e.fid || e.trashed) return "broken";
     out.push(e.fid);
