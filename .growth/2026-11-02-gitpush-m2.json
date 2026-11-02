@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "Stage A MVP M2, Push to GitHub (DEV flag): the license texts of the 9 npm packages in its lazy git worker (isomorphic-git, lightning-fs, pako, ...) in the notices every bundle carries (engine/sagebrush-worker.js +11387, cli/lib.gen.js +11620), plus the Storage panel's offer in the page; the worker and panel chunks themselves are lazy and in no measured bundle. sha.js, crc-32, diff3, clean-git-ref and isomorphic-textencoder are replaced by web/gitpush/shims so their ~65 KB of notices don't ship. Measured with bun 1.4.4 at the exact probe merge (pyjs +27675).",
+ "bytes": {
+  "cli/lib.gen.js": 11680,
+  "cli/pyjs.cjs": 27760,
+  "engine/sagebrush-worker.js": 11440
+ }
+}
