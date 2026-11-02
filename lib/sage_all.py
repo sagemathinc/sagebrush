@@ -503,17 +503,22 @@ def parent(x):
 
         sage: parent(2), parent(2/3), parent(1.5)
         (Integer Ring, Rational Field, Real Field with 53 bits of precision)
+        sage: parent(True), parent([1, 2])
+        (<class 'bool'>, <class 'list'>)
     """
+    if isinstance(x, bool):
+        return type(x)  # (before .parent(): bools are ints, which carry Integer's methods here)
     if hasattr(x, "parent"):
         return x.parent()
-    if isinstance(x, bool) or isinstance(x, int):
+    if isinstance(x, int):
         return ZZ
     if isinstance(x, _Fraction):
         return QQ
     if isinstance(x, float):
         from _sage_lang import _RealField
         return _RealField()
-    raise NotImplementedError("parent of %r" % (x,))
+    # anything else (a list, a str, ...): its Python type, as Sage's parent() gives
+    return type(x)
 
 
 from _pyjs_docsearch import search_doc

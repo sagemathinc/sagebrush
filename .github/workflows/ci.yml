@@ -1128,6 +1128,7 @@ jobs:
               bun web/test-lib-chunks.mjs
               bun web/board/test-ink.mjs
               bun web/workspace/export/test-measure.mjs
+              bun web/workspace/test-export-reminder.mjs
               ;;
           esac
 
