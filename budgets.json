@@ -563,9 +563,16 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/sagebrush-myst.js": {
+   "exact": false,
+   "ceiling": 11867,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 233458,
+   "ceiling": 233937,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -677,6 +684,7 @@
    "engine/sagebrush-analyze.js": 356439,
    "engine/sagebrush-engine.wasm": 7172791,
    "engine/sagebrush-graphview.js": 14111,
+   "engine/sagebrush-myst.js": 10788,
    "engine/sagebrush-notebook.js": 208117,
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,

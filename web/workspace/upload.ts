@@ -12,11 +12,29 @@
 // (a board's other formats are read by the board page's converter, given
 // as `asBoard`: this module doesn't carry them into the notebook's page)
 import type { Workspace, Entry } from "./api";
-import { freePath, join, nameOf, parentOf, safeName, splitExt, uploadAs, type DocKind } from "./paths";
+import { freePath, join, nameOf, openableAs, parentOf, safeName, splitExt, uploadAs, type DocKind } from "./paths";
 import { formatError, isBoard } from "../board/doc";
-import { fromFile } from "../notebook/ipynb.js";
+import { cellId, fromFile } from "../notebook/ipynb.js";
+import { fromMyst, isMystHead } from "../notebook/myst.js";
 
 export { uploadAs, openableAs, type DocKind } from "./paths";
+
+/** What a data file can be opened as, from its name and its first 4096
+ * bytes (`head`): a Jupytext MyST `.md` (isMystHead) as a notebook; else as
+ * openableAs says by its name. */
+export function openableAsFile(name: string, head: string | null): DocKind | null {
+  if (head !== null && /\.md$/i.test(name) && uploadAs(name.toLowerCase()) === "file" && isMystHead(head)) return "notebook";
+  return openableAs(name);
+}
+
+/** A file's first 4096 bytes as text, to tell a Jupytext MyST .md by them (openableAsFile): read whole, up to `max`
+ * (readUpTo refuses a larger file), within `ms`; null if not read in time, or not at all (the name decides then). */
+export function fileHead(ws: Workspace, path: string, max: number, ms = 300): Promise<string | null> {
+  return Promise.race([
+    ws.readUpTo(path, max).then((r) => new TextDecoder().decode(r.content.subarray(0, 4096)), () => null),
+    new Promise<null>((r) => setTimeout(() => r(null), ms)),
+  ]);
+}
 
 /** A `.board.json`'s text as a board: JSON of this format (or an earlier version), with items. */
 export function boardJson(text: string): unknown {
@@ -120,12 +138,16 @@ export async function uploadFiles(ws: Workspace, all: File[], folder: string, o:
  * beside it (`name.ipynb` or `name.board.json`, a free name), the original
  * left as it is.  Only the file `entry` is (its fid), read up to `maxBytes`.
  * `asBoard`: the board page's converter (a notebook needs none). */
-export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: { maxBytes: number; mode: string; asBoard?(name: string, text: string): unknown }): Promise<Entry> {
+export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: { maxBytes: number; mode: string; asBoard?(name: string, text: string): unknown; said?(m: string): void }): Promise<Entry> {
   const { entry: now, content } = await ws.readUpTo(entry.path, o.maxBytes);
   if (now.fid !== entry.fid) throw new Error(`${entry.path} was replaced`);
   const name = nameOf(now.path), text = new TextDecoder().decode(content);
-  let doc: unknown;
-  if (as === "notebook") doc = fromFile(name, text, o.mode);
+  let doc: any;
+  // (a .md: a Jupytext MyST notebook, by the same test the menu used (openableAsFile); any other .md isn't one)
+  if (as === "notebook" && /\.md$/i.test(name)) {
+    if (!isMystHead(text)) throw new Error(`${name} is not a Jupytext MyST notebook`);
+    doc = fromMyst(name, text, cellId);
+  } else if (as === "notebook") doc = fromFile(name, text, o.mode);
   else {
     if (!o.asBoard) throw new Error("a board is made from it on the board page");
     doc = o.asBoard(name, text);
@@ -133,8 +155,25 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
     if (bad) throw new Error(bad);
     if (!isBoard(doc)) throw new Error("not a board: a document needs nodes (or pages of them)");
   }
-  const folder = parentOf(now.path), taken = new Set((await ws.list(folder)).map((e) => e.path));
+  const folder = parentOf(now.path), listed = await ws.list(folder), taken = new Set(listed.map((e) => e.path));
+  // A Jupytext MyST .md (web/notebook/myst.js): its copy records the .md's sha256, and a copy beside it made from
+  // these same bytes is opened again rather than another made (plan-myst-notebooks r3 §8.5 U-4); never overwritten
+  const myst = as === "notebook" && doc?.metadata?.sagebrush?.myst;
+  let earlier = false;
+  if (myst) {
+    const source = [...new Uint8Array(await crypto.subtle.digest("SHA-256", content))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    doc.metadata.sagebrush.source = source;
+    const base = splitExt(name)[0], isCopy = (n: string) => n.startsWith(base) && /^(?: \(\d+\))?\.ipynb$/.test(n.slice(base.length));
+    for (const e of listed.filter((x) => x.kind === "notebook" && isCopy(nameOf(x.path))).slice(0, 20)) {
+      const had = (await ws.read(e.path).catch(() => null))?.content?.metadata?.sagebrush;
+      if (!had?.myst) continue;
+      if (had.source === source) { o.said?.(`Opened your notebook copy of "${name}". The .md isn't changed.`); return e; }
+      earlier = true;
+    }
+  }
   const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
   if (!p) throw new Error("no free name beside it");
-  return ws.create(p, { content: doc });
+  const made = await ws.create(p, { content: doc });
+  if (myst) o.said?.(earlier ? "The .md changed since your last copy, so this is a new copy; your earlier one is kept." : `Opened a notebook copy of "${name}" beside it. The .md isn't changed.`);
+  return made;
 }
