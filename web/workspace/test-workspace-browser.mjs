@@ -1066,9 +1066,14 @@ try {
     // (after the T cases: a fresh page, with a notebook of its own open outside their folders, so a T case whose move
     // went through (as under the controls K15/K16, its open notebook into Trash with its folder) can't reach the checks
     // after them: #447 r3's run, the ruling for r4)
-    await freshPage();
-    await openNb("/After T.ipynb", "After T", "after");
-    await until(`document.querySelector("#nbname").value === "After T"`);
+    // (inside its own row, one check always counted: a throw here (as under the control K7 in the r5 cross-check) is
+    // a named failure, "T.after", and never cuts the run short; the closed count is the same in every run)
+    await row(["T.after"], async () => {
+      await freshPage();
+      await openNb("/After T.ipynb", "After T", "after");
+      await until(`document.querySelector("#nbname").value === "After T"`);
+      check(true, "T.after: the page after the T cases opened its own notebook");
+    });
   }
   // the typed title's rename, its notebook moved and another put at its path
   // while the rename waited for the lock: this notebook gets the name, the
