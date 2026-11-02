@@ -247,6 +247,20 @@ for (const [what, method] of [["the hmeta put", "put"], ["the hmeta get", "get"]
   const nb = await w.create("/A/n.ipynb");
   const nt = await last(w.main);
   check(nt?.ident === nb.ref && nt.kind === "notebook" && nt.chain === null, `a notebook's record saved: its token in the notebooks' database, no chain: ${J(nt)}`);
+  const rec = await rawGet(w.main, "notebooks", nb.ref);
+  check(nt?.rev === rec?.rev, `a notebook token keeps its record's rev domain (${nt?.rev} = the record's ${rec?.rev})`);
+  // (A1-T17: three folders made in ONE transaction: each token at its OWN op's seq)
+  const before = (await rawAll(w.ws, "htokens")).length;
+  await w.mkdir("/D/E/F");
+  const made = (await rawAll(w.ws, "htokens")).slice(before), ops = (await w.ops()).filter((o) => o.op === "mkdir" && ["/D", "/D/E", "/D/E/F"].includes(o.path));
+  check(made.length === 3 && ops.length === 3 && made.every((t) => ops.some((o) => o.fid === t.ident && o.seq === t.rev)) && new Set(made.map((t) => t.rev)).size === 3, `A1-T17: mkdir /D/E/F in one transaction: 3 tokens, each at its own op's seq (${J(made.map((t) => t.rev))} vs ${J(ops.map((o) => o.seq))})`);
+  // (A1-T18: a board's index event (its file renamed: log) carries the op's seq; its content event (boardRowWrite) the row's rev)
+  await w.rename("/A/plan.board.json", "/A/plan3.board.json");
+  const idx = await last(), rop = (await w.ops()).filter((o) => o.op === "rename").at(-1);
+  check(idx?.ident === bd.ref && idx.kind === "board" && idx.rev === rop?.seq, `A1-T18: a board's index event (rename): its token's rev is the op's seq (${idx?.rev} = ${rop?.seq})`);
+  await w.write("/A/plan3.board.json", { title: "plan3", nodes: [] });
+  const con = await last(), row = await rawGet(w.ws, "boards", bd.ref);
+  check(con?.ident === bd.ref && con.kind === "board" && con.rev === row?.rev, `A1-T18: its content event (write): its token's rev is the row's rev (${con?.rev} = ${row?.rev})`);
   w.close?.();
 }
 
