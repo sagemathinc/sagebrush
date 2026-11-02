@@ -43,6 +43,7 @@ FRED_HOSTS = frozenset(["api.stlouisfed.org", "fred.stlouisfed.org", "alfred.stl
 CRED_NAMES = frozenset(["api_key", "apikey", "access_token", "token", "secret", "client_secret", "password", "passwd", "auth", "key_id"])
 UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 HEX = "0123456789abcdefABCDEF"
+DIGITS = "0123456789"   # (ASCII only: str.isdigit() accepts other scripts' digits)
 
 # (a test hook: production never calls it; test/sbdata/HARNESS.md H5)
 _test_after_verify = None
@@ -91,7 +92,7 @@ def _host(h):
     if not h or len(h) > 253 or not all(_LABEL.match(x) for x in labels):
         raise Refused("url")
     last = labels[-1]
-    if last.isdigit() or (last.startswith("0x") and all(c in HEX for c in last[2:])):
+    if (last and all(c in DIGITS for c in last)) or (last.startswith("0x") and all(c in HEX for c in last[2:])):
         raise Refused("url")
     return h
 
@@ -117,7 +118,7 @@ def _authority(scheme, auth):
     host, sep, port = auth.partition(":")
     host = _host(host)
     if sep:
-        if not port.isdigit() or not 1 <= int(port) <= 65535:
+        if not port or not all(c in DIGITS for c in port) or not 1 <= int(port) <= 65535:
             raise Refused("url")
         if int(port) != {"http": 80, "https": 443}[scheme]:
             host += ":" + str(int(port))
@@ -224,7 +225,7 @@ class _Parser:
             return self.string(STRING_CAP)
         if c in "tfn":
             raise Refused("literal")
-        if c == "-" or c.isdigit():
+        if c == "-" or c in DIGITS:
             return self.number()
         raise Refused("not-json")
 
@@ -283,6 +284,10 @@ class _Parser:
                         if len(h2) == 4 and all(x in HEX for x in h2) and 0xDC00 <= int(h2, 16) < 0xE000:
                             c = chr(0x10000 + ((ord(c) - 0xD800) << 10) + (int(h2, 16) - 0xDC00))
                             i += 6
+                    # (a lone or reversed surrogate is no character: refused
+                    # here, so no later encode can raise (astra3, RP-CODE-3))
+                    if 0xD800 <= ord(c) < 0xE000:
+                        raise Refused("surrogate")
                 else:
                     c = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}.get(e)
                     if c is None:
@@ -303,7 +308,7 @@ class _Parser:
         if neg:
             i += 1
         j = i
-        while j < len(s) and s[j].isdigit():
+        while j < len(s) and s[j] in DIGITS:
             j += 1
             if j - i > DIGITS_CAP:
                 raise Refused("number")

@@ -23,9 +23,12 @@ const fx = join(work, "fx");
 const made = spawnSync("python3", ["-I", join(ROOT, "test", "sbdata", "make.py"), fx], { encoding: "utf8" });
 if (made.status !== 0) throw new Error(`make.py failed: ${made.stderr}`);
 const rows: Record<string, { family: string; root: string; cwd: string; program: string; expect: string; fifo_writer?: string; worker?: boolean }> = JSON.parse(readFileSync(join(fx, "expected.json"), "utf8"));
-process.on("exit", () => rmSync(work, { recursive: true, force: true }));
+process.on("exit", () => {
+  spawnSync("chmod", ["-R", "u+rwx", work]); // (R1's directory without search permission)
+  rmSync(work, { recursive: true, force: true });
+});
 
-type Run = { out: string; err: string; ms: number; timedOut: boolean; spy: any[] };
+type Run = { out: string; err: string; ms: number; timedOut: boolean; code: number | null; signal: string | null; spy: any[] };
 
 function runRow(id: string, argv: string[], cwd: string, writer?: [string, string]): Promise<Run> {
   const spyDir = join(work, "spy", id);
@@ -44,13 +47,24 @@ function runRow(id: string, argv: string[], cwd: string, writer?: [string, strin
       timedOut = true;
       try { process.kill(-p.pid!, "SIGKILL"); } catch {}
     }, DEADLINE_MS);
-    p.on("close", () => {
+    p.on("close", (code, signal) => {
       clearTimeout(timer);
       if (w) try { process.kill(-w.pid, "SIGKILL"); } catch {}
       const spy = readdirSync(spyDir).flatMap((f) => readFileSync(join(spyDir, f), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-      resolve({ out, err, ms: Date.now() - t0, timedOut, spy });
+      resolve({ out, err, ms: Date.now() - t0, timedOut, code, signal, spy });
     });
   });
+}
+
+// (a run passes when it beat the deadline, exited with the row's expected
+// status (0 unless the row says otherwise) and no signal, and its last output
+// line is the row's expected line exactly (grader, runRow rc miss))
+function checkRun(id: string, run: Run, expect: string, rc = 0) {
+  assert.ok(!run.timedOut, `${id}: over the ${DEADLINE_MS} ms deadline (${run.ms} ms)`);
+  assert.equal(run.signal, null, `${id}: killed by ${run.signal}`);
+  assert.equal(run.code, rc, `${id}: exit status ${run.code}, expected ${rc}: stderr ${run.err.slice(-400)}`);
+  const lines = run.out.split("\n").filter((l) => l !== "");
+  assert.equal(lines[lines.length - 1] ?? "", expect, `${id}: stderr ${run.err.slice(-400)}`);
 }
 
 function fifoIn(dir: string): string {
@@ -81,9 +95,7 @@ for (const [id, r] of Object.entries(rows)) {
     const cliArgv = ["--data-root", join(base, r.root), "-c", r.program];
     const run = await runRow(id, r.worker ? ["--require", SPY, "-e", workerBoot(cliArgv)] : ["--require", SPY, CLI, ...cliArgv], join(base, r.cwd), writer);
     spyRuns.push({ id, spy: run.spy, worker: !!r.worker }); // (before any assertion: H2-H4 see every run)
-    assert.ok(!run.timedOut, `${id}: over the ${DEADLINE_MS} ms deadline (${run.ms} ms)`);
-    const lines = run.out.split("\n").filter((l) => l !== "");
-    assert.equal(lines[lines.length - 1] ?? "", r.expect, `${id}: stderr ${run.err.slice(-400)}`);
+    checkRun(id, run, r.expect);
   });
 }
 });
@@ -138,9 +150,7 @@ test("sbdata H2b: the launcher's worker realm carries the spy, and the replay ru
   const base = join(fx, "C1");
   const run = await runRow("H2b", ["--require", SPY, "-e", workerBoot(["--data-root", join(base, r.root), "-c", r.program])], join(base, r.cwd));
   spyRuns.push({ id: "H2b", spy: run.spy, worker: true });
-  assert.ok(!run.timedOut, "H2b deadline");
-  const lines = run.out.split("\n").filter((l) => l !== "");
-  assert.equal(lines[lines.length - 1] ?? "", r.expect, run.err.slice(-400));
+  checkRun("H2b", run, r.expect);
   assert.ok(ids(run.spy).some((t) => t >= 1), `H2b: a worker realm, got ${JSON.stringify(ids(run.spy))}`);
 });
 
@@ -166,4 +176,17 @@ test("sbdata H3: every expected realm has the spy installed and exactly one posi
 
 test("sbdata H4: no run recorded any network use", () => {
   assert.deepEqual(spyRuns.flatMap((r) => r.spy.filter((x) => x.kind === "network").map((x) => `${r.id}: ${x.what}`)), []);
+});
+
+// (H6: the exit status is enforced: F1's program printing F1's exact line and
+// then exiting 1, or raising, must FAIL the row check (grader, runRow rc miss))
+test("sbdata H6: a right line followed by a failing exit fails the row", async () => {
+  const r = rows.F1;
+  const base = join(fx, "F1");
+  for (const [id, tail] of [["H6a", "import sys\nsys.exit(1)\n"], ["H6b", "raise RuntimeError('after the line')\n"]]) {
+    const run = await runRow(id, [CLI, "--data-root", join(base, r.root), "-c", r.program + tail], join(base, r.cwd));
+    const lines = run.out.split("\n").filter((l) => l !== "");
+    assert.equal(lines[lines.length - 1] ?? "", r.expect, `${id}: the fixture prints the expected line`);
+    assert.throws(() => checkRun(id, run, r.expect), /exit status/, `${id}: the row check must fail`);
+  }
 });

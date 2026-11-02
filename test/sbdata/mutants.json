@@ -44,7 +44,8 @@
   "A25",
   "A26",
   "B23a",
-  "B23b"
+  "B23b",
+  "R41"
  ],
  "M-method": [
   "A29a",
@@ -56,15 +57,23 @@
   "A30a"
  ],
  "M-generic-json-parser": [
-  "B8c",
-  "B8d",
-  "B8e",
   "B12",
   "B13",
   "B19",
   "B20",
   "B22b",
-  "B26"
+  "B26",
+  "B8c",
+  "B8d",
+  "B8e",
+  "R32",
+  "R33",
+  "R34",
+  "R35",
+  "R36",
+  "R37",
+  "R38",
+  "R39"
  ],
  "M-version-format": [
   "B4",
@@ -175,7 +184,8 @@
   "D6",
   "D7",
   "D8",
-  "D9"
+  "D9",
+  "R5"
  ],
  "M-walk-above-root": [
   "D4"
@@ -186,7 +196,8 @@
   "D7",
   "D8",
   "D9",
-  "E22"
+  "E22",
+  "R5"
  ],
  "M-prefix-containment": [
   "D13"
@@ -250,5 +261,50 @@
  ],
  "M-forbidden-import": [
   "H1"
+ ],
+ "M-lstat-enoent-dropped": [
+  "R1",
+  "R2",
+  "R3",
+  "R5"
+ ],
+ "M-isdigit-restored": [
+  "R6",
+  "R7",
+  "R8",
+  "R9",
+  "R10",
+  "R11"
+ ],
+ "M-isdecimal": [
+  "R6",
+  "R8",
+  "R10"
+ ],
+ "M-read-max-unchecked": [
+  "R20",
+  "R21",
+  "R22",
+  "R23",
+  "R24",
+  "R25",
+  "R26",
+  "R27",
+  "R28",
+  "R29",
+  "R30"
+ ],
+ "M-surrogate-check-removed": [
+  "R32",
+  "R33",
+  "R34",
+  "R35",
+  "R36",
+  "R37",
+  "R38",
+  "R39"
+ ],
+ "M-rc-unchecked": [
+  "H6"
  ]
 }

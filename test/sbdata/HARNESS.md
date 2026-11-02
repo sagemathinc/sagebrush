@@ -39,7 +39,7 @@ node --import test/sbdata/spy.mjs dist/src/cli.js --data-root DIR/<row>/<root> -
 ```
 - It runs with cwd = `DIR/<row>/<cwd>`, a fresh process per row, under ptest.
 - The row's FIFO writer (C10b) is started by the test before the run and killed after it.
-- **PASS** means stdout's last line == `expect` exactly, rc 0, and the spy shows 0 network records.
+- **PASS** means stdout's last line == `expect` exactly, the exit status 0 and no signal (the test's `checkRun` asserts both: grader's runRow ruling on 5da953fe), and the spy shows 0 network records.
 
 ## The time bound (X2)
 
@@ -68,6 +68,7 @@ This spy does not make the runtime a general network sandbox (astra).
 | H3 | the positive records | exactly 1 `positive` per realm per run |
 | H4 | network records beyond H3's | 0 for every row |
 | H5 | `_test_after_verify` in the production sources (CPython `ast` over lib/_sbdata.py and lib/urllib/*.py) | appears only as the one module-level assignment `_test_after_verify = None` in _sbdata.py; no Call node references it |
+| H6 | F1's program printing F1's exact line, then `sys.exit(1)` (H6a) or a `raise` (H6b) | the row check (`checkRun`) FAILS on the exit status for both |
 
 ## Mutants (X1, X4)
 
@@ -89,3 +90,33 @@ At base a931ee43, every A–F row fails at import (`ModuleNotFoundError: No modu
 
 - `make.py`, `mutants.json` and `HARNESS.md` are listed by sha256 in the packet's SHA256SUMS.
 - `fixtures-manifest.txt` lists every file the generator writes (path, type, size and sha256; symlink targets; FIFOs by type), with its sha256 in SHA256SUMS. A fixture change shows up as a different manifest.
+
+## The review fixes on 5da953fe (family R, 41 rows)
+
+The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 41, for **203 CLI rows**. The H rows are H1–H6. That makes 210 tests.
+
+- **R1–R5:** `_fs.lstat_kind` is `none` only for ENOENT. Any other error is `error`.
+  - R1 is EACCES: a directory with no search permission. It holds only for a non-root user. As root, the row FAILS; it never skips.
+  - R2 is ELOOP: a symlink loop as an intermediate component.
+  - R3 is ENOTDIR: a path through a regular file.
+  - R4 is the ENOENT control.
+  - R5 is the ancestor control. The nearest marker's inspection errors (via the real helper, on an ELOOP path) while a valid snapshot sits above it, and the result is `invalid-snapshot`, never the ancestor's bytes.
+- **R6–R15:** numbers and ports accept ASCII digits only.
+  - R6–R11: an Arabic-Indic `٣` or a superscript `²` in the manifest's version, revision and size.
+  - R12–R15: `٣`, `²`, a fullwidth `１` and `٣٣` in a port. The ASCII gate refuses these first, so the port's ASCII-digit check is defense in depth.
+- **R16–R31:** `_fs.read_nofollow`'s `max` must be an integer in 0..50,000,000, checked natively before any open.
+  - The boundary rows: 0, a file of exactly max bytes vs one of max+1, and 50,000,000 vs 50,000,001.
+  - The invalid values: -1, 1.5, `10**30`, `'x'`, True, None, nan, inf and -inf.
+  - R30 is the no-open witness: a missing path with an over-ceiling max gives `bad-max` (without the check, it would give `unreadable`). R31 is the missing-path control.
+- **R32–R41:** an escaped lone or reversed surrogate in a url, an entry key or a meta field is `REFUSED surrogate` by the parser, never an uncaught `UnicodeEncodeError`.
+  - R40 is the valid-pair control: the pair in a meta field gives `OK 1`.
+  - R41 is a valid pair in a url, which is refused cleanly as `bad-value:url`.
+
+New mutants:
+- `M-lstat-enoent-dropped`;
+- `M-isdigit-restored` and `M-isdecimal`;
+- `M-read-max-unchecked`;
+- `M-surrogate-check-removed`;
+- `M-rc-unchecked`, which fails H6.
+
+Re-anchored: `M-ip-literal`, `M-port-range` and `M-cap-file-bytes` (whose read is now `ENTRY_CAP`, inside the native ceiling). The sets in mutants.json are traced by reading, and the DEV cross-check confirms them.
