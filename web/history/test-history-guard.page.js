@@ -151,6 +151,22 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/K/y.txt"); tx.objectStore("htokens").add(tok("kfid", 1e9 + 41)); });
   await settle();
   check(J(sinceC(k).map((x) => x.ident)) === J(["kyfid"]), `control: a child removed under a folder that stays (the folder's token only): caught: ${J(sinceC(k))}`);
+  // (an entry with no identity yet (named by its path) moved: its old path-name removed, a new one of the same kind
+  // added with its token: passes; a path-named entry removed with nothing added: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/pm", kind: "folder", ref: null }); tx.objectStore("entries").put({ path: "/pn", kind: "folder", ref: null }); tx.objectStore("htokens").add(tok("path:/pm", 1e9 + 50)); tx.objectStore("htokens").add(tok("path:/pn", 1e9 + 51)); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/pm"); tx.objectStore("entries").put({ path: "/pm2", kind: "folder", ref: null }); tx.objectStore("htokens").add(tok("path:/pm2", 1e9 + 52)); });
+  await settle();
+  check(sinceC(k).length === 0, `an unidentified entry moved (its path-name removed, a new one of its kind added with its token): passes: ${J(sinceC(k))}`);
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/pn"));
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["path:/pn"]), `control: a path-named entry removed with nothing added: caught: ${J(sinceC(k))}`);
+  // (a large move's mapping rows (keys that aren't paths) carry a kind: not source entries, pass; the same row at a path:
+  // caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "\u0001m/test/00000", kind: "folder", fid: "mapfid" }); tx.objectStore("entries").put({ path: "/notmap", kind: "folder", fid: "notmapfid" }); });
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["notmapfid"]), `a large move's mapping row (not a path) is no source entry; the same row at a path is caught: ${J(sinceC(k))}`);
   // (a removal with no token: caught; the same during a reset to a new workspace (meta "resetting"): passes)
   k = G.violations.length;
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/c1.txt"));

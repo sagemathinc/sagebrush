@@ -194,6 +194,13 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       // (a subtree removed with its top (emptyTrash, a folder's removal): an entry, or its bytes, removed under a folder
       // removed in this transaction whose own token is here; log() names the top, its subtree goes with it)
       if ((why === "removed" || why === "bytes removed") && underRemovedTop(t, t.removedAt.get(ident) ?? s.pathOf.get(ident))) continue;
+      // (an entry with no identity yet is named by its path: a move removes that name and adds another, the token names
+      // the new one.  A removed path-name passes only against an added path-name of the same kind in this transaction,
+      // one for one)
+      if (why === "removed" && ident.startsWith("path:")) {
+        const kind = t.removedKind?.get(ident), at = (t.pathAdded ?? []).indexOf(kind);
+        if (kind !== undefined && at >= 0) { t.pathAdded.splice(at, 1); continue; }
+      }
       if (store === "fileBytes" && t.migrated.has(ident)) {
         const from = t.migrated.get(ident), had = legacySum(s, db.name, from), now = s.bytes.get(ident);
         if (had !== undefined && had === now) continue;
@@ -256,10 +263,13 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
         const i = s.byPath.get(key);
         s.byPath.delete(key);
         // (the identity now at ANOTHER path (a move that put its new row first): its old row deleted, nothing removed)
-        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); t.removedAt.set(i, key); s.pathOf.delete(i); }
+        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); t.removedAt.set(i, key); (t.removedKind ??= new Map()).set(i, s.ent.get(i)?.kind); s.pathOf.delete(i); }
         return;
       }
       if (!value || !KINDS.has(value.kind)) return; // (a control row: a large move's record, mappings, queue)
+      // (a large move's own rows (its mappings, under keys that aren't paths: "\u0001m/…") carry a kind too: only a path
+      // is a source entry)
+      if (typeof value.path !== "string" || !value.path.startsWith("/")) return;
       // (Trash's own folder: the workspace's, with no identity and nothing synced (log() writes it no token), as the root)
       if (value.path === TRASH) return;
       const i = identOf(value), n = entryOf(value);
@@ -276,7 +286,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       if (t.changed.get(i)?.why === "removed") t.changed.delete(i);
       t.removedAt.delete(i); // (back, so not a removed top for its subtree)
       if (was !== undefined && !was.migrated && n.migrated && value.fid) t.migrated.set(value.fid, { ref: value.ref, trashed: !!value.trashed || value.path === TRASH || value.path.startsWith(TRASH + "/") });
-      if (was === undefined) mark(t, i, name, "added", s);
+      if (was === undefined) { mark(t, i, name, "added", s); if (i.startsWith("path:")) (t.pathAdded ??= []).push(n.kind); }
       else if (contentChanged(was, n)) mark(t, i, name, "content", s);
       s.ent.set(i, n);
       s.byPath.set(value.path, i);
