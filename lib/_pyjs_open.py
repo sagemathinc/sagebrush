@@ -262,4 +262,8 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
     text = data.decode(encoding or "utf-8", errors or "strict")
     if newline is None:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return TextFile(file, mode, text, append, encoding)
+    f = TextFile(file, mode, text, append, encoding)
+    if newline == "" or newline == "\r" or newline == "\r\n":
+        # (a line ends at newline, or for "" at any of "\r\n", "\r" and "\n")
+        f._readnl = newline
+    return f
