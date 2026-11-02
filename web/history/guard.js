@@ -71,7 +71,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   const txState = (tx) => {
     let t = T.get(tx);
     if (!t) {
-      t = { changed: new Map(), tokens: new Set(), rows: [], opSeqs: new Set(), ovf: false, exhausted: false };
+      t = { changed: new Map(), tokens: new Set(), rows: [], order: [], begin: null, ovf: false, exhausted: false };
       T.set(tx, t);
       tx.addEventListener("complete", () => judge(tx, t));
     }
@@ -85,8 +85,17 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     return /\/cases\.js:|fixtureTx/.test(frames[0] ?? "");
   };
   IDBDatabase.prototype.transaction = function (...a) {
+    const judged = a[1] === "readwrite" && classOf(this) && (judgeFixtures || !isFixture());
+    // (the generation it begins with, read by a transaction queued just before it: nothing can commit in between)
+    let begin = null;
+    if (judged && classOf(this) === "workspace") {
+      const bt = tx0.call(this, ["ops", "meta"], "readonly"), c = bt.objectStore("ops").openKeyCursor(null, "prev"), f = bt.objectStore("meta").get("opsFloor");
+      let last = 0;
+      c.onsuccess = () => { last = c.result?.key ?? 0; };
+      begin = new Promise((ok) => { bt.oncomplete = () => ok(Math.max(last, f.result ?? 0)); bt.onabort = () => ok(null); });
+    }
     const tx = tx0.apply(this, a);
-    if (a[1] === "readwrite" && classOf(this) && (judgeFixtures || !isFixture())) txState(tx);
+    if (judged) txState(tx).begin = begin;
     return tx;
   };
   const judge = (tx, t) => {
@@ -98,19 +107,19 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       return;
     }
     if (s.meta.get("hactive") !== true) return;
-    // (A5, A1.1: a workspace token's rev, exactly: an op's token names an op this transaction added (each its own
-    // seq); a token of a transaction that added none carries the index's generation, read just after its commit)
-    if (s.kind === "workspace") {
-      const ws = t.rows.filter((r) => r.kind === "file" || r.kind === "folder");
-      const bad = (r, why) => G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why });
-      if (t.opSeqs.size) for (const r of ws) { if (!t.opSeqs.has(r.rev)) bad(r, `rev ${r.rev} is no op of its transaction (${[...t.opSeqs]})`); }
-      else if (ws.length) {
-        G.pending++;
-        const rt = tx0.call(db, ["ops", "meta"], "readonly"), c = rt.objectStore("ops").openKeyCursor(null, "prev"), f = rt.objectStore("meta").get("opsFloor");
-        let last = 0;
-        c.onsuccess = () => { last = c.result?.key ?? 0; };
-        rt.oncomplete = () => { const gen = Math.max(last, f.result ?? 0); for (const r of ws) if (r.rev !== gen) bad(r, `rev ${r.rev} is not the index's generation ${gen}`); G.pending--; };
-      }
+    // (A5, A1.1, A1-T17: a workspace token's rev, EXACTLY: the seq of the last op its own transaction added before it
+    // (an op's token: its own op), or, with none before it, the generation the transaction began with)
+    if (s.kind === "workspace" && t.rows.some((r) => r.kind === "file" || r.kind === "folder")) {
+      G.pending++;
+      Promise.resolve(t.begin).then((begin) => {
+        let last = begin;
+        for (const ev of t.order) {
+          if (ev.op) { last = ev.op.result; continue; }
+          const r = ev.token;
+          if ((r.kind === "file" || r.kind === "folder") && r.rev !== last) G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why: `rev ${r.rev}, but the generation at its write point is ${last}` });
+        }
+        G.pending--;
+      });
     }
     for (const [ident, { store, why }] of t.changed) {
       G.checked++;
@@ -128,13 +137,13 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       if (t) f.call(this, t, tx, a);
       const r = orig.apply(this, a);
       // (each op's seq, as the store gives it: A5's exact-rev check, op by op (astra's A1.1 binding))
-      if (t && name === "add" && this.name === "ops") r.addEventListener("success", () => t.opSeqs.add(r.result));
+      if (t && name === "add" && this.name === "ops") t.order.push({ op: r });
       return r;
     };
   };
   const onWrite = function (t, tx, [value, key], del = false) {
     const st = this, s = shadowOf(tx.db), name = st.name, k = s.kind;
-    if (name === "htokens" && !del) { t.tokens.add(value.ident); t.rows.push(value); return; }
+    if (name === "htokens" && !del) { t.tokens.add(value.ident); t.rows.push(value); t.order.push({ token: value }); return; }
     if (name === "hmeta" && !del) { s.meta.set(key, value); if (key === "ovf") t.ovf = true; if (key === "exhausted" && value === true) t.exhausted = true; return; }
     if (!SRC[k]?.has(name)) return;
     if (k === "workspace" && name === "entries") {
