@@ -34,11 +34,11 @@ def show(label, v):
         check(label, fin, RTOL)
 
 
-def out(label, f):
+def out(label, f, message=True):
     try:
         v = f()
     except Exception as e:
-        print(label, "raises", type(e).__name__, str(e)[:120])
+        print(label, "raises", type(e).__name__, str(e)[:120] if message else "")
         return
     show(label, v)
 
@@ -76,7 +76,8 @@ out("rankdata(M, axis=0)", lambda: st.rankdata(M, axis=0))
 out("rankdata(M)", lambda: st.rankdata(M))
 out("rankdata(nans, nan_policy=omit)", lambda: st.rankdata(NANS, nan_policy="omit"))
 out("rankdata bad method", lambda: st.rankdata(X, method="bogus"))
-out("skew bad nan_policy", lambda: st.skew(X, nan_policy="bogus"))
+# (the type only: SciPy's message prints a set of the policies, whose order follows CPython's string hashing)
+out("skew bad nan_policy", lambda: st.skew(X, nan_policy="bogus"), message=False)
 
 # (correlations: the result object, its p-value in each tail, the confidence interval, the edges)
 for alt in ("two-sided", "greater", "less"):
