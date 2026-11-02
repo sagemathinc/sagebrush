@@ -2110,6 +2110,20 @@ class EllipticCurve_rational_field:
                 H += 2
         return sorted(out, key=lambda Q: (Q._P is not None, Q._P or ()))
 
+    def torsion_subgroup(self):
+        """The torsion subgroup, as Sage gives it: its structure, and the
+        generators PARI chooses (lib/_sage_ec_torsion.py, loaded on first use).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').torsion_subgroup()
+            Torsion Subgroup isomorphic to Z/5 associated to the Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+            sage: EllipticCurve('15a1').torsion_subgroup().invariants()
+            (2, 4)
+        """
+        import _sage_ec_torsion
+        return _sage_ec_torsion.torsion_subgroup(self)
+
     def point_search(self, height_limit, verbose=False):
         """Points with naive height log max(|r|, s^2) <= height_limit (x = r/s^2), as Sage.
 
@@ -3290,6 +3304,38 @@ class EllipticCurvePoint:
 
     def __hash__(self):
         return hash(("pt", self._E._a, self._P))
+
+    def _key(self):
+        # (Sage orders points by their projective coordinates [x, y, z])
+        from fractions import Fraction
+        return (Fraction(0), Fraction(1), Fraction(0)) if self._P is None else (self._P[0], self._P[1], Fraction(1))
+
+    def __lt__(self, other):
+        """Points compare by their coordinates (x : y : z), as in Sage.
+
+        EXAMPLES::
+
+            sage: sorted(EllipticCurve('14a1').torsion_subgroup().points())
+            [(0 : 1 : 0), (1 : -1 : 1), (2 : -5 : 1), (2 : 2 : 1), (9 : -33 : 1), (9 : 23 : 1)]
+        """
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        return self._key() < other._key()
+
+    def __le__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        return self._key() <= other._key()
+
+    def __gt__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        return self._key() > other._key()
+
+    def __ge__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        return self._key() >= other._key()
 
     def is_zero(self):
         """Whether this is the point at infinity.
