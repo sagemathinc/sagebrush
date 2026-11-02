@@ -126,7 +126,7 @@ try {
         ta.value = ${JSON.stringify(cmd)};
         ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
       })()`);
-      await until(`document.querySelectorAll(".sb-term-cmd").length === 0`, 60000);
+      if (!(await until(`document.querySelectorAll(".sb-term-cmd").length === 0`, 60000))) throw new Error(`run(${JSON.stringify(cmd)}): the scrollback wasn't emptied within 60 s`);
       await invariant(cmd);
       return { out: null, html: null, exit: null, status: await evaluate(`document.querySelector(".sb-term-status").textContent`), cwd: await evaluate(`document.querySelector(".sb-term-cwd").textContent`) };
     }
@@ -137,7 +137,9 @@ try {
       ta.value = ${JSON.stringify(cmd)};
       ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     })()`);
-    await until(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return (!c || !c.dataset.sbSeen) && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""; })()`, 60000);
+    // (a wait that runs out is a failure, never a slow pass: unchecked, these waits hid 8 minutes of timeouts)
+    if (!(await until(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return (!c || !c.dataset.sbSeen) && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""; })()`, 60000)))
+      throw new Error(`run(${JSON.stringify(cmd)}): no new command with its status within 60 s`);
     await invariant(cmd);
     return evaluate(`(() => {
       const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1);
