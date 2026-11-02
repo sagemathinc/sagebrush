@@ -91,9 +91,9 @@ At base a931ee43, every A–F row fails at import (`ModuleNotFoundError: No modu
 - `make.py`, `mutants.json` and `HARNESS.md` are listed by sha256 in the packet's SHA256SUMS.
 - `fixtures-manifest.txt` lists every file the generator writes (path, type, size and sha256; symlink targets; FIFOs by type), with its sha256 in SHA256SUMS. A fixture change shows up as a different manifest.
 
-## The review fixes on 5da953fe (family R, 47 rows)
+## The review fixes on 5da953fe (family R, 51 rows)
 
-The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 47, for **209 CLI rows**. The H rows are H1–H6. That makes 216 tests.
+The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 51, for **213 CLI rows**. The H rows are H1–H6. That makes 219 tests.
 
 - **R1–R5:** `_fs.lstat_kind` is `none` only for ENOENT. Any other error is `error`.
   - R1 is EACCES: a directory with no search permission. It holds only for a non-root user. As root, the row FAILS; it never skips.
@@ -108,8 +108,9 @@ The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and t
   - The boundary rows: 0, a file of exactly max bytes vs one of max+1, and 50,000,000 vs 50,000,001.
   - The invalid values: -1, 1.5, `10**30`, `'x'`, True, None, nan, inf and -inf.
   - R30 is the no-open witness: a missing path with an over-ceiling max gives `bad-max` (without the check, it would give `unreadable`). R31 is the missing-path control.
-- **R42–R47** (grader P2; R42 and R47 corrected per astra3): two manifest numbers whose first digit is ASCII and whose second is not, version `1٣` (R42) and size `1²` (R47), so the number LOOP meets the non-ASCII digit. Plus direct calls past the ASCII gate: `_authority('http', 'h:٣' / 'h:²' / 'h:１')` (R43–R45) and `_host('a.٣')` (R46). Each DIGITS line, by trace:
-  - the port line is killed by R43–R45, and the number-loop line by R42 and R47. Alone, it is killed by R42 only (13 under isdigit or isdecimal); R6–R11 stop at the number-start check;
+- **R42, R47–R51** (grader P2, after astra3's correction): mixed manifest numbers, an ASCII first digit and then a non-ASCII one, so the number LOOP meets it. `1٣` in version (R42), revision (R49) and size (R51); `1²` in version (R48), revision (R50) and size (R47). **R43–R46**: direct calls past the ASCII gate: `_authority('http', 'h:٣' / 'h:²' / 'h:１')` (R43–R45) and `_host('a.٣')` (R46). Each DIGITS line, by trace:
+  - the port line is killed by R43–R45;
+  - the number-loop line alone is killed by R42, R49 and R51 under both isdigit and isdecimal (13 gives a wrong value or `OK 1`), and by R47, R48 and R50 under isdigit only (int raises: a crash, which fails under rc). R6–R11 never reach the loop: the start check refuses them first;
   - the number-start line alone is EQUIVALENT: with it mutated alone, `number()` scans zero ASCII digits and refuses as not-json, the same result. Under the full mutant, it and the loop together kill R6–R11;
   - the IP last-label line alone is EQUIVALENT: `_LABEL` (`[a-z0-9]`, ASCII only) refuses a non-ASCII label first, which R46 pins.
 - **R32–R41:** an escaped lone or reversed surrogate in a url, an entry key or a meta field is `REFUSED surrogate` by the parser, never an uncaught `UnicodeEncodeError`.
