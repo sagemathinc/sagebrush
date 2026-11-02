@@ -6,7 +6,8 @@
 
 Supported: figure, subplots, subplot, plot (format strings), scatter, bar,
 barh, hist, fill_between, errorbar, step, axhline, axvline, text, annotate,
-title, xlabel, ylabel, xlim, ylim, xscale/yscale ('log'), xticks, yticks,
+title, xlabel, ylabel, xlim, ylim, xscale/yscale ('log'), semilogx, semilogy,
+loglog, xticks, yticks,
 grid, legend, axis, suptitle, savefig (SVG), show, close, gcf, gca, clf;
 contourf and colorbar; GridSpec (matplotlib.gridspec) and add_axes; rc and
 rcParams font sizes; $...$ math in any text (matplotlib's mathtext subset).
@@ -941,10 +942,37 @@ class Axes:
         return (r[2], r[3])
 
     def set_xscale(self, s, **kw):
+        _log_base(s, kw, "x")
         self._opts["xscale"] = s
 
     def set_yscale(self, s, **kw):
+        _log_base(s, kw, "y")
         self._opts["yscale"] = s
+
+    def get_xscale(self):
+        return self._opts.get("xscale", "linear")
+
+    def get_yscale(self):
+        return self._opts.get("yscale", "linear")
+
+    # (semilogx, semilogy and loglog as matplotlib's: the axis made a log
+    # one, with the scale's keywords, then plot with the rest)
+    def semilogx(self, *args, **kwargs):
+        d = {k: v for k, v in kwargs.items() if k in ["base", "subs", "nonpositive", "basex", "subsx", "nonposx"]}
+        self.set_xscale("log", **d)
+        return self.plot(*args, **{k: v for k, v in kwargs.items() if k not in d})
+
+    def semilogy(self, *args, **kwargs):
+        d = {k: v for k, v in kwargs.items() if k in ["base", "subs", "nonpositive", "basey", "subsy", "nonposy"]}
+        self.set_yscale("log", **d)
+        return self.plot(*args, **{k: v for k, v in kwargs.items() if k not in d})
+
+    def loglog(self, *args, **kwargs):
+        dx = {k: v for k, v in kwargs.items() if k in ["base", "subs", "nonpositive", "basex", "subsx", "nonposx"]}
+        self.set_xscale("log", **dx)
+        dy = {k: v for k, v in kwargs.items() if k in ["base", "subs", "nonpositive", "basey", "subsy", "nonposy"]}
+        self.set_yscale("log", **dy)
+        return self.plot(*args, **{k: v for k, v in kwargs.items() if k not in {*dx, *dy}})
 
     def set_xticks(self, ticks, labels=None, **kw):
         self._opts["xticks"] = [float(t) for t in ticks]
@@ -1539,6 +1567,14 @@ def ioff():
     pass
 
 
+def _log_base(scale, kw, axis):
+    # (a log axis here is base 10: its ticks are powers of 10; another base
+    # would label them wrongly, so it is refused)
+    b = kw.get("base", kw.get("base" + axis, 10))
+    if scale == "log" and b != 10:
+        raise NotImplementedError("a log %s axis of base %r is not supported by sagebrush's matplotlib (base 10 is)" % (axis, b))
+
+
 def _forward(name):
     def f(*args, **kw):
         return getattr(gca(), name)(*args, **kw)
@@ -1547,7 +1583,8 @@ def _forward(name):
 
 
 for _name in ("plot", "bar", "barh", "hist", "fill_between", "errorbar", "step", "stem",
-              "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis"):
+              "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis",
+              "semilogx", "semilogy", "loglog"):
     globals()[_name] = _forward(_name)
 
 

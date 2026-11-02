@@ -918,6 +918,36 @@ class ufunc:
         A, B = asarray(A), asarray(B)
         return self(A.reshape(A.shape + (1,) * B.ndim), B, **kw)
 
+    def at(self, a, indices, b=None, /):
+        """Unbuffered in place operation on a at indices: a repeated index
+        is operated on as many times, in order (np.add.at(a, [0, 0], 1) adds
+        2). The result is cast to a's dtype, as NumPy's."""
+        if not isinstance(a, ndarray):
+            raise TypeError("first operand must be array")
+        if self.nin == 1 and b is not None:
+            raise ValueError("second operand provided when ufunc is unary")
+        # (the flat positions that a[indices] selects, in its order and shape;
+        # an empty list selects none)
+        if isinstance(indices, list) and not indices:
+            indices = asarray([], dtype=intp)
+        pos = asarray(arange(a.size).reshape(a.shape)[indices])
+        if b is not None:
+            try:
+                b = broadcast_to(asarray(b), pos.shape)
+            except ValueError:
+                raise ValueError("array is not broadcastable to correct shape") from None
+            bs = b.ravel()
+        shape = a.shape
+        for k, p in enumerate(pos.ravel().tolist()):
+            # (the flat position's index in a, C order)
+            i = []
+            for n in reversed(shape):
+                p, c = divmod(p, n)
+                i.append(c)
+            i = tuple(reversed(i))
+            r = self(a[i]) if self.nin == 1 else self(a[i], bs[k])
+            a[i] = asarray(r).astype(a.dtype)[()]
+
 
 _BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
            "maximum", "minimum", "fmax", "fmin", "arctan2", "hypot", "copysign", "logaddexp",
