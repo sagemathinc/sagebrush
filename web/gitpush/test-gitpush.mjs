@@ -22,17 +22,23 @@ const git = (...a) => execFileSync("git", a, { encoding: "utf8", env: { ...proce
 const bare = join(tmp, "srv", "octo", "notes.git");
 git("init", "-q", "--bare", bare);
 git("-C", bare, "config", "http.receivepack", "true");
+// (M2-SEC-1's overlap check: two more repositories, A's private and B's public)
+const bareA = join(tmp, "srv", "alice", "private.git"), bareB = join(tmp, "srv", "bob", "public.git");
+for (const b of [bareA, bareB]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
 
 // (the stand-in proxy: the same routes as worker.mjs, CORS for the page, git http-backend behind; every request's
 // Authorization recorded)
 const seen = [];
 let page = "";
+// (each request held this long first: the busy check's push stays under way while the test changes the form)
+let holdMs = 0;
 const proxy = createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
   const cors = { "access-control-allow-origin": page, vary: "Origin", "access-control-allow-headers": "authorization, content-type, accept, git-protocol, user-agent", "access-control-allow-methods": "GET, POST" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
   const m = /^\/github\.com(\/[^/]+\/[^/]+\.git\/(?:info\/refs|git-receive-pack))$/.exec(u.pathname);
   seen.push({ path: u.pathname + u.search, auth: req.headers.authorization ?? null });
+  if (holdMs) await new Promise((r) => setTimeout(r, holdMs));
   if (!m) { res.writeHead(400, cors); return res.end("no\n"); }
   if (req.headers.authorization !== AUTH) { res.writeHead(401, cors); return res.end("A token is required\n"); }
   const chunks = []; for await (const c of req) chunks.push(c);
@@ -135,6 +141,16 @@ try {
   check(await until(`(() => { const t = ${P}.textContent.match(/Pushed[^)]*\\)/)?.[0] ?? ""; return !t.includes(${JSON.stringify(first.slice(0, 7))}) && /^Pushed just now/.test(t); })()`, 30000), "a second push: " + (await status()));
   check(JSON.stringify(tree()) === JSON.stringify(["a.txt", "nb.ipynb", "sub/b.bin"]) && show("a.txt") === "hello again\n", "…with the change, and without the removed file");
   check(git("-C", bare, "rev-parse", "sagebrush/proj~1").trim() === first, "…its parent the first push's commit (a fast-forward)");
+  // (M2-SEC-1) while a push is under way, Push now stays off, even when the repository's field changes (its token line
+  // redrawn)
+  holdMs = 1500;
+  await ev(`(${btn("/^Push now$/")}.click(), 1)`);
+  await sleep(300);
+  await ev(`(() => { const r = ${P}.querySelector("input[type=url]"); r.dispatchEvent(new Event("change")); return 1; })()`);
+  await sleep(400);
+  check(await ev(`${btn("/^Push now$/")}.disabled && /Pushing/.test(${P}.textContent)`), "(M2-SEC-1) Push now stays off while a push is under way, after the repository's field changed");
+  holdMs = 0;
+  check(await until(`!${btn("/^Push now$/")}.disabled`, 30000), "…and comes back when it ends");
   // nothing changed: a push that commits nothing
   const second = git("-C", bare, "rev-parse", "sagebrush/proj").trim();
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
@@ -159,6 +175,37 @@ try {
   await until(`/Token saved/.test(${P}.textContent)`);
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
   check(await until(`/GitHub refused the token \\(401\\)/.test(${P}.textContent)`, 30000), "a wrong token: \"GitHub refused the token (401)…\": " + (await status()));
+  // (M2-SEC-1) one push owns the worker from begin to end: a second begin is refused, not put in its place; a request
+  // naming another run is refused; A's files reach only A; the worker is free again after an end, an abort, or a
+  // begin that failed
+  const ov = await ev(`(async () => {
+    const m = await import(new URL("sagebrush-gitpush-panel.js", location.href).href);
+    const url = new URL("sagebrush-gitpush-worker.js", location.href).href;
+    const A = "https://github.com/alice/private.git", B = "https://github.com/bob/public.git", scope = "t-overlap";
+    const common = { scope, proxy: ${JSON.stringify(proxyUrl)}, author: { name: "t", email: "t@t" } };
+    const err = (p) => p.then(() => "accepted", (e) => e.message);
+    await m.call(url, "setToken", { scope, repo: A, token: ${JSON.stringify(TOKEN)} });
+    await m.call(url, "setToken", { scope, repo: B, token: ${JSON.stringify(TOKEN)} });
+    const a = await m.call(url, "begin", { ...common, repo: A, folder: "/private", branch: "sagebrush/private" });
+    const second = await err(m.call(url, "begin", { ...common, repo: B, folder: "/public", branch: "sagebrush/public" }));
+    const wrong = await err(m.call(url, "put", { run: "not-the-run", files: [{ path: "x.txt", bytes: new TextEncoder().encode("x") }] }));
+    const wrongEnd = await err(m.call(url, "end", { run: undefined }));
+    await m.call(url, "put", { run: a.run, files: [{ path: "private.txt", bytes: new TextEncoder().encode("PRIVATE A\\n") }] });
+    const done = await m.call(url, "end", { run: a.run });
+    const after = await err(m.call(url, "put", { run: a.run, files: [] }));
+    const b = await m.call(url, "begin", { ...common, repo: B, folder: "/public", branch: "sagebrush/public" });
+    await m.call(url, "abort", { run: b.run });
+    const noToken = await err(m.call(url, "begin", { ...common, repo: "https://github.com/carol/none.git", folder: "/c", branch: "sagebrush/c" }));
+    const again = await m.call(url, "begin", { ...common, repo: B, folder: "/public", branch: "sagebrush/public" });
+    await m.call(url, "abort", { run: again.run });
+    return { second, wrong, wrongEnd, after, noToken, done: !!done.commit, distinct: a.run !== b.run && b.run !== again.run };
+  })()`);
+  check(/Another push is under way here/.test(ov.second), "(M2-SEC-1) a second begin while one runs is refused: " + ov.second);
+  check(/no longer under way/.test(ov.wrong) && /no longer under way/.test(ov.wrongEnd), "…a put or end naming another run is refused: " + ov.wrong + " / " + ov.wrongEnd);
+  check(ov.done && git("-C", bareA, "show", "sagebrush/private:private.txt") === "PRIVATE A\n", "…the first push ends, into A");
+  check(git("-C", bareB, "for-each-ref").trim() === "", "…and B's repository got nothing");
+  check(/no longer under way/.test(ov.after), "…a request for the ended run is refused");
+  check(/Save a token/.test(ov.noToken) && ov.distinct, "…the worker is free again after an end, an abort, and a begin that failed");
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));

@@ -60,43 +60,49 @@ async function* filesUnder(w: Workspace, folder: string, trash: string): AsyncGe
 export async function pushFolder(w: Workspace, host: GitpushHost, o: { repo: string; folder: string; scope: string; onProgress?(n: number): void }) {
   const branch = branchFor(o.folder);
   await host.saveOpen?.();
-  const { sigs } = await call(host.workerUrl, "begin", { scope: o.scope, repo: o.repo, folder: o.folder, branch, proxy: host.proxy, author: { name: "Sagebrush", email: "noreply@sagebrush.space" } });
+  const { sigs, run } = await call(host.workerUrl, "begin", { scope: o.scope, repo: o.repo, folder: o.folder, branch, proxy: host.proxy, author: { name: "Sagebrush", email: "noreply@sagebrush.space" } });
   const skipped: Skip[] = [];
   const prefix = o.folder === "/" ? "/" : o.folder + "/";
   let batch: { path: string; bytes: Uint8Array; sig?: string }[] = [], bytes = 0, keep: string[] = [], n = 0;
   const flush = async () => {
-    if (keep.length) { await call(host.workerUrl, "keep", { paths: keep }); keep = []; }
-    if (batch.length) { const b = batch; batch = []; bytes = 0; await call(host.workerUrl, "put", { files: b }, b.map((f) => f.bytes.buffer as ArrayBuffer)); }
+    if (keep.length) { await call(host.workerUrl, "keep", { run, paths: keep }); keep = []; }
+    if (batch.length) { const b = batch; batch = []; bytes = 0; await call(host.workerUrl, "put", { run, files: b }, b.map((f) => f.bytes.buffer as ArrayBuffer)); }
   };
-  for await (const e of filesUnder(w, o.folder, host.trash)) {
-    const rel = e.path.slice(prefix.length);
-    const why = excluded(rel);
-    if (why) { skipped.push({ path: e.path, why }); continue; }
-    // (not here now, or too large now: what was pushed before stays)
-    if (e.remote || e.missing) { skipped.push({ path: e.path, why: "not on this device yet" }); keep.push(rel); continue; }
-    if (e.kind === "file" && (e.size ?? 0) > MAX_FILE) { skipped.push({ path: e.path, why: "larger than 50 MB" }); keep.push(rel); continue; }
-    const sig = signature(e);
-    if (sig && sigs[rel] === sig) { keep.push(rel); continue; }
-    let content: any;
-    try { content = (await w.read(e.path)).content; } catch (err) {
-      if (!host.isMissing(err)) throw err;
-      skipped.push({ path: e.path, why: "not on this device yet" }); keep.push(rel); continue;
+  // (the run let go if anything here fails: the worker refuses every other push until it ends or is let go)
+  try {
+    for await (const e of filesUnder(w, o.folder, host.trash)) {
+      const rel = e.path.slice(prefix.length);
+      const why = excluded(rel);
+      if (why) { skipped.push({ path: e.path, why }); continue; }
+      // (not here now, or too large now: what was pushed before stays)
+      if (e.remote || e.missing) { skipped.push({ path: e.path, why: "not on this device yet" }); keep.push(rel); continue; }
+      if (e.kind === "file" && (e.size ?? 0) > MAX_FILE) { skipped.push({ path: e.path, why: "larger than 50 MB" }); keep.push(rel); continue; }
+      const sig = signature(e);
+      if (sig && sigs[rel] === sig) { keep.push(rel); continue; }
+      let content: any;
+      try { content = (await w.read(e.path)).content; } catch (err) {
+        if (!host.isMissing(err)) throw err;
+        skipped.push({ path: e.path, why: "not on this device yet" }); keep.push(rel); continue;
+      }
+      let b: Uint8Array;
+      if (e.kind === "notebook") b = enc.encode(notebookFileText(stripOutputs(content)));
+      else if (e.kind === "board") { const images = new Images(); try { b = enc.encode(await boardFileText(content as BoardDoc, images)); } finally { images.dispose(); } }
+      else if (content instanceof Uint8Array) b = content.slice();
+      else if (content instanceof ArrayBuffer) b = new Uint8Array(content.slice(0));
+      else if (ArrayBuffer.isView(content)) b = new Uint8Array(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength));
+      else { skipped.push({ path: e.path, why: "its bytes are in a form this can't push" }); keep.push(rel); continue; }
+      if (b.length > MAX_FILE) { skipped.push({ path: e.path, why: "larger than 50 MB" }); keep.push(rel); continue; }
+      batch.push({ path: rel, bytes: b, ...(sig ? { sig } : {}) });
+      bytes += b.length;
+      o.onProgress?.(++n);
+      if (bytes >= 8 * 2 ** 20 || batch.length >= 200) await flush();
     }
-    let b: Uint8Array;
-    if (e.kind === "notebook") b = enc.encode(notebookFileText(stripOutputs(content)));
-    else if (e.kind === "board") { const images = new Images(); try { b = enc.encode(await boardFileText(content as BoardDoc, images)); } finally { images.dispose(); } }
-    else if (content instanceof Uint8Array) b = content.slice();
-    else if (content instanceof ArrayBuffer) b = new Uint8Array(content.slice(0));
-    else if (ArrayBuffer.isView(content)) b = new Uint8Array(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength));
-    else { skipped.push({ path: e.path, why: "its bytes are in a form this can't push" }); keep.push(rel); continue; }
-    if (b.length > MAX_FILE) { skipped.push({ path: e.path, why: "larger than 50 MB" }); keep.push(rel); continue; }
-    batch.push({ path: rel, bytes: b, ...(sig ? { sig } : {}) });
-    bytes += b.length;
-    o.onProgress?.(++n);
-    if (bytes >= 8 * 2 ** 20 || batch.length >= 200) await flush();
+    await flush();
+  } catch (err) {
+    await call(host.workerUrl, "abort", { run }).catch(() => {});
+    throw err;
   }
-  await flush();
-  const done = await call(host.workerUrl, "end", {});
+  const done = await call(host.workerUrl, "end", { run });
   return { ...done, branch, skipped };
 }
 
@@ -113,6 +119,8 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
   const status = el("p", { className: "note" });
   const skips = el("div");
   const go = el("button", { textContent: "Push now" });
+  // (a push under way keeps Push now off, whatever the token line redraws meanwhile: M2-SEC-1)
+  let pushing = false;
   const drawToken = async () => {
     const r = parseRepo(repo.value);
     const has = r ? (await call(host.workerUrl, "status", { scope, repo: r.url })).hasToken : false;
@@ -124,7 +132,7 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
       try { await call(host.workerUrl, "setToken", { scope, repo: rr.url, token: token.value.trim() }); token.value = ""; host.say("Token saved in this browser"); } catch (e: any) { host.say(e.message); }
       void drawToken();
     } }));
-    go.disabled = !has;
+    go.disabled = !has || pushing;
   };
   repo.onchange = () => void drawToken();
   const showLast = (last?: { at: number; commit: string; branch: string }) => {
@@ -135,6 +143,8 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
     const r = parseRepo(repo.value);
     if (!r) return host.say("Enter the repository's address (https://github.com/owner/repo)");
     const f = folder.value.trim().replace(/\/+$/, "") || "/";
+    if (pushing) return;
+    pushing = true;
     go.disabled = true;
     status.textContent = "Pushing…";
     try {
@@ -152,7 +162,7 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
       }
     } catch (e: any) {
       status.textContent = e?.message ?? "The push failed.";
-    } finally { go.disabled = false; void drawToken(); }
+    } finally { pushing = false; void drawToken(); }
   };
   box.replaceChildren(
     el("p", {}, el("b", { textContent: "Push to GitHub" }), " (preview)"),
