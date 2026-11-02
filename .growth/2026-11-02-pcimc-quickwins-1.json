@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "pcimc quick wins 1: the small Sage functions the pcimc cryptography book uses (xsrange, random_prime, prime_divisors/prime_factors, randrange/choice/sample, log(base=), xgcd(list), Mod.order(), GF(p).primitive_element(), Primes(), Integer.digits(digits=), Integer.bits()) in lib/sage_all.py, _sage_integer.py, _sage_expr.py and _sage_ff.py, with their docstring examples. Lighter tier (@sagebrush Nov 2). Measured with bun 1.4.4 (size-record.sh, key ec7979a4) on master d869f39f vs this PR's rebased head 5efd8d2d: cli/lib.gen.js +2104, cli/pyjs.cjs +9564, engine/lib/sage.pre +28468, engine/lib/sage.src +6719; no other row moves.",
+ "bytes": {
+  "cli/lib.gen.js": 2104,
+  "cli/pyjs.cjs": 9564,
+  "engine/lib/sage.pre": 28468,
+  "engine/lib/sage.src": 6719
+ }
+}
