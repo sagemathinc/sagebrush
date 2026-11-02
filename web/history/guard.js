@@ -13,12 +13,13 @@
 //     behaviour, not by name; so do metadata-only writes (the migrator's identities and hashes, a journal mark, the
 //     fetch's failure notes) and control rows (a large move's records).
 // The verdicts: window.__historyGuard.violations, each {db, ident, store, why}.  `skipOpener(name)`: a notebooks
-// database left to the app's own opener (the GC control).
+// database left to the app's own opener (the GC control); `judgeFixtures`: a test page's own transactions judged
+// too (the guard's own controls are such transactions).
 const SRC = { workspace: new Set(["entries", "fileBytes", "boards"]), notebooks: new Set(["notebooks"]) };
 const KINDS = new Set(["file", "folder", "notebook", "board"]);
 const FENCE = "__sagebrush-workspace__";
 
-export function installGuard({ inert = false, skipOpener = () => false } = {}) {
+export function installGuard({ inert = false, skipOpener = () => false, judgeFixtures = false } = {}) {
   const G = { violations: [], checked: 0, txs: 0, inert, dbs: new Map() };
   window.__historyGuard = G;
   const classOf = (db) => (db.objectStoreNames.contains("ops") && db.objectStoreNames.contains("entries") ? "workspace" : db.objectStoreNames.contains("notebooks") && db.objectStoreNames.contains("files") ? "notebooks" : null);
@@ -77,9 +78,15 @@ export function installGuard({ inert = false, skipOpener = () => false } = {}) {
     return t;
   };
   const tx0 = IDBDatabase.prototype.transaction;
+  // (a FIXTURE: a transaction a test page's own code opens directly (its caller's frame in cases.js, or any frame
+  // named fixtureTx), setting up a state to test, never the app's: not judged)
+  const isFixture = () => {
+    const frames = (new Error().stack ?? "").split("\n").slice(1).filter((l) => !/guard(-install)?\.js/.test(l) && /:\d+:\d+/.test(l));
+    return /\/cases\.js:|fixtureTx/.test(frames[0] ?? "");
+  };
   IDBDatabase.prototype.transaction = function (...a) {
     const tx = tx0.apply(this, a);
-    if (a[1] === "readwrite" && classOf(this)) txState(tx);
+    if (a[1] === "readwrite" && classOf(this) && (judgeFixtures || !isFixture())) txState(tx);
     return tx;
   };
   const judge = (tx, t) => {

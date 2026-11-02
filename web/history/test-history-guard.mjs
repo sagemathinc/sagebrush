@@ -23,7 +23,7 @@ await build(join(here, "guard.js"), "guard.js");
 await build(join(here, "../workspace/index.ts"), "ws.js");
 copyFileSync(join(here, "test-history-guard.page.js"), join(site, "cases.js"));
 // (the guard installed by its own module, before the cases' module (and anything it opens) loads)
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history guard test</title><script type="module">import { installGuard } from "./guard.js"; installGuard({ skipOpener: (n) => n.startsWith("noopener-") }); const { run } = await import("./cases.js"); window.run = run; window.ready = true;</script>`);
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history guard test</title><script type="module">import { installGuard } from "./guard.js"; installGuard({ skipOpener: (n) => n.startsWith("noopener-"), judgeFixtures: true }); const { run } = await import("./cases.js"); window.run = run; window.ready = true;</script>`);
 const FILES = ["/guard.js", "/ws.js", "/cases.js"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
