@@ -496,7 +496,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
 // shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
 import { answerPresence, TAB } from "./shell/presence.ts";
-import { openPreview } from "./workspace/preview.ts";
+import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -3125,6 +3125,8 @@ const wsReady = (async () => {
     readOnlyIfQuarantined();
     w.onDurability(readOnlyIfQuarantined);
     void startMigrator(w);
+    // ("Push to GitHub"'s automatic push, Stage A MVP M3: nothing at all without its DEV flag)
+    startGitpushAuto(w, (f) => new URL(f, location.href).href);
     return w;
   } catch (e) {
     console.warn("workspace:", e);

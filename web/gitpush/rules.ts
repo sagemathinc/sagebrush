@@ -7,6 +7,8 @@ export const MAX_FILE = 50 * 2 ** 20;
 /** At most this many bytes of changed files go in one push: the proxy takes 100 MiB a request (web/gitpush/worker.mjs),
  * so a larger first push goes as several commits, each pushed in turn. */
 export const PUSH_BATCH = 80 * 2 ** 20;
+/** The automatic push: every 10 minutes when something changed (M3). */
+export const AUTO_MS = 10 * 60_000;
 /** Pushes go only to branches named so: never main, never anything the person didn't make here. */
 export const BRANCH = /^sagebrush\/[a-z0-9][a-z0-9._-]{0,59}$/;
 const SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/;
