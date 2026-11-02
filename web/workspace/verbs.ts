@@ -4,7 +4,9 @@
 // made from that file, and the page checks every call against it).  The
 // verbs are Workspace.forAgent's (api.ts), minus watch and ops, which agents
 // get otherwise (a subscription, the log).  Nothing here is a verb a person
-// alone may use (dropVersions, emptying Trash, forget).
+// alone may use (dropVersions, emptying Trash, forget).  And one more, outside
+// the workspace: support.draft, a support request shown to the person, who
+// sends it (support-draft.ts); there is no verb that sends one.
 //   bun web/workspace/verbs.ts --write    (schema.json written again)
 // web/workspace/test-workspace.mjs fails when schema.json is stale.
 
@@ -46,13 +48,28 @@ export const VERBS = {
   version: { description: "The bytes of one of a data file's versions (an index into history).", params: obj({ path, index: { type: "integer", minimum: 0 } }, ["path", "index"]) },
 } as const;
 
+/** The verbs outside the workspace: they need no grant, since they only show the person something. */
+export const SUPPORT_VERBS = {
+  draft: {
+    description: "Draft a support request for the person: it is shown on their page as a card, and they review it and send it with one click; you can't send it yourself. Use it when you're blocked, or Sagebrush is missing a feature or package. The answer is only {drafted: true, shown: \"card\"}; a new draft replaces the one shown.",
+    params: obj({
+      kind: { enum: ["bug", "pkg", "feat", "book", "other"], description: "bug, pkg (a missing package), feat, book or other (the default)" },
+      subject: { type: "string", minLength: 5, maxLength: 180, description: "The title" },
+      body: { type: "string", minLength: 10, maxLength: 19000, description: "What you tried and what happened, in plain text: no attachments, so the relevant text or a link to a shared Sagebrush document" },
+    }, ["subject", "body"]),
+  },
+} as const;
+
 /** schema.json: the verbs, their parameters' JSON Schemas, and the limits. */
 export function schema() {
   return {
     $comment: "Written by web/workspace/verbs.ts (bun web/workspace/verbs.ts --write); do not edit.",
     protocol: 1,
     limits: { maxContentBytes: MAX_CONTENT_BYTES, maxFrameBytes: MAX_FRAME_BYTES, maxPath: MAX_PATH, maxDepth: MAX_DEPTH, maxName: MAX_NAME, maxList: MAX_LIST, maxHistory: MAX_HISTORY, inFlight: 8, perSecond: 100, burst: 200 },
-    verbs: Object.fromEntries(Object.entries(VERBS).map(([name, v]) => [`workspace.${name}`, { description: v.description, params: { $schema: "https://json-schema.org/draft/2020-12/schema", ...v.params } }])),
+    verbs: Object.fromEntries([
+      ...Object.entries(VERBS).map(([name, v]) => [`workspace.${name}`, v] as const),
+      ...Object.entries(SUPPORT_VERBS).map(([name, v]) => [`support.${name}`, v] as const),
+    ].map(([method, v]) => [method, { description: v.description, params: { $schema: "https://json-schema.org/draft/2020-12/schema", ...v.params } }])),
   };
 }
 export const schemaText = () => JSON.stringify(schema(), null, 2) + "\n";

@@ -169,6 +169,33 @@ try {
   const ra = await drive({ op: "req", method: "workspace.restore", params: { path: trashed.oldA } });
   ok(ra.err?.code === "invalid", `restoring an old /A (it would come back as "/A (2)", outside the grant) is refused (${ra.err?.message?.slice(0, 90)})`);
   ok(await ev(`T.ws.list("/").then((l) => !l.some((e) => /^\\/A \\(/.test(e.path)))`), "and nothing outside the grant was made");
+  // support.draft (the addendum to plan-support-requests r12, §6): the draft is shown as a card, the answer is only
+  // {drafted, shown}, nothing goes to the support form's origin, and only the person's trusted click opens it
+  await send("Network.enable");
+  const asked = [];
+  const onNet = (e) => { const m = JSON.parse(e.data); if (m.method === "Network.requestWillBeSent") asked.push(m.params.request.url); };
+  sock.addEventListener("message", onNet);
+  await ev(`(() => { window.__opened = []; window.open = (...a) => { window.__opened.push(a); return null; }; return true; })()`);
+  const sd = await drive({ op: "req", method: "support.draft", params: { kind: "pkg", subject: "Missing package: sympy", body: "workspace_read works, but sympy isn't installed." } });
+  ok(JSON.stringify(sd.ok) === '{"drafted":true,"shown":"card"}', `support.draft: the answer is only {drafted: true, shown: "card"} (${JSON.stringify(sd).slice(0, 120)})`);
+  ok(await until(`document.querySelector("#supportdraft strong")?.textContent === "Missing package: sympy"`), "support.draft: the person sees the card, with its subject");
+  ok(await ev(`!document.querySelector("#supportdraft a, #supportdraft [href]") && !/cocalc|support\\.sagebrush/.test(document.querySelector("#supportdraft").outerHTML)`), "support.draft: the card holds no link to the form");
+  const sdBad = await drive({ op: "req", method: "support.draft", params: { subject: "Missing package: sympy", body: "workspace_read works.", email: "x@example.com" } });
+  ok(sdBad.err?.code === "invalid", `support.draft with an email is refused (${sdBad.err?.message?.slice(0, 80)})`);
+  const sdSend = await drive({ op: "req", method: "support.send", params: { subject: "Missing package: sympy", body: "workspace_read works." } });
+  ok(!!sdSend.err, `support.send is no verb (${sdSend.err?.message?.slice(0, 60)})`);
+  await ev(`(() => { const b = [...document.querySelectorAll("#supportdraft button")].find((x) => x.textContent === "Review and send"); b.click(); b.dispatchEvent(new MouseEvent("click", { bubbles: true })); return true; })()`);
+  await sleep(300);
+  ok((await ev("window.__opened.length")) === 0 && (await ev(`!!document.querySelector("#supportdraft")`)), "support.draft: a script's click() and a dispatched click open nothing");
+  ok(!asked.some((u) => /cocalc\.ai|support\.sagebrush\.space/.test(u)), `support.draft: nothing went to the support form before the person's click (${asked.length} requests)`);
+  const at = await ev(`(() => { const r = [...document.querySelectorAll("#supportdraft button")].find((x) => x.textContent === "Review and send").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+  ok(await until("window.__opened.length === 1"), "support.draft: the person's click opens the form");
+  const [url, target, features] = await ev("window.__opened[0]");
+  ok(target === "_blank" && features === "noopener,noreferrer" && /^https:\/\/cocalc\.ai\/support\/new\?type=task&subject=%5Bsagebrush%5D%20pkg%3A%20Missing%20package%3A%20sympy&body=workspace_read%20works%2C%20but%20sympy%20isn't%20installed\.&url=https%3A%2F%2Fsagebrush\.space%2F&context=Sagebrush%20dev%2C%20notebook%2C%20pairing$/.test(url), `support.draft: in a new tab without opener or referrer, filled in (${url})`);
+  ok(!(await ev(`!!document.querySelector("#supportdraft")`)), "support.draft: the card goes once opened");
+  sock.removeEventListener("message", onNet);
+
   // the same code again, from another page, while paired: refused
   const again = await ev(`T.tryPair(${JSON.stringify(CODE)}, ${PORT})`);
   ok(/^refused/.test(again), `the used code, again: ${again}`);

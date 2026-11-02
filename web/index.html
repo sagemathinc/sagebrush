@@ -486,6 +486,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+import { checkDraft, showSupportDraft, DRAFT_DESCRIPTION, DRAFT_RESULT } from "./workspace/support-draft.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -3056,6 +3057,26 @@ const tools = [
       const box = await nb.setInteract(id, values);
       if (!box) return { content: [{ type: "text", text: `No interact ${id}; run_python or read_notebook lists them.` }] };
       return result(box);
+    },
+  },  {
+    name: "draft_support_request",
+    description: DRAFT_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["bug", "pkg", "feat", "book", "other"], description: "bug, pkg (a missing package), feat, book or other (the default)." },
+        subject: { type: "string", description: "The title, 5 to 180 characters." },
+        body: { type: "string", description: "What you tried and what happened, 10 to 19,000 characters of plain text." },
+      },
+      required: ["subject", "body"],
+    },
+    // (shown to the person as a card; only their click opens the form, and only they send it: support-draft.ts)
+    async execute(args) {
+      const how = { mode: nb.mode, via: "webmcp" };
+      const d = checkDraft(args, how);
+      if (typeof d === "string") return { isError: true, content: [{ type: "text", text: d }] };
+      showSupportDraft(d, how);
+      return { content: [{ type: "text", text: JSON.stringify(DRAFT_RESULT) }] };
     },
   },
 ];

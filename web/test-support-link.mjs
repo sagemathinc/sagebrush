@@ -1,6 +1,7 @@
 // The Support entry (William, Oct 31): the notebook page's ⋯ menu has one plain link to CoCalc's support form, in a new
 // tab. It adds no query, fragment or page data, and rel withholds the opener and the referrer. No script. It and
-// "How cells run" tell a screen reader they open in a new tab.
+// "How cells run" tell a screen reader they open in a new tab. An agent's support draft (web/workspace/support-draft.ts) is the one
+// other way to the form, in exactly its reviewed shape.
 // The whole tag must equal one exact literal, so any other attribute, in any quoting or case (an on* handler, style,
 // download), fails. Checked in web/index.html and web/dist/index.html; under CI the dist page must exist.
 //   node web/test-support-link.mjs
@@ -41,6 +42,19 @@ function check(file) {
     ok(body === `${label} <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span>`, `new-tab: ${file}: #${id} reads "${label} ↗", the arrow hidden from a screen reader, which hears "(opens in a new tab)" (${JSON.stringify(body)})`);
   }
   ok(/^\s*\.sr \{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset\(50%\); white-space: nowrap; \}$/m.test(html), `sr-class: ${file}: the .sr class is the visually hidden one`);
+}
+
+// The one other way to CoCalc's form: an agent's draft (web/workspace/support-draft.ts, the addendum to
+// plan-support-requests r12), opened only by the person's click on its card. Exactly this shape: the form's own
+// query parameters, each encoded, the page's address fixed (never the page's own), and nothing else.
+const DRAFT_URL =
+  "`https://cocalc.ai/support/new?type=${q(COCALC_TYPE[d.kind])}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q(\"https://sagebrush.space/\")}&context=${q(draftContext(how.mode, how.via))}`";
+{
+  const src = readFileSync(join(here, "workspace", "support-draft.ts"), "utf8");
+  const n = src.match(/cocalc\.ai/g)?.length ?? 0;
+  ok(src.includes("  return " + DRAFT_URL + ";\n") && n === 1, `draft: support-draft.ts opens CoCalc's form in exactly one way, the reviewed one (${n} mentions of cocalc.ai)`);
+  ok(src.includes("const q = (s: string) => encodeURIComponent(s);"), "draft: every value encoded");
+  ok(/review\.addEventListener\("click", \(e\) => \{\n\s+if \(!e\.isTrusted\) return;\n\s+const url = draftURL\(d, how\);\n\s+close\(\);\n\s+window\.open\(url, "_blank", "noopener,noreferrer"\);\n\s+\}\);/.test(src), "draft: opened only on a trusted click, in a new tab without opener or referrer");
 }
 
 let pages;

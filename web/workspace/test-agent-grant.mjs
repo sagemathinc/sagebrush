@@ -23,7 +23,22 @@ const good = {
   "workspace.history": { path: "/A/x.txt" },
   "workspace.version": { path: "/A/x.txt", index: 0 },
 };
-ok(AGENT_VERBS.size === 12 && Object.keys(good).every((v) => AGENT_VERBS.has(v)), "the schema's 12 verbs");
+ok(AGENT_VERBS.size === 13 && Object.keys(good).every((v) => AGENT_VERBS.has(v)), "the schema's 12 workspace verbs, and support.draft");
+// (an agent drafts a support request and the person sends it: no verb sends one, now or added later unnoticed;
+// the addendum to plan-support-requests r12, §6.4)
+ok(JSON.stringify([...AGENT_VERBS].filter((v) => !v.startsWith("workspace."))) === '["support.draft"]', "the only verb outside the workspace is support.draft");
+ok(checkCall("support.draft", { subject: "Missing package", body: "I need sympy's ode module." }) === null, "support.draft: a subject and body pass");
+ok(checkCall("support.draft", { kind: "pkg", subject: "Missing package", body: "I need sympy's ode module." }) === null, "support.draft: with a kind");
+for (const [p, why] of [
+  [{ subject: "Missing package" }, "no body"],
+  [{ subject: "Hi", body: "I need sympy's ode module." }, "a subject under 5"],
+  [{ subject: "x".repeat(181), body: "I need sympy's ode module." }, "a subject over 180"],
+  [{ subject: "Missing package", body: "x".repeat(19001) }, "a body over 19,000"],
+  [{ kind: "urgent", subject: "Missing package", body: "I need sympy's ode module." }, "an unknown kind"],
+  [{ subject: "Missing package", body: "I need sympy's ode module.", email: "a@b.c" }, "an email"],
+  [{ subject: "Missing package", body: "I need sympy's ode module.", send: true }, "send"],
+]) ok(checkCall("support.draft", p) !== null, `support.draft refuses ${why}`);
+for (const v of ["support.send", "support.submit", "support.create"]) ok(checkCall(v, { subject: "Missing package", body: "I need sympy's ode module." }) !== null, `${v} is not a verb`);
 for (const [v, p] of Object.entries(good)) ok(checkCall(v, p) === null, `${v}: good params pass (${checkCall(v, p) ?? "ok"})`);
 const bad = [
   ["workspace.drop", { path: "/A" }, "an unknown verb"],
