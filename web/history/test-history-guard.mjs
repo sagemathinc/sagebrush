@@ -1,3 +1,4 @@
+// ci: web-runner order=240 runner=bun chrome
 // History's dynamic census guard (web/history/guard.js; Stage A layer 1, design stage-a-l1 r2.2 §4) in headless
 // Chromium, with real IndexedDB: installed before anything opens a database, it must see a workspace scenario (index
 // ops, data files, Trash, boards, notebooks) as fully covered, with no violation, and catch each of its controls (two

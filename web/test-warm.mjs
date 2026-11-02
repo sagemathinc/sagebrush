@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=90
 // X1 (design r3) on the full page in headless Chromium: the language's
 // environment loads at the user's own actions (pointing at a code cell,
 // typing in it, moving onto it with the keyboard, choosing the language in

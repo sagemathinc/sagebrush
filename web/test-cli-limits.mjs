@@ -1,3 +1,4 @@
+// ci: checks.1 order=30
 // The engine's limits through the npm launcher (packages/sagebrush/bin/
 // sagebrush.cjs; plan-ff-limits r3, section 3), which reads --limits FILE
 // or SAGEBRUSH_LIMITS=FILE itself, with a bounded read, before it decides how

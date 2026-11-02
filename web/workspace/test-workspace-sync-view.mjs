@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=70 runner=bun chrome
 // Sync client step 4 (design/sync-client.md C3, D5, D10) in headless Chromium: pages of the server's log applied to
 // the confirmed index and the view in one transaction a page, local intents on top, nothing deleted the view
 // doesn't name gone.  The cases are in sync-view-cases.js.

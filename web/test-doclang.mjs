@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=110
 // The notebook's language, which only its user changes: the search box finds
 // the functions of the notebook's language only (Sage's library in a Sage
 // notebook, MATLAB's built-ins in a MATLAB one, and says there is no search in

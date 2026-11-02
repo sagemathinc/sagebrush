@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=70
 // time in the browser (lib/_pytime.py): the zone Chrome is in (its TZ), from
 // the pinned zone data (tzdata/, web/tzdata-chunks.mts) the worker fetches
 // and checks the first time time is imported (web/lib-lazy.ts), on the full

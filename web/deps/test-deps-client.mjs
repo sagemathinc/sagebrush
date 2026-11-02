@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=40 runner=bun
 // The page's side of the Share dialog's analysis (web/deps/deps-client.ts,
 // share-ux-plan r2 §3): progressive results, stop, the fail-safes, generations.
 // A fake worker runs the worker's protocol in-process (the real fileDeps).

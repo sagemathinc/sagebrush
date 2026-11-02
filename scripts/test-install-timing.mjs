@@ -1,3 +1,4 @@
+// ci: checks.5 order=50
 // scripts/install-timing.mjs (plan-install-timing-r2 §7): the statistics, the
 // order, the base-tag rule on a fixture repository, input refusal, the
 // summary, the workflow's contract, a real smoke of every measure on a tiny

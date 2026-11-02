@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=200 runner=bun
 // The bash shell's loader and its worker (plan-bash-shell r3 §1.3–§1.6, §6;
 // r4 addendum A1), in headless Chromium, against a server of its own: a set
 // built from optional/bash by the publisher, web/shell/worker-boot.js with the

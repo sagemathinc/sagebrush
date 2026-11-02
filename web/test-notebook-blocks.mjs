@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=100
 // The notebook's Markdown cells written as blocks (web/board/blocks.ts, as a
 // board's text is), in headless Chromium on the notebook page: a rendered
 // cell double-clicked shows its blocks where the rendered text was (nothing

@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=50 runner=bun
 // The shared reducer of the workspace index (web/workspace/sync-reduce.ts;
 // design/sync-client.md C4): its JSON vectors (sync-vectors.json, which the
 // server will run too), copies of an index independent of each other, and

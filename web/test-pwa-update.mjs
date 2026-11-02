@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=20 chrome
 // A deploy while a notebook is open (HARD-813-1): a page opened before it
 // keeps running its worker, whose library chunks (web/lib-chunks.mts) are
 // named by that build, and the deploy replaced lib/ and the service worker

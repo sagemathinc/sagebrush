@@ -1,3 +1,4 @@
+// ci: checks.5 order=10
 // The core's growth gate (scripts/size-measure.mjs, plan-growth-budget-r5 §5):
 // records, base selection, bundles and the bootstrap, the rules, epoch resets,
 // the range rule, markers, the merge protocol's lease, docs-only inputs and

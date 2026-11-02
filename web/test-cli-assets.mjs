@@ -1,3 +1,5 @@
+// ci: checks.3 order=10 -- build/cli/pyjs.cjs
+// ci: inline (release.yml)
 // The CLI bundle's notebook server (`sagebrush notebook`) serves every file
 // the page loads: the scripts it references (found in the page itself, so a
 // new one cannot be forgotten), KaTeX and the notices, at the top and under

@@ -1,3 +1,4 @@
+// ci: web-runner order=210 runner=bun chrome
 // The journal's activation (plan-sync-slice2-client r4 §1a) in headless Chromium, with real IndexedDB and Web
 // Locks: the workspace's version (8 meta's `journal`, 9 the board journal's barrier, 10 history's stores) and meta's `journal`; activation writing "journal" into the three fences and
 // then `active`; the fences' counters and their mark kept by every later write (a reset's, a quarantine's, a

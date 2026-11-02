@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bundledPackageDir } from './build-package-dir.mjs';

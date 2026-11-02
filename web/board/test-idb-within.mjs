@@ -1,3 +1,4 @@
+// ci: web-runner order=570
 // within() (web/board/idb-open.ts), the bound on the board's cache read
 // before it runs code: a result in time is that result and leaves no timer
 // behind (the review's HARD-030-1); one too late is the fallback.

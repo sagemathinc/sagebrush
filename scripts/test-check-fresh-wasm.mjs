@@ -1,3 +1,4 @@
+// ci: checks.5 order=30
 // scripts/check-fresh-wasm.mjs: a stale committed engine fails master pushes, dispatches and the
 // schedule, and only warns on a pull request; a fresh one passes everywhere.
 //   node scripts/test-check-fresh-wasm.mjs
