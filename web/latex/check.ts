@@ -56,15 +56,16 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   // (the code items: one refused or failed is an error at its line; one blocked by an earlier failure, a warning;
   //  those not run yet, one warning saying how to run them)
   const last = (m?: string) => String(m ?? "").split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
+  const lang = (m: string) => (/^(py|pyc|pycode|pyblock)$/.test(m) ? "Python" : /^(matlab|mcode|mblock)$/.test(m) ? "MATLAB" : "SageTeX");
   const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
     state: it.err ? `refused: ${it.err}` : it.s === "ok" ? "ok" : it.s === "error" ? `error: ${last(it.msg)}` : it.s === "blocked" ? "blocked" : "not run" }));
   let notRun = 0;
   for (const c of code) {
-    if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
-    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) wasn't run: an earlier item failed` });
+    if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `${lang(c.mode)} item ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
+    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${lang(c.mode)} item ${c.n} (${c.mode}) wasn't run: an earlier item of its language failed` });
     else if (c.state === "not run") notRun++;
   }
-  if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} SageTeX item${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
+  if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} code item${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
   problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),

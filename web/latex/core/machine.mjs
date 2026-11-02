@@ -1038,7 +1038,7 @@ export class Machine {
 }
 
 const BASE_KNOWN = new Set(["\\", " ", "[", "]", "(", ")", ",", ";", ":", "!", "{", "}", "%", "&", "#", "_", "$", "-", "/", "'", "`", "^", "~", "=", ".", "\"", "@", "|", "\u0001~", ""]);
-const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
+const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*", "matlabcode", "matlabblock",
   "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode"]);
 const EQ_ENVS = new Set(["equation", "align", "gather", "multline", "eqnarray"]);
 const KNOWN_ENVS = new Set(["itemize", "enumerate", "description", "center", "flushleft", "flushright", "figure", "figure*", "table", "table*", "tabular", "tabular*", "tabularx", "array",
