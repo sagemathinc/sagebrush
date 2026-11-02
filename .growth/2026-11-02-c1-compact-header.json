@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Clutter C1 (William Nov 2, the page cluttered): the notebook page's header in one row (name, links, theme; the subtitle kept for screen readers, the tagline not shown), CSS in web/index.html, part of the CLI's embedded site, so cli/pyjs.cjs may grow. Not measured on a probe: the marker is the CSS's raw added bytes (846) + 128, an upper bound.",
+ "bytes": {
+  "cli/pyjs.cjs": 974
+ }
+}
