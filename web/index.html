@@ -457,7 +457,7 @@
 // classic script, so the cells exist before the first paint.
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
-import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex } from "./docsearch.ts";
+import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
@@ -497,6 +497,27 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 // shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
+import { pageSession } from "./page/session.ts";
+// The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
+// page's own variables, read and set through these
+const session = pageSession({
+  get nb() { return nb; }, get kernels() { return kernels; }, get journalPage() { return journalPage; }, get journal() { return journal; },
+  get ttEl() { return ttEl; }, ttRefresh: (toEnd) => ttRefresh(toEnd), get historyDbReady() { return historyDbReady; },
+  loadHistory: () => loadHistory(), IdbPatchStore, get current() { return current; }, anchorOf, restoreAnchor,
+  open: (store, id, kind) => open(store, id, kind), storeFor: (id, initial) => storeFor(id, initial), get ws() { return ws; },
+  navLease: () => navLease(), get trashTest() { return trashTest; },
+  get writerBar() { return writerBar; }, writerBarHeight: () => writerBarHeight(), get statusEl() { return statusEl; },
+  DOC_SYNC_RELOAD, get nbName() { return nbName; }, get modeEl() { return modeEl; }, $: (q) => $(q),
+  get nbHistory() { return nbHistory; }, set nbHistory(v) { nbHistory = v; },
+  get historyQueue() { return historyQueue; }, set historyQueue(v) { historyQueue = v; },
+  get ttUnavailable() { return ttUnavailable; }, set ttUnavailable(v) { ttUnavailable = v; },
+  get textHashFn() { return textHashFn; }, set textHashFn(v) { textHashFn = v; },
+  get writerBarTimer() { return writerBarTimer; }, set writerBarTimer(v) { writerBarTimer = v; },
+  get replaying() { return replaying; }, set replaying(v) { replaying = v; },
+  get replayEnded() { return replayEnded; }, set replayEnded(v) { replayEnded = v; },
+  get docSwitch() { return docSwitch; }, set docSwitch(v) { docSwitch = v; },
+  get docSyncNeedsReload() { return docSyncNeedsReload; }, set docSyncNeedsReload(v) { docSyncNeedsReload = v; },
+});
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -1061,44 +1082,8 @@ const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
 // Changes made before the history is ready (its module and database load
 // after the notebook) wait here, and are recorded in order once it is.
 let historyQueue = [];
-// (a journal's store keeps its own history, T1 of its every save (notebook/journal.js): shown here, never recorded
-// from the page's changes, and let go, not closed, when another notebook opens: its saves still running finish first)
-let nbJournal = null, nbHistoryOff = null;
-async function startHistory(id) {
-  // (the journal's store let go only if the page now shows another: the same store reattached (a takeover's reload)
-  // keeps its lock and its history (astra's CORR-215-1); notebook/journal.js switchJournal)
-  if (!nbJournal) nbHistory?.close();
-  nbJournal = journalPage.switchJournal(nbJournal, nb.store);
-  nbHistoryOff?.();
-  nbHistoryOff = null;
-  nbHistory = null;
-  if (nbJournal) {
-    nbHistory = nbJournal.history;
-    historyQueue = [];
-    kernels.get(id)?.journal?.flushPending(id);
-    nbHistoryOff = nbHistory.on(() => { if (!ttEl.hidden) ttRefresh(false); });
-    if (!ttEl.hidden) ttRefresh(true);
-    return;
-  }
-  historyQueue = [nb.snapshot()]; // the notebook as it opened
-  const hdb = await historyDbReady;
-  if (!hdb) {
-    ttUnavailable = "TimeTravel needs this browser's storage, which is not available here (a private window of some browsers?).";
-    if (!ttEl.hidden) ttRefresh(true);
-    return;
-  }
-  let NotebookHistory;
-  try { ({ NotebookHistory, textHash: textHashFn } = await loadHistory()); } catch (e) { return console.warn("history:", e); }
-  if (current.id !== id) return;
-  const h = new NotebookHistory(new IdbPatchStore(hdb, id));
-  await h.init();
-  if (current.id !== id) return h.close(); // another notebook opened meanwhile
-  nbHistory = h;
-  for (const doc of historyQueue.splice(0)) h.record(doc); // (nothing for one that is the last version)
-  kernels.get(id)?.journal?.flushPending(id);
-  h.on(() => { if (!ttEl.hidden) ttRefresh(false); });
-  if (!ttEl.hidden) ttRefresh(true); // opened while the history was loading
-}
+// (TimeTravel's history started for the notebook opened: web/page/session.ts)
+function startHistory(id) { return session.startHistory(id); }
 nb.on("change", (doc) => (nb.store?.journaled ? null : nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
 function ttShow(open) {
   if (open === !ttEl.hidden) return;
@@ -2864,6 +2849,15 @@ async function searchDocs(query, limit = 20) {
   const idx = await loadDocIndex();
   return idx ? searchIndex(idx, query, limit) : null;
 }
+// (the agents' search_docs: every language's index, the notebook's own first,
+// or the one asked for; an index that doesn't load is left out. The search
+// box stays the notebook's language only.)
+async function searchAllDocs(query, limit, only) {
+  if (!docWords(query).length) return [];
+  const langs = only ? [only] : [nb.mode, ...Object.keys(DOC_INDEX).filter((l) => l !== nb.mode)];
+  const idxs = await Promise.all(langs.map((l) => loadDocIndex(l).then((x) => [l, x], () => [l, null])));
+  return searchIndexes(idxs, query, limit);
+}
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
 // (the results under the search box, which is in the toolbar's middle: moved
 // right as far as needed to be within the window, astra's UI-CA2-1)
@@ -2966,11 +2960,16 @@ const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(b
 const tools = [
   {
     name: "search_docs",
-    description: "Search the documentation of Sagebrush's Sage library: every public function and method, its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. Use it to find what Sagebrush can do before writing code; run_python with sage=true then runs it (name? in code shows one function's full documentation).",
-    inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\"." }, limit: { type: "number", description: "At most this many results (default 10)." } }, required: ["query"] },
-    async execute({ query, limit }) {
-      const hits = await searchDocs(query, limit ?? 10);
-      const text = hits.length ? hits.map((e) => `${docHead(e)}${e.open_problem ? "  [open problem]" : ""}\n  ${e.summary}`).join("\n") : "No function's documentation has all of these words.";
+    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation).",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\", \"prime_range\"." }, limit: { type: "number", description: "At most this many results (default 10)." }, language: { type: "string", enum: Object.keys(DOC_INDEX), description: "Only this language's functions (default: every language, the notebook's own first)." } }, required: ["query"] },
+    async execute({ query, limit, language }) {
+      if (language !== undefined && !DOC_INDEX[language]) return { isError: true, content: [{ type: "text", text: `No documentation search for ${JSON.stringify(language)}: one of ${Object.keys(DOC_INDEX).join(", ")}.` }] };
+      const hits = await searchAllDocs(query, limit ?? 10, language);
+      const tag = (e) => (e.lang !== nb.mode ? `  [${LANG_NAME[e.lang] ?? e.lang}]` : "");
+      const other = hits.some((e) => e.lang !== nb.mode);
+      const text = hits.length
+        ? hits.map((e) => `${docHead(e)}${tag(e)}${e.open_problem ? "  [open problem]" : ""}\n  ${e.summary}`).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
+        : "No function's documentation has all of these words.";
       return { content: [{ type: "text", text }] };
     },
   },
@@ -3277,110 +3276,13 @@ function showWriter(store, id) {
   $("#ttrepro").disabled = !c.repro;
   if (c.readOnly && store.onTakeover) store.onTakeover(() => takeOver(store, id));
 }
-// (a read-only tab that became the writer: reopened as it, said, the reader's place kept: the scroll, and the cell
-// that had the focus (board's 2))
-async function takeOver(store, id) {
-  if (current.id !== id || nb.store !== store) return;
-  const at = anchorOf(nb), focused = document.activeElement?.closest?.("#cells .cell")?.cell?.id ?? null;
-  try { await open(store, id); } catch (e) {
-    // (it couldn't be reopened as the writer here: the lock let go at once, so another tab (or this one, reloaded) can
-    // take it, rather than held by a tab that never writes; and said (board's C))
-    console.warn("notebook:", e);
-    await store.release();
-    writerBar.hidden = false;
-    writerBar.textContent = journalPage.TAKEOVER_FAILED;
-    writerBarHeight();
-    return;
-  }
-  restoreAnchor(nb, at);
-  if (focused) [...document.querySelectorAll("#cells .cell")].find((el) => el.cell?.id === focused)?.cell?.ta?.focus({ preventScroll: true });
-  // (said in the bar itself for a few seconds, where the reason was (the status line is also the interpreter's))
-  writerBar.hidden = false;
-  writerBar.textContent = journalPage.TAKEOVER;
-  writerBarHeight();
-  writerBarTimer = setTimeout(() => { if (!nb.store?.viewOnly) { writerBar.hidden = true; writerBar.textContent = ""; writerBarHeight(); } }, 6000);
-}
-// (DEV's switch, after the journal's activation: the notebook shown, if one was opened before it, opened again through
-// the journal, its synced history started (DOC_SYNC is on by then).  Whether it is: a failure lets go of the new store
-// and the old one (their writer locks: another tab, or this page reloaded, can take them), and leaves no store attached,
-// so nothing is editable with nowhere to save it (astra's DEVSW-2))
-async function reopenJournaled() {
-  // (one navigation lease over all of it, its cleanup (a detach, the writer locks let go) included: #447 r5c,
-  // R5-NAV-2 (2))
-  const end = await navLease();
-  try {
-  if (!current.id || current.kind !== "browser" || (nb.store?.journaled && nb.store.synced)) return true;
-  const id = current.id, prev = nb.store;
-  let st = null;
-  try {
-    st = await storeFor(id);
-    await open(st, id);
-    if (nb.store === st && st.journaled) return true;
-    throw new Error("the notebook isn't open through the journal");
-  } catch (e) {
-    if (trashTest.pause) await trashTest.pause("recovering");
-    console.warn("sync: the notebook not reopened through the journal:", e);
-    if (nb.store && (nb.store === st || nb.store === prev)) nb.detach();
-    for (const x of new Set([st, prev])) if (x?.journaled) try { await x.release(); } catch {}
-    return false;
-  }
-  } finally {
-    end();
-  }
-}
-// (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
-// to save), one another tab writes, a quarantined workspace, or a session being recreated)
-function shownReadOnly() {
-  return !nb.store || !!nb.store.viewOnly || !!ws?.quarantined || replaying || docSyncNeedsReload;
-}
-// (a session's recreation (TimeTravel's replay, the reactive recompute): `run` with the notebook owned and read-only,
-// after DEV's switch if it holds it (checked with no await before replaying is set), and never once the switch ended in
-// reload (astra's DEVSW-2-R3: a recreation queued behind it doesn't run, and can't unlock the notebook); the read-only
-// then set back from what holds (shownReadOnly: no store, another tab, quarantine, reload).  Resolves run's result, or
-// null if it didn't run)
-async function recreating(run) {
-  while (docSwitch) await docSwitch;
-  if (docSyncNeedsReload) {
-    statusEl.textContent = DOC_SYNC_RELOAD;
-    return null;
-  }
-  let endReplay;
-  replayEnded = new Promise((r) => { endReplay = r; });
-  replaying = true;
-  nb.setReadOnly(true);
-  try {
-    return await run();
-  } finally {
-    replaying = false;
-    endReplay();
-    nb.setReadOnly(shownReadOnly());
-    if (journal.session) journal.session.replay = false;
-  }
-}
-// (the notebook owned by DEV's switch from its read-only to its last restore (astra's DEVSW-2-R2): it waits for a
-// session's recreation to end, and a recreation asked meanwhile waits for the switch (before it sets `replaying`);
-// returns the release)
-async function ownNotebook() {
-  while (replaying || docSwitch) await (replaying ? replayEnded : docSwitch);
-  let end;
-  docSwitch = new Promise((r) => { end = r; });
-  return () => { docSwitch = null; end(); };
-}
-// (the switch's `reload`: the journal's activation began and this page couldn't go on with it: the notebook and the
-// page's controls for it read-only, and said, until a reload)
-function docSyncReload() {
-  docSyncNeedsReload = true;
-  clearTimeout(writerBarTimer);
-  nb.setReadOnly(true);
-  writerBar.hidden = false;
-  writerBar.textContent = DOC_SYNC_RELOAD;
-  writerBarHeight();
-  nbName.readOnly = true;
-  modeEl.disabled = true;
-  $("#ttrepro").disabled = true;
-  $("#ttclear").disabled = true;
-  $("#ttrevert").disabled = true;
-}
+// (a read-only tab's takeover as the writer, and DEV's switch: web/page/session.ts)
+function takeOver(store, id) { return session.takeOver(store, id); }
+function reopenJournaled() { return session.reopenJournaled(); }
+function shownReadOnly() { return session.shownReadOnly(); }
+function recreating(run) { return session.recreating(run); }
+function ownNotebook() { return session.ownNotebook(); }
+function docSyncReload() { return session.docSyncReload(); }
 let journalKit = null;
 async function storeFor(id, initial) {
   const fence = db ? await idb(db, "notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined) : undefined;

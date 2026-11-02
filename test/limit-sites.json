@@ -3897,6 +3897,26 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError message for a GF(q) vector times a rational: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), o.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5' #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
@@ -4276,6 +4296,11 @@
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
@@ -8409,6 +8434,11 @@
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: m.float_info = Ty.structseq(\"sys.float_info\", [\"max\", \"max_exp\", \"max_10_exp\", \"min\", \"min_exp\", \"min_10_exp\", \"dig\", \"mant_dig\", \"epsilon\", \"radix\", \"rounds\"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.float_info's values (max is the largest double, a FloatBox): the census word max as a field's name, refusing nothing"
  },
  "src/runtime/modules.ts :: str :: const ZONE_READ_MAX = (1 << 20) + 1; #0": {
   "class": "1",
