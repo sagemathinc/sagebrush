@@ -359,8 +359,16 @@ def _rvs_shape(dist, args, loc, scale, size, continuous):
     # any array is made of them, Sagebrush's numpy having no string arrays)
     if isinstance(size, (bool, np.bool_)):
         raise TypeError("an integer is required")
+    if isinstance(size, np.ndarray) and size.size == 0 and size.ndim <= 1:
+        # (an empty array, of any dtype: no dimensions, a scalar's shape)
+        size = ()
     if isinstance(size, np.ndarray):
-        if size.dtype.kind not in "iub":
+        # (an integer array of rank 0 or 1: a bool array is refused as a bool is, a higher rank by NumPy's index rule)
+        if size.dtype.kind == "b":
+            raise TypeError("an integer is required")
+        if size.ndim > 1:
+            raise TypeError("only integer scalar arrays can be converted to a scalar index")
+        if size.dtype.kind not in "iu":
             raise TypeError("'numpy.%s' object cannot be interpreted as an integer" % size.dtype.name)
         dims = [int(v) for v in size.reshape(-1).tolist()]
     else:
@@ -371,6 +379,8 @@ def _rvs_shape(dist, args, loc, scale, size, continuous):
         if not isinstance(v, (int, np.integer, bool, np.bool_)):
             raise TypeError("'numpy.%s' object cannot be interpreted as an integer" % type(np.asarray(v)[()]).__name__)
     size_ = tuple(int(v) for v in dims)
+    if any(v < 0 for v in size_):
+        raise ValueError("negative dimensions are not allowed")
     try:
         fits = np.broadcast_arrays(np.zeros(size_), np.zeros(bshape))[0].shape == size_
     except ValueError:
