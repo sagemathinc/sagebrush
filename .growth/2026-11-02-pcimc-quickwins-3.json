@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "pcimc quick wins 3: IntegerMod.__rpow__ (an integer, rational or real to the power of an element of Z/nZ; lib/_sage_ff.py), vector(ZZ or QQ, residues) lifted and ZZ matrix x GF(q) vector (lib/_sage_matrix.py, lib/_sage_ffmat.py), with docstring examples. No new chunk. Measured with bun 1.4.4 (size-record.sh) on master 8f85644f vs this PR's content head a0b7aad6: cli/lib.gen.js +720, cli/pyjs.cjs +928, engine/lib/sage.pre +8577, engine/lib/sage.src +2547; no other row moves.",
+ "bytes": {
+  "cli/lib.gen.js": 720,
+  "cli/pyjs.cjs": 928,
+  "engine/lib/sage.pre": 8577,
+  "engine/lib/sage.src": 2547
+ }
+}
