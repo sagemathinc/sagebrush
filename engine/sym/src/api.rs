@@ -311,6 +311,19 @@ fn kind_name(e: &SymError) -> &'static str {
 pub fn call(req: &str) -> String {
     crate::err::install_quiet_hook();
     let parts: Vec<&str> = req.split(SEP).collect();
+    // expand_bounded's refusal is returned, not thrown (a panic aborts in WebAssembly):
+    // "expand_bounded\x1f<e>\x1f<cap>" -> "ok\x1f<result>" or "err\x1fBoundExceeded\x1f<projected>"
+    if parts[0] == "expand_bounded" && parts.len() == 3 {
+        let r = catch(|| {
+            let cap: usize = parts[2].parse().unwrap_or_else(|_| crate::err::value_error(format!("expand_bounded: expected a cap, got {}", parts[2])));
+            crate::expand::expand_bounded(&d(parts[1]), cap)
+        });
+        return match r {
+            Ok(Ok(e)) => format!("ok{}{}", SEP, encode(&e)),
+            Ok(Err(b)) => format!("err{}BoundExceeded{}{}", SEP, SEP, b.projected),
+            Err(e) => format!("err{}{}{}{}", SEP, kind_name(&e), SEP, e),
+        };
+    }
     match catch(|| dispatch(parts[0], &parts[1..])) {
         Ok(out) => {
             let mut s = String::from("ok");
