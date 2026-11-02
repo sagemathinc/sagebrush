@@ -499,7 +499,7 @@ newBuiltinModule("sys", (m) => {
     const e = handled();
     return e === null ? tuple([null, null, null]) : tuple([typeOf(e), e, e.__traceback__ ?? null]);
   });
-  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
+  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);
 
