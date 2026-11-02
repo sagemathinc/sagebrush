@@ -2489,7 +2489,7 @@ def _satisfies(sol):
                 if _call("is_zero", im._s)[0] != "1" and _const_sign(im) not in (None, 0):
                     return False  # certainly not real
             if r._kind in ("integer", "even", "odd"):
-                fl = floor(v)
+                fl = _floor_sym(v)
                 if fl.is_numeric() and _const_sign(v - fl) == 1:
                     return False  # certainly not an integer
                 q = _py_number(v._s)
@@ -3518,8 +3518,71 @@ acosh = arccosh = _register(["arccosh", "acosh"], _m.acosh)
 atanh = arctanh = _register(["arctanh", "atanh"], _m.atanh)
 exp = _register(["exp"], _m.exp)
 _log1 = _register(["log", "ln"], _m.log)
-floor = _register(["floor"], _m.floor)
-ceil = ceiling = _register(["ceil", "ceiling"], _m.ceil)
+_floor_sym = _register(["floor"], _m.floor)
+_ceil_sym = _register(["ceil", "ceiling"], _m.ceil)
+
+
+def _integer_if_constant(r, which):
+    # Sage's floor/ceil of an exact constant is an Integer (floor(sqrt(1073)) is 32 in ZZ, so
+    # range() takes it); a symbolic argument stays symbolic (floor(y))
+    if not isinstance(r, Expression):
+        return r
+    if r.is_integer():
+        return r.pyobject()
+    ops = r.operands()
+    if len(ops) != 1 or r.variables() or not isinstance(ops[0], Expression):
+        return r
+    # a constant the engine left unevaluated (floor(sqrt(2)*10^20)): refine an interval until
+    # both of its ends give the same floor (ceil), as Sage does
+    from sage_all import RealIntervalField
+    c = ops[0]
+    for bits in (64, 256, 1024, 4096, 16384):
+        try:
+            iv = RealIntervalField(bits)(c)
+        except (TypeError, ValueError, ArithmeticError):
+            return r
+        lo, hi = iv.lower(), iv.upper()
+        a, b = (lo.floor(), hi.floor()) if which == "floor" else (lo.ceil(), hi.ceil())
+        if a == b:
+            return a
+    return r
+
+
+def floor(*args, **kwds):
+    """The floor: an Integer for a number or an exact constant, else the symbolic floor(x).
+
+    EXAMPLES::
+
+        sage: floor(sqrt(1073)), floor(pi), floor(-7/2), floor(1.5), floor(log(10^6, 2))
+        (32, 3, -4, 1, 19)
+        sage: floor(sqrt(2) * 10^20), floor(sqrt(10^40 + 1))
+        (141421356237309504880, 100000000000000000000)
+        sage: floor(sqrt(1073)).parent(), list(range(1, floor(sqrt(10)) + 1))
+        (Integer Ring, [1, 2, 3])
+        sage: var('y'); floor(y)
+        y
+        floor(y)
+    """
+    # (*args, **kwds: the signature the Core API recorded for the registered function)
+    return _integer_if_constant(_floor_sym(*args, **kwds), "floor")
+
+
+def ceil(*args, **kwds):
+    """The ceiling: an Integer for a number or an exact constant, else the symbolic ceil(x).
+
+    EXAMPLES::
+
+        sage: ceil(sqrt(2 * 1073)) - 1, ceil(pi), ceil(-sqrt(2)), ceil(1.5)
+        (46, 4, -1, 2)
+        sage: var('y'); ceil(y + 1)
+        y
+        ceil(y + 1)
+    """
+    # (*args, **kwds: the signature the Core API recorded for the registered function)
+    return _integer_if_constant(_ceil_sym(*args, **kwds), "ceil")
+
+
+ceiling = ceil
 def _register_special(names, nargs=(1,)):
     f = _special_function(names[0], nargs)
     f.__doc__ = _FUNCTION_DOCS.get(names[0])
@@ -4179,7 +4242,7 @@ class Solution(Expression):
         for p in self._params:
             if p in names:
                 v = _expr(names[p])
-                if not (v.is_numeric() if hasattr(v, "is_numeric") else False) or _call("is_zero", (v - floor(v))._s)[0] != "1":
+                if not (v.is_numeric() if hasattr(v, "is_numeric") else False) or _call("is_zero", (v - _floor_sym(v))._s)[0] != "1":
                     raise ValueError("%s is an integer parameter of the family, not %s" % (p, v))
                 params.remove(p)
         # the conditions first: where one fails the value may be undefined
