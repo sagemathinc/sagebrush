@@ -143,3 +143,15 @@ out("t.rvs(-1)", lambda: st.t.rvs(-1, size=1, random_state=0))
 out("binom.rvs(10, 1.5)", lambda: st.binom.rvs(10, 1.5, random_state=0))
 out("norm.rvs(loc=[0,1,2], size=2)", lambda: st.norm.rvs(loc=[0, 1, 2], size=2, random_state=0))
 out("levy.rvs(scale=[1, -1])", lambda: st.levy.rvs(scale=[1, -1], random_state=0))
+# (daybreak3's R1 and R2: the default random_state, NumPy's global stream as np.random.seed sets it; a size that
+# isn't an integer)
+np.random.seed(11)
+out("norm.rvs() global", lambda: st.norm.rvs())
+out("norm.rvs(size=3) global", lambda: st.norm.rvs(size=3))
+np.random.seed(11)
+out("norm.rvs(random_state=np.random)", lambda: st.norm.rvs(size=2, random_state=np.random))
+out("levy.rvs(size=2) global", lambda: st.levy.rvs(size=2))
+out("norm.rvs(Generator)", lambda: st.norm.rvs(size=2, random_state=np.random.default_rng(5)))
+for sz in (2.5, "3", (2, 1.5)):
+    out("norm.rvs(size=%r)" % (sz,), lambda: st.norm.rvs(size=sz, random_state=0))
+
