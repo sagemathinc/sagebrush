@@ -173,10 +173,11 @@
   "D5"
  ],
  "M-regular-file": [
-  "C10b"
+  "C10c"
  ],
  "M-nonblock-dropped": [
-  "C10a"
+  "C10a",
+  "C10c"
  ],
  "M-farthest-wins": [
   "D2",
