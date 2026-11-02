@@ -296,7 +296,7 @@ try {
       await ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); return 1; })()`);
       await until(`/Last export|No export/.test(${P}?.textContent ?? "")`);
     };
-    await ev(`${W}.setLastExport({ at: Date.now() - 8 * 86400000, partial: false, members: 1, bytes: 1 }).then(() => 1)`);
+    await idb("sagebrush-workspace", "meta", `(s) => s.put({ at: Date.now() - 8 * 86400000, partial: false, members: 1, bytes: 1 }, "export:last")`);
     await reopen();
     const line = await ev(`[...${P}.querySelectorAll("p.note")].map((p) => [p.className, p.textContent]).find(([, t]) => /Last export|No export/.test(t)) ?? null`);
     check(line?.[0] === "note remind" && /^Last export: 8 days ago · Export now$/.test(line?.[1] ?? ""), "an export 8 days ago: the reminder line, \"Last export: 8 days ago · Export now\": " + JSON.stringify(line));
@@ -305,7 +305,7 @@ try {
     check(ready, "…its \"Export now\" starts the export, as the button does (its ready state shows)");
     if (ready) await panelButton(/^Cancel$/).catch(() => {});
     await closeFlow();
-    await ev(`${W}.setLastExport({ at: Date.now() - 6 * 86400000, partial: false, members: 1, bytes: 1 }).then(() => 1)`);
+    await idb("sagebrush-workspace", "meta", `(s) => s.put({ at: Date.now() - 6 * 86400000, partial: false, members: 1, bytes: 1 }, "export:last")`);
     await reopen();
     check(/Last export prepared on this device: 6 days ago/.test(await panelText()) && !/Export now/.test(await panelText()), "an export 6 days ago: the plain status line, no reminder");
   });
