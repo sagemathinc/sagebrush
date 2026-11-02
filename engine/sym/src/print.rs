@@ -87,6 +87,16 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     if ma != mb && (ma && lone_fun(b) || mb && lone_fun(a)) {
         return if ma { Ordering::Less } else { Ordering::Greater };
     }
+    // pure symbolic terms: Sage's print order (P1-P4; Greater = printed first)
+    {
+        let (ra, rb) = (split_coeff(a).1, split_coeff(b).1);
+        if !ra.is_one() && !rb.is_one() && p_pure(&ra) && p_pure(&rb) {
+            let c = pcmp(&rb, &ra);
+            if c != Ordering::Equal {
+                return c;
+            }
+        }
+    }
     let (da, db) = (degree(a), degree(b));
     if da != db {
         return db.partial_cmp(&da).unwrap_or(Ordering::Equal);
@@ -231,6 +241,13 @@ fn lead_symbol(e: &Expr) -> Option<String> {
 
 /// The order of the factors of a product (Less: a is printed first).
 pub fn mul_order(a: &Expr, b: &Expr) -> Ordering {
+    // pure symbolic factors: Sage's factor order (P5; Greater = printed first)
+    if p_pure(a) && p_pure(b) {
+        let c = pmul_cmp(b, a);
+        if c != Ordering::Equal {
+            return c;
+        }
+    }
     let cat = |e: &Expr| -> u8 {
         let (base, x) = base_exp(e);
         if !has_symbol(e) && !has_function(e) && !is_numeric_base_power(e) {
@@ -320,6 +337,173 @@ fn sorted_terms(e: &Expr) -> Vec<Expr> {
             t
         }
         _ => vec![e.clone()],
+    }
+}
+
+
+// ------------------------------------------------------------------ Sage's print order
+// One total order for the terms of a sum and the factors of a product, as Sage prints
+// them (lane 4p; rules P0-P5 in sage2's spec, set by the counted Sage probe counted-3):
+// Ordering::Greater = printed first.
+
+fn p_pure(e: &Expr) -> bool {
+    match &e.kind {
+        Kind::Sym(_) => true,
+        Kind::Num(_) => false,
+        Kind::Add(v) => v.iter().all(|t| { let r = split_coeff(t).1; r.is_one() || p_pure(&r) }),
+        Kind::Mul(v) => v.iter().all(|f| f.is_num() || p_pure(f)),
+        Kind::Pow(b, x) => x.as_i64().is_some() && p_pure(b),
+        _ => false,
+    }
+}
+
+/// a sum compared in its sign-normalized form: led by a positive term (Sage stores -(x + y), not -x - y)
+fn p_norm(e: &Expr) -> Expr {
+    if let Kind::Add(_) = &e.kind {
+        let lead = sorted_terms(e)[0].clone();
+        if split_coeff(&lead).0.looks_negative() {
+            return neg(e);
+        }
+    }
+    e.clone()
+}
+
+fn p_be(f: &Expr) -> (Expr, i64) {
+    match &f.kind {
+        Kind::Pow(b, x) => (p_norm(b), x.as_i64().unwrap_or(1)),
+        _ => (p_norm(f), 1),
+    }
+}
+
+/// P1: the degree; a sum factor counts its exponent (1), not its own degree
+fn p_deg(e: &Expr) -> i64 {
+    match &e.kind {
+        Kind::Sym(_) => 1,
+        Kind::Add(_) => 1,
+        Kind::Pow(_, x) => x.as_i64().unwrap_or(1),
+        Kind::Mul(v) => v.iter().filter(|f| !f.is_num()).map(p_deg).sum(),
+        _ => 0,
+    }
+}
+
+/// a product's factors (no number), smallest first (P2)
+fn p_factors_up(e: &Expr) -> Vec<Expr> {
+    let mut v: Vec<Expr> = match &e.kind {
+        Kind::Mul(f) => f.iter().filter(|x| !x.is_num()).map(p_norm).collect(),
+        _ => vec![p_norm(e)],
+    };
+    v.sort_by(|a, b| pmul_cmp(a, b));
+    v
+}
+
+fn pcmp(a: &Expr, b: &Expr) -> Ordering {
+    let (a, b) = (&p_norm(a), &p_norm(b));
+    match (&a.kind, &b.kind) {
+        (Kind::Add(_), Kind::Add(_)) => p_add_add(a, b),
+        (Kind::Add(_), _) => p_add_x(a, b),
+        (_, Kind::Add(_)) => p_add_x(b, a).reverse(),
+        (Kind::Mul(_), Kind::Mul(_)) => p_mul_mul(a, b),
+        (Kind::Mul(_), _) => p_mul_x(a, b),
+        (_, Kind::Mul(_)) => p_mul_x(b, a).reverse(),
+        _ => p_pow_pow(a, b),
+    }
+}
+
+/// P3: a sum is compared through its greatest term (its first term as printed)
+fn p_key_term(s: &Expr) -> Expr {
+    sorted_terms(s)[0].clone()
+}
+
+fn p_add_x(s: &Expr, x: &Expr) -> Ordering {
+    let g = p_key_term(s);
+    let (gc, gr) = split_coeff(&g);
+    let c = if gr.is_one() { Ordering::Less } else { pcmp(&gr, x) };
+    if c != Ordering::Equal { return c; }
+    let c = gc.cmp(&Num::one());
+    if c != Ordering::Equal { return c; }
+    if sorted_terms(s).len() == 1 { Ordering::Equal } else { Ordering::Greater }
+}
+
+fn p_add_add(a: &Expr, b: &Expr) -> Ordering {
+    let (ta, tb) = (sorted_terms(a), sorted_terms(b));
+    for (x, y) in ta.iter().zip(&tb) {
+        let (cx, rx) = split_coeff(x);
+        let (cy, ry) = split_coeff(y);
+        let c = match (rx.is_one(), ry.is_one()) { (true, true) => Ordering::Equal, (true, false) => Ordering::Less, (false, true) => Ordering::Greater, _ => pcmp(&rx, &ry) };
+        if c != Ordering::Equal { return c; }
+        let c = cx.cmp(&cy);
+        if c != Ordering::Equal { return c; }
+    }
+    ta.len().cmp(&tb.len())
+}
+
+fn p_mul_mul(a: &Expr, b: &Expr) -> Ordering {
+    let c = p_deg(a).cmp(&p_deg(b));
+    if c != Ordering::Equal { return c; }
+    let (fa, fb) = (p_factors_up(a), p_factors_up(b));
+    for (x, y) in fa.iter().zip(&fb) {
+        let ((bx, ex), (by, ey)) = (p_be(x), p_be(y));
+        let c = pcmp(&bx, &by);
+        if c != Ordering::Equal { return c; }
+        let c = ey.cmp(&ex); // the smaller exponent is greater
+        if c != Ordering::Equal { return c; }
+    }
+    fa.len().cmp(&fb.len())
+}
+
+fn p_mul_x(m: &Expr, x: &Expr) -> Ordering {
+    let (bx, ex) = p_be(x);
+    let c = p_deg(m).cmp(&ex);
+    if c != Ordering::Equal { return c; }
+    let f = p_factors_up(m);
+    let (bm, em) = p_be(&f[0]);
+    let c = pcmp(&bm, &bx);
+    if c != Ordering::Equal { return c; }
+    let c = ex.cmp(&em);
+    if c != Ordering::Equal { return c; }
+    if f.len() == 1 { Ordering::Equal } else { Ordering::Greater }
+}
+
+/// P5: the order of a product's FACTORS (greater first): two powers (a symbol = power 1) by their bases
+/// first (by P), then the higher exponent; a sum by its greatest term against the other factor's BASE, then
+/// that term's coefficient against 1, then the sum is greater
+fn pmul_cmp(a: &Expr, b: &Expr) -> Ordering {
+    let (a, b) = (p_norm(a), p_norm(b));
+    match (&a.kind, &b.kind) {
+        (Kind::Add(_), Kind::Add(_)) => p_add_add(&a, &b),
+        (Kind::Add(_), _) => p_add_base(&a, &b),
+        (_, Kind::Add(_)) => p_add_base(&b, &a).reverse(),
+        _ => {
+            let ((ba, xa), (bb, xb)) = (p_be(&a), p_be(&b));
+            let c = match (&ba.kind, &bb.kind) {
+                (Kind::Sym(s), Kind::Sym(t)) => t.cmp(s),
+                _ => pcmp(&ba, &bb),
+            };
+            if c != Ordering::Equal { return c; }
+            xa.cmp(&xb)
+        }
+    }
+}
+
+fn p_add_base(s: &Expr, x: &Expr) -> Ordering {
+    let g = p_key_term(s);
+    let (gc, gr) = split_coeff(&g);
+    let (bx, _) = p_be(x);
+    let c = if gr.is_one() { Ordering::Less } else { pcmp(&gr, &bx) };
+    if c != Ordering::Equal { return c; }
+    let c = gc.cmp(&Num::one());
+    if c != Ordering::Equal { return c; }
+    if sorted_terms(s).len() == 1 { Ordering::Equal } else { Ordering::Greater }
+}
+
+/// P4: symbols and powers (a symbol = a power 1): the higher exponent is greater, then the base
+/// (two symbols: the alphabetically earlier name is greater)
+fn p_pow_pow(a: &Expr, b: &Expr) -> Ordering {
+    let ((ba, xa), (bb, xb)) = (p_be(a), p_be(b));
+    if xa != xb { return xa.cmp(&xb); }
+    match (&ba.kind, &bb.kind) {
+        (Kind::Sym(s), Kind::Sym(t)) => t.cmp(s),
+        _ => pcmp(&ba, &bb),
     }
 }
 
@@ -414,7 +598,6 @@ fn sage(e: &Expr) -> (String, u8) {
             terms.sort_by(sum_order);
             let mut s = String::new();
             for (k, t) in terms.iter().enumerate() {
-                let (c, _) = split_coeff(t);
                 if k == 0 {
                     s.push_str(&paren(sage_inner(t), P_ADD));
                 } else if let Kind::Num(n) = &t.kind {
@@ -430,12 +613,19 @@ fn sage(e: &Expr) -> (String, u8) {
                             s.push_str(&ns);
                         }
                     }
-                } else if c.looks_negative() {
-                    s.push_str(" - ");
-                    s.push_str(&paren(sage_inner(&neg(t)), P_MUL));
                 } else {
-                    s.push_str(" + ");
-                    s.push_str(&paren(sage_inner(t), P_MUL));
+                    // the sign as the term prints it (a negated sum factor carries it: x - (y - 1)*z)
+                    let ts = sage_inner(t);
+                    match ts.0.strip_prefix('-') {
+                        Some(rest) => {
+                            s.push_str(" - ");
+                            s.push_str(rest);
+                        }
+                        None => {
+                            s.push_str(" + ");
+                            s.push_str(&paren(ts, P_MUL));
+                        }
+                    }
                 }
             }
             (s, P_ADD)
@@ -512,6 +702,18 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
             denom.push(pow(&b, &neg(&x)));
         } else {
             numer.push(f.clone());
+        }
+    }
+
+    // a sum factor led by a negative term prints negated, its sign pulled out
+    // (Sage: -(x - 1)/y, -(2/x - 3)/(y - 1/x); render only, the expression is unchanged)
+    for f in numer.iter_mut().chain(denom.iter_mut()) {
+        if matches!(f.kind, Kind::Add(_)) {
+            let lead = sorted_terms(f)[0].clone();
+            if split_coeff(&lead).0.looks_negative() {
+                *f = neg(f);
+                coeff = coeff.neg();
+            }
         }
     }
     numer.sort_by(mul_order);
@@ -609,7 +811,6 @@ fn latex(e: &Expr) -> (String, u8) {
             terms.sort_by(sum_order);
             let mut s = String::new();
             for (k, t) in terms.iter().enumerate() {
-                let (c, _) = split_coeff(t);
                 if k == 0 {
                     s.push_str(&latex(t).0);
                 } else if matches!(t.kind, Kind::Num(_)) {
@@ -624,12 +825,19 @@ fn latex(e: &Expr) -> (String, u8) {
                             s.push_str(&ns);
                         }
                     }
-                } else if c.looks_negative() {
-                    s.push_str(" - ");
-                    s.push_str(&latex(&neg(t)).0);
                 } else {
-                    s.push_str(" + ");
-                    s.push_str(&latex(t).0);
+                    // the sign as the term prints it (a negated sum factor carries it: x - (y - 1)*z)
+                    let ts = latex(t).0;
+                    match ts.strip_prefix('-') {
+                        Some(rest) => {
+                            s.push_str(" - ");
+                            s.push_str(rest);
+                        }
+                        None => {
+                            s.push_str(" + ");
+                            s.push_str(&ts);
+                        }
+                    }
                 }
             }
             (s, P_ADD)
@@ -716,6 +924,18 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
             numer.push(f.clone());
         }
     }
+
+    // a sum factor led by a negative term prints negated, its sign pulled out
+    // (Sage: -(x - 1)/y, -(2/x - 3)/(y - 1/x); render only, the expression is unchanged)
+    for f in numer.iter_mut().chain(denom.iter_mut()) {
+        if matches!(f.kind, Kind::Add(_)) {
+            let lead = sorted_terms(f)[0].clone();
+            if split_coeff(&lead).0.looks_negative() {
+                *f = neg(f);
+                coeff = coeff.neg();
+            }
+        }
+    }
     numer.sort_by(mul_order);
     denom.sort_by(mul_order);
     let neg_sign = coeff.looks_negative();
@@ -749,6 +969,8 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
             _ => (c.clone(), Num::one()),
         };
         let cn_one_term = cn.is_real() || matches!(&cn, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&cn, Num::Float(a, _) if *a == 0.0);
+        // a lone sum numerator prints bare (\frac{x + 1}{x - 1}, as Sage)
+        let top = if cn.is_one() && numer.len() == 1 && matches!(numer[0].kind, Kind::Add(_)) { latex(&numer[0]).0 } else { top };
         let top = if cn.is_one() { top } else if top == "1" { cn.latex() } else { format!("{} \\, {}", lparen((cn.latex(), if cn_one_term { P_ATOM } else { P_ADD }), P_MUL), top) };
         // a factor in front of the denominator groups a sum
         // (\frac{1}{2 \, {\left(x + 1\right)}}, as Sage)
@@ -762,4 +984,200 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
         body = if body.is_empty() { c.latex() } else { format!("{} \\, {}", lparen((c.latex(), if one_term { P_ATOM } else { P_ADD }), P_MUL), body) };
     }
     (if neg_sign { format!("-{}", body) } else { body }, if neg_sign { P_NEG } else { P_MUL })
+}
+
+#[cfg(test)]
+mod print_order_tests {
+    //! Lane 4p's code criteria (S7): the print order is a consistent total order, and printing only
+    //! renders. Each check also runs on a mutant that it must reject, so a pass means something.
+    use super::*;
+    use crate::parse::parse;
+
+    type Cmp = fn(&Expr, &Expr) -> Ordering;
+
+    fn exprs(v: &[&str]) -> Vec<Expr> {
+        v.iter().map(|s| parse(s)).collect()
+    }
+
+    /// None if cmp is antisymmetric and transitive on xs and every permutation of xs sorts to one
+    /// order; otherwise the first failure
+    fn inconsistency(cmp: Cmp, xs: &[Expr]) -> Option<String> {
+        for a in xs {
+            if cmp(a, a) != Ordering::Equal {
+                return Some(format!("{} vs itself", to_string(a)));
+            }
+            for b in xs {
+                if cmp(a, b) != cmp(b, a).reverse() {
+                    return Some(format!("antisymmetry {} / {}", to_string(a), to_string(b)));
+                }
+                for c in xs {
+                    if cmp(a, b) != Ordering::Greater && cmp(b, c) != Ordering::Greater && cmp(a, c) == Ordering::Greater {
+                        return Some(format!("transitivity {} <= {} <= {}", to_string(a), to_string(b), to_string(c)));
+                    }
+                }
+            }
+        }
+        // Heap's algorithm over every permutation (n <= 6: at most 720)
+        fn heap(k: usize, idx: &mut Vec<usize>, f: &mut dyn FnMut(&[usize])) {
+            if k == 1 {
+                f(idx);
+                return;
+            }
+            for i in 0..k {
+                heap(k - 1, idx, f);
+                let j = if k % 2 == 0 { i } else { 0 };
+                idx.swap(j, k - 1);
+            }
+        }
+        let mut idx: Vec<usize> = (0..xs.len()).collect();
+        let mut first: Option<Vec<String>> = None;
+        let mut bad = None;
+        heap(xs.len(), &mut idx, &mut |p: &[usize]| {
+            let mut v: Vec<Expr> = p.iter().map(|&i| xs[i].clone()).collect();
+            v.sort_by(cmp);
+            let s: Vec<String> = v.iter().map(to_string).collect();
+            match &first {
+                None => first = Some(s),
+                Some(f) if bad.is_none() && &s != f => bad = Some(format!("input order changes the sort: {:?} / {:?}", f, s)),
+                _ => {}
+            }
+        });
+        bad
+    }
+
+    /// the control for (a): the real order, except that elements whose printed lengths differ mod 3
+    /// are ranked cyclically (0 < 1 < 2 < 0), a tie-break that is antisymmetric but not transitive
+    fn cyclic(real: Cmp, a: &Expr, b: &Expr) -> Ordering {
+        let (ka, kb) = (to_string(a).len() % 3, to_string(b).len() % 3);
+        if ka == kb {
+            real(a, b)
+        } else if (ka + 1) % 3 == kb {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    }
+    fn sum_order_mutant(a: &Expr, b: &Expr) -> Ordering {
+        cyclic(sum_order, a, b)
+    }
+    fn mul_order_mutant(a: &Expr, b: &Expr) -> Ordering {
+        cyclic(mul_order, a, b)
+    }
+
+    const TERM_SETS: [&[&str]; 6] = [
+        &["a^2*b", "a^2*x", "2*a*b*x", "2*a*x^2", "b*x^2", "x^3"],
+        &["(x + y)*x", "x^2", "x*y", "y^2", "(x - 1)*x"],
+        &["a*b", "(a + b)*c", "a*c", "c*d", "(a - b)*c"],
+        &["(a^2 - b^2)*a", "a*b^2", "a^3", "b^3"],
+        &["b*y", "c*h", "f*h", "x*y", "a*d", "b*c"],
+        &["(p^2 + q)*r", "p*q*r", "p^2*r", "q^3"],
+    ];
+    const FACTOR_SETS: [&[&str]; 4] = [
+        &["x^2", "y - 1/x", "x", "y"],
+        &["a", "f*h - x*y", "b*y - c*h", "d", "g"],
+        &["a + b", "c^2", "c", "a", "b^2"],
+        &["x + 1", "x^2", "x", "y + 1"],
+    ];
+
+    #[test]
+    fn term_order_is_consistent() {
+        for set in TERM_SETS {
+            assert_eq!(inconsistency(sum_order, &exprs(set)), None, "sum_order on {:?}", set);
+        }
+        let mut caught = 0;
+        for set in TERM_SETS {
+            let r = inconsistency(sum_order_mutant, &exprs(set));
+            eprintln!("control sum_order_mutant on {:?}: {}", set, r.as_deref().unwrap_or("accepted"));
+            caught += r.is_some() as usize;
+        }
+        assert!(caught > 0, "the check accepts a non-transitive mutant of sum_order");
+    }
+
+    #[test]
+    fn factor_order_is_consistent() {
+        for set in FACTOR_SETS {
+            assert_eq!(inconsistency(mul_order, &exprs(set)), None, "mul_order on {:?}", set);
+        }
+        let mut caught = 0;
+        for set in FACTOR_SETS {
+            let r = inconsistency(mul_order_mutant, &exprs(set));
+            eprintln!("control mul_order_mutant on {:?}: {}", set, r.as_deref().unwrap_or("accepted"));
+            caught += r.is_some() as usize;
+        }
+        assert!(caught > 0, "the check accepts a non-transitive mutant of mul_order");
+    }
+
+    const RENDER_CASES: [&str; 9] = [
+        "(y - 1/x)*x^2",
+        "-(2/x - 3)/(y - 1/x)",
+        "(1 - x)/y",
+        "x - (1 - y)*z",
+        "(b - a)*(d - c)",
+        "a^2*b + a^2*x + 2*a*b*x + 2*a*x^2 + b*x^2 + x^3",
+        "-(f*h - x*y)*a + (c*h - b*y)*d + (b*f - c*x)*g",
+        "(x + 1)/(x - 1) + x*y*z",
+        "1/((a + b)*c^2) - (p - q)^2",
+    ];
+
+    /// None if printing e leaves encode() byte-equal and the printed string re-parses to e, decided by
+    /// expanding the difference to canonical form (no simplify); otherwise the failure
+    fn render_failure(printer: fn(&Expr) -> String, s: &str) -> Option<String> {
+        let e = parse(s);
+        let before = crate::api::encode(&e);
+        let p = printer(&e);
+        let _ = to_latex(&e);
+        if crate::api::encode(&e) != before {
+            return Some(format!("printing changed the expression: {}", s));
+        }
+        let r = parse(&p);
+        if crate::expand::expand(&sub(&r, &e)).is_zero() {
+            None
+        } else {
+            Some(format!("{} printed as {}, which re-parses to a different value", s, p))
+        }
+    }
+
+    /// the controls for (b): the real printer, then the first top-level " - " / " + " swapped (a
+    /// flipped sign; the whole negated when there is no top-level sum), or the last top-level term
+    /// dropped (" + 1" added when there is only one term)
+    fn top_level_ops(p: &str) -> Vec<usize> {
+        let (mut depth, mut v) = (0i32, vec![]);
+        for (i, ch) in p.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                '+' | '-' if depth == 0 && i > 0 && p[..i].ends_with(' ') => v.push(i),
+                _ => {}
+            }
+        }
+        v
+    }
+    fn flip_sign_printer(e: &Expr) -> String {
+        let p = to_string(e);
+        match top_level_ops(&p).first() {
+            Some(&i) => format!("{}{}{}", &p[..i], if &p[i..i + 1] == "-" { "+" } else { "-" }, &p[i + 1..]),
+            None => format!("-({})", p),
+        }
+    }
+    fn drop_term_printer(e: &Expr) -> String {
+        let p = to_string(e);
+        match top_level_ops(&p).last() {
+            Some(&i) => p[..i - 1].to_string(),
+            None => format!("{} + 1", p),
+        }
+    }
+
+    #[test]
+    fn printing_only_renders() {
+        for s in RENDER_CASES {
+            assert_eq!(render_failure(to_string, s), None);
+        }
+        for (name, m) in [("flip-sign", flip_sign_printer as fn(&Expr) -> String), ("drop-term", drop_term_printer)] {
+            for s in RENDER_CASES {
+                let r = render_failure(m, s);
+                eprintln!("control {}: {}", name, r.as_deref().unwrap_or("accepted"));
+                assert!(r.is_some(), "the check accepts the {} mutant on {}", name, s);
+            }
+        }
+    }
 }
