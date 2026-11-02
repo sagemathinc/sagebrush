@@ -468,7 +468,7 @@ const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") }
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT, deleteNotebookRecord } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
@@ -993,7 +993,7 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   // (listed in the workspace, or not kept: a notebook no entry lists is
   // never left behind; saved() says so and tries again, LIMIT-E46-1)
   try { await wsAdoptNotebook(id, name, rest.mode); } catch (e) {
-    await idb(db, "notebooks", "readwrite", (s) => s.delete(id)).catch(() => {});
+    await deleteNotebookRecord(db, id).catch(() => {});
     throw e;
   }
   nbKept.set(key, { id, rev: rec.rev });
@@ -2483,7 +2483,7 @@ fileMenu.addEventListener("click", async (e) => {
       if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       await nb.mayLeave();
       nb.detach();
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      await deleteNotebookRecord(db, current.id);
       shareSent.forget(current.id);
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
@@ -2562,7 +2562,7 @@ async function showOpen() {
     del.setAttribute("aria-label", `Delete ${d.name || "Untitled"}`);
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      await deleteNotebookRecord(db, d.id);
       shareSent.forget(d.id);
       await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;

@@ -27,7 +27,7 @@
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
-import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE } from "../notebook/stores.js";
+import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHistoryDb, FENCE, deleteNotebookRecord } from "../notebook/stores.js";
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
@@ -35,6 +35,7 @@ import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
 import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
 import { entriesOf, fenceCheck, physicalOf, busyError, dropView, rewriting, under, D11, RW, FENCE_READ, STAGE, type ERecord } from "./sync-rewrite";
+import { noteToken, chainOf, HIST_STORES, type Chain } from "../history/tokens";
 import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
 export type Entry = {
@@ -251,6 +252,27 @@ type LookalikeTest = { deliver?(path: string): void; request?(kind: "getAll" | "
 const VERSION_STORES = ["versions", "versionBytes", "prunable", "meta"];
 // (a change's stores with sync's: its pending note and pins in its own transaction (design/sync-client.md C2))
 const withSync = (...stores: string[]) => [...new Set([...stores, ...SYNC_STORES])];
+/** A transaction that writes a board's row: its stores, with the index (the board's place) and history's. */
+const withBoard = (...stores: string[]) => [...new Set([...stores, "boards", "entries", ...HIST_STORES])];
+/** Every write of a board's row, with its history token in the same transaction (web/history/tokens.ts; inert until
+ * history is turned on): `row` put (or added), or the row of `id` deleted (`row` null).  `rev`, the row's revision
+ * after the write (a delete's: the revision it removed, or 0). */
+async function boardRowWrite(tx: IDBTransaction, id: string, row: object | null, rev: number, add = false): Promise<void> {
+  const st = tx.objectStore("boards");
+  if (row === null) st.delete(id);
+  else if (add) st.add(row);
+  else st.put(row);
+  await noteToken(tx, { ident: id, rev, kind: "board", chain: row === null ? null : () => boardChain(tx, id) });
+}
+/** A board's chain: the place of the one entry that names it, read through the index's logical view; null when none
+ * does (not placed yet, or gone); "broken" when more than one does. */
+async function boardChain(tx: IDBTransaction, id: string): Promise<Chain> {
+  const v = await entriesOf(tx), es = await v.byRef("board", id, 2);
+  if (es.length === 0) return null;
+  if (es.length > 1) return "broken";
+  const e = es[0], inT = !!e.trashed || e.path === TRASH || e.path.startsWith(TRASH + "/");
+  return chainOf(e.path, inT, (p) => v.get(p), parentOf);
+}
 // (an old copy of a migrated file's bytes, in "sagebrush"/files or in trash, not yet deleted: a key
 // in meta, so that reconcile never takes it for a file of its own and the migrator deletes it)
 const STALE = "stale:";
@@ -286,7 +308,7 @@ export type Identity = { workspace: string; generation: number };
 const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
 // (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
 // keys it keeps)
-const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger"];
+const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
 /** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
 type Collect = { collect?: number[] };
 function sinkOf(c: unknown): number[] | undefined {
@@ -1362,14 +1384,14 @@ export class Workspace {
         rev = out.rev;
       } else if (e.kind === "board") {
         this.checkBoard(content);
-        rev = await inTx(this.ws, "boards", "readwrite", async (tx) => {
+        rev = await inTx(this.ws, withBoard(), "readwrite", async (tx) => {
           const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(e.ref!));
           if (!cur) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
           if (opts.base !== undefined && cur.rev !== opts.base) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, cur.doc);
           // (not the journal's write: the row left without its envelope, which spoke of the value before; the next
           // journaled load stamps it)
           const { tag: _t, ...rest } = plainRow(cur);
-          st.put({ ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) } satisfies PlainBoardRecord);
+          await boardRowWrite(tx, e.ref!, { ...rest, doc: content, rev: cur.rev + 1, updated: t, ...(opts.tag ? { tag: opts.tag } : {}) } satisfies PlainBoardRecord, cur.rev + 1);
           return cur.rev + 1;
         });
       } else throw new WorkspaceError("invalid", "a folder has no contents to write");
@@ -1421,7 +1443,7 @@ export class Workspace {
         const body = jw.markOnly ? null : stripBoard(doc ?? {});
         if (body) this.checkBoard(body);
         const t = this.now();
-        const r = await inTx(this.ws, ["boards", "meta"], "readwrite", async (tx) => {
+        const r = await inTx(this.ws, withBoard("meta"), "readwrite", async (tx) => {
           const state = (await req(tx.objectStore("meta").get("journal"))) as JournalState | undefined;
           if (state?.active !== true) return { refused: BOARD_NOT_JOURNAL_PHASE };
           const st = tx.objectStore("boards"), cur: BoardRecord | undefined = await req(st.get(ref));
@@ -1442,7 +1464,7 @@ export class Workspace {
           const stamp = !hasEnvelope(cur) && !opts.tag && canonJson(stripBoard(cur.doc ?? {})) === canonJson(body);
           const { tag: _t, ...rest } = plainRow(cur);
           const tag = stamp ? cur.tag : opts.tag;
-          st.put({ ...rest, doc: body!, rev: cur.rev + 1, updated: t, ...(tag ? { tag } : {}), j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}), ...(stamp ? { stampOf: cur.rev } : {}) });
+          await boardRowWrite(tx, ref, { ...rest, doc: body!, rev: cur.rev + 1, updated: t, ...(tag ? { tag } : {}), j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}), ...(stamp ? { stampOf: cur.rev } : {}) }, cur.rev + 1);
           return { rev: cur.rev + 1 };
         });
         if ("refused" in r) return r.refused as string;
@@ -2116,14 +2138,14 @@ export class Workspace {
       if (e.ref === null) continue;
       try {
         if (e.kind === "notebook") {
-          await this.mainTx("notebooks", "readwrite", (st) => st.delete(e.ref!));
+          await this.deleteNotebook(e.ref!);
           // (its versions, and its journal's rows with their charges, in one transaction: web/notebook/journal-rows.js.
           // Its versions' keys are [id, patch id], a string: [id, -Infinity] up to [id, []] takes every key of its whose
           // second part is a number, a date, a string or binary (they sort in that order, below every array); no
           // array is ever written there)
           if (hdb) await inTx(hdb, "history", "readwrite", async (tx) => { const st = tx.objectStore("history"); st.delete(IDBKeyRange.bound([e.ref, -Infinity], [e.ref, []])); await dropRows(st, e.ref!); });
         } else if (e.kind === "board") {
-          await inTx(this.ws, "boards", "readwrite", async (tx) => { tx.objectStore("boards").delete(e.ref!); });
+          await inTx(this.ws, withBoard(), "readwrite", async (tx) => { await boardRowWrite(tx, e.ref!, null, 0); });
           // (its TimeTravel: by the board's source, "board:local:<id>", with its name in this browser after it)
           const pre = "board:local:" + e.ref;
           // (and its journal's rows, keyed by the same name, the board journal's store's id)
@@ -2934,6 +2956,13 @@ export class Workspace {
     return out;
   }
 
+  /** A notebook's record deleted, with its history token (notebook/stores.js deleteNotebookRecord), or a
+   * WorkspaceError("storage") where there is no notebooks' database, as mainTx. */
+  private deleteNotebook(id: string): Promise<void> {
+    if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks and files");
+    return deleteNotebookRecord(this.main, id);
+  }
+
   /** One request on "sagebrush" (notebooks, files), or a WorkspaceError("storage") where there is none. */
   async mainTx<T>(store: string, mode: IDBTransactionMode, f: (st: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks and files");
@@ -2964,22 +2993,22 @@ export class Workspace {
       const journaled = (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal";
       const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
-      undo = () => this.mainTx("notebooks", "readwrite", (st) => st.delete(ref));
+      undo = () => this.deleteNotebook(ref);
     } else if (kind === "board") {
       const doc = content ?? { title: splitExt(nameOf(q))[0], ...(mode && mode !== "python" ? { mode } : {}), nodes: [] };
       this.checkBoard(doc);
       mode = mode ?? (doc as any).mode ?? "python";
-      ref = await inTx(this.ws, "boards", "readwrite", async (tx) => {
+      ref = await inTx(this.ws, withBoard(), "readwrite", async (tx) => {
         const st = tx.objectStore("boards");
         for (;;) {
           const id = hex(6);
           if ((await req(st.getKey(id))) === undefined) {
-            st.add({ id, doc, rev: 1, updated: t, ...(origin ? { origin } : {}) } satisfies BoardRecord);
+            await boardRowWrite(tx, id, { id, doc, rev: 1, updated: t, ...(origin ? { origin } : {}) } satisfies BoardRecord, 1, true);
             return id;
           }
         }
       });
-      undo = () => inTx(this.ws, "boards", "readwrite", async (tx) => tx.objectStore("boards").delete(ref));
+      undo = () => inTx(this.ws, withBoard(), "readwrite", async (tx) => boardRowWrite(tx, ref, null, 0));
     } else {
       const b = bytesOf(content ?? new Uint8Array(0));
       if (b.length > this.limits.maxFileBytes) throw new WorkspaceError("limit", `a file is at most ${this.limits.maxFileBytes} bytes`);
@@ -3064,7 +3093,7 @@ export class Workspace {
         }
         bytes = undefined;
       } else if (fields.kind === "file" && !fields.sha256) throw new WorkspaceError("invalid", "a data file is adopted with its SHA-256 (design/sync-client.md §3)");
-      const stores = ["entries", "ops", ...(also.board ? ["boards"] : []), ...(also.meta?.length || also.dropMeta?.length || move ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : []), ...(move ? ["fileBytes"] : [])];
+      const stores = ["entries", "ops", ...(also.board ? ["boards", ...HIST_STORES] : []), ...(also.meta?.length || also.dropMeta?.length || move ? ["meta"] : []), ...(also.dropTrash?.length ? ["trash"] : []), ...(move ? ["fileBytes"] : [])];
       const entry = await inTx(this.ws, withSync(...stores), "readwrite", async (tx) => {
         const ev = await fenceCheck(tx, [folder]);
         const st = tx.objectStore("entries");
@@ -3074,7 +3103,7 @@ export class Workspace {
         await fenceCheck(tx, [p]);
         if (also.at && (await req(st.getKey(also.at))) !== undefined) throw new WorkspaceError("exists", `${also.at} is there already`);
         // (an old-style row whatever it was given: its envelope dropped)
-        if (also.board) tx.objectStore("boards").put(plainRow(also.board));
+        if (also.board) await boardRowWrite(tx, also.board.id, plainRow(also.board), also.board.rev);
         for (const [k, v] of also.meta ?? []) tx.objectStore("meta").put(v, k);
         for (const k of also.dropMeta ?? []) tx.objectStore("meta").delete(k);
         for (const k of also.dropTrash ?? []) tx.objectStore("trash").delete(k);
@@ -3191,6 +3220,16 @@ export class Workspace {
     const rec: Op = { ...op, ...id, t: this.now(), device: this.device, by: this.actor };
     rec.seq = (await req(tx.objectStore("ops").add(rec))) as number;
     ops.push(rec);
+    // (history's change token, in this transaction (web/history/tokens.ts; inert until history is turned on): the
+    // identity the op changed, its op seq, and its folder ancestry after it.  An entry the migrator hasn't given an
+    // identity yet is named by its path with a broken chain, which forces a repair: never a change left unrecorded)
+    if (e) {
+      const ident = identOf(e), at = now ? now.path : null;
+      await noteToken(tx, {
+        ident: ident ?? `path:${e.path}`, rev: rec.seq, kind: e.kind,
+        chain: ident ? async () => chainOf(at, !!now?.trashed || (at !== null && (at === TRASH || at.startsWith(TRASH + "/"))), async (p) => (await entriesOf(tx)).get(p), parentOf) : "broken",
+      });
+    }
     // (sync's pending note, and a pin on new bytes, in this transaction: design/sync-client.md C2)
     await noteChange(tx, rec, pin);
   }
@@ -3546,10 +3585,10 @@ export class Workspace {
         if (typeof out === "string" || !out.conflict) return;
       }
     } else if (e.kind === "board") {
-      await inTx(this.ws, "boards", "readwrite", async (tx) => {
+      await inTx(this.ws, withBoard(), "readwrite", async (tx) => {
         const st = tx.objectStore("boards"), rec: BoardRecord | undefined = await req(st.get(e.ref!));
         // (an ordinary write: without the row's envelope)
-        if (rec && String(rec.doc?.title ?? "") === oldName) st.put({ ...plainRow(rec), doc: { ...rec.doc, title: newName }, rev: rec.rev + 1, updated: this.now() } satisfies PlainBoardRecord);
+        if (rec && String(rec.doc?.title ?? "") === oldName) await boardRowWrite(tx, e.ref!, { ...plainRow(rec), doc: { ...rec.doc, title: newName }, rev: rec.rev + 1, updated: this.now() } satisfies PlainBoardRecord, rec.rev + 1);
       });
     }
   }
