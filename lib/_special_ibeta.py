@@ -134,14 +134,15 @@ def _gammaincinv_outer(a, y, upper):
         return _math.nan
     if a > 1e30:
         # (the quantile's spread about a, z sqrt(a), is below a's rounding: Wilson and Hilferty's cube, whose error is
-        # O(1/a), is the root; computed in logs and at most the largest double, as scipy's (daybreak3's B1))
+        # O(1/a), is the root; at most the largest double, as scipy's (daybreak3's B1))
         pp = min(p, q)
         t = _math.sqrt(-2 * _math.log(pp))
         z = (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481)) - t
         if p < 0.5:
             z = -z
-        c = 1 - 1 / (9 * a) - z / (3 * _math.sqrt(a))
-        return min(_exp_or_inf(_math.log(a) + 3 * _math.log(c)), 1.7976931348623157e308)
+        c3 = (1 - 1 / (9 * a) - z / (3 * _math.sqrt(a))) ** 3
+        # (a c^3 by multiplying, not through logs, whose rounding is |log a| eps: c rounds to 1 here)
+        return 1.7976931348623157e308 if c3 > 1 and a > 1.7976931348623157e308 / c3 else a * c3
     # (where the root underflows: P(a, x) ~ x^a / Gamma(a + 1) for small x, so x = (p Gamma(a + 1))^(1/a))
     if a < 1 and p < 0.5:
         lx = (_math.log(p) + _math.lgamma(a + 1)) / a
