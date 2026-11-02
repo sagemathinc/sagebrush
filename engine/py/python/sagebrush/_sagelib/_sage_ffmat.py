@@ -2912,7 +2912,9 @@ class FFSubspace(FFVectorSpace):
             ValueError: the value must be in the range from 0 to 1
         """
         if isinstance(n, slice):
-            return list(self)[n]
+            # only the elements asked for (a range is lazy): K[0:2] of a large
+            # space doesn't enumerate the whole space
+            return [self[i] for i in range(len(self))[n]]
         card = len(self)
         n = int(n)
         if n < 0:
