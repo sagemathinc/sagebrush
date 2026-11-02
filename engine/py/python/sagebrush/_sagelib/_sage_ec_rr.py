@@ -99,9 +99,10 @@ class EllipticCurve_real_field:
     change_ring = base_extend
 
     def __call__(self, *args):
-        """E(0), E(x, y), E((x, y)) or E((x, y, z)); a point not on the curve
-        is a TypeError (Sage's check, with a relative tolerance of 2^-26 for
-        the rounding of RR).
+        """E(0), E(x, y), E((x, y)), E((x, y, z)) or a point of E; coordinates
+        not on the curve are a TypeError, checked exactly, as in Sage: even a
+        computed point's rounded coordinates, given as numbers, may be refused
+        (the point itself is accepted).
 
         EXAMPLES::
 
@@ -109,6 +110,8 @@ class EllipticCurve_real_field:
             ((0.000000000000000 : 1.00000000000000 : 0.000000000000000), (1.00000000000000 : 0.000000000000000 : 1.00000000000000))
         """
         R = _RR()
+        if len(args) == 1 and isinstance(args[0], EllipticCurvePoint_real_field) and args[0]._E == self:
+            return args[0]
         if len(args) == 1 and not isinstance(args[0], (list, tuple)) and args[0] == 0:
             return EllipticCurvePoint_real_field(self, (R(0), R(1), R(0)))
         if len(args) == 1:
@@ -126,10 +129,7 @@ class EllipticCurve_real_field:
         if z != 1:
             x, y, z = x / z, y / z, R(1)
         a1, a2, a3, a4, a6 = self._a
-        lhs = y * y + a1 * x * y + a3 * y
-        rhs = x * x * x + a2 * x * x + a4 * x + a6
-        scale = max(1.0, abs(float(lhs)), abs(float(rhs)))
-        if abs(float(lhs - rhs)) > scale * 2.0 ** -26:
+        if y * y + a1 * x * y + a3 * y - (x * x * x + a2 * x * x + a4 * x + a6) != 0:
             raise TypeError("Coordinates %s do not define a point on %r" % (c, self))
         return EllipticCurvePoint_real_field(self, (x, y, z))
 
