@@ -167,6 +167,18 @@ test("the real failing shape: marked, leakCheck drops it and says why; unmarked,
   assert.equal(run(`WAIT_SELF_EXIT_MS`), 1000);
 });
 
+// (shape (a) of a target that exits about 1 ms after its last DONE, exactly as CI 41061496397 and 41433230816 read it:
+// the final sample taken in the kernel's exit, threads 2 and no RSS, with no reason of its own.  Not a candidate, no
+// final_drop, the samples untouched; leakCheck drops it and judges repeats 3 and 4: the same verdict as shape (b))
+test("a final sample read in the kernel's exit (CI's shape): no final drop, dropped as exiting, the row's verdict unchanged", () => {
+  const ci = JSON.stringify([...[8, 8, 8, 8].map((t, k) => ({ i: k + 1, t_done: 1000 * (k + 1), rss_kb: 64000 + k, threads: t })), { i: 5, t_done: 5000, rss_kb: null, threads: 2, exiting: true }]);
+  assert.equal(run(`finalDropCandidate(${ci})`), null);
+  const m = run(`markFinalShutdown(${ci}, { why: "exit", t_finish: 5010, t_exit: 5001 })`);
+  assert.ok(m.final_drop === null && JSON.stringify(m.samples) === ci, JSON.stringify(m));
+  const r = run(`leakCheck(${ci})`);
+  assert.ok(r.ok === true && r.threads_same === true && r.last_exiting === true && r.from === 3 && r.to === 4 && r.last_exiting_why === undefined, JSON.stringify(r));
+});
+
 test("the session's end, once: a re-entry during the own-exit wait is a no-op, the kill runs exactly once after the wait; no candidate kills at once", () => {
   const r = run(`await (async () => {
     const log = []; let t = 0;
