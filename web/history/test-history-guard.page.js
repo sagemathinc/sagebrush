@@ -129,6 +129,27 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   await raw(w.ws, ["entries", "fileBytes", "htokens", "hmeta"], (tx) => { tx.objectStore("fileBytes").put(new Uint8Array([1, 2]), "mfid3"); tx.objectStore("entries").put({ path: "/m3.txt", kind: "file", ref: "/m3.txt", fid: "mfid3", ident: "mfid3", migrated: true, size: 2, sha256: "m" }); });
   await settle();
   check(J(sinceC(k).map((x) => x.ident)) === J(["mfid3"]) && /no legacy copy/.test(sinceC(k)[0]?.why ?? ""), `control (G1): a migration with no legacy copy to compare: caught: ${J(sinceC(k))}`);
+  // (Trash's own folder (the workspace's, no identity, no token by log()): passes; any other new folder with no token: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/Trash", kind: "folder", ref: null, fid: "trashfid" }); tx.objectStore("entries").put({ path: "/notrash", kind: "folder", ref: null, fid: "ntfid" }); });
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["ntfid"]), `Trash's own folder passes; another new folder with no token is caught: ${J(sinceC(k))}`);
+  // (a data file's ref following its path (a move): not content, passes; a notebook's ref changed is a new identity: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/rf.txt", kind: "file", ref: "/rf.txt", fid: "rffid", migrated: true, sha256: "r", size: 1 }); tx.objectStore("entries").put({ path: "/rn.ipynb", kind: "notebook", ref: "rnref1" }); tx.objectStore("htokens").add(tok("rffid", 1e9 + 20)); tx.objectStore("htokens").add(tok("rnref1", 1e9 + 21)); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/rf.txt", kind: "file", ref: "/elsewhere.txt", fid: "rffid", migrated: true, sha256: "r", size: 1 }); tx.objectStore("entries").put({ path: "/rn.ipynb", kind: "notebook", ref: "rnref2" }); });
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["rnref2"]), `a data file's ref changed (its legacy key, following a move) passes; a notebook's ref changed (a new identity) is caught: ${J(sinceC(k))}`);
+  // (a subtree removed with its top, the top's token only: passes; a child removed under a folder that stays, with that
+  // folder's token: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { for (const [p, f] of [["/S", "sfid"], ["/S/x.txt", "sxfid"], ["/K", "kfid"], ["/K/y.txt", "kyfid"]]) { tx.objectStore("entries").put({ path: p, kind: p.endsWith(".txt") ? "file" : "folder", ref: null, fid: f, ...(p.endsWith(".txt") ? { migrated: true, sha256: "s", size: 1 } : {}) }); tx.objectStore("htokens").add(tok(f, 1e9 + 30 + p.length)); } });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/S"); tx.objectStore("entries").delete("/S/x.txt"); tx.objectStore("htokens").add(tok("sfid", 1e9 + 40)); });
+  await settle();
+  check(sinceC(k).length === 0, `a folder removed with its subtree, the folder's token alone: passes: ${J(sinceC(k))}`);
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/K/y.txt"); tx.objectStore("htokens").add(tok("kfid", 1e9 + 41)); });
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["kyfid"]), `control: a child removed under a folder that stays (the folder's token only): caught: ${J(sinceC(k))}`);
   // (a removal with no token: caught; the same during a reset to a new workspace (meta "resetting"): passes)
   k = G.violations.length;
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/c1.txt"));

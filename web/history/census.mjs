@@ -20,7 +20,9 @@ const SOURCES = /"(entries|fileBytes|boards|notebooks)"/;
 const SITE = /(?:\b(?:inTx|mainTx|idb)\(\s*[^,()]+(?:\([^()]*\))?\s*,\s*([^]*?)\s*,\s*"readwrite"|\.transaction\(\s*([^]*?)\s*,\s*"readwrite"\s*\))/g;
 const LITERAL = /^(?:"[^"]*"|\[\s*(?:"[^"]*"\s*,?\s*)*\])$/;
 
-const skip = (p) => /(^|\/)(node_modules|dist|vendor)(\/|$)/.test(p) || /(^|\/)test-[^/]*$|-cases\.js$|\.page\.js$|(^|\/)census\.mjs$/.test(p);
+// (generated output, as .gitignore has it (web/site/public, build, app.tmp.js), is never a source: a built tree is
+// censused the same as a fresh checkout)
+const skip = (p) => /(^|\/)(node_modules|dist|vendor|build)(\/|$)|^site\/public(\/|$)|(^|\/)app\.tmp\.js$/.test(p) || /(^|\/)test-[^/]*$|-cases\.js$|\.page\.js$|(^|\/)census\.mjs$/.test(p);
 function* files(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name), rel = relative(web, p);
