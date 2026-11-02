@@ -596,12 +596,14 @@ sur("R39", "REFUSED surrogate", k="GET " + U + LO + "\ud83d")
 sur("R40", "OK 1", recorded_by="fixture" + PAIR)
 sur("R41", "REFUSED bad-value:url", url=U + PAIR)
 
-# (R42-R46: grader P2: _authority and _host called directly, past the ASCII
-# gate, so each DIGITS line is reached with a non-ASCII digit; R42 and R47:
-# a number whose first digit is ASCII and whose second is not (1٣, 1²), so the
+# (R42-R51: grader P2: _authority and _host called directly, past the ASCII
+# gate, so each DIGITS line is reached with a non-ASCII digit; R42, R47-R51:
+# version, revision and size whose first digit is ASCII and whose second is
+# not (1\u0663, 1\u00b2), so the
 # number LOOP meets the non-ASCII digit (R6-R11 stop at the number start)
 # that STARTS with one)
-for rid, field, val in (("R42", "version", "1\u0663"), ("R47", "size", "1\u00b2")):
+for rid, field, val in (("R42", "version", "1\u0663"), ("R47", "size", "1\u00b2"), ("R48", "version", "1\u00b2"),
+                        ("R49", "revision", "1\u0663"), ("R50", "revision", "1\u00b2"), ("R51", "size", "1\u0663")):
     text = json.dumps(manifest({"GET " + U: entry(U, size=1)}), ensure_ascii=False)
     old = '"%s": 1' % field
     assert text.count(old) == 1
