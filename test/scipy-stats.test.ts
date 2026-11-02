@@ -76,7 +76,8 @@ test("scipy.stats: the samplers whose numpy.random method Sagebrush lacks raise 
 import scipy.stats as st
 for name, args in (("t", (3,)), ("f", (2, 5)), ("chi2", (4,)), ("cauchy", ()), ("binom", (10, 0.3))):
     try:
-        getattr(st, name).rvs(*args, size=2, random_state=0)
+        # (the default random_state: NumPy's global stream, daybreak3's R1)
+        getattr(st, name).rvs(*args, size=2)
         print(name, "no error")
     except NotImplementedError as e:
         print(name, "NotImplementedError", str(e).split(":")[0])
