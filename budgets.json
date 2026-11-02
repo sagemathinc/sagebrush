@@ -241,6 +241,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-ipaddress.src": {
+   "exact": false,
+   "ceiling": 92882,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-ipython.src": {
    "exact": false,
    "ceiling": 7481,
@@ -374,6 +381,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-sbdata.src": {
+   "exact": false,
+   "ceiling": 21139,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-sbx.src": {
    "exact": false,
    "ceiling": 52848,
@@ -433,6 +447,13 @@
   "engine/lib/mod-unittest.src": {
    "exact": false,
    "ceiling": 15659,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-urllib.src": {
+   "exact": false,
+   "ceiling": 61481,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -631,6 +652,7 @@
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
    "engine/lib/mod-io.src": 13519,
+   "engine/lib/mod-ipaddress.src": 84439,
    "engine/lib/mod-ipython.src": 6801,
    "engine/lib/mod-json.src": 4930,
    "engine/lib/mod-locale.src": 85045,
@@ -650,6 +672,7 @@
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sb-check.src": 4356,
+   "engine/lib/mod-sbdata.src": 19218,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-scipy-special.src": 41877,
@@ -659,6 +682,7 @@
    "engine/lib/mod-textwrap.src": 21233,
    "engine/lib/mod-tzdata.src": 802,
    "engine/lib/mod-unittest.src": 14236,
+   "engine/lib/mod-urllib.src": 55892,
    "engine/lib/mod-uuid.src": 39564,
    "engine/lib/mod-viewer3d.src": 94924,
    "engine/lib/mod-warnings.src": 5464,
