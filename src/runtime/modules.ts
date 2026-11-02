@@ -1791,6 +1791,10 @@ function chdir(p: string) {
   }
 }
 
+// _fs.read_nofollow's ceiling: the largest read the replay layer makes (one
+// entry's cap, lib/_sbdata.py ENTRY_CAP); a fixed native bound, not Python's
+const READ_NOFOLLOW_MAX = 50_000_000;
+
 // The data replay layer's root (_fs.data_root): set once by the host before
 // any Python runs (the CLI: --data-root DIR, else its starting directory),
 // as a realpath; null on a host that sets none.
@@ -1896,14 +1900,18 @@ newBuiltinModule("_fs", (m) => {
   // realpath, which os lacks (no os.readlink))
   fn(m, "data_root", () => dataRoot);
   fn(m, "read_nofollow", (path: string, max: any) => {
-    const limit = Number(max);
+    // (max is checked here, before any open, read or allocation: an integer
+    // in 0..READ_NOFOLLOW_MAX, the largest replay read (one entry's 50 MB
+    // cap); anything else is refused (daybreak3, LIMIT-M1-1))
+    const limit = typeof max === "bigint" || typeof max === "number" ? Number(max) : NaN;
+    if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return "bad-max";
     let fd = -1;
     try {
       fd = fs.openSync(at(path), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
       const st = fs.fstatSync(fd);
       if (!st.isFile()) return "not-regular";
       if (st.size > limit) return "too-large";
-      const buf = new Uint8Array(limit + 1);
+      const buf = new Uint8Array(Math.min(limit, st.size) + 1);
       let n = 0;
       while (n < buf.length) {
         let k = 0;
@@ -1928,8 +1936,10 @@ newBuiltinModule("_fs", (m) => {
       const st = fs.lstatSync(at(path), { bigint: true });
       const kind = st.isSymbolicLink() ? "link" : st.isDirectory() ? "dir" : st.isFile() ? "file" : "other";
       return tuple([kind, String(st.dev), String(st.ino)]);
-    } catch {
-      return tuple(["none", "", ""]);
+    } catch (e: any) {
+      // (only a missing path is absent: any other error (EACCES, EIO, ELOOP,
+      // ENOTDIR...) is "error", which every caller refuses: fail closed)
+      return tuple([e?.code === "ENOENT" ? "none" : "error", "", ""]);
     }
   });
   fn(m, "realpath", (path: string) => {

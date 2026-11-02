@@ -485,6 +485,117 @@ def pin_head(base):
 F("F13", "fetch(%r, method='HEAD')\n" % U, "SERVED %s " % sha(b""), setup=pin_head)
 F("F14", "fetch(%r, method='HEAD')\n" % U, "URLERROR not-pinned canary=0")
 
+# ---------------------------------------------------------------- R: the review fixes
+# (RP-SEC-1, astra: lstat_kind is "none" only for ENOENT; RP-SEC-2: ASCII
+# digits only; LIMIT-M1-1, daybreak3: read_nofollow's max checked natively
+# before any open; grader's row rulings for each)
+
+
+def R(rid, program, exp, setup=None):
+    row(rid, "R", program, exp, setup=setup)
+
+
+def errno_tree(base):
+    d = os.path.join(base, "root")
+    os.symlink("loop", os.path.join(d, "loop"))   # (a loop as an intermediate component: ELOOP)
+    open(os.path.join(d, "f.txt"), "w").write("abc")
+
+
+def noexec_tree(base):
+    d = os.path.join(base, "root")
+    os.makedirs(os.path.join(d, "noexec"))
+    open(os.path.join(d, "noexec", "x"), "w").write("x")
+    os.chmod(os.path.join(d, "noexec"), 0o600)   # (no search permission: EACCES for a non-root user)
+
+
+# (R1 holds only for a non-root user: as root lstat succeeds and the row FAILS,
+# never skips; the test restores the mode before it removes its tree)
+R("R1", "import _fs\nprint(_fs.lstat_kind('noexec/x')[0])\n", "error", noexec_tree)
+R("R2", "import _fs\nprint(_fs.lstat_kind('loop/x')[0])\n", "error", errno_tree)
+R("R3", "import _fs\nprint(_fs.lstat_kind('f.txt/x')[0])\n", "error", errno_tree)
+R("R4", "import _fs\nprint(_fs.lstat_kind('missing')[0])\n", "none", errno_tree)
+
+
+def ancestor_with_loop(base):
+    snap_at(os.path.join(base, "root"))
+    os.makedirs(os.path.join(base, "root", "a"))
+    os.symlink("loop", os.path.join(base, "root", "loop"))
+
+
+# (R5: the nearest marker's inspection errors (the real helper, on an ELOOP
+# path) while a valid snapshot sits above it: a miss, never the ancestor's bytes)
+R("R5", "import _fs\nreal = _fs.lstat_kind\nloop = _fs.realpath('..') + '/loop/x'\n"
+        "class W:\n    def __getattr__(self, n):\n        return getattr(_fs, n)\n"
+        "    def lstat_kind(self, p):\n        return real(loop if p.endswith('/a/.sagebrush-data') else p)\n"
+        "_sbdata._fs = W()\nfetch(%r)\n" % U, "URLERROR invalid-snapshot canary=0", ancestor_with_loop)
+rows["R5"]["cwd"] = "root/a"
+
+# (R6-R11: a manifest number written with an Arabic-Indic decimal digit or a
+# superscript digit, in version, revision and size: not JSON)
+for i, (field, ch) in enumerate([(f, c) for f in ("version", "revision", "size") for c in ("\u0663", "\u00b2")]):
+    base_m = manifest({"GET " + U: entry(U, size=1)})
+    text = json.dumps(base_m, ensure_ascii=False)
+    old = {"version": '"version": 1', "revision": '"revision": 1', "size": '"size": 1'}[field]
+    assert text.count(old) == 1
+    raw = text.replace(old, old[:-1] + ch).encode("utf-8")
+    B("R%d" % (6 + i), "REFUSED not-json", raw=raw)
+    rows["R%d" % (6 + i)]["family"] = "R"
+# (R12-R15: a port written with those digits: refused)
+for i, ch in enumerate(["\u0663", "\u00b2", "\uff11", "\u0663\u0663"]):
+    R("R%d" % (12 + i), "key('GET', %r)\n" % ("https://example.org:%s/a" % ch), "REFUSED url")
+
+
+def read_tree(base):
+    d = os.path.join(base, "root")
+    open(os.path.join(d, "f.txt"), "w").write("abc")
+
+
+def rn(rid, path, mx, exp):
+    R(rid, "import _fs\nr = _fs.read_nofollow(%r, %s)\nprint(r if isinstance(r, str) else 'bytes %%d' %% len(r))\n" % (path, mx), exp, read_tree)
+
+
+rn("R16", "f.txt", "0", "too-large")
+rn("R17", "f.txt", "3", "bytes 3")
+rn("R18", "f.txt", "2", "too-large")
+rn("R19", "f.txt", "50000000", "bytes 3")
+rn("R20", "f.txt", "50000001", "bad-max")
+rn("R21", "f.txt", "-1", "bad-max")
+rn("R22", "f.txt", "1.5", "bad-max")
+rn("R23", "f.txt", "10 ** 30", "bad-max")
+rn("R24", "f.txt", "'x'", "bad-max")
+rn("R25", "f.txt", "True", "bad-max")
+rn("R26", "f.txt", "None", "bad-max")
+rn("R27", "f.txt", "float('nan')", "bad-max")
+rn("R28", "f.txt", "float('inf')", "bad-max")
+rn("R29", "f.txt", "float('-inf')", "bad-max")
+rn("R30", "missing", "50000001", "bad-max")
+rn("R31", "missing", "5", "unreadable")
+
+# (R32-R41: astra3 RP-CODE-3: an escaped lone or reversed surrogate in a url,
+# an entry key or a meta field is refused by the parser (never an uncaught
+# UnicodeEncodeError); a valid pair is a character: the controls)
+HI, LO, PAIR = "\ud800", "\udc00", "\U0001f600"
+
+
+def sur(rid, exp, url=U, k=None, **over):
+    e = entry(url, **over)
+    raw = json.dumps(manifest({k if k is not None else "GET " + url: e})).encode()
+    assert raw.isascii()
+    B(rid, exp, raw=raw)
+    rows[rid]["family"] = "R"
+
+
+sur("R32", "REFUSED surrogate", url=U + HI)
+sur("R33", "REFUSED surrogate", url=U + LO)
+sur("R34", "REFUSED surrogate", k="GET " + U + HI)
+sur("R35", "REFUSED surrogate", k="GET " + U + LO)
+sur("R36", "REFUSED surrogate", recorded_by="fixture" + HI)
+sur("R37", "REFUSED surrogate", recorded_by="fixture" + LO)
+sur("R38", "REFUSED surrogate", recorded_by="fixture" + LO + "\ud83d")
+sur("R39", "REFUSED surrogate", k="GET " + U + LO + "\ud83d")
+sur("R40", "OK 1", recorded_by="fixture" + PAIR)
+sur("R41", "REFUSED bad-value:url", url=U + PAIR)
+
 json.dump(rows, open(os.path.join(OUT, "expected.json"), "w"), indent=1, sort_keys=True)
 fam = {}
 for r in rows.values():

@@ -27,8 +27,8 @@ mut("M-malformed-pct", SB, '            if len(h) != 2 or h[0] not in HEX or h[1
 mut("M-dot-segments", SB, '    if any(seg in (".", "..") for seg in re.sub("%2[eE]", ".", p).split("/")):\n        raise Refused("url")\n', '')
 mut("M-userinfo", SB, '    if "@" in auth:\n        raise Refused("url")\n    if auth.startswith("["):', '    auth = auth.rpartition("@")[2]\n    if auth.startswith("["):')
 mut("M-empty-host-labels", SB, '    if not h or len(h) > 253 or not all(_LABEL.match(x) for x in labels):', '    if len(h) > 253 or not all(_LABEL.match(x) for x in labels if x):')
-mut("M-ip-literal", SB, '    if last.isdigit() or (last.startswith("0x") and all(c in HEX for c in last[2:])):\n        raise Refused("url")\n', '')
-mut("M-port-range", SB, '        if not port.isdigit() or not 1 <= int(port) <= 65535:', '        if not port.isdigit():')
+mut("M-ip-literal", SB, '    if (last and all(c in DIGITS for c in last)) or (last.startswith("0x") and all(c in HEX for c in last[2:])):\n        raise Refused("url")\n', '')
+mut("M-port-range", SB, '        if not port or not all(c in DIGITS for c in port) or not 1 <= int(port) <= 65535:', '        if not port or not all(c in DIGITS for c in port):')
 mut("M-ascii-gate", SB, '    if not isinstance(url, str) or not _printable_ascii(url):\n        raise Refused("url")\n    m = re.match', '    if not isinstance(url, str):\n        raise Refused("url")\n    m = re.match')
 mut("M-method", SB, '    if method not in ("GET", "HEAD"):\n        raise Refused("method")\n    return method', '    return method')
 mut("M-scheme", SB, '    if scheme not in ("http", "https"):\n        raise Refused("url")\n', '')
@@ -44,7 +44,7 @@ mut("M-cap-key-derived", SB, '    if len(k.encode("utf-8")) > len(e["method"]) +
 mut("M-cap-metadata", SB, '    if len(v.encode("utf-8")) > META_CAP:\n        raise Refused("cap:" + f)\n', '')
 mut("M-cap-folder", SB, '    if total > FOLDER_CAP:\n        raise Refused("cap:folder")\n', '')
 mut("M-cap-entry-size", SB, '    if e["size"] > ENTRY_CAP:\n        raise Refused("cap:size")\n', '')
-mut("M-cap-file-bytes", SB, '    raw = _fs.read_nofollow(snapdir + "/snapshot.json", FILE_CAP)', '    raw = _fs.read_nofollow(snapdir + "/snapshot.json", 10 ** 9)')
+mut("M-cap-file-bytes", SB, '    raw = _fs.read_nofollow(snapdir + "/snapshot.json", FILE_CAP)', '    raw = _fs.read_nofollow(snapdir + "/snapshot.json", ENTRY_CAP)')
 mut("M-encoding", SB, '    if raw[:3] == b"\\xef\\xbb\\xbf":\n        raise Refused("encoding")\n    try:\n        text = raw.decode("utf-8")\n    except UnicodeDecodeError:\n        raise Refused("encoding")', '    text = raw.decode("utf-8", "replace")')
 mut("M-via-enum", SB, '    if e["via"] not in ("relay", "import", "converted"):\n        raise Refused("bad-value:via")\n', '')
 mut("M-converted-from", SB, '    if e["via"] == "converted" and "converted_from" not in e:\n        raise Refused("missing:converted_from")\n', '')
@@ -83,6 +83,17 @@ mut("M-header-refusal", RQ, '        if cls is not None:\n            raise _err
 mut("M-head-from-get", RQ, '        e = entries.get(k)\n', '        e = entries.get(k) or entries.get(k.replace("HEAD ", "GET ", 1))\n')
 mut("M-spy-not-in-worker", TEST, 'workerData: { sagebrushCli: { argv: ${JSON.stringify(argv)} } } });', 'execArgv: [], workerData: { sagebrushCli: { argv: ${JSON.stringify(argv)} } } });')
 mut("M-forbidden-import", SB, '\nimport _fs\n', '\nimport _fs\ntry:\n    import socket\nexcept ImportError:\n    pass\n')
+# (the review fixes: RP-SEC-1/RP-CODE-1, RP-SEC-2/RP-CODE-2, RP-CODE-3,
+# LIMIT-M1-1, and the grader's runRow exit-status ruling)
+mut("M-lstat-enoent-dropped", MOD, 'e?.code === "ENOENT" ? "none" : "error"', '"none"')
+for mid, digit in (("M-isdigit-restored", ".isdigit()"), ("M-isdecimal", ".isdecimal()")):
+    mut(mid, SB, '    if (last and all(c in DIGITS for c in last)) or', '    if last%s or' % digit)
+    mut(mid, SB, '        if not port or not all(c in DIGITS for c in port) or', '        if not port%s or' % digit)
+    mut(mid, SB, '        if c == "-" or c in DIGITS:', '        if c == "-" or c%s:' % digit)
+    mut(mid, SB, '        while j < len(s) and s[j] in DIGITS:', '        while j < len(s) and s[j]%s:' % digit)
+mut("M-read-max-unchecked", MOD, '    if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return "bad-max";\n', '')
+mut("M-surrogate-check-removed", SB, '                    if 0xD800 <= ord(c) < 0xE000:\n                        raise Refused("surrogate")\n', '')
+mut("M-rc-unchecked", TEST, '  assert.equal(run.code, rc, `${id}: exit status ${run.code}, expected ${rc}: stderr ${run.err.slice(-400)}`);\n', '')
 
 # (check: per id, apply its rows in order; each anchor exactly once there)
 ids = []

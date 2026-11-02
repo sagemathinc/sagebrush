@@ -7801,6 +7801,14 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: chdir :: const READ_NOFOLLOW_MAX = 50_000_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
  "src/runtime/modules.ts :: factorial :: if (n > LLONG_MAX) raise(T.OverflowError, `factorial() argument should not exceed ${LLONG_MAX}`); #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -7886,21 +7894,21 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(limit + 1); #0": {
+ "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "python (@sagebrush-python)",
-  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
  },
- "src/runtime/modules.ts :: quiet :: const limit = Number(max); #0": {
+ "src/runtime/modules.ts :: quiet :: const limit = typeof max === \"bigint\" || typeof max === \"number\" ? Number(max) : NaN; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "python (@sagebrush-python)",
-  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
  },
  "src/runtime/modules.ts :: quiet :: fn(m, \"read_nofollow\", (path: string, max: any) => { #0": {
   "class": "1",
@@ -7909,6 +7917,14 @@
   },
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return \"bad-max\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
  },
  "src/runtime/modules.ts :: quiet :: if (st.size > limit) return \"too-large\"; #0": {
   "class": "1",
