@@ -657,6 +657,13 @@ jobs:
           # (the notebook journal, 16 s, here in the fast tier: it evaluates slices of web/index.html, so any edit there
           # can break it (#466's CI1); moved from web-runner-sync, which runs on the full tier only)
           CHROME=google-chrome bun web/notebook/test-journal.mjs
+          # (Stage A layer 1: history's change tokens (inert in the app); the dynamic census guard and its controls; the
+          # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
+          # scripts/nightly-history-guard.sh, not wired (@sagebrush, Nov 2, William's CI-speed ruling))
+          CHROME=google-chrome bun web/history/test-history-tokens.mjs
+          CHROME=google-chrome bun web/history/test-history-guard.mjs
+          CHROME=google-chrome bun web/history/test-history-d11.mjs
+          bun web/history/test-history-census.mjs
           # (the board journal's store, Workspace.journalWrite and the kind)
           CHROME=google-chrome bun web/board/test-board-journal.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-detect.mjs
