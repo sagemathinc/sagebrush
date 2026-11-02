@@ -1623,6 +1623,9 @@ const bookAcc = bookAccess({
   myst: fromMyst,
   maxBytes: LIMITS.maxBoardBytes,
 });
+// (the same, for the tests, which call the page's own capability directly (web/notebook/test-myst.mjs part C): less
+// than the page's own workspace, window.sagebrush.workspace, already gives this page's code)
+window.__sagebrushMystBook = () => bookAcc.mystBook();
 
 // The app: a notebook opened from the computer is its .ipynb file, and the
 // files in its folder are Python's files (read when it opens; what Python
