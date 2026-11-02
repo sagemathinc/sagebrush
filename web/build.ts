@@ -251,6 +251,9 @@ if (LATEX) {
 // component, nothing else built here (plan-myst-notebooks r3 §8.1: its laziness is this, and the network test's)
 {
   const isMyst = (p: string) => /(^|\/)web\/myst\//.test(p.replace(/\\/g, "/"));
+  // (a bun whose Bun.build gives no metafile, as 1.2.21's doesn't, can't be checked here, nor list the bundles' npm
+  // packages below: CI's pin, DEVELOPMENT.md's bun, gives one)
+  if (mystResult.metafile === undefined) throw new Error(`bun ${Bun.version}'s Bun.build gives no metafile, which this build reads; use bun 1.4.4 (CI's pin): bun upgrade, or curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4`);
   if (!Object.keys(mystResult.metafile?.inputs ?? {}).some(isMyst)) throw new Error("sagebrush-myst.js doesn't contain web/myst");
   for (const [what, r] of builds) if (r !== mystResult && Object.keys(r.metafile?.inputs ?? {}).some(isMyst)) throw new Error(`${what} contains web/myst: MyST's renderer belongs only in sagebrush-myst.js`);
 }
@@ -460,7 +463,8 @@ function boardMystClosure(what: string, r: any) {
   const notices = readFileSync(join(here, "..", "packages", "sagebrush", "THIRD-PARTY-NOTICES.txt"), "utf8");
   if (!notices.includes(`web/js-dependencies.json ${hash}`)) {
     console.error("web/js-dependencies.json changed: run node scripts/third-party-notices.mjs, then this build again");
-    process.exit(1);
+    // (its own exit code, so scripts/build-all.sh can write the notices and build again; CI fails on any)
+    process.exit(3);
   }
   writeFileSync(join(here, "dist", "THIRD-PARTY-NOTICES.txt"), notices);
 }
