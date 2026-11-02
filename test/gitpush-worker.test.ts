@@ -15,19 +15,25 @@ const req = (path: string, init: { method?: string; headers?: Record<string, str
   new Request(P + path, { method: init.method ?? "GET", headers: { origin: ORIGIN, authorization: TOKEN, ...(init.headers ?? {}) }, body: init.body });
 const REFS = "/github.com/octo/notes.git/info/refs?service=git-receive-pack";
 const RECEIVE = "/github.com/octo/notes.git/git-receive-pack";
+const UREFS = "/github.com/octo/notes.git/info/refs?service=git-upload-pack";
+const UPLOAD = "/github.com/octo/notes.git/git-upload-pack";
 const upstream = (status = 200, headers: Record<string, string> = { "content-type": "application/x-git-receive-pack-advertisement" }) => {
   const calls: { url: string; init: any }[] = [];
   const f = async (url: string, init: any) => { calls.push({ url, init }); return new Response("ok", { status, headers }); };
   return { calls, f };
 };
 
-test("route: only the two push endpoints, on github.com, with exact names", () => {
-  assert.deepEqual(w.route("GET", P + REFS), { owner: "octo", repo: "notes", endpoint: "refs" });
-  assert.deepEqual(w.route("POST", P + RECEIVE), { owner: "octo", repo: "notes", endpoint: "receive" });
-  assert.deepEqual(w.route("GET", P + "/github.com/a-b_c/d.e-f.git/info/refs?service=git-receive-pack"), { owner: "a-b_c", repo: "d.e-f", endpoint: "refs" });
+test("route: only git's two smart-HTTP services (push, and M4b's fetch), on github.com, with exact names", () => {
+  assert.deepEqual(w.route("GET", P + REFS), { owner: "octo", repo: "notes", endpoint: "refs", service: "git-receive-pack" });
+  assert.deepEqual(w.route("POST", P + RECEIVE), { owner: "octo", repo: "notes", endpoint: "post", service: "git-receive-pack" });
+  assert.deepEqual(w.route("GET", P + UREFS), { owner: "octo", repo: "notes", endpoint: "refs", service: "git-upload-pack" });
+  assert.deepEqual(w.route("POST", P + UPLOAD), { owner: "octo", repo: "notes", endpoint: "post", service: "git-upload-pack" });
+  assert.deepEqual(w.route("GET", P + "/github.com/a-b_c/d.e-f.git/info/refs?service=git-receive-pack"), { owner: "a-b_c", repo: "d.e-f", endpoint: "refs", service: "git-receive-pack" });
   for (const [method, path] of [
-    ["GET", "/github.com/octo/notes.git/info/refs?service=git-upload-pack"], // pull is not in M1
-    ["POST", "/github.com/octo/notes.git/git-upload-pack"],
+    ["GET", "/github.com/octo/notes.git/info/refs?service=git-upload-archive"],
+    ["GET", "/github.com/octo/notes.git/info/refs?service=git-upload-pack&x=1"],
+    ["POST", "/github.com/octo/notes.git/git-upload-archive"],
+    ["POST", UPLOAD + "?a=1"], ["GET", UPLOAD], ["POST", UREFS],
     ["GET", "/github.com/octo/notes.git/info/refs"],
     ["GET", "/github.com/octo/notes.git/info/refs?service=git-receive-pack&x=1"],
     ["POST", RECEIVE + "?a=1"],
@@ -68,10 +74,15 @@ test("the built upstream URL: only https://github.com/<owner>/<repo>.git/<the pu
   assert.equal(up.calls.length, 0);
   await w.handle(req(REFS), env(), up.f);
   await w.handle(req(RECEIVE, { method: "POST", body: "x", headers: { "content-length": "1" } }), env(), up.f);
+  await w.handle(req(UREFS), env(), up.f);
+  await w.handle(req(UPLOAD, { method: "POST", body: "x", headers: { "content-length": "1" } }), env(), up.f);
+  assert.deepEqual(up.calls.map((c) => [c.init.method, c.url.slice("https://github.com".length)]), [
+    ["GET", "/octo/notes.git/info/refs?service=git-receive-pack"], ["POST", "/octo/notes.git/git-receive-pack"],
+    ["GET", "/octo/notes.git/info/refs?service=git-upload-pack"], ["POST", "/octo/notes.git/git-upload-pack"]]);
   for (const { url } of up.calls) {
     const u = new URL(url);
     assert.equal(u.origin, "https://github.com");
-    assert.match(u.pathname + u.search, /^\/octo\/notes\.git\/(info\/refs\?service=git-receive-pack|git-receive-pack)$/);
+    assert.match(u.pathname + u.search, /^\/octo\/notes\.git\/(info\/refs\?service=git-(receive|upload)-pack|git-(receive|upload)-pack)$/);
     assert.ok(!u.pathname.split("/").some((s) => s === "." || s === ".."));
   }
 });
@@ -100,7 +111,7 @@ test("refusals: no token, no limiter (fail closed), over the rate, no or too lar
   const slow = limiter(false);
   assert.equal((await w.handle(req(REFS, { headers: { "cf-connecting-ip": "203.0.113.9" } }), env({ LIMITER: slow }), up.f)).status, 429);
   assert.deepEqual(slow.keys, ["203.0.113.9"]);
-  assert.equal((await w.handle(req("/github.com/o/r.git/git-upload-pack", { method: "POST", body: "x" }), env(), up.f)).status, 400);
+  assert.equal((await w.handle(req("/github.com/o/r.git/git-upload-archive", { method: "POST", body: "x" }), env(), up.f)).status, 400);
   const big = new Request(P + RECEIVE, { method: "POST", headers: { origin: ORIGIN, authorization: TOKEN, "content-length": String(w.MAX_BODY + 1) } });
   assert.equal((await w.handle(big, env(), up.f)).status, 413);
   const chunked = new Request(P + RECEIVE, { method: "POST", headers: { origin: ORIGIN, authorization: TOKEN },

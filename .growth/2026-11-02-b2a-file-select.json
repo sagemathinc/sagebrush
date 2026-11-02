@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "B2a (William: select files in the file browser): web/workspace/browser.ts's row checkboxes, shift-click ranges and the selection bar (Download, Clear), part of the CLI's embedded site. Measured with size-record.sh (bun 1.4.4, node 24.21.0, pnpm 11.9.0) on master 8eb0e0eb vs the head 2661fce3 (one commit on it, so the merge probe's tree): cli/pyjs.cjs +6028; no other bundle changed. Marker = growth + 128. Records frozen in /scratch/agents-ui-tmp/szb2a (SUMS 0629b5f3).",
+ "bytes": {
+  "cli/pyjs.cjs": 6156
+ }
+}

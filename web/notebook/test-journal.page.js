@@ -2,7 +2,7 @@
 // core (journal.js).  W the workspace, N the journal, H the notebook's history (history.js), R sync's rows.  Each case
 // has a workspace of its own; the notebooks' history is one database for the whole origin, its fence dropped before
 // each case (in a browser there is only ever one workspace), and each case's notebooks have ids of their own.
-import { W, N, H, R, B, S, P } from "./all.js";
+import { W, N, H, R, B, S, P, G } from "./all.js";
 
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -720,15 +720,11 @@ async function kindLaw() {
   hdb.close();
 }
 
-// (the notebook page's own functions, as index.html has them, run with what they use given to them: startHistory and
-// takeOver (astra's CORR-215-4, board's C))
+// (the notebook page's own functions, the ones index.html runs (web/page/session.ts), with what they use given to them:
+// startHistory and takeOver (astra's CORR-215-4, board's C))
 async function pageFunctions(deps) {
-  const src = await (await fetch("./page-src.html")).text();
-  const a = src.indexOf("let nbJournal = null, nbHistoryOff = null;"), b = src.indexOf('nb.on("change"', a);
-  const t0 = src.indexOf("async function takeOver(store, id) {"), t1 = src.indexOf("\n}\n", t0) + 3;
-  if (a < 0 || b < 0 || t0 < 0) throw new Error("the page's journal functions weren't found");
-  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\n${src.slice(t0, t1)}\nreturn { startHistory, takeOver };\n}`);
-  return make(deps);
+  const { startHistory, takeOver } = G.pageSession(deps);
+  return { startHistory, takeOver };
 }
 const pageHelpers = () => ({ pageControls: N.pageControls, switchJournal: N.switchJournal, TAKEOVER: N.TAKEOVER, TAKEOVER_FAILED: N.TAKEOVER_FAILED });
 
@@ -1578,19 +1574,17 @@ async function syncWireRows() {
 }
 
 // ---- DEV's switch on the notebook page (astra's DEVSW-2, daybreak3): the page's own reopenJournaled, shownReadOnly and
-// docSyncReload, as index.html has them, run with what they use given to them; and the switch over a real workspace
+// docSyncReload (web/page/session.ts, the ones index.html runs), with what they use given to them; and the switch over a
+// real workspace
 async function switchFunctions(deps) {
   // (navLease: the page's navigation lease (B1, #447 r5c), defined outside this slice; here a lease with no Move to
   // Trash hold, as in these tests: its end a no-op, nothing went to Trash meanwhile. A test's own deps may override it.
-  // Set on the test's own object: the functions read deps live (`with`), and the tests change them as they go)
+  // Set on the test's own object: the functions read deps live (web/page/session.ts's p), and the tests change them as they go)
   if (!("navLease" in deps)) deps.navLease = async () => Object.assign(() => {}, { after: null });
   // (trashTest: the page's Move to Trash test hooks (B1), none here: no pauses)
   if (!("trashTest" in deps)) deps.trashTest = {};
-  const src = await (await fetch("./page-src.html")).text();
-  const a = src.indexOf("// (DEV's switch, after the journal's activation"), b = src.indexOf("let journalKit = null;", a);
-  if (a < 0 || b < 0) throw new Error("the page's switch functions weren't found");
-  const make = new Function("deps", `with (deps) {\n${src.slice(a, b)}\nreturn { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating };\n}`);
-  return make(deps);
+  const { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating } = G.pageSession(deps);
+  return { reopenJournaled, shownReadOnly, docSyncReload, ownNotebook, recreating };
 }
 const pageNb = (st) => ({ store: st, ro: [], detach() { this.store = null; }, setReadOnly(r) { this.ro.push(r); } });
 
