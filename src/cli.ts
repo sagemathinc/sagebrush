@@ -77,9 +77,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   board open FILE [--port N] [--no-browser]
            a board in your browser, shown again each time FILE changes
            (sagebrush board --help: every board command)
-  latex check|render FILE.tex [--png DIR]
-           check a .tex file as Sagebrush's LaTeX editor shows it, and see it:
-           an HTML file, and a PNG per beamer frame (sagebrush latex --help)
+  latex check|run|render FILE.tex [--png DIR]
+           check a .tex file as Sagebrush's LaTeX editor shows it, run its
+           SageTeX code, and see it: an HTML file, and a PNG per beamer frame
+           (sagebrush latex --help)
 `;
 
 // A SystemExit's status as the process's exit code, by CPython's rule
@@ -538,7 +539,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (argv[0] === "latex" && (["check", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
     const latex = loadLatex();
     if (typeof latex === "string") { process.stderr.write(`sagebrush: ${latex}\n`); process.exitCode = 2; return; }
-    process.exitCode = await latex.latexCommand(argv.slice(1));
+    // (cli: the script this process runs, the bundle or the npm launcher, for `latex run`'s Sage session)
+    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: process.argv[1] ? resolve(process.argv[1]) : undefined });
     return;
   }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
@@ -820,7 +822,7 @@ else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boar
 /** `sagebrush latex`'s module, sagebrush-latex.cjs (scripts/build-cli.mjs): beside this bundle in the npm package and in
  * build/cli; from a checkout's tsc or bun run, build/cli's. Loaded by its path, so no bundler folds it into this one.
  * Or why there is none. */
-function loadLatex(): { latexCommand: (argv: string[]) => Promise<number> } | string {
+function loadLatex(): { latexCommand: (argv: string[], opts?: { cli?: string }) => Promise<number> } | string {
   const here = typeof __dirname === "string" ? __dirname : ".";
   const req = createRequire(join(here, "x.js"));
   for (const p of [join(here, "sagebrush-latex.cjs"), join(here, "..", "build", "cli", "sagebrush-latex.cjs"), join(here, "..", "..", "build", "cli", "sagebrush-latex.cjs")]) {

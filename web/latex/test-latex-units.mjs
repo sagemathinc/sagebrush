@@ -316,7 +316,7 @@ check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["d
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
   const want = {
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
-    sagetex: ["In this preview", "not connected"], pythontex: ["In this preview", "is not supported in this preview: not run"],
+    sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "is not supported in this preview: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
     tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
