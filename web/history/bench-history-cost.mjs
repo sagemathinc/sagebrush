@@ -15,14 +15,18 @@
 // The gate, per browser and workload (D(x) = the median of x's five within-round paired deltas against base):
 //   A, central latency: B50 = the median of base's five p50s, T50 = min(1 ms, max(0.5 ms, 0.05 B50)).
 //   B, the GC-tail burden: U = 0.01 (one percentage point of saves).
-//   VALID only if  D_p50(aa) <= T50,  D_q(aa) <= U,  D_p50(delay) > T50  and  D_q(tail) > U  (else VOID, never PASS);
+//   VALID only if  D_p50(aa) <= T50,  D_q(aa) <= U,  D_p50(delay) > T50,  D_q(tail) > U  AND  D_q'(tail) > U, where
+//   q'(tail) counts the tail run's saves over 3 x the SAME ROUND's base p50 and D_q'(tail) = the median of the five
+//   q'(tail) - q(base) (the grader's G-T1..G-T3: own-p50 and base-anchored power both; equality at U fails; else VOID);
 //   PASS if  D_p50(head) <= T50,  D_q(head) <= U  and head's p99 <= 250 ms in every run (the r6.4 backstop, the save's
 //   end-to-end latency containing its transaction's wait; set's p99 reported).  p95 is reported only.
 // STOPs (for daybreak3 + the grader, never a verdict), decided before the medians:  performance.now()'s resolution over
 // 100 us in any run (compared in whole microseconds);  the instability/spread STOP: any of base, aa, head, delay and set
 // whose five p50s have max > 2 x min AND max - min > 5 ms.  NOT tail (daybreak3's T1 ruling): its real sleeps alter the
 // concurrent workload's contention by design, so its p50 is evidence, not an estimator; tail is judged only by
-// D_q(tail) > U (and the resolution STOP), and its p50/p90/p95/p99/max, q, bursts and wall time are reported.  The
+// its two power rows (D_q(tail) > U and D_q'(tail) > U) and the structural checks (exactly its declared save count, a
+// finite wall time, the resolution STOP, the anchor preflight); its p50/p90/p95/p99/max, q, q', bursts and wall time
+// are reported, and every run's raw per-save latencies (all six configurations) are kept in the report's JSON.  The
 // rules' boundary and scope controls run before anything else; a wrong one is BAD.
 // The two mutants' anchors (DELAY's patch in tokens.ts, TAIL's hook in the page) are preflighted before the run, and
 // their expected outcomes declared: DELAY D_p50 > T50 and TAIL D_q > U in every workload and browser.
@@ -122,7 +126,7 @@ export async function bench(config, workload, scale = 1) {
   } else for (let i = 0; i < N[workload] * scale; i++) await one(w, i, workload === "files" ? "file" : "nb");
   const wall = performance.now() - wall0, p50 = pct(out, 0.5), stalled = out.map((x) => x > 3 * p50), bursts = [];
   for (let i = 0, k = 0; i <= stalled.length; i++) { if (i < stalled.length && stalled[i]) k++; else { if (k >= 10) bursts.push(k); k = 0; } }
-  const r = { n: out.length, wall, p50, p90: pct(out, 0.9), p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, q: stalled.filter(Boolean).length / out.length, bursts, res };
+  const r = { n: out.length, wall, p50, p90: pct(out, 0.9), p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, q: stalled.filter(Boolean).length / out.length, bursts, res, lat: out };
   for (const x of ws) x.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
   return r;
@@ -207,10 +211,40 @@ for (const [ms, want, what] of [
   if (d.split("while (performance.now() - t0 < 2) {}").length !== 2) die("the DELAY mutant's anchor isn't in place exactly once");
   if (b.split("TAIL-ANCHOR").length !== 2 || b.split('config === "tail" && ++started % 10 === 0').length !== 2) die("the TAIL mutant's anchor isn't in place exactly once");
 }
-const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1), U = 0.01;
+// (the verdict of one browser and workload, from its STOPs and medians; and its unit rows: the power rows are strict
+// (equality at U or T50 doesn't pass), the null and head rows inclusive; own-pass/anchored-fail is VOID)
+const U = 0.01;
+const verdictOf = (stop, m) => {
+  if (stop.length) return "STOP";
+  const valid = m.aaP50 <= m.T50 && m.aaQ <= U && m.delayP50 > m.T50 && m.tailQ > U && m.tailQa > U;
+  if (!valid) return "VOID";
+  return m.headP50 <= m.T50 && m.headQ <= U && m.headP99 <= 250 ? "PASS" : "FAIL";
+};
+{
+  const ok = { T50: 0.5, aaP50: 0, aaQ: 0, delayP50: 2, tailQ: 0.1, tailQa: 0.1, headP50: 0, headQ: 0, headP99: 10 };
+  for (const [over, want, what] of [
+    [{}, "PASS", "every row passes: VALID and PASS"],
+    [{ tailQa: 0.005 }, "VOID", "tail's own-p50 power passes, the base-anchored fails: VOID"],
+    [{ tailQ: 0.005 }, "VOID", "tail's base-anchored power passes, the own-p50 fails: VOID"],
+    [{ tailQ: 0.01 }, "VOID", "tail's own-p50 power exactly U: not past, VOID"],
+    [{ tailQa: 0.01 }, "VOID", "tail's base-anchored power exactly U: not past, VOID"],
+    [{ tailQ: 0.0101, tailQa: 0.0101 }, "PASS", "both tail powers just over U: VALID"],
+    [{ delayP50: 0.5 }, "VOID", "delay exactly T50: not caught, VOID"],
+    [{ aaP50: 0.5, aaQ: 0.01 }, "PASS", "A/A exactly T50 and exactly U: within, VALID"],
+    [{ aaP50: 0.5001 }, "VOID", "A/A p50 just over T50: VOID"],
+    [{ aaQ: 0.0101 }, "VOID", "A/A q just over U: VOID"],
+    [{ headP50: 0.5, headQ: 0.01, headP99: 250 }, "PASS", "head exactly T50, U and 250 ms: PASS"],
+    [{ headP50: 0.5001 }, "FAIL", "head p50 just over T50: FAIL"],
+    [{ headQ: 0.0101 }, "FAIL", "head q just over U: FAIL"],
+    [{ headP99: 250.01 }, "FAIL", "head p99 just over 250 ms: FAIL"],
+    [{ headP50: 9, aaP50: 9 }, "VOID", "VOID outranks FAIL"],
+  ]) if (verdictOf([], { ...ok, ...over }) !== want) die(`the verdict's unit row: ${what}`);
+  if (verdictOf(["x"], ok) !== "STOP") die("the verdict's unit row: a STOP outranks every row");
+}
+const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
-const report = { master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50 and TAIL: D_q > U, in every workload and browser; A/A within both", browsers: {} };
+const report = { master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
 console.log(`declared: ${report.declared}; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 try {
@@ -225,22 +259,30 @@ try {
         order.push(turn);
         for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`));
       }
-      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && [x.p50, x.p95, x.p99, x.q, x.res].every(Number.isFinite))))) die(`${bname} ${workload}: a run measured nothing`);
+      // (structural, every configuration tail included: exactly the declared save count, finite statistics and wall time)
+      const scale = bname === "firefox" ? FF_SCALE : 1, want = (workload === "concurrent" ? 4 * 200 : 500) * scale;
+      for (const c of CONFIGS) for (const x of runs[c]) {
+        if (x.n !== want || x.lat.length !== want) die(`${bname} ${workload} ${c}: ${x.n} saves measured, ${want} declared`);
+        if (![x.p50, x.p95, x.p99, x.q, x.res, x.wall].every(Number.isFinite) || !(x.wall > 0)) die(`${bname} ${workload} ${c}: a statistic or the wall time isn't finite`);
+      }
       const of = (c, k) => runs[c].map((x) => x[k]);
       const B50 = med(of("base", "p50")), T50 = Math.min(1, Math.max(0.5, 0.05 * B50));
       const pairedOf = (k) => Object.fromEntries(["aa", "head", "delay", "set", "tail"].map((c) => [c, runs[c].map((x, r) => x[k] - runs.base[r][k])]));
       const P50 = pairedOf("p50"), Q = pairedOf("q");
+      // (q'(tail): the tail run's saves over 3 x the same round's base p50)
+      const qa = runs.tail.map((x, r) => x.lat.filter((v) => v > 3 * runs.base[r].p50).length / x.lat.length);
+      const QA = qa.map((v, r) => v - runs.base[r].q), DQA = med(QA);
       const D = Object.fromEntries(Object.entries(P50).map(([c, d]) => [c, med(d)])), DQ = Object.fromEntries(Object.entries(Q).map(([c, d]) => [c, med(d)]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...of(c, "p99"))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => of(c, "res")));
       const spread = spreadOf(Object.fromEntries(CONFIGS.map((c) => [c, of(c, "p50")])));
       const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : [])];
-      const valid = D.aa <= T50 && DQ.aa <= U && D.delay > T50 && DQ.tail > U, pass = D.head <= T50 && DQ.head <= U, backstop = p99.head <= 250;
-      const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
+      const m = { T50, aaP50: D.aa, aaQ: DQ.aa, delayP50: D.delay, tailQ: DQ.tail, tailQa: DQA, headP50: D.head, headQ: DQ.head, headP99: p99.head };
+      const verdict = verdictOf(stop, m), backstop = p99.head <= 250;
       verdicts.push(verdict);
-      rows[workload] = { verdict, stop, B50, T50, U, D, DQ, P50, Q, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
+      rows[workload] = { verdict, stop, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
-      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us`);
+      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
     report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
@@ -251,7 +293,7 @@ try {
   for (const d of [site, base, delay]) rmSync(d, { recursive: true, force: true });
 }
 const oi = process.argv.indexOf("--out");
-if (oi > 0) writeFileSync(process.argv[oi + 1], JSON.stringify(report, null, 1));
+if (oi > 0) writeFileSync(process.argv[oi + 1], JSON.stringify(report));
 const v = verdicts.includes("STOP") ? "STOP" : verdicts.includes("VOID") ? "VOID" : verdicts.includes("FAIL") ? "FAIL" : "PASS";
 console.log(`HCOST: ${v} (${LEGS.join(" + ")}; ${verdicts.join(" ")})`);
 process.exit({ PASS: 0, FAIL: 1, STOP: 3, VOID: 76 }[v]);
