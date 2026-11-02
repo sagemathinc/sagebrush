@@ -29,11 +29,13 @@ const MYST_FM = "---\njupytext:\n  text_representation:\n    extension: .md\n   
 
 // A capability over files in memory, as the page's does it (web/workspace/book-cap.ts): has() by name (no content),
 // read() refusing past `max` as readUpTo does; every read recorded
-function fakeCap(files: Map<string, Uint8Array>, self: string) {
+let books = 0;
+function fakeCap(files: Map<string, Uint8Array>, self: string, book = `/book${++books}`) {
   const reads: string[] = [];
   let alive = true;
   const cap: BookCap = {
-    book: "/book",
+    // (each its own book: the asset's cache holds one book, keyed by it; tests don't share it unless they say so)
+    book,
     self,
     live: () => alive,
     has: async (n) => files.has(n),
@@ -297,7 +299,7 @@ test("the cache: a chapter edited between builds shows its new display (keyed by
     ["a.md", enc(MYST_FM + "# A\n```{prf:theorem} T\n:label: x\nB.\n```\n")],
     ["b.md", enc(MYST_FM + "# B\n")],
   ]);
-  const f = fakeCap(files, "b.ipynb");
+  const f = fakeCap(files, "b.ipynb", "/cached");
   assert.equal(bookOf(await go(f.cap)).labels.get("x")?.display, "Theorem 1.1");
   files.set("a.md", enc(MYST_FM + "# A\n```{prf:algorithm} T\n:label: x\nB.\n```\n"));
   assert.equal(bookOf(await go(f.cap)).labels.get("x")?.display, "Algorithm 1.1", "the edit seen");
