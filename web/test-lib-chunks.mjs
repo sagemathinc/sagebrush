@@ -63,5 +63,13 @@ ok(lu.manifest.chunks["matlab-lu"]?.src && !lu.manifest.chunks["matlab-lu"].pre 
 ok(JSON.stringify(Object.keys(JSON.parse(lu.chunks.get(lu.manifest.chunks["matlab-lu"].src.file).toString()).files).sort()) === JSON.stringify(["_matlab_colamd.py", "_matlab_lu.py"]), "its chunk holds exactly those two files");
 const luRec = libChunks({ "core.py": "", "_matlab.py": "", "_matlab_lu.py": "" }, { py: rec({}), matlab: rec({ "py|_matlab": mod("_matlab.py"), "py|_matlab_lu": mod("_matlab_lu.py") }) }, "b");
 ok(luRec.manifest.files["_matlab_lu.py"] === "matlab", "a start that compiled _matlab_lu keeps it in its own group (the recordings first)");
+// (elliptic curves over GF(p), _sage_ec_ff, is its own group, mod-sage-ec-ff;
+// the other Sage extras, _sage_ec among them, stay in sage-more)
+const ec = libChunks({ "core.py": "", "sage_all.py": "", "_sage_ec_ff.py": "E = 1\n", "_sage_ec.py": "", "_sage_ec_cubic.py": "", "_sage_lazy.py": "" },
+  { py: rec({ "py|core": mod("core.py") }), sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py") }) }, "b");
+const fe = ec.manifest.files;
+ok(fe["_sage_ec_ff.py"] === "mod-sage-ec-ff", "_sage_ec_ff: mod-sage-ec-ff");
+ok(["_sage_ec.py", "_sage_ec_cubic.py", "_sage_lazy.py"].every((f) => fe[f] === "sage-more") && fe["sage_all.py"] === "sage", "the other Sage extras stay in sage-more, sage_all in sage: " + JSON.stringify(fe));
+ok(ec.manifest.chunks["mod-sage-ec-ff"]?.src && !ec.manifest.chunks["mod-sage-ec-ff"].pre && !ec.manifest.modes.sage.includes("mod-sage-ec-ff"), "mod-sage-ec-ff: sources only, and Sage mode's start doesn't fetch it");
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

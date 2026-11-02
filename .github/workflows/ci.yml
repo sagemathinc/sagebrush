@@ -631,6 +631,8 @@ jobs:
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
+          # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
+          CHROME=google-chrome bun web/notebook/test-myst.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
           # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
@@ -641,6 +643,13 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
+          # (Stage A layer 1: history's change tokens (inert in the app); the dynamic census guard and its controls; the
+          # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
+          # scripts/nightly-history-guard.sh, not wired (@sagebrush, Nov 2, William's CI-speed ruling))
+          CHROME=google-chrome bun web/history/test-history-tokens.mjs
+          CHROME=google-chrome bun web/history/test-history-guard.mjs
+          CHROME=google-chrome bun web/history/test-history-d11.mjs
+          bun web/history/test-history-census.mjs
           # (the board journal's store, Workspace.journalWrite and the kind)
           CHROME=google-chrome bun web/board/test-board-journal.mjs
           bun web/workspace/test-doc-sync-switch.mjs
@@ -1143,6 +1152,7 @@ jobs:
               bun web/test-lib-chunks.mjs
               bun web/board/test-ink.mjs
               bun web/workspace/export/test-measure.mjs
+              bun web/workspace/test-export-reminder.mjs
               ;;
           esac
 

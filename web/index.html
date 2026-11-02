@@ -468,7 +468,7 @@ const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") }
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT, deleteNotebookRecord } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
@@ -483,7 +483,7 @@ import { mountBrowser } from "./workspace/browser.ts";
 import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
-import { uploadFiles, openableAs, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
@@ -994,7 +994,7 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   // (listed in the workspace, or not kept: a notebook no entry lists is
   // never left behind; saved() says so and tries again, LIMIT-E46-1)
   try { await wsAdoptNotebook(id, name, rest.mode); } catch (e) {
-    await idb(db, "notebooks", "readwrite", (s) => s.delete(id)).catch(() => {});
+    await deleteNotebookRecord(db, id).catch(() => {});
     throw e;
   }
   nbKept.set(key, { id, rev: rec.rev });
@@ -2484,7 +2484,7 @@ fileMenu.addEventListener("click", async (e) => {
       if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       await nb.mayLeave();
       nb.detach();
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      await deleteNotebookRecord(db, current.id);
       shareSent.forget(current.id);
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
@@ -2563,7 +2563,7 @@ async function showOpen() {
     del.setAttribute("aria-label", `Delete ${d.name || "Untitled"}`);
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      await deleteNotebookRecord(db, d.id);
       shareSent.forget(d.id);
       await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;
@@ -2724,7 +2724,8 @@ async function uploadHere(list, folder) {
     return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
   }
   if (single && r.kept.length === 1 && !r.made.length) {
-    const e = r.kept[0], as = openableAs(nameOf(e.path));
+    // (a Jupytext MyST .md is a notebook by its first 4 KiB: web/notebook/myst.js)
+    const e = r.kept[0], as = openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await blobHead([...list][0]) : null);
     if (as && confirm(`Open "${nameOf(e.path)}" as a ${as}?\n\nA converted copy, "${splitExt(nameOf(e.path))[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${nameOf(e.path)}" stays as it is.`)) await openAs(e, as);
   }
   if (r.kept.length || r.made.length || refused) wsShowFiles(true);
@@ -2736,9 +2737,13 @@ async function uploadHere(list, folder) {
 async function openAs(e, as) {
   if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
   try {
-    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode });
+    let said = "";
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, said: (m) => { said = m; } });
     wsBrowser?.refresh();
-    openEntry(made);
+    // (what was said, after the notebook opened: its own status lines come first)
+    if (!said) return openEntry(made);
+    saveNow();
+    await openId(made.ref).then(() => { wsTrackCurrent(); statusEl.textContent = said; }, sayNotLeft);
   } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
 }
 filesBtn.onclick = () => {

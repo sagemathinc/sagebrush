@@ -145,6 +145,9 @@ const consoleResult = await Bun.build(<any>{
 // small and usually in the first cell, is part of the page script.)
 // (in a LaTeX build, the same module plus KaTeX's renderToString, for the LaTeX editor's worker: web/latex/math-dev.ts)
 const mathResult = await Bun.build(<any>{ metafile: true, entrypoints: [LATEX ? join(here, "latex", "math-dev.ts") : join(here, "math.ts")], outdir: join(here, "dist"), naming: "sagebrush-math.js", target: "browser", format: "esm", minify: true });
+// A Jupytext MyST notebook's directives and roles (web/myst), loaded by the notebook only for one: never precached
+// (LAZY, not SHELL), and an engine file for the component (plan-myst-notebooks r3 §8.1, §8.6)
+const mystResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "myst", "index.ts")], outdir: join(here, "dist"), naming: "sagebrush-myst.js", target: "browser", format: "esm", minify: true });
 // The canvas view of a graph's picture (web/graph/view.ts), loaded by the
 // notebook when Graph.plot's output first needs it
 const graphResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "graph", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-graphview.js", target: "browser", format: "esm", minify: true });
@@ -182,8 +185,8 @@ const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(h
 // own and its worker, fetched only when the button is clicked, so the page's start doesn't carry them
 const exportResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "entry.ts")], outdir: join(here, "dist"), naming: "sagebrush-export.js", target: "browser", format: "esm", minify: true });
 const exportWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-export-worker.js", target: "browser", format: "esm", minify: true });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult]];
-for (const r of [result, consoleResult, mathResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult]) {
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult]];
+for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -229,6 +232,13 @@ if (LATEX) {
   // (for the asset budget gate, scripts/site-asset-budget.mjs: every bundle's inputs, by output, outside dist)
   mkdirSync(join(here, "..", "build"), { recursive: true });
   writeFileSync(join(here, "..", "build", "latex-metafile.json"), JSON.stringify(Object.fromEntries(builds.map(([what, r]) => [what, Object.keys(r.metafile?.inputs ?? {})])), null, 0) + "\n");
+}
+// MyST's renderer (web/myst) is in its own asset and in no other bundle: not the page's script, not the notebook
+// component, nothing else built here (plan-myst-notebooks r3 §8.1: its laziness is this, and the network test's)
+{
+  const isMyst = (p: string) => /(^|\/)web\/myst\//.test(p.replace(/\\/g, "/"));
+  if (!Object.keys(mystResult.metafile?.inputs ?? {}).some(isMyst)) throw new Error("sagebrush-myst.js doesn't contain web/myst");
+  for (const [what, r] of builds) if (r !== mystResult && Object.keys(r.metafile?.inputs ?? {}).some(isMyst)) throw new Error(`${what} contains web/myst: MyST's renderer belongs only in sagebrush-myst.js`);
 }
 copyFileSync(join(here, "llms.txt"), join(here, "dist", "llms.txt"));
 // the early-alpha notice, for the site's own pages only (web/alpha-banner.js, SECURITY.md)
@@ -297,7 +307,7 @@ const MIME: Record<string, string> = { tzif: "application/octet-stream", html: "
 // (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
 const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "runner/index.html", ...LIB_CHUNKS];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-myst.js", "runner/index.html", ...LIB_CHUNKS];
 // (each one's name as the site's Worker serves engine files: web/engines.ts)
 for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
@@ -458,7 +468,7 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // never fetched can't be imported, and one whose compiled code wasn't is
 // compiled from its source: src/compile.ts)
 const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
-const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-myst.js", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 const shellHash = new Bun.CryptoHasher("sha256");
 for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
@@ -549,7 +559,7 @@ copyFileSync(join(here, "share-client", "view.html"), join(here, "dist", "s", "i
 // (its link preview's image, board's design: committed as rendered, never generated here; og.svg is its source)
 copyFileSync(join(here, "share-client", "og.png"), join(here, "dist", "s", "og.png"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
-for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));

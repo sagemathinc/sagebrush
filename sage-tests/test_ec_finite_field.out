@@ -1,0 +1,116 @@
+S01 Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S02 (True, True) | <class 'tuple'>
+S03 False | <class 'bool'>
+S04 ((8 : 3 : 1), (10 : 4 : 1)) | <class 'tuple'>
+S05 ((8, 3), (10, 4)) | <class 'tuple'>
+S06 (7, 3) | <class 'tuple'>
+S07 (10, 7) | <class 'tuple'>
+S08 (10, 4) | <class 'tuple'>
+S09 (0 : 1 : 0) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S10 (True, True) | <class 'tuple'>
+S11 [(0 : 1 : 0), (7 : 3 : 1), (7 : 8 : 1), (8 : 3 : 1), (8 : 8 : 1), (10 : 4 : 1), (10 : 7 : 1)]
+S12 (True, True) | <class 'tuple'>
+S13 [(10 : 4 : 1), (7 : 3 : 1), (7 : 8 : 1), (10 : 7 : 1), (8 : 8 : 1), (0 : 1 : 0)] | <class 'list'>
+S14 (7, 7) | <class 'tuple'>
+S15 7 | Integer Ring
+S16 7 | Integer Ring
+S17 Ring of integers modulo 11
+S18 3 | Ring of integers modulo 11
+S19 5 | Ring of integers modulo 11
+S20 ERR TypeError: Coordinates [1, 1, 1] do not define a point on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S21 ERR ZeroDivisionError: inverse of Mod(0, 11) does not exist
+S22 (8, 3, 1) | <class 'tuple'>
+S23 (0 : 1 : 0) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S24 (8 : 3 : 1) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S25 [(8 : 3 : 1), (8 : 8 : 1)] | <class 'list'>
+S26 ERR ValueError: No point with x-coordinate 1 on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S27 (0, 0, 0, 7, 2) | <class 'tuple'>
+S28 False | <class 'bool'>
+S29 ERR ArithmeticError: y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 defines a singular curve
+S30 ERR ArithmeticError: y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 defines a singular curve
+S31 ERR ArithmeticError: y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 defines a singular curve
+S32 ERR ArithmeticError: y^2 = x^3 defines a singular curve
+S33 [(0 : 1 : 0), (0 : 1 : 1), (0 : 12 : 1), (2 : 3 : 1), (2 : 10 : 1), (4 : 0 : 1), (5 : 3 : 1), (5 : 10 : 1), (6 : 3 : 1), (6 : 10 : 1), (10 : 0 : 1), (12 : 0 : 1)]
+S34 False | <class 'bool'>
+S35 (0 : 1 : 0) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S36 (0 : 1 : 0) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S37 (0 : 1 : 0) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Ring of integers modulo 11
+S38 False | <class 'bool'>
+S39 True | <class 'bool'>
+S40 True | <class 'bool'>
+S41 Elliptic Curve defined by y^2 = x^3 + 32122457*x + 12623843 over Finite Field of size 42997061
+S42 (22035006 : 41971927 : 1) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 32122457*x + 12623843 over Finite Field of size 42997061
+S43 42994062 | Integer Ring
+S44 42994062 | Integer Ring
+S45 (19415416, 39168943) | <class 'tuple'>
+S46 19415416 | Finite Field of size 42997061
+S47 Finite Field of size 42997061
+S48 12616091 | Finite Field of size 42997061
+S49 (8262151, 42935304) | <class 'tuple'>
+S50 (8262151, 61757) | <class 'tuple'>
+S51 (2388559, True) | <class 'tuple'>
+S52 (27002908, 15615650) | <class 'tuple'>
+S53 (22035006 : 1025134 : 1) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 32122457*x + 12623843 over Finite Field of size 42997061
+S54 [(22035006 : 1025134 : 1), (22035006 : 41971927 : 1)] | <class 'list'>
+S55 Elliptic Curve defined by y^2 = x^3 + 7 over Ring of integers modulo 115792089237316195423570985008687907853269984665640564039457584007908834671663
+S56 115792089237316195423570985008687907852837564279074904382605163141518161494337 | Integer Ring
+S57 True | <class 'bool'>
+S58 (89565891926547004231252920425935692360644145829622209833684329913297188986597, 12158399299693830322967808612713398636155367887041628176798871954788371653930) | <class 'tuple'>
+S59 115792089237316195423570985008687907852837564279074904382605163141518161494337 | Integer Ring
+S60 10008 | Integer Ring
+S61 10029 | Integer Ring
+S62 1000004 | Integer Ring
+S63 1001331 | Integer Ring
+S64 ERR ArithmeticError: y^2 = x^3 + x + 1 defines a singular curve
+S65 ERR ArithmeticError: y^2 = x^3 + x + 1 defines a singular curve
+S66 [(0 : 1 : 0), (0 : 1 : 1), (0 : 2 : 1), (1 : 0 : 1)]
+S67 9 | Integer Ring
+S68 Elliptic Curve defined by y^2 = x^3 + x + 3 over Finite Field of size 101
+S69 ERR TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 13' and 'Ring of integers modulo 11'
+S70 Elliptic Curve defined by y^2 = x^3 + x + 2 over Ring of integers modulo 11
+S71 ERR TypeError: unsupported operand parent(s) for -: 'Rational Field' and 'Ring of integers modulo 11'
+S72 (8 : 3 : 1) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Finite Field of size 11
+S73 (8 : 3 : 1) | Abelian group of points on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Finite Field of size 11
+S74 ERR TypeError: Coordinates [1, 3, 1] do not define a point on Elliptic Curve defined by y^2 = x^3 + 7*x + 2 over Finite Field of size 11
+S75 True | <class 'bool'>
+S76 True | <class 'bool'>
+S77 [(0 : 1 : 0), (0 : 0 : 1), (1 : 2 : 1), (1 : 5 : 1), (2 : 0 : 1), (3 : 1 : 1), (3 : 6 : 1), (5 : 0 : 1)]
+S78 998505 | Integer Ring
+S79 999981750 | Integer Ring
+S80 True | <class 'bool'>
+S81 [(1 : 3 : 1), (2 : 3704 : 1), (4 : 9 : 1), (5 : 2981 : 1), (6 : 480 : 1), (10 : 4104 : 1), (11 : 37 : 1), (13 : 1222 : 1), (14 : 737 : 1), (17 : 2229 : 1), (18 : 3649 : 1), (19 : 2804 : 1)]
+S82 [[(1 : 3 : 1), (1 : 10004 : 1)], [(2 : 3704 : 1), (2 : 6303 : 1)], [], [(4 : 9 : 1), (4 : 9998 : 1)], [(5 : 2981 : 1), (5 : 7026 : 1)], [(6 : 480 : 1), (6 : 9527 : 1)], [], [], [], [(10 : 4104 : 1), (10 : 5903 : 1)], [(11 : 37 : 1), (11 : 9970 : 1)]]
+S83 [(7 : 3 : 1), (8 : 3 : 1), (10 : 4 : 1)]
+S84 ERR ZeroDivisionError: inverse of Mod(0, 11) does not exist
+S85 ERR ZeroDivisionError: inverse of Mod(0, 11) does not exist
+S86 [9828, 9828, 10173, 9828, 10029, 10173, 10192, 9828, 10029, 10029, 9847, 10173]
+S87 [10016, 10004, 10004, 10016, 10016, 10016, 9810, 10004, 10016, 10004, 10210, 10004]
+S88 [10008, 10008, 10008, 10008]
+S89 [10008, 10008, 10008, 10008]
+S90 [998208, 998208, 998208, 998208, 999218, 998208, 1000850, 998208]
+S91 [1000704, 1001331, 1001331, 998067, 1002001, 998067, 1002001, 1000704]
+S92 2305843009172975185
+S93 2305843011064986121
+S94 2305843009213693952
+S95 1032
+S96 Elliptic Curve defined by y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 over Finite Field of size 1009
+S97 [(3 : 465 : 1), (3 : 538 : 1)]
+S98 ERR TypeError: Coordinates [3, 0, 1] do not define a point on Elliptic Curve defined by y^2 + x*y + 3*y = x^3 + 2*x^2 + 4*x + 5 over Finite Field of size 1009
+S99 [(0 : 1 : 0), (0 : 409 : 1), (0 : 597 : 1), (1 : 2 : 1), (1 : 1003 : 1), (3 : 465 : 1)]
+S100 [1, 12, 12, 516, 516, 43, 43, 258]
+S101 239
+S102 748
+S103 [(0 : 1 : 0), (0 : 1 : 1), (0 : 2 : 1), (2 : 0 : 1), (2 : 1 : 1)]
+S104 [(0 : 1 : 0), (1 : 1 : 1)]
+S105 2
+S109 (0 : 1 : 0)
+S110 (0 : 1 : 0)
+S111 2
+S113 '(8 : 3 : 1)'
+S114 (7 : 3 : 1)
+S115 (7 : 3 : 1)
+S116 (8 : 8 : 1)
+S117 False
+S118 True
+S119 (0, 0, 0, 7, 2)
+S120 (0, 0, 0)
