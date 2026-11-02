@@ -297,10 +297,6 @@
    "class": "EXEMPT",
    "why": "noteFetchFailed: fetchFailed recorded on the entry, content unchanged"
   },
-  "workspace/sync-fetch.ts|1|inTx(w.ws, [\"entries\", \"fileBytes\", \"meta\", ...HIST_STORES], \"readwrite\", async (tx) => {": {
-   "class": "TOKEN",
-   "why": "install: the fetched bytes present, its token (noteToken)"
-  },
   "workspace/sync-pins.ts|1|const end = await inTx(w.ws, [...RELEASE_STORES], \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
    "why": "the versions backfill: prunable rows only, under RELEASE_STORES' scope"
@@ -332,6 +328,10 @@
   "notebook/stores.js|1|const tx = this.db.transaction(notebookScope(this.db), \"readwrite\"), st = tx.objectStore(\"notebooks\");": {
    "class": "TOKEN",
    "why": "IdbStore.save: the record and its token (its markOnly stamp: metadata only)"
+  },
+  "workspace/sync-fetch.ts|1|inTx(w.ws, [\"entries\", \"fileBytes\", \"meta\", \"ops\", ...HIST_STORES], \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "install: the fetched bytes present, its token (noteToken) at the index generation (A1.1; ops read for it)"
   }
  }
 }

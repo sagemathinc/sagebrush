@@ -26,8 +26,30 @@ const walk = function* (d) { for (const n of readdirSync(d)) { const p = join(d,
   const md = /MAX_DEPTH = (\d+)/.exec(readFileSync(join(web, "workspace/paths.ts"), "utf8"))?.[1], ma = /MAX_ANCESTORS = (\d+)/.exec(readFileSync(join(here, "tokens.ts"), "utf8"))?.[1];
   if (!(Number(md) === 32 && Number(ma) === Number(md) - 1)) fails.push(`A1.2: MAX_ANCESTORS (${ma}) must be paths.ts MAX_DEPTH (${md}) - 1, and MAX_DEPTH 32`);
 }
+// (A1-T9: every delete of a board's row or a notebook's record goes through its ONE helper (boardRowWrite in api.ts,
+// deleteNotebookRecord in stores.js), which writes the token; a direct delete anywhere else in the app fails, and the
+// control, a fixture with one, must be caught)
+const DIRECT = /objectStore\("(boards|notebooks)"\)\.delete\(|\b(idb|mainTx)\([^)]*"notebooks",\s*"readwrite"[^)]*\)\s*=>\s*\w+\.delete\(|\bmainTx\("notebooks",\s*"readwrite"/;
+const helperOk = (rel, line) => (rel === "workspace/api.ts" && /^\s*if \(row === null\) st\.delete\(id\);/.test(line)) || (rel === "notebook/stores.js" && /tx\.objectStore\("notebooks"\)\.delete\(id\);/.test(line));
+const directDeletes = (files) => {
+  const out = [];
+  for (const p of files) {
+    const rel = p.startsWith(web) ? p.slice(web.length + 1) : p, lines = readFileSync(p, "utf8").split("\n");
+    if (/(^|\/)test-|-cases\.js$|\.page\.js$/.test(rel)) continue;
+    lines.forEach((l, i) => { if ((DIRECT.test(l) || /\bst\.delete\(/.test(l) && /boards|notebooks/.test(lines.slice(Math.max(0, i - 3), i + 1).join("\n"))) && !helperOk(rel, l)) out.push(`${rel}:${i + 1}: ${l.trim().slice(0, 120)}`); });
+  }
+  return out;
+};
 const tokImports = [...readFileSync(join(here, "tokens.ts"), "utf8").matchAll(/^import .* from "([^"]+)";/gm)].map((m) => m[1]);
 if (JSON.stringify(tokImports) !== JSON.stringify(["../workspace/db"])) fails.push("Z1: tokens.ts imports more than ../workspace/db: " + JSON.stringify(tokImports));
+{
+  const found = directDeletes(walk(web));
+  if (found.length) fails.push("A1-T9: a board or notebook deleted outside its helper:\n    " + found.join("\n    "));
+  const fxd = mkdtempSync(join(tmpdir(), "sb-census-")), fx = join(fxd, "direct-delete.ts");
+  writeFileSync(fx, 'export const g = (db, id) => { const tx = db.transaction("notebooks", "readwrite"); tx.objectStore("notebooks").delete(id); };\n');
+  if (!directDeletes([fx]).length) fails.push("A1-T9 control: a fixture's direct notebook delete wasn't caught");
+  rmSync(fxd, { recursive: true, force: true });
+}
 for (const p of walk(web)) {
   const rel = p.slice(web.length + 1), src = readFileSync(p, "utf8"), isTest = /(^|\/)test-|-cases\.js$|\.page\.js$|^history\/(guard|guard-harness|census)\./.test(rel);
   if (/history\/tokens"/.test(src) && !isTest && !APP_IMPORTERS.has(rel)) fails.push(`Z1: ${rel} imports history/tokens (not a source writer)`);
