@@ -831,7 +831,7 @@
  "lib/_sage_matrix.py: random_matrix :: loop :: range(3 * n)": 1,
  "lib/_sage_matrix.py: random_matrix.entry :: call :: max(db, 1)": 1,
  "lib/_sage_matrix.py: vector :: call :: any(not isinstance(x, int) for x in v)": 1,
- "lib/_sage_matrix.py: vector :: comprehension :: entries": 1,
+ "lib/_sage_matrix.py: vector :: comprehension :: entries": 2,
  "lib/_sage_matrix.py: vector :: comprehension :: v": 1,
  "lib/_sage_matrix.py: zero_matrix :: call :: range(nrows)": 1,
  "lib/_sage_matrix.py: zero_matrix :: comprehension :: range(nrows)": 1,
