@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "pcimc floor/ceil: floor() and ceil() of an exact symbolic constant return Sage's Integer (RealIntervalField refinement for non-integer constants), parent() of a bool or a parentless object gives its Python type (lib/_sage_expr.py, lib/sage_all.py), and _sage_manifolds keeps its periodic-angle k symbolic (CI1's revision), with docstring examples. Lighter tier (@sagebrush Nov 2). Measured with bun 1.4.4 (size-record.sh, key ec7979a4) on master e6f391dc vs this PR's content head db163a81: cli/lib.gen.js +976, cli/pyjs.cjs +1792, engine/lib/sage.pre +6916, engine/lib/sage.src +2574; no other row moves.",
+ "bytes": {
+  "cli/lib.gen.js": 976,
+  "cli/pyjs.cjs": 1792,
+  "engine/lib/sage.pre": 6916,
+  "engine/lib/sage.src": 2574
+ }
+}
