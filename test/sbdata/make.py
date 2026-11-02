@@ -322,6 +322,11 @@ C("C9", "URLERROR invalid-blob canary=0", blob_dir)
 C("C10a", "URLERROR invalid-blob canary=0", fifo)
 C("C10b", "URLERROR invalid-blob canary=0", fifo)
 rows["C10b"]["fifo_writer"] = BODY.decode()
+# (C10c: an EMPTY entry whose blob is a FIFO with no writer: only the
+# regular-file check refuses it, since a 0-byte read of it matches size 0 and
+# sha256(b"") (grader ruling on the 0fc0bfe4 DEV pass: C10b alone no longer
+# kills M-regular-file once the read is bounded by fstat's size)
+C("C10c", "URLERROR invalid-blob canary=0", fifo, body=b"")
 C("C11", "SERVED %s " % sha(b""), body=b"")
 C("C12", "SERVED %s " % S, hardlink_inside)
 C("C13", "URLERROR invalid-blob canary=0", entries=[entry(U, BODY, size=len(BODY) + 1)])
