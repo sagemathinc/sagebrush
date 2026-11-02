@@ -1750,6 +1750,246 @@
   "class": "2",
   "owner": "raster/image I/O"
  },
+ "engine/sym/src/api.rs :: call :: crate::expand::expand_bounded(&d(parts[1]), cap) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/api.rs :: call :: let cap: usize = parts[2].parse().unwrap_or_else(|_| crate::err::value_error(format!(\"expand_bounded: expected a cap, got {}\", parts[2]))); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: Kind::Mul(v) => expand_product_bounded(v, cap), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: if arity > cap { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: if total > cap as u128 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: let x = expand_bounded(c, cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: match expand_bounded(c, cap) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: pub fn expand_bounded(e: &Expr, cap: usize) -> Result<Expr, BoundExceeded> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: return Ok(pow(&power_of_sum_bounded(b, (-n) as u64, cap)?, &int(-1))); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: return power_of_sum_bounded(b, n as u64, cap); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_product_bounded :: fn expand_product_bounded(v: &[Expr], cap: usize) -> Result<Expr, BoundExceeded> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_product_bounded :: let p = prospective(acc.len(), ts.len(), cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_product_bounded :: let ts = terms_bounded(f, cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: power_of_sum_bounded :: acc = terms_bounded(&add(next), cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: power_of_sum_bounded :: fn power_of_sum_bounded(b: &Expr, n: u64, cap: usize) -> Result<Expr, BoundExceeded> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: power_of_sum_bounded :: let p = prospective(acc.len(), ts.len(), cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: power_of_sum_bounded :: let ts = terms_bounded(b, cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: power_of_sum_bounded :: next.push(expand_bounded(&mul2(a, t), cap)?); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: prospective :: fn prospective(acc: usize, ts: usize, cap: usize) -> Result<usize, BoundExceeded> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: prospective :: if p > cap as u128 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: run :: fn run(e: &Expr, cap: usize) -> (Result<Expr, BoundExceeded>, Vec<(&'static str, u128)>) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: run :: let r = expand_bounded(e, cap); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: terms_bounded :: fn terms_bounded(e: &Expr, cap: usize) -> Result<Vec<Expr>, BoundExceeded> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: terms_bounded :: if v.len() > cap { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -4457,6 +4697,16 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix_sr.py ::  :: _SR_CHARPOLY_MAX = 10 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
  "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
   "class": "2",
   "disposition": {
@@ -4477,6 +4727,26 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
  },
+ "lib/_sage_matrix_sr.py ::  :: _SR_TERMS_MAX = 50000 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: _SR_WORK_MAX = 100000 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
  "lib/_sage_matrix_sr.py ::  :: checked after each row operation (_SR_MAX_CHARS). #0": {
   "class": "2",
   "disposition": {
@@ -4496,6 +4766,186 @@
   },
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: SRPoly.shift :: from _sage_matrix import _MAX_ENTRIES #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: SRPoly.shift :: if k + len(self._c) > _MAX_ENTRIES: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: SRPoly.shift :: raise _count_error(\"A shifted symbolic polynomial\", k + len(self._c), _MAX_ENTRIES, \"coefficients\", \"one polynomial\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _Work.charge :: if self.total > _SR_WORK_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _Work.charge :: raise _count_error(\"A symbolic characteristic polynomial\", self.total, _SR_WORK_MAX, \"terms of work\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _charpoly_coeffs :: if n > _SR_CHARPOLY_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _charpoly_coeffs :: raise _count_error(\"A symbolic characteristic polynomial of a %d x %d matrix\" % (n, n), n, _SR_CHARPOLY_MAX, \"rows\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _count_error :: \"\"\"A fixed limit counted in unit (rows, terms) rather than bytes: the #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _count_error :: \"%s needs %d %s, but Sagebrush has a fixed limit of %d %s for %s.\" % (what, need, unit, limit, unit, allowance_for), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _count_error :: def _count_error(what, need, limit, unit, allowance_for=\"one symbolic matrix\"): #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _count_error :: limit_bytes hold them).\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _count_error :: return _memguard.SagebrushMemoryError(text, what, int(need), int(limit), allowance_for, fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _expand_bounded :: expansion would hold more than _SR_TERMS_MAX terms: the engine checks #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _expand_bounded :: r = _raw(_SEP.join((\"expand_bounded\", _sr(e)._s, str(_SR_TERMS_MAX)))).split(_SEP) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _expand_bounded :: raise _count_error(\"An expansion in a symbolic characteristic polynomial\", int(r[2]), _SR_TERMS_MAX, \"terms\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _matrix_mul :: about n times. Refused before the product past _SR_MAX_CHARS.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _matrix_mul :: if need > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _matrix_mul :: raise _memory_error(\"The entries of a symbolic matrix product\", need, _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
  },
  "lib/_sage_matrix_sr.py :: _memory_error :: def _memory_error(what, need, limit): #0": {
   "class": "2",
@@ -4602,7 +5052,7 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
  },
- "lib/_sage_matrix_sr.py :: _size_check :: raise _memory_error(\"The entries of a symbolic elimination\", n, _SR_MAX_CHARS) #0": {
+ "lib/_sage_matrix_sr.py :: _size_check :: raise _memory_error(what, n, _SR_MAX_CHARS) #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -4610,7 +5060,7 @@
    }
   },
   "owner": "matrices over SR (@sagebrush-sage2)",
-  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+  "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
  },
  "lib/_sage_matrix_sr.py :: _sr_guard :: \"\"\"A symbolic r x w workspace: at most _SR_MAX rows and columns.\"\"\" #0": {
   "class": "2",
@@ -4641,16 +5091,6 @@
   },
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
- },
- "lib/_sage_matrix_sr.py :: adjugate :: raise NotImplementedError(\"the adjugate of a symbolic matrix larger than 4 x 4 is not available in sagebrush yet\") #0": {
-  "class": "coverage",
-  "owner": "matrices over SR (@sagebrush-sage2)",
-  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
- },
- "lib/_sage_matrix_sr.py :: det :: raise NotImplementedError(\"the determinant of a symbolic matrix larger than 3 x 3 is not available in sagebrush yet\") #0": {
-  "class": "coverage",
-  "owner": "matrices over SR (@sagebrush-sage2)",
-  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None): #0": {
   "class": "3",

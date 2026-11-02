@@ -843,7 +843,7 @@ class Matrix:
         [ 3/2 -1/2], -2, [15 22]
         )
     """
-    __slots__ = ("_base", "_rows", "_subdiv", "_nc", "_immutable")
+    __slots__ = ("_base", "_rows", "_subdiv", "_nc", "_immutable", "_cache")
 
     def __init__(self, base, rows, ncols=None):
         # read boundedly and check the shape before converting anything
@@ -1117,6 +1117,7 @@ class Matrix:
         """
         if getattr(self, "_immutable", False):
             raise ValueError("matrix is immutable; please change a copy instead (i.e., use copy(M) to change a copy of M).")
+        self._cache = None  # (the symbolic charpoly, det and adjugate: _sage_matrix_sr)
         if isinstance(ij, tuple):
             if len(ij) != 2:
                 raise IndexError("a matrix index is a row and a column")
@@ -1628,6 +1629,9 @@ class Matrix:
         """
         if not self.is_square():
             raise ValueError("matrix must be square")
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.charpoly(self, var)
         from sagebrush import linalg
         from _sage_poly import PolynomialRing
         return PolynomialRing(self._base, var)(linalg.charpoly(self._rows))

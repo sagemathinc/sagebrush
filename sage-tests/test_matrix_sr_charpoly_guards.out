@@ -1,0 +1,18 @@
+10 50000 100000 4194304
+ok
+SagebrushMemoryError G0 11
+SagebrushMemoryError G0 11
+SagebrushMemoryError G0 11
+ok
+ok
+SagebrushMemoryError G2 100004
+SagebrushMemoryError G2 106262 True
+ok
+SagebrushMemoryError G3 50250
+ok
+SagebrushMemoryError G4 
+ok
+SagebrushMemoryError G4-product 
+ok
+False 2*y - 1
+SagebrushMemoryError shift  True x^4 - 2*x*x^3 + (x^2 - 1)*x^2 0
