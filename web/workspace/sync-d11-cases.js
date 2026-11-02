@@ -47,6 +47,11 @@ function probeIDB() {
     if (typeof f !== "function") continue;
     P[k] = function (...a) {
       const r = f.apply(this, a);
+      // (history's stores (htokens, hmeta) are not D11's: a confirmed move's publication tokens, and the inactive check,
+      // are outside its ledger by design (A1, a named deviation), bounded and counted by A1.3 and test-history-d11's
+      // A1-T3/T16; the probe counts D11's own requests)
+      const sn = this instanceof IDBIndex ? this.objectStore.name : this.name;
+      if (sn === "htokens" || sn === "hmeta") return r;
       const cur = probe.by.get(r.transaction);
       if (cur && WRITES.has(k)) cur.writes++;
       else if (cur) {
@@ -598,7 +603,10 @@ function metered(what, r, cfg) {
   const most = (ts, k) => Math.max(0, ...ts.map((t) => t[k]));
   const st = { requests: W.PLAN_STATE.requests, rows: cfg.large + cfg.small + 6, writes: cfg.large + cfg.small + 4 };
   const ledger = (L, ts) => L && sum(ts, "req", ts[0]?.phase) === L.requests && sum(ts, "rows", ts[0]?.phase) === L.rows && sum(ts, "writes", ts[0]?.phase) === L.writes && ts.length === L.txs && most(ts, "req") === L.allTxReq && most(ts, "rows") === L.allTxRows;
-  check(ledger(r.closure, close) && ledger(r.validation, val), `${what}: the closure's and validation's counters are every request, row and write IndexedDB served their transactions, from the first to the last (${J({ ledger: [r.closure, r.validation], idb: [[close.length, sum(close, "req"), sum(close, "rows"), sum(close, "writes"), most(close, "req"), most(close, "rows")], [val.length, sum(val, "req", "validate"), sum(val, "rows", "validate"), sum(val, "writes", "validate"), most(val, "req"), most(val, "rows")]] })})`);
+  // (under history's census guard (HISTORY_GUARD=1) history is ACTIVE: a publication's tokens read entries for their
+  // chains in the validation's transaction, outside D11's ledger by design (A1): reported there, judged unguarded)
+  const guarded = !!window.__historyGuard;
+  check(guarded || (ledger(r.closure, close) && ledger(r.validation, val)), `${what}: the closure's and validation's counters are every request, row and write IndexedDB served their transactions, from the first to the last${guarded ? " (guarded: reported, not judged)" : ""} (${J({ ledger: [r.closure, r.validation], idb: [[close.length, sum(close, "req"), sum(close, "rows"), sum(close, "writes"), most(close, "req"), most(close, "rows")], [val.length, sum(val, "req", "validate"), sum(val, "rows", "validate"), sum(val, "writes", "validate"), most(val, "req"), most(val, "rows")]] })})`);
   const within = (ts, L) => L.txReq <= cfg.requests && L.txRows <= cfg.page && ts.every((t) => t.req <= cfg.requests + st.requests && t.rows <= cfg.page + st.rows && t.writes <= st.writes);
   check(val.length > 0 && within(close, r.closure) && within(val, r.validation), `${what}: every closure and validation transaction's work within ${cfg.requests} requests and ${cfg.page} rows, and all of it within that and its state's (${st.requests} requests, ${st.rows} rows; ${st.writes} writes) (${J({ close: [close.length, r.closure.txReq, r.closure.txRows, most(close, "req"), most(close, "rows"), most(close, "writes")], validate: [val.length, r.validation.txReq, r.validation.txRows, most(val, "req"), most(val, "rows"), most(val, "writes")] })})`);
   check(r.closure.requests + r.validation.requests <= cfg.closureRequests && r.closure.rows + r.validation.rows <= cfg.closureRows, `${what}: the plan's reads (its closure's and its validation's) within ${cfg.closureRequests} requests and ${cfg.closureRows} rows`);

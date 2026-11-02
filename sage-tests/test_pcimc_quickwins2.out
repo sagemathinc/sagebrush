@@ -1,0 +1,90 @@
+S01 True | <class 'bool'>
+S02 ([-3  0  0] ; [ 0  3  0] ; [ 0  0  3], [   1    1    0] ; [-1/2    0    1] ; [-1/2    2   -1])
+S03 1
+S04 (2, 1)
+S05 False | <class 'bool'>
+S06 ERR ValueError: not diagonalizable
+S07 False | <class 'bool'>
+S08 ERR ValueError: not diagonalizable over Rational Field
+S09 ERR TypeError: not a square matrix
+S10 ([3 0] ; [0 2], [0 1] ; [1 0])
+S11 ([3 0] ; [0 1], [ 1  1] ; [ 1 -1])
+S12 ERR ValueError: matrix entries must be from a field
+S13 3
+S14 1
+S15 0
+S16 1
+S17 True | <class 'bool'>
+S18 True | <class 'bool'>
+S19 True
+S20 False
+S21 Vector space of degree 5 and dimension 1 over Finite Field of size 2 ; Basis matrix: ; [1 0 1 0 1]
+S22 [(0, 0, 0, 0, 0), (1, 0, 1, 0, 1)]
+S23 [(1, 0, 1, 0, 1)]
+S24 [(1, 0, 1, 0, 1)]
+S25 (0, 0, 0, 0, 0) | Vector space of degree 5 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1 0 1 0 1]
+S26 (1, 0, 1, 0, 1) | Vector space of degree 5 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1 0 1 0 1]
+S27 (1, 0, 1, 0, 1) | Vector space of degree 5 and dimension 1 over Finite Field of size 2
+Basis matrix:
+[1 0 1 0 1]
+S28 [(0, 0, 0, 0, 0)]
+S29 [(0, 0, 0, 0, 0)]
+S30 ERR ValueError: the value must be in the range from 0 to 1
+S31 2
+S32 [(0, 0, 0, 0), (1, 1, 0, 0), (0, 0, 1, 1), (1, 1, 1, 1)]
+S33 [(1, 1, 0, 0), (0, 0, 1, 1), (1, 1, 1, 1)]
+S34 [(1, 1, 0, 0), (0, 0, 1, 1)]
+S35 Multiplicative Abelian group isomorphic to C4
+S36 [1, 2, 3, 4]
+S38 Multiplicative Abelian group isomorphic to C2 x C2 x C2
+S40 [1, 5, 7, 11, 13, 17, 19, 23]
+S41 (f,)
+S42 (f0, f1, f2)
+S43 4
+S44 [1, f, f^2, f^3]
+S45 [1, f2, f1, f1*f2, f0, f0*f2, f0*f1, f0*f1*f2]
+S46 [7, 13, 17]
+S47 [2]
+S48 Multiplicative Abelian group isomorphic to C2 x C2
+S49 Multiplicative Abelian group isomorphic to C6
+S50 [1, f, f^2, f^3, f^4, f^5]
+S51 [1, 2, 4, 8, 7, 5]
+S52 Trivial Abelian group
+S53 [1]
+S54 Trivial Abelian group
+S55 Multiplicative Abelian group isomorphic to C6
+S56 [1, 3, 2, 6, 4, 5]
+S57 (7, 13, 17)
+S58 Multiplicative Abelian group isomorphic to C2 x C4
+S59 [1, 2, 4, 7, 8, 11, 13, 14]
+S60 f
+S61 f^2
+S62 3
+S63 True
+S64 8
+S65 (2, 2, 2)
+S66 Multiplicative Abelian group isomorphic to C2 x C20
+S67 (2, 20)
+S68 [51, 77]
+S69 [-3, 3, 3]
+S70 True
+S71 [(-3, 1), (3, 2)]
+S72 [(5, 1), (1, 2)]
+S73 [(2, 1), (-1, 2)]
+S74 [(2, 1), (1, 1), (-3, 1)]
+S75 [(1/2, 1), (-7, 1), (4, 3)]
+S76 [(-5, 1), (2, 2)]
+S77 ([5 0 0] ; [0 1 0] ; [0 0 1], [0 1 0] ; [0 0 1] ; [1 0 0])
+S78 ([ 2  0  0] ; [ 0 -1  0] ; [ 0  0 -1], [1 0 0] ; [0 1 0] ; [0 0 1])
+S79 ([ 3  0  0] ; [ 0 -1  0] ; [ 0  0 -1], [ 1  1  0] ; [ 1 -1  0] ; [ 0  0  1])
+S80 ([5 0] ; [0 2], [ 1  1] ; [ 1 -2])
+S81 False
+S82 ([3 0] ; [0 1], [1 1] ; [1 4])
+S83 0
+S84 ERR ValueError: base field must be exact, but Real Field with 53 bits of precision is not
+S85 False
+S86 ERR ValueError: not diagonalizable over Rational Field
