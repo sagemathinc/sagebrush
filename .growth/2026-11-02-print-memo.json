@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "print memo (#487): the print-order sorts memoized within one print in engine/sym/src/print.rs (a HashMap memo and two Rust tests); no lib change. Measured with bun 1.4.4 (size-record.sh) on master 430ba326 vs this PR's head b27a9157 (CI's fresh engine committed): cli/pyjs.cjs +21700, engine/sagebrush-engine.wasm +16289; no other row grows.",
+ "bytes": {
+  "cli/pyjs.cjs": 21700,
+  "engine/sagebrush-engine.wasm": 16289
+ }
+}
