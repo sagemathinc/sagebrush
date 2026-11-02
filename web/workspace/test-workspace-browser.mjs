@@ -8,7 +8,7 @@
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-workspace-browser.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -17,6 +17,65 @@ const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const shots = process.env.SHOT_DIR;
 let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// C-NAV (#447 r5c, the grader's census): in web/index.html, every place that switches the notebook (beginSwitch),
+// detaches it (nb.detach) or sets what is open (`current = {`) is inside a function that takes the navigation lease as
+// its first statement and gives it back in the finally of its outermost try (so its catch and cleanup are inside the
+// lease), or is one of the named exceptions.  Returns the problems found (none: it holds).
+export function navCensus(src) {
+  // (a function's body, from its opening brace to the one that closes it: strings, template literals and comments
+  // skipped, so their braces don't count)
+  const close = (i) => {
+    let depth = 0;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === "/" && src[i + 1] === "/") { i = src.indexOf("\n", i); continue; }
+      if (c === "/" && src[i + 1] === "*") { i = src.indexOf("*/", i) + 1; continue; }
+      if (c === '"' || c === "'") { for (i++; src[i] !== c; i++) if (src[i] === "\\") i++; continue; }
+      if (c === "`") { i = tmpl(i + 1); continue; }
+      if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) return i;
+    }
+    return -1;
+  };
+  const tmpl = (i) => {
+    for (; i < src.length; i++) {
+      if (src[i] === "\\") { i++; continue; }
+      if (src[i] === "`") return i;
+      if (src[i] === "$" && src[i + 1] === "{") i = close(i + 1);
+    }
+    return i;
+  };
+  const LEASED = ["open", "openId", "openArrived", "reopenJournaled", "bindDiskFile"];
+  const problems = [], ranges = {};
+  for (const name of [...LEASED, "navLease", "beginSwitch"]) {
+    const m = new RegExp(`^(?:async )?function ${name}\\(`, "m").exec(src);
+    if (!m) { problems.push(`${name}: not found`); continue; }
+    const open = src.indexOf("{", src.indexOf(")", m.index)), end = close(open);
+    ranges[name] = [m.index, end];
+    if (!LEASED.includes(name)) continue;
+    const body = src.slice(open + 1, end).replace(/^\s*(\/\/[^\n]*\n\s*)*/, "");
+    const first = /^const (end|endSwitch) = await navLease\(\);\s*(\/\/[^\n]*\n\s*)*/.exec(body);
+    if (!first) { problems.push(`${name}: its first statement doesn't take the lease`); continue; }
+    const rest = body.slice(first[0].length);
+    if (!rest.startsWith("try {")) { problems.push(`${name}: the lease isn't followed by its outermost try`); continue; }
+    const at = open + 1 + (src.slice(open + 1, end).length - body.length) + first[0].length;
+    const tryEnd = close(at + 4);
+    if (!new RegExp(`^\\s*finally\\s*\\{\\s*${first[1]}\\(\\);\\s*\\}\\s*$`).test(src.slice(tryEnd + 1, end))) problems.push(`${name}: the lease isn't given back in the finally of its outermost try`);
+  }
+  const inside = (i) => Object.entries(ranges).find(([, [a, b]]) => i > a && i < b)?.[0];
+  for (const m of src.matchAll(/beginSwitch\(|\bnb\.detach\(|\bcurrent = \{/g)) {
+    const fn = inside(m.index);
+    if (fn && fn !== "beginSwitch") continue;
+    if (m[0] === "beginSwitch(" && /function $/.test(src.slice(m.index - 9, m.index))) continue; // (its definition)
+    if (m[0] === "current = {" && src.startsWith("current = { id: null", m.index) && src.slice(m.index - 4, m.index) === "let ") continue; // (its declaration)
+    // (File ▸ Delete with no workspace: a hold exists only inside the workspace's remove(), so never during one)
+    // (its record deleted right after: st.delete before L1 #469, deleteNotebookRecord since)
+    if (m[0] === "nb.detach(" && /(?:st\.delete|deleteNotebookRecord\(db,)\s*\(?current\.id\)/.test(src.slice(m.index, m.index + 200))) continue;
+    problems.push(`${m[0]} at line ${src.slice(0, m.index).split("\n").length}: outside the leased functions`);
+  }
+  return problems;
+}
 const profile = mkdtempSync(join(tmpdir(), "sb-ws-browser-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 if (!port) port = await devtoolsPort(profile);
@@ -594,6 +653,436 @@ try {
   const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
   check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
   check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
+  // (B1) …an error, said as one: role=alert, styled apart, kept until Dismissed (a ✕ named "Dismiss"); Dismissing it
+  // from the keyboard puts the focus back in the list, never on the body
+  const errToast = await ev(`(() => { const t = document.querySelector("#wssidebar .ftoast"); const x = [...(t?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "✕"); return { err: !!t?.classList.contains("err"), role: t?.getAttribute("role") ?? null, bg: t ? getComputedStyle(t).backgroundColor : null, close: x?.getAttribute("aria-label") ?? null }; })()`);
+  check(errToast.err && errToast.role === "alert" && errToast.bg === "rgb(253, 236, 234)" && errToast.close === "Dismiss", "B1-err: an error is said as one (role=alert, its own colours, a ✕ named Dismiss): " + JSON.stringify(errToast));
+  const dis = await ev(`(() => { const x = [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "✕"); x?.focus(); x?.click(); const a = document.activeElement; return { gone: !document.querySelector("#wssidebar .ftoast"), active: a?.classList.contains("frow") ? "row" : a?.tagName }; })()`);
+  check(dis.gone && dis.active === "row", "B1-dismiss: Dismiss from the keyboard puts the focus on a row of the list, never the body: " + JSON.stringify(dis));
+  // (B1, William Nov 1) Move to Trash on the notebook OPEN here: no "open something else first"
+  {
+    const toastTxt = `document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`;
+    const press = (label) => ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === ${JSON.stringify(label)})?.click(); return 1; })()`);
+    const trashRow = async (p) => { await until(`!!document.querySelector(${JSON.stringify(rowSel(p))})`); await click(rowSel(p) + " .more"); await menu("Move to Trash"); };
+    const openNb = (p, name, code) => ev(`${W}.create(${JSON.stringify(p)}, { content: { name: ${JSON.stringify(name)}, mode: "python", cells: [{ id: "c", code: ${JSON.stringify(code)} }] } }).then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+    const shown = () => ev(`document.querySelector("#nbname").value`);
+    const isAt = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e)`);
+    // (the trashing hook held once, at `stage`, by its test-only seam (sagebrush.trashTest.pause, unset in production))
+    const holdAt = (stage) => ev(`(() => { window.__b1at = null; sagebrush.trashTest.pause = (s) => { if (s !== ${JSON.stringify(stage)}) return; sagebrush.trashTest.pause = null; window.__b1at = s; return new Promise((r) => (window.__b1go = r)); }; return 1; })()`);
+    const reached = () => until(`window.__b1at !== null`, 30000);
+    const release = () => ev(`(() => { window.__b1go?.(); return 1; })()`);
+    const dismissAny = () => press("✕");
+    // (each T case starts on a freshly loaded page, so nothing one leaves (a save that failed and is still pending) can
+    // reach the next: the grader's ruling (d)(i) on #447 r2)
+    const freshPage = async () => { await go(base); await until(`!!${W}`, 60000); if (await ev(`${S}.hidden`)) await click("#wsfilesbtn"); await until(`!${S}.hidden`); };
+    // (#447 r5c: the seams are inert as shipped: no pause armed until a test arms one; and C-NAV, the census of what
+    // switches the notebook (navCensus, above))
+    check((await ev(`sagebrush.trashTest.pause === null`)) === true, "B1-seams: the test seam is unarmed as the page ships (trashTest.pause null)");
+    const census = navCensus(readFileSync(new URL("../index.html", import.meta.url), "utf8"));
+    check(census.length === 0, "C-NAV: every switch, detach and `current =` is inside a function that holds the navigation lease over all of it: " + JSON.stringify(census));
+    // (its save failing: not moved, and said so, in board's words; it stays open, where it was)
+    check((await openNb("/B1 open.ipynb", "B1 open", "first")) === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
+    await ev(`(() => { const nb = sagebrush.notebook; window.__b1saved = nb.saved; nb.saved = () => Promise.reject(new Error("disk full")); return 1; })()`);
+    await trashRow("/B1 open.ipynb");
+    const refused = await until(`(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "").startsWith("Not moved to Trash: its changes couldn't be saved (disk full).")`);
+    const rs = await ev(`(async () => { const nb = sagebrush.notebook; nb.saved = window.__b1saved; return { shown: document.querySelector("#nbname").value, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }; })()`);
+    await shot("b1-error");
+    check(refused && rs.shown === "B1 open" && rs.here && !rs.trash, "B1-save: its save failing, it isn't moved: said as an error, and it stays open: " + JSON.stringify(rs));
+    await dismissAny();
+    // (moved: saved first, another opened in its place; the toast at the foot of the files, under the list, which
+    // doesn't move)
+    await ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "edited, not saved yet"); return 1; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 open.ipynb"))})`);
+    const top0 = await ev(`document.querySelector("#wssidebar .ftree").getBoundingClientRect().top`);
+    await trashRow("/B1 open.ipynb");
+    const moved = await until(`/"B1 open\\.ipynb" moved to Trash/.test(${toastTxt})`);
+    const st = await ev(`(async () => { const t = document.querySelector("#wssidebar .ftoast"), tr = document.querySelector("#wssidebar .ftree"); return { shown: document.querySelector("#nbname").value, top: tr.getBoundingClientRect().top, below: t ? t.getBoundingClientRect().top >= tr.getBoundingClientRect().bottom - 1 : null, role: t?.getAttribute("role") ?? null, undo: [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.tagName ?? null, trashed: await ${W}.read("/Trash/B1 open.ipynb").then((r) => r.content?.cells?.[0]?.code ?? null).catch((e) => "unread: " + e), here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e) }; })()`);
+    check(moved && st.undo === "BUTTON" && st.role === "status" && st.shown !== "B1 open" && !st.here, "B1-move: the open notebook moved to Trash from the file browser, another opened in its place, a status with an Undo button: " + JSON.stringify(st));
+    check(st.trashed === "edited, not saved yet", "B1-savedfirst: what it had yet to save was saved first, so Trash has what was last seen: " + JSON.stringify(st.trashed));
+    await shot("b1-moved");
+    check(st.top === top0 && st.below === true, `B1-place: the toast is under the list, which didn't move: top ${top0} -> ${st.top}, below ${st.below}`);
+    // (Undo kept while it holds the focus, past its 10 s)
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.focus(); return 1; })()`);
+    await sleep(11_000);
+    check(/"B1 open\.ipynb" moved to Trash/.test(await ev(toastTxt)), "B1-keep: the toast stays past 10 s while its Undo holds the focus");
+    await press("Undo");
+    const back = await until(`document.querySelector("#nbname").value === "B1 open"`);
+    const bk = await ev(`(async () => ({ code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }))()`);
+    check(back && bk.here && !bk.trash && bk.code === "edited, not saved yet", "B1-undo: Undo puts it back and opens it again, as it was last seen: " + JSON.stringify(bk));
+    check(await until(`document.activeElement?.dataset?.path === "/B1 open.ipynb"`, 5000), "B1-undofocus: after Undo the focus is on its row: " + (await ev(`document.activeElement?.dataset?.path ?? document.activeElement?.tagName`)));
+    // …and a folder the open notebook is in: the same, another opened that isn't in it
+    await openNb("/B1 dir/inner.ipynb", "inner", "inside");
+    await until(`document.querySelector("#nbname").value === "inner"`);
+    await trashRow("/B1 dir");
+    const fmoved = await until(`/"B1 dir" moved to Trash/.test(${toastTxt})`);
+    const fs = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, inTrash: await ${W}.stat("/Trash/B1 dir/inner.ipynb").then((e) => !!e) }))()`);
+    check(fmoved && fs.shown !== "inner" && fs.inTrash, "B1-folder: a folder holding the open notebook goes to Trash too, another (not in it) opened: " + JSON.stringify(fs));
+    await press("Undo");
+    check(await until(`document.querySelector("#nbname").value === "inner"`), "B1-folderundo: …and Undo opens the notebook in it again");
+    // (astra R1, T2) the path replaced while the hook waits: what is there now is NOT moved, and the conflict is said
+    for (const [id, sel, open, moveTo, fresh] of [["T2", "/T2 a.ipynb", "/T2 a.ipynb", "/T2 moved.ipynb", "/T2 a.ipynb"], ["T2.folder", "/T2 dir", "/T2 dir/x.ipynb", "/T2 dir moved", "/T2 dir/new.txt"]]) {
+      const nm = open.split("/").pop().replace(/\.ipynb$/, "");
+      await freshPage();
+      await openNb(open, nm, "t2");
+      await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm)}`);
+      await holdAt("switched");
+      await trashRow(sel);
+      const r0 = await reached();
+      await ev(`(async () => { await ${W}.rename(${JSON.stringify(sel)}, ${JSON.stringify(moveTo)}); await ${W}.create(${JSON.stringify(fresh)}, { content: ${JSON.stringify(fresh)}.endsWith(".ipynb") ? { name: "REPLACEMENT", mode: "python", cells: [{ id: "r", code: "REPLACEMENT" }] } : "REPLACEMENT" }); return 1; })()`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`);
+      const t = await ev(`(async () => ({ fresh: await ${W}.read(${JSON.stringify(fresh)}).then((r) => typeof r.content === "string" ? r.content : r.content?.cells ? r.content.cells[0]?.code : new TextDecoder().decode(r.content)).catch(() => null), inTrash: await ${W}.stat(${JSON.stringify("/Trash/" + sel.slice(1))}).then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.fresh === "REPLACEMENT" && !t.inTrash, `${id}: the path replaced while it waited: what is there now isn't moved, and it is said: ` + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (astra R2, T3) an edit after the save, and ITS save failing: nothing moves, the edit is kept, it stays open
+    {
+      await freshPage();
+      await openNb("/T3.ipynb", "T3", "t3");
+      await until(`document.querySelector("#nbname").value === "T3"`);
+      await holdAt("saved");
+      await trashRow("/T3.ipynb");
+      const r0 = await reached();
+      await ev(`(() => { const nb = sagebrush.notebook, s = nb.store; window.__t3store = s; window.__t3save = s.save; s.save = () => Promise.reject(new Error("disk full")); nb.setInput(nb.cells()[0], "T3 edit"); return 1; })()`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/T3.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T3.ipynb").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "T3" && t.code === "T3 edit" && t.here && !t.inTrash, "T3: an edit after the save, its save failing: nothing moves, and the edit is kept, open here: " + JSON.stringify(t));
+      await ev(`(async () => { window.__t3store.save = window.__t3save; await sagebrush.notebook.saved().catch(() => {}); return 1; })()`);
+      await dismissAny();
+    }
+    // (astra R2, T4) a page switch in between. T4: while it switched, a notebook INSIDE the folder opened: nothing
+    // moves. T4.same: before it switched, another notebook opened: nothing moves, and that one stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T4 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T4 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
+      await holdAt("switched");
+      await trashRow("/T4 dir");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T4 dir/b.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T4: a notebook inside the folder opened while it switched: nothing moves, and that notebook stays open: " + JSON.stringify(t));
+      await dismissAny();
+      await freshPage();
+      await ev(`${W}.create("/T4 other.ipynb", { content: { name: "T4 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T4s.ipynb", "T4s", "s");
+      await until(`document.querySelector("#nbname").value === "T4s"`);
+      await holdAt("saved");
+      await trashRow("/T4s.ipynb");
+      const r1 = await reached();
+      await ev(`${W}.stat("/T4 other.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said1 = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const u = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4s.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4s.ipynb").then((e) => !!e) }))()`);
+      check(r1 && said1 && u.shown === "T4 other" && u.here && !u.inTrash, "T4.same: another notebook opened before it switched: nothing moves, and the one opened stays open: " + JSON.stringify(u));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T5) another notebook opened while Trash's OWN switch waits inside open(), after every check of the
+    // hook: that switch is dropped before it detaches anything; nothing moves, and the notebook opened stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T5 other.ipynb", { content: { name: "T5 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T5.ipynb", "T5", "t5");
+      await until(`document.querySelector("#nbname").value === "T5"`);
+      await holdAt("beforeDetach");
+      await trashRow("/T5.ipynb");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T5 other.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T5.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T5.ipynb").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "T5 other" && t.here && !t.inTrash, "T5: another notebook opened while Trash's own switch waited (after its checks): that switch is dropped, nothing moves, the one opened stays open: " + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T6) a notebook INSIDE the folder opened after the hook's last check, before the move: the
+    // workspace's own check, holding its lock, refuses it; nothing moves, and that notebook stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T6 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T6 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
+      await holdAt("checked");
+      await trashRow("/T6 dir");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T6 dir/b.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T6 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T6 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T6: a notebook inside the folder opened after the last check, before the move: the workspace refuses under its lock, nothing moves: " + JSON.stringify(t));
+      await dismissAny();
+    }
+    // ---------------------------------------------------------------- #447 r5c: the navigation hold (T7–T16)
+    // (seams: `arm(stages, failing)` pauses each stage named the first time it is reached (__b1at lists them), until
+    // `goOn(stage)`; a failing one then rejects, as a write failing there would.  A navigation is started, never
+    // awaited (window.__nav says how it ended).  Every row ends with the page's navigation counters back at zero)
+    const arm = (stages, failing = []) => ev(`(() => { window.__b1at = []; window.__b1go = {}; window.__b1armed = new Set(${JSON.stringify(stages)}); const failing = new Set(${JSON.stringify(failing)}); sagebrush.trashTest.pause = (s) => { if (!window.__b1armed.has(s)) return; window.__b1armed.delete(s); window.__b1at.push(s); return new Promise((ok, no) => (window.__b1go[s] = () => (failing.has(s) ? no(new Error("test: failed at " + s)) : ok()))); }; return 1; })()`);
+    const armMore = (stage) => ev(`(() => { window.__b1armed.add(${JSON.stringify(stage)}); return 1; })()`);
+    const at = (stage) => until(`(window.__b1at ?? []).includes(${JSON.stringify(stage)})`, 30000);
+    const goOn = (stage) => ev(`(() => { const f = window.__b1go?.[${JSON.stringify(stage)}]; delete window.__b1go?.[${JSON.stringify(stage)}]; f?.(); return 1; })()`);
+    const disarm = () => ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; return 1; })()`);
+    const navTo = (p) => ev(`(async () => { const e = await ${W}.stat(${JSON.stringify(p)}); if (!e) { window.__nav = { done: true, err: "not there" }; return 1; } window.__nav = { done: false }; sagebrush.open(e.ref).then((r) => (window.__nav = { done: true, r }), (x) => (window.__nav = { done: true, err: String(x?.message ?? x) })); return 1; })()`);
+    const navNow = () => ev(`window.__nav ?? null`);
+    const idle = () => until(`(() => { const s = sagebrush.trashTest.state(); return s.switches === 0 && !s.held; })()`, 20000);
+    const toastIs = (txt, ms = 20000) => until(`(document.querySelector("#wssidebar .ftoast")?.textContent ?? "").startsWith(${JSON.stringify(txt)})`, ms);
+    const errHas = (txt, ms = 20000) => until(`(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "").includes(${JSON.stringify(txt)})`, ms);
+    const dropText = (n) => `“${n}” was moved to Trash, so it wasn't opened.`;
+    const mk = (p, name) => ev(`${W}.create(${JSON.stringify(p)}, { content: { name: ${JSON.stringify(name)}, mode: "python", cells: [{ id: "c", code: ${JSON.stringify(name)} }] } }).then(() => 1)`);
+    const openAt = async (p, name) => { await ev(`${W}.stat(${JSON.stringify(p)}).then((e) => sagebrush.open(e.ref)).then(() => 1)`); return until(`document.querySelector("#nbname").value === ${JSON.stringify(name)}`); };
+    // (a folder of more than D11.chunk (1,000) entries, put straight into the index as a big workspace holds them, so
+    // its move takes largeMove's path)
+    const fillLarge = (dir) => ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("entries", "readwrite"), st = tx.objectStore("entries"), t = Date.now(); for (let i = 0; i <= 1000; i++) st.put({ path: ${JSON.stringify(dir)} + "/g" + String(i).padStart(4, "0"), kind: "folder", ref: null, created: t, updated: t }); tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
+    // (a row that throws (its seam never reached, an entry already gone, as under a control) fails each of its own checks
+    // not yet made, said, and the run goes on to the next: the closed count stays exact)
+    const row = async (ids, f) => {
+      const c0 = checks;
+      try { await f(); }
+      catch (e) { for (const id of ids.slice(checks - c0)) check(false, `${id}: the row threw: ${String(e?.stack ?? e?.message ?? e).slice(0, 2400)}`); }
+      finally { await ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; if (sagebrush.shareTest) { sagebrush.shareTest.beforeLeave = undefined; sagebrush.shareTest.beforeAttach = undefined; } window.__leaveGo?.(); return 1; })()`).catch(() => {}); }
+    };
+    // (a row whose setup or seam isn't reached stops there: its remaining checks fail at once, rather than each waiting
+    // out its own timeout (a control that takes the seam away then costs seconds, not minutes))
+    const need = (ok, what) => { if (!ok) throw new Error(what); };
+    const where = (dir) => ev(`(async () => ({ here: await ${W}.stat(${JSON.stringify(dir)}).then((e) => !!e), inTrash: await ${W}.stat(${JSON.stringify("/Trash/" + dir.slice(1))}).then((e) => !!e) }))()`);
+    // (each row's notebooks named after its folder, files and all ("T7 a.ipynb": the page shows the file's name), so no name an earlier row left can stand in)
+    const nm = (dir, x) => `${dir.slice(1).replace(/ dir$/, "")} ${x}`, nf = (dir, x) => `${dir}/${nm(dir, x)}.ipynb`;
+    const curPath = () => ev(`${W}.list("/", { recursive: true }).then((l) => l.find((e) => e.kind === "notebook" && e.ref === sagebrush.notebook.store.id)?.path ?? null)`);
+    const setUp = async (dir, large) => {
+      await freshPage();
+      await mk(nf(dir, "b"), nm(dir, "b"));
+      await mk(nf(dir, "a"), nm(dir, "a"));
+      if (large) { await fillLarge(dir); await freshPage(); }
+      return openAt(nf(dir, "a"), nm(dir, "a"));
+    };
+    // (T7 small / T8 large: a navigation into what goes, started after the move is admitted and before it publishes,
+    // waits; the move publishes; the navigation isn't opened, said, with Restore and open, which puts it all back,
+    // opens that notebook and gives it the focus.  The stage reached names the path taken)
+    for (const [id, dir, large] of [["T7", "/T7 dir", false], ["T8", "/T8 dir", true]]) await row([id, `${id}.restore`], async () => {
+      const ready = await setUp(dir, large);
+      need(ready, "its setup wasn't reached");
+      const stage = large ? "publishing:large" : "publishing:small";
+      await arm([stage]);
+      await trashRow(dir);
+      const r0 = await at(stage);
+      need(r0, "its seam wasn't reached");
+      await navTo(nf(dir, "b"));
+      await sleep(800);
+      const mid = { shown: await shown(), nav: await navNow(), path: await ev(`window.__b1at.join()`) };
+      await goOn(stage);
+      const said = await toastIs(dropText(`${nm(dir, "b")}.ipynb`), 60000);
+      const t = { shown: await shown(), nav: await navNow(), ...(await where(dir)), buttons: await ev(`[...document.querySelectorAll("#wssidebar .ftoast button")].map((b) => b.textContent)`), idle: await idle() };
+      check(ready && r0 && mid.path === stage && mid.shown !== nm(dir, "b") && mid.nav && !mid.nav.done && said && t.inTrash && !t.here && t.shown !== nm(dir, "b") && t.nav?.done && t.nav.r === false && t.buttons.includes("Restore and open") && t.idle, `${id}: a navigation into what goes, after it was admitted and before it published, waited; it was moved, and that notebook wasn't opened, said so with Restore and open: ` + JSON.stringify({ mid, t }));
+      await press("Restore and open");
+      const back = await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm(dir, "b"))}`, 60000);
+      const b2 = { ...(await where(dir)), focus: await ev(`document.activeElement?.tagName ?? null`), idle: await idle() };
+      check(back && b2.here && !b2.inTrash && b2.focus === "TEXTAREA" && b2.idle, `${id}.restore: Restore and open put it back, opened that notebook and gave it the focus: ` + JSON.stringify(b2));
+      await disarm();
+    });
+    // (T9 / T9b: the notebook open here moved INTO what goes (into it, or two folders down) after the page's last
+    // check and before the workspace's: refused, the notebook looked up where it is now)
+    for (const [id, dir, into] of [["T9", "/T9 dir", "/T9 dir/r.ipynb"], ["T9b", "/T9b dir", "/T9b dir/s1/s2/r.ipynb"]]) await row([id], async () => {
+      await freshPage();
+      await mk(`${dir}/${id} a.ipynb`, `${id} a`);
+      if (id === "T9b") await ev(`${W}.create(${JSON.stringify(dir + "/s1/s2/keep.txt")}, { content: "k" }).then(() => 1)`);
+      const ready = await openAt(`${dir}/${id} a.ipynb`, `${id} a`);
+      need(ready, "its setup wasn't reached");
+      await holdAt("checked");
+      await trashRow(dir);
+      const r0 = await reached();
+      need(r0, "its seam wasn't reached");
+      const p0 = await curPath();
+      await ev(`${W}.rename(${JSON.stringify(p0)}, ${JSON.stringify(into)}).then(() => 1)`);
+      await release();
+      const said = await errHas("the page changed meanwhile");
+      const t = { ...(await where(dir)), moved: await ev(`${W}.stat(${JSON.stringify(into)}).then((e) => !!e)`), idle: await idle() };
+      check(ready && r0 && said && t.here && !t.inTrash && t.moved && t.idle, `${id}: the notebook open here moved inside what goes before the workspace's check: refused, nothing moved: ` + JSON.stringify(t));
+      await dismissAny();
+    });
+    // (T10: a navigation under way (held before it leaves the notebook) when the workspace checks: refused; the
+    // navigation then ends where it was going)
+    await row(["T10"], async () => {
+      await freshPage();
+      await mk("/T10 dir/T10 a.ipynb", "T10 a");
+      await mk("/T10 c.ipynb", "T10 c");
+      const ready = await openAt("/T10 dir/T10 a.ipynb", "T10 a");
+      need(ready, "its setup wasn't reached");
+      await holdAt("checked");
+      await trashRow("/T10 dir");
+      const r0 = await reached();
+      need(r0, "its seam wasn't reached");
+      await ev(`(() => { window.__leave = new Promise((r) => (window.__leaveGo = r)); sagebrush.shareTest.beforeLeave = () => window.__leave; return 1; })()`);
+      await navTo("/T10 c.ipynb");
+      await sleep(400);
+      await release();
+      const said = await errHas("the page changed meanwhile");
+      const t1 = await where("/T10 dir");
+      await ev(`(() => { sagebrush.shareTest.beforeLeave = undefined; window.__leaveGo(); return 1; })()`);
+      const opened = await until(`document.querySelector("#nbname").value === "T10 c"`, 20000);
+      const ok = await idle();
+      check(ready && r0 && said && t1.here && !t1.inTrash && opened && ok, "T10: a navigation under way when the workspace checks: refused, nothing moved, and the navigation ended where it was going: " + JSON.stringify({ t1, opened }));
+      await dismissAny();
+    });
+    // (T11 small / T11L large: the move failing right before it publishes, a navigation waiting: said, nothing moved,
+    // the hold let go (the navigation ran), the workspace's lock not held, and the next Move to Trash goes through)
+    for (const [id, dir, large] of [["T11", "/T11 dir", false], ["T11L", "/T11L dir", true]]) await row([id], async () => {
+      const ready = await setUp(dir, large);
+      need(ready, "its setup wasn't reached");
+      const stage = large ? "publishing:large" : "publishing:small";
+      await arm([stage], [stage]);
+      await trashRow(dir);
+      const r0 = await at(stage);
+      need(r0, "its seam wasn't reached");
+      await navTo(nf(dir, "b"));
+      await sleep(800);
+      const mid = await navNow();
+      await goOn(stage);
+      const said = await errHas("test: failed at " + stage, 60000);
+      const opened = await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm(dir, "b"))}`, 30000);
+      const t = { ...(await where(dir)), lockFree: await until(`navigator.locks.query().then((q) => !q.held.some((x) => x.name === "sagebrush-workspace"))`, 5000) };
+      // (lockFree: free within a 5 s poll, not one read: the product's own OPFS witness write takes the lock briefly up
+      // to 10 s after any commit (api.ts publish() :818-823 -> flushOpfs() :826-838, the lock at :833; OPFS_EVERY_MS
+      // = 10 s, :354), so one read can catch that legitimate hold; a lock not let go within the poll still fails: K31)
+      await disarm();
+      await dismissAny();
+      await ev(`${W}.create(${JSON.stringify(`/${id} next.txt`)}, { content: "n" }).then(() => 1)`);
+      await trashRow(`/${id} next.txt`);
+      const next = await toastIs(`"${id} next.txt" moved to Trash`);
+      const ok = await idle();
+      check(ready && r0 && mid && !mid.done && said && opened && t.here && !t.inTrash && t.lockFree && next && ok, `${id}: failing right before it published: said, nothing moved, the waiting navigation ran, no lock held, and the next Move to Trash went through: ` + JSON.stringify({ mid, t, opened, next }));
+    });
+    // (T12: a navigation started while the workspace looks the open notebook up (the hold already taken) waits; the
+    // move publishes; it isn't opened, said)
+    await row(["T12"], async () => {
+      const dir = "/T12 dir", ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
+      await arm(["lookup"]);
+      await trashRow("/T12 dir");
+      const r0 = await at("lookup");
+      need(r0, "its seam wasn't reached");
+      await navTo(nf(dir, "b"));
+      await sleep(800);
+      const mid = { shown: await shown(), nav: await navNow() };
+      await goOn("lookup");
+      const said = await toastIs(dropText(`${nm(dir, "b")}.ipynb`), 30000);
+      const t = { shown: await shown(), nav: await navNow(), ...(await where("/T12 dir")), idle: await idle() };
+      check(ready && r0 && mid.shown !== nm(dir, "b") && mid.nav && !mid.nav.done && said && t.inTrash && t.shown !== nm(dir, "b") && t.nav?.r === false && t.idle, "T12: a navigation started during the workspace's lookup waited; moved; not opened, said: " + JSON.stringify({ mid, t }));
+      await disarm();
+      await dismissAny();
+    });
+    // (T13: a second Move to Trash of what is open here while the first is held right before it publishes: refused in
+    // the page, before the workspace, and its settling doesn't let the first one's hold go; that is let go once)
+    await row(["T13"], async () => {
+      const dir = "/T13 dir", ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
+      await arm(["publishing:small"]);
+      await trashRow("/T13 dir");
+      const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
+      await navTo(nf(dir, "b"));
+      await sleep(400);
+      const before = await ev(`sagebrush.trashTest.state().releases`);
+      const rp = await curPath();
+      await trashRow(rp);
+      const said2 = await errHas("another move to Trash is under way here");
+      await sleep(600);
+      const mid = { nav: await navNow(), st: await ev(`sagebrush.trashTest.state()`), still: await ev(`${W}.stat(${JSON.stringify(rp)}).then((e) => !!e)`) };
+      await goOn("publishing:small");
+      const said = await toastIs(dropText(`${nm(dir, "b")}.ipynb`), 30000);
+      const after = await ev(`sagebrush.trashTest.state().releases`);
+      const ok = await idle();
+      check(ready && r0 && said2 && mid.nav && !mid.nav.done && mid.st.held && mid.still && said && after === before + 1 && ok, "T13: a second Move to Trash meanwhile: refused in the page, the first one's hold kept (its navigation still waiting), let go once: " + JSON.stringify({ mid, before, after }));
+      await disarm();
+      await dismissAny();
+    });
+    // (T14a–c: each way of navigating waits while a move holds the page: Sagebrush's open (by id), a click on the row,
+    // File ▸ New (a new notebook, opened once the move is done); into what went: not opened, said)
+    for (const [id, how] of [["T14a", "open"], ["T14b", "row"], ["T14c", "new"]]) await row([id], async () => {
+      const dir = `/${id} dir`;
+      const ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
+      await arm(["publishing:small"]);
+      await trashRow(dir);
+      const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
+      const was = await shown();
+      if (how === "open") await navTo(nf(dir, "b"));
+      else if (how === "row") await click(rowSel(nf(dir, "b")));
+      else await ev(`(() => { document.querySelector('[data-f="new"]').click(); return 1; })()`);
+      await sleep(800);
+      const mid = await shown();
+      await goOn("publishing:small");
+      const moved = await until(`${W}.stat(${JSON.stringify("/Trash/" + dir.slice(1))}).then((e) => !!e)`, 30000);
+      const end = how === "new" ? await until(`document.querySelector("#nbname").value === "Untitled"`, 30000) : await toastIs(dropText(`${nm(dir, "b")}.ipynb`), 30000);
+      const t = { shown: await shown(), idle: await idle() };
+      check(ready && r0 && mid === was && moved && end && (how === "new" || t.shown !== nm(dir, "b")) && t.idle, `${id}: ${how} waited while the move was held, then ${how === "new" ? "opened" : "wasn't opened, said"}: ` + JSON.stringify({ was, mid, t }));
+      await disarm();
+      await dismissAny();
+    });
+    // (T15: the hand-off: a navigation let go by one move counts itself as under way at once, so a second Move to
+    // Trash checked right then (held at "leased") is refused; never both)
+    await row(["T15"], async () => {
+      const ready = await setUp("/T15 dir", false);
+      need(ready, "its setup wasn't reached");
+      await mk("/T15 c.ipynb", "T15 c");
+      await arm(["publishing:small"]);
+      await trashRow("/T15 dir");
+      const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
+      await navTo("/T15 c.ipynb");
+      await sleep(400);
+      await armMore("leased");
+      await goOn("publishing:small");
+      const r1 = await at("leased");
+      need(r1, "its second seam wasn't reached");
+      // (the open notebook's path, waited for (every 100 ms, at most 10 s): mid-switch it isn't listed yet, and a null
+      // path must not reach trashRow (the grader's ruling ada70738: a deterministic T15 under K26))
+      let rp = null;
+      for (const end = Date.now() + 10000; rp == null && Date.now() < end; ) { rp = await curPath(); if (rp == null) await sleep(100); }
+      need(rp, "the open notebook's path wasn't found within 10 s");
+      await trashRow(rp);
+      const said = await errHas("the page changed meanwhile", 30000);
+      const kept = await ev(`${W}.stat(${JSON.stringify(rp)}).then((e) => !!e)`);
+      await goOn("leased");
+      const opened = await until(`document.querySelector("#nbname").value === "T15 c"`, 30000);
+      const ok = await idle();
+      check(ready && r0 && r1 && said && kept && opened && ok, "T15: a second Move to Trash right as a held navigation was let go: refused (the navigation already counted), and the navigation then opened: " + JSON.stringify({ rp, kept, opened }));
+      await disarm();
+      await dismissAny();
+    });
+    // (T16: the journal's reopen failing, held in its recovery: a Move to Trash then is refused (the reopen still holds
+    // its lease), nothing moved)
+    await row(["T16"], async () => {
+      const ready = await setUp("/T16 dir", false);
+      need(ready, "its setup wasn't reached");
+      await arm(["recovering"]);
+      await ev(`(() => { sagebrush.shareTest.beforeAttach = () => { sagebrush.shareTest.beforeAttach = undefined; throw new Error("test: the reopen fails"); }; window.__re = null; sagebrush.trashTest.nav.reopen().then((r) => (window.__re = r)); return 1; })()`);
+      const r0 = await at("recovering");
+      need(r0, "its seam wasn't reached");
+      await trashRow("/T16 dir");
+      const said = await errHas("the page changed meanwhile", 30000);
+      const t = await where("/T16 dir");
+      await goOn("recovering");
+      const ended = await until(`window.__re === false`, 20000);
+      const ok = await idle();
+      check(ready && r0 && said && t.here && !t.inTrash && ended && ok, "T16: during the journal's reopen's recovery, a Move to Trash was refused, nothing moved: " + JSON.stringify({ t, said, ended }));
+      await disarm();
+      await dismissAny();
+    });
+    // (after the T cases: a fresh page, with a notebook of its own open outside their folders, so a T case whose move
+    // went through (as under the controls K15/K16, its open notebook into Trash with its folder) can't reach the checks
+    // after them: #447 r3's run, the ruling for r4)
+    // (inside its own row, one check always counted: a throw here (as under the control K7 in the r5 cross-check) is
+    // a named failure, "T.after", and never cuts the run short; the closed count is the same in every run)
+    await row(["T.after"], async () => {
+      await freshPage();
+      await openNb("/After T.ipynb", "After T", "after");
+      await until(`document.querySelector("#nbname").value === "After T"`);
+      check(true, "T.after: the page after the T cases opened its own notebook");
+    });
+  }
   // the typed title's rename, its notebook moved and another put at its path
   // while the rename waited for the lock: this notebook gets the name, the
   // other is untouched (CORR-5D2-3)
@@ -663,6 +1152,43 @@ try {
   check(mr[0] >= 0 && mr[1] >= 0 && mr[2] <= mr[4] && mr[3] <= mr[5] && mr[6] === "auto", "a menu on a 320×240 screen stays inside it: " + JSON.stringify(mr));
   await ev(`(() => { document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()); return 1; })()`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // (grader R1 on #447, T1) open for editing in ANOTHER tab (sync's journal: that tab holds its writer lock): Move to
+  // Trash from this tab's files is refused, said as an error, and nothing moves. (The fence switched to the journal
+  // for this check only, and put back after it.)
+  {
+    const FENCE = "__sagebrush-workspace__";
+    const idbDo = (body) => ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onerror = () => no(String(r.error)); r.onsuccess = () => { const db = r.result; const tx = db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks"); ${body} }; })`);
+    const fence0 = await idbDo(`const g = st.get(${JSON.stringify(FENCE)}); g.onsuccess = () => { db.close(); ok(g.result ?? null); };`);
+    const t1 = await ev(`${W}.create("/T1.ipynb", { content: { name: "T1", mode: "python", cells: [{ id: "c", code: "t1" }] } }).then((e) => e.ref)`);
+    let t1tab = null, j = { fence: !!fence0 };
+    try {
+      if (fence0) await idbDo(`st.put(${JSON.stringify({ ...fence0, phase: "journal", journal: 1 })}); tx.oncomplete = () => { db.close(); ok(1); };`);
+      t1tab = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "?nb=" + encodeURIComponent(t1))}`, { method: "PUT" })).json();
+      const wsT = new WebSocket(t1tab.webSocketDebuggerUrl);
+      await new Promise((r) => (wsT.onopen = r));
+      let nT = 0; const waitT = new Map();
+      wsT.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waitT.has(d.id)) { waitT.get(d.id)(d.result ?? d.error); waitT.delete(d.id); } };
+      const evT = async (expression) => { const id = ++nT; const r = await new Promise((ok) => { waitT.set(id, ok); wsT.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); return r?.result?.value; };
+      for (let i = 0; i < 300 && !(await evT(`!!(window.sagebrush?.notebook?.store?.journaled && !sagebrush.notebook.store.viewOnly && sagebrush.notebook.snapshot().name === "T1")`).catch(() => false)); i++) await sleep(100);
+      j.writer = await evT(`!!(sagebrush.notebook.store?.journaled && !sagebrush.notebook.store.viewOnly)`).catch(() => false);
+      await go(base + "?nb=" + encodeURIComponent(t1));
+      j.viewOnly = await until(`!!(${W} && sagebrush.notebook?.store?.journaled && sagebrush.notebook.store.viewOnly && sagebrush.notebook.snapshot().name === "T1")`, 30000);
+      if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+      await until(`!!document.querySelector(${JSON.stringify(rowSel("/T1.ipynb"))})`);
+      await click(rowSel("/T1.ipynb") + " .more");
+      await menu("Move to Trash");
+      j.said = await until(`/open for editing in another tab/.test(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "")`, 20000);
+      j.here = await ev(`${W}.stat("/T1.ipynb").then((e) => !!e)`);
+      j.inTrash = await ev(`${W}.stat("/Trash/T1.ipynb").then((e) => !!e)`);
+      j.shown = await ev(`document.querySelector("#nbname").value`);
+    } finally {
+      if (t1tab) await send("Target.closeTarget", { targetId: t1tab.id });
+      if (fence0) await idbDo(`st.put(${JSON.stringify(fence0)}); tx.oncomplete = () => { db.close(); ok(1); };`);
+      await go(base);
+      await until(`!!${W}`, 60000);
+    }
+    check(j.fence && j.writer && j.viewOnly && j.said && j.here && !j.inTrash && j.shown === "T1", "T1: open for editing in another tab, Move to Trash here is refused, said as an error, and nothing moves: " + JSON.stringify(j));
+  }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);
@@ -678,7 +1204,8 @@ try {
 } finally {
   chrome.kill();
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  // (a profile Chrome is still writing as it exits: tried again, and never allowed to lose the checks' report)
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.error("note: the profile wasn't removed: " + (e?.code ?? e)); }
 }
 if (fails.length) {
   console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));

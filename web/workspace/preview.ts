@@ -359,6 +359,27 @@ export async function estimate(): Promise<{ usage: number; quota: number } | und
 }
 export const fmtBytes = fmtSize;
 
+/** The push proxy's address when "Push to GitHub" is offered here (DEV, or a page on this machine, with the flag), or null. */
+export function gitpushProxy(): string | null {
+  try {
+    if (!/^(dev\.sagebrush\.space|127\.0\.0\.1|localhost)$/.test(location.hostname)) return null;
+    const v = localStorage.getItem("sagebrush.gitpush");
+    return v && /^(https:\/\/[a-z0-9.-]+|http:\/\/127\.0\.0\.1:\d+)$/.test(v) ? v : null;
+  } catch { return null; }
+}
+
+/** "Push to GitHub"'s automatic push (Stage A MVP M3), started by the page once its workspace is open: with the flag,
+ * its chunk loaded a little after the page starts, pushing every 10 minutes when something changed; without it, nothing. */
+export function startGitpushAuto(w: Workspace, url: (file: string) => string): void {
+  const proxy = gitpushProxy();
+  if (!proxy) return;
+  const delay = (globalThis as any).__SB_GITPUSH_TEST__?.autoDelayMs ?? 20_000;
+  setTimeout(() => {
+    import(url("sagebrush-gitpush-panel.js")).then((m) => m.startAuto(w, { say() {}, fail() {}, workerUrl: url("sagebrush-gitpush-worker.js"), proxy, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }))
+      .catch((e) => console.warn("Push to GitHub:", e));
+  }, delay);
+}
+
 /** The Storage panel (§6.3). */
 export async function openStorage(w: Workspace, host: StorageHost): Promise<void> {
   const { box, close, onClose } = panel("Storage");
@@ -422,7 +443,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       keep.append(ask);
     }
     body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
-    body.append(exportBox, syncBox);
+    body.append(exportBox, gitBox, syncBox);
   };
   // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
   const exportBox = h("div", { className: "export" });
@@ -454,6 +475,18 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     const go = button("Export all current files (.zip)", () => void start());
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
     void stamp();
+  }
+  // ("Push to GitHub", Stage A MVP r1, DEV only: offered only on DEV or a local page, in a browser whose flag
+  // (localStorage "sagebrush.gitpush") names the push proxy; its flow is the lazy chunk's, web/gitpush)
+  const gitBox = h("div", { className: "export" });
+  const proxy = gitpushProxy();
+  if (host.exportUrl && proxy) {
+    gitBox.append(button("Push to GitHub…", async () => {
+      try {
+        const m = await import(host.exportUrl!("sagebrush-gitpush-panel.js"));
+        await m.openGitpush(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-gitpush-worker.js"), proxy, saveOpen: host.saveOpen, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }, gitBox);
+      } catch (err) { host.fail(err); }
+    }));
   }
   // (sync, step 5: its own section, drawn by its own poll, ended with the panel)
   const syncBox = h("div");
