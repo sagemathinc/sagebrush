@@ -36,15 +36,18 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main, footer { max-width: 920px; margin: 0 auto; padding: 0 20px; }
-  header { padding-top: 18px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
-  header .title { flex: 1 1 440px; min-width: 0; }
+  /* (the header in one row: the name, the site's links and the theme (clutter C1, William Nov 2: the notebook was
+     pushed ~140 px down). The heading's subtitle stays in it for screen readers and search, not shown; the tagline
+     is on the articles, as on a phone) */
+  header { padding-top: 10px; padding-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+  header .title { flex: 1 1 440px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 22px; }
   header .tools { display: flex; gap: 8px; align-items: center; }
-  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 14px; }
+  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; font-size: 14px; }
   nav.links a { font-weight: 600; text-decoration: none; }
   nav.links a:hover { text-decoration: underline; }
-  h1 { margin: 0; font-size: 21px; line-height: 1.3; letter-spacing: -0.01em; }
-  h1 span { color: var(--accent); }
-  .tag { color: var(--muted); margin: 4px 0 6px; font-size: 14px; }
+  h1 { margin: 0; font-size: 0; line-height: 1.3; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); font-size: 20px; }
+  .tag { display: none; }
   /* the toolbar, kept in view as the notebook scrolls, as TimeTravel's is (William, Oct 17): the
      function search, Run all, the File and ⋯ menus always a press away; cells scrolled to stop below it */
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
@@ -112,6 +115,9 @@
   #docsearch { font: 13px system-ui, sans-serif; width: 15em; max-width: 40vw; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); }
   #docresults { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(600px, 92vw); max-height: 70vh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
   #docresults[hidden] { display: none; }
+  /* (its results open: the toolbar, which holds them, over the file browser (B7, William Nov 1): its z-index 9 would
+     keep them under the browser's 20 wherever they reach it; a phone's toolbar is above it already) */
+  html:not(.phone) .bar:has(#docresults:not([hidden])) { z-index: 21; }
   #docresults li { padding: 5px 8px; border-radius: 5px; cursor: pointer; }
   #docresults li[aria-selected=true] { background: var(--code); }
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
@@ -199,10 +205,8 @@
   #theme { font-size: 13px; padding: 3px 8px; }
   @media (max-width: 640px) {
     header { padding-top: 10px; gap: 8px; }
-    h1 { font-size: 17px; }
-    /* (a phone: the notebook first; the tagline is on the articles) */
-    .tag { display: none; }
-    nav.links { gap: 2px 14px; font-size: 13px; margin-bottom: 2px; }
+    nav.links { gap: 2px 14px; font-size: 13px; }
+    h1 span { font-size: 17px; }
     /* the toolbar: smaller, and the settings on their own row */
     .bar { gap: 6px; }
     .bar button, .bar select { padding: 4px 9px; font-size: 14px; }
@@ -473,6 +477,9 @@ import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSe
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
+// (the MyST reader: given to convertCopy, which the board page shares without it)
+import { fromMyst } from "./notebook/myst.js";
+import { bookAccess } from "./workspace/book-cap.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
@@ -943,7 +950,7 @@ if (REMOTE_PREVIEW) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page) });
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
@@ -1488,6 +1495,9 @@ class TextFileStore {
 
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
+// (the document generation: raised whenever the open document changes or the workspace closes; a book capability
+// is bound to the one it was made in: web/workspace/book-cap.ts, plan-myst-notebooks-p2 r2 §11.1)
+let docGen = 0;
 // (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
 const beforeSwitch = [];
 // (while the notebook is changing, from the first wait to the new one attached, there is no notebook
@@ -1513,6 +1523,7 @@ async function open(store, id, kind = "browser") {
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
+  docGen++;
   ttShow(false);
   current = { id, kind };
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
@@ -1604,6 +1615,21 @@ async function openArrived(id) {
   return true;
 }
 const saveNow = () => nb.flush();
+// A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
+// and another chapter opened (web/workspace/book-cap.ts; plan-myst-notebooks-p2 r2 §2, §11.1)
+const bookAcc = bookAccess({
+  now: () => ({ gen: docGen, ws, ref: current.kind === "browser" ? current.id : null }),
+  isMyst: () => !!nb.meta?.metadata?.sagebrush?.myst,
+  confirm: (text) => confirm(text),
+  save: async () => { await saveNow(); },
+  openRef: async (ref) => { const ok = await openId(ref).catch(() => false); if (ok) wsTrackCurrent(); return ok; },
+  said: (text) => { statusEl.textContent = text; },
+  myst: fromMyst,
+  maxBytes: LIMITS.maxBoardBytes,
+});
+// (the same, for the tests, which call the page's own capability directly (web/notebook/test-myst.mjs part C): less
+// than the page's own workspace, window.sagebrush.workspace, already gives this page's code)
+window.__sagebrushMystBook = () => bookAcc.mystBook();
 
 // The app: a notebook opened from the computer is its .ipynb file, and the
 // files in its folder are Python's files (read when it opens; what Python
@@ -2738,7 +2764,7 @@ async function openAs(e, as) {
   if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
   try {
     let said = "";
-    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, said: (m) => { said = m; } });
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, myst: fromMyst, said: (m) => { said = m; } });
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
     if (!said) return openEntry(made);
@@ -3087,7 +3113,7 @@ const wsReady = (async () => {
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
-    w.onClosed(() => showReloadNotice());
+    w.onClosed(() => { docGen++; showReloadNotice(); });
     if (w.closed) showReloadNotice();
     // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
@@ -3554,6 +3580,16 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   booted();
+  // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
+  // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
+  // meanwhile (another fid), said, nothing made
+  if (qs.has("openas")) {
+    const at = qs.get("openas"), fid = qs.get("fid");
+    history.replaceState(null, "", location.pathname + flagQuery + location.hash);
+    const e = ws && at ? await ws.stat(at).catch(() => null) : null;
+    if (e && e.kind === "file" && e.fid === fid) await openAs(e, "notebook");
+    else statusEl.textContent = `could not open ${at ? nameOf(at) : "it"} as a notebook: it isn't there any more`;
+  }
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {
     history.replaceState(null, "", location.pathname + flagQuery + location.hash);
