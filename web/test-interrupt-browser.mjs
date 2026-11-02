@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/test-interrupt-matrix.mjs)
 // The interrupt matrix's browser host (used by web/test-interrupt-matrix.mjs): the notebook
 // page's interpreter worker, interrupted with the page's Stop button.  Markers come from the
 // cell's own output, read while the cell runs; the Stop is stamped on the harness's clock just

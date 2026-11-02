@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/agents/test-agents-artifacts.mjs, web/agents/test-agents-layout.mjs)
 // @ts-check
 // Ports for the browser tests, so that any number of test runs can share a
 // machine (the shared test VM runs several CI runs at once): a test's

@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=190
 // The notebook page's package set is a barrier before its first run
 // (web/index.html notebookPkgset, web/notebook/worker-kernel.js; astra's
 // CORR-PR68-3), in headless Chromium against web/dist (web/serve.py) behind a

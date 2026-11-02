@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The questions preview's build flag (web/build.ts): a flagged build puts the page in
 // web/dist/questions, and an ordinary build after it removes it again (dist isn't
 // cleared between builds). Runs `bun web/build.ts` three times: flagged, ordinary, flagged.

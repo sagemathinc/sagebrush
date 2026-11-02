@@ -1,3 +1,4 @@
+// ci: web-runner order=180 runner=bun chrome
 // The workspace's admit option (plan-bash-shell r3 §2.3, §9.1), with its cases in admit-cases.js:
 //   CHROME=google-chrome bun web/workspace/test-workspace-admit.mjs
 import { spawn } from "node:child_process";

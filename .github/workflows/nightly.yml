@@ -58,9 +58,7 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          CHROME=google-chrome node web/workspace/test-export-scale.mjs --ci
-          CHROME=google-chrome node web/workspace/test-export-controls.mjs
-          node web/workspace/test-export-campaign-check.mjs
+          node scripts/web-tests.mjs run export-controls
 
   lookalike-controls:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
@@ -98,4 +96,4 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          CHROME=google-chrome node web/workspace/test-workspace-lookalike-controls.mjs
+          node scripts/web-tests.mjs run lookalike-controls

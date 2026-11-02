@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The notebook's Jupyter-like editing, in headless Chromium with real key
 // events: command mode (Esc; A, B, D D, Z, C, V, M, Y, Shift+M, H), edit mode
 // (auto-indent, ↑/↓ between cells, Ctrl+; split, Ctrl+/ comments), dragging a

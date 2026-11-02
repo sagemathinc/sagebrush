@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=220 runner=bun
 // The documents' bounded serializer (web/shell/bounded-json.ts; LIMIT-BASH-S2-R2-1, CORR-BASH-S2-R2-2):
 // exactly JSON.stringify(v, null, 1) + "\n" in UTF-8, refused past its cap without building any value, key
 // or text whole, in a number of chunks that follows the output's bytes, not its tokens.

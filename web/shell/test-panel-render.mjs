@@ -1,3 +1,4 @@
+// ci: web-browser/terminal.1 order=10 runner=bun
 // The terminal panel's renderer (web/shell/panel-render.ts; plan-bash-shell r8c E5.3, E5.4): line ends, SGR, visible
 // escapes, and the per-command caps with the omission line charged.  A first set (the preview); E5.8's full list
 // follows in step 6's PR.

@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=120 runner=bun
 // A board kept in a CoCalc syncdb (syncdb.ts; design/board-cocalc-adapter.md),
 // deterministically, over replicas of real patchflow sessions (the records of
 // history.ts, its codec with a records merge3 written from CoCalc's

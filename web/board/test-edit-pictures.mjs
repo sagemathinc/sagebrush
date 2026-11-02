@@ -1,3 +1,4 @@
+// ci: web-runner order=550 runner=bun
 // The frame's side of pictures by reference (web/board/edit-pictures.ts; web/board-host-protocol.md, "Pictures:
 // imagePut and imageGet"), against a scripted host.  Run with Bun:
 //   bun web/board/test-edit-pictures.mjs

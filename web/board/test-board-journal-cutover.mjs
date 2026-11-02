@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The board journal's cutover (test 16): two builds of the site served from ONE
 // origin (one IndexedDB), the build from before the board journal under /old/ (SB_DIST_OLD) and this one under /new/
 // (SB_DIST): a page of the old build, open on a board, can't change its row once a page of this build has opened the

@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=20 runner=bun
 // fileDeps (web/deps/file-deps.ts): which workspace files the Share
 // dialog pre-checks, from a notebook's code (share-ux-plan r2 §2).  The
 // cases are python's (PY-SHARE-1/2/3) and astra3's (CORR-SHAREUX-2) from

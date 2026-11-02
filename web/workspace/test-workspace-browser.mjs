@@ -1,3 +1,4 @@
+// ci: web-runner order=470 chrome
 // The file browser (web/workspace/browser.ts, design/workspace-files.md §4)
 // on both pages, in headless Chromium against the built site: the Files
 // button and the sidebar (remembered across pages); New board, folder,

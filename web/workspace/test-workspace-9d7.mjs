@@ -1,3 +1,4 @@
+// ci: web-runner order=290 runner=bun chrome
 // astra's probes on 9d7ce2e6 (CORR-9D7-1/2), verbatim from /scratch/astra-detect-9d7/web/workspace/astra-9d7-probes.mjs
 // with its cases in astra-9d7-cases.js:  CHROME=google-chrome bun web/workspace/test-workspace-9d7.mjs
 // The workspace (web/workspace/: design/workspace-files.md §2, §8.2) in

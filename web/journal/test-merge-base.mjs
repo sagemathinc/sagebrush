@@ -1,3 +1,4 @@
+// ci: web-runner order=420 runner=bun
 // The base of a merge with the history (web/journal/store.js mergeBaseOf; plan-exact-only r1, astra3's BASE-1/BASE-2),
 // on real patchflow histories: a root and two concurrent versions (two clients, each on its own store, so neither saw
 // the other's), read back by a session of the notebooks' codec (exact merges) or of a codec without merge3 (a board's).

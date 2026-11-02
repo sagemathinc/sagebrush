@@ -1,3 +1,4 @@
+// ci: web-runner order=510 runner=bun
 // Names a board gives that every object already has as a member
 // ("constructor", "toString", "__proto__"): a sticker's icon and a tool's
 // icon are looked up as their own entries, never the object's members

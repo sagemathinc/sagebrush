@@ -1,3 +1,4 @@
+// ci: web-browser/remote-preview order=10
 // Remote compute's preview in the notebook page (web/notebook/remote-ui.js,
 // sagebrush-remote.js), end to end in headless Chromium: the picker only
 // with ?remote=1, the Connect sheet, a cell run by a person's Run (approved,

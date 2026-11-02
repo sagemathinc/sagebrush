@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=90 runner=bun
 // TimeTravel's versions of a large board (history.ts BoardHistory, on
 // patchflow), quickly and exactly: the first version, the whole board, not
 // quadratic in its records; an edit's version quick, an item removed too

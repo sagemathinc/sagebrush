@@ -1,3 +1,4 @@
+// ci: web-runner order=430 runner=bun
 // web/notebook/start-all.js (sync-docs, #1 (a)): every notebook of this device whose synced history hasn't started is
 // loaded as its writer and let go; the open one, one started meanwhile and one another tab writes are left; one the
 // store refuses as too large is counted by name and the walk goes on; one refused for room ends the walk; any other

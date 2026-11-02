@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=40 chrome
 // The app (PWA) works offline: load sagebrush.space's files (web/dist, by
 // web/serve.py), let the service worker keep them, stop the server, reload,
 // and run Python.  Also checks the manifest and installability.

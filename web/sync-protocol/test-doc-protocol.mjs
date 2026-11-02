@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=90 runner=bun
 // The documents' sync protocol (doc-protocol.ts; plan-sync-slice2-r9.md §0a):
 // its encodings against doc-vectors.json (made by an independent Python
 // implementation, gen-doc-vectors.py), and its checks, each accepting what

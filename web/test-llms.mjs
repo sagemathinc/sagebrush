@@ -1,3 +1,4 @@
+// ci: checks.3 order=40
 // llms.txt and the board format page (web/llms.txt, web/board-format.md), as
 // built into web/site/public by `bun web/build.ts`:
 // - every https://sagebrush.space/ link names a file the site serves, and a

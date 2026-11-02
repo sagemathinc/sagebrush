@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=60
 // One interpreter per notebook (design/reactive-notebook.md, step 1), on the
 // full page in headless Chromium: switching notebooks switches interpreters
 // (each keeps its variables); Restart keeps the outputs, marked stale until

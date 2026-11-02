@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The notebook as a component (web/notebook), in headless Chromium: the embed
 // page (web/embed) runs code; changes made elsewhere (a store's subscribe)
 // are applied in place, keeping the caret of the cell being edited and the

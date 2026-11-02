@@ -1,3 +1,4 @@
+// ci: web-runner order=90 runner=bun chrome
 // Questions whose ids are names an object already has ("__proto__",
 // "constructor", "toString": a board's ids are any strings): answered on the
 // board, with notes, and submitted, every answer and note reaches the host

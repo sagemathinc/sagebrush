@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=100 runner=bun
 // preview.ts (design/outputs.md, section 1): a slow item's preview is
 // bounded (text cut to its head and tail, one picture, never SVG, HTML or
 // scripts), read back only when well formed, and a board over its total

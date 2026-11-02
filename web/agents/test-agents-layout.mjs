@@ -1,3 +1,4 @@
+// ci: web-runner-sync.2 order=20 runner=bun chrome
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full

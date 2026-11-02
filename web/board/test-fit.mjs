@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=40
 // How a board opens (board.ts overview(), mount.ts look(); friction 6, 12,
 // 13): all of it when that is legible (zoom LEGIBLE, 0.6, or more), clear
 // of the title bar and the caption; a larger board at that zoom, from its

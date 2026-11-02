@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs)
 // The preview's Stop (the simulated gateway, remote-ui.js PreviewGateway): a Stop while a Run runs on the preview's
 // interpreter ends that run when the interpreter says it stopped, not at the Stop, so a Run asked after it is
 // delivered only then, never into the interpreter's fallback (WorkerKernel.interrupt's restart, which stops every

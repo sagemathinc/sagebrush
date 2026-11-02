@@ -1,3 +1,4 @@
+// ci: inline (ci.yml)
 // Tests for scripts/check-no-server-imports.mjs (PR #59, astra's CORR-PR59-2):
 // real imports however they are written are found; imports inside comments
 // and strings are not.

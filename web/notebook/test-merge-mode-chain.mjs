@@ -1,3 +1,4 @@
+// ci: web-runner order=390 runner=bun
 // The safety claim behind exact-only merges for histories made before them (plan-exact-only r1 §7, risk 5; first the
 // grader's G-P2b-2): a history of one writer (every notebook's own history: a single writer per device) is one line of
 // patches, and the codec without merge3 (patchflow's apply-all, every history's rule until now) and the notebook codec

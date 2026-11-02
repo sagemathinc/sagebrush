@@ -1,3 +1,4 @@
+// ci: web-runner order=410 runner=bun
 // Exact merges cost nothing at startup (plan-exact-only r1 §6, the grader's E-5): cocalc-ai's merge (db-merge3.ts) and
 // patchflow's text merge (its merge3.js, with diff-match-patch) are in the lazily loaded history bundle
 // (sagebrush-history.js, built from history.js) and NOT in the page's own script (index.html's, which web/build.ts

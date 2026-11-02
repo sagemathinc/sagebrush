@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=230
 // The browser worker's init gate (web/worker.ts; plan-ff-limits r3, section
 // 4), in headless Chromium: the worker runs nothing before its init message
 // gives it its limits (the deployment's or course's JSON text, or null for

@@ -1,3 +1,4 @@
+// ci: checks.3 order=80
 // The comments core (comments-core.mjs; plan latex-comments r4.2): the merge, the anchors, the limits, the retries.
 // Named after the reviews' implementation tests (astra LC-T1..T7, daybreak3 DB3-IMPL-1..4).
 //   bun web/latex/test-comments-core.mjs

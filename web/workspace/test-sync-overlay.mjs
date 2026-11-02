@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=60 runner=bun
 // D10 (design/sync-client.md): the shared reducer run over a stored index, a page at a time, on copy-on-write
 // overlays over a partial base that loads its misses: every vector, at every page size, gives exactly what the
 // in-memory reducer gives; a discarded overlay leaves the base untouched; a partial map can't be iterated.

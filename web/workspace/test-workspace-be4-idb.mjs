@@ -1,3 +1,4 @@
+// ci: web-runner order=340 runner=bun chrome
 // astra's real-IdbPatchStore probes on be486fe2 (CORR-BE4-1/2), from
 // /scratch/sagebrush-reviews/evidence/durability-detect-be4-astra/ with its cases in astra-be4-idb-cases.js:
 //   CHROME=google-chrome bun web/workspace/test-workspace-be4-idb.mjs
