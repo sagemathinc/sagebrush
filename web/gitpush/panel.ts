@@ -7,7 +7,7 @@ import type { Entry, Workspace } from "../workspace/api";
 import type { BoardDoc } from "../board/doc";
 import { Images } from "../board/images";
 import { boardFileText, notebookFileText } from "../workspace/file-bytes";
-import { MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
+import { AUTO_MS, MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
 
 export type GitpushHost = {
   say(m: string): void;
@@ -56,10 +56,19 @@ async function* filesUnder(w: Workspace, folder: string, trash: string): AsyncGe
   }
 }
 
-/** One push of `folder`: its files read and sent in batches, then the worker's commit and push. */
-export async function pushFolder(w: Workspace, host: GitpushHost, o: { repo: string; folder: string; scope: string; onProgress?(n: number): void }) {
+/** One push of `folder`, one at a time across this browser's tabs (each tab has its own git worker, on the same local
+ * repository): a person's push waits for one under way; the automatic push (`auto`) is skipped instead (busy). */
+export async function pushFolder(w: Workspace, host: GitpushHost, o: { repo: string; folder: string; scope: string; auto?: boolean; onProgress?(n: number): void }): Promise<any> {
+  const locks = (navigator as any).locks;
+  if (!locks) return pushNow(w, host, o);
+  return locks.request(`sagebrush-gitpush:${o.scope}`, { ifAvailable: !!o.auto }, (lock: unknown) => (lock ? pushNow(w, host, o) : { busy: true }));
+}
+
+/** Its files read and sent in batches, then the worker's commit and push. */
+async function pushNow(w: Workspace, host: GitpushHost, o: { repo: string; folder: string; scope: string; auto?: boolean; onProgress?(n: number): void }) {
   const branch = branchFor(o.folder);
-  await host.saveOpen?.();
+  // (a person's push saves the open documents first; the automatic one pushes what is saved)
+  if (!o.auto) await host.saveOpen?.();
   const { sigs, run } = await call(host.workerUrl, "begin", { scope: o.scope, repo: o.repo, folder: o.folder, branch, proxy: host.proxy, author: { name: "Sagebrush", email: "noreply@sagebrush.space" } });
   const skipped: Skip[] = [];
   const prefix = o.folder === "/" ? "/" : o.folder + "/";
@@ -106,6 +115,44 @@ export async function pushFolder(w: Workspace, host: GitpushHost, o: { repo: str
   return { ...done, branch, skipped };
 }
 
+/** The automatic push (M3): this page's, at most one. `dirty` is set by every change the workspace tells this tab
+ * (its own, other tabs', agents', and other devices' through sync); a push starts only when the folder was pushed by
+ * hand once (its repository and folder are known) and the token is saved. A failure is kept, shown in the panel,
+ * and tried again at the next turn. */
+type Auto = { dirty: boolean; running: boolean; error?: string; at?: number };
+let auto: Auto | undefined;
+/** The open sections' redraws, told after each automatic push (a section may open before the automatic push starts). */
+const autoListeners = new Set<() => void>();
+const T = (): { autoMs?: number } => (globalThis as any).__SB_GITPUSH_TEST__ ?? {};
+
+export function startAuto(w: Workspace, host: GitpushHost): void {
+  if (auto) return;
+  const a: Auto = (auto = { dirty: true, running: false });
+  w.watch(() => { a.dirty = true; });
+  const turn = async () => {
+    try {
+      if (!a.dirty || a.running) return;
+      const scope = w.ws.name;
+      const st = await call(host.workerUrl, "status", { scope });
+      if (!st.repo || !st.folder || !st.hasToken) return;
+      a.running = true;
+      a.dirty = false;
+      try {
+        const r = await pushFolder(w, host, { repo: st.repo, folder: st.folder, scope, auto: true });
+        if (r?.busy) a.dirty = true;
+        else { a.error = undefined; a.at = Date.now(); }
+      } catch (e: any) {
+        a.dirty = true;
+        a.error = e?.message ?? "The push failed.";
+      } finally {
+        a.running = false;
+        for (const f of autoListeners) try { f(); } catch {}
+      }
+    } finally { setTimeout(turn, T().autoMs ?? AUTO_MS); }
+  };
+  void turn();
+}
+
 /** The section in the Storage panel. */
 export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElement): Promise<void> {
   const scope = w.ws.name;
@@ -135,10 +182,17 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
     go.disabled = !has || pushing;
   };
   repo.onchange = () => void drawToken();
+  const autoLine = el("p", { className: "note" });
   const showLast = (last?: { at: number; commit: string; branch: string }) => {
     status.textContent = last ? `Pushed ${ago(last.at)} to ${last.branch} (${last.commit.slice(0, 7)})` : "Not pushed yet";
+    autoLine.textContent = !last ? "After the first push, it pushes again by itself every 10 minutes when something changed, while Sagebrush is open in this browser."
+      : auto?.error ? `The automatic push failed: ${auto.error} It tries again in 10 minutes.`
+      : "Pushes by itself every 10 minutes when something changed, while Sagebrush is open in this browser.";
   };
   showLast(st.last);
+  // (an automatic push meanwhile: the line redrawn while the section is shown)
+  const redraw = async () => { if (!box.isConnected) { autoListeners.delete(redraw); return; } showLast((await call(host.workerUrl, "status", { scope })).last); };
+  autoListeners.add(redraw);
   go.onclick = async () => {
     const r = parseRepo(repo.value);
     if (!r) return host.say("Enter the repository's address (https://github.com/owner/repo)");
@@ -170,7 +224,7 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
     el("div", {}, "Folder ", folder, el("span", { className: "note", textContent: " pushes to the branch sagebrush/<its name>; never main" })),
     tokenLine,
     el("p", { className: "note", textContent: "Use a fine-grained token for this one repository, with Contents: Read and write, expiring in 30 days or less. It stays in this browser: Sagebrush's servers never store it. Notebooks are pushed without their outputs." }),
-    go, status, skips,
+    go, status, autoLine, skips,
   );
   await drawToken();
 }

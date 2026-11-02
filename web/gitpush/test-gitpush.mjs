@@ -3,7 +3,8 @@
 // and never in the page; a folder pushed through a stand-in for the push proxy (the same /github.com/<owner>/<repo>.git
 // routes as web/gitpush/worker.mjs) to a real git server (git http-backend), its files as the rules say (notebooks
 // without outputs, .sagebrush never, nothing outside the folder); a second push with a change and a removal; a branch
-// moved on the server refused, never overwritten; a wrong token refused in fixed words; Forget token.
+// moved on the server refused, never overwritten; a wrong token refused in fixed words; Forget token; (M3) the automatic
+// push: a change pushed by itself, nothing pushed when nothing changed, and its failure said in the panel.
 //   node web/gitpush/test-gitpush.mjs        (CHROME=… to choose the browser)
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -97,6 +98,8 @@ const show = (path, ref = "sagebrush/proj") => git("-C", bare, "show", `${ref}:$
 const NB = { mode: "python", cells: [{ id: "c1", code: "print(1)", outputs: [{ output_type: "stream", name: "stdout", text: "SECRET-OUTPUT\n" }], n: "3", ms: 12 }, { id: "c2", type: "markdown", code: "# Notes" }] };
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (the automatic push's test hook: at once after load, then every t-autoMs (an hour unless a scenario sets it))
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SB_GITPUSH_TEST__ = { autoDelayMs: 0, autoMs: +localStorage.getItem("t-autoMs") || 3600000 };` });
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`(async () => {
@@ -156,6 +159,28 @@ try {
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
   await until(`!${btn("/^Push now$/")}.disabled`, 30000);
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === second, "with nothing changed, no new commit");
+  // (M3) the automatic push: a reload with a fast turn; a change pushed by itself, with no click
+  const openSection = async () => {
+    check(await openStorage(), "the Storage panel opens");
+    await until(`!!(${btn("/^Push to GitHub/")})`);
+    await ev(`(${btn("/^Push to GitHub/")}.click(), 1)`);
+    return until(`${P}.querySelector("input[type=url]")?.value === "https://github.com/octo/notes.git" && /Token saved/.test(${P}.textContent)`);
+  };
+  const count = () => Number(git("-C", bare, "rev-list", "--count", "sagebrush/proj").trim());
+  await ev(`(localStorage.setItem("t-autoMs", "700"), 1)`);
+  await go(base);
+  await until(`!!${W}`, 60000);
+  check(await openSection(), "after a reload the section remembers the repository, the folder and the token");
+  check(/Pushes by itself every 10 minutes when something changed/.test(await ev(`${P}.textContent`)), "…and says it pushes by itself");
+  await sleep(2500);
+  const before = count();
+  check(before === 2, "the automatic push with nothing changed makes no commit: " + before);
+  await ev(`(async () => { await ${W}.create("/proj/auto.txt", { content: "pushed by itself\\n" }); return 1; })()`);
+  check((await (async () => { for (let i = 0; i < 60; i++) { if (count() === before + 1) return true; await sleep(250); } return false; })()), "a change is pushed by itself, without a click");
+  check(show("auto.txt") === "pushed by itself\n", "…its file on the server");
+  check(await until(`/^Pushed (just now|1 min ago) to sagebrush\\/proj/.test(${P}.textContent.match(/Pushed[^)]*\\)/)?.[0] ?? "") && ${P}.textContent.includes(${JSON.stringify(git("-C", bare, "rev-parse", "--short=7", "sagebrush/proj").trim())})`), "…and the open section's status line follows it");
+  await sleep(2000);
+  check(count() === before + 1, "no further commits while nothing changes");
   // the branch moved on the server: refused, nothing overwritten
   const other = join(tmp, "other");
   git("clone", "-q", "-b", "sagebrush/proj", bare, other);
@@ -166,6 +191,9 @@ try {
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
   check(await until(`/GitHub's sagebrush\\/proj has commits this browser doesn't have\\. Nothing was overwritten\\./.test(${P}.textContent)`, 30000), "a branch moved on GitHub: refused in words: " + (await status()));
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === moved, "…and the server's branch is as it was (never forced)");
+  check(await until(`/The automatic push failed: GitHub's sagebrush\\/proj has commits this browser doesn't have/.test(${P}.textContent)`, 10000), "the automatic push's failure is said in the panel");
+  await sleep(2000);
+  check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === moved, "…and its retries never overwrite the server's branch");
   // every request carried the token, and only to the proxy's two routes
   check(seen.length > 0 && seen.every((s) => s.auth === AUTH && /^\/github\.com\/octo\/notes\.git\/(info\/refs\?service=git-receive-pack|git-receive-pack)$/.test(s.path)), "every request went to the proxy's push routes, with the token: " + JSON.stringify([...new Set(seen.map((s) => s.path))]));
   // a wrong token: refused in fixed words; Forget token
