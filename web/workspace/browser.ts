@@ -9,7 +9,8 @@
 // deletes older versions in it; the foot's meter opens the Storage panel
 // (preview.ts, step 2b).
 import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
-import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
+import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind } from "./paths";
+import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
 import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
@@ -419,7 +420,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
-  function rowMenu(at: HTMLElement, e: Entry) {
+  async function rowMenu(at: HTMLElement, e: Entry) {
     if (trashView) {
       popup(at, [
         ["Restore", () => w.restore(e.path).then((x) => say(`Restored to ${x.path}`)).catch(fail).then(refresh)],
@@ -434,8 +435,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
     if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
-    // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays)
-    const as = e.kind === "file" && host.openAs ? openableAs(nameOf(e.path)) : null;
+    // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
+    //  by its first 4 KiB, read in at most 300 ms, else by its name: a Jupytext MyST one is a notebook)
+    const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
     if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
