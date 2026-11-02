@@ -839,7 +839,7 @@ try {
     const row = async (ids, f) => {
       const c0 = checks;
       try { await f(); }
-      catch (e) { for (const id of ids.slice(checks - c0)) check(false, `${id}: the row threw: ${String(e?.message ?? e).slice(0, 300)}`); }
+      catch (e) { for (const id of ids.slice(checks - c0)) check(false, `${id}: the row threw: ${String(e?.stack ?? e?.message ?? e).slice(0, 2400)}`); }
       finally { await ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; if (sagebrush.shareTest) { sagebrush.shareTest.beforeLeave = undefined; sagebrush.shareTest.beforeAttach = undefined; } window.__leaveGo?.(); return 1; })()`).catch(() => {}); }
     };
     // (a row whose setup or seam isn't reached stops there: its remaining checks fail at once, rather than each waiting
@@ -940,7 +940,10 @@ try {
       await goOn(stage);
       const said = await errHas("test: failed at " + stage, 60000);
       const opened = await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm(dir, "b"))}`, 30000);
-      const t = { ...(await where(dir)), lockFree: await ev(`navigator.locks.query().then((q) => !q.held.some((x) => x.name === "sagebrush-workspace"))`) };
+      const t = { ...(await where(dir)), lockFree: await until(`navigator.locks.query().then((q) => !q.held.some((x) => x.name === "sagebrush-workspace"))`, 5000) };
+      // (lockFree: free within a 5 s poll, not one read: the product's own OPFS witness write takes the lock briefly up
+      // to 10 s after any commit (api.ts publish() :818-823 -> flushOpfs() :826-838, the lock at :833; OPFS_EVERY_MS
+      // = 10 s, :354), so one read can catch that legitimate hold; a lock not let go within the poll still fails: K31)
       await disarm();
       await dismissAny();
       await ev(`${W}.create(${JSON.stringify(`/${id} next.txt`)}, { content: "n" }).then(() => 1)`);
