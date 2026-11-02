@@ -19,8 +19,11 @@
 //   PASS if  D_p50(head) <= T50,  D_q(head) <= U  and head's p99 <= 250 ms in every run (the r6.4 backstop, the save's
 //   end-to-end latency containing its transaction's wait; set's p99 reported).  p95 is reported only.
 // STOPs (for daybreak3 + the grader, never a verdict), decided before the medians:  performance.now()'s resolution over
-// 100 us in any run (compared in whole microseconds);  the instability/spread STOP: any configuration whose five p50s
-// have max > 2 x min AND max - min > 5 ms.  Both rules' boundary controls run before anything else; a wrong one is BAD.
+// 100 us in any run (compared in whole microseconds);  the instability/spread STOP: any of base, aa, head, delay and set
+// whose five p50s have max > 2 x min AND max - min > 5 ms.  NOT tail (daybreak3's T1 ruling): its real sleeps alter the
+// concurrent workload's contention by design, so its p50 is evidence, not an estimator; tail is judged only by
+// D_q(tail) > U (and the resolution STOP), and its p50/p90/p95/p99/max, q, bursts and wall time are reported.  The
+// rules' boundary and scope controls run before anything else; a wrong one is BAD.
 // The two mutants' anchors (DELAY's patch in tokens.ts, TAIL's hook in the page) are preflighted before the run, and
 // their expected outcomes declared: DELAY D_p50 > T50 and TAIL D_q > U in every workload and browser.
 // Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
@@ -176,6 +179,18 @@ for (const [xs, want, what] of [
   [[30, 59, 40, 40, 40], false, "max - min 29 > 5 but max < 2 x min: not past"],
   [[4, 4, 4, 4, 4], false, "no spread: not past"],
 ]) if (spreadStop(xs) !== want) die(`the spread STOP's boundary control: ${what} (${xs.join(", ")})`);
+// (its scope, T1: base, aa, head, delay and set; never tail.  Scope controls: an arbitrarily spread tail with every other
+// configuration calm STOPs nothing; the same spread in each in-scope configuration STOPs exactly that one)
+const SPREAD_SCOPE = ["base", "aa", "head", "delay", "set"];
+const spreadOf = (p50s) => SPREAD_SCOPE.filter((c) => spreadStop(p50s[c]));
+{
+  const calm = [10, 10.2, 9.9, 10.1, 10], wild = [5, 30, 8, 40, 6], all = ["base", "aa", "head", "delay", "set", "tail"];
+  const with_ = (c) => Object.fromEntries(all.map((k) => [k, k === c ? wild : calm]));
+  if (!spreadStop(wild)) die("the spread STOP's scope control: the wild series isn't past the rule");
+  if (spreadOf(with_("tail")).length !== 0) die("the spread STOP's scope control: a spread tail STOPs");
+  // (the ruled scope, written out here independently of SPREAD_SCOPE, so a narrowed or widened scope is caught)
+  for (const c of ["base", "aa", "head", "delay", "set"]) if (spreadOf(with_(c)).join() !== c) die(`the spread STOP's scope control: a spread ${c} doesn't STOP (alone)`);
+}
 // (the resolution STOP, in whole microseconds, and its boundary controls: 100 us is not past, 101 us is)
 const resStop = (ms) => Math.round(ms * 1000) > 100;
 for (const [ms, want, what] of [
@@ -218,7 +233,7 @@ try {
       const D = Object.fromEntries(Object.entries(P50).map(([c, d]) => [c, med(d)])), DQ = Object.fromEntries(Object.entries(Q).map(([c, d]) => [c, med(d)]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...of(c, "p99"))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => of(c, "res")));
-      const spread = CONFIGS.filter((c) => spreadStop(of(c, "p50")));
+      const spread = spreadOf(Object.fromEntries(CONFIGS.map((c) => [c, of(c, "p50")])));
       const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : [])];
       const valid = D.aa <= T50 && DQ.aa <= U && D.delay > T50 && DQ.tail > U, pass = D.head <= T50 && DQ.head <= U, backstop = p99.head <= 250;
       const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
