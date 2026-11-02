@@ -22,7 +22,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // detaches it (nb.detach) or sets what is open (`current = {`) is inside a function that takes the navigation lease as
 // its first statement and gives it back in the finally of its outermost try (so its catch and cleanup are inside the
 // lease), or is one of the named exceptions.  Returns the problems found (none: it holds).
-export function navCensus(src) {
+// (src: index.html; or, with its options, a module the page's functions moved to (web/page/session.ts: reopenJournaled),
+// its functions indented inside pageSession, what they use read through p)
+export function navCensus(src, { leased = ["open", "openId", "openArrived", "reopenJournaled", "bindDiskFile"], also = ["navLease", "beginSwitch"], indent = "" } = {}) {
   // (a function's body, from its opening brace to the one that closes it: strings, template literals and comments
   // skipped, so their braces don't count)
   const close = (i) => {
@@ -46,16 +48,16 @@ export function navCensus(src) {
     }
     return i;
   };
-  const LEASED = ["open", "openId", "openArrived", "reopenJournaled", "bindDiskFile"];
+  const LEASED = leased;
   const problems = [], ranges = {};
-  for (const name of [...LEASED, "navLease", "beginSwitch"]) {
-    const m = new RegExp(`^(?:async )?function ${name}\\(`, "m").exec(src);
+  for (const name of [...LEASED, ...also]) {
+    const m = new RegExp(`^${indent}(?:async )?function ${name}\\(`, "m").exec(src);
     if (!m) { problems.push(`${name}: not found`); continue; }
     const open = src.indexOf("{", src.indexOf(")", m.index)), end = close(open);
     ranges[name] = [m.index, end];
     if (!LEASED.includes(name)) continue;
     const body = src.slice(open + 1, end).replace(/^\s*(\/\/[^\n]*\n\s*)*/, "");
-    const first = /^const (end|endSwitch) = await navLease\(\);\s*(\/\/[^\n]*\n\s*)*/.exec(body);
+    const first = /^const (end|endSwitch) = await (?:p\.)?navLease\(\);\s*(\/\/[^\n]*\n\s*)*/.exec(body);
     if (!first) { problems.push(`${name}: its first statement doesn't take the lease`); continue; }
     const rest = body.slice(first[0].length);
     if (!rest.startsWith("try {")) { problems.push(`${name}: the lease isn't followed by its outermost try`); continue; }
@@ -678,7 +680,10 @@ try {
     // (#447 r5c: the seams are inert as shipped: no pause armed until a test arms one; and C-NAV, the census of what
     // switches the notebook (navCensus, above))
     check((await ev(`sagebrush.trashTest.pause === null`)) === true, "B1-seams: the test seam is unarmed as the page ships (trashTest.pause null)");
-    const census = navCensus(readFileSync(new URL("../index.html", import.meta.url), "utf8"));
+    // (reopenJournaled moved to web/page/session.ts, index.html's own one only calls it there)
+    const pageSrc = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    const census = [...navCensus(pageSrc, { leased: ["open", "openId", "openArrived", "bindDiskFile"] }), ...navCensus(readFileSync(new URL("../page/session.ts", import.meta.url), "utf8"), { leased: ["reopenJournaled"], also: [], indent: "  " }).map((x) => "web/page/session.ts: " + x)];
+    if (!pageSrc.includes("\nfunction reopenJournaled() { return session.reopenJournaled(); }\n")) census.push("reopenJournaled: index.html's isn't the one that calls web/page/session.ts's");
     check(census.length === 0, "C-NAV: every switch, detach and `current =` is inside a function that holds the navigation lease over all of it: " + JSON.stringify(census));
     // (its save failing: not moved, and said so, in board's words; it stays open, where it was)
     check((await openNb("/B1 open.ipynb", "B1 open", "first")) === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
