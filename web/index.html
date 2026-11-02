@@ -36,15 +36,18 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main, footer { max-width: 920px; margin: 0 auto; padding: 0 20px; }
-  header { padding-top: 18px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
-  header .title { flex: 1 1 440px; min-width: 0; }
+  /* (the header in one row: the name, the site's links and the theme (clutter C1, William Nov 2: the notebook was
+     pushed ~140 px down). The heading's subtitle stays in it for screen readers and search, not shown; the tagline
+     is on the articles, as on a phone) */
+  header { padding-top: 10px; padding-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+  header .title { flex: 1 1 440px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 22px; }
   header .tools { display: flex; gap: 8px; align-items: center; }
-  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 14px; }
+  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; font-size: 14px; }
   nav.links a { font-weight: 600; text-decoration: none; }
   nav.links a:hover { text-decoration: underline; }
-  h1 { margin: 0; font-size: 21px; line-height: 1.3; letter-spacing: -0.01em; }
-  h1 span { color: var(--accent); }
-  .tag { color: var(--muted); margin: 4px 0 6px; font-size: 14px; }
+  h1 { margin: 0; font-size: 0; line-height: 1.3; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); font-size: 20px; }
+  .tag { display: none; }
   /* the toolbar, kept in view as the notebook scrolls, as TimeTravel's is (William, Oct 17): the
      function search, Run all, the File and ⋯ menus always a press away; cells scrolled to stop below it */
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
@@ -202,10 +205,8 @@
   #theme { font-size: 13px; padding: 3px 8px; }
   @media (max-width: 640px) {
     header { padding-top: 10px; gap: 8px; }
-    h1 { font-size: 17px; }
-    /* (a phone: the notebook first; the tagline is on the articles) */
-    .tag { display: none; }
-    nav.links { gap: 2px 14px; font-size: 13px; margin-bottom: 2px; }
+    nav.links { gap: 2px 14px; font-size: 13px; }
+    h1 span { font-size: 17px; }
     /* the toolbar: smaller, and the settings on their own row */
     .bar { gap: 6px; }
     .bar button, .bar select { padding: 4px 9px; font-size: 14px; }
