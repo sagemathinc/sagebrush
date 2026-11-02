@@ -328,6 +328,19 @@ export function createNotebook(root, opts = {}) {
   }
   let mathModule = null;
   const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")));
+  // A Jupytext MyST notebook (a copy of a MyST .md: web/notebook/myst.js): its Markdown's directives and roles
+  // drawn by sagebrush-myst.js (web/myst), fetched only for such a notebook, once; until it has come, plain Markdown.
+  // (`editing`: a block of a cell being written, drawn as it is typed)
+  let myst = null, mystLoading = null;
+  function mystFor(cell, editing = false) {
+    const m = meta.metadata?.sagebrush?.myst;
+    if (!m) return undefined;
+    if (myst) return myst.hookFor(cell, editing, +m.chapter || 0);
+    mystLoading ??= import(asset("sagebrush-myst.js")).then((mod) => {
+      myst = mod.attach({ root, cells, renderMd, h });
+      for (const c of cells()) if (c.type === "markdown" && c.el.classList.contains("rendered")) renderMd(c);
+    }, () => { mystLoading = null; });
+  }
   // Typeset math (show(expr), integrate_steps): text/latex through KaTeX,
   // with the text form until KaTeX has loaded (and if it cannot).
   function appendLatex(box, b) {
@@ -1674,7 +1687,7 @@ export function createNotebook(root, opts = {}) {
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
-    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures() }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) {
       await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
@@ -1698,7 +1711,7 @@ export function createNotebook(root, opts = {}) {
   function openBlocks(cell) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
-      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures() }),
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",

@@ -81,6 +81,8 @@ const STYLE = `
 .sbfprev .pb th { background: #efeee7; position: sticky; top: 0; }
 .sbfprev .pb img { max-width: 100%; max-height: 60vh; display: block; margin: 0 auto; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
 .sbfprev .pb .note, .sbfprev .note { color: #5d645f; font-size: 12.5px; margin: 6px 0; }
+.sbfprev .note.remind { color: #7a5a12; }
+.sbfprev .note.remind button { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .sbfprev .pa { display: flex; gap: 8px; padding: 8px 14px; border-top: 1px solid #e2e1d9; align-items: center; flex-wrap: wrap; }
 .sbfprev .pa .sp { flex: 1; }
 .sbfprev .pv { border-top: 1px solid #e2e1d9; padding: 8px 14px 12px; max-height: 34vh; overflow: auto; }
@@ -328,12 +330,24 @@ export type StorageHost = PreviewHost & {
   saveOpen?: () => Promise<void>;
 };
 
+/** How long ago `at` was, in words: "just now", "5 min ago", "3 h ago", "yesterday", "9 days ago". */
+const agoText = (at: number, now: number) => {
+  const m = Math.floor((now - at) / 60_000), d = Math.floor(m / 1440);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : d === 1 ? "yesterday" : `${d} days ago`;
+};
 /** "Last export prepared on this device: …" (E1 r2c §0): set only after an export's file was closed. */
 export function exportStatus(last: { at: number; partial: boolean } | undefined, now = Date.now()): string {
   if (!last) return "No export prepared on this device yet";
-  const m = Math.floor((now - last.at) / 60_000), d = Math.floor(m / 1440);
-  const when = m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : d === 1 ? "yesterday" : `${d} days ago`;
-  return `Last export prepared on this device: ${when}${last.partial ? " (partial)" : ""}`;
+  return `Last export prepared on this device: ${agoText(last.at, now)}${last.partial ? " (partial)" : ""}`;
+}
+/** After this many days without a complete export on this device, the status line becomes a gentle reminder. */
+export const EXPORT_DUE_DAYS = 7;
+/** The reminder that replaces the status line, or null when none is due (William, Nov 2: "Last export: N days ago –
+ * Export now"): the last complete export on this device is older than EXPORT_DUE_DAYS, or there is none (a partial one
+ * doesn't count) and the workspace holds something to export. */
+export function exportReminder(last: { at: number; partial: boolean } | undefined, holds: boolean, now = Date.now()): string | null {
+  if (!last || last.partial) return holds ? (last ? `Last export: ${agoText(last.at, now)}, partial` : "No export yet") : null;
+  return now - last.at > EXPORT_DUE_DAYS * 86_400_000 ? `Last export: ${agoText(last.at, now)}` : null;
 }
 
 /** The browser's estimate of what this site holds, and of what it may: undefined where it can't say. */
@@ -354,6 +368,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
   const body = h("div", { className: "pb" });
   box.append(body);
   x.focus();
+  // (whether the workspace holds anything to export, as draw() last counted it; the export reminder asks)
+  let holds = false, restamp: (() => void) | undefined;
   const draw = async () => {
     const [est, use, kept] = await Promise.all([
       estimate(),
@@ -368,6 +384,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     } else body.append(h("p", { className: "note", textContent: "This browser doesn't say how much it holds." }));
     const dl = h("dl");
     const line = (label: string, value: string, act?: HTMLElement, cls = "") => { const dd = h("dd", { textContent: value }); dd.className = cls; dl.append(h("dt", { textContent: label }), dd, act ?? h("span")); };
+    holds = use.documents + use.files.count > 0;
+    restamp?.();
     line("Notebooks and boards", String(use.documents));
     line("Data files", `${use.files.count} · ${fmtSize(use.files.bytes)}`);
     let free: HTMLElement | undefined;
@@ -410,12 +428,20 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
   const exportBox = h("div", { className: "export" });
   if (host.exportUrl) {
     const status = h("p", { className: "note" }), flow = h("div");
-    const stamp = () => w.lastExport().then((l) => { status.textContent = exportStatus(l); }, () => { status.textContent = ""; });
+    // (the status line, or, when an export is due, the reminder in its place with "Export now": the same flow as the
+    // button, start())
+    const stamp = () => w.lastExport().then((l) => {
+      const due = exportReminder(l, holds);
+      status.className = due ? "note remind" : "note";
+      if (due) status.replaceChildren(`${due} · `, button("Export now", () => void start()));
+      else status.textContent = exportStatus(l);
+    }, () => { status.className = "note"; status.textContent = ""; });
+    restamp = () => void stamp();
     let running = false;
     // (closing the panel cancels the export it shows: entry.ts)
     const closed = new AbortController();
     onClose(() => closed.abort());
-    const go = button("Export all current files (.zip)", async () => {
+    const start = async () => {
       if (running) return;
       running = true;
       go.disabled = true;
@@ -424,7 +450,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
         const kit = { isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
         await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit, closed: closed.signal }, flow);
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
-    });
+    };
+    const go = button("Export all current files (.zip)", () => void start());
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
     void stamp();
   }

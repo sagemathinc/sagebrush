@@ -1,0 +1,39 @@
+S01 10 | Integer Ring
+S02 5 | Ring of integers modulo 1019
+S03 [1, 958, 10, 363, 756, 289, 48, 542] | <class 'list'>
+S04 [1, 958, 10, 363] | <class 'list'>
+S05 0 | Integer Ring
+S06 341 | Integer Ring
+S07 ERR ValueError: no discrete log of 3 found to base 6
+S08 2 | Integer Ring
+S09 2 | Integer Ring
+S10 3 | Integer Ring
+S11 ERR ZeroDivisionError: inverse of Mod(9, 15) does not exist
+S12 4 | Integer Ring
+S13 ERR ValueError: no discrete log of 16 found to base 2 with bounds (10, 20)
+S14 ERR ValueError: no discrete log of 16 found to base 2 with bounds (5, 9)
+S15 7 | Integer Ring
+S16 7 | Integer Ring
+S17 7 | Integer Ring
+S18 3 | Integer Ring
+S19 ERR ValueError: no discrete log of z found to base z^2
+S20 1000002 | Integer Ring
+S21 864664 | Integer Ring
+S22 True | <class 'bool'>
+S23 1 | Integer Ring
+S24 0 | Integer Ring
+S25 ERR ZeroDivisionError: inverse of Mod(0, 1019) does not exist
+S27 10 | Integer Ring
+S28 ERR TypeError: cannot unpack non-iterable NoneType object
+S29 123456789 | Integer Ring
+S30 ERR ValueError: no discrete log of 16 found to base 2 with bounds (10, 20)
+S31 4 | Integer Ring
+S32 4 | Integer Ring
+S33 4 | Integer Ring
+S34 4 | Integer Ring
+S35 2 | Integer Ring
+S36 12 | Integer Ring
+S37 0 | Integer Ring
+S38 2 | Integer Ring
+S39 ERR ValueError: no discrete log of 3 found to base 2
+S40 4 | Integer Ring
