@@ -354,7 +354,15 @@ def _rvs_shape(dist, args, loc, scale, size, continuous):
     bshape = np.broadcast_arrays(np.asarray(loc), np.asarray(scale), *fargs)[0].shape
     if size is None:
         return bshape, fargs
-    size_ = tuple(int(v) for v in np.atleast_1d(size))
+    dims = list(size) if isinstance(size, (tuple, list)) else [size]
+    for v in dims:
+        # (SciPy's, from NumPy's: a dimension that isn't an integer is a TypeError, never truncated; checked before
+        # any array is made of them)
+        if isinstance(v, str):
+            raise TypeError("'numpy.str_' object cannot be interpreted as an integer")
+        if not isinstance(v, (int, np.integer)) or isinstance(v, bool):
+            raise TypeError("'numpy.%s' object cannot be interpreted as an integer" % type(np.asarray(v)[()]).__name__)
+    size_ = tuple(int(v) for v in dims)
     try:
         fits = np.broadcast_arrays(np.zeros(size_), np.zeros(bshape))[0].shape == size_
     except ValueError:
@@ -375,7 +383,10 @@ def _no_sampler(name, method):
 def _random_state(seed):
     # (SciPy's check_random_state)
     if seed is None or seed is np.random:
-        return np.random.mtrand._rand
+        # (NumPy's global RandomState: numpy.random.mtrand._rand there, Sagebrush's numpy.random._global here; the
+        # same stream np.random.seed sets)
+        mt = getattr(np.random, "mtrand", None)
+        return mt._rand if mt is not None else np.random._global
     if isinstance(seed, (int, np.integer)):
         return np.random.RandomState(seed)
     if isinstance(seed, (np.random.RandomState, np.random.Generator)):
