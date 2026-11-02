@@ -263,13 +263,19 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
         const i = s.byPath.get(key);
         s.byPath.delete(key);
         // (the identity now at ANOTHER path (a move that put its new row first): its old row deleted, nothing removed)
-        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); t.removedAt.set(i, key); (t.removedKind ??= new Map()).set(i, s.ent.get(i)?.kind); s.pathOf.delete(i); }
+        if (i && s.pathOf.get(i) === key && !t.parked?.has(i)) { mark(t, i, name, "removed", s); t.removedAt.set(i, key); (t.removedKind ??= new Map()).set(i, s.ent.get(i)?.kind); s.pathOf.delete(i); }
         return;
       }
       if (!value || !KINDS.has(value.kind)) return; // (a control row: a large move's record, mappings, queue)
       // (a large move's own rows (its mappings, under keys that aren't paths: "\u0001m/…") carry a kind too: only a path
       // is a source entry)
-      if (typeof value.path !== "string" || !value.path.startsWith("/")) return;
+      // (one carrying an identity is that identity PARKED (a large move's staged copy, between its transactions): a removal
+      // of the identity in this same transaction is no removal; it's still in the shadow, and judged where it lands)
+      if (typeof value.path !== "string" || !value.path.startsWith("/")) {
+        const pi = (value.kind === "file" || value.kind === "folder" ? value.fid : value.ref) ?? null;
+        if (pi) { (t.parked ??= new Set()).add(pi); if (t.changed.get(pi)?.why === "removed") t.changed.delete(pi); t.removedAt.delete(pi); }
+        return;
+      }
       // (Trash's own folder: the workspace's, with no identity and nothing synced (log() writes it no token), as the root)
       if (value.path === TRASH) return;
       const i = identOf(value), n = entryOf(value);
