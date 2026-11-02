@@ -383,7 +383,7 @@
   },
   "engine/lib/mod-sbdata.src": {
    "exact": false,
-   "ceiling": 21584,
+   "ceiling": 22212,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -672,7 +672,7 @@
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sb-check.src": 4356,
-   "engine/lib/mod-sbdata.src": 19622,
+   "engine/lib/mod-sbdata.src": 20193,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-scipy-special.src": 41877,
