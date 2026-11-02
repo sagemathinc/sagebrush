@@ -1,7 +1,8 @@
 {
  "v": 1,
- "reason": "B2n (William: range selection in the notebook): a shift-click or Shift+arrow range of cells; copy, cut, paste, delete and drag on all of it; copies keep outputs and counts; Z undoes a cut or a move as one. web/notebook/notebook.js and notebook.css are in the CLI's embedded site, so cli/pyjs.cjs grows. Not measured on a probe: the marker is the raw added bytes (6499) + 128, an upper bound.",
+ "reason": "B2n (William: range selection in the notebook): a shift-click or Shift+arrow range of cells; copy, cut, paste, delete and drag on all of it; copies keep outputs and counts; Z undoes a cut or a move as one. web/notebook/notebook.js and notebook.css are in engine/sagebrush-notebook.js and in the CLI's embedded site. Growth from #490 CI1's size-gate (run 41506499792, base 235308 / 25476671): engine/sagebrush-notebook.js +2363, cli/pyjs.cjs +3180; each marker = growth + 128.",
  "bytes": {
-  "cli/pyjs.cjs": 6627
+  "cli/pyjs.cjs": 3308,
+  "engine/sagebrush-notebook.js": 2491
  }
 }
