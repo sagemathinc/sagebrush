@@ -15,7 +15,9 @@ import type { Workspace, Entry } from "./api";
 import { freePath, join, nameOf, openableAs, parentOf, safeName, splitExt, uploadAs, type DocKind } from "./paths";
 import { formatError, isBoard } from "../board/doc";
 import { cellId, fromFile } from "../notebook/ipynb.js";
-import { HEAD_BYTES, TEXT, fromMyst, isMystHead } from "../notebook/myst.js";
+// (the 4 KiB rule only, which imports nothing: the reader, web/notebook/myst.js, is given as `myst` by the notebook
+// page, so the board page doesn't carry it: plan-myst-notebooks-p2 r2 §11.3)
+import { HEAD_BYTES, TEXT, isMystHead } from "../notebook/myst-head.js";
 
 export { uploadAs, openableAs, type DocKind } from "./paths";
 
@@ -139,22 +141,53 @@ export async function uploadFiles(ws: Workspace, all: File[], folder: string, o:
   return out;
 }
 
+/** A Jupytext MyST .md asked for as a board (the board page's "Open as a board", chosen when the file browser
+ * couldn't read its head in time: agents-ui's N-2): not converted; the page offers it as a notebook instead. */
+export class MystNotebookError extends Error {}
+
+/** The sha256 of a file's bytes, in hex: what a MyST copy records of its .md (metadata.sagebrush.source). */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** A MyST .md's notebook copy beside it made from these same bytes (`source`, their sha256: plan-myst-notebooks r3
+ * §8.5 U-4), if there is one; `earlier`: a copy of other bytes (an earlier version) is there.  `listed`: the folder's
+ * entries, if already listed.  Reads at most 20 notebooks' metadata, nothing else. */
+export async function findCopy(ws: Workspace, mdPath: string, source: string, listed?: Entry[]): Promise<{ copy: Entry | null; earlier: boolean }> {
+  const name = nameOf(mdPath), base = splitExt(name)[0];
+  const all = listed ?? (await ws.list(parentOf(mdPath)));
+  const isCopy = (n: string) => n.startsWith(base) && /^(?: \(\d+\))?\.ipynb$/.test(n.slice(base.length));
+  let earlier = false;
+  for (const e of all.filter((x) => x.kind === "notebook" && isCopy(nameOf(x.path))).slice(0, 20)) {
+    const had = (await ws.read(e.path).catch(() => null))?.content?.metadata?.sagebrush;
+    if (!had?.myst) continue;
+    if (had.source === source) return { copy: e, earlier };
+    earlier = true;
+  }
+  return { copy: null, earlier };
+}
+
 /** A recognised data file opened as a document: its converted copy, made
  * beside it (`name.ipynb` or `name.board.json`, a free name), the original
  * left as it is.  Only the file `entry` is (its fid), read up to `maxBytes`.
- * `asBoard`: the board page's converter (a notebook needs none). */
-export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: { maxBytes: number; mode: string; asBoard?(name: string, text: string): unknown; said?(m: string): void }): Promise<Entry> {
+ * `asBoard`: the board page's converter (a notebook needs none); `myst`: the MyST reader (web/notebook/myst.js
+ * fromMyst), given by the notebook page, which alone opens a MyST .md as a notebook. */
+export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: { maxBytes: number; mode: string; asBoard?(name: string, text: string): unknown; myst?(name: string, text: string, newId: () => string): any; said?(m: string): void }): Promise<Entry> {
   const { entry: now, content } = await ws.readUpTo(entry.path, o.maxBytes);
   if (now.fid !== entry.fid) throw new Error(`${entry.path} was replaced`);
   const name = nameOf(now.path), text = new TextDecoder().decode(content);
+  const md = /\.md$/i.test(name), mystText = () => new TextDecoder(TEXT.encoding, TEXT).decode(content);
   let doc: any;
   // (a .md: a Jupytext MyST notebook, by the same test the menu used (openableAsFile); any other .md isn't one)
-  if (as === "notebook" && /\.md$/i.test(name)) {
-    const t = new TextDecoder(TEXT.encoding, TEXT).decode(content);
+  if (as === "notebook" && md) {
+    const t = mystText();
     if (!isMystHead(t)) throw new Error(`${name} is not a Jupytext MyST notebook`);
-    doc = fromMyst(name, t, cellId);
+    if (!o.myst) throw new Error(`${name} is opened as a notebook on the notebook page`);
+    doc = o.myst(name, t, cellId);
   } else if (as === "notebook") doc = fromFile(name, text, o.mode);
   else {
+    // (a MyST .md isn't made a board: the page says so and offers the notebook, nothing made: N-2)
+    if (md && isMystHead(mystText())) throw new MystNotebookError(`"${name}" is a Jupytext MyST notebook: open it as a notebook`);
     if (!o.asBoard) throw new Error("a board is made from it on the board page");
     doc = o.asBoard(name, text);
     const bad = formatError(doc);
@@ -167,15 +200,11 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
   const myst = as === "notebook" && doc?.metadata?.sagebrush?.myst;
   let earlier = false;
   if (myst) {
-    const source = [...new Uint8Array(await crypto.subtle.digest("SHA-256", content))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    const source = await sha256Hex(content);
     doc.metadata.sagebrush.source = source;
-    const base = splitExt(name)[0], isCopy = (n: string) => n.startsWith(base) && /^(?: \(\d+\))?\.ipynb$/.test(n.slice(base.length));
-    for (const e of listed.filter((x) => x.kind === "notebook" && isCopy(nameOf(x.path))).slice(0, 20)) {
-      const had = (await ws.read(e.path).catch(() => null))?.content?.metadata?.sagebrush;
-      if (!had?.myst) continue;
-      if (had.source === source) { o.said?.(`Opened your notebook copy of "${name}". The .md isn't changed.`); return e; }
-      earlier = true;
-    }
+    const found = await findCopy(ws, now.path, source, listed);
+    if (found.copy) { o.said?.(`Opened your notebook copy of "${name}". The .md isn't changed.`); return found.copy; }
+    earlier = found.earlier;
   }
   const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
   if (!p) throw new Error("no free name beside it");

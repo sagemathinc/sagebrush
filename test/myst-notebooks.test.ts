@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, copyFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,9 +14,12 @@ import { buildIndex, hook, MAX_DEPTH } from "../web/myst";
 // and what the renderer writes, parsed as a browser parses it, against payloads in every place a value goes.
 
 const dir = __dirname + "/../../test/myst/";
-// (an ES module the browser loads: a .mjs copy for node, imported for real, as tsc would make import() a require)
-const copy = join(mkdtempSync(join(tmpdir(), "sb-myst-")), "myst.mjs");
-copyFileSync(__dirname + "/../../web/notebook/myst.js", copy);
+// (ES modules the browser loads: copies for node, in a folder that says they're modules, imported for real, as tsc
+// would make import() a require; myst.js imports ./myst-head.js)
+const copies = mkdtempSync(join(tmpdir(), "sb-myst-"));
+writeFileSync(join(copies, "package.json"), '{"type":"module"}\n');
+for (const f of ["myst.js", "myst-head.js"]) copyFileSync(__dirname + "/../../web/notebook/" + f, join(copies, f));
+const copy = join(copies, "myst.js");
 const load = () => new Function("u", "return import(u)")(pathToFileURL(copy).href);
 let n = 0;
 const newId = () => `c${n++}`;

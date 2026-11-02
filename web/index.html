@@ -473,6 +473,8 @@ import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSe
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
+// (the MyST reader: given to convertCopy, which the board page shares without it)
+import { fromMyst } from "./notebook/myst.js";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
@@ -2738,7 +2740,7 @@ async function openAs(e, as) {
   if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
   try {
     let said = "";
-    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, said: (m) => { said = m; } });
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, myst: fromMyst, said: (m) => { said = m; } });
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
     if (!said) return openEntry(made);
@@ -3554,6 +3556,16 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   booted();
+  // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
+  // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
+  // meanwhile (another fid), said, nothing made
+  if (qs.has("openas")) {
+    const at = qs.get("openas"), fid = qs.get("fid");
+    history.replaceState(null, "", location.pathname + flagQuery + location.hash);
+    const e = ws && at ? await ws.stat(at).catch(() => null) : null;
+    if (e && e.kind === "file" && e.fid === fid) await openAs(e, "notebook");
+    else statusEl.textContent = `could not open ${at ? nameOf(at) : "it"} as a notebook: it isn't there any more`;
+  }
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {
     history.replaceState(null, "", location.pathname + flagQuery + location.hash);
