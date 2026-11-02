@@ -3897,6 +3897,21 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), o.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5' #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
@@ -4276,6 +4291,11 @@
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
