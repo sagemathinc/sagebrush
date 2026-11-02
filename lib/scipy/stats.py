@@ -354,13 +354,21 @@ def _rvs_shape(dist, args, loc, scale, size, continuous):
     bshape = np.broadcast_arrays(np.asarray(loc), np.asarray(scale), *fargs)[0].shape
     if size is None:
         return bshape, fargs
-    dims = list(size) if isinstance(size, (tuple, list)) else [size]
+    # (SciPy's, from NumPy's: a scalar bool is refused; an array gives its elements, a sequence its items, a bool
+    # among them taken as 0 or 1; a dimension that isn't an integer is a TypeError, never truncated; checked before
+    # any array is made of them, Sagebrush's numpy having no string arrays)
+    if isinstance(size, (bool, np.bool_)):
+        raise TypeError("an integer is required")
+    if isinstance(size, np.ndarray):
+        if size.dtype.kind not in "iub":
+            raise TypeError("'numpy.%s' object cannot be interpreted as an integer" % size.dtype.name)
+        dims = [int(v) for v in size.reshape(-1).tolist()]
+    else:
+        dims = list(size) if isinstance(size, (tuple, list)) else [size]
     for v in dims:
-        # (SciPy's, from NumPy's: a dimension that isn't an integer is a TypeError, never truncated; checked before
-        # any array is made of them)
         if isinstance(v, str):
             raise TypeError("'numpy.str_' object cannot be interpreted as an integer")
-        if not isinstance(v, (int, np.integer)) or isinstance(v, bool):
+        if not isinstance(v, (int, np.integer, bool, np.bool_)):
             raise TypeError("'numpy.%s' object cannot be interpreted as an integer" % type(np.asarray(v)[()]).__name__)
     size_ = tuple(int(v) for v in dims)
     try:

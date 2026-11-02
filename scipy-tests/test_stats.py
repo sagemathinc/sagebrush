@@ -154,4 +154,7 @@ out("levy.rvs(size=2) global", lambda: st.levy.rvs(size=2))
 out("norm.rvs(Generator)", lambda: st.norm.rvs(size=2, random_state=np.random.default_rng(5)))
 for sz in (2.5, "3", (2, 1.5)):
     out("norm.rvs(size=%r)" % (sz,), lambda: st.norm.rvs(size=sz, random_state=0))
+# (daybreak3's second R2: an array size, a scalar bool refused, a bool inside a sequence, NumPy integers)
+for sz in (np.array([2, 3]), np.array(2), np.bool_(True), True, (2, True), np.array([1.5]), [2, np.int32(3)], np.int64(4)):
+    out("norm.rvs(size=%r)" % (sz,), lambda: st.norm.rvs(size=sz, random_state=0))
 
