@@ -8,17 +8,17 @@
 // through a front with the same /__ctl.  This file reads only core: nothing under web/{site,files,share,sync,lti}.
 // The 2 cases that need the cloud's plan limits (storageFull, tooLarge) are skipped by name, each saying so.
 //   SYNC_REQUIRE_CLAIM=1 CHROME=google-chrome bun web/workspace/test-sync-client-ref.mjs
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, copyFileSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 import { ReferenceServer } from "../sync-protocol/reference-server.ts";
-import { checkFgen } from "../sync-protocol/doc-protocol.ts";
-import { clientOf, toB64 } from "../sync-protocol/protocol.ts";
+import { checkFgen, isClient } from "../sync-protocol/doc-protocol.ts";
+import { admissionBound, clientOf, isDocId, toB64 } from "../sync-protocol/protocol.ts";
 
 // (the reference server has the claim protocol, so a refused doc_claim must be a failed check, never the legacy path:
 // this runner refuses to start without the flag rather than run the cases without it)
@@ -99,6 +99,23 @@ if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >
   process.exit(1);
 }
 const LIMIT_S = process.env.RUN_LIMIT_S !== undefined ? Number(process.env.RUN_LIMIT_S) : REQUIRED_S;
+// ---- force-reload PR 0b (plan p0-harness r2): CASES=floors runs the real old front's floor rows (P0-0, P0-pos, P0-a,
+// P0-b, P0-c, sync-floor-cases.js) instead of the control pages and the main run.  Its page is built from OLD_FRONT, a
+// clean detached checkout of 98a9f74fb (the last front before stale_build), checked file by file (oldFront, below);
+// P0_SENSITIVITY=pr-head is the declared control alone: OLD_FRONT at the PR's own head, and P0-0 only
+const CASES = process.env.CASES ?? null;
+const FLOORS = CASES === "floors";
+const OLD_FRONT = process.env.OLD_FRONT ?? null;
+const SENSITIVITY = process.env.P0_SENSITIVITY ?? null;
+const OLD_SHA = "98a9f74fb90c8283ffa9054f4f77133921ba1b83";
+for (const [bad, said] of [
+  [CASES !== null && !FLOORS, `CASES=${CASES} is not a case list this runner has (floors)`],
+  [FLOORS && !OLD_FRONT, "CASES=floors needs OLD_FRONT (a clean checkout of the old front)"],
+  [!FLOORS && (OLD_FRONT !== null || SENSITIVITY !== null), "OLD_FRONT and P0_SENSITIVITY are for CASES=floors only"],
+  [SENSITIVITY !== null && SENSITIVITY !== "pr-head", `P0_SENSITIVITY=${SENSITIVITY} is not a mode this runner has (pr-head)`],
+]) if (bad) { console.error("FAIL: " + said); process.exit(1); }
+/** the floor rows' whole in-page run (plan r2 §5: 6 minutes, or the run is void) */
+const FLOORS_S = 360;
 /** r6 §4: the one stop-path run's switch, read once here; any other value is refused */
 const CONTROL_STOP = process.env.CONTROL_STOP ?? null;
 if (CONTROL_STOP !== null && CONTROL_STOP !== "upstreamCloseFailure") {
@@ -180,6 +197,17 @@ let serverNoticesDropped = 0;
 /** over the whole run: /__files/ GETs answered 200 (the downloads through the redirect), and answers that would have sent
  * the page to another origin (a Location, or a 3xx, not on the front's own) */
 const front = { files200: 0, leaks: [], requests: 0, filesXSync: [], filesPreflights: 0 };
+/** CASES=floors: what passed the front, in order, each with its time (ms): {k: "sent" | "got" | "close" | "http", ...};
+ * read and reset only by the floor rows' `flog` command.  Null (nothing kept) in every other run. */
+const flog = FLOORS ? [] : null;
+const fl = (e) => { if (flog) flog.push({ ...e, at: Date.now() }); };
+/** CASES=floors: the old front's provenance (oldFront) and the sha256 of each ws.js the front served */
+const floorsFront = { prov: null, served: [] };
+/** CASES=floors: holdForward's handles, each to its hold's release (armRefHold's, so the barrier releases it too) */
+const forwards = new Map();
+let forwardSeq = 0;
+/** the floors every floor row starts and ends with (plan r2 §4): bound 0, served 1, no registry */
+const FLOORS_RESET = { reload: 0, compat: 0, served: 1 };
 const resetLog = () => Object.assign(log, { sent: [], got: [], http: [], sockets: 0, putsNow: 0, maxPuts: 0, ops: [], bindings: [], rebuilt: [], serverNotices: 0, fgenRefused: 0, batchesUp: 0 });
 
 // ---- 3b's front registry (plan r3 §2, r4 §1, r5 §1): every front await in flight, by label and epoch tag, so the page
@@ -422,6 +450,81 @@ async function control(body) {
   }
 }
 
+// ---- the floor rows' commands (CASES=floors only; plan p0-harness r2 §3): a closed set, each with a closed body (its
+// keys exactly, every value checked), answered synchronously; nothing is dispatched by a name the body carries.  They
+// reach only the reference server's test controls, from this runner: no product file has any of them.
+
+const FLOOR_COMMANDS = ["floors", "holdForward", "releaseForward", "held", "flog", "snapshot", "provenance", "floorsRowEnd"];
+/** the floor rows' accounts (the page signs in as these, in order; snapshot answers for these only) */
+const FLOOR_ACCOUNTS = Array.from({ length: 12 }, (_, i) => `f0f0f0f0-${String(i).padStart(4, "0")}-4f0f-8f0f-f0f0f0f0f0${String(i).padStart(2, "0")}`);
+const ORDINAL_MAX = 2 ** 31 - 1;
+const ordinal = (v, min) => Number.isSafeInteger(v) && v >= min && v <= ORDINAL_MAX;
+const exactKeys = (body, keys) => { const k = Object.keys(body).sort(); return J(k) === J([...keys, "cmd"].sort()); };
+const refuse = (status, why) => ({ status, body: { error: why } });
+const floorsNow = () => ({ bound: admissionBound(ref.controls.floors()), floors: ref.controls.floors() });
+function floorControl(body) {
+  if (!FLOORS) return refuse(400, "CASES=floors only");
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return refuse(400, "body");
+  switch (body.cmd) {
+    case "floors": {
+      if (!exactKeys(body, ["reload", "compat", "served", "registry"])) return refuse(400, "floors: reload, compat, served and registry, exactly");
+      const { reload, compat, served, registry } = body;
+      if (![reload, compat, served].every((v) => ordinal(v, 0))) return refuse(400, "floors: each a safe integer in [0, 2^31 - 1]");
+      if (!Array.isArray(registry) || registry.length > 16) return refuse(400, "registry: at most 16 entries");
+      const pairs = [];
+      for (const e of registry) {
+        if (e === null || typeof e !== "object" || Array.isArray(e) || J(Object.keys(e).sort()) !== J(["core", "n"]) || !ordinal(e.n, 1) || typeof e.core !== "string" || !/^[0-9a-f]{40}$/.test(e.core)) return refuse(400, "registry: entries {n, core}, n in [1, 2^31 - 1], core 40 lowercase hex");
+        pairs.push([e.n, e.core]);
+      }
+      if (new Set(pairs.map(([n]) => n)).size !== pairs.length) return refuse(400, "registry: each n once");
+      ref.controls.setFloors({ reload, compat, served });
+      ref.controls.setRegistry(pairs);
+      return { status: 200, body: floorsNow() };
+    }
+    case "holdForward": {
+      if (!exactKeys(body, ["doc", "client"]) || !isDocId(body.doc) || !isClient(body.client)) return refuse(400, "holdForward: doc (a document id) and client (a client id), exactly");
+      // (only through armRefHold, into the run's refHolds: the barrier and the cleanup release whatever a row leaves)
+      const release = armRefHold(body.doc, body.client);
+      const handle = `h${++forwardSeq}`;
+      forwards.set(handle, release);
+      return { status: 200, body: { handle } };
+    }
+    case "releaseForward": {
+      if (!exactKeys(body, ["handle"]) || typeof body.handle !== "string") return refuse(400, "releaseForward: handle, exactly");
+      const release = forwards.get(body.handle);
+      // (released once: a second release, or a handle never given, is refused, and the row fails on it)
+      if (!release) return refuse(409, "releaseForward: no such hold (released already, or never given)");
+      forwards.delete(body.handle);
+      refHolds.delete(release);
+      release();
+      return { status: 200, body: { released: body.handle } };
+    }
+    case "held":
+      if (!exactKeys(body, [])) return refuse(400, "held: no fields");
+      return { status: 200, body: { holding: ref.controls.holding(), refHolds: refHolds.size, handles: forwards.size } };
+    case "flog": {
+      if (!exactKeys(body, ["from"]) || !ordinal(body.from, 0)) return refuse(400, "flog: from (an index), exactly");
+      return { status: 200, body: { length: flog.length, events: flog.slice(body.from) } };
+    }
+    case "snapshot":
+      if (!exactKeys(body, ["account"]) || !FLOOR_ACCOUNTS.includes(body.account)) return refuse(400, "snapshot: account (a floor row's), exactly");
+      return { status: 200, body: { snapshot: ref.controls.snapshot(body.account) } };
+    case "provenance":
+      if (!exactKeys(body, [])) return refuse(400, "provenance: no fields");
+      return { status: 200, body: { head: floorsFront.prov?.head ?? null, pin: OLD_SHA, mode: SENSITIVITY ?? "normal", built: floorsFront.prov?.bundle ?? null, served: floorsFront.served } };
+    case "floorsRowEnd": {
+      // (a row's end, its finally: every hold it armed released, its handles gone, the floors reset)
+      if (!exactKeys(body, [])) return refuse(400, "floorsRowEnd: no fields");
+      releaseRefHolds(refHolds);
+      forwards.clear();
+      ref.controls.setFloors(FLOORS_RESET);
+      ref.controls.setRegistry([]);
+      return { status: 200, body: { refHolds: refHolds.size, holding: ref.controls.holding(), ...floorsNow() } };
+    }
+  }
+  return refuse(400, "unknown");
+}
+
 /** The headers of an answer passed to the page, without those the front sets itself; a Location (or a 3xx) that isn't
  * on the front's own origin, or the files origin's /__files/, is counted as a leak of another origin, and the run fails
  * on any.  The blob GET's 303 to /__files/ is sent to the files origin, as PROD's goes to files.cocalcusercontent.com */
@@ -486,12 +589,20 @@ function serve(req, server) {
 }
 async function serveOp(req, server, u, p) {
   try {
-    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/ctl.html") {
+    // (CASES=floors: the bytes of ws.js hashed as they are served, so P0-0's bundle is the one the page loaded)
+    if (FLOORS && p === "/ws.js") {
+      const bytes = new Uint8Array(await Bun.file(join(site, "ws.js")).arrayBuffer());
+      floorsFront.served.push(createHash("sha256").update(bytes).digest("hex"));
+      return new Response(bytes, { headers: { "content-type": "text/javascript" } });
+    }
+    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/ctl.html" || (FLOORS && p === "/floors.html")) {
       return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
     }
     if (p === "/__ctl") {
       const body = JSON.parse((await readBody(req, "text")) || "{}");
       relabel(`ctl ${body.cmd}`);
+      // (the floor rows' commands answer a refusal with its own status: 400, or 409 for a handle released already)
+      if (FLOOR_COMMANDS.includes(body.cmd)) { const out = floorControl(body); return Response.json(out.body, { status: out.status }); }
       return Response.json(await control(body));
     }
     // the account socket, proxied message by message (websocket, below), so the cases can drop, fake or close
@@ -581,6 +692,7 @@ async function serveOp(req, server, u, p) {
       if (isPut) log.putsNow--;
     }
     entry.status = r.status;
+    if (flog && isPut) fl({ k: "http", method: "PUT", path: p, status: r.status, body: (await readBody(r.clone(), "text")).slice(0, 500) });
     return passOn(r, p, req.method);
   } catch (e) {
     return new Response(String(e), { status: 500 });
@@ -633,6 +745,7 @@ const websocket = {
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
       log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
+      fl({ k: "got", t: m.t, req: m.req, code: m.code, detail: m.t === "error" ? m.detail : undefined });
       if (m.t === "index_changed" && !ctl.serverNotices) {
         log.serverNotices++;
         serverNoticesDropped++;
@@ -670,7 +783,7 @@ const websocket = {
       }
       d.send(text);
     };
-    up.onclose = (code) => d.closeBoth(code);
+    up.onclose = (code) => { fl({ k: "close", code }); d.closeBoth(code); };
     for (const text of d.buf.splice(0)) up.onmessage(text);
     // (a close the server made before this socket opened, kept, then passed on)
     const early = d.early();
@@ -683,6 +796,7 @@ const websocket = {
     try { m = JSON.parse(text); } catch { m = {}; }
     log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
     if (m.t === "hello") d.helloAccount = m.account ?? null;
+    fl({ k: "sent", t: m.t, req: m.req, ...(m.t === "batch" ? { doc: m.doc } : {}) });
     // (every batch checked as the canonical reference server checks it (§5.8: one generation for each client in its
     // patches, and no other): a failing one is refused here, routed to its request, and never forwarded)
     if (m.t === "batch") {
@@ -1323,6 +1437,69 @@ async function controlStop(cookie) {
   throw new Error("CONTROL_STOP: the barrier passed; it must not");
 }
 
+/**
+ * CASES=floors: the old front's page bundle, built from `dir` and proved to be 98a9f74fb's (plan p0-harness r2 §2),
+ * or a throw before any browser starts.  (1) HEAD is OLD_SHA (in the pr-head mode, P0-0 reports it instead); (2) the
+ * checkout is clean, and its web/ made read-only before the build; (3) every input of the bundle, by its resolved path:
+ * the one harness entry (exactly the re-exports below), a product file of the checkout whose bytes equal
+ * `git show <pin>:<path>`, a dependency under <dir>/node_modules's resolved directory (listed with its sha256), or a
+ * `node:` builtin the browser target polyfills (Bun's own; listed);
+ * anything else, a product file of another tree reached through a link included, is escaped and refused; and the old
+ * protocol.ts must be among the inputs; (4) the bundle's sha256, which the page's own load must match (P0-0).
+ */
+function oldFront(dir, outdir) {
+  const git = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
+  const sha = (b) => createHash("sha256").update(b).digest("hex");
+  const head = git("rev-parse", "HEAD").trim();
+  if (SENSITIVITY === null && head !== OLD_SHA) throw new Error(`OLD_FRONT is at ${head}, not ${OLD_SHA}`);
+  const dirty = git("status", "--porcelain", "--untracked-files=all");
+  if (dirty !== "") throw new Error(`OLD_FRONT isn't clean: ${dirty.split("\n").slice(0, 5).join("; ")}`);
+  execFileSync("chmod", ["-R", "a-w", join(dir, "web")]);
+  const root = realpathSync(dir), web = root + "/web/";
+  const nm = existsSync(join(dir, "node_modules")) ? realpathSync(join(dir, "node_modules")) + "/" : null;
+  const entryPath = join(outdir, "p0-entry.ts");
+  // (the old workspace, its refusalOf (P0-0), and its document sync as its own test bundles it (test-doc-sync.mjs):
+  // the notebook journal, its history, DocSync, and the journal's rows, for P0-c's real durable path)
+  const entry = [
+    `export * from ${J(web + "workspace/index.ts")};`,
+    `export { refusalOf } from ${J(web + "sync-protocol/protocol.ts")};`,
+    `export * as N from ${J(web + "notebook/journal.js")};`,
+    `export * as H from ${J(web + "notebook/history.js")};`,
+    `export * as DS from ${J(web + "workspace/doc-sync.ts")};`,
+    `export * as JR from ${J(web + "notebook/journal-rows.js")};`,
+  ].join("\n") + "\n";
+  writeFileSync(entryPath, entry);
+  return { head, root, nm, entryPath, entry, sha, git };
+}
+async function buildOldFront(dir, outdir) {
+  const o = oldFront(dir, outdir);
+  const b = await bounded(Bun.build({ entrypoints: [o.entryPath], outdir, naming: "ws.js", target: "browser", format: "esm", metafile: true }), "the old front's bundle", 120_000);
+  if (!b.success) throw new Error("the old front's bundle: " + b.logs.map(String).join("\n"));
+  const inputs = [];
+  for (const key of Object.keys(b.metafile.inputs)) {
+    // (a Node builtin the browser target polyfills, such as node:events: Bun's own, never a file of any tree; listed)
+    if (/^node:[a-z_/]+$/.test(key)) { inputs.push({ path: key, class: "builtin", sha256: null }); continue; }
+    const abs = resolve(process.cwd(), key);
+    if (!existsSync(abs)) throw new Error(`the old front's bundle has an input that isn't a file: ${key}`);
+    const real = realpathSync(abs), bytes = readFileSync(real);
+    if (real === realpathSync(o.entryPath)) {
+      if (bytes.toString() !== o.entry) throw new Error("the harness entry isn't exactly its re-exports");
+      inputs.push({ path: "(entry)", class: "entry", sha256: o.sha(bytes) });
+    } else if (real.startsWith(o.root + "/") && !(o.nm && real.startsWith(o.nm)) && !real.startsWith(o.root + "/node_modules/")) {
+      const rel = real.slice(o.root.length + 1);
+      let want = null;
+      try { want = execFileSync("git", ["-C", dir, "show", `${o.head}:${rel}`], { maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "ignore"] }); } catch {}
+      if (want === null) throw new Error(`the old front's ${rel} isn't a file of ${o.head}`);
+      if (!want.equals(bytes)) throw new Error(`the old front's ${rel} isn't the bytes of ${o.head}`);
+      inputs.push({ path: rel, class: "product", sha256: o.sha(bytes) });
+    } else if (o.nm && real.startsWith(o.nm)) inputs.push({ path: real.slice(o.nm.length), class: "dependency", sha256: o.sha(bytes) });
+    else throw new Error(`the old front's bundle reaches outside it (escaped): ${real}`);
+  }
+  if (!inputs.some((i) => i.path === "web/sync-protocol/protocol.ts")) throw new Error("the old front's bundle has no web/sync-protocol/protocol.ts of its own");
+  const bundle = o.sha(readFileSync(join(outdir, "ws.js")));
+  return { head: o.head, bundle, inputs };
+}
+
 let results = [];
 try {
   // (the temporary directories, made inside the try: if the second can't be, the cleanup still removes the first)
@@ -1366,13 +1543,24 @@ try {
   const controlCookie = await resourceControls();
   if (CONTROL_STOP === "upstreamCloseFailure") await controlStop(controlCookie);
   // (the page: the workspace bundled in this process, and the cases beside it)
-  waitingOn = "the page's bundle (Bun.build of index.ts)";
-  const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
-  if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
-  copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
-  writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true; window.__budgets = ${J(MAIN_BUDGETS)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
-  // (the control pages: their own accounts, never the main run's, and their own budgets; P7 has none, so it's legacy)
-  writeFileSync(join(site, "ctl.html"), `<!doctype html><meta charset="utf-8"><title>sync client test: controls</title><script>const p = new URLSearchParams(location.search).get("p"); window.ACCOUNTS = ${J(CTL_ACCOUNTS)}.slice(3 * Math.max(0, ${J(CONTROL_PAGES.map((c) => c.page))}.indexOf(p))); window.FULL = null; window.SMALL = null; window.REQUIRE_CLAIM = true; if (p !== "P7") window.__budgets = ${J(CONTROL_BUDGETS)};</script><script type="module">import { run, runControls } from "./cases.js"; window.run = run; window.runControls = runControls; window.ready = true;</script>`);
+  if (FLOORS) {
+    // (the old front, proved before any browser starts: a provenance failure ends the run here)
+    waitingOn = "the old front's bundle and its provenance (OLD_FRONT)";
+    floorsFront.prov = await buildOldFront(OLD_FRONT, site);
+    const by = (c) => floorsFront.prov.inputs.filter((i) => i.class === c).length;
+    console.log(`  old front: ${floorsFront.prov.head} (${SENSITIVITY ?? "normal"} mode), bundle ${floorsFront.prov.bundle}; inputs: ${by("product")} product, ${by("dependency")} dependency, ${by("builtin")} builtin, ${by("entry")} entry`);
+    if (process.env.P0_PROVENANCE_OUT) writeFileSync(process.env.P0_PROVENANCE_OUT, J(floorsFront.prov, null, 1) + "\n");
+    copyFileSync(join(here, "sync-floor-cases.js"), join(site, "cases.js"));
+    writeFileSync(join(site, "floors.html"), `<!doctype html><meta charset="utf-8"><title>sync floors: the old front</title><script>window.ACCOUNTS = ${J(FLOOR_ACCOUNTS)}; window.OLD_SHA = ${J(OLD_SHA)};</script><script type="module">import { runFloors } from "./cases.js"; window.runFloors = runFloors; window.ready = true;</script>`);
+  } else {
+    waitingOn = "the page's bundle (Bun.build of index.ts)";
+    const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
+    if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
+    copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
+    writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true; window.__budgets = ${J(MAIN_BUDGETS)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+    // (the control pages: their own accounts, never the main run's, and their own budgets; P7 has none, so it's legacy)
+    writeFileSync(join(site, "ctl.html"), `<!doctype html><meta charset="utf-8"><title>sync client test: controls</title><script>const p = new URLSearchParams(location.search).get("p"); window.ACCOUNTS = ${J(CTL_ACCOUNTS)}.slice(3 * Math.max(0, ${J(CONTROL_PAGES.map((c) => c.page))}.indexOf(p))); window.FULL = null; window.SMALL = null; window.REQUIRE_CLAIM = true; if (p !== "P7") window.__budgets = ${J(CONTROL_BUDGETS)};</script><script type="module">import { run, runControls } from "./cases.js"; window.run = run; window.runControls = runControls; window.ready = true;</script>`);
+  }
   server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: serve, websocket });
   origin = `http://127.0.0.1:${server.port}`;
   filesServer = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: filesServe });
@@ -1443,88 +1631,106 @@ try {
   /** The core run must be in diagnostic mode (r3 §1): a legacy fallback here is a failure, never a pass */
   const requireDiagnostic = (rep) => (rep?.mode === "diagnostic" ? null : `diagnostic mode not active: ${rep ? `${rep.mode} (${rep.why})` : "no report"}`);
 
-  // (the control pages, each a fresh navigation, before the main run: every control line must be ok)
-  newPage();
-  for (const cp of CONTROL_PAGES) {
-    const allowance = pageAllowanceS(cp) - T_PAGE_S - LATE_OBS_MS / 1000;
-    if (cp.page === "P8") ctl.quietUnknown = true;
-    const proofs0 = reg.proofs;
-    await transition(`/ctl.html?p=${cp.page}`);
-    const r = await runInPage(`window.runControls(${J(cp.page)})`, allowance);
-    let lines;
-    if (r.done) lines = await answer();
-    else {
-      // (r6, @sagebrush's (3): a page that doesn't end is a failed control, recorded with its receipt; r7: its disposal
-      // is then proved below (or the whole test stops), and the barrier must still prove the front quiet, or the whole
-      // test stops as before. The pages after it, and the main run, then go on, the main run as DIAGNOSTIC ONLY)
-      lines = [[false, `didn't end within ${allowance} s (elapsed ${r.elapsedS} s): ${receipt(r)}`]];
+  if (FLOORS) {
+    // (CASES=floors: the floor rows alone, on the old front's page; each row's verdict printed as a ROW line, which the
+    // declared runs read: a precondition or a witness failing in an unmutated run is a STOP, never a pass)
+    newPage();
+    await transition("/floors.html");
+    const r = await runInPage(`window.runFloors(${J(SENSITIVITY === "pr-head" ? "P0-0" : "")})`, FLOORS_S);
+    if (!r.done) throw new Error(`the floor rows didn't end within ${FLOORS_S} s (the run is void): ${receipt(r)}`);
+    const out = await answer();
+    results = out.results;
+    for (const row of out.rows) console.log(`ROW ${row.id} ${row.ok ? "PASS" : "FAIL"}${row.ok ? "" : " " + row.kinds.join(",")}`);
+    // (a stop: a row past its limit, or whose cleanup failed or didn't end; the rows after it didn't run)
+    if (out.stopped) { console.log(`STOPPED ${out.stopped}`); fails.push(`the floor rows stopped: ${out.stopped}`); }
+    const fb = await barrier("the floor rows");
+    for (const l of fb.late) console.log(`  late (the barrier): ${l}`);
+    control1(refHolds.size === 0 && forwards.size === 0 && ref.controls.holding() === 0, "(control) the floor rows left no hold armed or waiting: " + J({ refHolds: refHolds.size, handles: forwards.size, holding: ref.controls.holding() }));
+    fails.push(...results.filter(([ok]) => !ok).map(([, what]) => what));
+  } else {
+    // (the control pages, each a fresh navigation, before the main run: every control line must be ok)
+    newPage();
+    for (const cp of CONTROL_PAGES) {
+      const allowance = pageAllowanceS(cp) - T_PAGE_S - LATE_OBS_MS / 1000;
+      if (cp.page === "P8") ctl.quietUnknown = true;
+      const proofs0 = reg.proofs;
+      await transition(`/ctl.html?p=${cp.page}`);
+      const r = await runInPage(`window.runControls(${J(cp.page)})`, allowance);
+      let lines;
+      if (r.done) lines = await answer();
+      else {
+        // (r6, @sagebrush's (3): a page that doesn't end is a failed control, recorded with its receipt; r7: its disposal
+        // is then proved below (or the whole test stops), and the barrier must still prove the front quiet, or the whole
+        // test stops as before. The pages after it, and the main run, then go on, the main run as DIAGNOSTIC ONLY)
+        lines = [[false, `didn't end within ${allowance} s (elapsed ${r.elapsedS} s): ${receipt(r)}`]];
+      }
+      for (const [ok, what] of Array.isArray(lines) ? lines : [[false, `${cp.page}: no control lines: ${J(lines)}`]]) control1(ok, `(control) ${cp.page} ${what}`);
+      if (!r.done) {
+        // (r7: the disposal PROVED (disposePage), inside the answer's unused FETCH_S slot, and recorded as a control
+        // either way; unproved, the whole test stops here, before the barrier and before any later page or the main run)
+        const d = await disposePage({
+          frame: (ms) => send("Page.getFrameTree", {}, ms).then((t) => { if (!t?.frameTree?.frame) throw new Error("no frame tree: " + J(t).slice(0, 300)); return t.frameTree.frame; }),
+          navigate: (ms) => send("Page.navigate", { url: "about:blank" }, ms),
+          probe: (ms) => ev('location.href === "about:blank" && typeof window.runControls === "undefined" && typeof window.run === "undefined" && typeof window.__report === "undefined" && typeof window.__runP === "undefined"', ms),
+        }, FETCH_S * 1000);
+        control1(d.ok, `(control) ${cp.page} disposed of after it didn't end (about:blank, within ${FETCH_S} s): ${d.said}`);
+        requireDisposed(cp.page, d, `; ${receipt(r)}`);
+        console.log(`  page ${cp.page} closed (proved: ${d.said}) after it didn't end; ${receipt(r)}`);
+      }
+      const proofs = reg.proofs - proofs0;
+      const b = await barrier(cp.page);
+      // (the harness's side of the terminal controls: what only the front or the barrier saw)
+      if (cp.page === "P5") control1(b.late.some((l) => /^ctl slow@/.test(l)), "(control) P5 K-J: the barrier saw the abandoned ctl slow complete, late: " + J(b.late));
+      if (cp.page === "P6") control1(b.late.some((l) => /^armed late@/.test(l)) || r.report?.stopped?.late?.some?.((l) => /^armed late@/.test(l)), "(control) P6 K-L2: the armed op's late completion recorded: " + J({ barrier: b.late, page: r.report?.stopped?.late }));
+      // (P7, r6: the empty selection made no request at all while its run ran (so no ctl("reset") and no proof
+      // command), from the front's own count; its elapsed time and window.progress (unset: no case started) recorded)
+      if (cp.page === "P7") control1(r.done && r.report?.mode === "legacy" && proofs === 0 && r.requests === 0 && r.progress === null, "(control) P7 K-M1: legacy, the empty selection made no request (no ctl reset, no proof command): " + J({ mode: r.report?.mode, proofs, requests: r.requests, progress: r.progress, elapsedS: r.elapsedS }));
+      if (cp.page === "P8") { const no = requireDiagnostic(r.report); control1(no !== null && /quiet answered \{"error":"unknown"\}/.test(no), "(control) P8 K-M2: the runner refuses the run: " + no); }
+      if (cp.page === "RES1") control1(b.before.closers === 1 && b.before.inflight === 0, "(control) RES1 K-RES1: a socket left open with nothing in flight: the barrier closed it and passed: " + J(b.before));
     }
-    for (const [ok, what] of Array.isArray(lines) ? lines : [[false, `${cp.page}: no control lines: ${J(lines)}`]]) control1(ok, `(control) ${cp.page} ${what}`);
-    if (!r.done) {
-      // (r7: the disposal PROVED (disposePage), inside the answer's unused FETCH_S slot, and recorded as a control
-      // either way; unproved, the whole test stops here, before the barrier and before any later page or the main run)
-      const d = await disposePage({
-        frame: (ms) => send("Page.getFrameTree", {}, ms).then((t) => { if (!t?.frameTree?.frame) throw new Error("no frame tree: " + J(t).slice(0, 300)); return t.frameTree.frame; }),
-        navigate: (ms) => send("Page.navigate", { url: "about:blank" }, ms),
-        probe: (ms) => ev('location.href === "about:blank" && typeof window.runControls === "undefined" && typeof window.run === "undefined" && typeof window.__report === "undefined" && typeof window.__runP === "undefined"', ms),
-      }, FETCH_S * 1000);
-      control1(d.ok, `(control) ${cp.page} disposed of after it didn't end (about:blank, within ${FETCH_S} s): ${d.said}`);
-      requireDisposed(cp.page, d, `; ${receipt(r)}`);
-      console.log(`  page ${cp.page} closed (proved: ${d.said}) after it didn't end; ${receipt(r)}`);
-    }
-    const proofs = reg.proofs - proofs0;
-    const b = await barrier(cp.page);
-    // (the harness's side of the terminal controls: what only the front or the barrier saw)
-    if (cp.page === "P5") control1(b.late.some((l) => /^ctl slow@/.test(l)), "(control) P5 K-J: the barrier saw the abandoned ctl slow complete, late: " + J(b.late));
-    if (cp.page === "P6") control1(b.late.some((l) => /^armed late@/.test(l)) || r.report?.stopped?.late?.some?.((l) => /^armed late@/.test(l)), "(control) P6 K-L2: the armed op's late completion recorded: " + J({ barrier: b.late, page: r.report?.stopped?.late }));
-    // (P7, r6: the empty selection made no request at all while its run ran (so no ctl("reset") and no proof
-    // command), from the front's own count; its elapsed time and window.progress (unset: no case started) recorded)
-    if (cp.page === "P7") control1(r.done && r.report?.mode === "legacy" && proofs === 0 && r.requests === 0 && r.progress === null, "(control) P7 K-M1: legacy, the empty selection made no request (no ctl reset, no proof command): " + J({ mode: r.report?.mode, proofs, requests: r.requests, progress: r.progress, elapsedS: r.elapsedS }));
-    if (cp.page === "P8") { const no = requireDiagnostic(r.report); control1(no !== null && /quiet answered \{"error":"unknown"\}/.test(no), "(control) P8 K-M2: the runner refuses the run: " + no); }
-    if (cp.page === "RES1") control1(b.before.closers === 1 && b.before.inflight === 0, "(control) RES1 K-RES1: a socket left open with nothing in flight: the barrier closed it and passed: " + J(b.before));
-  }
 
-  // (the main run: every case but the cloud-only ones, which are skipped by name; its report polled, so a run that
-  // doesn't end within its bound still says its cases' times, the open steps and where it was)
-  // (r6: a control failed before the main run (its page's cleanup proved by the barrier): the main run still runs, for
-  // diagnosis only; G1 is unchanged (the failure fails the run), and this label marks the table)
-  const diagnosticOnly = fails.length > 0;
-  if (diagnosticOnly) console.log(`  DIAGNOSTIC ONLY: ${fails.length} control(s) failed before the main run; its table below can never count toward G1`);
-  await transition("/");
-  for (const name of CLOUD_ONLY) if (selected(name)) console.log(`skipped (cloud-only, the reference server has no quotas): ${name}`);
-  let modeChecked = false;
-  const main = await runInPage(`window.run(${J(ONLY)}, ${J(CLOUD_ONLY.join(","))})`, PILOT_MAIN_S, (rep) => {
-    if (modeChecked || !rep.mode) return;
-    modeChecked = true;
-    const no = requireDiagnostic(rep);
-    if (no) throw new Error(no);
-  });
-  for (const c of main.report?.cases ?? []) console.log(`  case${diagnosticOnly ? " (DIAGNOSTIC ONLY)" : ""} ${c.name}: ${c.outcome ?? "running"}, ${c.endMs !== undefined ? ((c.endMs - c.startMs) / 1000).toFixed(1) + " s" : "unended"}${c.over ? `, over its bound by ${c.over} s (report-only)` : ""}, checks from ${c.checks}${c.cleanup && !c.cleanup.ok ? `, cleanup FAILED at ${c.cleanup.step}` : ""}`);
-  if (!main.done) throw new Error(`the run didn't end within ${PILOT_MAIN_S} s: ${receipt(main)}`);
-  { const no = requireDiagnostic(main.report); if (no) throw new Error(no); }
-  if (main.report.stopped) fails.push(`fail-stop: ${J(main.report.stopped).slice(0, 2000)}`);
-  for (const l of main.report.late ?? []) console.log(`  late: ${l}`);
-  results = await answer();
-  const mb = await barrier("the main run");
-  for (const l of mb.late) console.log(`  late (the barrier): ${l}`);
-  waitingOn = "(the run's results)";
-  fails.push(...results.filter(([ok]) => !ok).map(([, what]) => what));
-  // (claims: with SYNC_REQUIRE_CLAIM the legacy path is a failure, never a pass; its only result says "not exercised")
-  for (const [, what] of results) if (/not exercised/.test(what)) fails.push(`a "not exercised" result: ${what}`);
-  // (measurements, printed pass or fail)
-  for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
-  // (informational: the reference server sends index_changed after ops that move an account's head; ctl.serverNotices
-  // is off, so the front drops them)
-  console.log(`  front: the server's own index_changed notices dropped (ctl.serverNotices off): ${serverNoticesDropped}`);
-  // (the downloads went through the redirect to the page's own /__files/: required when a download case ran)
-  if (DOWNLOADS.some(selected)) {
-    console.log(`  front: downloads through /__files/ on the files origin: ${front.files200} (preflights: ${front.filesPreflights})`);
-    if (front.files200 === 0) fails.push("no download went through /__files/ (the blob GET's redirect)");
-  } else console.log("  front: downloads through /__files/: not required (ONLY names no download case)");
-  // (the proxied pairs' closes over the run, for the gate's behaviour on real data; any failure also fails the cleanup)
-  console.log(`  front: proxied close failures recorded: ${closeFailures.length}; page sockets already closed, not closed again: ${closeSkips.n}`);
-  if (front.filesXSync.length) fails.push(`x-sync-* headers reached the files origin (its CORS refuses them, so those downloads fail in a browser): ${front.filesXSync.length}: ${front.filesXSync.slice(0, 3).join("; ")}`);
-  if (front.leaks.length) fails.push(`the internal origin leaked to the page: ${front.leaks.length} responses: ${front.leaks.slice(0, 5).join("; ")}`);
+    // (the main run: every case but the cloud-only ones, which are skipped by name; its report polled, so a run that
+    // doesn't end within its bound still says its cases' times, the open steps and where it was)
+    // (r6: a control failed before the main run (its page's cleanup proved by the barrier): the main run still runs, for
+    // diagnosis only; G1 is unchanged (the failure fails the run), and this label marks the table)
+    const diagnosticOnly = fails.length > 0;
+    if (diagnosticOnly) console.log(`  DIAGNOSTIC ONLY: ${fails.length} control(s) failed before the main run; its table below can never count toward G1`);
+    await transition("/");
+    for (const name of CLOUD_ONLY) if (selected(name)) console.log(`skipped (cloud-only, the reference server has no quotas): ${name}`);
+    let modeChecked = false;
+    const main = await runInPage(`window.run(${J(ONLY)}, ${J(CLOUD_ONLY.join(","))})`, PILOT_MAIN_S, (rep) => {
+      if (modeChecked || !rep.mode) return;
+      modeChecked = true;
+      const no = requireDiagnostic(rep);
+      if (no) throw new Error(no);
+    });
+    for (const c of main.report?.cases ?? []) console.log(`  case${diagnosticOnly ? " (DIAGNOSTIC ONLY)" : ""} ${c.name}: ${c.outcome ?? "running"}, ${c.endMs !== undefined ? ((c.endMs - c.startMs) / 1000).toFixed(1) + " s" : "unended"}${c.over ? `, over its bound by ${c.over} s (report-only)` : ""}, checks from ${c.checks}${c.cleanup && !c.cleanup.ok ? `, cleanup FAILED at ${c.cleanup.step}` : ""}`);
+    if (!main.done) throw new Error(`the run didn't end within ${PILOT_MAIN_S} s: ${receipt(main)}`);
+    { const no = requireDiagnostic(main.report); if (no) throw new Error(no); }
+    if (main.report.stopped) fails.push(`fail-stop: ${J(main.report.stopped).slice(0, 2000)}`);
+    for (const l of main.report.late ?? []) console.log(`  late: ${l}`);
+    results = await answer();
+    const mb = await barrier("the main run");
+    for (const l of mb.late) console.log(`  late (the barrier): ${l}`);
+    waitingOn = "(the run's results)";
+    fails.push(...results.filter(([ok]) => !ok).map(([, what]) => what));
+    // (claims: with SYNC_REQUIRE_CLAIM the legacy path is a failure, never a pass; its only result says "not exercised")
+    for (const [, what] of results) if (/not exercised/.test(what)) fails.push(`a "not exercised" result: ${what}`);
+    // (measurements, printed pass or fail)
+    for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
+    // (informational: the reference server sends index_changed after ops that move an account's head; ctl.serverNotices
+    // is off, so the front drops them)
+    console.log(`  front: the server's own index_changed notices dropped (ctl.serverNotices off): ${serverNoticesDropped}`);
+    // (the downloads went through the redirect to the page's own /__files/: required when a download case ran)
+    if (DOWNLOADS.some(selected)) {
+      console.log(`  front: downloads through /__files/ on the files origin: ${front.files200} (preflights: ${front.filesPreflights})`);
+      if (front.files200 === 0) fails.push("no download went through /__files/ (the blob GET's redirect)");
+    } else console.log("  front: downloads through /__files/: not required (ONLY names no download case)");
+    // (the proxied pairs' closes over the run, for the gate's behaviour on real data; any failure also fails the cleanup)
+    console.log(`  front: proxied close failures recorded: ${closeFailures.length}; page sockets already closed, not closed again: ${closeSkips.n}`);
+    if (front.filesXSync.length) fails.push(`x-sync-* headers reached the files origin (its CORS refuses them, so those downloads fail in a browser): ${front.filesXSync.length}: ${front.filesXSync.slice(0, 3).join("; ")}`);
+    if (front.leaks.length) fails.push(`the internal origin leaked to the page: ${front.leaks.length} responses: ${front.leaks.slice(0, 5).join("; ")}`);
+  }
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push(`threw: ${e?.stack ?? e} (waiting on: ${waitingOn})`);
@@ -1538,6 +1744,7 @@ if (fails.length) {
   process.exit(1);
 }
 const skipped = CLOUD_ONLY.filter(selected).length;
-console.log(`ok: sync's client against the reference server, ${results.length} checks, ${controls.length} runner controls, ${skipped} cloud-only cases skipped`);
+if (FLOORS) console.log(`ok: the old front (${floorsFront.prov?.head}) against the reference server's floors, ${results.length} checks, ${controls.length} runner controls`);
+else console.log(`ok: sync's client against the reference server, ${results.length} checks, ${controls.length} runner controls, ${skipped} cloud-only cases skipped`);
 if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
 process.exit(0);
