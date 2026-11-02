@@ -201,16 +201,20 @@ def redact(url):
 
 # ------------------------------------------------------------------ the manifest parser (§2.4)
 
+_WS = re.compile(r"[ \t\n\r]*")
+_PLAIN = re.compile(r'[^"\\\x00-\x1f]+')   # (no quote, backslash or control)
+
+
 class _Parser:
     def __init__(self, text):
         self.s = text
         self.i = 0
 
+    # (whitespace and runs of plain string characters are matched by regex,
+    # not a loop per character: an 8 MB manifest or 2000 entries took
+    # seconds in the engine, past CI's 5 s row deadline under load)
     def ws(self):
-        s, i = self.s, self.i
-        while i < len(s) and s[i] in " \t\n\r":
-            i += 1
-        self.i = i
+        self.i = _WS.match(self.s, self.i).end()
 
     def value(self, depth):
         self.ws()
@@ -264,6 +268,14 @@ class _Parser:
         out = []
         n = 0
         while True:
+            m = _PLAIN.match(s, i)
+            if m is not None:
+                run = m.group()
+                n += len(run.encode("utf-8", "surrogatepass"))
+                if n > cap:
+                    raise Refused(capcode)
+                out.append(run)
+                i = m.end()
             if i >= len(s):
                 raise Refused("not-json")
             c = s[i]

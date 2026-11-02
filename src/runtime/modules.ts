@@ -1799,9 +1799,18 @@ const READ_NOFOLLOW_MAX = 50_000_000;
 // any Python runs (the CLI: --data-root DIR, else its starting directory),
 // as a realpath; null on a host that sets none.
 let dataRoot: string | null = null;
+let dataRootSet = false;
 export function setDataRoot(dir: string): void {
-  if (dataRoot !== null) return; // (the first host setting wins)
-  dataRoot = require("fs").realpathSync(dir);
+  if (dataRootSet) return; // (the first host setting wins)
+  dataRootSet = true;
+  // (a root that can't be resolved, e.g. Deno without --allow-read, is no
+  // root: replay then misses with "no data root on this host", and the
+  // program still runs)
+  try {
+    dataRoot = require("fs").realpathSync(dir);
+  } catch {
+    dataRoot = null;
+  }
 }
 
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
