@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "scipy.stats lane, PR 2 (William's QRPM book corpus): scipy.stats' distributions norm, t, f, chi2, cauchy, levy and binom. The module is its own lazy chunk (mod-scipy-stats, a new bundle with its budgets row); scipy's package lists the submodule (sci +37, its precompiled form +19); the CLI carries the module (lib.gen, pyjs); the worker's and the notebook page's library manifests list the chunk (+199, +48). Measured with bun 1.4.4 on master 8f85644f, net of #489's marker in the same tree.",
+ "reason": "scipy.stats lane, PR 2 (William's QRPM book corpus): scipy.stats' distributions norm, t, f, chi2, cauchy, levy and binom. The module is its own lazy chunk (mod-scipy-stats, a new bundle with its budgets row); scipy's package lists the submodule (sci +37, its precompiled form +19); the CLI carries the module (lib.gen, pyjs); the worker's and the notebook page's library manifests list the chunk (+199, +48). Measured with bun 1.4.4 on master 8e5f2ac3, net of #489's marker in the same tree.",
  "bytes": {
-  "cli/lib.gen.js": 11532,
-  "cli/pyjs.cjs": 11824,
+  "cli/lib.gen.js": 11868,
+  "cli/pyjs.cjs": 12236,
   "engine/lib/sci.src": 37,
   "engine/lib/sci.pre": 19,
   "engine/sagebrush-worker.js": 199,
