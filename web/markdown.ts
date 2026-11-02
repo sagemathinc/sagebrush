@@ -21,6 +21,14 @@ export interface Options {
   remote?: boolean | "click";
   // the document's pictures' pixels (image-size.ts), counting its data: pictures
   pixels?: PixelBudget;
+  // a Jupytext MyST notebook's directives and roles (web/myst, loaded only for one): an extension given render()
+  // itself for its bodies, with these same options one level deeper (`depth`), and the inline renderer for titles
+  myst?: MystHook;
+  depth?: number;
+}
+
+export interface MystHook {
+  extension(r: { render(src: string): string; inline(src: string): string; depth: number }): object;
 }
 
 function mathExtension() {
@@ -89,5 +97,13 @@ export function render(src: string, opts: Options = {}): string {
       },
     },
   });
+  if (opts.myst) {
+    const depth = opts.depth ?? 0;
+    md.use(opts.myst.extension({
+      render: (s) => render(s, { ...opts, depth: depth + 1 }),
+      inline: (s) => md.parseInline(s, { async: false }) as string,
+      depth,
+    }) as any);
+  }
   return md.parse(src, { async: false }) as string;
 }
