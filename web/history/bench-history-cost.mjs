@@ -7,7 +7,8 @@
 // let the transaction commit).  Configurations: base, aa, head, delay (hactive unset); set (HEAD with hactive SET in
 // the workspace's hmeta: informational for L1, its paired p50 delta <= 3 ms reported); tail (HEAD, with the harness
 // adding 100 ms to every 10th save, inside the timed interval: the GC-tail gate's power control).
-// Rounds: 5 per workload; round r runs every configuration once, in CONFIGS rotated by r.  Every run opens its own
+// Rounds: 5 per workload, in the frozen ORDER table (r4; the r3 cyclic rotation aliased carryover with the condition), each
+// run in a FRESH browser process with an identical, discarded warm-up (r4, A1/A2).  Every run opens its own
 // fresh databases and deletes them after.
 // Per run: p50/p90/p95/p99/max; q = the share of its saves over 3 x the run's own p50 (stalled); its bursts (10 or more
 // consecutive stalled saves, in completion order: the marker of one incremental major-GC cycle, reported, not gated);
@@ -32,7 +33,8 @@
 // their expected outcomes declared: DELAY D_p50 > T50, TAIL D_q > U and D_q' > U, in every workload and browser.
 // Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
 // (its default rounds performance.now() to 1 ms), the same for every configuration; incremental GC stays on.
-// Workloads (Chromium; Firefox x HCOST_FF_SCALE, 6 under the settlement: 3000 / 3000 / 4 x 1200):
+// Workloads (Chromium; Firefox x HCOST_FF_SCALE, frozen at 3 in r4 (daybreak3 9c7a8db4, E2): 1500 / 1500 / 4 x 600, its
+// performance REPORT-ONLY by William's decision; Chromium gates D2 alone):
 //   files       500 serial writes of a 4 KiB data file (10 files round-robin)
 //   notebooks   500 serial saves of a 50-cell notebook
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
@@ -90,19 +92,36 @@ for (const [name, dir] of [["base", base], ["aa", base], ["warm", base], ["head"
 // The hash is of the bundle NORMALIZED: Bun writes each module's path as a "// <path>" comment, relative to the cwd and
 // through this run's random temp directory, so each such line is cut to its path from the last web/, src/ or
 // node_modules/ segment; nothing else changes.  The raw sha256 is recorded too)
+// (the normalizer (the grader d2f6e83f, term 1): exactly one rule, applied line by line: a line that is ENTIRELY
+// "// " + a path with no spaces, whose path has a web/, src/ or node_modules/ segment, is cut to "// " + its path from the
+// LAST such segment; every other line, code or comment, is unchanged.  Its rows: the same code through different temp
+// paths normalizes identically; one changed code byte, or a changed non-path comment, does not)
+const normalizeBundle = (text) => text.split("\n").map((l) => l.replace(/^\/\/ (\S*\/)?((?:web|src|node_modules)\/\S*)$/, "// $2")).join("\n");
+{
+  const A = "// ../../sync-docs-tmp/d2/t4/sb-hcost-base-8CQkUd/web/board/idb-open.ts\nvar a = 1;\n// node_modules/.pnpm/p@1/node_modules/q/i.js\nvar b = 2;";
+  const B = "// ../t/sb-hcost-base-MFaLsv/web/board/idb-open.ts\nvar a = 1;\n// ../../x/node_modules/.pnpm/p@1/node_modules/q/i.js\nvar b = 2;";
+  if (normalizeBundle(A) !== normalizeBundle(B)) die("the normalizer's unit row: different temp paths don't normalize identically");
+  if (normalizeBundle(A.replace("var a = 1;", "var a = 2;")) === normalizeBundle(B)) die("the normalizer's unit row: a changed code byte normalizes away");
+  if (normalizeBundle("// a comment with web/x.ts in it\nx") === normalizeBundle("// a comment with web/y.ts in it\nx")) die("the normalizer's unit row: a non-path comment is cut");
+  if (normalizeBundle("x // ../t/web/a.ts") === normalizeBundle("x // ../u/web/a.ts")) die("the normalizer's unit row: a trailing comment on a code line is cut");
+}
 const { createHash } = await import("node:crypto");
-export const normalizeBundle = (text) => text.split("\n").map((l) => l.replace(/^\/\/ (\S*\/)?((?:web|src|node_modules)\/\S*)$/, "// $2")).join("\n");
 const sha = (x) => createHash("sha256").update(x).digest("hex");
-if (normalizeBundle("// ../../t/sb-hcost-base-AbC123/web/x.ts\ncode // web/y\n// node_modules/.pnpm/p/node_modules/q/i.js") !== "// web/x.ts\ncode // web/y\n// node_modules/q/i.js") die("normalizeBundle's unit row");
+const NORMALIZER_SHA = sha(normalizeBundle.toString());
 const BUNDLE_RAW = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, sha(readFileSync(join(site, `ws-${n}.js`)))]));
 const BUNDLE_SHA = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, sha(normalizeBundle(readFileSync(join(site, `ws-${n}.js`), "utf8")))]));
 if (!(BUNDLE_SHA.warm === BUNDLE_SHA.base && BUNDLE_SHA.aa === BUNDLE_SHA.base)) die(`ws-warm, ws-base and ws-aa aren't byte-identical (${BUNDLE_SHA.warm} ${BUNDLE_SHA.base} ${BUNDLE_SHA.aa})`);
 if (process.env.HCOST_FROZEN_HASHES) {
+  // (lines: "<sha256>  ws-<name>.js" (normalized), "<sha256>  normalizer" (its source), "<n>  HCOST_FF_SCALE")
   const want = Object.fromEntries(readFileSync(process.env.HCOST_FROZEN_HASHES, "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/)).map(([h, f]) => [f, h]));
-  for (const [f, h] of Object.entries(want)) { const n = f.replace(/^ws-|\.js$/g, ""); if (BUNDLE_SHA[n] !== h) die(`FROZEN-HASHES: ${f} is ${BUNDLE_SHA[n]}, frozen ${h}`); }
-  if (!want["ws-warm.js"]) die("FROZEN-HASHES doesn't pin ws-warm.js");
+  for (const [f, h] of Object.entries(want)) {
+    if (f === "normalizer") { if (h !== NORMALIZER_SHA) die(`FROZEN-HASHES: the normalizer is ${NORMALIZER_SHA}, frozen ${h}`); continue; }
+    if (f === "HCOST_FF_SCALE") { if (h !== String(process.env.HCOST_FF_SCALE)) die(`FROZEN-HASHES: HCOST_FF_SCALE is ${process.env.HCOST_FF_SCALE}, frozen ${h}`); continue; }
+    const n = f.replace(/^ws-|\.js$/g, ""); if (BUNDLE_SHA[n] !== h) die(`FROZEN-HASHES: ${f} is ${BUNDLE_SHA[n]}, frozen ${h}`);
+  }
+  for (const k of ["ws-warm.js", "ws-base.js", "ws-aa.js", "ws-head.js", "ws-delay.js", "normalizer", "HCOST_FF_SCALE"]) if (!want[k]) die(`FROZEN-HASHES doesn't pin ${k}`);
 }
-if (process.argv.includes("--hashes-only")) { for (const [n, h] of Object.entries(BUNDLE_SHA)) console.log(`${h}  ws-${n}.js`); process.exit(0); }
+if (process.argv.includes("--hashes-only")) { for (const [n, h] of Object.entries(BUNDLE_SHA)) console.log(`${h}  ws-${n}.js`); console.log(`${NORMALIZER_SHA}  normalizer`); process.exit(0); }
 writeFileSync(join(site, "bench.js"), `
 const N = { files: 500, notebooks: 500, concurrent: 200 };
 const pct = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)]; };
@@ -138,11 +157,16 @@ export async function warm() {
   for (let i = 0; i < 100; i++) { const a = performance.now(); await w.write("/w.bin", bytes); lat.push(performance.now() - a); }
   w.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
-  // (its own databases verified gone before any measured run; what remains may only be the product's shared databases,
-  // which every workspace open creates (every measured run does too), declared in SHARED_DBS; the full list is kept)
-  const all = (await indexedDB.databases()).map((d) => d.name).sort();
-  const left = all.filter((n) => n === name || n === mainName || !SHARED_DBS.includes(n));
-  return { saves: lat.length, lat, left, all, ms: performance.now() - t0 };
+  // (the evidence for the host's warmCheckFault: every database now present, and the record count of every store in each
+  // shared one present; nothing is decided here)
+  const all = (await indexedDB.databases()).map((d) => d.name).sort(), shared = {};
+  for (const n of all.filter((x) => SHARED_DBS.includes(x))) shared[n] = await new Promise((ok) => {
+    const q = indexedDB.open(n);
+    q.onerror = () => ok({ error: String(q.error) });
+    q.onsuccess = () => { const db = q.result, counts = {}, names = [...db.objectStoreNames]; if (!names.length) { db.close(); return ok(counts); }
+      const tx = db.transaction(names); let k = 0; for (const st of names) { const c = tx.objectStore(st).count(); c.onsuccess = () => { counts[st] = c.result; if (++k === names.length) { db.close(); ok(counts); } }; } };
+  });
+  return { saves: lat.length, lat, all, shared, own: [name, mainName], ms: performance.now() - t0 };
 }
 export async function bench(config, workload, scale = 1) {
   const res = resolution();
@@ -189,7 +213,7 @@ const url = `http://127.0.0.1:${server.port}/`, sleep = (ms) => new Promise((r) 
 // D-Bus's 25 s timeout before the first navigation commits (probes on VM1, 2026-11-02: 25.2 s -> 0.2 s); it selects the
 // password store's backend only)
 async function chromium() {
-  const profile = mkdtempSync(join(tmpdir(), "sb-hcost-")), chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
+  const profile = mkdtempSync(join(tmpdir(), "sb-hcost-")), chrome = spawn(process.env.CHROME ?? "chromium", chromeArgs(profile), { stdio: "ignore", detached: true });
   GROUPS.add(chrome.pid);
   const port = await devtoolsPort(profile);
   let targets;
@@ -343,6 +367,48 @@ const warmFault = (src) => {
   if (/warm\(/.test(m)) return "bench() calls the warm-up";
   return null;
 };
+// (the warm-up's evidence, decided here (the grader d2f6e83f, term 2): exactly 100 timed saves; its own two databases
+// gone; besides them only the product's two shared databases, SHARED_DBS_HOST, may exist, and every store in them is
+// empty (a fresh profile; a data-file warm-up writes no notebook or board history): a third database, a leftover of its
+// own or any record in a shared one is refused.  Its rows)
+const SHARED_DBS_HOST = ["sagebrush-board-history", "sagebrush-history"];
+const warmCheckFault = (wu) => {
+  if (!wu || wu.saves !== 100) return `${wu?.saves} saves, not 100`;
+  if (!Array.isArray(wu.lat) || wu.lat.length !== 100) return `${wu.lat?.length} timed saves, not 100`;
+  if (!Array.isArray(wu.all) || !Array.isArray(wu.own)) return "no database evidence";
+  const own = wu.all.filter((n) => wu.own.includes(n)); if (own.length) return `its own database(s) left: ${own.join(", ")}`;
+  const other = wu.all.filter((n) => !SHARED_DBS_HOST.includes(n) && !wu.own.includes(n)); if (other.length) return `a database besides the shared two: ${other.join(", ")}`;
+  for (const [n, stores] of Object.entries(wu.shared ?? {})) {
+    if (!stores || stores.error) return `the shared database ${n} couldn't be read`;
+    for (const [st, c] of Object.entries(stores)) if (c !== 0) return `${c} record(s) in ${n}/${st}`;
+  }
+  for (const n of wu.all.filter((x) => SHARED_DBS_HOST.includes(x))) if (!(n in (wu.shared ?? {}))) return `the shared database ${n} wasn't counted`;
+  return null;
+};
+{
+  const ok = { saves: 100, lat: Array(100).fill(1), own: ["hcost-warm-x", "hcost-warm-x-m"], all: ["sagebrush-board-history", "sagebrush-history"], shared: { "sagebrush-board-history": { history: 0 }, "sagebrush-history": { history: 0 } } };
+  if (warmCheckFault(ok) !== null) die(`the warm-up check's unit row: clean evidence refused (${warmCheckFault(ok)})`);
+  for (const [over, what] of [
+    [{ saves: 99 }, "99 saves declared"],
+    [{ lat: Array(99).fill(1) }, "99 timed saves"],
+    [{ all: [...ok.all, "hcost-warm-x"] }, "its own database left"],
+    [{ all: [...ok.all, "some-third-db"] }, "a third database"],
+    [{ shared: { ...ok.shared, "sagebrush-history": { history: 1 } } }, "a warm-up record in sagebrush-history"],
+    [{ shared: { ...ok.shared, "sagebrush-board-history": { history: 2 } } }, "records in sagebrush-board-history"],
+    [{ shared: { "sagebrush-history": { history: 0 } } }, "a shared database not counted"],
+    [{ shared: { ...ok.shared, "sagebrush-history": { error: "x" } } }, "an unreadable shared database"],
+  ]) if (warmCheckFault({ ...ok, ...over }) === null) die(`the warm-up check's unit row: ${what} isn't refused`);
+}
+// (every Chromium launch's arguments, from this one declared list (the grader d2f6e83f, term 3): --password-store=basic
+// is the only flag beyond r3's (a backend-only flag: the D-Bus keyring wait of a fresh profile, 25.2 s -> 0.2 s on the
+// VMs' Chrome 155, bisected 2026-11-02); no scheduling or rendering flag.  Its row)
+const CHROME_FLAGS = ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0"];
+const chromeArgs = (profile) => [...CHROME_FLAGS, `--user-data-dir=${profile}`, "about:blank"];
+{
+  const a = chromeArgs("/p");
+  if (!a.includes("--password-store=basic")) die("the Chromium flags' unit row: --password-store=basic is missing");
+  if (JSON.stringify(a) !== JSON.stringify(["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", "--user-data-dir=/p", "about:blank"])) die(`the Chromium flags' unit row: the arguments aren't exactly the declared ones (${a.join(" ")})`);
+}
 // (the two mutants' anchors, preflighted: DELAY's patch landed exactly once; TAIL's hook is in the page exactly once)
 {
   const d = readFileSync(join(delay, "web/history/tokens.ts"), "utf8"), b = readFileSync(join(site, "bench.js"), "utf8");
@@ -459,8 +525,13 @@ const stopNow = async (why) => {
 const MODE = process.env.HCOST_MODE ?? "";
 if (!["INFO", "COUNTED"].includes(MODE)) die("HCOST_MODE: INFO or COUNTED, declared before the run");
 const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
-if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
-const report = { gating: GATING, reportOnly: REPORT_ONLY, mode: MODE, order: ORDER, bundles: BUNDLE_SHA, bundlesRaw: BUNDLE_RAW, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
+// (r4, E2: the Firefox scale is frozen at 3 (1500 / 1500 / 4 x 600) and must be declared; a missing or other scale is
+// refused whenever the Firefox leg runs.  Its rows)
+const FF_SCALE_FROZEN = 3;
+const scaleFault = (legs, declared) => (legs.includes("firefox") && !(declared !== undefined && +declared === FF_SCALE_FROZEN) ? `HCOST_FF_SCALE must be declared as ${FF_SCALE_FROZEN} (got ${declared})` : null);
+for (const [legs, d, bad, what] of [[["chromium", "firefox"], "3", false, "3 declared"], [["chromium", "firefox"], "6", true, "6"], [["chromium", "firefox"], undefined, true, "undeclared"], [["chromium", "firefox"], "1", true, "1"], [["chromium"], undefined, false, "no Firefox leg"]]) if ((scaleFault(legs, d) !== null) !== bad) die(`the Firefox scale's unit row: ${what}`);
+{ const f = scaleFault(LEGS, process.env.HCOST_FF_SCALE); if (f !== null) die(f); }
+const report = { normalizer: NORMALIZER_SHA, gating: GATING, reportOnly: REPORT_ONLY, mode: MODE, order: ORDER, bundles: BUNDLE_SHA, bundlesRaw: BUNDLE_RAW, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
 console.log(`declared: ${report.declared}; D2 gates on ${GATING.join(", ")} only, ${REPORT_ONLY.join(", ")} REPORT-ONLY (William, Nov 2); mode ${MODE} (INFO: per-predecessor carry <= U or STOP; COUNTED: reported); a fresh browser process per run with the identical warm-up; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 partial = report;
@@ -484,9 +555,8 @@ try {
       try {
         const wu = await b.ev("window.warm()");
         leg.warm.push(wu); t.push(Date.now());
-        // (A2: exactly the declared 100 saves; no database left behind; the evidence kept apart, never in a measured row)
-        if (wu.saves !== 100 || !Array.isArray(wu.lat) || wu.lat.length !== 100) await stopNow(`${bname}: the warm-up made ${wu.saves} saves, not 100`);
-        if (!Array.isArray(wu.left) || wu.left.length !== 0) await stopNow(`${bname}: the warm-up left database(s) ${JSON.stringify(wu.left)}`);
+        // (A2: warmCheckFault on the warm-up's own evidence; the evidence is kept apart, never in a measured row)
+        { const f = warmCheckFault(wu); if (f !== null) await stopNow(`${bname}: the warm-up: ${f}`); }
         const x = await fn(b); t.push(Date.now());
         return x;
       } finally {
@@ -526,7 +596,7 @@ try {
       delete report.inProgress;
       rows[workload] = { verdict, stop, carry, chrono, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
-      console.log(`${bname} ${workload}: ${REPORT_ONLY.includes(bname) ? `REPORT-ONLY (computed: ${verdict})` : verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us; carryover q after tail ${pp(carry.afterTail)} vs after others ${pp(carry.other)}: ${pp(carry.carry)} (${carryPast ? "PAST" : "within"} U${MODE === "INFO" ? "" : ", reported"})`);
+      console.log(`${bname} ${workload}: ${REPORT_ONLY.includes(bname) ? `REPORT-ONLY at scale ${FF_SCALE} (computed: ${verdict})` : verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us; carryover q after tail ${pp(carry.afterTail)} vs after others ${pp(carry.other)}: ${pp(carry.carry)} (${carryPast ? "PAST" : "within"} U${MODE === "INFO" ? "" : ", reported"})`);
       console.log(`  per-predecessor mean q: ${Object.entries(carry.byPred).map(([p, q]) => `${p} ${pp(q)}`).join("; ")}`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
@@ -542,5 +612,5 @@ if (crash) die(`crash: ${String(crash?.stack ?? crash).slice(0, 2000)}`);
 if (OUT) writeFileSync(OUT, JSON.stringify(report));
 const v = overallOf(verdicts);
 const list = (bs) => verdicts.filter((r) => bs.includes(r.browser)).map((r) => r.verdict).join(" ");
-console.log(`HCOST: ${v} (gating ${GATING.join("+")}: ${list(GATING) || "none"}; report-only ${REPORT_ONLY.join("+")}: ${list(REPORT_ONLY) || "none"})`);
+console.log(`HCOST: ${v} (gating ${GATING.join("+")}: ${list(GATING) || "none"}; report-only ${REPORT_ONLY.join("+")} at scale ${FF_SCALE}: ${list(REPORT_ONLY) || "none"})`);
 process.exit({ PASS: 0, FAIL: 1, STOP: 3, VOID: 76 }[v]);
