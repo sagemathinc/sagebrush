@@ -10,12 +10,12 @@ import { join } from "node:path";
 const script = join(__dirname, "..", "..", "scripts", "ci-paths.mjs");
 const dir = mkdtempSync(join(tmpdir(), "ci-paths-"));
 
-function classify(files: string[]): Record<string, string> {
+function classify(files: string[], labels = ""): Record<string, string> {
   const list = join(dir, "files.txt");
   writeFileSync(list, files.join("\n") + "\n");
   const r = spawnSync(process.execPath, [script], {
     encoding: "utf8",
-    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge" },
+    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels },
   });
   assert.equal(r.status, 0, r.stderr);
   return Object.fromEntries(r.stdout.trim().split("\n").map((l) => l.split("=") as [string, string]));
@@ -272,4 +272,28 @@ test("the unsafe boundary's routes: every build input the scanner reads selects 
     assert.equal(classify([f]).unsafe_sweep, "true", f);
   for (const f of ["scripts/build-cli.mjs", "web/run-tests.sh", ".github/workflows/pypi.yml", "app/src-tauri/Cargo.toml", "newdir/unknown.xyz", "design/plan.md"])
     assert.equal(classify([f]).unsafe_sweep, "false", f);
+});
+
+test("the full tier on a pull request: the full-ci label, or a sync, sharing, security or data-loss path (CI speed plan option 2)", () => {
+  // one path of each class selects the full tier, and with it every suite, the WebKit job included
+  for (const f of [
+    "web/sync/doc.ts", "web/sync-protocol/doc-protocol.ts", "web/journal/store.js", "web/workspace/sync-outbox.ts",
+    "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
+    "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
+    "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/migrate.ts", "web/board/export.ts",
+    "web/latex/save.ts", "scripts/check-export-size.mjs",
+  ]) {
+    const o = classify([f]);
+    assert.equal(o.full, "true", f);
+    assert.deepEqual([o.node, o.web, o.modes, o.webkit, o.engine_full], ["true", "true", "true", "true", "true"], f);
+  }
+  // the label alone, beside other labels, even on a prose-only change
+  const labelled = classify(["README.md"], "documentation,full-ci");
+  assert.equal(labelled.full, "true");
+  assert.equal(labelled.docs_only, "false");
+  // the fast tier: other web code, other labels, and the one big page (its author labels a save or Trash change)
+  for (const f of ["web/index.html", "web/workspace/browser.ts", "web/notebook/test-start-all.mjs", "web/board/frame.ts"]) {
+    assert.equal(classify([f]).full, "false", f);
+  }
+  assert.equal(classify(["web/index.html"], "bug,full-ci-later").full, "false");
 });

@@ -12,6 +12,8 @@ on:
   push:
     branches: [master]
   pull_request:
+    # (labeled: adding the full-ci label reruns the pull request on the full tier)
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   schedule:
     - cron: "17 8 * * *"
@@ -67,6 +69,7 @@ jobs:
         name: classify changed paths and select the tier
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (the limits census alone, in seconds and with no build: it must run on an
@@ -459,7 +462,9 @@ jobs:
 
   web-sync:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
+    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
     steps:
@@ -737,7 +742,9 @@ jobs:
   # Oct 30.  Never a longer timeout: split again if either job nears its limit)
   web-runner-sync:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
+    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
