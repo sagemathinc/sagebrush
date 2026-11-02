@@ -449,7 +449,11 @@ async function tail() {
   }
   const p = stats(got.plain), c = stats(got.collapsing), p0 = stats(without.plain), c0 = stats(without.collapsing);
   const same = J(p) === J(p0) && J(c) === J(c0);
-  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= COLLAPSE_WORST && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
+  // (the call counts are history's INACTIVE cost (what PROD ships); under history's census guard (HISTORY_GUARD=1) history
+  // is active, every save also writing its token: the counts are reported there, judged unguarded; the rest is judged)
+  const guarded = !!window.__historyGuard;
+  const counts = guarded || (p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= COLLAPSE_WORST && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST);
+  check(observed && c.n > 0 && counts && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}${guarded ? " (guarded: counts reported, not judged)" : ""}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
   // (one identity with many pins (kept apart): a release, and a cleanup page, cost the same few calls)
   const recs = await ob.records();
   await counting(() => W.cleanPins(w));
