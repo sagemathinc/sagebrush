@@ -29,7 +29,7 @@
 // are reported, and every run's raw per-save latencies (all six configurations) are kept in the report's JSON.  The
 // rules' boundary and scope controls run before anything else; a wrong one is BAD.
 // The two mutants' anchors (DELAY's patch in tokens.ts, TAIL's hook in the page) are preflighted before the run, and
-// their expected outcomes declared: DELAY D_p50 > T50 and TAIL D_q > U in every workload and browser.
+// their expected outcomes declared: DELAY D_p50 > T50, TAIL D_q > U and D_q' > U, in every workload and browser.
 // Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
 // (its default rounds performance.now() to 1 ms), the same for every configuration; incremental GC stays on.
 // Workloads (Chromium; Firefox x HCOST_FF_SCALE, 6 under the settlement: 3000 / 3000 / 4 x 1200):
