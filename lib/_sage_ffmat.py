@@ -1041,11 +1041,15 @@ class FFVector:
         if isinstance(o, _sage_matrix.Matrix):
             # (times a matrix over ZZ: in GF(q), as Sage coerces; another
             # ring: Sage's TypeError)
-            if o._base is _sa().ZZ:
-                return matrix(self._base, o._rows)._vecmat(self)
+            if o._base is _sa().ZZ and o.nrows() == len(self._e):
+                # (by shape: a matrix with no rows keeps its columns)
+                return matrix(self._base, o.nrows(), o.ncols(), [x for r in o._rows for x in r])._vecmat(self)
             raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), o.parent()))
         c = _admit(self._base, o)
         if c is None:
+            if isinstance(o, _F) or type(o).__name__ == "Rational":
+                # (no coercion of QQ into GF(q), as Sage)
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), _sa().parent(o)))
             return NotImplemented
         return FFVector(self._base, [a * c for a in self._e])
 

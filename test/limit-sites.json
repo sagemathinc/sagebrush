@@ -3897,6 +3897,11 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError message for a GF(q) vector times a rational: matched words, no limit"
+ },
  "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), o.parent())) #0": {
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",

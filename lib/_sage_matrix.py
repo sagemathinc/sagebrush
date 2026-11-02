@@ -1486,8 +1486,9 @@ class Matrix:
         if isinstance(other, _sage_ffmat.FFVector):
             # (a matrix over ZZ times a vector over GF(q): in GF(q), as Sage
             # coerces; over QQ or another ring, Sage's TypeError)
-            if self._base is _sa().ZZ:
-                return _sage_ffmat.matrix(other._base, self._rows) * other
+            if self._base is _sa().ZZ and self.ncols() == len(other):
+                # (by shape: a matrix with no rows keeps its columns)
+                return _sage_ffmat.matrix(other._base, self.nrows(), self.ncols(), [x for r in self._rows for x in r]) * other
             raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
         if isinstance(other, Vector):
             ov = _raw_entries(other)
