@@ -1,35 +1,36 @@
 // The cost gate of history's change tokens (Stage A layer 1; design stage-a-l1 r2.1 §6 [D2] as amended by daybreak3's
-// statistic ruling (stage-a-l1-d2-statistic-daybreak3.md) and the grader's G-1..G-5): the added per-save cost with
-// history INACTIVE (what PROD ships), per workload, in Chromium and in Firefox.
+// rulings (stage-a-l1-d2-statistic-daybreak3.md; the D2 settlement after the O1 power check l1-d2-o1-power-r1) and the
+// grader's): the added per-save cost with history INACTIVE (what PROD ships), per workload, in Chromium and in Firefox.
 // Builds, each served as its own bundle to the same page: BASE (origin/master's web/, or HCOST_BASE_DIR's tree, the
 // packet's same-day master, its sha in HCOST_BASE_SHA), AA (the SAME base tree built again under another name: the
 // noise control), HEAD (this tree), DELAY (this tree, noteToken with a 2 ms synchronous wait at its top: a timer would
-// let the transaction commit).  Configurations: base, aa, head, delay (hactive unset) and set (HEAD with hactive SET in
-// the workspace's hmeta: informational for L1, its paired delta <= 3 ms reported).
-// Rounds: 5 per workload; round r runs every configuration once, in CONFIGS rotated by r (a Latin square: each
-// configuration once at each position).  Every run opens its own fresh databases and deletes them after (P5).
-// The statistic (daybreak3): per round, the paired p95 deltas head-base, aa-base, delay-base (and set-base); D(x) = the
-// median of x's five.  B = the median of base's five p95s; T = min(1 ms, max(0.5 ms, 0.05 B)).  Per browser and
-// workload:  VALID only if D(aa) <= T and D(delay) > T (otherwise the leg is VOID, never PASS);  PASS if D(head) <= T.
-// Also: the r6.4 backstop, a transaction wait <= 250 ms at p99, judged conservatively on the end-to-end p99 of head and
-// set (the save's latency contains its transaction's wait); every raw p95/p99 and the worst-of-5 reported.
-// STOPs (for daybreak3 + the grader, never a verdict): performance.now()'s resolution over 0.1 ms in any run (measured
-// in the page before each run); the instability/spread STOP (daybreak3, the grader): any configuration whose five round
-// p95s have max > 2 x min AND max - min > 5 ms, decided before the medians; its boundary controls (equal, below, above
-// for each conjunct) run before anything else, and a wrong one is BAD.
+// let the transaction commit).  Configurations: base, aa, head, delay (hactive unset); set (HEAD with hactive SET in
+// the workspace's hmeta: informational for L1, its paired p50 delta <= 3 ms reported); tail (HEAD, with the harness
+// adding 100 ms to every 10th save, inside the timed interval: the GC-tail gate's power control).
+// Rounds: 5 per workload; round r runs every configuration once, in CONFIGS rotated by r.  Every run opens its own
+// fresh databases and deletes them after.
+// Per run: p50/p90/p95/p99/max; q = the share of its saves over 3 x the run's own p50 (stalled); its bursts (10 or more
+// consecutive stalled saves, in completion order: the marker of one incremental major-GC cycle, reported, not gated);
+// its wall time; performance.now()'s resolution (measured in the page before the run).
+// The gate, per browser and workload (D(x) = the median of x's five within-round paired deltas against base):
+//   A, central latency: B50 = the median of base's five p50s, T50 = min(1 ms, max(0.5 ms, 0.05 B50)).
+//   B, the GC-tail burden: U = 0.01 (one percentage point of saves).
+//   VALID only if  D_p50(aa) <= T50,  D_q(aa) <= U,  D_p50(delay) > T50  and  D_q(tail) > U  (else VOID, never PASS);
+//   PASS if  D_p50(head) <= T50,  D_q(head) <= U  and head's p99 <= 250 ms in every run (the r6.4 backstop, the save's
+//   end-to-end latency containing its transaction's wait; set's p99 reported).  p95 is reported only.
+// STOPs (for daybreak3 + the grader, never a verdict), decided before the medians:  performance.now()'s resolution over
+// 100 us in any run (compared in whole microseconds);  the instability/spread STOP: any configuration whose five p50s
+// have max > 2 x min AND max - min > 5 ms.  Both rules' boundary controls run before anything else; a wrong one is BAD.
+// The two mutants' anchors (DELAY's patch in tokens.ts, TAIL's hook in the page) are preflighted before the run, and
+// their expected outcomes declared: DELAY D_p50 > T50 and TAIL D_q > U in every workload and browser.
 // Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
-// (its default rounds performance.now() to 1 ms), the same for every configuration.
-// Workloads:
+// (its default rounds performance.now() to 1 ms), the same for every configuration; incremental GC stays on.
+// Workloads (Chromium; Firefox x HCOST_FF_SCALE, 6 under the settlement: 3000 / 3000 / 4 x 1200):
 //   files       500 serial writes of a 4 KiB data file (10 files round-robin)
 //   notebooks   500 serial saves of a 50-cell notebook
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
 //   CHROME=chromium PLAYWRIGHT=<dir with playwright 1.64.1> bun web/history/bench-history-cost.mjs [--out report.json]
-// BROWSERS=chromium,firefox (the default, both) picks the legs.  HCOST_FF_SCALE (default 1) multiplies every Firefox
-// workload's save count (O1, daybreak3 + the grader: 6, i.e. 3000 / 3000 / 4 x 1200, runs long enough to span several
-// of Firefox's incremental-GC cycles).  Each run also reports its wall time, p50/p95/p99/max, its stalled saves (over 3
-// x the run's own p50) and its bursts (10 or more consecutive stalled saves, in completion order): the declared marker
-// of one incremental major-GC cycle (diag-r1: the GC cycle is a 1-2 s burst of uniformly slowed saves).  A Firefox run
-// with fewer than 3 bursts is a STOP (the grader's G-1).  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
+// BROWSERS=chromium,firefox (the default, both) picks the legs.  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -95,13 +96,16 @@ export function resolution() {
 }
 export async function bench(config, workload, scale = 1) {
   const res = resolution();
-  const W = await import("./ws-" + (config === "set" ? "head" : config) + ".js");
+  const W = await import("./ws-" + (config === "set" || config === "tail" ? "head" : config) + ".js");
   const name = "hcost-" + config + "-" + workload + "-" + (++runs), mainName = name + "-m";
   const w = await W.Workspace.open({ name, mainName });
   if (config === "set") await activate(name);
   const bytes = new Uint8Array(4096).fill(7), out = [];
+  let started = 0;
   const one = async (w, i, kind) => {
     const t0 = performance.now();
+    // TAIL-ANCHOR: the tail mutant's hook (every 10th save started, 100 ms inside the timed interval)
+    if (config === "tail" && ++started % 10 === 0) await new Promise((ok) => setTimeout(ok, 100));
     if (kind === "file") await w.write("/f" + (i % 10) + ".bin", bytes);
     else await w.write("/n" + (i % 10) + ".ipynb", nb(i));
     out.push(performance.now() - t0);
@@ -115,7 +119,7 @@ export async function bench(config, workload, scale = 1) {
   } else for (let i = 0; i < N[workload] * scale; i++) await one(w, i, workload === "files" ? "file" : "nb");
   const wall = performance.now() - wall0, p50 = pct(out, 0.5), stalled = out.map((x) => x > 3 * p50), bursts = [];
   for (let i = 0, k = 0; i <= stalled.length; i++) { if (i < stalled.length && stalled[i]) k++; else { if (k >= 10) bursts.push(k); k = 0; } }
-  const r = { n: out.length, wall, p50, p90: pct(out, 0.9), p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, bursts, res };
+  const r = { n: out.length, wall, p50, p90: pct(out, 0.9), p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, q: stalled.filter(Boolean).length / out.length, bursts, res };
   for (const x of ws) x.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
   return r;
@@ -158,7 +162,8 @@ async function firefox() {
   return { ev: (expression) => page.evaluate(expression), close: () => browser.close(), version: browser.version() };
 }
 
-// (the instability/spread STOP, and its boundary controls: each conjunct at equality is NOT past, just above is)
+// (the instability/spread STOP, on each configuration's five p50s, and its boundary controls: each conjunct at
+// equality is NOT past, just above is)
 const spreadStop = (xs) => { const hi = Math.max(...xs), lo = Math.min(...xs); return hi > 2 * lo && hi - lo > 5; };
 for (const [xs, want, what] of [
   [[5, 10, 6, 7, 8], false, "max = 2 x min exactly (and max - min = 5): not past"],
@@ -171,14 +176,27 @@ for (const [xs, want, what] of [
   [[30, 59, 40, 40, 40], false, "max - min 29 > 5 but max < 2 x min: not past"],
   [[4, 4, 4, 4, 4], false, "no spread: not past"],
 ]) if (spreadStop(xs) !== want) die(`the spread STOP's boundary control: ${what} (${xs.join(", ")})`);
-// (the quantile each leg's statistic uses: HCOST_Q_CHROMIUM / HCOST_Q_FIREFOX, p50 | p90 | p95, default p95; under
-// review for Firefox, where p95 sits on the incremental-GC knee: l1-d2-o1-power-r1)
-const QUANT = Object.fromEntries(["chromium", "firefox"].map((b) => [b, process.env["HCOST_Q_" + b.toUpperCase()] ?? "p95"]));
-if (Object.values(QUANT).some((q) => !["p50", "p90", "p95"].includes(q))) die("HCOST_Q_*: p50, p90 or p95");
-const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
+// (the resolution STOP, in whole microseconds, and its boundary controls: 100 us is not past, 101 us is)
+const resStop = (ms) => Math.round(ms * 1000) > 100;
+for (const [ms, want, what] of [
+  [0.1, false, "exactly 100 us: not past"],
+  [0.10000000009313226, false, "100 us read a hair over by float subtraction: not past"],
+  [0.09999999997671694, false, "100 us read a hair under: not past"],
+  [0.0200, false, "20 us: not past"],
+  [0.101, true, "101 us: past"],
+  [1, true, "1 ms (Firefox's default rounding): past"],
+]) if (resStop(ms) !== want) die(`the resolution STOP's boundary control: ${what} (${ms})`);
+// (the two mutants' anchors, preflighted: DELAY's patch landed exactly once; TAIL's hook is in the page exactly once)
+{
+  const d = readFileSync(join(delay, "web/history/tokens.ts"), "utf8"), b = readFileSync(join(site, "bench.js"), "utf8");
+  if (d.split("while (performance.now() - t0 < 2) {}").length !== 2) die("the DELAY mutant's anchor isn't in place exactly once");
+  if (b.split("TAIL-ANCHOR").length !== 2 || b.split('config === "tail" && ++started % 10 === 0').length !== 2) die("the TAIL mutant's anchor isn't in place exactly once");
+}
+const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1), U = 0.01;
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
-const report = { master, statistic: "daybreak3: median of within-round paired p95 deltas, T = min(1, max(0.5, 0.05 B))", browsers: {} };
+const report = { master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50 and TAIL: D_q > U, in every workload and browser; A/A within both", browsers: {} };
+console.log(`declared: ${report.declared}; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 try {
   for (const [bname, open] of [["chromium", chromium], ["firefox", firefox]]) {
@@ -192,27 +210,25 @@ try {
         order.push(turn);
         for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`));
       }
-      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99) && Number.isFinite(x.res))))) die(`${bname} ${workload}: a run measured nothing`);
-      const q = QUANT[bname], p95 = (c) => runs[c].map((x) => x[q]);
-      const B = med(p95("base")), T = Math.min(1, Math.max(0.5, 0.05 * B));
-      const paired = Object.fromEntries(["aa", "head", "delay", "set"].map((c) => [c, runs[c].map((x, r) => x[q] - runs.base[r][q])]));
-      const D = Object.fromEntries(Object.entries(paired).map(([c, d]) => [c, med(d)]));
-      const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...p95(c))]));
-      const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
-      // (to the microsecond: Chromium's coarsened clock steps exactly 100 us, which float subtraction may read a hair over)
-      const resMax = Math.round(1e6 * Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)))) / 1e6;
-      const spread = CONFIGS.filter((c) => spreadStop(p95(c)));
-      const fewGc = bname === "firefox" ? CONFIGS.flatMap((c) => runs[c].map((x, r) => [c, r, x.bursts.length]).filter((z) => z[2] < 3)) : [];
-      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(spread.length ? [`instability/spread: ${spread.join(", ")}`] : []), ...(fewGc.length ? [`under 3 GC bursts: ${fewGc.map(([c, r, n]) => `${c}#${r + 1}:${n}`).join(" ")}`] : [])];
-      const valid = D.aa <= T && D.delay > T, pass = D.head <= T, backstop = p99.head <= 250 && p99.set <= 250;
+      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && [x.p50, x.p95, x.p99, x.q, x.res].every(Number.isFinite))))) die(`${bname} ${workload}: a run measured nothing`);
+      const of = (c, k) => runs[c].map((x) => x[k]);
+      const B50 = med(of("base", "p50")), T50 = Math.min(1, Math.max(0.5, 0.05 * B50));
+      const pairedOf = (k) => Object.fromEntries(["aa", "head", "delay", "set", "tail"].map((c) => [c, runs[c].map((x, r) => x[k] - runs.base[r][k])]));
+      const P50 = pairedOf("p50"), Q = pairedOf("q");
+      const D = Object.fromEntries(Object.entries(P50).map(([c, d]) => [c, med(d)])), DQ = Object.fromEntries(Object.entries(Q).map(([c, d]) => [c, med(d)]));
+      const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...of(c, "p99"))]));
+      const resMax = Math.max(...CONFIGS.flatMap((c) => of(c, "res")));
+      const spread = CONFIGS.filter((c) => spreadStop(of(c, "p50")));
+      const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : [])];
+      const valid = D.aa <= T50 && DQ.aa <= U && D.delay > T50 && DQ.tail > U, pass = D.head <= T50 && DQ.head <= U, backstop = p99.head <= 250;
       const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
       verdicts.push(verdict);
-      rows[workload] = { verdict, stop, B, T, D, paired, worst, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
-      const f = (x) => x.toFixed(2);
-      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired ${q} medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
-      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} ${q} ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])}); p50 ${runs[c].map((x) => f(x.p50)).join(" / ")}; max ${runs[c].map((x) => f(x.max)).join(" / ")}; stalled ${runs[c].map((x) => x.stalled).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
+      rows[workload] = { verdict, stop, B50, T50, U, D, DQ, P50, Q, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
+      const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
+      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us`);
+      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
-    report.browsers[bname] = { version: b.version, quantile: QUANT[bname], scale: bname === "firefox" ? FF_SCALE : 1, rows };
+    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
     await b.close();
   }
 } finally {
