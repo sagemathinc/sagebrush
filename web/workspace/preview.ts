@@ -10,6 +10,7 @@ import { migrationState, type MigrationState } from "./migrator";
 import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { TRASH, nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+import { restoreServerVersion, serverVersionBytes, serverVersions } from "./server-versions";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -266,6 +267,7 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
   el.replaceChildren(h("h3", { textContent: list.length ? `Earlier versions (${list.length})` : "Earlier versions" }));
   if (!list.length) {
     el.append(h("p", { className: "note", textContent: "None yet: when this file is written over, what it had is kept here." }));
+    void drawServerVersions(w, e, el, host, close);
     return;
   }
   // (newest first; each by its id, which stays its own while older ones are dropped)
@@ -302,6 +304,38 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
     }, "danger");
     el.append(h("div", { style: "margin-top:8px" }, del));
   }
+  void drawServerVersions(w, e, el, host, close);
+}
+
+/** The server's versions of a synced data file (version-history note r1), below the device's own: each with Download
+ * and Restore; the file's own bytes now aren't listed.  Nothing where the server can't say (sync off, offline). */
+async function drawServerVersions(w: Workspace, e: Entry, el: HTMLElement, host: PreviewHost, close: () => void) {
+  if (NO_SYNC) return;
+  const list = (await serverVersions(e))?.filter((v) => v.sha256 !== e.sha256);
+  if (!list?.length || !el.isConnected) return;
+  const name = nameOf(e.path);
+  const box = h("div", { className: "server-versions" }, h("h3", { textContent: `On the server (${list.length})` }));
+  for (const v of list) {
+    const r = h("div", { className: "vr" }, h("span", { textContent: `${fmtTime(v.t)} · ${who(v.by)} · ${fmtSize(v.size)}` }));
+    r.dataset.sha256 = v.sha256;
+    r.append(
+      button("Download", async () => {
+        try { downloadBytes(await serverVersionBytes(v), `${splitExt(name)[0]} (${new Date(v.t).toISOString().slice(0, 16).replace(":", "-")})${splitExt(name)[1]}`); } catch (err) { host.say(`That version couldn't be downloaded: ${(err as Error).message}`); }
+      }),
+      button("Restore", async () => {
+        try {
+          await restoreServerVersion(w, e, v);
+          host.say(`"${name}" restored to the server's version of ${fmtTime(v.t)}`);
+          close();
+        } catch (err) {
+          if (err instanceof WorkspaceError) stale(err, name, host, close);
+          else host.say(`"${name}" wasn't restored: ${(err as Error).message}`);
+        }
+      }),
+    );
+    box.append(r);
+  }
+  el.append(box);
 }
 
 /** "Delete older versions in this folder" (§2.5): what it frees said and confirmed; only a person. */
