@@ -8,7 +8,7 @@
 // A data file opens its preview, with its earlier versions; a folder's ⋯
 // deletes older versions in it; the foot's meter opens the Storage panel
 // (preview.ts, step 2b).
-import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
+import { Workspace, WorkspaceError, LIMITS, type Entry, type TrashGate } from "./api";
 import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
@@ -50,8 +50,15 @@ export type BrowserHost = {
   /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
    * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
    * moved). None: the page can't, and an open document isn't moved to Trash. */
-  trashing?(e: Entry): Promise<string | void | { still?: () => boolean }>;
+  trashing?(e: Entry): Promise<string | void | TrashGate>;
+  /** Every Move to Trash of what is open here, once it has settled (moved, refused or failed): `gate` is what trashing
+   * returned (none if it refused), `moved` what went to Trash if it did (the page releases its navigation hold, and
+   * tells a navigation that waited into it, with `dropped`). */
+  trashDone?(gate: TrashGate | undefined, moved?: TrashMoved): void;
 };
+/** What went to Trash, for a navigation that waited into it (#447 r5c, board's (A)): said as not opened, with Restore
+ * and open while it can still be put back (`open` opens the notebook asked for once it is). */
+export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
 const RECENT = 5;
@@ -181,7 +188,7 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean; label?: string } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -220,8 +227,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     toast = null;
     renderToast();
   }, ms);
-  const say = (text: string, undo?: () => unknown, sticky = false, error = false) => {
-    toast = { text, undo, sticky, error };
+  const say = (text: string, undo?: () => unknown, sticky = false, error = false, label = "Undo") => {
+    toast = { text, undo, sticky, error, label };
     renderToast();
     if (!sticky) hideLater(toast, 10_000);
   };
@@ -235,7 +242,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (!toast) return;
     // (an error looks like one, and is announced as one: role=alert, kept until closed)
     const t = h("div", { className: toast.error ? "ftoast err" : "ftoast", role: toast.error ? "alert" : "status" }, h("span", { textContent: toast.text }));
-    if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); focusList(); void f(); }; t.append(u); }
+    // (Undo: the focus to the list meanwhile, its row after; another action (Restore and open) takes the focus itself)
+    if (toast.undo) { const label = toast.label ?? "Undo", u = h("button", { textContent: label }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); if (label === "Undo") focusList(); void f(); }; t.append(u); }
     if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Dismiss" }); x.setAttribute("aria-label", "Dismiss"); x.onclick = () => { const had = toastEl.contains(document.activeElement); toast = null; renderToast(); if (had) focusList(); }; t.append(x); }
     toastEl.append(t);
   };
@@ -500,14 +508,36 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // (the document open here, or a folder it is in: the page saves it and opens another in its place first, so what
     // goes to Trash is what was last seen, and Undo opens it again; a page that can't, says so and moves nothing)
     const wasOpen = cur && at && within(at, e.path) ? cur : null;
-    // (the page's own condition for the move, checked by the workspace holding its lock: astra's R2 on #447)
-    let still: (() => boolean) | undefined;
+    // (the page's own condition for the move, checked by the workspace holding its lock (astra's R2 on #447), and its
+    // navigation held from then until the move settles, told here once it has, whatever happened (astra3's
+    // B1-R4-CODE-1, #447 r5c))
+    let gate: TrashGate | undefined, moved: Entry | undefined;
     if (wasOpen) {
       if (!host.trashing) return sayError(`Not moved to Trash: "${nameOf(at!)}" is open on this page, and this page can't close it`);
       const r = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
-      if (typeof r === "string") return sayError(`Not moved to Trash: ${r}`);
-      still = r?.still;
+      if (typeof r === "string") { host.trashDone?.(undefined); return sayError(`Not moved to Trash: ${r}`); }
+      gate = r || undefined;
     }
+    try { await toTrashGated(e, wasOpen, gate, (t) => (moved = t)); }
+    finally {
+      if (wasOpen) host.trashDone?.(gate, moved && {
+        entry: moved,
+        // (a navigation that waited into what went: not opened (board's (A)); Restore and open while it is still there)
+        dropped: (name, open) => {
+          const text = `“${name}” was moved to Trash, so it wasn't opened.`;
+          void w.stat(moved!.path).then((x) => {
+            if (!x || x.created !== moved!.created || x.fid !== moved!.fid) return say(text);
+            say(text, async () => {
+              try { await w.restore(moved!.path, moved!); } catch (err) { await refresh(); return fail(err); }
+              await refresh();
+              await open();
+            }, false, false, "Restore and open");
+          }, () => say(text));
+        },
+      });
+    }
+  }
+  async function toTrashGated(e: Entry, wasOpen: ReturnType<NonNullable<BrowserHost["current"]>> | null, gate: TrashGate | undefined, done: (t: Entry) => void) {
     // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
     if (e.kind === "file" && e.unmoved) {
       if (!confirm(`"${nameOf(e.path)}" is too large to put in Trash (${fmtSize(e.size ?? 0)}, kept by an older version of Sagebrush). Delete it for good? To keep it, Download it first.`)) return;
@@ -520,7 +550,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     try {
       // (by its identity: whatever is at that path now, if not the entry chosen (replaced meanwhile, as across the
       // trashing hook's waits), is refused, astra's R1 on #447)
-      const t = await w.remove(e.path, e, undefined, still ? { still } : {});
+      const t = await w.remove(e.path, e, undefined, gate ?? {});
+      done(t);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
       // (and the document that was open, open again where Undo put it back)
       const reopen = async () => {
