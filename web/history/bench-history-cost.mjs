@@ -82,7 +82,18 @@ const build = async (entry, naming) => {
   const b = await Bun.build({ entrypoints: [entry], outdir: site, naming, target: "browser", format: "esm" });
   if (!b.success) die(b.logs.join("\n"));
 };
-for (const [name, dir] of [["base", base], ["aa", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
+for (const [name, dir] of [["base", base], ["aa", base], ["warm", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
+// (A2: the built bundles' sha256; ws-warm, ws-base and ws-aa come from the same base tree and must be byte-identical; with
+// HCOST_FROZEN_HASHES (a packet's FROZEN-HASHES: "<sha256>  ws-<name>.js" lines) every listed bundle must match, else BAD)
+const { createHash } = await import("node:crypto");
+const BUNDLE_SHA = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, createHash("sha256").update(readFileSync(join(site, `ws-${n}.js`))).digest("hex")]));
+if (!(BUNDLE_SHA.warm === BUNDLE_SHA.base && BUNDLE_SHA.aa === BUNDLE_SHA.base)) die(`ws-warm, ws-base and ws-aa aren't byte-identical (${BUNDLE_SHA.warm} ${BUNDLE_SHA.base} ${BUNDLE_SHA.aa})`);
+if (process.env.HCOST_FROZEN_HASHES) {
+  const want = Object.fromEntries(readFileSync(process.env.HCOST_FROZEN_HASHES, "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/)).map(([h, f]) => [f, h]));
+  for (const [f, h] of Object.entries(want)) { const n = f.replace(/^ws-|\.js$/g, ""); if (BUNDLE_SHA[n] !== h) die(`FROZEN-HASHES: ${f} is ${BUNDLE_SHA[n]}, frozen ${h}`); }
+  if (!want["ws-warm.js"]) die("FROZEN-HASHES doesn't pin ws-warm.js");
+}
+if (process.argv.includes("--hashes-only")) { for (const [n, h] of Object.entries(BUNDLE_SHA)) console.log(`${h}  ws-${n}.js`); process.exit(0); }
 writeFileSync(join(site, "bench.js"), `
 const N = { files: 500, notebooks: 500, concurrent: 200 };
 const pct = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)]; };
@@ -107,6 +118,19 @@ export function resolution() {
   let last = performance.now();
   while (steps.length < 200) { const t = performance.now(); if (t > last) { steps.push(t - last); last = t; } }
   return pct(steps, 0.5);
+}
+// (r4, A2: the declared, discarded, identical warm-up of every fresh process: WARM_SAVES file saves through ws-warm.js,
+// the base tree built under its own name, so every process loads the same extra code whatever its configuration)
+export async function warm() {
+  const W = await import("./ws-warm.js"), name = "hcost-warm-" + Math.random().toString(36).slice(2), mainName = name + "-m", t0 = performance.now();
+  const w = await W.Workspace.open({ name, mainName }), bytes = new Uint8Array(4096).fill(7), lat = [];
+  await w.create("/w.bin", { content: bytes });
+  for (let i = 0; i < 100; i++) { const a = performance.now(); await w.write("/w.bin", bytes); lat.push(performance.now() - a); }
+  w.close();
+  for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
+  // (its databases verified gone before any measured run: none of this page's databases may remain)
+  const left = (await indexedDB.databases()).map((d) => d.name);
+  return { saves: lat.length, lat, left, ms: performance.now() - t0 };
 }
 export async function bench(config, workload, scale = 1) {
   const res = resolution();
@@ -139,8 +163,8 @@ export async function bench(config, workload, scale = 1) {
   return r;
 }
 `);
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history cost</title><script type="module">import { bench, resolution } from "./bench.js"; window.bench = bench; window.resolution = resolution; window.ready = true;</script>`);
-const FILES = ["/bench.js", "/ws-base.js", "/ws-aa.js", "/ws-head.js", "/ws-delay.js"];
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history cost</title><script type="module">import { bench, resolution, warm } from "./bench.js"; window.bench = bench; window.resolution = resolution; window.warm = warm; window.ready = true;</script>`);
+const FILES = ["/bench.js", "/ws-base.js", "/ws-aa.js", "/ws-warm.js", "/ws-head.js", "/ws-delay.js"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });
@@ -151,6 +175,7 @@ const url = `http://127.0.0.1:${server.port}/`, sleep = (ms) => new Promise((r) 
 // (a browser as one function: evaluate(expr) in a page at `url`)
 async function chromium() {
   const profile = mkdtempSync(join(tmpdir(), "sb-hcost-")), chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
+  GROUPS.add(chrome.pid);
   const port = await devtoolsPort(profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
@@ -165,7 +190,9 @@ async function chromium() {
   await send("Page.navigate", { url });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
   const version = (await send("Browser.getVersion")).product;
-  return { ev, version, close: () => { ws.close(); try { process.kill(-chrome.pid, "SIGKILL"); } catch {} rmSync(profile, { recursive: true, force: true }); } };
+  // (A1: close kills the process group and reaps it: resolved only once the browser process has exited)
+  const exited = new Promise((r) => chrome.once("exit", r));
+  return { ev, version, close: async () => { ws.close(); try { process.kill(-chrome.pid, "SIGKILL"); } catch {} await Promise.race([exited, sleep(15000)]); rmSync(profile, { recursive: true, force: true }); } };
 }
 async function firefox() {
   if (!process.env.PLAYWRIGHT) die("PLAYWRIGHT (the directory of playwright 1.64.1) is needed for Firefox");
@@ -173,8 +200,38 @@ async function firefox() {
   const browser = await pw.firefox.launch({ firefoxUserPrefs: { "privacy.reduceTimerPrecision": false, "privacy.resistFingerprinting": false } }), page = await browser.newPage();
   await page.goto(url);
   await page.waitForFunction("window.ready === true");
-  return { ev: (expression) => page.evaluate(expression), close: () => browser.close(), version: browser.version() };
+  return { ev: (expression) => page.evaluate(expression), close: () => Promise.race([browser.close(), sleep(15000)]), version: browser.version() };
 }
+// (A1: the census between runs: this user's processes of either browser (Chromium's sb-hcost- profiles, the staged
+// Firefox's path); a fresh process is launched only at a census of 0, else a sticky STOP)
+const censusMarks = () => [join(tmpdir(), "sb-hcost-"), ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? [join(process.env.PLAYWRIGHT_BROWSERS_PATH, "firefox-")] : [])];
+// (the grader's and daybreak3's A1: the census counts (1) every descendant of this process, the whole tree, whatever
+// its name; (2) every process in a process group this bench created (a Chromium's, which survives reparenting); (3) every
+// process naming a browser profile or the staged Firefox.  The ps command itself is never counted.  Pure, with rows)
+const GROUPS = new Set();
+const censusOf = (psText, root, groups, marks) => {
+  const procs = psText.split("\n").map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map((m) => ({ pid: +m[1], ppid: +m[2], pgid: +m[3], args: m[4] }));
+  const kids = new Map(); for (const p of procs) (kids.get(p.ppid) ?? kids.set(p.ppid, []).get(p.ppid)).push(p);
+  const tree = new Set(), stack = [root];
+  while (stack.length) for (const k of kids.get(stack.pop()) ?? []) if (!tree.has(k.pid)) { tree.add(k.pid); stack.push(k.pid); }
+  return procs.filter((p) => p.pid !== root && !p.args.startsWith("ps ") && (tree.has(p.pid) || groups.has(p.pgid) || marks.some((m) => p.args.includes(m)))).length;
+};
+{
+  const ps = (rows) => rows.map((r) => r.join(" ")).join("\n"), M = ["/tmp/sb-hcost-"];
+  for (const [rows, want, what] of [
+    [[[100, 1, 100, "bun bench"], [200, 100, 100, "ps -e -o"]], 0, "only this process and the census's own ps: 0"],
+    [[[100, 1, 100, "bun bench"], [201, 100, 201, "some-child"]], 1, "a child left alive, whatever its name: 1"],
+    [[[100, 1, 100, "bun bench"], [201, 100, 201, "x"], [202, 201, 201, "grandchild"]], 2, "a child and a grandchild: 2"],
+    [[[100, 1, 100, "bun bench"], [301, 1, 777, "chrome --type=renderer"]], 1, "reparented to init but in a created group: 1"],
+    [[[100, 1, 100, "bun bench"], [302, 1, 302, "chrome --user-data-dir=/tmp/sb-hcost-ab"]], 1, "a stray naming a profile: 1"],
+    [[[100, 1, 100, "bun bench"], [400, 1, 400, "sshd: user"], [401, 1, 401, "someone else"]], 0, "unrelated processes: 0"],
+  ]) if (censusOf(ps(rows), 100, new Set([777]), M) !== want) die(`the census's unit row: ${what}`);
+}
+function census() {
+  const ps = spawnSync("ps", ["-e", "-o", "pid=,ppid=,pgid=,args="], { encoding: "utf8" }).stdout ?? "";
+  return censusOf(ps, process.pid, GROUPS, censusMarks());
+}
+async function censusZero() { for (let i = 0; i < 150; i++) { if (census() === 0) return true; await sleep(100); } return false; }
 
 // (the instability/spread STOP, on each configuration's five p50s, and its boundary controls: each conjunct at
 // equality is NOT past, just above is)
@@ -253,10 +310,28 @@ const qAnchored = (tail, base) => {
   if (!near(QA, [0.1, 0, -0.1]) || Math.abs(DQA) > 1e-12) die(`q'(tail)'s unit row: less that round's base q, their median (${QA}; ${DQA})`);
   if (med([3, 1, 2]) !== 2 || med([4, 1, 3, 2]) !== 2.5) die("the median's unit row");
 }
+// (A2's static rules for the warm-up (daybreak3's mutants: a configuration-specific bundle, save-count drift, a leaked
+// database, warm-up leakage into a measured run): warm() imports ws-warm.js exactly once and nothing else, never reads
+// the configuration, makes exactly 100 saves, deletes AND verifies its databases, never touches the measured samples;
+// bench() never calls it.  Applied to the built page before the run; the selftest mutates the source against it)
+const warmFault = (src) => {
+  const a = src.indexOf("export async function warm()"), b = src.indexOf("export async function bench(");
+  if (a < 0 || b < a) return "no warm() before bench()";
+  const e = src.indexOf("return r;", b), w = src.slice(a, b), m = src.slice(b, e);
+  if (e < 0) return "no end of bench()";
+  if (w.split('import("./ws-warm.js")').length !== 2 || w.split("import(").length !== 2) return "warm() doesn't import exactly ws-warm.js, once";
+  if (/config/.test(w)) return "warm() reads the configuration";
+  if (w.split("i < 100;").length !== 2 || w.split("i++").length !== 2) return "warm() isn't exactly 100 saves";
+  if (!w.includes("indexedDB.deleteDatabase(d)") || !w.includes("await indexedDB.databases()")) return "warm() doesn't delete and verify its databases";
+  if (/\bout\b/.test(w)) return "warm() touches the measured samples";
+  if (/warm\(/.test(m)) return "bench() calls the warm-up";
+  return null;
+};
 // (the two mutants' anchors, preflighted: DELAY's patch landed exactly once; TAIL's hook is in the page exactly once)
 {
   const d = readFileSync(join(delay, "web/history/tokens.ts"), "utf8"), b = readFileSync(join(site, "bench.js"), "utf8");
   if (d.split("while (performance.now() - t0 < 2) {}").length !== 2) die("the DELAY mutant's anchor isn't in place exactly once");
+  const wf = warmFault(b); if (wf !== null) die(`the warm-up's static rule: ${wf}`);
   if (b.split("TAIL-ANCHOR").length !== 2 || b.split('config === "tail" && ++started % 10 === 0').length !== 2) die("the TAIL mutant's anchor isn't in place exactly once");
 }
 // (the verdict of one browser and workload, from its STOPs and medians; and its unit rows: the power rows are strict
@@ -289,26 +364,94 @@ const verdictOf = (stop, m) => {
   ]) if (verdictOf([], { ...ok, ...over }) !== want) die(`the verdict's unit row: ${what}`);
   if (verdictOf(["x"], ok) !== "STOP") die("the verdict's unit row: a STOP outranks every row");
 }
+// (r4 (the grader 9308b24b, daybreak3): the frozen order of each leg's workload, 5 rounds of the 6 configurations;
+// over the whole 30-run sequence, round boundaries included: the run after tail is each of base, aa, head, delay and set
+// exactly once; tail is never last; base opens only round 1; each configuration takes 5 different positions; no ordered
+// neighbour pair occurs twice.  Its rule rows below; the selftest's mutants break each)
+const ORDER = [
+  ["base", "aa", "head", "delay", "set", "tail"],
+  ["set", "head", "base", "tail", "delay", "aa"],
+  ["aa", "delay", "tail", "base", "head", "set"],
+  ["delay", "base", "set", "aa", "tail", "head"],
+  ["head", "tail", "aa", "set", "base", "delay"],
+];
+const orderFault = (t) => {
+  const seq = t.flat(), NT = ["base", "aa", "head", "delay", "set"];
+  if (t.length !== 5 || t.some((r) => r.length !== 6 || new Set(r).size !== 6 || r.some((c) => !NT.includes(c) && c !== "tail"))) return "not 5 rounds of the 6 configurations";
+  // (tail is never last: implied by the next rule, which needs a run after each of the five tails)
+  const after = seq.flatMap((c, i) => (c === "tail" ? [seq[i + 1]] : []));
+  if ([...after].sort().join() !== [...NT].sort().join()) return `the runs after tail are ${after.join(",")}`;
+  if (t.every((r) => r[0] === "base")) return "base opens every round";
+  for (let k = 0; k < 6; k++) if (new Set(t.map((r) => r[k])).size !== 5) return `position ${k + 1} repeats a configuration`;
+  const pairs = seq.slice(1).map((c, i) => seq[i] + ">" + c);
+  if (new Set(pairs).size !== pairs.length) return "an ordered neighbour pair repeats";
+  return null;
+};
+{
+  if (orderFault(ORDER) !== null) die(`the order table's rule row: ${orderFault(ORDER)}`);
+  const rot = [0, 1, 2, 3, 4].map((r) => ORDER[0].map((_, k) => ORDER[0][(k + r) % 6]));
+  if (orderFault(rot) === null) die("the order table's rule row: r3's cyclic rotation isn't refused");
+  const lastTail = ORDER.map((r) => [...r]); lastTail[4] = ["head", "aa", "set", "base", "delay", "tail"];
+  if (orderFault(lastTail) === null) die("the order table's rule row: tail last isn't refused");
+  // (a table meeting every rule but the neighbour-pair one (found by search): tail>set occurs twice)
+  const pairRepeat = [["tail", "set", "delay", "head", "aa", "base"], ...ORDER.slice(1)];
+  if (orderFault(pairRepeat) !== "an ordered neighbour pair repeats") die(`the order table's rule row: a repeated neighbour pair isn't refused for that reason (${orderFault(pairRepeat)})`);
+}
+// (the per-predecessor q table, by actual chronology (R4): each workload's runs in the order run; a run's predecessor is
+// the run before it in that workload (the first has none and is excluded); tail's own runs are excluded (the mutant);
+// carry = |mean q after tail - mean q after any other|.  INFO: carry > U is a STOP; COUNTED: reported only)
+const carryOf = (seq) => {
+  const after = [], other = [];
+  for (let i = 1; i < seq.length; i++) { if (seq[i].c === "tail") continue; (seq[i - 1].c === "tail" ? after : other).push(seq[i].q); }
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const byPred = {};
+  for (let i = 1; i < seq.length; i++) if (seq[i].c !== "tail") (byPred[seq[i - 1].c] ??= []).push(seq[i].q);
+  return { afterTail: mean(after), other: mean(other), carry: Math.abs(mean(after) - mean(other)), nAfter: after.length, nOther: other.length, byPred: Object.fromEntries(Object.entries(byPred).map(([p, xs]) => [p, mean(xs)])) };
+};
+{
+  const mk = (qs) => qs.map(([c, q]) => ({ c, q }));
+  const a = carryOf(mk([["base", 0.5], ["tail", 0.9], ["aa", 0.02], ["head", 0.05], ["tail", 0.9], ["set", 0.04], ["delay", 0.06]]));
+  if (a.nAfter !== 2 || a.nOther !== 2 || Math.abs(a.afterTail - 0.03) > 1e-12 || Math.abs(a.other - 0.055) > 1e-12 || Math.abs(a.carry - 0.025) > 1e-12) die(`the carryover's unit row: chronology, tail excluded, first run excluded (${JSON.stringify(a)})`);
+}
+// (a sticky STOP during the run: launch failure, a non-zero census, a version change; the report so far, then STOP)
+const stopNow = (why) => { console.log(`HCOST: STOP (${why})`); writePartial(`STOP: ${why}`); process.exit(3); };
+const MODE = process.env.HCOST_MODE ?? "";
+if (!["INFO", "COUNTED"].includes(MODE)) die("HCOST_MODE: INFO or COUNTED, declared before the run");
 const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
-const report = { master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
-console.log(`declared: ${report.declared}; Firefox scale ${FF_SCALE}`);
+const report = { mode: MODE, order: ORDER, bundles: BUNDLE_SHA, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
+console.log(`declared: ${report.declared}; mode ${MODE} (INFO: per-predecessor carry <= U or STOP; COUNTED: reported); a fresh browser process per run with the identical warm-up; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 partial = report;
 let crash = null;
 try {
   for (const [bname, open] of [["chromium", chromium], ["firefox", firefox]]) {
     if (!LEGS.includes(bname)) continue;
-    const b = await open(), rows = {};
-    console.log(`${bname}: ${b.version}`);
-    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
+    const rows = {}, leg = report.browsers[bname] = { version: null, scale: bname === "firefox" ? FF_SCALE : 1, launches: 0, warm: [], rows };
+    // (one fresh process per run: census 0, launch, the warm-up, the run, close and reap)
+    const fresh = async (fn) => {
+      if (!(await censusZero())) stopNow(`${bname}: ${census()} browser process(es) left before a launch`);
+      let b;
+      try { b = await open(); } catch (e) { stopNow(`${bname}: the launch failed: ${String(e?.message ?? e).slice(0, 300)}`); }
+      leg.launches++;
+      if (leg.version === null) { leg.version = b.version; console.log(`${bname}: ${b.version}`); }
+      else if (b.version !== leg.version) stopNow(`${bname}: the version changed between launches (${leg.version} -> ${b.version})`);
+      try {
+        const wu = await b.ev("window.warm()");
+        leg.warm.push(wu);
+        // (A2: exactly the declared 100 saves; no database left behind; the evidence kept apart, never in a measured row)
+        if (wu.saves !== 100 || !Array.isArray(wu.lat) || wu.lat.length !== 100) stopNow(`${bname}: the warm-up made ${wu.saves} saves, not 100`);
+        if (!Array.isArray(wu.left) || wu.left.length !== 0) stopNow(`${bname}: the warm-up left database(s) ${JSON.stringify(wu.left)}`);
+        return await fn(b);
+      } finally { await b.close(); if (!(await censusZero())) stopNow(`${bname}: ${census()} browser process(es) left after a close`); }
+    };
     for (const workload of ["files", "notebooks", "concurrent"]) {
-      const runs = Object.fromEntries(CONFIGS.map((c) => [c, []])), order = [];
+      const runs = Object.fromEntries(CONFIGS.map((c) => [c, []])), order = [], chrono = [];
       report.inProgress = { browser: bname, workload, order, runs };
       for (let r = 0; r < ROUNDS; r++) {
-        const turn = CONFIGS.map((_, k) => CONFIGS[(k + r) % CONFIGS.length]);
+        const turn = ORDER[r];
         order.push(turn);
-        for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`));
+        for (const c of turn) { const x = await fresh((b) => b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`)); runs[c].push(x); chrono.push({ c, q: x.q }); }
       }
       // (structural, every configuration tail included: exactly the declared save count, finite statistics and wall time)
       const scale = bname === "firefox" ? FF_SCALE : 1, want = (workload === "concurrent" ? 4 * 200 : 500) * scale;
@@ -322,17 +465,19 @@ try {
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...of(c, "p99"))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => of(c, "res")));
       const spread = spreadOf(Object.fromEntries(CONFIGS.map((c) => [c, of(c, "p50")])));
-      const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : [])];
+      const carry = carryOf(chrono), carryPast = carry.carry > U;
+      const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : []), ...(MODE === "INFO" && carryPast ? [`carryover: |q after tail - q after others| ${(100 * carry.carry).toFixed(2)} pp > U`] : [])];
       const m = { T50, aaP50: D.aa, aaQ: DQ.aa, delayP50: D.delay, tailQ: DQ.tail, tailQa: DQA, headP50: D.head, headQ: DQ.head, headP99: p99.head };
       const verdict = verdictOf(stop, m), backstop = p99.head <= 250;
       verdicts.push(verdict);
       delete report.inProgress;
-      rows[workload] = { verdict, stop, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
+      rows[workload] = { verdict, stop, carry, chrono, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
-      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us`);
+      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us; carryover q after tail ${pp(carry.afterTail)} vs after others ${pp(carry.other)}: ${pp(carry.carry)} (${carryPast ? "PAST" : "within"} U${MODE === "INFO" ? "" : ", reported"})`);
+      console.log(`  per-predecessor mean q: ${Object.entries(carry.byPred).map(([p, q]) => `${p} ${pp(q)}`).join("; ")}`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
-    await b.close();
+    console.log(`${bname}: ${leg.launches} fresh processes, warm-ups ${leg.warm.length} (discarded)`);
   }
 } catch (e) {
   crash = e;
