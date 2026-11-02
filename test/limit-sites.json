@@ -4702,10 +4702,10 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet #0": {
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet #0": {
   "class": "coverage",
   "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "base_extend of a curve over QQ to a ring other than QQ, ZZ, GF(p), Zmod(p): not available yet (Sage has them)"
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
   "class": "coverage",
@@ -4901,6 +4901,11 @@
   "class": "none",
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
