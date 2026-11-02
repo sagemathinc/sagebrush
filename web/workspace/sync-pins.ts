@@ -52,8 +52,10 @@ export const PINS = {
    * committed: throwing aborts it, as a page killed there would) */
   cutAfterRead: null as null | ((rec: { id: string; op: { sha256?: string } }) => void),
 };
-/** The stores a local change's transaction takes for this, besides its own. */
-export const SYNC_STORES = ["pending", "pins", "meta"];
+/** The stores a local change's transaction takes for this, besides its own; with history's (web/history/tokens.ts:
+ * every change's token is written in its own transaction, so every scope that logs an op holds them, the server's
+ * applies through the view included). */
+export const SYNC_STORES = ["pending", "pins", "meta", "htokens", "hmeta"];
 /** The stores release needs: a pin kept apart has a version, an orphan has bytes, an owner has its pending record. */
 export const RELEASE_STORES = ["pending", "pins", "meta", "versions", "versionBytes", "prunable", "entries", "fileBytes"];
 
