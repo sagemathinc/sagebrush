@@ -1,0 +1,29 @@
+S01 32 | Integer Ring
+S02 33 | Integer Ring
+S03 46 | Integer Ring
+S04 [1, 2, 3] | <class 'list'>
+S05 3 | Integer Ring
+S06 4 | Integer Ring
+S07 3 | Integer Ring
+S08 -4 | Integer Ring
+S09 4 | Integer Ring
+S10 -2 | Integer Ring
+S11 -1 | Integer Ring
+S12 4 | Integer Ring
+S13 19 | Integer Ring
+S14 19 | Integer Ring
+S15 20 | Integer Ring
+S16 1 | Integer Ring
+S17 -2 | Integer Ring
+S18 2 | Integer Ring
+S19 5 | Integer Ring
+S20 floor(y) | Symbolic Ring
+S21 ceil(y + 1) | Symbolic Ring
+S22 floor(sqrt(y)) | Symbolic Ring
+S23 100000000000000000000 | Integer Ring
+S24 141421356237309504880 | Integer Ring
+S25 164 | Integer Ring
+S27 333333 | Integer Ring
+S28 False | <class 'bool'>
+S29 [0, 1, 2, 3, 4] | <class 'list'>
+S30 125 | Integer Ring
