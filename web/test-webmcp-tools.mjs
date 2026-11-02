@@ -133,8 +133,11 @@ try {
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));
 } finally {
+  // (Chromium's profile removed only once it has exited: it writes there until then, CI's ENOTEMPTY on #516)
+  const gone = chrome.exitCode !== null || chrome.signalCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
   chrome.kill(); serve.kill();
-  rmSync(tmp, { recursive: true, force: true });
+  await Promise.race([gone, sleep(5000)]);
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 console.log(`${checks - fails.length}/${checks} checks passed`);
 process.exit(fails.length ? 1 : 0);
