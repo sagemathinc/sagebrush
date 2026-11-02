@@ -153,6 +153,49 @@ export function startAuto(w: Workspace, host: GitpushHost): void {
   void turn();
 }
 
+/** (M4a) The History list: the branch's commits in this browser, newest first; a commit's files; a file as that commit
+ * holds it, shown as text (never as HTML) or offered as a download. Only reads: nothing in the workspace changes. */
+export async function showHistory(host: GitpushHost, o: { scope: string; repo: string; branch: string }, into: HTMLElement): Promise<void> {
+  const commits: { oid: string; message: string; at: number }[] = await call(host.workerUrl, "log", { ...o, depth: 100 });
+  const list = el("ol", { className: "gphist" });
+  if (!commits.length) { into.replaceChildren(el("p", { className: "note", textContent: "No versions in this browser yet: push once first." })); return; }
+  for (const c of commits) {
+    const open = el("button", { textContent: `${c.message.split("\n")[0]} · ${ago(c.at)} · ${c.oid.slice(0, 7)}` });
+    const files = el("div");
+    open.onclick = async () => {
+      if (files.childNodes.length) { files.replaceChildren(); return; }
+      const r = await call(host.workerUrl, "files", { ...o, oid: c.oid });
+      const ul = el("ul");
+      for (const path of r.files as string[]) {
+        const view = el("div");
+        const b = el("button", { textContent: path, className: "gpfile" });
+        b.onclick = async () => {
+          if (view.childNodes.length) { view.replaceChildren(); return; }
+          const f = await call(host.workerUrl, "read", { ...o, oid: c.oid, path });
+          const bytes = f.bytes as Uint8Array;
+          let text: string | null = null;
+          if (!bytes.includes(0)) try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, 2 ** 20)); } catch {}
+          const save = el("button", { textContent: "Download", onclick: () => {
+            const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" }));
+            const a = el("a", { href: url, download: path.split("/").pop() || "file" });
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 10_000);
+          } });
+          view.replaceChildren(
+            text !== null ? el("pre", { className: "gptext", textContent: text + (bytes.length > 2 ** 20 ? "\n…" : "") }) : el("p", { className: "note", textContent: `Not text: ${f.size} bytes.` }),
+            save, f.truncated ? el("span", { className: "note", textContent: " (only its first 50 MB)" }) : "",
+          );
+        };
+        ul.append(el("li", {}, b, view));
+      }
+      if (r.more) ul.append(el("li", { textContent: `and ${r.more} more files` }));
+      files.replaceChildren(ul);
+    };
+    list.append(el("li", {}, open, files));
+  }
+  into.replaceChildren(el("p", { className: "note", textContent: `Versions of ${o.branch} in this browser, newest first (the same commits as on GitHub once pushed):` }), list);
+}
+
 /** The section in the Storage panel. */
 export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElement): Promise<void> {
   const scope = w.ws.name;
@@ -218,13 +261,21 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
       status.textContent = e?.message ?? "The push failed.";
     } finally { pushing = false; void drawToken(); }
   };
+  // (M4a: the History list, of the repository and folder last pushed here)
+  const hist = el("div");
+  const histBtn = el("button", { textContent: "History", onclick: async () => {
+    if (hist.childNodes.length) { hist.replaceChildren(); return; }
+    const s2 = await call(host.workerUrl, "status", { scope });
+    if (!s2.repo || !s2.folder) { hist.replaceChildren(el("p", { className: "note", textContent: "No versions in this browser yet: push once first." })); return; }
+    try { await showHistory(host, { scope, repo: s2.repo, branch: branchFor(s2.folder) }, hist); } catch (e: any) { hist.replaceChildren(el("p", { className: "note", textContent: e?.message ?? "The history couldn't be read." })); }
+  } });
   box.replaceChildren(
     el("p", {}, el("b", { textContent: "Push to GitHub" }), " (preview)"),
     el("div", {}, "Repository ", repo),
     el("div", {}, "Folder ", folder, el("span", { className: "note", textContent: " pushes to the branch sagebrush/<its name>; never main" })),
     tokenLine,
     el("p", { className: "note", textContent: "Use a fine-grained token for this one repository, with Contents: Read and write, expiring in 30 days or less. It stays in this browser: Sagebrush's servers never store it. Notebooks are pushed without their outputs." }),
-    go, status, autoLine, skips,
+    go, status, autoLine, skips, histBtn, hist,
   );
   await drawToken();
 }
