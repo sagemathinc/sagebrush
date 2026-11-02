@@ -1036,7 +1036,11 @@ try {
       await goOn("publishing:small");
       const r1 = await at("leased");
       need(r1, "its second seam wasn't reached");
-      const rp = await curPath();
+      // (the open notebook's path, waited for (every 100 ms, at most 10 s): mid-switch it isn't listed yet, and a null
+      // path must not reach trashRow (the grader's ruling ada70738: a deterministic T15 under K26))
+      let rp = null;
+      for (const end = Date.now() + 10000; rp == null && Date.now() < end; ) { rp = await curPath(); if (rp == null) await sleep(100); }
+      need(rp, "the open notebook's path wasn't found within 10 s");
       await trashRow(rp);
       const said = await errHas("the page changed meanwhile", 30000);
       const kept = await ev(`${W}.stat(${JSON.stringify(rp)}).then((e) => !!e)`);
