@@ -1,0 +1,146 @@
+S01 x^2*(y - 1/x) || x^{2} {\left(y - \frac{1}{x}\right)}
+S02 x*(y - 1/x) || x {\left(y - \frac{1}{x}\right)}
+S03 (x + 1)*x || {\left(x + 1\right)} x
+S04 (x + 1)*y || {\left(x + 1\right)} y
+S05 x*(y + 1) || x {\left(y + 1\right)}
+S06 (a + b)*c || {\left(a + b\right)} c
+S07 a*(c + d) || a {\left(c + d\right)}
+S08 (b + c)*b || {\left(b + c\right)} b
+S09 (b + c)*c || {\left(b + c\right)} c
+S10 (x^2 + y)*x || {\left(x^{2} + y\right)} x
+S11 (y^2 + x)*y || {\left(y^{2} + x\right)} y
+S12 x*y*(z - 1/y) || x y {\left(z - \frac{1}{y}\right)}
+S13 1/(x^2*(y - 1/x)) || \frac{1}{x^{2} {\left(y - \frac{1}{x}\right)}}
+S14 1/(x*(y - 1/x)) || \frac{1}{x {\left(y - \frac{1}{x}\right)}}
+S15 1/((x - 1/y)*y) || \frac{1}{{\left(x - \frac{1}{y}\right)} y}
+S16 1/((a + b)*c^2) || \frac{1}{{\left(a + b\right)} c^{2}}
+S17 1/(a^2*(c + d)) || \frac{1}{a^{2} {\left(c + d\right)}}
+S18 (x + y)*(x - y) || {\left(x + y\right)} {\left(x - y\right)}
+S19 (x + 1)*(y + 1) || {\left(x + 1\right)} {\left(y + 1\right)}
+S20 (x + 2)*(x + 1)*x || {\left(x + 2\right)} {\left(x + 1\right)} x
+S21 -a*b^2 + (a^2 - b^2)*a || -a b^{2} + {\left(a^{2} - b^{2}\right)} a
+S22 -(x + y)*x + x^2 + x*y - 1 || -{\left(x + y\right)} x + x^{2} + x y - 1
+S23 (x + y)*x + x*y || {\left(x + y\right)} x + x y
+S24 x^2 + (x + y)*y || x^{2} + {\left(x + y\right)} y
+S25 (x + y)*x + y^2 || {\left(x + y\right)} x + y^{2}
+S26 a*b + (a + b)*c || a b + {\left(a + b\right)} c
+S27 (a + b)*c + a*c || {\left(a + b\right)} c + a c
+S28 (a - b)*c + c*d || {\left(a - b\right)} c + c d
+S29 (x + 1)*x^2 + x^3 + x || {\left(x + 1\right)} x^{2} + x^{3} + x
+S30 (x - 1)*x + x^2 + x || {\left(x - 1\right)} x + x^{2} + x
+S31 -(f*h - x*y)*a + (f*g - d*y)*b + (d*h - g*x)*c || -{\left(f h - x y\right)} a + {\left(f g - d y\right)} b + {\left(d h - g x\right)} c
+S32 -(f*h - x*y)*a + (c*h - b*y)*d + (b*f - c*x)*g || -{\left(f h - x y\right)} a + {\left(c h - b y\right)} d + {\left(b f - c x\right)} g
+S33 -(2/x - 3)/(y - 1/x) || -\frac{\frac{2}{x} - 3}{y - \frac{1}{x}}
+S34 2/x + (2/x - 3)/(x*(y - 1/x)) || \frac{2}{x} + \frac{\frac{2}{x} - 3}{x {\left(y - \frac{1}{x}\right)}}
+S35 -(2/x - 3)/(y - 1/x) || -\frac{\frac{2}{x} - 3}{y - \frac{1}{x}}
+S36 -(x - 1)/y || -\frac{x - 1}{y}
+S37 -(x - 1)/y || -\frac{x - 1}{y}
+S38 -(x - 1)*y || -{\left(x - 1\right)} y
+S39 -(x - 1)*y || -{\left(x - 1\right)} y
+S40 -(x + 1)/y || -\frac{x + 1}{y}
+S41 -(a - b)*c + d || -{\left(a - b\right)} c + d
+S42 -(a - b)*c + d || -{\left(a - b\right)} c + d
+S43 1/x + (1/x - 1)/(x*(y - 1/x)) || \frac{1}{x} + \frac{\frac{1}{x} - 1}{x {\left(y - \frac{1}{x}\right)}}
+S44 -(1/x - 1)/(y - 1/x) || -\frac{\frac{1}{x} - 1}{y - \frac{1}{x}}
+S45 -(1/x - 1)/(y - 1/x) || -\frac{\frac{1}{x} - 1}{y - \frac{1}{x}}
+S46 x - y + 1 || x - y + 1
+S47 (y - 1)*z + x || {\left(y - 1\right)} z + x
+S48 -(x - y)^2 || -{\left(x - y\right)}^{2}
+S49 -(x - y)/(x + y) || -\frac{x - y}{x + y}
+S50 -(x - y)/(x + y) || -\frac{x - y}{x + y}
+S51 -a*b^2 + (a^2 - b^2)*a || -a b^{2} + {\left(a^{2} - b^{2}\right)} a
+S52 -(f*h - x*y)*a + (c*h - b*y)*d + (b*f - c*x)*g || -{\left(f h - x y\right)} a + {\left(c h - b y\right)} d + {\left(b f - c x\right)} g
+S53 [1/x + 1/(x^2*(y - 1/x))        -1/(x*(y - 1/x))] ; [       -1/(x*(y - 1/x))             1/(y - 1/x)] || \left(\begin{array}{rr} ; \frac{1}{x} + \frac{1}{x^{2} {\left(y - \frac{1}{x}\right)}} & -\frac{1}{x {\left(y - \frac{1}{x}\right)}} \\ ; -\frac{1}{x {\left(y - \frac{1}{x}\right)}} & \frac{1}{y - \frac{1}{x}} ; \end{array}\right)
+S54 [                            1                             0 2/x + (2/x - 3)/(x*(y - 1/x))] ; [                            0                             1          -(2/x - 3)/(y - 1/x)] || \left(\begin{array}{rrr} ; 1 & 0 & \frac{2}{x} + \frac{\frac{2}{x} - 3}{x {\left(y - \frac{1}{x}\right)}} \\ ; 0 & 1 & -\frac{\frac{2}{x} - 3}{y - \frac{1}{x}} ; \end{array}\right)
+S55 (1/x + 1/(x^2*(y - 1/x)), -1/(x*(y - 1/x))) || \left(\frac{1}{x} + \frac{1}{x^{2} {\left(y - \frac{1}{x}\right)}},\,-\frac{1}{x {\left(y - \frac{1}{x}\right)}}\right)
+S56 (1/x + (1/x - 1)/(x*(y - 1/x)), -(1/x - 1)/(y - 1/x), 0) || \left(\frac{1}{x} + \frac{\frac{1}{x} - 1}{x {\left(y - \frac{1}{x}\right)}},\,-\frac{\frac{1}{x} - 1}{y - \frac{1}{x}},\,0\right)
+S57 x^2 + 2*x + 1 || x^{2} + 2 \, x + 1
+S58 (x + 1)^2 || {\left(x + 1\right)}^{2}
+S59 x*sin(x) + cos(x) || x \sin\left(x\right) + \cos\left(x\right)
+S60 sin(x)/x^2 + cos(x) || \frac{\sin\left(x\right)}{x^{2}} + \cos\left(x\right)
+S61 1/2*x^2/y || \frac{x^{2}}{2 \, y}
+S62 (x + 1)/(x - 1) || \frac{x + 1}{x - 1}
+S63 x*y*z + x + y + z || x y z + x + y + z
+S64 e^(2*x) + e^(-x) + e^x || e^{\left(2 \, x\right)} + e^{\left(-x\right)} + e^{x}
+S65 -f*h + x*y || -f h + x y
+S66 f*h - x*y || f h - x y
+S67 -c*h + b*y || -c h + b y
+S68 c*h - b*y || c h - b y
+S69 -b*c + a*d || -b c + a d
+S70 b*c - a*d || b c - a d
+S71 x*y - z^2 || x y - z^{2}
+S72 a*x + b*y || a x + b y
+S73 p*q*r + (p^2 + q)*r || p q r + {\left(p^{2} + q\right)} r
+S74 u^2*w^2 + (u^3 + v)*w || u^{2} w^{2} + {\left(u^{3} + v\right)} w
+S75 s^2*t + (s^2 - t)*s || s^{2} t + {\left(s^{2} - t\right)} s
+S76 a*b^2 + (a^2 + 1)*b || a b^{2} + {\left(a^{2} + 1\right)} b
+S77 x*y*z + (x^2 + y^2)*z || x y z + {\left(x^{2} + y^{2}\right)} z
+S78 -k*m*n + (m^2 + n)*k || -k m n + {\left(m^{2} + n\right)} k
+S79 c*d*l + (c^2 + d)*l || c d l + {\left(c^{2} + d\right)} l
+S80 b*c + a*d || b c + a d
+S81 b*y + a*z || b y + a z
+S82 q*r + p*s || q r + p s
+S83 b*c*l + a*d*l || b c l + a d l
+S84 w*x + v*y + u*z || w x + v y + u z
+S85 b*c^2 + a^2*d || b c^{2} + a^{2} d
+S86 h*j + g*k || h j + g k
+S87 (a + z)*m || {\left(a + z\right)} m
+S88 (b + y)*k || {\left(b + y\right)} k
+S89 (c + w)*n*p || {\left(c + w\right)} n p
+S90 1/((a + z)*m) || \frac{1}{{\left(a + z\right)} m}
+S91 (d + v)*l^2 || {\left(d + v\right)} l^{2}
+S92 f*(l + u) + 1 || f {\left(l + u\right)} + 1
+S93 (b + x)*c*d || {\left(b + x\right)} c d
+S94 x + y + z || x + y + z
+S95 p*q + r || p q + r
+S96 a^2 + b^2 + c^2 || a^{2} + b^{2} + c^{2}
+S97 v*w + u || v w + u
+S98 q + r + s + t || q + r + s + t
+S99 k*l + m*n || k l + m n
+S100 a*b^2 || a b^{2}
+S101 x*y^3 || x y^{3}
+S102 p*q^2*r || p q^{2} r
+S103 c*d^4 || c d^{4}
+S104 u^2*v^5*w || u^{2} v^{5} w
+S105 s*t^2 + u || s t^{2} + u
+S106 h*k^3*m^2 || h k^{3} m^{2}
+S107 -(z - 2)/w || -\frac{z - 2}{w}
+S108 -(p - q)*r*s || -{\left(p - q\right)} r s
+S109 -(p - q)/(p + q) || -\frac{p - q}{p + q}
+S110 -(m - 1)*n || -{\left(m - 1\right)} n
+S111 (a - b)*(c - d) || {\left(a - b\right)} {\left(c - d\right)}
+S112 -(t - 1)*u*v || -{\left(t - 1\right)} u v
+S113 -(r - s)/t^2 || -\frac{r - s}{t^{2}}
+S114 (p + q)/r || \frac{p + q}{r}
+S115 (u - v)/(u + v) || \frac{u - v}{u + v}
+S116 (m^2 + 1)/n^2 || \frac{m^{2} + 1}{n^{2}}
+S117 (a + 1)/(b*c) || \frac{a + 1}{b c}
+S118 (s + t)/(s - t)^2 || \frac{s + t}{{\left(s - t\right)}^{2}}
+S119 (w - 1)/w || \frac{w - 1}{w}
+S120 a^2*(b + c)*d^3 || a^{2} {\left(b + c\right)} d^{3}
+S121 ((a + b)*c + d)*l || {\left({\left(a + b\right)} c + d\right)} l
+S122 (1/2*x + 1/2)*y || {\left(\frac{1}{2} \, x + \frac{1}{2}\right)} y
+S123 3/4*a*b + (2/3*a + 2/3*b)*c || \frac{3}{4} \, a b + {\left(\frac{2}{3} \, a + \frac{2}{3} \, b\right)} c
+S124 (x + 1)*sin(x) + x^2 || {\left(x + 1\right)} \sin\left(x\right) + x^{2}
+S125 (y - 1)*e^y || {\left(y - 1\right)} e^{y}
+S126 sqrt(2)*(a + b) || \sqrt{2} {\left(a + b\right)}
+S127 (x + 1)*y + x*sqrt(y) || {\left(x + 1\right)} y + x \sqrt{y}
+S128 (x + 1)^2*(y + 2) || {\left(x + 1\right)}^{2} {\left(y + 2\right)}
+S129 (p - q)^2 + (p + q)*r || {\left(p - q\right)}^{2} + {\left(p + q\right)} r
+S130 x^3*y + (x^2 + y)*x*y || x^{3} y + {\left(x^{2} + y\right)} x y
+S131 (t^2 - 1)*cos(t)/(t + 1) || \frac{{\left(t^{2} - 1\right)} \cos\left(t\right)}{t + 1}
+S132 a^2*b + a*x^2 || a^{2} b + a x^{2}
+S133 a^2*c + b*y^2 || a^{2} c + b y^{2}
+S134 p*q^2 + p^2*r || p q^{2} + p^{2} r
+S135 u^2*v + u*w^2 || u^{2} v + u w^{2}
+S136 b^2*c + a*z^2 || b^{2} c + a z^{2}
+S137 g^2*h + f*k^2 || g^{2} h + f k^{2}
+S138 a^2*b*c + a*b*x^2 || a^{2} b c + a b x^{2}
+S139 m^2*n + l*q^2 || m^{2} n + l q^{2}
+S140 a^2*b + 2*a*x^2 + b*x^2 || a^{2} b + 2 \, a x^{2} + b x^{2}
+S141 c^2*d + b*x^2 + a*y^2 || c^{2} d + b x^{2} + a y^{2}
+S142 (a^2*b + a*x^2)*y || {\left(a^{2} b + a x^{2}\right)} y
+S143 s^2*t + r*u^2 + q*v^2 || s^{2} t + r u^{2} + q v^{2}
+S144 a*b^2 + a^2*z || a b^{2} + a^{2} z
+S145 x^2*y + w*z^2 || x^{2} y + w z^{2}
+S146 a^2*b + a^2*x + 2*a*b*x + 2*a*x^2 + b*x^2 + x^3 || a^{2} b + a^{2} x + 2 \, a b x + 2 \, a x^{2} + b x^{2} + x^{3}
