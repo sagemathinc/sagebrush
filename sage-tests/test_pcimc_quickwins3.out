@@ -32,3 +32,14 @@ S33 ERR TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Ve
 S34 ERR TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 2'
 S35 ERR TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 2 dense matrices over Rational Field' and 'Vector space of dimension 2 over Finite Field of size 
 S36 (1, 6)
+S37 ()
+S38 Vector space of dimension 0 over Finite Field of size 2
+S39 (0, 0, 0)
+S40 Vector space of dimension 3 over Finite Field of size 2
+S41 ERR TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field'
+S42 (0, 0, 0)
+S43 Vector space of dimension 3 over Finite Field of size 2
+S44 ()
+S45 Vector space of dimension 0 over Finite Field of size 2
+S46 ERR TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 2 dense matrices over Integer Ring' and 'Vector space of dimension 3 over Finite Field of size 5'
+S47 ERR TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Full MatrixSpace of 3 by 1 dense matrices over Integer Ring'
