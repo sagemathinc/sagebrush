@@ -154,3 +154,16 @@ print(rel(float(sc.betainc(0.5, 0.5, 1 - 1e-9)), 0.9999798683154395) <= 2.3e-16,
 `);
   assert.equal(out.trim(), "True True True True 0.0 0.0 0.5 nan nan True");
 });
+
+test("scipy.special.gammaincinv and gammainccinv at the largest finite a: the largest double, as SciPy's, never inf (daybreak3's B1)", () => {
+  const out = py(`
+import sys
+import scipy.special as sc
+M = 1.7976931348623157e308  # (the largest double; sys.float_info.max is a float there too)
+print([float(sc.gammaincinv(M, y)) == M for y in (1e-300, 0.1, 0.5, 0.9, 1 - 1e-12)],
+      [float(sc.gammainccinv(M, y)) == M for y in (1e-300, 0.1, 0.5, 0.9)],
+      [float(sc.gammaincinv(1e34, y)) == 1e34 for y in (0.1, 0.5, 0.9)])
+`);
+  assert.equal(out.trim(), "[True, True, True, True, True] [True, True, True, True] [True, True, True]");
+});
+

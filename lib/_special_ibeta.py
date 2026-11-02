@@ -3,18 +3,21 @@ function's inverse, for scipy.special and scipy.stats' distributions: a
 module of its own (its own library chunk in the browser, mod-special-ibeta),
 over lib/_special.py's incomplete gamma, beta and Stirling functions.
 
-After two algorithms SciPy's xsf carries (BSD 3-Clause, see NOTICE.md):
-Cephes's incbet (Moshier: its power series, continued fractions and their
-choice, followed closely) and CDFLIB's translation of DiDonato and Morris's
-Algorithm 708 (ACM TOMS 18, 1992: bgrat, bfrac and basym, followed nearly line
-by line; brcomp's prefactor in a form of its own); the inverses are
-Sagebrush's, from Numerical Recipes' starts (invbetai, invgammp).  The accuracy each
+The power series and the two continued fractions follow Cephes's incbet
+(Moshier), which SciPy's xsf carries (BSD 3-Clause, see NOTICE.md).  The
+methods for large parameters are those of DiDonato and Morris, "Significant
+digit computation of the incomplete beta function ratios" (ACM TOMS 18,
+1992): the cancellation-free prefactor, the expansion for large a in
+incomplete gamma functions and the continued fraction in lambda, each
+derived here from the mathematics (the integral, DLMF 8.17.22 and its even
+contraction) in Sagebrush's own form.  The inverses are Sagebrush's, from
+Numerical Recipes' starting formulas (invbetai, invgammp).  The accuracy each
 docstring states is measured against mpmath in test/special.test.ts.
 (Under CPython, use SciPy itself.)"""
 
 import math as _math
 
-from _special import (NotCovered, _PI, _STIRLING_R, _betaln_pos, _elementwise, _erfcx1, _exp_or_inf, _gammainc1, _gammainc_logd, _isnan, _lgamma_diff, _log1pmx, _stirling_mu)
+from _special import (NotCovered, _B2K, _PI, _STIRLING_R, _betaln_pos, _elementwise, _exp_or_inf, _gammainc1, _gammainc_logd, _isnan, _lgamma_diff, _log1pmx, _stirling_mu)
 
 
 def _gammainc_deriv(a, x):
@@ -129,6 +132,16 @@ def _gammaincinv_outer(a, y, upper):
         return _math.inf
     if a == 0 or a == _math.inf:
         return _math.nan
+    if a > 1e30:
+        # (the quantile's spread about a, z sqrt(a), is below a's rounding: Wilson and Hilferty's cube, whose error is
+        # O(1/a), is the root; computed in logs and at most the largest double, as scipy's (daybreak3's B1))
+        pp = min(p, q)
+        t = _math.sqrt(-2 * _math.log(pp))
+        z = (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481)) - t
+        if p < 0.5:
+            z = -z
+        c = 1 - 1 / (9 * a) - z / (3 * _math.sqrt(a))
+        return min(_exp_or_inf(_math.log(a) + 3 * _math.log(c)), 1.7976931348623157e308)
     # (where the root underflows: P(a, x) ~ x^a / Gamma(a + 1) for small x, so x = (p Gamma(a + 1))^(1/a))
     if a < 1 and p < 0.5:
         lx = (_math.log(p) + _math.lgamma(a + 1)) / a
@@ -140,9 +153,10 @@ def _gammaincinv_outer(a, y, upper):
 def gammaincinv(a, y):
     """the inverse of gammainc in x: the x >= 0 with P(a, x) = y, a > 0,
     0 <= y <= 1 (scipy's conventions: 0 at y = 0, inf at y = 1, nan outside
-    or at a <= 0).  Halley's method on the smaller of P and Q from Numerical
-    Recipes' start (invgammp), safeguarded by bisection; 0 where the root
-    underflows.  Largest error found against mpmath (a from 1e-3 to 1e8,
+    or at a <= 0).  Newton's method on the log of the smaller of P and Q in
+    log x (_tail_root), from Numerical Recipes' start (invgammp), safeguarded
+    by bisection; 0 where the root underflows; for a above 1e30, Wilson and
+    Hilferty's cube (the root rounds to it), at most the largest double.  Largest error found against mpmath (a from 1e-3 to 1e8,
     y from 1e-300 to 1 - 1e-12): see test/special.test.ts's tolerance"""
     return _elementwise(lambda a, y: _gammaincinv_outer(a, y, False), a, y)
 
@@ -244,64 +258,70 @@ def _betainc_series(a, b, x):
     return _math.exp(lp) * s
 
 
-def _betainc_bgrat(a, b, x, y):
-    """I_x(a, b) for a >= 15 and 0 < b <= 1 by DiDonato and Morris's
-    asymptotic expansion (ACM TOMS 18, 1992, Algorithm 708's bgrat): with
-    nu = a + (b - 1)/2 and z = -nu log x, Q(b, z) times the series of their
-    section 4 in powers of 1/nu, its terms through Q(b, z) z^-b e^z Gamma(b)
-    and its recurrence.  None where the series doesn't reach full precision
-    within 30 terms (then the continued fraction is used)"""
-    bm1 = b - 1.0
-    nu = a + 0.5 * bm1
-    lnx = _math.log(x) if y > 0.375 else _math.log1p(-y)
-    z = -nu * lnx
-    if b * z == 0:
+def _sinhc_power_coeffs(c, n):
+    """e_0..e_n with (sinh(s/2)/(s/2))^c = sum_k e_k s^(2k): log(sinh(w)/w) =
+    sum_{j >= 1} B_2j (2w)^(2j) / (2j (2j)!) (DLMF 4.33.? from 24.2.1's
+    generating function), so the log's coefficients in s^2 are
+    c B_2j / (2j (2j)!), and the power's follow by the exponential's
+    recurrence k e_k = sum_{j=1..k} j l_j e_(k-j)"""
+    logc = [0.0] + [c * _B2K[j - 1] / (2 * j * _math.factorial(2 * j)) for j in range(1, n + 1)]
+    e = [1.0]
+    for k in range(1, n + 1):
+        e.append(_math.fsum(j * logc[j] * e[k - j] for j in range(1, k + 1)) / k)
+    return e
+
+
+_NTERMS = 20
+
+
+def _betainc_large_a_series(a, b, x, y):
+    """I_x(a, b) for large a and 0 < b <= 1, from the integral with t = e^-s:
+    I_x(a, b) = 1/B(a, b) int_u^inf e^(-nu s) s^(b-1) (sinh(s/2)/(s/2))^(b-1) ds,
+    u = -log x, nu = a + (b - 1)/2 (DiDonato and Morris 1992, section 4's
+    expansion).  With (sinh(s/2)/(s/2))^(b-1) = sum e_k s^(2k), each term is an
+    upper incomplete gamma: I = Gamma(a+b)/(Gamma(a) nu^b) sum_k e_k
+    Gamma(b + 2k, z) / (Gamma(b) nu^(2k)), z = nu u.  Its terms h_k =
+    Gamma(b + 2k, z) / (Gamma(b) r nu^(2k)), r = z^b e^-z / Gamma(b), follow
+    from Gamma(s + 1, z) = s Gamma(s, z) + z^s e^-z twice: h_(k+1) =
+    ((b + 2k)(b + 2k + 1) h_k + (b + 2k + 1 + z) u^(2k)) / nu^2, from h_0 =
+    Q(b, z) / r.  The series in s converges for s < 2 pi, and its integral
+    is an expansion in 1/nu: None where its terms don't fall below eps of
+    the sum within _NTERMS (20, the Bernoulli numbers _special holds) of them"""
+    nu = a + 0.5 * (b - 1.0)
+    u = -(_math.log(x) if y > 0.375 else _math.log1p(-y))
+    z = nu * u
+    if z <= 0:
         return None
-    # (u = r / (Gamma(a + b)/Gamma(a) nu^b), r = z^b e^-z / Gamma(b): their prefactor, in logs)
-    logr = b * _math.log(z) - z - _math.lgamma(b)
-    logu = logr - (_lgamma_diff(a, b) + b * _math.log(nu))
-    if logu < -745:
+    # (the prefactor Gamma(a+b) r / (Gamma(a) nu^b), in logs; r's own scale kept out of h_0, gammaincc scaled)
+    logpre = b * _math.log(z) - z - _math.lgamma(b) - _lgamma_diff(a, b) - b * _math.log(nu)
+    if logpre < -745:
         return 0.0
-    u = _math.exp(logu)
-    # (j = Q(b, z) / r = Q(b, z) z^-b e^z Gamma(b) = gammaincc scaled / b, never formed as an underflowed Q over r)
-    j = _gammainc1(b, z, upper=True, scaled=True) / b
-    v = 0.25 / (nu * nu)
-    t2 = 0.25 * lnx * lnx
-    total = j
-    t, cn, n2 = 1.0, 1.0, 0.0
-    c = [0.0] * 31
-    d = [0.0] * 31
-    for n in range(1, 31):
-        bp2n = b + n2
-        j = (bp2n * (bp2n + 1.0) * j + (z + bp2n + 1.0) * t) * v
-        n2 += 2.0
-        t *= t2
-        cn /= n2 * (n2 + 1.0)
-        c[n] = cn
-        acc = 0.0
-        if n > 1:
-            coef = b - n
-            for i in range(1, n):
-                acc += coef * c[i] * d[n - i]
-                coef += b
-        d[n] = bm1 * cn + acc / n
-        dj = d[n] * j
-        total += dj
+    e = _sinhc_power_coeffs(b - 1.0, _NTERMS)
+    h = _gammainc1(b, z, upper=True, scaled=True) / b
+    u2 = u * u
+    nu2 = nu * nu
+    total = e[0] * h
+    upow = 1.0
+    for k in range(_NTERMS - 1):
+        h = ((b + 2 * k) * (b + 2 * k + 1) * h + (b + 2 * k + 1 + z) * upow) / nu2
+        upow *= u2
+        term = e[k + 1] * h
+        total += term
         if total <= 0:
             return None
-        if abs(dj) <= 1e-16 * total:
-            return u * total
+        if abs(term) <= 1e-16 * total:
+            return _math.exp(logpre) * total
     return None
 
 
 def _betainc_large_a(a, b, x, y):
-    """I_x(a, b) for a >= 15 and 0 < b <= 15: bgrat at b' = b - n in (0, 1],
-    then the recurrence DLMF 8.17.21, I_x(a, b) = I_x(a, b') +
-    sum_{k < n} x^a y^(b'+k) / ((b' + k) B(a, b' + k)), whose terms are all
-    positive.  None where bgrat is (see _betainc_bgrat)"""
+    """I_x(a, b) for a >= 15 and 0 < b <= 40: the series above at b0 = b - n
+    in (0, 1], then DLMF 8.17.21 upward, I_x(a, b) = I_x(a, b0) +
+    sum_{k < n} x^a y^(b0+k) / ((b0 + k) B(a, b0 + k)), all its terms
+    positive.  None where the series is"""
     n = int(_math.ceil(b) - 1) if b > 1 else 0
     b0 = b - n
-    w = _betainc_bgrat(a, b0, x, y)
+    w = _betainc_large_a_series(a, b0, x, y)
     if w is None:
         return None
     if n:
@@ -314,115 +334,41 @@ def _betainc_large_a(a, b, x, y):
     return w
 
 
-def _betainc_bfrac(a, b, x, y, lam):
-    """I_x(a, b) for a, b > 1 by DiDonato and Morris's continued fraction
-    (Algorithm 708's bfrac), in lambda = (a + b) y - b, with the prefactor
-    x^a y^b / B(a, b) of _betainc_logpre; None if it doesn't converge"""
+def _betainc_cf_lambda(a, b, x, y, lam):
+    """I_x(a, b) for a > 1, b > 0 below the mean, lambda = (a + b) y - b >= 0:
+    the even contraction of DLMF 8.17.22's continued fraction (DiDonato and
+    Morris 1992's section 3 uses its form in lambda), I_x(a, b) = pre / (a f),
+    f = beta_0 + alpha_1 / (beta_1 + alpha_2 / (beta_2 + ...)), whose
+    denominators, written exactly in lambda (no cancellation for lambda >= 0
+    and a > 1), are beta_0 = (1 + lambda)/(a + 1) and
+    beta_m = ((a+b)(a-1) + 2m(a+2b)(a+m) + lambda ((a+b)(a-1) + 2m(a+m)))
+             / ((a+b)(a+2m-1)(a+2m+1)),
+    and numerators alpha_m = (a+m-1)(a+b+m-1) m (b-m) x^2 /
+    ((a+2m-2)(a+2m-1)^2 (a+2m)); by Lentz's method, until a convergent moves
+    by less than eps.  None if it doesn't converge"""
     lp = _betainc_logpre(a, b, x, y)
     if lp < -746:
         return 0.0
-    c = 1.0 + lam
-    c0 = b / a
-    c1 = 1.0 + 1.0 / a
-    yp1 = y + 1.0
-    n, pp, ss = 0.0, 1.0, a + 1.0
-    an, bn, anp1, bnp1 = 0.0, 1.0, 1.0, c / c1
-    r = c1 / c
-    for _ in range(_BETAINC_TERMS):
-        n += 1.0
-        t = n / a
-        w = n * (b - n) * x
-        e = a / ss
-        alpha = (pp * (pp + c0) * e * e) * (w * x)
-        e = (1.0 + t) / (c1 + t + t)
-        beta = n + w / ss + e * (c + n * yp1)
-        pp = 1.0 + t
-        ss += 2.0
-        t = alpha * an + beta * anp1
-        an, anp1 = anp1, t
-        t = alpha * bn + beta * bnp1
-        bn, bnp1 = bnp1, t
-        r0 = r
-        r = anp1 / bnp1
-        if abs(r - r0) <= 1e-16 * r:
-            return _math.exp(lp) * r
-        an /= bnp1
-        bn /= bnp1
-        anp1 = r
-        bnp1 = 1.0
-    return None
-
-
-_E0 = 1.1283791670955126  # 2/sqrt(pi)
-_E1 = 0.35355339059327373  # 2^(-3/2)
-
-
-def _betainc_basym(a, b, lam):
-    """I_x(a, b) for a, b >= 15, lambda = (a + b) y - b >= 0, by Temme's
-    uniform asymptotic expansion as DiDonato and Morris give it (Algorithm
-    708's basym), with erfcx for their erfc1; None where its terms don't
-    reach full precision within 20"""
-    num = 20
-    if a < b:
-        h = a / b
-        r0 = 1.0 / (1.0 + h)
-        r1 = (b - a) / b
-        w0 = 1.0 / _math.sqrt(a * (1.0 + h))
-    else:
-        h = b / a
-        r0 = 1.0 / (1.0 + h)
-        r1 = (b - a) / a
-        w0 = 1.0 / _math.sqrt(b * (1.0 + h))
-    f = -a * _log1pmx(-lam / a) - b * _log1pmx(lam / b)
-    t = _math.exp(-f)
-    if t == 0.0:
-        return 0.0
-    z0 = _math.sqrt(f)
-    z = 0.5 * (z0 / _E1)
-    z2 = f + f
-    a0 = [0.0] * (num + 2)
-    b0 = [0.0] * (num + 2)
-    cc = [0.0] * (num + 2)
-    d = [0.0] * (num + 2)
-    a0[1] = (2.0 / 3.0) * r1
-    cc[1] = -0.5 * a0[1]
-    d[1] = -cc[1]
-    j0 = (0.5 / _E0) * float(_erfcx1(z0))
-    j1 = _E1
-    total = j0 + d[1] * w0 * j1
-    sacc, h2, hn, w = 1.0, h * h, 1.0, w0
-    znm1, zn = z, z2
-    for n in range(2, num + 1, 2):
-        hn = h2 * hn
-        a0[n] = 2.0 * r0 * (1.0 + h * hn) / (n + 2.0)
-        np1 = n + 1
-        sacc += hn
-        a0[np1] = 2.0 * r1 * sacc / (n + 3.0)
-        for i in range(n, np1 + 1):
-            r = -0.5 * (i + 1.0)
-            b0[1] = r * a0[1]
-            for m in range(2, i + 1):
-                bsum = 0.0
-                for j in range(1, m):
-                    bsum += (j * r - (m - j)) * a0[j] * b0[m - j]
-                b0[m] = r * a0[m] + bsum / m
-            cc[i] = b0[i] / (i + 1.0)
-            dsum = 0.0
-            for j in range(1, i):
-                dsum += d[i - j] * cc[j]
-            d[i] = -(dsum + cc[i])
-        j0 = _E1 * znm1 + (n - 1.0) * j0
-        j1 = _E1 * zn + n * j1
-        znm1 = z2 * znm1
-        zn = z2 * zn
-        w = w0 * w
-        t0 = d[n] * w * j0
-        w = w0 * w
-        t1 = d[np1] * w * j1
-        total += t0 + t1
-        if abs(t0) + abs(t1) <= 1e-16 * total:
-            u = _math.exp(-(_stirling_mu(a) + _stirling_mu(b) - _stirling_mu(a + b)))
-            return _E0 * t * u * total
+    tiny = 1e-300
+    s_ab = a + b
+    k0 = s_ab * (a - 1.0)
+    f = (1.0 + lam) / (a + 1.0)
+    if f == 0:
+        f = tiny
+    cc, dd = f, 0.0
+    x2 = x * x
+    for m in range(1, _BETAINC_TERMS):
+        alpha = (a + m - 1) * (s_ab + m - 1) * m * (b - m) * x2 / ((a + 2 * m - 2) * (a + 2 * m - 1) ** 2 * (a + 2 * m))
+        beta = (k0 + 2 * m * (a + 2 * b) * (a + m) + lam * (k0 + 2 * m * (a + m))) / (s_ab * (a + 2 * m - 1) * (a + 2 * m + 1))
+        dd = beta + alpha * dd
+        dd = 1.0 / (dd if abs(dd) > tiny else tiny)
+        cc = beta + alpha / cc
+        if abs(cc) < tiny:
+            cc = tiny
+        delta = cc * dd
+        f *= delta
+        if abs(delta - 1.0) <= 1e-16:
+            return _math.exp(lp) / (a * f)
     return None
 
 
@@ -448,13 +394,7 @@ def _betainc_pq(a, b, x, y):
         # (Algorithm 708's choice for a, b > 1 below the mean: Temme's expansion near the mean for both above 100,
         # else their continued fraction in lambda; lambda computed from whichever of x, y is the smaller)
         lam = (a + b) * y - b if a > b else a - (a + b) * x
-        if lam < 0:
-            lam = 0.0
-        mn = min(a, b)
-        if mn > 100 and lam <= 0.03 * mn:
-            t = _betainc_basym(a, b, lam)
-        if t is None:
-            t = _betainc_bfrac(a, b, x, y, lam)
+        t = _betainc_cf_lambda(a, b, x, y, max(lam, 0.0))
     if t is None:
         if x * (a + b - 2.0) - (a - 1.0) < 0:
             w = _betainc_frac(x, [a, a + b, a, a + 1.0, 1.0, b - 1.0, a + 1.0, a + 2.0, 1.0, -1.0])
@@ -498,17 +438,23 @@ def _betainc1(a, b, x, upper=False):
 def betainc(a, b, x):
     """the regularized incomplete beta function I_x(a, b) =
     B(x; a, b) / B(a, b) (DLMF 8.17.2), real a, b >= 0 and 0 <= x <= 1
-    (scipy's argument order).  The continued fraction DLMF 8.17.22 by
-    Lentz's method, for x < (a + 1)/(a + b + 2) and through the symmetry
-    I_x(a, b) = 1 - I_{1-x}(b, a) above it, so the smaller of I and 1 - I is
-    computed directly; its prefactor x^a (1 - x)^b / B(a, b) for a, b >= 15
-    by DiDonato and Morris's cancellation-free form (see _betainc_logpre).
+    (scipy's argument order).  The tail below the mean a/(a + b) is computed
+    directly, the other through I_x(a, b) = 1 - I_{1-x}(b, a) (DLMF 8.17.4;
+    _betainc_pq): there Cephes's power series (b x <= 1, x <= 0.95); for a
+    large and b up to 40 the expansion of DiDonato and Morris's section 4,
+    derived in _betainc_large_a_series; for a, b > 1 the even contraction of
+    DLMF 8.17.22 in lambda (_betainc_cf_lambda); else Cephes's continued
+    fractions incbcf and incbd by their convergents.  The prefactor
+    x^a (1 - x)^b / B(a, b) for a, b >= 15 in DiDonato and Morris's
+    cancellation-free form (see _betainc_logpre).
     scipy's limits: 0 at x = 0, 1 at x = 1, 1 at a = 0 and 0 at b = 0
     (otherwise), 0 at a = inf and 1 at b = inf; nan outside the domain and
-    at a = b = 0.  NotCovered above a or b = 1e8 (the fraction needs about
+    at a = b = 0.  NotCovered above a or b = 1e8 (the fractions need about
     sqrt(max(a, b)) terms) or for complex arguments.  Largest error found
-    against mpmath: see test/special.test.ts's tolerance (relative, of
-    max(1, |log value|) as gammainc's)"""
+    against mpmath: 5e-15 of max(1, |log value|) for a, b up to 1e5 in
+    test/special.test.ts, as gammainc's; growing to about 2e-13 for a and b
+    both near 1e7 about the mean, the fraction's rounding over its
+    sqrt(a + b) terms"""
     return _elementwise(lambda a, b, x: _betainc1(a, b, x), a, b, x)
 
 
@@ -595,9 +541,10 @@ def _betaincinv_outer(a, b, y, upper):
 def betaincinv(a, b, y):
     """the inverse of betainc in x: the x in [0, 1] with I_x(a, b) = y,
     a, b > 0, 0 <= y <= 1 (scipy's conventions: 0 at y = 0, 1 at y = 1, nan
-    outside or at a, b <= 0 or infinite).  Halley's method on the smaller
-    tail from Numerical Recipes' start (invbetai), safeguarded by
-    bisection; 0 where the root underflows.  NotCovered above a or b = 1e8.
+    outside or at a, b <= 0 or infinite).  Newton's method on the log of the
+    smaller tail in log x (_tail_root), on the side of 1/2 the root is on,
+    from Numerical Recipes' start (invbetai), safeguarded by bisection; 0
+    where the root underflows.  NotCovered above a or b = 1e8.
     Largest error found against mpmath: see test/special.test.ts's tolerance"""
     return _elementwise(lambda a, b, y: _betaincinv_outer(a, b, y, False), a, b, y)
 
