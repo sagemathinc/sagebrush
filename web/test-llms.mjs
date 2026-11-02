@@ -21,6 +21,16 @@ const check = (ok, what) => {
   if (!ok) failed++;
 };
 
+// /version.json (web/build.ts): what the deploy is, for agents: the core commit, the build time and ids
+if (hasSite) {
+  let v = null;
+  try { v = JSON.parse(readFileSync(join(pub, "version.json"), "utf8")); } catch {}
+  check(!!v && /^[0-9a-f]{40}$/.test(v.core ?? "") && !Number.isNaN(Date.parse(v.built)) && /^[0-9a-f]{16}$/.test(v.engine ?? "") && /^[0-9a-f]+$/.test(v.build ?? "") && typeof v.latex === "boolean",
+    "version.json: the core commit, the build time, the engine's and library's ids, the LaTeX flag: " + JSON.stringify(v));
+  const h = readFileSync(join(pub, "_headers"), "utf8");
+  check(/^\/version\.json\n  Cache-Control: no-store\n  Access-Control-Allow-Origin: \*$/m.test(h), "version.json: never cached, readable from any origin (_headers)");
+}
+
 // a path on the site, as the files the site serves
 function served(path) {
   const p = decodeURIComponent(path.replace(/[?#].*$/, ""));
