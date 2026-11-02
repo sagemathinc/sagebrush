@@ -69,6 +69,10 @@ jobs:
       # checked: ci.yml has no paths filter and this job no tier condition)
       - name: every action pinned to a commit (scripts/check-action-pins.mjs, on its fixtures first)
         run: bun scripts/test-check-action-pins.mjs && bun scripts/check-action-pins.mjs
+      # (the suites name their jobs in "// ci:" headers, not the workflows: a suite without one, or a target no
+      # workflow runs, fails here, in the job every run has)
+      - name: test discovery (scripts/web-tests.mjs check)
+        run: node scripts/web-tests.mjs check
       - id: paths
         name: classify changed paths and select the tier
         env:
