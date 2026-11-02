@@ -334,14 +334,14 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   ENGINE = { id, api: ENGINE_API, files: Object.fromEntries(Object.entries(files).map(([f, d]) => [f, d.sha256])) };
   console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
 }
-// A board page takes only the 4 KiB MyST rule (web/notebook/myst-head.js), never the MyST reader
+// A board page takes only the 4 KiB MyST rule (web/notebook/myst-head.ts), never the MyST reader
 // (web/notebook/myst.js) or renderer (web/myst): plan-myst-notebooks-p2 r2 §11.3 (its uploads and "Open as a board"
 // need only the rule; a MyST .md opened as a notebook goes to the notebook page)
 function boardMystClosure(what: string, r: any) {
   const inputs = Object.keys(r.metafile?.inputs ?? {}).map((p) => p.replace(/\\/g, "/"));
-  if (!inputs.some((p) => /(^|\/)web\/notebook\/myst-head\.js$/.test(p))) throw new Error(`${what} doesn't contain web/notebook/myst-head.js`);
+  if (!inputs.some((p) => /(^|\/)web\/notebook\/myst-head\.(js|ts)$/.test(p))) throw new Error(`${what} doesn't contain web/notebook/myst-head.ts`);
   const heavy = inputs.filter((p) => /(^|\/)web\/notebook\/myst\.js$|(^|\/)web\/myst\//.test(p));
-  if (heavy.length) throw new Error(`${what} contains ${heavy.join(", ")}: a board page takes only web/notebook/myst-head.js`);
+  if (heavy.length) throw new Error(`${what} contains ${heavy.join(", ")}: a board page takes only web/notebook/myst-head.ts`);
 }
 // Boards (design/board.md), at /board/, with their example documents
 {

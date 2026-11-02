@@ -4,7 +4,7 @@
 // read, never written: plan-myst-notebooks r3 §2.2, §8.4, §8.5).
 //
 // Which files are MyST (isMystHead, the 4 KiB rule) and the front matter's closed
-// grammar are in web/notebook/myst-head.js, re-exported here.
+// grammar are in web/notebook/myst-head.ts, re-exported here.
 //
 // Cells (jupytext's MyST format): ```{code-cell} <lang> fences are code cells
 // (option lines ":key: value" or a "---" block at their start: the cell's

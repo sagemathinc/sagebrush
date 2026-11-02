@@ -475,6 +475,7 @@ import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 // (the MyST reader: given to convertCopy, which the board page shares without it)
 import { fromMyst } from "./notebook/myst.js";
+import { bookAccess } from "./workspace/book-cap.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
@@ -945,7 +946,7 @@ if (REMOTE_PREVIEW) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page) });
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
@@ -1490,6 +1491,9 @@ class TextFileStore {
 
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
+// (the document generation: raised whenever the open document changes or the workspace closes; a book capability
+// is bound to the one it was made in: web/workspace/book-cap.ts, plan-myst-notebooks-p2 r2 §11.1)
+let docGen = 0;
 // (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
 const beforeSwitch = [];
 // (while the notebook is changing, from the first wait to the new one attached, there is no notebook
@@ -1515,6 +1519,7 @@ async function open(store, id, kind = "browser") {
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
   nb.detach();
+  docGen++;
   ttShow(false);
   current = { id, kind };
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
@@ -1606,6 +1611,18 @@ async function openArrived(id) {
   return true;
 }
 const saveNow = () => nb.flush();
+// A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
+// and another chapter opened (web/workspace/book-cap.ts; plan-myst-notebooks-p2 r2 §2, §11.1)
+const bookAcc = bookAccess({
+  now: () => ({ gen: docGen, ws, ref: current.kind === "browser" ? current.id : null }),
+  isMyst: () => !!nb.meta?.metadata?.sagebrush?.myst,
+  confirm: (text) => confirm(text),
+  save: async () => { await saveNow(); },
+  openRef: async (ref) => { const ok = await openId(ref).catch(() => false); if (ok) wsTrackCurrent(); return ok; },
+  said: (text) => { statusEl.textContent = text; },
+  myst: fromMyst,
+  maxBytes: LIMITS.maxBoardBytes,
+});
 
 // The app: a notebook opened from the computer is its .ipynb file, and the
 // files in its folder are Python's files (read when it opens; what Python
@@ -3089,7 +3106,7 @@ const wsReady = (async () => {
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
-    w.onClosed(() => showReloadNotice());
+    w.onClosed(() => { docGen++; showReloadNotice(); });
     if (w.closed) showReloadNotice();
     // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
