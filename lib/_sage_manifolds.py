@@ -1507,7 +1507,7 @@ def _in_domain(chart, vals):
             out.append(v)
             continue
         if "periodic" in rng:
-            k = sa.floor(v / (2 * sa.pi))
+            k = _SR(sa.floor(v / (2 * sa.pi)))  # (floor of a constant is an Integer, as in Sage)
             if k.is_numeric() and not k.is_trivial_zero():
                 v = _simplify(v - 2 * sa.pi * k)
         elif rng == "(0, +oo)" and not bool(v > 0):
