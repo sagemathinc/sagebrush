@@ -100,11 +100,18 @@
 //   api.ts BoardRecord).  Nothing changes in the stores; the version is the barrier: a page of an earlier build, whose
 //   board writes keep the rest of a row as it is, is closed by this upgrade (versionchange) before any row can have
 //   an envelope, and an earlier build opening fresh gets a VersionError, so no earlier code changes `boards` again
+//
+// Version 10 (Stage A layer 1, plan-collab-stage-a r6.4 §2.2; schema only):
+//
+//   htokens  history's change tokens, by seq (web/history/tokens.ts): one per identity a save changes, written in the
+//            save's own transaction while hmeta's `hactive` is set, which nothing sets yet (inert)
+//   hmeta    their counter, counts, overflow witness, `hactive` and `exhausted` (web/history/tokens.ts); empty until
+//            history is turned on.  Stores of their own, so that reading and deleting tokens never contends on meta
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 9;
+export const WS_VERSION = 10;
 /** meta's `journal` record (version 8): `activating` from activation's first write until every fence says
  * "journal", then `active` (plan-sync-slice2-client r4 §1a). */
 export type JournalState = { v: 1; active: boolean; activating?: true };
@@ -179,6 +186,11 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
     // (not activated: one write, whatever is in the workspace)
     if (old < 8) tx.objectStore("meta").put({ v: 1, active: false } satisfies JournalState, "journal");
     // (version 9: nothing to change; the upgrade itself closes the pages of earlier builds)
+    // (version 10: history's stores, made empty; nothing written in them until history is turned on)
+    if (old < 10) {
+      db.createObjectStore("htokens", { keyPath: "seq" });
+      db.createObjectStore("hmeta");
+    }
   }, onClose, ms);
 }
 
