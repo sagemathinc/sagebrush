@@ -18,6 +18,7 @@ import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex } from "../web/latex/engine/render.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
+import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
 
 setKatex(katex.renderToString);
 
@@ -27,15 +28,6 @@ const TEX_MAX = 4 * 2 ** 20;
 const PAGES_MAX = 60;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
-
-export interface Problem { severity: "error" | "warning"; kind: string; name: string; line: number | null; message: string }
-export interface CheckResult {
-  file: string; ok: boolean; class: string; outcome: string;
-  frames: { n: number; title: string; line: number | null }[];
-  problems: Problem[];
-  images: { name: string; found: boolean; path?: string; why?: string }[];
-  code: { n: number; mode: string; state: string }[];
-}
 
 const HELP = `sagebrush latex: check and see a .tex file as Sagebrush's LaTeX editor shows it
 
@@ -105,31 +97,13 @@ export async function latexCommand(argv: string[]): Promise<number> {
 function usage(why: string): number { process.stderr.write(`sagebrush latex: ${why}\n\n${HELP}`); return 2; }
 function fail(why: string): number { process.stderr.write(`sagebrush latex: ${why}\n`); return 2; }
 
-/** The line (1-based) of a source offset, or null for none. */
-function lineOf(text: string, at: number): number | null {
-  if (!(at >= 0)) return null;
-  let n = 1;
-  for (let i = text.indexOf("\n"); i !== -1 && i < at; i = text.indexOf("\n", i + 1)) n++;
-  return n;
-}
-
-const MESSAGES: Record<string, (name: string) => string> = {
-  command: (n) => `\\${n} is not supported by the preview (it shows as a grey \\${n} chip)`,
-  environment: (n) => `the ${n} environment is not supported by the preview (its content is shown in a plain box)`,
-  "not-rendered": (n) => `${n} is not drawn by the preview (a placeholder is shown instead)`,
-  math: (n) => `KaTeX can't typeset this math: ${n}`,
-  runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
-  redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
-};
-const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion"]);
-
 /** The preview of a .tex file: what check reports, and the self-contained HTML page. */
 export function renderTex(file: string, text: string): { result: CheckResult; html: string } {
   // (a first pass finds the images the document names; the second has them, read from the file's own folder
   //  as the editor reads them from the workspace: imageCandidates, never outside it)
   const first = new Engine({}).update(text, { cold: true });
   const images: Record<string, string | { why: string }> = {};
-  const imgReport: CheckResult["images"] = [];
+  const imgReport: ImageReport[] = [];
   let kept = 0;
   for (const name of first.imageRefs as string[]) {
     const c = imageCandidates(name, "/" + basename(file));
@@ -152,35 +126,9 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
   const r = new Engine({ images }).update(text, { cold: true });
-  const problems: Problem[] = [];
-  if (r.stats.outcome !== "ok") problems.push({ severity: "error", kind: "expansion", name: String(r.stats.outcome), line: null, message: `expansion stopped (${r.stats.outcome}): the preview shows the document only up to that point` });
-  for (const p of r.problems as { kind: string; name: string; at: number }[]) {
-    const m = MESSAGES[p.kind];
-    problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
-  }
-  for (const im of imgReport) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
-  const code = (r.sageItems as any[]).map((it, k) => ({ n: k + 1, mode: String(it.mode), state: it.err ? `refused: ${it.err}` : "not run" }));
-  if (code.length) problems.push({ severity: "warning", kind: "code", name: String(code.length), line: null, message: `${code.length} SageTeX item${code.length === 1 ? " is" : "s are"} shown but not run by the preview` });
-  problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
-  const result: CheckResult = {
-    file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.stats.outcome),
-    frames: (r.frames as { n: number; title: string; at: number }[]).map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at) })),
-    problems, images: imgReport, code,
-  };
+  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
+    sage: (r.sageItems as any[]).map((it) => ({ mode: String(it.mode), err: it.err ?? null })) }, imgReport);
   return { result, html: pageHtml(basename(file), r.chunks.join("\n"), !!r.beamer) };
-}
-
-/** The first line naming an image (a missing one has no position of its own). */
-function lineFind(text: string, name: string): number | null {
-  const i = text.indexOf("{" + name + "}");
-  return i < 0 ? null : lineOf(text, i);
-}
-
-function checkText(r: CheckResult): string {
-  const lines: string[] = [];
-  lines.push(`${r.file}: ${r.class === "beamer" ? `beamer, ${r.frames.length} frame${r.frames.length === 1 ? "" : "s"}` : "a document"}; ${r.problems.length ? `${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "no problems"}`);
-  for (const p of r.problems) lines.push(`${r.file}:${p.line ?? "-"}: ${p.severity}: ${p.message}`);
-  return lines.join("\n") + "\n";
 }
 
 // ---- the page
