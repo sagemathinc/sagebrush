@@ -267,6 +267,31 @@ Python's a: \py{a}. Sage: $\sage{2^5}$.
   const sw2 = await run(dir, "check", "swap.tex", "--json");
   check("sagesilent turned pycode: the later Python and Sage results dropped", sw2.json.code.map((x) => x.state).join(",") === "not run,not run,not run", sw2.json?.code);
 
+  // (two blocks switched, astra's case: [pycode a=123, matlabcode b=456, \matlab{b}] with both blocks turned sagesilent:
+  //  every later result dropped, so the MATLAB value 456 can't stand)
+  const TWO = String.raw`\documentclass{article}
+\begin{document}
+\begin{pycode}
+a = 123
+\end{pycode}
+\begin{matlabcode}
+b = 456;
+\end{matlabcode}
+MATLAB's b: \matlab{b}.
+\end{document}
+`;
+  writeFileSync(join(dir, "two.tex"), TWO);
+  const tw0 = await run(dir, "run", "two.tex", "--json");
+  check("two switches: run first", tw0.code === 0 && tw0.json.items.map((x) => x.state).join(",") === "ok,ok,ok", tw0.json?.items);
+  writeFileSync(join(dir, "two.tex"), TWO.replace(/\\(begin|end)\{(pycode|matlabcode)\}/g, "\\$1{sagesilent}"));
+  const tw1 = await run(dir, "check", "two.tex", "--json");
+  await run(dir, "render", "two.tex", "-o", "two.html");
+  check("two blocks switched to sagesilent: every later result dropped, the stale 456 not shown", tw1.json.code.map((x) => x.state).join(",") === "not run,not run,not run" && !readFileSync(join(dir, "two.html"), "utf8").includes(">456<"), tw1.json?.code);
+  // (a same-language change keeps the other languages' results: the per-language rule)
+  writeFileSync(join(dir, "two.tex"), TWO.replace("a = 123", "a = 124"));
+  const tw2 = await run(dir, "check", "two.tex", "--json");
+  check("a same-language edit: only its language's later results dropped", tw2.json.code.map((x) => x.state).join(",") === "not run,ok,ok", tw2.json?.code);
+
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");

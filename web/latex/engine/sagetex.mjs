@@ -126,20 +126,22 @@ export function plotOptions(opts) {
 // long as it is for the very item at its place (its key) and every one before it in its language is too; only ok, error and blocked
 // states, with the fields the renderer shows (each checked again where it is shown: inlineHtml, mathPart)
 export function savedStates(items, saved) {
-  // (per language: each language runs in a session of its own, so an item's result depends only on the items before
-  //  it in its language; one changed item drops its result and the later ones of its language, no other)
+  // (by language: each language runs in a session of its own, so a changed item drops its result and the later ones
+  //  of its language, no other; but an item whose language changed (a pycode turned sagesilent), a saved result that
+  //  isn't one, or no saved result at its place, drops every later result of every language: @sagebrush's ruling on
+  //  astra's LATEX-LANG-1, so no value of code that is gone can stand)
   const out = [], broken = new Set();
-  for (let k = 0; k < items.length && k < saved.length; k++) {
+  for (let k = 0; k < items.length; k++) {
     const x = saved[k], lang = LANG[items[k].mode] || "sage";
-    if (broken.has(lang)) continue;
-    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) {
-      // (both languages: the item's now, and the one its saved result was of, read from the saved key's mode; a
-      //  pycode turned sagesilent leaves no Python result after it standing; astra's LATEX-LANG-1)
+    const ok = x && typeof x === "object" && ["ok", "error", "blocked"].includes(x.s) && typeof x.key === "string";
+    if (!ok || x.key !== itemKey(items[k])) {
+      let was = null;
+      if (ok) try { const m = JSON.parse(x.key); was = Array.isArray(m) ? LANG[m[0]] || null : null; } catch {}
+      if (was !== lang) break;
       broken.add(lang);
-      let was = null; try { const m = JSON.parse(x && typeof x.key === "string" ? x.key : "null"); was = Array.isArray(m) ? LANG[m[0]] : null; } catch {}
-      if (was) broken.add(was); else for (const l of new Set(Object.values(LANG))) broken.add(l);
       continue;
     }
+    if (broken.has(lang)) continue;
     const st = { key: x.key, s: x.s };
     if (typeof x.latex === "string") st.latex = x.latex;
     if (typeof x.src === "string") st.src = x.src;
