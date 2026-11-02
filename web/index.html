@@ -2961,7 +2961,7 @@ const tools = [
   },
   {
     name: "run_python",
-    description: "Run Python 3.14 code (or Sage syntax with sage=true, Magma with magma=true, MATLAB with matlab=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change.",
+    description: "Run Python 3.14 code (or Sage syntax with sage=true, Magma with magma=true, MATLAB with matlab=true) in this page's notebook: it is added as a new cell, runs in the browser, and its output (stdout, the value of a final expression, or a traceback) is returned, with each plot as a PNG image plus a text description. Variables persist between calls. numpy is available (NumPy 2 API, results and seeded random streams match NumPy). Plotting: matplotlib.pyplot (a subset; figures show automatically), or Sage's plot/point/line/contour_plot/plot3d/... (sage=true; 3D plots come back as a picture of the default view). Sage mode also has symbolic calculus (diff, integrate, limit, solve, taylor, desolve) on Sagebrush's own engine; animations (Sage animate, matplotlib FuncAnimation) return their first, middle and last frames. @interact functions get controls that set_interact can change. A notebook that already has code keeps its language: code in another (sage=true in a Python notebook, say) runs in a new notebook of that language, opened then, and the result says so.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2973,17 +2973,27 @@ const tools = [
       required: ["code"],
     },
     async execute({ code, sage, magma, matlab }) {
-      // (an agent changes the language only of a notebook with no code yet)
+      // (an agent changes the language only of a notebook with no code yet; one with code keeps its language, its code
+      // being that language's: the code runs in a new notebook of the language asked for, opened now, and the one before
+      // is saved, unchanged. Sim run 2, APP-sage-switch: refused there, agents fell back to `from sage.all import *` or
+      // the CLI)
       const want = magma ? "magma" : matlab ? "matlab" : sage !== undefined ? (sage ? "sage" : "python") : nb.mode;
+      let note = null;
       if (want !== nb.mode) {
-        if (hasCode()) return { isError: true, content: [{ type: "text", text: `This notebook is ${LANG_NAME[nb.mode] ?? nb.mode} and has code, so its language isn't changed: run ${LANG_NAME[nb.mode] ?? nb.mode} code, or ask the person using the page to change its language.` }] };
-        setMode(want);
+        if (hasCode()) {
+          const was = docName(), from = LANG_NAME[nb.mode] ?? nb.mode, to = LANG_NAME[want] ?? want;
+          saveNow();
+          await openNew(`Untitled (${to})`, want, [""], true);
+          note = `"${was}" is ${from} and has code, so its language isn't changed: this ran in a new ${to} notebook, "${docName()}", open now ("${was}" is saved as it was).`;
+        } else setMode(want);
       }
       const last = cells().at(-1);
       const cell = last && last.type === "code" && last.ta.value.trim() === "" ? last : nb.addCell("");
       nb.setInput(cell, code);
       await nb.run(cell);
-      return result(cell.out);
+      const r = await result(cell.out);
+      if (note) r.content.unshift({ type: "text", text: note });
+      return r;
     },
   },
   {
