@@ -596,6 +596,22 @@ sur("R39", "REFUSED surrogate", k="GET " + U + LO + "\ud83d")
 sur("R40", "OK 1", recorded_by="fixture" + PAIR)
 sur("R41", "REFUSED bad-value:url", url=U + PAIR)
 
+# (R42-R46: grader P2: _authority and _host called directly, past the ASCII
+# gate, so each DIGITS line is reached with a non-ASCII digit; R42: a number
+# that STARTS with one)
+B("R42", "REFUSED not-json", raw=json.dumps(manifest({"GET " + U: entry(U)}), ensure_ascii=False).replace('"version": 1', '"version": \u0663').encode("utf-8"))
+rows["R42"]["family"] = "R"
+
+
+def direct(rid, call, exp):
+    R(rid, "try:\n    print('OK', _sbdata.%s)\nexcept _sbdata.Refused as e:\n    print('REFUSED', e.code)\n" % call, exp)
+
+
+direct("R43", "_authority('http', 'h:\u0663')", "REFUSED url")
+direct("R44", "_authority('http', 'h:\u00b2')", "REFUSED url")
+direct("R45", "_authority('http', 'h:\uff11')", "REFUSED url")
+direct("R46", "_host('a.\u0663')", "REFUSED url")
+
 json.dump(rows, open(os.path.join(OUT, "expected.json"), "w"), indent=1, sort_keys=True)
 fam = {}
 for r in rows.values():

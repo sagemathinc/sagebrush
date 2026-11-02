@@ -91,9 +91,9 @@ At base a931ee43, every A–F row fails at import (`ModuleNotFoundError: No modu
 - `make.py`, `mutants.json` and `HARNESS.md` are listed by sha256 in the packet's SHA256SUMS.
 - `fixtures-manifest.txt` lists every file the generator writes (path, type, size and sha256; symlink targets; FIFOs by type), with its sha256 in SHA256SUMS. A fixture change shows up as a different manifest.
 
-## The review fixes on 5da953fe (family R, 41 rows)
+## The review fixes on 5da953fe (family R, 46 rows)
 
-The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 41, for **203 CLI rows**. The H rows are H1–H6. That makes 210 tests.
+The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 46, for **208 CLI rows**. The H rows are H1–H6. That makes 215 tests.
 
 - **R1–R5:** `_fs.lstat_kind` is `none` only for ENOENT. Any other error is `error`.
   - R1 is EACCES: a directory with no search permission. It holds only for a non-root user. As root, the row FAILS; it never skips.
@@ -108,6 +108,10 @@ The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and t
   - The boundary rows: 0, a file of exactly max bytes vs one of max+1, and 50,000,000 vs 50,000,001.
   - The invalid values: -1, 1.5, `10**30`, `'x'`, True, None, nan, inf and -inf.
   - R30 is the no-open witness: a missing path with an over-ceiling max gives `bad-max` (without the check, it would give `unreadable`). R31 is the missing-path control.
+- **R42–R46** (grader P2): a manifest number that starts with `٣` (R42), and direct calls past the ASCII gate: `_authority('http', 'h:٣' / 'h:²' / 'h:１')` (R43–R45) and `_host('a.٣')` (R46). Each DIGITS line, by trace:
+  - the port line is killed by R43–R45, and the number loop by R6–R11 and R42;
+  - the number-start line alone is EQUIVALENT: `number()` refuses an empty ASCII digit run as not-json, the same result;
+  - the IP last-label line alone is EQUIVALENT: `_LABEL` (`[a-z0-9]`, ASCII only) refuses a non-ASCII label first, which R46 pins.
 - **R32–R41:** an escaped lone or reversed surrogate in a url, an entry key or a meta field is `REFUSED surrogate` by the parser, never an uncaught `UnicodeEncodeError`.
   - R40 is the valid-pair control: the pair in a meta field gives `OK 1`.
   - R41 is a valid pair in a url, which is refused cleanly as `bad-value:url`.
