@@ -70,6 +70,7 @@ import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, isPause
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
+import { filesButton, setFilesOpen, filesResizer } from "../workspace/sidebar-chrome";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { pairLink } from "../workspace/pair-link";
 import { SyncOwner } from "../workspace/sync-owner";
@@ -1490,24 +1491,32 @@ export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 if (ws && local) {
   const side = document.createElement("div");
   side.id = "wssidebar";
-  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:272px;border-right:1px solid #d4d4cb;z-index:30";
+  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;border-right:1px solid #d4d4cb;z-index:30";
   side.hidden = true;
   document.body.append(side);
   const btn = document.createElement("button");
-  btn.textContent = "Files";
-  btn.title = "Your notebooks, boards and files (in this browser)";
   btn.setAttribute("aria-pressed", "false");
+  btn.setAttribute("aria-controls", "wssidebar");
   btn.dataset.sbb = "files";
+  // (the logo and an arrow, as on the notebook page; the sidebar's right edge resizes it: web/workspace/sidebar-chrome.ts)
+  filesButton(btn);
   document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
   const phone = () => matchMedia("(max-width: 640px)").matches;
+  let width = 272;
+  const layout = () => {
+    const on = !side.hidden;
+    boardEl.style.left = on && !phone() ? `${width}px` : "";
+    side.style.width = phone() ? "" : `${width}px`;
+    side.style.right = phone() ? "0" : "";
+  };
+  const resizeSync = filesResizer(side, (w) => { width = w; layout(); });
   const show = (on: boolean) => {
     side.hidden = !on;
-    boardEl.style.left = on && !phone() ? "272px" : "";
-    side.style.width = phone() ? "" : "272px";
-    side.style.right = phone() ? "0" : "";
-    btn.setAttribute("aria-pressed", String(on));
+    layout();
+    resizeSync();
+    setFilesOpen(btn, on);
     try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
     dispatchEvent(new Event("resize"));
     if (on && !browser) browser = mountBrowser(side, {

@@ -78,9 +78,10 @@
   #files { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
   #files[hidden] { display: none; }
   /* the workspace's file browser (web/workspace/browser.ts): a sidebar on the left; on a phone, a sheet over the page */
-  #wssidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 272px; border-right: 1px solid var(--line); z-index: 20; }
+  #wssidebar { position: fixed; left: 0; top: 0; bottom: 0; width: var(--wsw, 272px); border-right: 1px solid var(--line); z-index: 20; }
   #wssidebar[hidden] { display: none; }
-  body.wsfiles { padding-left: 272px; }
+  body.wsfiles { padding-left: var(--wsw, 272px); }
+  /* (its toggle, the logo and an arrow, and the handle on its right edge that resizes it: web/workspace/sidebar-chrome.ts) */
   @media (max-width: 640px) { #wssidebar { width: auto; right: 0; } body.wsfiles { padding-left: 0; } }
   #files.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent2); }
   #files .fhead { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
@@ -242,7 +243,7 @@
   html.phone .bar #runall, html.phone .bar #stop { flex: 1 0 auto; }
   /* (File and ⋯ always in view; what doesn't fit scrolls: the stale-cells button last) */
   html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
-  html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
+  html.phone .bar #wsfilesbtn { order: -1; } html.phone .bar #runstale { order: 5; }
   html.phone.typing .bar { display: none; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
@@ -300,6 +301,7 @@
   <!-- one row: what you do most on the left (one of Run all / Stop shows, by
        whether cells are running); settings and menus on the right -->
   <div class="bar" role="toolbar" aria-label="Notebook">
+    <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button class="primary" id="runall" title="Run every cell in order">▶ Run all</button>
     <button class="stop" id="stop" hidden title="Interrupt the running program (KeyboardInterrupt; variables are kept)">■ Stop</button>
     <button id="add" title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
@@ -312,7 +314,6 @@
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
     <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="gpu">Remote compute (preview)</option></select>
-    <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -479,6 +480,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+import { filesButton, setFilesOpen, filesResizer } from "./workspace/sidebar-chrome.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -3392,13 +3394,16 @@ async function wsFile(path, data, opts = {}) {
 // button shows and hides it, remembered; the first time, it is shown if
 // there is more than one document.
 const wsSidebar = $("#wssidebar"), wsFilesBtn = $("#wsfilesbtn");
+filesButton(wsFilesBtn);
+const wsResizeSync = filesResizer(wsSidebar, (w) => document.documentElement.style.setProperty("--wsw", `${w}px`));
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
-  wsFilesBtn.setAttribute("aria-pressed", String(on));
+  setFilesOpen(wsFilesBtn, on);
+  wsResizeSync();
   try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
