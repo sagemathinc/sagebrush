@@ -41,6 +41,8 @@ export type LibManifest = {
   modes: Record<string, string[]>;
   /** the packages' registry, and each package file ("<dir>/<path>") -> its group */
   packages: { registry: unknown; files: Record<string, string> };
+  /** group -> its offline item (web/offline-inventory.mts), set by web/build.ts */
+  items?: Record<string, string>;
   /** the pinned zone data's index (web/tzdata-chunks.mts), for a browser's time */
   tzdata?: ChunkRef & { version: string };
 };
