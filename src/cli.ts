@@ -536,7 +536,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   }
   // (`latex`: the LaTeX editor's engine, in a file of its own beside this one, src/latex-cli.ts; a script named latex
   // here runs as before unless a latex command is asked for)
-  if (argv[0] === "latex" && (["check", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
+  if (argv[0] === "latex" && (["check", "run", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
     const latex = loadLatex();
     if (typeof latex === "string") { process.stderr.write(`sagebrush: ${latex}\n`); process.exitCode = 2; return; }
     // (cli: the script this process runs, the bundle or the npm launcher, for `latex run`'s Sage session)
