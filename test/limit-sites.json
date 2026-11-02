@@ -5132,6 +5132,78 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sbdata.py :: _Parser.string :: def string(self, cap, capcode=\"cap:string\"): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _Parser.string :: if n > cap: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _Parser.string :: if n > cap: #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e; #459 CI1 revision 7c10a89d: the run-at-a-time charge): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _check_url :: raise Refused(\"cap:\" + f) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _entry :: raise Refused(\"cap:key\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _entry :: raise Refused(\"cap:size\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _meta :: raise Refused(\"cap:\" + f) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: validate :: raise Refused(\"cap:entries\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: validate :: raise Refused(\"cap:folder\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
  "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
   "class": "3",
   "owner": "special functions",
@@ -5276,6 +5348,166 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
+ },
+ "lib/ipaddress.py :: IPv4Network.__init__ :: elif self._prefixlen == (self.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv4Network.__init__ :: if self._prefixlen == (self.max_prefixlen - 1): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv6Network.__init__ :: elif self._prefixlen == self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv6Network.__init__ :: if self._prefixlen == (self.max_prefixlen - 1): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseAddress.__format__ :: padlen = self.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseAddress.__format__ :: padlen = self.max_prefixlen // 4 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork._address_class :: raise NotImplementedError(msg) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: ValueError: The prefixlen_diff is too small or too large. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: if new_prefixlen > self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: if self._prefixlen == self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV4 :: max_prefixlen = IPV4LENGTH #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV4._make_netmask :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6 :: max_prefixlen = IPV6LENGTH #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: _max_parts = cls._HEXTET_COUNT + 1 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: if len(parts) > _max_parts: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: msg = \"At most %d colons permitted in %r\" % (_max_parts-1, ip_str) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: parts = ip_str.split(':', maxsplit=_max_parts) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._make_netmask :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._string_from_ip_int :: raise ValueError('IPv6 address is too large') #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._check_int_address :: raise AddressValueError(msg % (address, self.max_prefixlen, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: byteslen = cls.max_prefixlen // 8 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: cls.max_prefixlen) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: prefixlen = cls.max_prefixlen - trailing_zeroes #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_prefix_string :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._split_addr_prefix :: return address, cls.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._split_addr_prefix :: return address[0], cls.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _count_righthand_zero_bits :: bits: maximum number of bits to count. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: collapse_addresses :: elif ip._prefixlen == ip.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: summarize_address_range :: ip_bits = first.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v4_int_to_packed :: ValueError: If the integer is negative or too large to be an #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v4_int_to_packed :: raise ValueError(\"Address negative or too large for IPv4\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v6_int_to_packed :: raise ValueError(\"Address negative or too large for IPv6\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
  },
  "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
   "class": "none",
@@ -7890,6 +8122,14 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: chdir :: const READ_NOFOLLOW_MAX = 50_000_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
  "src/runtime/modules.ts :: factorial :: if (n > LLONG_MAX) raise(T.OverflowError, `factorial() argument should not exceed ${LLONG_MAX}`); #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -7974,6 +8214,46 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: const limit = typeof max === \"bigint\" || typeof max === \"number\" ? Number(max) : NaN; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: fn(m, \"read_nofollow\", (path: string, max: any) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return \"bad-max\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: if (st.size > limit) return \"too-large\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
  "src/runtime/modules.ts :: setDigits :: const i = O.index(maxdigits); #0": {
   "class": "3",
