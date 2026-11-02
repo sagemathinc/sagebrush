@@ -22,6 +22,14 @@ const roman = (n) => { if (n <= 0 || n > 4999) return String(n); const v = [[100
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
+// a beamer slide's box (style.ts .slide): the class's aspectratio (beamer's paper sizes, in mm) and its type size as a share
+// of the slide's width (--sfs, in cqw: the slide is a size container); 11pt and 4:3 (128 x 96 mm) unless given
+const ASPECTS = { "1610": [160, 100], "169": [160, 90], "149": [140, 90], "141": [148.5, 105], "54": [125, 100], "43": [128, 96], "32": [135, 90] };
+function slideStyle(opt) {
+  const m = /aspectratio\s*=\s*(\d+)/.exec(opt || ""), [w, h] = ASPECTS[m && Object.hasOwn(ASPECTS, m[1]) ? m[1] : "43"];
+  const pt = /(^|,)\s*(8|9|10|11|12|14|17|20)pt\s*(,|$)/.exec(opt || ""), size = pt ? +pt[2] : 11;
+  return "aspect-ratio:" + w + "/" + h + ";--sfs:" + (size * 0.3528 / w * 100).toFixed(3);
+}
 function cssDim(s) {
   const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|ex|bp|pc|px|sp|\\textwidth|\\linewidth|\\columnwidth|\\hsize|\\textheight)?/.exec(String(s));
   if (!m) return null;
@@ -183,13 +191,19 @@ const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markb
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
   fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], savebox: [1, 2], sbox: [0, 2], usebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
-  bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1] };
+  bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1],
+  usetheme: [1, 1], usecolortheme: [1, 1], usefonttheme: [1, 1], useinnertheme: [1, 1], useoutertheme: [1, 1], setbeamertemplate: [0, 2],
+  setbeamercolor: [0, 2], setbeamerfont: [0, 2], setbeamersize: [0, 1], setbeamercovered: [0, 1], titlegraphic: [0, 1], logo: [0, 1],
+  AtBeginSection: [1, 1], AtBeginSubsection: [1, 1], beamertemplatenavigationsymbolsempty: [0, 0] };
 
 class Renderer {
   constructor(opts) {
     this.opts = opts || {};
     this.images = this.opts.images || {}; this.imageRefs = new Set();
-    this.cls = "article"; this.book = false;
+    this.cls = "article"; this.book = false; this.clsOpt = "";
+    // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
+    //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
+    this.frameList = []; this.problems = []; this.lastPos = -1;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
@@ -208,8 +222,11 @@ class Renderer {
   unk(name, flow, st) {
     if (this.inPreamble) return;
     this.stats.unknownCommands++; this.unknown.set(name, (this.unknown.get(name) || 0) + 1);
+    this.problem("command", name);
     flow.html('<span class="unk" title="not supported in this prototype">\\' + esc(name) + "</span>", st);
   }
+
+  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), at: this.lastPos }); }
 
   // ---- argument readers over a sibling list
   isSp(n) { return n && n.t === "x" && !isCs(n.v) && catOf(n.v) === CAT.SPACE; }
@@ -297,6 +314,7 @@ class Renderer {
   }
   math(src, display) {
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
+    if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     if (!this.mathFails.length) return h;
     const f = this.mathFails; this.mathFails = [];
     return h + mathFailHtml(f, esc);
@@ -306,7 +324,7 @@ class Renderer {
   walk(nodes, ctx, flow) {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
-      if (n.p !== undefined && !flow.inline) flow.pos = n.p;
+      if (n.p !== undefined) { this.lastPos = n.p; if (!flow.inline) flow.pos = n.p; }
       switch (n.t) {
         case "x": i = this.tok(nodes, i, ctx, flow); break;
         case "g": this.walk(n.kids, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow); break;
@@ -325,9 +343,10 @@ class Renderer {
         case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
         case "err":
           // (a half-typed argument: what was read, then a note; LaTeX would say "Paragraph ended before \x was complete")
+          this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
-        case "cls": this.cls = n.cls; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
+        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
         default: break;
       }
     }
@@ -531,14 +550,64 @@ class Renderer {
         const b = flow.open("div", ' class="env-' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); return;
       }
       case "tikzpicture": case "tikzcd": case "axis": case "pspicture": {
+        this.problem("not-rendered", env);
         flow.block('<div class="placeholder">[' + esc(env) + ": not rendered in this prototype]</div>"); return;
       }
+      // (beamer: its blocks, and each frame a slide; in another class, unknown environments as before)
+      case "block": case "alertblock": case "exampleblock":
+        if (this.cls === "beamer") return this.bblock(n, c2, flow);
+      // falls through
+      case "frame":
+        if (this.cls === "beamer" && env === "frame") return this.frame(n.kids, c2, flow);
+      // falls through
       default:
         if (n.user) { this.walk(n.kids, c2, flow); return; }
-        if (!Object.hasOwn(SIZES, env)) { this.unknown.set("env:" + env, (this.unknown.get("env:" + env) || 0) + 1); }
+        if (!Object.hasOwn(SIZES, env)) { this.unknown.set("env:" + env, (this.unknown.get("env:" + env) || 0) + 1); this.problem("environment", env); }
         else c2.st.size = SIZES[env];
         { const b = flow.open("div", ' class="env-unknown" title="' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); }
     }
+  }
+  // a beamer frame as a slide: \begin{frame}<spec>[options]<spec>{title}{subtitle}, or \frametitle / \framesubtitle
+  // at its top level. Its overlays are all shown (every step at once). The slide's size is the class's aspectratio
+  // (4:3 unless given); its type scales with its width (style.ts)
+  frame(kids, ctx, flow) {
+    let j = this.spec(kids, -1), o;
+    [o, j] = this.opt(kids, j); const fopts = o ? this.str(o) : "";
+    j = this.spec(kids, j);
+    const grp = (i) => { let k = i + 1; while (k < kids.length && this.isSp(kids[k])) k++; return kids[k] && kids[k].t === "g" ? k : -1; };
+    let title = null, sub = null, g = grp(j);
+    if (g >= 0) { title = kids[g].kids; j = g; g = grp(j); if (g >= 0) { sub = kids[g].kids; j = g; } }
+    const body = [], rest = kids.slice(j + 1);
+    for (let i = 0; i < rest.length; i++) {
+      const nm = this.csName(rest[i]);
+      if (nm === "frametitle" || nm === "framesubtitle") {
+        const k0 = this.spec(rest, i); const [, k1] = this.opt(rest, k0); const [a, k2] = this.arg(rest, k1);
+        if (nm === "frametitle") title = a; else sub = a;
+        i = k2; continue;
+      }
+      body.push(rest[i]);
+    }
+    const n = this.frameList.length + 1;
+    this.frameList.push({ n, title: title ? this.str(title).replace(/\s+/g, " ").trim() : "", at: this.lastPos });
+    const head = title && !/\bplain\b/.test(fopts) ? '<header class="slide-title">' + this.inline(title, ctx) + (sub ? '<div class="slide-subtitle">' + this.inline(sub, ctx) + "</div>" : "") + "</header>" : "";
+    const va = /(^|,)\s*t\s*(,|$)/.test(fopts) ? " va-t" : /(^|,)\s*b\s*(,|$)/.test(fopts) ? " va-b" : "";
+    const b = flow.open("section", ' class="slide' + va + '" data-frame="' + n + '" id="frame-' + n + '" style="' + slideStyle(this.clsOpt) + '"', head);
+    const inner = flow.open("div", ' class="slide-body"');
+    this.walk(body, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow);
+    flow.close(inner); flow.close(b);
+  }
+  // an overlay command's argument (after its <spec>): shown, as every step is; \invisible's takes its room, unseen
+  overlayArg(nodes, i, ctx, flow, hidden) {
+    const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0);
+    if (hidden) flow.html('<span class="invisible">' + this.inline(a, ctx) + "</span>", ctx.st); else this.walk(a, ctx, flow);
+    return j;
+  }
+  // beamer's block, alertblock and exampleblock: {title}, then the body
+  bblock(n, ctx, flow) {
+    const j0 = this.spec(n.kids, -1); const [t, j] = this.arg(n.kids, j0);
+    const b = flow.open("div", ' class="bblock ' + n.env + '"', '<div class="bblock-title">' + this.inline(t, ctx) + "</div>");
+    const inner = flow.open("div", ' class="bblock-body"');
+    this.walk(n.kids.slice(j + 1), ctx, flow); flow.close(inner); flow.close(b);
   }
   mathEnv(n, ctx, flow) {
     const env = n.env, base = env.replace(/\*$/, ""), numbered = !env.endsWith("*") && env !== "displaymath" && env !== "math";
@@ -744,7 +813,7 @@ class Renderer {
     const m = this.meta;
     if (!m.title && !m.author) return "";
     const date = m.date !== null ? m.date : esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }));
-    return '<div class="titleblock">' + (m.title ? '<div class="title">' + m.title + "</div>" : "") + (m.author ? '<div class="author">' + m.author + "</div>" : "") + (date ? '<div class="date">' + date + "</div>" : "") +
+    return '<div class="titleblock">' + (m.title ? '<div class="title">' + m.title + "</div>" : "") + (m.author ? '<div class="author">' + m.author + "</div>" : "") + (m.institute ? '<div class="institute">' + m.institute + "</div>" : "") + (date ? '<div class="date">' + date + "</div>" : "") +
       (m.thanks.length ? '<div class="thanks">' + m.thanks.map((t) => "<div>* " + t + "</div>").join("") + "</div>" : "") + "</div>";
   }
 
@@ -820,6 +889,17 @@ const CMDS = {
   date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.date = this.inline(a, ctx); return j; },
   maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
   titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
+  // (beamer's overlays: every step is shown, so \only, \uncover, \visible and \onslide show their content; \alt its first)
+  only: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
+  uncover: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
+  visible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
+  invisible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, true); },
+  onslide: function (nodes, i) { return this.spec(nodes, i); },
+  alt: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
+  alert: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="alert">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  structure: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="structure">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  note: function (nodes, i) { const j0 = this.spec(nodes, i); const [, j1] = this.opt(nodes, j0); const [, j] = this.arg(nodes, j1); return j; },
+  institute: function (nodes, i, ctx) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); this.meta.institute = this.inline(a, ctx); return j; },
   tableofcontents: function (nodes, i, ctx, flow) { flow.block("\u0001TOC\u0002"); return i; },
   appendix: function (nodes, i) { this.appendix = true; if (this.book) this.ctr.chapter = 0; else this.ctr.section = 0; return i; },
   url: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const u = this.str(a).replace(/\\([#%&_~$])/g, "$1"); const s = safeUrl(u); flow.html(s ? '<a class="url" href="' + esc(s) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + "</a>" : '<span class="url">' + esc(u) + "</span>", ctx.st); return j; },
@@ -829,7 +909,8 @@ const CMDS = {
   texorpdfstring: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
   ensuremath: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html(this.math(this.mathStr(a), false), ctx.st); return j; },
   fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  frame: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  frame: function (nodes, i, ctx, flow) {
+    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
@@ -1070,5 +1151,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, imageRefs: [...R.imageRefs], stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }
