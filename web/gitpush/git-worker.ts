@@ -36,8 +36,10 @@ type State = { repo: string; folder: string; sigs: Record<string, string>; last?
 const getState = (scope: string) => idb<State | undefined>("state", "readonly", (s) => s.get(scope));
 const putState = (scope: string, st: State) => idb("state", "readwrite", (s) => s.put(st, scope));
 
-/** One push, from begin to end. */
+/** One push, from begin to end: the worker's only one (M2-SEC-1). Its id goes with every put, keep, end and abort; a
+ * request with any other id is refused, and a second begin is refused while it runs, never put in its place. */
 type Run = {
+  id: string;
   scope: string; repo: string; url: string; branch: string; folder: string; proxy: string; token: string;
   fs: any; dir: string; cache: object; author: { name: string; email: string };
   tracked: Set<string>; seen: Set<string>; sigs: Record<string, string>;
@@ -74,6 +76,36 @@ async function commitAndPush(r: Run, message: string): Promise<void> {
   if (!res?.ok || res.refs?.[`refs/heads/${r.branch}`]?.ok === false) throw new Error(pushWords({ code: "PushRejectedError" }, r.branch, r.repo));
 }
 
+/** The run a request names, or a refusal (never touching the run under way). */
+function owned(id: unknown): Run {
+  if (!run || id !== run.id) throw new Error("That push is no longer under way.");
+  return run;
+}
+let beginning = false;
+
+async function beginNow({ scope, repo, folder, branch, proxy, author }: { scope: string; repo: string; folder: string; branch: string; proxy: string; author: { name: string; email: string } }) {
+  const p = parseRepo(repo);
+  if (!p) throw new Error("That isn't a GitHub repository address (https://github.com/owner/repo).");
+  if (!BRANCH.test(branch)) throw new Error(`Pushes go only to a sagebrush/… branch, not ${branch}.`);
+  if (!/^https:\/\/|^http:\/\/127\.0\.0\.1:\d+$/.test(proxy)) throw new Error("No push proxy is set for this site.");
+  const token = await getToken(scope, repo);
+  if (!token) throw new Error("Save a token for this repository first.");
+  const fs = new FS(`sagebrush-gitpush:${scope}`);
+  const dir = `/${p.owner}/${p.repo}/${branch}`;
+  await mkdirp(fs, dir);
+  let tracked: string[] = [];
+  try { await fs.promises.stat(dir + "/.git"); } catch { await git.init({ fs, dir, defaultBranch: branch }); }
+  const cache = {};
+  try { tracked = await git.listFiles({ fs, dir, cache }); } catch { tracked = []; }
+  const st = await getState(scope);
+  // (a signature counts only for a path this repository holds: a lost or new local repository reads everything)
+  const sigs: Record<string, string> = {};
+  if (st && st.repo === repo && st.folder === folder) for (const t of tracked) if (st.sigs[t]) sigs[t] = st.sigs[t];
+  const id = crypto.randomUUID();
+  run = { id, scope, repo, url: p.url, branch, folder, proxy, token, fs, dir, cache, author, tracked: new Set(tracked), seen: new Set(), sigs: { ...sigs }, changed: 0, removed: 0, pending: 0, parts: 0, dirty: false };
+  return { sigs, run: id };
+}
+
 const ops: Record<string, (a: any) => Promise<unknown>> = {
   async status({ scope, repo }: { scope: string; repo?: string }) {
     const st = await getState(scope);
@@ -90,29 +122,13 @@ const ops: Record<string, (a: any) => Promise<unknown>> = {
     return true;
   },
   async begin({ scope, repo, folder, branch, proxy, author }: { scope: string; repo: string; folder: string; branch: string; proxy: string; author: { name: string; email: string } }) {
-    const p = parseRepo(repo);
-    if (!p) throw new Error("That isn't a GitHub repository address (https://github.com/owner/repo).");
-    if (!BRANCH.test(branch)) throw new Error(`Pushes go only to a sagebrush/… branch, not ${branch}.`);
-    if (!/^https:\/\/|^http:\/\/127\.0\.0\.1:\d+$/.test(proxy)) throw new Error("No push proxy is set for this site.");
-    const token = await getToken(scope, repo);
-    if (!token) throw new Error("Save a token for this repository first.");
-    const fs = new FS(`sagebrush-gitpush:${scope}`);
-    const dir = `/${p.owner}/${p.repo}/${branch}`;
-    await mkdirp(fs, dir);
-    let tracked: string[] = [];
-    try { await fs.promises.stat(dir + "/.git"); } catch { await git.init({ fs, dir, defaultBranch: branch }); }
-    const cache = {};
-    try { tracked = await git.listFiles({ fs, dir, cache }); } catch { tracked = []; }
-    const st = await getState(scope);
-    // (a signature counts only for a path this repository holds: a lost or new local repository reads everything)
-    const sigs: Record<string, string> = {};
-    if (st && st.repo === repo && st.folder === folder) for (const t of tracked) if (st.sigs[t]) sigs[t] = st.sigs[t];
-    run = { scope, repo, url: p.url, branch, folder, proxy, token, fs, dir, cache, author, tracked: new Set(tracked), seen: new Set(), sigs: { ...sigs }, changed: 0, removed: 0, pending: 0, parts: 0, dirty: false };
-    return { sigs };
+    if (run || beginning) throw new Error("Another push is under way here. Try again when it finishes.");
+    beginning = true;
+    try { return await beginNow({ scope, repo, folder, branch, proxy, author }); } finally { beginning = false; }
   },
   /** Files that may have changed: written when they differ, and in a batch's commit once PUSH_BATCH bytes are waiting. */
-  async put({ files }: { files: { path: string; bytes: Uint8Array; sig?: string }[] }) {
-    const r = run!;
+  async put({ run: id, files }: { run: string; files: { path: string; bytes: Uint8Array; sig?: string }[] }) {
+    const r = owned(id);
     const add: string[] = [];
     for (const f of files) {
       r.seen.add(f.path);
@@ -131,13 +147,14 @@ const ops: Record<string, (a: any) => Promise<unknown>> = {
     return { parts: r.parts };
   },
   /** Paths kept as they were pushed (unchanged, or not on this device now, or too large now). */
-  async keep({ paths }: { paths: string[] }) {
-    for (const p of paths) run!.seen.add(p);
+  async keep({ run: id, paths }: { run: string; paths: string[] }) {
+    const r = owned(id);
+    for (const p of paths) r.seen.add(p);
     return true;
   },
   /** Everything not sent or kept is removed; a commit if anything changed, and the push. */
-  async end() {
-    const r = run!;
+  async end({ run: id }: { run: string }) {
+    const r = owned(id);
     for (const p of r.tracked) {
       if (r.seen.has(p)) continue;
       await git.remove({ fs: r.fs, dir: r.dir, cache: r.cache, filepath: p });
@@ -163,6 +180,11 @@ const ops: Record<string, (a: any) => Promise<unknown>> = {
     run = undefined;
     return { ...last, changed: r.changed, removed: r.removed };
   },
+  /** The run let go, after a failure on the page's side (a read that threw): only that run. */
+  async abort({ run: id }: { run: string }) {
+    if (run && run.id === id) run = undefined;
+    return true;
+  },
   /** (M4's History list, and the tests) the branch's commits here, newest first. */
   async log({ scope, repo, branch, depth = 50 }: { scope: string; repo: string; branch: string; depth?: number }) {
     const p = parseRepo(repo);
@@ -183,7 +205,8 @@ self.onmessage = async (ev: MessageEvent) => {
   } catch (e: any) {
     // (only our own words: an Error made here; anything else, the general one)
     const message = e instanceof Error && !(e as any).code ? e.message : "The push failed.";
-    if (op === "begin" || op === "put" || op === "end") run = undefined;
+    // (a failed put or end lets its own run go; any other request, a refused begin included, leaves it as it is)
+    if ((op === "put" || op === "end") && run && args?.run === run.id) run = undefined;
     (self as any).postMessage({ id, ok: false, error: message });
   }
 };
