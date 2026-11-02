@@ -70,7 +70,9 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
-  /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
+  /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
+  // (the workspace's API: Trash's remove, restore and move, and emptying it)
+  /^web\/workspace\/api\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
   /^scripts\/check-export-size\.mjs$/,
 ];
 const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());

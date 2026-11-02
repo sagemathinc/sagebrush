@@ -104,7 +104,7 @@ test("engine-cpython runs on pull requests that touch the CPython package's inpu
   // tested here, since engine/Cargo.lock is engine/'s)
   for (const f of ["scripts/ci-cpus.sh", "scripts/clippy/clippy-summary.py", "scripts/clippy/fixtures/expected.tsv", "web/workspace/schema.json", "web/workspace/paths.ts", "engine/modsym/examples/sage/eisenstein_new_dims.jsonl", "Cargo.lock", "Cargo.toml"])
     assert.equal(cp([f]), "true", f);
-  for (const f of ["web/board/test-merge.mjs", "web/workspace/api.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
+  for (const f of ["web/board/test-merge.mjs", "web/workspace/browser.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
     assert.equal(cp([f]), "false", f);
   // the full tier always runs it
   const list = join(dir, "files.txt");
@@ -280,7 +280,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/sync/doc.ts", "web/sync-protocol/doc-protocol.ts", "web/journal/store.js", "web/workspace/sync-outbox.ts",
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
-    "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/migrate.ts", "web/board/export.ts",
+    "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
   ]) {
     const o = classify([f]);
