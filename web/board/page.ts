@@ -111,6 +111,11 @@ async function shareLinkOf(json: string): Promise<string> {
   if (url.length > MAX_LINK) throw new Error(`this board is ${(url.length / 1e6).toFixed(1)} MB as a link, more than a browser's address takes (${MAX_LINK / 1e6} MB): share it as a file instead (File > Download > HTML)`);
   return url;
 }
+/** Whether this tab's sessionStorage keeps a board's pause: written and read back (a probe key, removed). */
+function pauseKept(): boolean {
+  const k = "sagebrush-board-paused:probe";
+  try { sessionStorage.setItem(k, "1"); const ok = sessionStorage.getItem(k) === "1"; sessionStorage.removeItem(k); return ok; } catch { return false; }
+}
 /** A share link's board text: base64url, inflated, at most `max` bytes (refused past it, never cut). */
 async function inflateLink(z: string, max: number): Promise<string> {
   let bytes: Uint8Array;
@@ -367,15 +372,22 @@ const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
 // own copy, its code paused until they run it (as a board brought in from a file), the fragment cleared; at most
 // LIMITS.maxBoardBytes once inflated
 let sharedFailed = "";
+// (the copy a link made in this load: its code paused here whatever sessionStorage does, astra's BOARD-SHARE-1)
+let sharedCopy: string | null = null;
 if (location.hash.startsWith("#z=") && !embedded() && !q.has("doc")) {
   const z = location.hash.slice(3);
   history.replaceState(null, "", location.pathname + location.search);
   try {
     const d = boardFromText(await inflateLink(z, LIMITS.maxBoardBytes), "Shared board");
     if (!isBoard(d)) throw new Error("it isn't a board");
+    // (fails closed: no copy is made unless its pause can be kept, in this tab's sessionStorage, and read back;
+    // a reload of the copy reads it there)
+    if (!pauseKept()) throw new Error("this browser won't keep a note for this tab (sessionStorage), which a shared board's code needs to stay paused until you run it");
     const id = ws ? await makeInWorkspace(ws, d, true) : makeLocal(d);
     if (!id) throw new Error(STORAGE_REFUSED);
+    sharedCopy = id;
     pauseBoard(id);
+    if (!isPaused(id)) sharedFailed = "**This shared board's code is paused in this page only:** this browser didn't keep the note that keeps it paused, so it would run if you reload. Run it only if you trust it.";
     q.set("doc", "local:" + id);
     history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:"));
   } catch (err) {
@@ -1129,7 +1141,7 @@ const host: BoardHost = {
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
   // (a board brought in from a file, opened here: its code waits for the person, until they run it)
-  codePaused: local && isPaused(source.slice(6)),
+  codePaused: local && (source.slice(6) === sharedCopy || isPaused(source.slice(6))),
   codeResumed: () => { if (local) unpause(source.slice(6)); },
   store: {
     async load() {

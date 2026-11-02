@@ -71,6 +71,29 @@ try {
     const c = await caption();
     check(/This shared board couldn't be opened/.test(c) && want.test(c) && !/[?&]doc=local:/.test(await ev("location.search")) && (await ev("location.hash")) === "", `${why}: nothing opened, said why, the fragment cleared`);
   }
+  // sessionStorage refused or full (astra's BOARD-SHARE-1): no copy made, or the copy's code still paused, never run
+  const refuse = (pred) => send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (this === window.sessionStorage && (${pred})(String(k))) throw new DOMException("full", "QuotaExceededError"); return set.call(this, k, v); }; })();` });
+  const boards = () => ev(`window.sagebrush.workspace ? window.sagebrush.workspace.list("/").then((l) => l.filter((e) => e.kind === "board").length) : -1`);
+  await open(`${origin}/board/?new=python`);
+  const before = await boards();
+  const s1 = await refuse("(k) => true");
+  await open(link);
+  await sleep(1500);
+  check(/This shared board couldn't be opened/.test(await caption()) && /sessionStorage/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before, `sessionStorage refused: no copy made, said why (${before} boards before and after)`);
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s1.identifier });
+  // (the probe kept, the pause's own key refused: the copy's code is paused in this page anyway, and said)
+  const s2 = await refuse("(k) => k.startsWith('sagebrush-board-paused:') && k !== 'sagebrush-board-paused:probe'");
+  await open(link);
+  check(await until(`/[?&]doc=local:[0-9a-f]{12}/.test(location.search)`), "the pause's own key refused: the copy is made");
+  check(await until(`!document.querySelector('[data-sbb="runpaused"]').hidden`, 10000) && /paused in this page only/.test(await caption()), "…its code paused all the same (Run this board's code shown), and the caption says a reload would not keep it so");
+  await sleep(1500);
+  const outs = () => ev(`Promise.race([window.sagebrush.board.outputs().then((o) => JSON.stringify(o)), new Promise((r) => setTimeout(() => r("(still running)"), 8000))])`);
+  const o1 = await outs();
+  check(!/\b25\b/.test(o1), `…and its code hasn't run (outputs ${o1.slice(0, 80)})`);
+  // (the control: the person's Run, and then it runs: 25 primes below 100)
+  await ev(`(document.querySelector('[data-sbb="runpaused"]').click(), true)`);
+  check(await until(`window.sagebrush.board.outputs().then((o) => /\\b25\\b/.test(JSON.stringify(o)))`, 60000), "…until the person runs it: then its output (25)");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s2.identifier });
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));
