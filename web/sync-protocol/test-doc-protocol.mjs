@@ -111,7 +111,7 @@ check(res.maxRSS > 0 && res.maxRSS < 96 * 1024, `jcs: 16 MiB of U+0001 refused b
 // ---- a refusal with a code this build doesn't know fails closed: "invalid", final, its code kept (daybreak3's U2)
 {
   const J = JSON.stringify;
-  check(J([...R.CODES].sort()) === J([...new Set(R.CODES)].sort()) && R.CODES.length === 18 && R.isCode("unavailable") && !R.isCode("brand_new") && !R.isCode(5), "protocol.ts's CODES at runtime, and isCode");
+  check(J([...R.CODES].sort()) === J([...new Set(R.CODES)].sort()) && R.CODES.length === 20 && R.isCode("unavailable") && R.isCode("stale_build") && R.isCode("floor_refresh") && !R.isCode("brand_new") && !R.isCode(5), "protocol.ts's CODES at runtime, and isCode");
   let got = null;
   try { R.unwrap({ error: { code: "brand_new", message: "from a newer server", detail: { retry_after: 5 } } }); } catch (e) { got = e; }
   check(got instanceof R.SyncError && got.code === "invalid" && got.detail?.unknown_code === "brand_new" && got.detail?.final === true && !("retry_after" in got.detail), "an unknown code: invalid, final, no retry_after kept: " + J(got?.detail));
