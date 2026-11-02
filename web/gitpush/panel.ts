@@ -7,7 +7,9 @@ import type { Entry, Workspace } from "../workspace/api";
 import type { BoardDoc } from "../board/doc";
 import { Images } from "../board/images";
 import { boardFileText, notebookFileText } from "../workspace/file-bytes";
-import { AUTO_MS, MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
+import { AUTO_MS, GIT_BRANCH, MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
+import { uploadFiles } from "../workspace/upload";
+import { freePath, join, safeName } from "../workspace/paths";
 
 export type GitpushHost = {
   say(m: string): void;
@@ -153,6 +155,89 @@ export function startAuto(w: Workspace, host: GitpushHost): void {
   void turn();
 }
 
+/** (M4a) The History list: the branch's commits in this browser, newest first; a commit's files; a file as that commit
+ * holds it, shown as text (never as HTML) or offered as a download. Only reads: nothing in the workspace changes. */
+export async function showHistory(host: GitpushHost, o: { scope: string; repo: string; branch: string }, into: HTMLElement): Promise<void> {
+  const commits: { oid: string; message: string; at: number }[] = await call(host.workerUrl, "log", { ...o, depth: 100 });
+  const list = el("ol", { className: "gphist" });
+  if (!commits.length) { into.replaceChildren(el("p", { className: "note", textContent: "No versions in this browser yet: push once first." })); return; }
+  for (const c of commits) {
+    const open = el("button", { textContent: `${c.message.split("\n")[0]} · ${ago(c.at)} · ${c.oid.slice(0, 7)}` });
+    const files = el("div");
+    open.onclick = async () => {
+      if (files.childNodes.length) { files.replaceChildren(); return; }
+      const r = await call(host.workerUrl, "files", { ...o, oid: c.oid });
+      const ul = el("ul");
+      for (const path of r.files as string[]) {
+        const view = el("div");
+        const b = el("button", { textContent: path, className: "gpfile" });
+        b.onclick = async () => {
+          if (view.childNodes.length) { view.replaceChildren(); return; }
+          const f = await call(host.workerUrl, "read", { ...o, oid: c.oid, path });
+          const bytes = f.bytes as Uint8Array;
+          let text: string | null = null;
+          if (!bytes.includes(0)) try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, 2 ** 20)); } catch {}
+          const save = el("button", { textContent: "Download", onclick: () => {
+            const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" }));
+            const a = el("a", { href: url, download: path.split("/").pop() || "file" });
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 10_000);
+          } });
+          view.replaceChildren(
+            text !== null ? el("pre", { className: "gptext", textContent: text + (bytes.length > 2 ** 20 ? "\n…" : "") }) : el("p", { className: "note", textContent: `Not text: ${f.size} bytes.` }),
+            save, f.truncated ? el("span", { className: "note", textContent: " (only its first 50 MB)" }) : "",
+          );
+        };
+        ul.append(el("li", {}, b, view));
+      }
+      if (r.more) ul.append(el("li", { textContent: `and ${r.more} more files` }));
+      files.replaceChildren(ul);
+    };
+    list.append(el("li", {}, open, files));
+  }
+  into.replaceChildren(el("p", { className: "note", textContent: `Versions of ${o.branch} in this browser, newest first (the same commits as on GitHub once pushed):` }), list);
+}
+
+/** (M4b) "Copy from GitHub branch": the branch's files, as its newest commit holds them, into a NEW folder at the top
+ * ("<repo> (<branch>)", a free name), each by Upload's own rule (uploadFiles: notebooks and boards made from their
+ * files, data files kept), one at a time. Nothing already in the workspace is written: the folder is new, and every
+ * data file is made with create(), which refuses a path that is there (never putFile, which writes over). */
+export async function copyBranch(w: Workspace, host: GitpushHost, o: { scope: string; repo: string; branch: string; onProgress?(k: number, n: number): void }) {
+  if (!GIT_BRANCH.test(o.branch)) throw new Error("That isn't a branch name git takes.");
+  const p = parseRepo(o.repo);
+  if (!p) throw new Error("That isn't a GitHub repository address (https://github.com/owner/repo).");
+  const got = await call(host.workerUrl, "fetchBranch", { scope: o.scope, repo: p.url, branch: o.branch, proxy: host.proxy });
+  const skipped: Skip[] = [], refused: string[] = [];
+  let made = 0;
+  try {
+    const top = new Set((await w.list("/")).map((e) => e.path));
+    const folder = freePath("/", safeName(`${p.repo} (${o.branch.replace(/\//g, "-")})`), "", (x) => top.has(x));
+    if (!folder) throw new Error("No free name at the top of the workspace for the copy.");
+    await w.mkdir(folder);
+    const keepFile = async (path: string, bytes: Uint8Array) => { await w.create(path, { content: bytes }); };
+    const files: string[] = got.files;
+    let k = 0;
+    for (const rel of files) {
+      o.onProgress?.(++k, files.length);
+      const why = excluded(rel);
+      if (why) { skipped.push({ path: rel, why }); continue; }
+      const segs = rel.split("/"), name = segs.pop()!;
+      // (a name the workspace would change can't be copied as it is: listed, never renamed)
+      if (segs.some((s) => safeName(s) !== s) || safeName(name) !== name) { skipped.push({ path: rel, why: "a name this workspace doesn't take" }); continue; }
+      const dir = segs.length ? join(folder, segs.join("/")) : folder;
+      if (segs.length && !(await w.stat(dir))) await w.mkdir(dir);
+      const { bytes } = await call(host.workerUrl, "fetchRead", { id: got.id, path: rel });
+      if ((bytes as Uint8Array).length > MAX_FILE) { skipped.push({ path: rel, why: "larger than 50 MB" }); continue; }
+      const r = await uploadFiles(w, [new File([bytes as BlobPart], name)], dir, { maxBytes: MAX_FILE, docMaxBytes: w.limits.maxBoardBytes, mode: "python", keepFile });
+      made += r.made.length + r.kept.length;
+      for (const x of r.refused) refused.push(`${segs.length ? segs.join("/") + "/" : ""}${x}`);
+    }
+    return { folder, made, skipped, refused, oid: got.oid as string };
+  } finally {
+    await call(host.workerUrl, "fetchDone", { id: got.id }).catch(() => {});
+  }
+}
+
 /** The section in the Storage panel. */
 export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElement): Promise<void> {
   const scope = w.ws.name;
@@ -218,13 +303,50 @@ export async function openGitpush(w: Workspace, host: GitpushHost, box: HTMLElem
       status.textContent = e?.message ?? "The push failed.";
     } finally { pushing = false; void drawToken(); }
   };
+  // (M4b: Copy from GitHub branch, into a new folder; the branch's name typed, its repository the field's)
+  const copyBranchName = el("input", { type: "text", placeholder: "agent/x", size: 24 });
+  copyBranchName.spellcheck = false;
+  const copyStatus = el("div");
+  let copying = false;
+  const copyBtn = el("button", { textContent: "Copy into a new folder", onclick: async () => {
+    if (copying) return;
+    const r = parseRepo(repo.value), b = copyBranchName.value.trim();
+    if (!r) return host.say("Enter the repository's address first (https://github.com/owner/repo)");
+    if (!GIT_BRANCH.test(b)) return host.say("Enter the name of a branch on GitHub (for example agent/x)");
+    copying = true;
+    copyBtn.disabled = true;
+    copyStatus.replaceChildren(el("p", { className: "note", textContent: `Fetching ${b}…` }));
+    try {
+      const res = await copyBranch(w, host, { scope, repo: r.url, branch: b, onProgress: (k, n) => { copyStatus.firstElementChild!.textContent = `Copying ${b}: ${k} of ${n} files`; } });
+      const lines = [...res.skipped.map((x) => `${x.path}: ${x.why}`), ...res.refused];
+      copyStatus.replaceChildren(el("p", { className: "note", textContent: `Copied ${res.made} file${res.made === 1 ? "" : "s"} of ${b} (${res.oid.slice(0, 7)}) into ${res.folder}` }));
+      if (lines.length) {
+        const ul = el("ul");
+        for (const l of lines.slice(0, 200)) ul.append(el("li", { textContent: l }));
+        copyStatus.append(el("details", {}, el("summary", { textContent: `Not copied: ${lines.length}` }), ul));
+      }
+    } catch (e: any) {
+      copyStatus.replaceChildren(el("p", { className: "note", textContent: e?.message ?? "The copy failed." }));
+    } finally { copying = false; copyBtn.disabled = false; }
+  } });
+  // (M4a: the History list, of the repository and folder last pushed here)
+  const hist = el("div");
+  const histBtn = el("button", { textContent: "History", onclick: async () => {
+    if (hist.childNodes.length) { hist.replaceChildren(); return; }
+    const s2 = await call(host.workerUrl, "status", { scope });
+    if (!s2.repo || !s2.folder) { hist.replaceChildren(el("p", { className: "note", textContent: "No versions in this browser yet: push once first." })); return; }
+    try { await showHistory(host, { scope, repo: s2.repo, branch: branchFor(s2.folder) }, hist); } catch (e: any) { hist.replaceChildren(el("p", { className: "note", textContent: e?.message ?? "The history couldn't be read." })); }
+  } });
   box.replaceChildren(
     el("p", {}, el("b", { textContent: "Push to GitHub" }), " (preview)"),
     el("div", {}, "Repository ", repo),
     el("div", {}, "Folder ", folder, el("span", { className: "note", textContent: " pushes to the branch sagebrush/<its name>; never main" })),
     tokenLine,
     el("p", { className: "note", textContent: "Use a fine-grained token for this one repository, with Contents: Read and write, expiring in 30 days or less. It stays in this browser: Sagebrush's servers never store it. Notebooks are pushed without their outputs." }),
-    go, status, autoLine, skips,
+    go, status, autoLine, skips, histBtn, hist,
+    el("p", {}, el("b", { textContent: "Copy from GitHub branch" })),
+    el("div", {}, "Branch ", copyBranchName, " ", copyBtn, el("span", { className: "note", textContent: " into a new folder; nothing already here is changed" })),
+    copyStatus,
   );
   await drawToken();
 }

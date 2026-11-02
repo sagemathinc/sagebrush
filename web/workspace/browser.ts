@@ -114,6 +114,16 @@ const STYLE = `
 .sbfiles .frow .more { visibility: hidden; }
 .sbfiles .frow:hover .more, .sbfiles .frow:focus-within .more, .sbfiles .frow.cur .more { visibility: visible; }
 .sbfiles .frow input { flex: 1; font: inherit; padding: 1px 4px; border: 1px solid #4a6b49; border-radius: 4px; min-width: 0; }
+/* (B2: a row's checkbox, at its left: shown on the row pointed at or focused, and on every row while any is selected) */
+/* (a span with role=checkbox, not an <input>: a row's one input stays its name typed in place) */
+.sbfiles .frow .sel { flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid #8a8f8b; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: #fff; cursor: pointer; visibility: hidden; }
+.sbfiles .frow .sel[aria-checked=true] { background: #4a6b49; border-color: #4a6b49; }
+.sbfiles .frow:hover .sel, .sbfiles .frow:focus-within .sel, .sbfiles.selecting .frow .sel { visibility: visible; }
+.sbfiles .frow.picked { background: #e6eedf; }
+.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0 10px 6px; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; }
+.sbfiles .fsel[hidden] { display: none; }
+.sbfiles .fsel input { margin: 0; cursor: pointer; }
+.sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
@@ -132,7 +142,7 @@ const STYLE = `
 @media (prefers-color-scheme: dark) {
   .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
   .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
-  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur { background: #2b3a29; }
+  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur, .sbfiles .frow.picked { background: #2b3a29; }
   .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; } .sbfmenu button:hover { background: #2b3a29; }
 }
 `;
@@ -217,7 +227,21 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const tree = h("div", { className: "ftree", role: "tree" });
   const foot = h("div", { className: "ffoot" });
   const picker = h("input", { type: "file", multiple: true, hidden: true });
-  root.append(head, search, tree, toastEl, foot, picker);
+  // (B2, William: rows selected by their checkboxes; a click toggles one, a shift-click the range from the last one
+  // clicked, in the order shown; the bar above the list says how many, selects or clears them all, and acts on them.
+  // Only rows drawn in the tree are selectable (not Recent's, not Trash's): a row that stops being drawn (its folder
+  // closed, a search) leaves the selection, so an action never reaches a row out of sight)
+  const selected = new Set<string>();
+  let anchor: string | null = null;
+  const selAll = h("input", { type: "checkbox" });
+  selAll.setAttribute("aria-label", "Select all shown");
+  const selCount = h("span");
+  const selDownload = h("button", { className: "ib", textContent: "Download", title: "Download the selected files", style: "font-size:12.5px" });
+  const selClear = h("button", { className: "ib", textContent: "Clear", title: "Clear the selection (Esc)", style: "font-size:12.5px" });
+  const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
+  selBar.setAttribute("role", "toolbar");
+  selBar.setAttribute("aria-label", "Selected files");
+  root.append(head, search, selBar, tree, toastEl, foot, picker);
   container.append(root);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
@@ -343,10 +367,24 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
     // (its sync icon, painted after the render (sync-rows.ts), as text a screen reader says too)
     const si = h("span", { className: "si" });
+    const selectable = !opts.recent && !trashView;
+    if (selectable) {
+      const on = selected.has(e.path);
+      const cb = h("span", { className: "sel", textContent: on ? "✓" : "" });
+      cb.setAttribute("role", "checkbox");
+      cb.setAttribute("aria-checked", String(on));
+      cb.setAttribute("aria-label", `Select ${nameOf(e.path)}`);
+      cb.onclick = (ev) => { ev.stopPropagation(); pick1(e.path, !selected.has(e.path), ev.shiftKey); };
+      r.dataset.sel = "1";
+      if (selected.has(e.path)) r.classList.add("picked");
+      r.append(cb);
+    }
     r.append(chev, ic, name, si, meta, more);
     if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
       if ((ev.target as HTMLElement).closest("input")) return;
+      // (a shift-click on a row while some are selected extends the selection to it, rather than opening it)
+      if (ev.shiftKey && selectable && selected.size) { pick1(e.path, true, true); return; }
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
@@ -364,6 +402,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (ev.key === "Enter") r.click();
       else if (ev.key === "F2" && !trashView) startRename(r, e);
       else if (ev.key === "Delete" && !trashView) toTrash(e);
+      else if (ev.key === " " && selectable) { ev.preventDefault(); pick1(e.path, !selected.has(e.path), ev.shiftKey); }
+      else if (ev.key === "Escape" && selected.size) clearSel();
       else if (ev.key === "ArrowRight" && e.kind === "folder" && !open.has(e.path)) toggle(e.path);
       else if (ev.key === "ArrowLeft" && e.kind === "folder" && open.has(e.path)) toggle(e.path);
       else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
@@ -377,6 +417,55 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "folder" && !trashView) dropTarget(r, e.path);
     return r;
   }
+
+  // (B2: the selectable rows as drawn, in order)
+  const selRows = () => [...tree.querySelectorAll<HTMLElement>(".frow[data-sel]")];
+  // (one row's checkbox set to `on`; with shift, every row from the last one clicked to it, in the order shown)
+  function pick1(path: string, on: boolean, shift: boolean) {
+    const paths = selRows().map((r) => r.dataset.path!);
+    const i = anchor === null ? -1 : paths.indexOf(anchor), j = paths.indexOf(path);
+    const range = shift && i >= 0 && j >= 0 ? paths.slice(Math.min(i, j), Math.max(i, j) + 1) : [path];
+    for (const p of range) if (on) selected.add(p); else selected.delete(p);
+    anchor = path;
+    paintSel();
+  }
+  function clearSel() {
+    selected.clear();
+    anchor = null;
+    paintSel();
+  }
+  // (the rows' checkboxes and marks, and the bar, from the selection, without drawing the tree again)
+  function paintSel() {
+    const rows = selRows();
+    let shown = 0;
+    for (const r of rows) {
+      const on = selected.has(r.dataset.path!);
+      if (on) shown++;
+      r.classList.toggle("picked", on);
+      const cb = r.querySelector<HTMLElement>(".sel");
+      if (cb) { cb.setAttribute("aria-checked", String(on)); cb.textContent = on ? "✓" : ""; }
+    }
+    root.classList.toggle("selecting", selected.size > 0);
+    selBar.hidden = selected.size === 0;
+    selCount.textContent = `${selected.size} selected`;
+    selAll.checked = rows.length > 0 && shown === rows.length;
+    selAll.indeterminate = shown > 0 && shown < rows.length;
+  }
+  selAll.onchange = () => {
+    if (selAll.checked) for (const r of selRows()) selected.add(r.dataset.path!);
+    else selected.clear();
+    anchor = null;
+    paintSel();
+  };
+  selClear.onclick = () => { clearSel(); focusList(); };
+  selDownload.onclick = async () => {
+    const files = entries.filter((e) => selected.has(e.path) && e.kind === "file");
+    const skipped = selected.size - files.length;
+    if (!files.length) { say("Only files download: no file is selected"); return; }
+    // (one after another: a browser asks once before a page downloads several files)
+    for (const e of files) await download(e);
+    say(`${files.length} file${files.length === 1 ? "" : "s"} downloaded` + (skipped ? ` (${skipped} not a file: folders, notebooks and boards have their own export)` : ""));
+  };
 
   function toggle(p: string) {
     if (open.has(p)) open.delete(p); else open.add(p);
@@ -442,6 +531,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       empty.onclick = emptyAll;
       foot.append(empty);
     } else foot.append(meterEl);
+    // (B2: a selected row no longer drawn (its folder closed, a search, Trash shown, gone) leaves the selection)
+    const drawn = new Set(selRows().map((r) => r.dataset.path!));
+    for (const p of selected) if (!drawn.has(p)) selected.delete(p);
+    if (anchor !== null && !drawn.has(anchor)) anchor = null;
+    paintSel();
   }
   async function emptyAll() {
     if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { crc32 } from "node:zlib";
-import { BRANCH, branchFor, excluded, gitUnsafe, parseRepo, pushWords, signature, stripOutputs } from "../web/gitpush/rules";
+import { BRANCH, GIT_BRANCH, branchFor, excluded, fetchWords, gitUnsafe, parseRepo, pushWords, signature, stripOutputs } from "../web/gitpush/rules";
 import Sha1 from "../web/gitpush/shims/sha1";
 import crc from "../web/gitpush/shims/crc32";
 
@@ -92,4 +92,14 @@ test("the CRC-32 shim equals node:zlib's (signed, as crc-32 returns it)", () => 
     assert.equal(crc.buf(b) >>> 0, crc32(b), `length ${n}`);
     assert.equal(crc.buf(b), crc32(b) | 0);
   }
+});
+
+test("GIT_BRANCH and fetchWords (M4b): branch names git takes, and fixed words for a failed copy", () => {
+  for (const b of ["main", "agent/x", "sagebrush/proj", "feature/a-b_c.d", "v1.2", "a/b/c"]) assert.match(b, GIT_BRANCH, b);
+  for (const b of ["", "a..b", "a//b", "/a", "a/", ".a", "a/.b", "a.lock", "a.lock/b", "a.", "a b", "a~1", "a^", "a:b", "a?", "a*", "a[", "a\\b", "x".repeat(101), "refs/heads/../x"]) assert.doesNotMatch(b, GIT_BRANCH, b);
+  const r = "https://github.com/o/r.git";
+  assert.equal(fetchWords({ code: "NotFoundError" }, "agent/x", r), "https://github.com/o/r.git has no branch agent/x.");
+  assert.match(fetchWords({ code: "HttpError", data: { statusCode: 401 } }, "agent/x", r), /refused the token \(401\)/);
+  assert.equal(fetchWords({ code: "HttpError", data: { statusCode: 500 } }, "agent/x", r), "The copy failed (500).");
+  assert.equal(fetchWords(undefined, "agent/x", r), "Couldn't reach GitHub through the push proxy.");
 });
