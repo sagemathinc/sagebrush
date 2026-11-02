@@ -128,6 +128,7 @@ export function resolution() {
 }
 // (r4, A2: the declared, discarded, identical warm-up of every fresh process: WARM_SAVES file saves through ws-warm.js,
 // the base tree built under its own name, so every process loads the same extra code whatever its configuration)
+const SHARED_DBS = ["sagebrush-board-history", "sagebrush-history"];
 export async function warm() {
   const W = await import("./ws-warm.js"), name = "hcost-warm-" + Math.random().toString(36).slice(2), mainName = name + "-m", t0 = performance.now();
   const w = await W.Workspace.open({ name, mainName }), bytes = new Uint8Array(4096).fill(7), lat = [];
@@ -135,9 +136,11 @@ export async function warm() {
   for (let i = 0; i < 100; i++) { const a = performance.now(); await w.write("/w.bin", bytes); lat.push(performance.now() - a); }
   w.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
-  // (its databases verified gone before any measured run: none of this page's databases may remain)
-  const left = (await indexedDB.databases()).map((d) => d.name);
-  return { saves: lat.length, lat, left, ms: performance.now() - t0 };
+  // (its own databases verified gone before any measured run; what remains may only be the product's shared databases,
+  // which every workspace open creates (every measured run does too), declared in SHARED_DBS; the full list is kept)
+  const all = (await indexedDB.databases()).map((d) => d.name).sort();
+  const left = all.filter((n) => n === name || n === mainName || !SHARED_DBS.includes(n));
+  return { saves: lat.length, lat, left, all, ms: performance.now() - t0 };
 }
 export async function bench(config, workload, scale = 1) {
   const res = resolution();
