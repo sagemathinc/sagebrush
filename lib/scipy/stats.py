@@ -115,7 +115,7 @@ class _Dist:
         for i, s in enumerate(self.shapes):
             if s in kwds:
                 if i < len(args):
-                    raise TypeError("%s() got multiple values for argument '%s'" % (self.name, s))
+                    raise TypeError("_parse_args() got multiple values for argument '%s'" % s)
                 args.append(kwds.pop(s))
         if len(args) < n:
             missing = self.shapes[len(args):]
@@ -123,6 +123,9 @@ class _Dist:
                             % (len(missing), "" if len(missing) == 1 else "s", ", ".join("'%s'" % m for m in missing)))
         extra = args[n:]
         args = args[:n]
+        for i, kw in enumerate(("loc", "scale")[:len(extra)]):
+            if kw in kwds:
+                raise TypeError("_parse_args() got multiple values for argument '%s'" % kw)
         loc = kwds.pop("loc", 0)
         scale = kwds.pop("scale", 1)
         if extra:
@@ -145,18 +148,30 @@ class _Dist:
         return ok
 
     def support(self, *args, **kwds):
+        """(a, b) for the parameters: broadcast together, nan where they are invalid, as SciPy's (a discrete
+        distribution's in its parameters' own dtype where none is)"""
         args, loc, scale = self._parse(args, kwds, scale_ok=not self.discrete)
+        fargs = [np.asarray(x, dtype=float) for x in args]
+        a, b = self._support(*fargs)
         if all(np.ndim(x) == 0 for x in list(args) + [loc, scale]):
-            ok = bool(self._argcheck(*[np.asarray(x, dtype=float) for x in args])) and (self.discrete or float(scale) > 0)
+            ok = bool(self._argcheck(*fargs)) and (self.discrete or float(scale) > 0)
             if not ok:
                 # (SciPy's: two Python floats, nan, for invalid parameters)
                 return _NAN, _NAN
-        a, b = self._support(*[np.asarray(x, dtype=float) for x in args])
         if self.discrete:
-            lo, hi = a + np.asarray(loc, dtype=float), b + np.asarray(loc, dtype=float)
+            raw = [np.asarray(x) for x in args]
+            ra, rb = self._support_raw(*raw)
+            lo, hi = np.asarray(ra) + np.asarray(loc), np.asarray(rb) + np.asarray(loc)
         else:
-            lo, hi = np.asarray(loc, dtype=float) + np.asarray(scale, dtype=float) * a, np.asarray(loc, dtype=float) + np.asarray(scale, dtype=float) * b
-        return _scalar_or(np.asarray(lo, dtype=float)), _scalar_or(np.asarray(hi, dtype=float))
+            lo = np.asarray(loc, dtype=float) + np.asarray(scale, dtype=float) * a
+            hi = np.asarray(loc, dtype=float) + np.asarray(scale, dtype=float) * b
+        ok = self._argcheck(*fargs) & (True if self.discrete else (np.asarray(scale, dtype=float) > 0))
+        shape = np.broadcast_arrays(np.asarray(lo), np.asarray(hi), np.asarray(ok))[0].shape
+        lo, hi, ok = [np.broadcast_to(np.asarray(v), shape) for v in (lo, hi, ok)]
+        if not np.all(ok):
+            lo = np.where(ok, lo.astype(float), _NAN)
+            hi = np.where(ok, hi.astype(float), _NAN)
+        return _scalar_or(np.array(lo)), _scalar_or(np.array(hi))
 
     def fit(self, *args, **kwds):
         raise _unsupported("%s.fit" % self.name)
@@ -307,14 +322,50 @@ class rv_continuous(_Dist):
 
     def rvs(self, *args, size=None, random_state=None, **kwds):
         args, loc, scale = self._parse(args, kwds)
+        shape, z_args = _rvs_shape(self, args, loc, scale, size, True)
         rs = _random_state(random_state)
-        z = self._rvs(rs, size, *[np.asarray(a, dtype=float) for a in args])
-        return _scalar_or(np.asarray(z * np.asarray(scale, dtype=float) + np.asarray(loc, dtype=float), dtype=float))
+        z = self._rvs(rs, shape, *[np.broadcast_to(np.asarray(a, dtype=float), shape) for a in args])
+        out = np.asarray(z, dtype=float) * np.asarray(scale, dtype=float) + np.asarray(loc, dtype=float)
+        return _scalar_or(np.asarray(out, dtype=float).reshape(shape))
 
-    def _rvs(self, rs, size, *args):
-        # (by inversion: SciPy's own default, rv_continuous._rvs)
-        u = rs.uniform(size=size)
-        return self._ppf(u, *args)
+    def _rvs(self, rs, shape, *args):
+        # (by inversion of a uniform draw: SciPy's own default, rv_continuous._rvs, so the same seed gives
+        # SciPy's numbers)
+        u = rs.uniform(size=None if shape == () else shape)
+        flat = np.asarray(u, dtype=float).reshape(-1)
+        return np.asarray(self._ppf(flat, *[np.asarray(a, dtype=float).reshape(-1) for a in args]), dtype=float).reshape(shape)
+
+
+_DOMAIN = ("Domain error in arguments. The `scale` parameter must be positive for all distributions, and many "
+           "distributions have restrictions on shape parameters. Please see the `scipy.stats.%s` documentation for details.")
+
+
+def _rvs_shape(dist, args, loc, scale, size, continuous):
+    """the sample's shape (size, else the parameters' broadcast shape) after SciPy's checks: every parameter in its
+    domain (ValueError otherwise) and the parameters broadcasting to size"""
+    fargs = [np.asarray(a, dtype=float) for a in args]
+    ok = dist._argcheck(*fargs) & (np.asarray(scale, dtype=float) > 0 if continuous else True)
+    if not np.all(ok):
+        raise ValueError(_DOMAIN % dist.name)
+    bshape = np.broadcast_arrays(np.asarray(loc), np.asarray(scale), *fargs)[0].shape
+    if size is None:
+        return bshape, fargs
+    size_ = tuple(int(v) for v in np.atleast_1d(size))
+    try:
+        fits = np.broadcast_arrays(np.zeros(size_), np.zeros(bshape))[0].shape == size_
+    except ValueError:
+        fits = False
+    if not fits:
+        raise ValueError("size does not match the broadcast shape of the parameters. %s, %s, %s"
+                         % (size, tuple(np.int64(v) for v in size_), bshape))
+    return size_, fargs
+
+
+def _no_sampler(name, method):
+    def f(self, rs, shape, *args):
+        raise NotImplementedError("scipy.stats.%s.rvs is not in Sagebrush yet: Sagebrush's numpy.random has no %s, "
+                                  "SciPy's sampler for it" % (name, method))
+    return f
 
 
 def _random_state(seed):
@@ -362,8 +413,8 @@ class norm_gen(rv_continuous):
     def _stats(self):
         return 0.0, 1.0, 0.0, 0.0
 
-    def _rvs(self, rs, size):
-        return rs.standard_normal(size)
+    def _rvs(self, rs, shape):
+        return rs.standard_normal(None if shape == () else shape)
 
 
 norm = norm_gen()
@@ -438,8 +489,7 @@ class t_gen(rv_continuous):
         k = np.where(df > 4, 6.0 / np.where(df > 4, df - 4, 1.0), np.where(df > 2, _INF, _NAN))
         return m, v, s, k
 
-    def _rvs(self, rs, size, df):
-        return rs.standard_t(df, size=size)
+    _rvs = _no_sampler("t", "standard_t")
 
 
 t = t_gen()
@@ -516,8 +566,7 @@ class f_gen(rv_continuous):
                      / (v1 * np.where(v2 > 8, v2 - 6, 1.0) * np.where(v2 > 8, v2 - 8, 1.0) * (v1 + v2 - 2)), _NAN)
         return m, v, s, k
 
-    def _rvs(self, rs, size, dfn, dfd):
-        return rs.f(dfn, dfd, size=size)
+    _rvs = _no_sampler("f", "f")
 
 
 f = f_gen()
@@ -556,8 +605,7 @@ class chi2_gen(rv_continuous):
     def _stats(self, df):
         return df, 2 * df, 2 * np.sqrt(2.0 / df), 12.0 / df
 
-    def _rvs(self, rs, size, df):
-        return rs.chisquare(df, size=size)
+    _rvs = _no_sampler("chi2", "chisquare")
 
 
 chi2 = chi2_gen()
@@ -595,8 +643,7 @@ class cauchy_gen(rv_continuous):
     def _stats(self):
         return _NAN, _NAN, _NAN, _NAN
 
-    def _rvs(self, rs, size):
-        return rs.standard_cauchy(size)
+    _rvs = _no_sampler("cauchy", "standard_cauchy")
 
 
 cauchy = cauchy_gen()
@@ -633,9 +680,6 @@ class levy_gen(rv_continuous):
     def _stats(self):
         return _INF, _INF, _NAN, _NAN
 
-    def _rvs(self, rs, size):
-        z = rs.standard_normal(size)
-        return 1.0 / (z * z)
 
 
 levy = levy_gen()
@@ -746,9 +790,10 @@ class rv_discrete(_Dist):
 
     def rvs(self, *args, size=None, random_state=None, **kwds):
         args, loc, _ = self._parse(args, kwds, scale_ok=False)
+        shape, fargs = _rvs_shape(self, args, loc, 1, size, False)
         rs = _random_state(random_state)
-        z = self._rvs(rs, size, *[np.asarray(a) for a in args])
-        return _scalar_or(np.asarray(z + np.asarray(loc), dtype=np.int64))
+        z = self._rvs(rs, shape, *[np.broadcast_to(np.asarray(a), shape) for a in args])
+        return _scalar_or(np.asarray(np.asarray(z) + np.asarray(loc), dtype=np.int64).reshape(shape))
 
 
 class binom_gen(rv_discrete):
@@ -818,8 +863,10 @@ class binom_gen(rv_discrete):
             g2 = 1.0 / var - 6.0 / n
         return mu, var, g1, g2
 
-    def _rvs(self, rs, size, n, p):
-        return rs.binomial(n, p, size)
+    _rvs = _no_sampler("binom", "binomial")
+
+    def _support_raw(self, n, p):
+        return np.zeros_like(n), n
 
 
 binom = binom_gen()

@@ -71,3 +71,28 @@ for f in (lambda: st.levy_stable.pdf(1.0, 1.5, 0), lambda: st.levy_stable.cdf(1.
   assert.equal(out, ["levy_stable.pdf", "levy_stable.cdf", "genextreme.fit", "genpareto.fit", "norm.fit"].map((n) => "NotImplementedError scipy.stats." + n + "\n").join(""));
 });
 
+test("scipy.stats: the samplers whose numpy.random method Sagebrush lacks raise NotImplementedError, after rvs's own checks (daybreak3's B1)", () => {
+  const out = py(`
+import scipy.stats as st
+for name, args in (("t", (3,)), ("f", (2, 5)), ("chi2", (4,)), ("cauchy", ()), ("binom", (10, 0.3))):
+    try:
+        getattr(st, name).rvs(*args, size=2, random_state=0)
+        print(name, "no error")
+    except NotImplementedError as e:
+        print(name, "NotImplementedError", str(e).split(":")[0])
+try:
+    st.t.rvs(-1, size=2, random_state=0)
+except ValueError as e:
+    print("t invalid df: ValueError", str(e).split(".")[0])
+`);
+  assert.equal(out, [
+    "t NotImplementedError scipy.stats.t.rvs is not in Sagebrush yet",
+    "f NotImplementedError scipy.stats.f.rvs is not in Sagebrush yet",
+    "chi2 NotImplementedError scipy.stats.chi2.rvs is not in Sagebrush yet",
+    "cauchy NotImplementedError scipy.stats.cauchy.rvs is not in Sagebrush yet",
+    "binom NotImplementedError scipy.stats.binom.rvs is not in Sagebrush yet",
+    "t invalid df: ValueError Domain error in arguments",
+    "",
+  ].join("\n"));
+});
+
