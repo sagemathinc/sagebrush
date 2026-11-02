@@ -860,7 +860,9 @@ def symbolic_equal(answer, expected):
     defined at 0): an algebraic equality, not equality of functions on a
     domain. Wrong only with a proof: a point with positive rational
     coordinates where each side, on its own, evaluates to an exact rational
-    and the two differ. Else it can't decide; sampling never makes it right.
+    and the two differ; or, where they don't (sin, e^x), where the difference
+    evaluated in rigorous intervals (RIF) has an enclosure without 0. Else it
+    can't decide; sampling never makes it right.
     With assumptions in force (assume()), it only simplifies: a point might
     break them. A string is read by parse_expression. Sage boards only.
 
@@ -873,6 +875,14 @@ def symbolic_equal(answer, expected):
         'they differ at $x = 1/2$'
         sage: symbolic_equal(sin(x)^2, 1 - cos(x)^2).ok
         True
+
+    A wrong answer with sin or e^x is proven wrong by an interval enclosure of
+    the difference that excludes 0 (agent simulation run 3)::
+
+        sage: symbolic_equal(2*x*sin(x) + x*cos(x), diff(x^2*sin(x), x)).verdict()
+        'they differ at $x = 1/2$'
+        sage: symbolic_equal(e^x, 1 + x + x^2/2).ok
+        False
     """
     try:
         import sage_all
@@ -901,11 +911,20 @@ def symbolic_equal(answer, expected):
             va = _exact(a, at, QQ)
             ve = _exact(e, at, QQ)
         except Exception:
+            va = ve = None
+        where = ", ".join("%s = %s" % (v, at[v]) for v in vs)
+        if va is not None and ve is not None:
+            if va != ve:
+                return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
             continue
-        if va is None or ve is None:
+        # (not both exact rationals, as with sin or e^x: the difference in
+        # rigorous intervals; an enclosure without 0 proves they differ, one
+        # with 0 decides nothing. A point outside the domain is skipped.)
+        try:
+            r = sage_all.RIF(d.subs(at))
+        except Exception:
             continue
-        if va != ve:
-            where = ", ".join("%s = %s" % (v, at[v]) for v in vs)
+        if not r.contains_zero():
             return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
     return Verdict(None, "the check could not decide whether these are equal")
 
