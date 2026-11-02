@@ -42,7 +42,9 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   // (changed: its kind, document, or Trash; its bytes' hash and size, once a hash was recorded.  With none recorded
   // yet, a hash and size being recorded is the migrator's (fillHash, migrateOne: from the bytes already there, which
   // fileBytes' own judging covers), not a change of content)
-  const contentChanged = (o, n) => o.kind !== n.kind || o.ref !== n.ref || o.trashed !== n.trashed || (o.sha256 !== null && (o.sha256 !== n.sha256 || o.size !== n.size));
+  // (a data file's or folder's ref is where its legacy bytes were kept, following its path (a move rewrites it): not its
+  // content, which its fid's bytes are; a document's ref IS its identity)
+  const contentChanged = (o, n) => o.kind !== n.kind || (o.kind !== "file" && o.kind !== "folder" && o.ref !== n.ref) || o.trashed !== n.trashed || (o.sha256 !== null && (o.sha256 !== n.sha256 || o.size !== n.size));
   const identOf = (e) => (e.kind === "file" || e.kind === "folder" ? e.fid : e.ref) ?? `path:${e.path}`;
   const strip = (r) => { if (!r || typeof r !== "object") return r; const { j, hash, unjournaled, updated, stampOf, tag, ...rest } = r; return JSON.stringify(rest); };
 
@@ -65,7 +67,13 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       // leave it UNPAIRED (owner null), and an unpaired database is judged closed: no reset exempts it, no legacy bytes are
       // known in it)
       if (k === "workspace") G.lastWs = G.lastWs === null ? db.name : "\u0000ambiguous";
-      else { const o = shadowOf(db); o.owner = G.lastWs && G.lastWs !== "\u0000ambiguous" ? G.lastWs : null; G.lastWs = null; }
+      else {
+        // (paired once by Workspace.open's order; a later open of the same database (the app's other stores open it too)
+        // keeps that pairing; never paired: unpaired)
+        const o = shadowOf(db);
+        if (G.lastWs && G.lastWs !== "\u0000ambiguous") o.owner = G.lastWs; else if (o.owner === undefined) o.owner = null;
+        G.lastWs = null;
+      }
       shadowOf(db);
       if (!db.objectStoreNames.contains("hmeta")) return;
       const s = shadowOf(db);
@@ -104,7 +112,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   const txState = (tx) => {
     let t = T.get(tx);
     if (!t) {
-      t = { changed: new Map(), tokens: new Set(), rows: [], order: [], begin: null, ovf: false, exhausted: false, migrated: new Map(), site: null, judged: true, hmetaGone: false };
+      t = { changed: new Map(), tokens: new Set(), rows: [], order: [], begin: null, ovf: false, exhausted: false, migrated: new Map(), site: null, judged: true, hmetaGone: false, removedAt: new Map() };
       T.set(tx, t);
       tx.addEventListener("complete", () => judge(tx, t));
     }
@@ -181,6 +189,9 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       // (G1: a data file's bytes put under the fid its entry is given, migrated, in this transaction: the migrator moving
       // a file's bytes (migrateOne), passed only if they ARE the legacy bytes: the same sum as the copy it moved from,
       // in this workspace's Trash store or its own notebooks database's files)
+      // (a subtree removed with its top (emptyTrash, a folder's removal): an entry, or its bytes, removed under a folder
+      // removed in this transaction whose own token is here; log() names the top, its subtree goes with it)
+      if ((why === "removed" || why === "bytes removed") && underRemovedTop(t, t.removedAt.get(ident) ?? s.pathOf.get(ident))) continue;
       if (store === "fileBytes" && t.migrated.has(ident)) {
         const from = t.migrated.get(ident), had = legacySum(s, db.name, from), now = s.bytes.get(ident);
         if (had !== undefined && had === now) continue;
@@ -195,6 +206,11 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   const mark = (t, ident, store, why, s) => {
     if (s && /removed|cleared/.test(why) && purging(s)) { (t.removedQuiet ??= new Map()).set(ident, { store, why }); return; }
     t.changed.set(ident, { store, why });
+  };
+  const underRemovedTop = (t, path) => {
+    if (typeof path !== "string") return false;
+    for (const [i, p] of t.removedAt) if (t.tokens.has(i) && p !== path && path.startsWith(p + "/")) return true;
+    return false;
   };
   // (the legacy copy's sum a migrated file was moved from: a trashed one's in the workspace's own Trash store, else
   // in its notebooks database's files; undefined when that database isn't paired, or holds no such copy)
@@ -238,10 +254,12 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
         const i = s.byPath.get(key);
         s.byPath.delete(key);
         // (the identity now at ANOTHER path (a move that put its new row first): its old row deleted, nothing removed)
-        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); s.pathOf.delete(i); }
+        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); t.removedAt.set(i, key); s.pathOf.delete(i); }
         return;
       }
       if (!value || !KINDS.has(value.kind)) return; // (a control row: a large move's record, mappings, queue)
+      // (Trash's own folder: the workspace's, with no identity and nothing synced (log() writes it no token), as the root)
+      if (value.path === TRASH) return;
       const i = identOf(value), n = entryOf(value);
       let was = s.ent.get(i);
       // (an identity GIVEN: the entry at this path had none (named by its path) and has one now, still the same kind and
@@ -254,6 +272,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       }
       // (a move that deleted its old row first: the identity is back, at its new path: not removed)
       if (t.changed.get(i)?.why === "removed") t.changed.delete(i);
+      t.removedAt.delete(i); // (back, so not a removed top for its subtree)
       if (was !== undefined && !was.migrated && n.migrated && value.fid) t.migrated.set(value.fid, { ref: value.ref, trashed: !!value.trashed || value.path === TRASH || value.path.startsWith(TRASH + "/") });
       if (was === undefined) mark(t, i, name, "added", s);
       else if (contentChanged(was, n)) mark(t, i, name, "content", s);
