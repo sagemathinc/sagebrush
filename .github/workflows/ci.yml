@@ -12,6 +12,8 @@ on:
   push:
     branches: [master]
   pull_request:
+    # (labeled: adding the full-ci label reruns the pull request on the full tier)
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   schedule:
     - cron: "17 8 * * *"
@@ -41,6 +43,10 @@ jobs:
       engine_full: ${{ steps.paths.outputs.engine_full }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       webkit: ${{ steps.paths.outputs.webkit }}
+      web_groups: ${{ steps.paths.outputs.web_groups }}
+      web_runner: ${{ steps.paths.outputs.web_runner }}
+      web_export: ${{ steps.paths.outputs.web_export }}
+      web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
@@ -67,6 +73,7 @@ jobs:
         name: classify changed paths and select the tier
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (the limits census alone, in seconds and with no build: it must run on an
@@ -459,7 +466,9 @@ jobs:
 
   web-sync:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
+    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
     steps:
@@ -543,7 +552,8 @@ jobs:
   # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
   web-export:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (test-export alone: about 4.5 min on #459's runs)
     timeout-minutes: 20
@@ -584,7 +594,8 @@ jobs:
 
   web-runner:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -643,6 +654,9 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
+          # (the notebook journal, 16 s, here in the fast tier: it evaluates slices of web/index.html, so any edit there
+          # can break it (#466's CI1); moved from web-runner-sync, which runs on the full tier only)
+          CHROME=google-chrome bun web/notebook/test-journal.mjs
           # (Stage A layer 1: history's change tokens (inert in the app); the dynamic census guard and its controls; the
           # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
           # scripts/nightly-history-guard.sh, not wired (@sagebrush, Nov 2, William's CI-speed ruling))
@@ -652,20 +666,6 @@ jobs:
           bun web/history/test-history-census.mjs
           # (the board journal's store, Workspace.journalWrite and the kind)
           CHROME=google-chrome bun web/board/test-board-journal.mjs
-          bun web/workspace/test-doc-sync-switch.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
-          # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-old.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-6b7.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1-trash.mjs
-          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-1f3.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-detect.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-9d7.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-c05.mjs
@@ -681,7 +681,6 @@ jobs:
           bun web/notebook/test-p2c-merge.mjs
           bun web/notebook/test-exact-lazy.mjs
           bun web/journal/test-merge-base.mjs
-          bun web/notebook/test-sync-rows.mjs
           bun web/notebook/test-start-all.mjs
           bun web/notebook/test-runner-fetch.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-migrate-time.mjs
@@ -702,7 +701,8 @@ jobs:
   # each, run nightly (nightly.yml); the same setup and server)
   web-lookalike:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the report alone: 25 s on #459's run 41470481644)
     timeout-minutes: 15
@@ -739,12 +739,71 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome node web/workspace/test-workspace-lookalike.mjs
 
-  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the notebook
-  # journal and the documents' sync, about 6.5 min of it, run here, in parallel; the same setup and server; @sagebrush,
-  # Oct 30.  Never a longer timeout: split again if either job nears its limit)
+  # (the workspace's sync tests, moved out of web-runner, the fast tier's longest job, CI speed plan: sync is
+  # full-tier work, William's (b), Nov 2)
+  web-sync-ops:
+    needs: changes
+    # (the full tier only, as web-sync: scripts/ci-paths.mjs fullTierPaths)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (about 4 min of tests in the project, 240 s on Nov 2)
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14"
+      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - name: the workspace's sync operations, outbox, pins and old-sync detector
+        run: |
+          python3 web/serve.py 8765 &
+          server_pid=$!
+          cleanup_server() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup_server EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          sleep 1
+          kill -0 "$server_pid"
+          bun web/workspace/test-doc-sync-switch.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-pins.mjs
+          # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-old.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-9c2.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-fef.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-12e.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-6b7.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1-trash.mjs
+          CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-1f3.mjs
+          bun web/notebook/test-sync-rows.mjs
+
+  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the
+  # documents' sync runs here, in parallel; the same setup and server; @sagebrush, Oct 30.  The notebook journal, 16 s,
+  # went back to web-runner in the fast tier (CI speed iv).  Never a longer timeout: split again if either job nears
+  # its limit)
   web-runner-sync:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
+    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -765,7 +824,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: the notebook journal and the documents' sync
+      - name: the documents' sync
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -778,7 +837,6 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          CHROME=google-chrome bun web/notebook/test-journal.mjs
           CHROME=google-chrome bun web/workspace/test-doc-sync.mjs
       # (the agents chat's notebook and LaTeX artifacts, web/agents (the artifacts plan r2 + r2.1): the agents page built
       # (SAGEBRUSH_AGENTS=1) without the LaTeX editor and tested, then with it (SAGEBRUSH_LATEX_PREVIEW=test) and tested
@@ -951,11 +1009,13 @@ jobs:
 
   web-browser:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_groups != '[]'
     strategy:
       fail-fast: false
       matrix:
-        group: [notebook, board-a, board-b, board-c, board-unit, terminal, remote-preview]
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, board-a, board-b, board-c,
+        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
+        group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
     # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
@@ -1565,6 +1625,7 @@ jobs:
       - web-export
       - web-runner-sync
       - web-lookalike
+      - web-sync-ops
       - web-browser
       - interrupt-matrix
       - conformance
@@ -1589,7 +1650,7 @@ jobs:
             ${{ needs.checks.result }} ${{ needs.size-gate.result }}
             ${{ needs.web-sync.result }}
             ${{ needs.web-runner.result }} ${{ needs.web-export.result }} ${{ needs.web-runner-sync.result }}
-            ${{ needs.web-lookalike.result }}
+            ${{ needs.web-lookalike.result }} ${{ needs.web-sync-ops.result }}
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }}
