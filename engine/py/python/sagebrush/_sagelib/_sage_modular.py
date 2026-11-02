@@ -3405,8 +3405,23 @@ def EllipticCurve(x, y=None):
         ...
         ValueError: unknown Cremona label '11z1'
     """
+    if y is not None and isinstance(y, (list, tuple)) and not isinstance(x, (list, tuple, str)):
+        # EllipticCurve(R, [a1, ...]): over QQ/ZZ below, over GF(p)/Zmod(p) in _sage_ec_ff
+        from _sage_poly import QQ, ZZ
+        if x is QQ or x is ZZ:
+            x, y = y, None
+        else:
+            import _sage_ec_ff
+            return _sage_ec_ff.elliptic_curve(x, y)
     if y is not None:
         x = [x, y]
+    if isinstance(x, (list, tuple)):
+        # coefficients in GF(p) or Zmod(p) (Mod(7, 11), GF(p)(3)): the curve over that ring
+        import _sage_ff
+        for t in x:
+            if isinstance(t, (_sage_ff.IntegerMod, _sage_ff.FiniteFieldElement)):
+                import _sage_ec_ff
+                return _sage_ec_ff.elliptic_curve(t.parent(), x)
     if isinstance(x, str):
         lab = x.strip()
         if _re.fullmatch(r"\d+[a-z]+", lab):
