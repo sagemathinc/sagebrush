@@ -276,13 +276,38 @@ try {
   await ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); return 1; })()`);
   check(await until(`/Export all current files \\(\\.zip\\)/.test(${P}?.textContent ?? "")`), "the Storage panel offers Export all current files (.zip)");
   check(/TimeTravel, old file versions, Trash, and this device's settings are not included/.test(await panelText()), "…with what isn't included, in one line");
-  check(/No export prepared on this device yet/.test(await panelText()), "…and no export prepared yet");
+  // (the workspace holds files and none was exported on this device: the status line is the gentle reminder)
+  check(/No export yet · Export now/.test(await panelText()), "…and no export prepared yet: the reminder in the status line's place");
   check(!(await ev(`[...performance.getEntriesByType("resource")].some((r) => /sagebrush-export/.test(r.name))`)), "the export's chunk isn't loaded before the click");
 
   // ---- N-3: without the test page's hooks, the caps in effect are the real table
   await scenario("prod", async () => {
     const c = await ev(`(async () => { delete window.__SB_EXPORT_TEST__; const m = await import(new URL("sagebrush-export.js", location.href).href); return m.capsInEffect(); })()`);
     check(c?.blob === 256 * 2 ** 20 && c?.doc === 64 * 2 ** 20 && c?.spoolBlob === 64 * 2 ** 20 && c?.total === 20 * 2 ** 30 && c?.manifest === 64 * 2 ** 20, "without the test page's hooks, the caps are the real ones: " + JSON.stringify(c));
+  });
+
+  // ---- the export reminder (William, Nov 2: "Last export: N days ago – Export now"): due after EXPORT_DUE_DAYS (7)
+  // without a complete export on this device, in the status line's place; "Export now" is the button's own flow
+  await scenario("reminder", async () => {
+    await hooks();
+    const reopen = async () => {
+      await ev(`(() => { ${P}?.querySelector(".ph .x")?.click(); return 1; })()`);
+      await until(`!${P}`, 5000);
+      await ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); return 1; })()`);
+      await until(`/Last export|No export/.test(${P}?.textContent ?? "")`);
+    };
+    await idb("sagebrush-workspace", "meta", `(s) => s.put({ at: Date.now() - 8 * 86400000, partial: false, members: 1, bytes: 1 }, "export:last")`);
+    await reopen();
+    const line = await ev(`[...${P}.querySelectorAll("p.note")].map((p) => [p.className, p.textContent]).find(([, t]) => /Last export|No export/.test(t)) ?? null`);
+    check(line?.[0] === "note remind" && /^Last export: 8 days ago · Export now$/.test(line?.[1] ?? ""), "an export 8 days ago: the reminder line, \"Last export: 8 days ago · Export now\": " + JSON.stringify(line));
+    await panelButton(/^Export now$/);
+    const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => /^(Save…|Export again)$/.test(b.textContent))`, 180000);
+    check(ready, "…its \"Export now\" starts the export, as the button does (its ready state shows)");
+    if (ready) await panelButton(/^Cancel$/).catch(() => {});
+    await closeFlow();
+    await idb("sagebrush-workspace", "meta", `(s) => s.put({ at: Date.now() - 6 * 86400000, partial: false, members: 1, bytes: 1 }, "export:last")`);
+    await reopen();
+    check(/Last export prepared on this device: 6 days ago/.test(await panelText()) && !/Export now/.test(await panelText()), "an export 6 days ago: the plain status line, no reminder");
   });
 
   // ---- 1-3, 9: an export through OPFS; the archive outside the browser; data files equal to the workspace's bytes
