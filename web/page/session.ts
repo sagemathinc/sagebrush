@@ -76,6 +76,10 @@ export function pageSession(p: PageContext) {
   // and the old one (their writer locks: another tab, or this page reloaded, can take them), and leaves no store attached,
   // so nothing is editable with nowhere to save it (astra's DEVSW-2))
   async function reopenJournaled() {
+    // (one navigation lease over all of it, its cleanup (a detach, the writer locks let go) included: #447 r5c,
+    // R5-NAV-2 (2))
+    const end = await p.navLease();
+    try {
     if (!p.current.id || p.current.kind !== "browser" || (p.nb.store?.journaled && p.nb.store.synced)) return true;
     const id = p.current.id, prev = p.nb.store;
     let st: any = null;
@@ -85,10 +89,14 @@ export function pageSession(p: PageContext) {
       if (p.nb.store === st && st.journaled) return true;
       throw new Error("the notebook isn't open through the journal");
     } catch (e) {
+      if (p.trashTest.pause) await p.trashTest.pause("recovering");
       console.warn("sync: the notebook not reopened through the journal:", e);
       if (p.nb.store && (p.nb.store === st || p.nb.store === prev)) p.nb.detach();
       for (const x of new Set([st, prev])) if (x?.journaled) try { await x.release(); } catch {}
       return false;
+    }
+    } finally {
+      end();
     }
   }
   // (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
