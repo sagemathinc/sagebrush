@@ -111,6 +111,20 @@ async function shareLinkOf(json: string): Promise<string> {
   if (url.length > MAX_LINK) throw new Error(`this board is ${(url.length / 1e6).toFixed(1)} MB as a link, more than a browser's address takes (${MAX_LINK / 1e6} MB): share it as a file instead (File > Download > HTML)`);
   return url;
 }
+/** A shared board's copy undone, as if never made: from the workspace (to Trash, then out of it), or from this
+ * browser's boards. */
+async function discardCopy(id: string) {
+  try {
+    if (ws) {
+      const p = await ws.pathOf("board", id);
+      if (p) { const t = await ws.remove(p); await ws.emptyTrash([t.path]); }
+    } else {
+      localStorage.removeItem(localKey(id));
+      localStorage.removeItem(localKey(id) + "#here");
+      writeList(localBoards().filter((b) => b.id !== id));
+    }
+  } catch (e) { console.warn("board: a shared board's copy not undone:", e); }
+}
 /** Whether this tab's sessionStorage keeps a board's pause: written and read back (a probe key, removed). */
 function pauseKept(): boolean {
   const k = "sagebrush-board-paused:probe";
@@ -387,7 +401,13 @@ if (location.hash.startsWith("#z=") && !embedded() && !q.has("doc")) {
     if (!id) throw new Error(STORAGE_REFUSED);
     sharedCopy = id;
     pauseBoard(id);
-    if (!isPaused(id)) sharedFailed = "**This shared board's code is paused in this page only:** this browser didn't keep the note that keeps it paused, so it would run if you reload. Run it only if you trust it.";
+    // (its own pause key written and read back, or no copy at all: removed for good, @sagebrush on BOARD-SHARE-1; a
+    // warning and a copy would run its code at the next reload)
+    if (!isPaused(id)) {
+      sharedCopy = null;
+      await discardCopy(id);
+      throw new Error("this browser didn't keep the note (sessionStorage) that keeps a shared board's code paused until you run it");
+    }
     q.set("doc", "local:" + id);
     history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:"));
   } catch (err) {

@@ -58,9 +58,14 @@ try {
   // opening it: the person's own copy, the same board, its code paused, the fragment gone
   check(await open(link), "the link opens the board page");
   check(await until(`/[?&]doc=local:[0-9a-f]{12}/.test(location.search) && location.hash === ""`), `a copy of its own, the fragment cleared (${await ev("location.search + location.hash")})`);
+  await until(`!!window.sagebrush.board.snapshot().doc?.title`, 20000);
   const got = await ev(`window.sagebrush.board.snapshot().doc`);
   check(got.title === TALK.title && TALK.nodes.every((x) => got.nodes.some((y) => y.id === x.id && (y.text ?? y.code) === (x.text ?? x.code))), `the same board: title, notes and code (${got.nodes?.length} items)`);
   check(await until(`!document.querySelector('[data-sbb="runpaused"]').hidden`, 10000), "its code is paused until the person runs it (Run this board's code shown)");
+  const paused0 = await ev(`Promise.race([window.sagebrush.board.outputs().then((o) => JSON.stringify(o)), new Promise((r) => setTimeout(() => r("(still running)"), 8000))])`);
+  check(!/\b25\b/.test(paused0), "…its code hasn't run");
+  await ev(`(document.querySelector('[data-sbb="runpaused"]').click(), true)`);
+  check(await until(`window.sagebrush.board.outputs().then((o) => /\\b25\\b/.test(JSON.stringify(o)))`, 60000), "…until the person runs it: then its output (25 primes below 100)");
   const copy = await ev("location.href");
   check(await open(copy) && (await ev("location.href")) === copy, "a reload opens the same copy, not a second one");
 
@@ -76,23 +81,33 @@ try {
   const boards = () => ev(`window.sagebrush.workspace ? window.sagebrush.workspace.list("/").then((l) => l.filter((e) => e.kind === "board").length) : -1`);
   await open(`${origin}/board/?new=python`);
   const before = await boards();
+  const outs = () => ev(`Promise.race([window.sagebrush.board.outputs().then((o) => JSON.stringify(o)), new Promise((r) => setTimeout(() => r("(still running)"), 8000))])`);
   const s1 = await refuse("(k) => true");
   await open(link);
   await sleep(1500);
   check(/This shared board couldn't be opened/.test(await caption()) && /sessionStorage/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before, `sessionStorage refused: no copy made, said why (${before} boards before and after)`);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s1.identifier });
-  // (the probe kept, the pause's own key refused: the copy's code is paused in this page anyway, and said)
+  // (the probe kept, the pause's own key refused: no copy either, nothing left behind, its code never run; a warning
+  // and a copy would run it at the next reload, @sagebrush)
   const s2 = await refuse("(k) => k.startsWith('sagebrush-board-paused:') && k !== 'sagebrush-board-paused:probe'");
   await open(link);
-  check(await until(`/[?&]doc=local:[0-9a-f]{12}/.test(location.search)`), "the pause's own key refused: the copy is made");
-  check(await until(`!document.querySelector('[data-sbb="runpaused"]').hidden`, 10000) && /paused in this page only/.test(await caption()), "…its code paused all the same (Run this board's code shown), and the caption says a reload would not keep it so");
   await sleep(1500);
-  const outs = () => ev(`Promise.race([window.sagebrush.board.outputs().then((o) => JSON.stringify(o)), new Promise((r) => setTimeout(() => r("(still running)"), 8000))])`);
+  const trash = await ev(`window.sagebrush.workspace.list("/Trash").then((l) => l.filter((e) => e.kind === "board").length).catch(() => 0)`);
+  check(/This shared board couldn't be opened/.test(await caption()) && /keeps a shared board's code paused/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before && trash === 0, `the pause's own key refused: no copy kept (not in the files, not in Trash: ${trash}), said why`);
   const o1 = await outs();
-  check(!/\b25\b/.test(o1), `…and its code hasn't run (outputs ${o1.slice(0, 80)})`);
-  // (the control: the person's Run, and then it runs: 25 primes below 100)
-  await ev(`(document.querySelector('[data-sbb="runpaused"]').click(), true)`);
-  check(await until(`window.sagebrush.board.outputs().then((o) => /\\b25\\b/.test(JSON.stringify(o)))`, 60000), "…until the person runs it: then its output (25)");
+  check(!/\b25\b/.test(o1), `…and the shared code never ran (outputs ${o1.slice(0, 60)})`);
+  // (astra's reload negative: reloaded before any Run, there is still no copy to open, nothing ran)
+  await send("Page.reload");
+  await until("!!window.sagebrush?.board", 20000);
+  await sleep(1000);
+  check(!/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before && !/\b25\b/.test(await outs()), "…reloaded before any Run: still no copy, nothing ran");
+  // (and this browser's own boards, without the workspace (?workspace=0): no copy kept there either)
+  const localIds = () => ev(`JSON.parse(localStorage.getItem("sagebrush-boards") ?? "[]").map((b) => b.id).join(",")`);
+  await open(`${origin}/board/?workspace=0&new=python`);
+  const localBefore = await localIds();
+  await open(`${origin}/board/?workspace=0${link.slice(link.indexOf("#"))}`);
+  await sleep(1500);
+  check(/keeps a shared board's code paused/.test(await caption()) && (await localIds()) === localBefore && !/[?&]doc=local:/.test(await ev("location.search")), `without the workspace, the pause's own key refused: no copy in this browser's boards either (${localBefore.split(",").length} before and after)`);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s2.identifier });
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
