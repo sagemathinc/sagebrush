@@ -223,40 +223,56 @@ async function rmrf(fs: any, p: string): Promise<void> {
     await fs.promises.rmdir(p);
   } else await fs.promises.unlink(p);
 }
+/** Scratch directories (each named <ms>-<uuid>) over a day old, from copies whose page closed: removed. */
+async function sweepScratch(fs: any): Promise<void> {
+  let names: string[] = [];
+  try { names = await fs.promises.readdir("/fetch"); } catch { return; }
+  for (const n of names) {
+    const at = Number(n.split("-")[0]);
+    if (!(at > 0) || Date.now() - at > 86_400_000) await rmrf(fs, `/fetch/${n}`);
+  }
+}
+
+async function fetchNow({ scope, repo, branch, proxy }: { scope: string; repo: string; branch: string; proxy: string }) {
+  const p = parseRepo(repo);
+  if (!p) throw new Error("That isn't a GitHub repository address (https://github.com/owner/repo).");
+  if (!GIT_BRANCH.test(branch)) throw new Error("That isn't a branch name git takes.");
+  if (!/^https:\/\/|^http:\/\/127\.0\.0\.1:\d+$/.test(proxy)) throw new Error("No push proxy is set for this site.");
+  const token = await getToken(scope, repo);
+  if (!token) throw new Error("Save a token for this repository first.");
+  // (M4B-DATA-1: the scratch has a database of its own, never the push repositories', whose top folders are owners'
+  // names, "fetch" among them; and only scratch over a day old is removed, so another tab's copy under way stays)
+  const fs = new FS(`sagebrush-gitpush-scratch:${scope}`);
+  {
+    // (scratch left by a copy that never finished: a closed page)
+    await sweepScratch(fs);
+    const id = `${Date.now()}-${crypto.randomUUID()}`, dir = `/fetch/${id}`;
+    await mkdirp(fs, dir);
+    let oid: string, paths: string[];
+    try {
+      // (init and a fetch of that one branch, depth 1: only its newest commit's objects come)
+      await git.init({ fs, dir, defaultBranch: "copy" });
+      await git.addRemote({ fs, dir, remote: "origin", url: p.url });
+      const res = await git.fetch({ fs, http, dir, remote: "origin", corsProxy: proxy, ref: branch, remoteRef: branch, singleBranch: true, depth: 1, tags: false,
+        headers: { authorization: "Basic " + btoa("x-access-token:" + token) }, onAuth: () => ({ username: "x-access-token", password: token }) });
+      if (!res.fetchHead) throw { code: "NotFoundError" };
+      oid = res.fetchHead;
+      paths = await git.listFiles({ fs, dir, ref: oid });
+    } catch (e: any) {
+      await rmrf(fs, dir);
+      throw new Error(fetchWords(e, branch, repo));
+    }
+    if (paths.length > COPY_FILES) { await rmrf(fs, dir); throw new Error(`${branch} has more than ${COPY_FILES.toLocaleString("en-US")} files, more than a copy takes.`); }
+    fetched = { id, fs, dir, oid, paths: new Set(paths) };
+    return { id, oid, files: paths };
+  }
+}
+
 const fetchOps = {
   async fetchBranch({ scope, repo, branch, proxy }: { scope: string; repo: string; branch: string; proxy: string }) {
     if (fetched || fetching) throw new Error("Another copy is under way here. Try again when it finishes.");
-    const p = parseRepo(repo);
-    if (!p) throw new Error("That isn't a GitHub repository address (https://github.com/owner/repo).");
-    if (!GIT_BRANCH.test(branch)) throw new Error("That isn't a branch name git takes.");
-    if (!/^https:\/\/|^http:\/\/127\.0\.0\.1:\d+$/.test(proxy)) throw new Error("No push proxy is set for this site.");
-    const token = await getToken(scope, repo);
-    if (!token) throw new Error("Save a token for this repository first.");
     fetching = true;
-    const fs = new FS(`sagebrush-gitpush:${scope}`);
-    try {
-      // (scratch left by a copy that never finished: a closed page)
-      await rmrf(fs, "/fetch");
-      const id = crypto.randomUUID(), dir = `/fetch/${id}`;
-      await mkdirp(fs, dir);
-      let oid: string, paths: string[];
-      try {
-        // (init and a fetch of that one branch, depth 1: only its newest commit's objects come)
-        await git.init({ fs, dir, defaultBranch: "copy" });
-        await git.addRemote({ fs, dir, remote: "origin", url: p.url });
-        const res = await git.fetch({ fs, http, dir, remote: "origin", corsProxy: proxy, ref: branch, remoteRef: branch, singleBranch: true, depth: 1, tags: false,
-          headers: { authorization: "Basic " + btoa("x-access-token:" + token) }, onAuth: () => ({ username: "x-access-token", password: token }) });
-        if (!res.fetchHead) throw { code: "NotFoundError" };
-        oid = res.fetchHead;
-        paths = await git.listFiles({ fs, dir, ref: oid });
-      } catch (e: any) {
-        await rmrf(fs, dir);
-        throw new Error(fetchWords(e, branch, repo));
-      }
-      if (paths.length > COPY_FILES) { await rmrf(fs, dir); throw new Error(`${branch} has more than ${COPY_FILES.toLocaleString("en-US")} files, more than a copy takes.`); }
-      fetched = { id, fs, dir, oid, paths: new Set(paths) };
-      return { id, oid, files: paths };
-    } finally { fetching = false; }
+    try { return await fetchNow({ scope, repo, branch, proxy }); } finally { fetching = false; }
   },
   /** One file of the fetched branch, as its commit holds it: only a path that commit lists. */
   async fetchRead({ id, path }: { id: string; path: string }) {
