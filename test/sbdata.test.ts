@@ -72,10 +72,10 @@ for (const [id, r] of Object.entries(rows)) {
     const base = join(fx, id);
     const writer: [string, string] | undefined = r.fifo_writer !== undefined ? [r.fifo_writer, fifoIn(join(base, "root"))] : undefined;
     const run = await runRow(id, ["--require", SPY, CLI, "--data-root", join(base, r.root), "-c", r.program], join(base, r.cwd), writer);
+    spyRuns.push({ id, spy: run.spy, worker: false }); // (before any assertion: H2-H4 see every run)
     assert.ok(!run.timedOut, `${id}: over the ${DEADLINE_MS} ms deadline (${run.ms} ms)`);
     const lines = run.out.split("\n").filter((l) => l !== "");
     assert.equal(lines[lines.length - 1] ?? "", r.expect, `${id}: stderr ${run.err.slice(-400)}`);
-    spyRuns.push({ id, spy: run.spy, worker: false });
   });
 }
 });
@@ -134,10 +134,10 @@ const { Worker } = require("node:worker_threads");
 const w = new Worker(${JSON.stringify(`require(${JSON.stringify(CLI)});`)}, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv: ${JSON.stringify(argv)} } } });
 w.on("exit", (c) => { process.exitCode = c; });`;
   const run = await runRow("H2b", ["--require", SPY, "-e", boot], join(base, r.cwd));
+  spyRuns.push({ id: "H2b", spy: run.spy, worker: true });
   assert.ok(!run.timedOut, "H2b deadline");
   const lines = run.out.split("\n").filter((l) => l !== "");
   assert.equal(lines[lines.length - 1] ?? "", r.expect, run.err.slice(-400));
-  spyRuns.push({ id: "H2b", spy: run.spy, worker: true });
   assert.ok(ids(run.spy).some((t) => t >= 1), `H2b: a worker realm, got ${JSON.stringify(ids(run.spy))}`);
 });
 
