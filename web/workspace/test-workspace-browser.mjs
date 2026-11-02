@@ -70,7 +70,8 @@ export function navCensus(src) {
     if (m[0] === "beginSwitch(" && /function $/.test(src.slice(m.index - 9, m.index))) continue; // (its definition)
     if (m[0] === "current = {" && src.startsWith("current = { id: null", m.index) && src.slice(m.index - 4, m.index) === "let ") continue; // (its declaration)
     // (File ▸ Delete with no workspace: a hold exists only inside the workspace's remove(), so never during one)
-    if (m[0] === "nb.detach(" && /st\.delete\(current\.id\)/.test(src.slice(m.index, m.index + 200))) continue;
+    // (its record deleted right after: st.delete before L1 #469, deleteNotebookRecord since)
+    if (m[0] === "nb.detach(" && /(?:st\.delete|deleteNotebookRecord\(db,)\s*\(?current\.id\)/.test(src.slice(m.index, m.index + 200))) continue;
     problems.push(`${m[0]} at line ${src.slice(0, m.index).split("\n").length}: outside the leased functions`);
   }
   return problems;
