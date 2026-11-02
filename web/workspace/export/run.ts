@@ -14,7 +14,7 @@ import { Images } from "../../board/images";
 import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
 import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
 import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, NAME, PATH, putRow, R, readRow, TIME } from "./rows";
-import { boardSlices, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
+import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
 // (the serializers: Download's own functions, from the module Download calls (file-bytes.ts), built into this chunk
 // rather than handed over by the page, so that a page carries them only if it uses them itself before any click
 // (E1 r2a, @sagebrush's eager-size ruling); the same source, so the export's bytes are Download's by construction)
@@ -292,11 +292,13 @@ async function capture(w: Workspace, e: Entry, signal: AbortSignal): Promise<{ e
   return { ...r, at };
 }
 
-/** The bytes a member streams to, counted (preflight's measure of a document): past `max`, stopped with `why`. */
-async function measure(src: AsyncIterable<Uint8Array> | Iterable<Uint8Array>, max: number, why: string): Promise<number> {
-  let n = 0;
-  for await (const s of src as AsyncIterable<Uint8Array>) { n += s.length; if (n > max) throw new ExportStopped(why); }
-  return n;
+/** The bytes a document's member streams to, counted (preflight's measure; E1 r2e item 4, route (b)): the same writer
+ * as memberOf's, counting what it would hand on, no slice encoded or made; past `max`, stopped with `why`. */
+async function measure(e: Entry, content: any, pace: Pace, images: Images, max: number, why: string): Promise<number> {
+  const count = new Counter(max, () => { throw new ExportStopped(why); });
+  if (e.kind === "notebook") return notebookBytes(content, ipynbObject, pace, count);
+  if (e.kind === "board") return boardBytes(content as BoardDoc, images, SER, pace, count);
+  throw new ExportStopped(`${e.path}: only a document is measured`);
 }
 
 /** What isn't on this device, said plainly (E1 r2 simplification: the export refuses rather than leaving anything out;
@@ -362,7 +364,7 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
           throw err;
         }
         const images = new Images();
-        try { size = await measure(memberOf(c.entry, c.content, pace, images), capOf(e.kind), capWhy(e.path, e.kind)); } finally { images.dispose(); }
+        try { size = await measure(c.entry, c.content, pace, images, capOf(e.kind), capWhy(e.path, e.kind)); } finally { images.dispose(); }
       }
       if (size > capOf(e.kind)) throw new ExportStopped(capWhy(e.path, e.kind));
       plan.bytes += size;
