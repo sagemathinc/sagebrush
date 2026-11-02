@@ -3,6 +3,7 @@
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is fetched in chunks (lib/), and the
 // Unicode name table is left out.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,16 +18,18 @@ function withAlphaBanner(html: string): string {
   return html.replace("</head>", ALPHA_BANNER_TAG + "</head>");
 }
 const here = import.meta.dir;
-// The LaTeX editor (DEV only; web/latex/): built only with SAGEBRUSH_LATEX_PREVIEW=1 (the DEV deploy) or "test" (the
-// same, its page also on loopback hosts, for VM tests). Unset, __SB_LATEX__ is false in every bundle, its hooks fold
-// away, no LaTeX file is written, and the output is what it was without it. With =1, SAGEBRUSH_PREVIEW_HOST may name
-// one more host under .sagebrush.cloud for a preview deploy (web/latex/preview-host.mjs; else ignored).
-const LATEX_MODE = process.env.SAGEBRUSH_LATEX_PREVIEW ?? "";
-if (!["", "1", "test"].includes(LATEX_MODE)) throw new Error(`SAGEBRUSH_LATEX_PREVIEW must be unset, 1 or test, not ${JSON.stringify(LATEX_MODE)}`);
-const LATEX = LATEX_MODE !== "";
+// The LaTeX editor (web/latex/): ON BY DEFAULT on the site (William, Nov 2 12:52 PM PST, PROD included). Built unless
+// SAGEBRUSH_LATEX_PREVIEW=0 (a build without it: __SB_LATEX__ false in every bundle, its hooks fold away, no LaTeX file
+// written); "test" is the same build with its page also on loopback hosts, for the browser tests. It runs only on the
+// hosts that serve its files (sagebrush.space and dev.sagebrush.space; with SAGEBRUSH_PREVIEW_HOST, one preview host under
+// .sagebrush.cloud, web/latex/preview-host.mjs): the CLI's page (127.0.0.1) and the desktop app's don't offer it.
+const LATEX_MODE = process.env.SAGEBRUSH_LATEX_PREVIEW || "1";
+if (!["0", "1", "test"].includes(LATEX_MODE)) throw new Error(`SAGEBRUSH_LATEX_PREVIEW must be unset, 0, 1 or test, not ${JSON.stringify(LATEX_MODE)}`);
+const LATEX = LATEX_MODE !== "0";
 const LATEX_PREVIEW_HOST = previewHost(LATEX_MODE, process.env.SAGEBRUSH_PREVIEW_HOST);
+const LATEX_SITE_HOSTS = ["sagebrush.space", "dev.sagebrush.space"];
 const LATEX_DEFINE = LATEX
-  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? ["dev.sagebrush.space", "127.0.0.1", "localhost"] : ["dev.sagebrush.space", ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
+  ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? [...LATEX_SITE_HOSTS, "127.0.0.1", "localhost"] : [...LATEX_SITE_HOSTS, ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
   : { __SB_LATEX__: "false" };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
@@ -608,7 +611,21 @@ copyFileSync(join(here, "share-client", "view.html"), join(here, "dist", "s", "i
 // (its link preview's image, board's design: committed as rendered, never generated here; og.svg is its source)
 copyFileSync(join(here, "share-client", "og.png"), join(here, "dist", "s", "og.png"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
-for (const f of ["index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm"])
+// /version.json: what this build is, for an agent (or a person) asking a site which code it runs: the core commit it was
+// built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when, its engine's and library's ids,
+// and whether the LaTeX editor is in it. Never cached (web/_headers), and outside the service worker's shell, so always this deploy's.
+{
+  const git = (...a: string[]) => { try { return execFileSync("git", a, { cwd: join(here, ".."), encoding: "utf8" }).trim(); } catch { return null; } };
+  const sha = git("rev-parse", "HEAD");
+  writeFileSync(join(here, "dist", "version.json"), JSON.stringify({
+    core: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
+    built: new Date().toISOString(),
+    engine: engineHash,
+    build: buildId,
+    latex: LATEX,
+  }, null, 1) + "\n");
+}
+for (const f of ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm"])
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
