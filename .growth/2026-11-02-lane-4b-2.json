@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Lane 4b-2 (#483): Sage's charpoly over SR with det (n >= 4) and the adjugate from it, its gates, SRPoly and the compiled-polynomial evaluation (lib/_sage_matrix_sr.py, lib/_sage_matrix.py) with docstring examples; the engine's expand_bounded op (engine/sym/src/expand.rs, api.rs) in CI's fresh wasm. Measured with bun 1.4.4 (size-record.sh) on master 2e53a56d vs this PR's head 33eb818e (CI's fresh engine committed): cli/lib.gen.js +5436, cli/pyjs.cjs +15108, engine/lib/sage-more.src +13212, engine/lib/sage.pre +554, engine/lib/sage.src +230, engine/sagebrush-engine.wasm +7317; no other row grows.",
+ "bytes": {
+  "cli/lib.gen.js": 5436,
+  "cli/pyjs.cjs": 15108,
+  "engine/lib/sage-more.src": 13212,
+  "engine/lib/sage.pre": 554,
+  "engine/lib/sage.src": 230,
+  "engine/sagebrush-engine.wasm": 7317
+ }
+}
