@@ -266,9 +266,12 @@ carries: Cephes's `incbet` (`include/xsf/cephes/incbet.h`: its power series,
 its two continued fractions incbcf and incbd, and its choice among them),
 and CDFLIB's translation of DiDonato and Morris's Algorithm 708 (ACM TOMS
 18, 1992; `include/xsf/cdflib.h`: `bgrat`, `bfrac`, `basym` and `brcomp`'s
-prefactor), written from the published algorithms and their structure, not
-as line-by-line translations; the inverses' starting values are Numerical
-Recipes' (invbetai, invgammp), formulas only.
+prefactor). `_betainc_series` and `_betainc_frac` follow incbet's pseries,
+incbcf and incbd closely, and `_betainc_bgrat`, `_betainc_bfrac` and
+`_betainc_basym` follow bgrat, bfrac and basym nearly line by line (their
+structure, recurrences and variable names); the prefactor's form is
+DiDonato and Morris's (brcomp), written anew; the inverses are Sagebrush's,
+with Numerical Recipes' starting values (invbetai, invgammp), formulas only.
 
 ```
 BSD 3-Clause License
