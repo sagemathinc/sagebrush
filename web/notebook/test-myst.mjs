@@ -180,6 +180,9 @@ async function browser() {
       await b.ev(`(document.querySelector('.frow[data-path=${JSON.stringify(path)}]').click(), true)`);
     };
     const bookLinks = () => b.ev("document.querySelectorAll('a.myst-ref-book').length");
+    // (the page quiet: no IndexedDB read of a file's bytes for 1.5 s (an interpreter started meanwhile gives Python
+    // every file of the browser's, which isn't the book's doing), before a window is measured)
+    const settle = async () => { let last = -1; for (let i = 0; i < 100; i++) { const n = (await io()).content; if (n === last) return; last = n; await sleep(1500); } };
     // (reads of a book's files: of the bytes of _toc.yml and of every chapter .md, by their file ids, whatever else the
     // page reads meanwhile (an interpreter's start reads its own stores))
     let BOOKFILES = [];
@@ -300,6 +303,7 @@ async function browser() {
     // g1: the same notebook opened again (same workspace, notebook, folder): the old capability refuses, unread
     await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
     await b.ev("window.__sagebrushMystBook().then((c) => { window.__old = c; })");
+    await settle();
     await reset();
     await row("/book/09-Improving_DL.ipynb");
     C(await b.until("window.__sagebrushMystBook().then((c) => !!c && c !== window.__old)", 20000), "g1: the same notebook reopened: a new capability");
@@ -307,6 +311,7 @@ async function browser() {
     await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
     await sleep(500);
     C((await bookReads()) === 6, "...its book read again: 6 reads (" + (await bookReads()) + ")");
+    await settle();
     await reset();
     const stale = await b.ev("window.__old.read('_toc.yml', 65536).then((r) => r.refused ?? 'read')");
     const named1 = (await io()).named.filter((c) => c.includes("_toc.yml"));
@@ -322,6 +327,7 @@ async function browser() {
     await row("/book/09-Improving_DL.ipynb");
     await loaded("09-Improving_DL");
     await sleep(1500);
+    await settle();
     await reset();
     const g5 = await b.ev("window.__seven.open('08-CRT_Bezout', {}).then((r) => typeof r === 'object' ? r.refused : r)");
     const named5 = (await io()).named.filter((c) => /08-CRT_Bezout/.test(c));
@@ -340,11 +346,15 @@ async function browser() {
     await b.ev("(delete window.__sbBookHold, true)");
 
     // g4: a book built for chapter 9, held before it's shown, the lone chapter opened meanwhile: never shown there
-    await b.ev("(window.__sbBookHold = (p) => p === 'before-publish' ? new Promise((r) => { window.__let4 = r; window.__held4 = true; }) : undefined, true)");
+    // (only the first build held: chapter 9's; the lone chapter opened for real (a new document: the page's
+    // capability promise a new one) before it's let go)
+    await b.ev("(window.__n4 = 0, window.__sbBookHold = (p) => p === 'before-publish' && ++window.__n4 === 1 ? new Promise((r) => { window.__let4 = r; window.__held4 = true; }) : undefined, true)");
     await row("/book/09-Improving_DL.ipynb");
     C(await b.until("window.__held4 === true", 30000), "g4: chapter 9's book built, held before it's shown");
+    await b.ev("(window.__p9 = window.__sagebrushMystBook(), true)");
     await row("/solo/09-Improving_DL.ipynb");
-    await b.until("document.querySelectorAll('.myst-box').length >= 8", 20000);
+    C(await b.until("window.__sagebrushMystBook() !== window.__p9 && document.querySelectorAll('.myst-box').length >= 8", 20000), "...the lone chapter opened meanwhile");
+    await sleep(1000);
     await b.ev("(window.__let4(), true)");
     await sleep(1500);
     C((await bookLinks()) === 0 && !(await b.ev("!!document.querySelector('.myst-toc, .myst-bookline')")), "...let go: nothing of it in the lone chapter (" + (await bookLinks()) + " book links)");
