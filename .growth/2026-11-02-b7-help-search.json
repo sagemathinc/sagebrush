@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "B7 (William: the function search's results showed under the file browser): one CSS rule in web/index.html (the notebook bar above the file browser while its results are open), part of the CLI's embedded site, so cli/pyjs.cjs grows. Not measured on a probe: the marker is the rule's raw added bytes (294, its comment included) + 128, an upper bound.",
+ "bytes": {
+  "cli/pyjs.cjs": 422
+ }
+}

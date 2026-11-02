@@ -36,15 +36,18 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main, footer { max-width: 920px; margin: 0 auto; padding: 0 20px; }
-  header { padding-top: 18px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
-  header .title { flex: 1 1 440px; min-width: 0; }
+  /* (the header in one row: the name, the site's links and the theme (clutter C1, William Nov 2: the notebook was
+     pushed ~140 px down). The heading's subtitle stays in it for screen readers and search, not shown; the tagline
+     is on the articles, as on a phone) */
+  header { padding-top: 10px; padding-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+  header .title { flex: 1 1 440px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 22px; }
   header .tools { display: flex; gap: 8px; align-items: center; }
-  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 8px; font-size: 14px; }
+  nav.links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; font-size: 14px; }
   nav.links a { font-weight: 600; text-decoration: none; }
   nav.links a:hover { text-decoration: underline; }
-  h1 { margin: 0; font-size: 21px; line-height: 1.3; letter-spacing: -0.01em; }
-  h1 span { color: var(--accent); }
-  .tag { color: var(--muted); margin: 4px 0 6px; font-size: 14px; }
+  h1 { margin: 0; font-size: 0; line-height: 1.3; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); font-size: 20px; }
+  .tag { display: none; }
   /* the toolbar, kept in view as the notebook scrolls, as TimeTravel's is (William, Oct 17): the
      function search, Run all, the File and ⋯ menus always a press away; cells scrolled to stop below it */
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
@@ -112,6 +115,9 @@
   #docsearch { font: 13px system-ui, sans-serif; width: 15em; max-width: 40vw; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); }
   #docresults { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(600px, 92vw); max-height: 70vh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
   #docresults[hidden] { display: none; }
+  /* (its results open: the toolbar, which holds them, over the file browser (B7, William Nov 1): its z-index 9 would
+     keep them under the browser's 20 wherever they reach it; a phone's toolbar is above it already) */
+  html:not(.phone) .bar:has(#docresults:not([hidden])) { z-index: 21; }
   #docresults li { padding: 5px 8px; border-radius: 5px; cursor: pointer; }
   #docresults li[aria-selected=true] { background: var(--code); }
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
@@ -199,10 +205,8 @@
   #theme { font-size: 13px; padding: 3px 8px; }
   @media (max-width: 640px) {
     header { padding-top: 10px; gap: 8px; }
-    h1 { font-size: 17px; }
-    /* (a phone: the notebook first; the tagline is on the articles) */
-    .tag { display: none; }
-    nav.links { gap: 2px 14px; font-size: 13px; margin-bottom: 2px; }
+    nav.links { gap: 2px 14px; font-size: 13px; }
+    h1 span { font-size: 17px; }
     /* the toolbar: smaller, and the settings on their own row */
     .bar { gap: 6px; }
     .bar button, .bar select { padding: 4px 9px; font-size: 14px; }
@@ -468,11 +472,14 @@ const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") }
 // Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
-import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT } from "./notebook/stores.js";
+import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT, deleteNotebookRecord } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
 import { createJournal, fmtEstimate } from "./replay-page.js";
 import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
+// (the MyST reader: given to convertCopy, which the board page shares without it)
+import { fromMyst } from "./notebook/myst.js";
+import { bookAccess } from "./workspace/book-cap.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
@@ -489,7 +496,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
 // shell/terminal.js, is loaded at its first open: this page carries only the menu item and the ps answer)
 import { answerPresence, TAB } from "./shell/presence.ts";
-import { openPreview } from "./workspace/preview.ts";
+import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 const EXAMPLES = {
   "Welcome": [
     {"md": "# Welcome to Sagebrush\n\nPython 3.14, compiled to JavaScript, runs **in this page**: nothing is sent anywhere. Press **Shift+Enter** to run a cell (or **Run all** above). This is a *Markdown* cell: double-click it to edit. It can have lists, tables, `code`, [links](https://github.com/sagemathinc/sagebrush) and math:\n\n$$e^{i\\pi} + 1 = 0, \\qquad \\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$\n\n**How it is built:** [articles](/articles/) on the open-source (MIT/Apache) engines behind this page, from Gröbner bases and FGLM to modular symbols, Galois groups and class groups: how each algorithm works, what worked, what did not."},
@@ -943,7 +950,7 @@ if (REMOTE_PREVIEW) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page) });
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
@@ -994,7 +1001,7 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   // (listed in the workspace, or not kept: a notebook no entry lists is
   // never left behind; saved() says so and tries again, LIMIT-E46-1)
   try { await wsAdoptNotebook(id, name, rest.mode); } catch (e) {
-    await idb(db, "notebooks", "readwrite", (s) => s.delete(id)).catch(() => {});
+    await deleteNotebookRecord(db, id).catch(() => {});
     throw e;
   }
   nbKept.set(key, { id, rev: rec.rev });
@@ -1022,6 +1029,8 @@ window.sagebrush = {
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
   get share() { return shareDialog; }, get shareTest() { return shareTest; },
+  // (tests: Move to Trash's pauses, B1)
+  get trashTest() { return trashTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
 };
@@ -1488,6 +1497,9 @@ class TextFileStore {
 
 // Open a document in the notebook, from a store (and remember it for next time).
 let current = { id: null, kind: "browser" };
+// (the document generation: raised whenever the open document changes or the workspace closes; a book capability
+// is bound to the one it was made in: web/workspace/book-cap.ts, plan-myst-notebooks-p2 r2 §11.1)
+let docGen = 0;
 // (before the notebook changes: the Share dialog's upload ends first, and its open is closed, CORR-172-ASTRA-2)
 const beforeSwitch = [];
 // (while the notebook is changing, from the first wait to the new one attached, there is no notebook
@@ -1506,13 +1518,40 @@ function beginSwitch() {
     }
   };
 }
-async function open(store, id, kind = "browser") {
-  const endSwitch = beginSwitch();
+// (B1, #447 r5c: Move to Trash's navigation hold, and the lease every navigation takes.  The hold is taken by Trash's
+// still() (holding the workspace's lock, with no navigation under way) and released, by its owner only, once the move
+// has settled: published, refused or failed (astra3's B1-R4-CODE-1, R5-OWNER-3).  A navigation waits for any hold, then
+// counts itself as under way in the same synchronous step, so no hold can begin between the two (R5-NAV-2 (1)); it
+// holds that lease until its outermost finally, cleanup included (R5-NAV-2 (2)); a lease taken inside another never
+// waits (no hold can exist while one is held) and only counts.  `after`: what went to Trash while it waited, if anything)
+let hold = null, holdReleases = 0;
+function holdNav() {
+  let settle;
+  const tok = { settled: new Promise((r) => (settle = r)), release(moved) { if (hold !== tok) return; hold = null; holdReleases++; settle(moved ?? null); } };
+  hold = tok;
+  return tok;
+}
+async function navLease() {
+  let after = null;
+  while (hold) after = (await hold.settled) ?? after;
+  const end = beginSwitch();
+  if (trashTest.pause) await trashTest.pause("leased");
+  return Object.assign(end, { after });
+}
+async function open(store, id, kind = "browser", guard = null) {
+  const endSwitch = await navLease();
   try {
   for (const f of beforeSwitch) await f();
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
+  // (Move to Trash's own switch (B1): it leaves only the notebook it was asked to; another opened here meanwhile wins,
+  // and this switch is dropped before it detaches anything (astra's R2 on #447))
+  if (guard) {
+    if (trashTest.pause) await trashTest.pause("beforeDetach");
+    if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
+  }
   nb.detach();
+  docGen++;
   ttShow(false);
   current = { id, kind };
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
@@ -1542,29 +1581,45 @@ const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } :
 // (design/capabilities.md §6): "person" for New, "elsewhere" for an example, a share link or a file
 // opened, a copy's source's for Save a copy; a notebook not made here has none (unknown))
 const madeAs = new Map();
-async function openDocument(doc, here = false, made = "elsewhere") {
+async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
   const id = newId();
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
-  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id);
+  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
-const openNew = (name, mode, codes, here = false) => openDocument({ name, mode, cells: codes.map(asCell) }, here);
-async function openId(id) {
-  // (the LaTeX editor has this page, web/latex/page.ts: a notebook opened from it (its files, their menus, an
-  // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
-  const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-  if (!doc) return openArrived(id);
-  await open(await storeFor(id), id);
-  savedEl.textContent = "opened";
-  return true;
+const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+async function openId(id, guard = null) {
+  const end = await navLease();
+  try {
+    // (it waited while what it asks for went to Trash: not opened, said, with Restore and open (board's (A), #447 r5c))
+    if (end.after) {
+      const p = await ws?.pathOf("notebook", id).catch(() => undefined);
+      if (p && (p === "/Trash" || p.startsWith("/Trash/"))) {
+        end.after.dropped(nameOf(p), async () => { await openId(id); cells()[0]?.ta.focus(); });
+        return false;
+      }
+    }
+    // (the LaTeX editor has this page, web/latex/page.ts: a notebook opened from it (its files, their menus, an
+    // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
+    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
+    const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
+    if (!doc) return await openArrived(id);
+    await open(await storeFor(id), id, "browser", guard);
+    savedEl.textContent = "opened";
+    return true;
+  } finally {
+    end();
+  }
 }
 // (a notebook another device made, listed here by sync with no record yet (2c-3): opened through the journal's store
 // only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
 // answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
 // and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
 async function openArrived(id) {
+  // (one navigation lease over all of it, its recovery included: #447 r5c, R5-NAV-2 (2))
+  const end = await navLease();
+  try {
   const w = await wsNow();
   const at = w && !w.closed && (await w.journalActive().catch(() => false)) ? await w.pathOf("notebook", id).catch(() => undefined) : undefined;
   if (!at) return false;
@@ -1602,8 +1657,26 @@ async function openArrived(id) {
   }
   savedEl.textContent = "opened";
   return true;
+  } finally {
+    end();
+  }
 }
 const saveNow = () => nb.flush();
+// A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
+// and another chapter opened (web/workspace/book-cap.ts; plan-myst-notebooks-p2 r2 §2, §11.1)
+const bookAcc = bookAccess({
+  now: () => ({ gen: docGen, ws, ref: current.kind === "browser" ? current.id : null }),
+  isMyst: () => !!nb.meta?.metadata?.sagebrush?.myst,
+  confirm: (text) => confirm(text),
+  save: async () => { await saveNow(); },
+  openRef: async (ref) => { const ok = await openId(ref).catch(() => false); if (ok) wsTrackCurrent(); return ok; },
+  said: (text) => { statusEl.textContent = text; },
+  myst: fromMyst,
+  maxBytes: LIMITS.maxBoardBytes,
+});
+// (the same, for the tests, which call the page's own capability directly (web/notebook/test-myst.mjs part C): less
+// than the page's own workspace, window.sagebrush.workspace, already gives this page's code)
+window.__sagebrushMystBook = () => bookAcc.mystBook();
 
 // The app: a notebook opened from the computer is its .ipynb file, and the
 // files in its folder are Python's files (read when it opens; what Python
@@ -1611,17 +1684,17 @@ const saveNow = () => nb.flush();
 let diskFile = null, diskFiles = [];
 const splitPath = (p) => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return { dir: p.slice(0, i), sep: p[i] || "/", name: p.slice(i + 1) }; };
 async function bindDiskFile(path, doc = null) {
-  const { dir, sep, name } = splitPath(path);
-  diskFile = { path, dir, sep, name };
-  const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
-  const endSwitch = beginSwitch();
+  const end = await navLease();
   try {
+    const { dir, sep, name } = splitPath(path);
+    diskFile = { path, dir, sep, name };
+    const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
     if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
     await open(store, "file:" + path, "file");
+    try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
   } finally {
-    endSwitch();
+    end();
   }
-  try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
 }
 async function openDiskFile(path) {
   try {
@@ -1962,6 +2035,11 @@ const shareSent = {
 // fresh transaction, key -> {attempt, at, tag}; `registry()` and `account()` for the cases that order the records'
 // changes themselves; `fault` (see shareSent) and `changeLog` (each change's kind and durability, and each
 // read-back), set by a test)
+// (tests only: Move to Trash's waits (B1); `pause`, unset here and in every build, is set by a test to hold the
+// trashing hook at "saved" and at "switched", so production never waits on it)
+// (test seams of B1 (#447): `pause(stage)`, null unless a test sets it; `state()`, the navigation counters, read only;
+// `nav.reopen`, the journal's reopen as sync calls it)
+const trashTest = { pause: null, state: () => ({ switches, held: !!hold, releases: holdReleases }), nav: { reopen: () => reopenJournaled() } };
 const shareTest = {
   workspace: () => wsNow(),
   async sent() {
@@ -2484,7 +2562,7 @@ fileMenu.addEventListener("click", async (e) => {
       if (!confirm(`Delete the notebook "${nbName.value}" from this browser?`)) break;
       await nb.mayLeave();
       nb.detach();
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(current.id));
+      await deleteNotebookRecord(db, current.id);
       shareSent.forget(current.id);
       await wsForgetNotebook(current.id);
       const hdb = await historyDbReady;
@@ -2563,7 +2641,7 @@ async function showOpen() {
     del.setAttribute("aria-label", `Delete ${d.name || "Untitled"}`);
     del.onclick = async () => {
       if (d.id === current.id || !confirm(`Delete "${d.name}"?`)) return;
-      await idb(db, "notebooks", "readwrite", (st) => st.delete(d.id));
+      await deleteNotebookRecord(db, d.id);
       shareSent.forget(d.id);
       await wsForgetNotebook(d.id);
       const hdb = await historyDbReady;
@@ -2738,7 +2816,7 @@ async function openAs(e, as) {
   if (as === "board") return toBoard("/board/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid));
   try {
     let said = "";
-    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, said: (m) => { said = m; } });
+    const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, myst: fromMyst, said: (m) => { said = m; } });
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
     if (!said) return openEntry(made);
@@ -3087,7 +3165,7 @@ const wsReady = (async () => {
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
-    w.onClosed(() => showReloadNotice());
+    w.onClosed(() => { docGen++; showReloadNotice(); });
     if (w.closed) showReloadNotice();
     // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
@@ -3099,6 +3177,8 @@ const wsReady = (async () => {
     readOnlyIfQuarantined();
     w.onDurability(readOnlyIfQuarantined);
     void startMigrator(w);
+    // ("Push to GitHub"'s automatic push, Stage A MVP M3: nothing at all without its DEV flag)
+    startGitpushAuto(w, (f) => new URL(f, location.href).href);
     return w;
   } catch (e) {
     console.warn("workspace:", e);
@@ -3225,6 +3305,10 @@ async function takeOver(store, id) {
 // and the old one (their writer locks: another tab, or this page reloaded, can take them), and leaves no store attached,
 // so nothing is editable with nowhere to save it (astra's DEVSW-2))
 async function reopenJournaled() {
+  // (one navigation lease over all of it, its cleanup (a detach, the writer locks let go) included: #447 r5c,
+  // R5-NAV-2 (2))
+  const end = await navLease();
+  try {
   if (!current.id || current.kind !== "browser" || (nb.store?.journaled && nb.store.synced)) return true;
   const id = current.id, prev = nb.store;
   let st = null;
@@ -3234,10 +3318,14 @@ async function reopenJournaled() {
     if (nb.store === st && st.journaled) return true;
     throw new Error("the notebook isn't open through the journal");
   } catch (e) {
+    if (trashTest.pause) await trashTest.pause("recovering");
     console.warn("sync: the notebook not reopened through the journal:", e);
     if (nb.store && (nb.store === st || nb.store === prev)) nb.detach();
     for (const x of new Set([st, prev])) if (x?.journaled) try { await x.release(); } catch {}
     return false;
+  }
+  } finally {
+    end();
   }
 }
 // (what holds for the notebook shown, the switch's read-only set back from it: read-only with no store attached (nowhere
@@ -3427,6 +3515,80 @@ function wsShowFiles(on) {
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
       renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
+      // (a Move to Trash of what is open here has settled: its own hold released, if it took one; a navigation that
+      // waited is told what went (#447 r5c))
+      trashDone(gate, moved) { gate?.release?.(moved); },
+      // (the open notebook, or a folder it is in, going to Trash from the file browser (B1). Fenced until it is closed
+      // (astra's R2 on #447): read-only here meanwhile, and every edit counted; saved until a save ends with no edit
+      // after it, the same notebook still the one open here and still this page's to change (else refused, nothing
+      // moved); then another opened in its place, the most recent one not going with it, else a new Untitled; then
+      // whatever is open must not be inside what goes; and the saves of any edit that slipped in before the switch,
+      // awaited: if one fails, this notebook is opened again and nothing moves. Open for editing in another tab of
+      // this browser: refused, said)
+      async trashing(e) {
+        if (current.kind !== "browser") return;
+        const id = current.id, inside = (p) => p === e.path || p.startsWith(e.path.replace(/\/$/, "") + "/");
+        const same = () => current.kind === "browser" && current.id === id;
+        const crossTab = "this notebook is open for editing in another tab of this browser: close it there, then try again.";
+        if (!pageMay().trash) return crossTab;
+        // (one at a time: another Move to Trash of what is open here still settling (#447 r5c, R5-OWNER-3))
+        if (hold) return "another move to Trash is under way here.";
+        let edits = 0;
+        const offs = [nb.on("dirty", () => edits++), nb.on("change", () => edits++)];
+        nb.setReadOnly(true);
+        try {
+          let others = [];
+          for (let round = 0; ; round++) {
+            const seen = edits;
+            try {
+              saveNow();
+              await nb.saved();
+              if (trashTest.pause) await trashTest.pause("saved");
+              await nb.mayLeave();
+              others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id && !inside(x.path));
+            } catch (err) { return `its changes couldn't be saved (${err?.message ?? err}).`; }
+            if (!same()) return "another notebook was opened here meanwhile, so nothing was moved.";
+            if (!pageMay().trash) return crossTab;
+            if (edits === seen) break;
+            if (round >= 3) return "it kept changing while it was being saved (is a cell running?), so nothing was moved.";
+          }
+          try { if (others.length) await openId(others[0].ref, { expect: id }); else await openNew("Untitled", nb.mode, [""], true, { expect: id }); }
+          catch (err) { return err?.navWon ? "another notebook was opened here meanwhile, so nothing was moved." : `another notebook couldn't be opened in its place (${err?.message ?? err}).`; }
+          wsTrackCurrent();
+          if (trashTest.pause) await trashTest.pause("switched");
+          if (same()) return "it is still open.";
+          const now = current.kind === "browser" ? await ws.pathOf("notebook", current.id).catch(() => undefined) : undefined;
+          if (now && inside(now)) return `"${nameOf(now)}" is open here and inside it, so nothing was moved.`;
+          if (trashTest.pause) await trashTest.pause("checked");
+          try { await nb.saved(); }
+          catch (err) { await openId(id).catch(() => {}); return `its last changes couldn't be saved (${err?.message ?? err}), so it was opened again.`; }
+          // (and checked again by the workspace itself, holding its lock (no other tab's change can follow until the
+          // move is published): no navigation under way and no other hold, then this page's navigation held, then the
+          // notebook open here looked up NOW, which must not be what goes or inside it; and asked again right before
+          // the move publishes.  The hold is released by trashDone, once the move has settled (#447 r5c))
+          let tok = null, pinned = null;
+          const holding = () => !!tok && hold === tok && switches === 0 && current.kind === "browser" && current.id === pinned;
+          return {
+            still: async () => {
+              if (switches > 0 || hold || current.kind !== "browser") return false;
+              pinned = current.id;
+              const mine = (tok = holdNav());
+              if (trashTest.pause) await trashTest.pause("lookup");
+              const now = await ws.pathOf("notebook", pinned).catch(() => undefined);
+              const ok = holding() && !(now && inside(now));
+              if (!ok) mine.release();
+              return ok;
+            },
+            recheck: holding,
+            ...(trashTest.pause ? { pause: async (stage) => { await trashTest.pause?.(stage); } } : {}),
+            release: (moved) => tok?.release(moved),
+          };
+        } finally {
+          for (const off of offs) off();
+          // (as showWriter leaves it; another notebook opened meanwhile has had its own set by open())
+          if (same()) nb.setReadOnly(!!pageMay().readOnly || !!ws?.quarantined || docSyncNeedsReload);
+        }
+      },
       // (and saved by the notebook, after what it has yet to save: CORR-0B0-2)
       retitles: (e) => e.kind === "notebook" && e.ref === current.id && current.kind === "browser",
       renamed(e) {
@@ -3554,6 +3716,16 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   booted();
+  // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
+  // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
+  // meanwhile (another fid), said, nothing made
+  if (qs.has("openas")) {
+    const at = qs.get("openas"), fid = qs.get("fid");
+    history.replaceState(null, "", location.pathname + flagQuery + location.hash);
+    const e = ws && at ? await ws.stat(at).catch(() => null) : null;
+    if (e && e.kind === "file" && e.fid === fid) await openAs(e, "notebook");
+    else statusEl.textContent = `could not open ${at ? nameOf(at) : "it"} as a notebook: it isn't there any more`;
+  }
   // back from signing in to share (?share): the dialog again
   if (qs.has("share")) {
     history.replaceState(null, "", location.pathname + flagQuery + location.hash);
