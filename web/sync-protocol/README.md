@@ -34,3 +34,32 @@ Pinned so far:
 - the cleared history's refusal on batch and pull (`epoch`), as against a claim's `stale_epoch`.
 
 The reference server is checked against them in test-reference-server.mjs, and cloud's server in its test-sync.
+
+## The force-reload floors (plan force-reload r7.2 §1-§2)
+
+A client may declare its release in hello: `release: {n, core}`, a registered build's ordinal and the exact core sha it
+was built from (protocol.ts `checkRelease`). A build that declares none is `n = 0`. This is a compatibility and
+accident guard, not attestation.
+
+`releaseRefusal` decides admission for every state-changing message, and for hello itself, against the floors
+`{reload, compat, served}`. The bound is $\max(\min(R, \text{served}), C)$. A registered release is an exact `{n, core}`
+pair of the registry. `n = 0` is refused once the bound is above 0.
+
+**How a refusal is delivered.** A server never answers a page's request with `stale_build`. A build from before these
+codes reads an unknown refusal as final (`refusalOf`), and a final refusal is never sent again. So the refusal is pushed
+without a `req`, and then the socket closes with 4426. Whatever the page sent stays its own to send again after it
+reloads.
+
+A blob PUT carries `x-sync-release: <n>:<sha>`. A stale one is refused with 409 `stale_build` and a `retry_after`,
+never with 400/413, which a build from before these codes treats as final.
+
+`floor_refresh` is the cloud server's retryable refusal when its floors went stale between a commit's two stages.
+
+The reference server has no caches, so a floor holds at once. Its `/api/sync/v1/compat` answers in seconds
+(`set_at`, `d1now`), as D1's `unixepoch('subsec')` does.
+
+**The old front against it (PR 0b).** `CASES=floors OLD_FRONT=<dir> bun web/workspace/test-sync-client-ref.mjs` runs the
+real page of the last build before these codes, 98a9f74fb, against this server's floors (web/workspace/sync-floor-cases.js:
+rows P0-0, P0-pos, P0-a, P0-b and P0-c). `<dir>` is a clean detached checkout of 98a9f74fb (with a `node_modules` link);
+the runner refuses it unless every file of the page's bundle is that commit's, byte for byte, and prints one `ROW` line
+per row. These rows must pass before any deployed server may refuse with `stale_build`, or any floor is set above 0.

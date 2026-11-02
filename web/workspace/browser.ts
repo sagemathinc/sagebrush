@@ -43,6 +43,10 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
+   * are, and this tab's open documents saved first; without exportUrl, not offered. */
+  exportUrl?: (file: string) => string;
+  saveOpen?: () => Promise<void>;
 };
 
 const OPEN_KEY = "sagebrush-files-open";
@@ -412,7 +416,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll }).then(() => meter());
+  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   function rowMenu(at: HTMLElement, e: Entry) {

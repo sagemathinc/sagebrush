@@ -13,7 +13,10 @@
 //   stale_epoch), batch (with
 //   fgen), pull (with upto, recv and chain), clear (its root bootstraps the
 //   clearing client's new-epoch row), changed;
-// - HTTP: the test sign-in, status, enable, delete, blobs/check, blob PUT/GET.
+// - HTTP: the test sign-in, status, enable, delete, blobs/check, blob PUT/GET;
+// - the force-reload floors (plan force-reload r7.2 §2): hello's `release`, every write admitted against the floors
+//   (`stale_build`: told, then the socket closed, so no request of the page's is ever answered with it), the blob PUT's
+//   `x-sync-release`, GET /api/client-floor and GET /api/sync/v1/compat.  It has no caches, so a floor holds at once.
 // Document sockets, tickets and snapshots come with their stages
 // (2c-5, 2d); until then a ticket is refused as `invalid`.
 //
@@ -23,8 +26,9 @@
 //   bun web/sync-protocol/test-reference-server.mjs
 
 import {
-  LIMITS, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, clientOf, enc, fields, has, isDevice,
-  isDocId, isHash, isNat, isSha, parseMessage, sha256Hex, toB64, type Batch, type Env, type Head, type Op,
+  LIMITS, NO_RELEASE, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, checkRelease, clientOf, enc, fields,
+  has, isDevice, isDocId, isHash, isNat, isSha, parseMessage, releaseRefusal, sha256Hex, toB64, type Batch, type Env, type Floors, type Head,
+  type Op, type Release,
 } from "./protocol.ts";
 import { batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkUpto, hex } from "./doc-protocol.ts";
 
@@ -84,6 +88,8 @@ export class RefSocket {
   closed = false;
   /** set by hello */
   device: string | null = null;
+  /** set by hello: the release the page declared (none: NO_RELEASE) */
+  release: Release = NO_RELEASE;
   inflight = 0;
   constructor(private server: ReferenceServer, readonly account: Account, readonly session: string) {}
   /** From the page to the server: each message starts in arrival order and runs until it awaits, as the real
@@ -117,8 +123,15 @@ export class ReferenceServer {
   private making = new Map<string, Promise<Account>>();
   private sessions = new Map<string, Session>();
   private holds = new Map<string, { wait: Promise<void>; release: () => void }>();
+  /** batches that took a hold and are waiting for its release (the test's entered-hold boundary) */
+  private holding = 0;
   private fakes = new Map<string, Fake[]>();
   private nowMs: number | null = null;
+  /** The force-reload floors and the release registry (n -> core sha); none by default, so every build may write. */
+  private floors: Floors = { reload: 0, compat: 0, served: 0 };
+  private registry = new Map<number, string>();
+  /** The compat floor's publication (r7.2 §2): raised as pending, then finalized with its time, in seconds. */
+  private compatRow: { epoch: number; state: "pending" | "final"; set_at: number | null } = { epoch: 0, state: "final", set_at: 0 };
   /** Who may sync (the allowlist); everyone by default. */
   constructor(private opts: { allow?: (account: string) => boolean } = {}) {}
 
@@ -134,6 +147,8 @@ export class ReferenceServer {
       this.holds.set(`${doc}:${client ?? "*"}`, { wait, release });
       return () => release();
     },
+    /** How many batches have taken a hold and wait for its release now. */
+    holding: (): number => this.holding,
     /** The next `n` answers to messages of type `t` dropped, or refused with `error`. */
     fake: (t: string, f: Fake, n = 1) => { this.fakes.set(t, [...(this.fakes.get(t) ?? []), ...Array(n).fill(f)]); },
     /** A session ended: its sockets get `revoked` and close 4401. */
@@ -145,6 +160,37 @@ export class ReferenceServer {
     clients: (account: string, doc: string) => {
       const d = this.accounts.get(account)?.docs.get(doc);
       return d ? Object.fromEntries([...d.clients].map(([k, c]) => [k, { ...c }])) : null;
+    },
+    /** The floors in force now, a copy. */
+    floors: (): Floors => ({ ...this.floors }),
+    /** The floors in force (any not given keep theirs). */
+    setFloors: (f: Partial<Floors>) => { this.floors = { ...this.floors, ...f }; },
+    /** The release registry: [n, core sha] pairs. */
+    setRegistry: (pairs: [number, string][]) => { this.registry = new Map(pairs); },
+    /** The compat floor's Raise: strict (a raise to the same or a lower value changes nothing), pending until finalized. */
+    raiseCompat: (v: number): number | null => {
+      if (!(v > this.floors.compat)) return null;
+      this.floors.compat = v;
+      this.compatRow = { epoch: this.compatRow.epoch + 1, state: "pending", set_at: null };
+      return this.compatRow.epoch;
+    },
+    /** Its Finalize: the pending epoch `e`, stamped with the server's time in seconds; anything else changes nothing. */
+    finalizeCompat: (e: number): boolean => {
+      if (this.compatRow.epoch !== e || this.compatRow.state !== "pending") return false;
+      this.compatRow = { epoch: e, state: "final", set_at: this.now() / 1000 };
+      return true;
+    },
+    /** An account's state as one string (its ops, devices, blobs and documents with their clients), for "nothing
+     * changed" assertions. */
+    snapshot: (account: string): string | null => {
+      const a = this.accounts.get(account);
+      if (!a) return null;
+      return J({
+        state: a.state, generation: a.generation, ops: a.ops,
+        devices: [...a.devices].map(([k, d]) => [k, d.next_dseq, d.refused, d.answers.size]),
+        blobs: [...a.blobs.keys()].sort(),
+        docs: [...a.docs].map(([k, d]) => [k, d.epoch, d.seq, d.head, d.batches.length, [...d.clients].map(([c, v]) => [c, v.fgen, v.next_cseq])]),
+      });
     },
     /** A document's head and stored batches, for assertions. */
     doc: (account: string, doc: string) => {
@@ -207,14 +253,20 @@ export class ReferenceServer {
       }
       return err(404, "missing");
     }
+    // (the floors, to anyone: integers only, no text; cached briefly at the edge on the real server)
+    if (p === "/api/client-floor" && m === "GET") return new Response(JSON.stringify(this.floors), { status: 200, headers: { "content-type": "application/json", "cache-control": "public, max-age=30", "x-content-type-options": "nosniff" } });
     if (!p.startsWith("/api/sync/")) return err(404, "not found");
     const who = this.sessionOf(req.headers.get("cookie"));
     if (!who) return err(401, "sign in first");
     const a = await this.accountOf(who.account);
     const allowed = this.opts.allow?.(who.account) ?? true;
     if (p === "/api/sync/v1/status" && m === "GET") {
-      if (!allowed) return json({ available: false, reason: "not_allowlisted", state: "off", account: a.hash });
-      return json({ available: true, state: a.state, ...(a.generation ? { generation: a.generation } : {}), account: a.hash });
+      if (!allowed) return json({ available: false, reason: "not_allowlisted", state: "off", account: a.hash, ...this.floors });
+      return json({ available: true, state: a.state, ...(a.generation ? { generation: a.generation } : {}), account: a.hash, ...this.floors });
+    }
+    // (the authoritative compat read: uncached, one clock, seconds (r7.2 §2))
+    if (p === "/api/sync/v1/compat" && m === "GET") {
+      return new Response(JSON.stringify({ compat: this.floors.compat, ...this.compatRow, d1now: this.now() / 1000 }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
     if (!allowed) return err(403, "forbidden", { message: "sync isn't enabled for this account" });
     if (p === "/api/sync/v1/enable" && m === "POST") {
@@ -256,6 +308,10 @@ export class ReferenceServer {
     const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
     if (g && m === "PUT") {
       if (a.state !== "active") return err(409, a.state === "deleting" ? "deleting" : "readonly");
+      // (the release at the request's start: a stale build's bytes are refused with a retry, never as final (a build
+      // from before the floors treats 400/413 as final and anything else as "later"))
+      const stale = releaseRefusal(releaseHeader(req.headers.get("x-sync-release")), this.floors, this.registry);
+      if (stale) return err(409, "stale_build", { ...stale.detail, retry_after: 60_000 });
       // (admitted for this generation: rechecked after the body's await, so a PUT paused across a deletion and a
       // re-enable can't land in the next generation, CORR-173-3)
       const gen = a.generation;
@@ -323,11 +379,16 @@ export class ReferenceServer {
 
   private async handle(ws: RefSocket, m: Json) {
     const a = ws.account, t = m.t;
-    if (t === "hello") return this.hello(ws, fields(m, ["t", "v", "device", "name", "index_after", "docs", "account", "generation"], "hello"));
+    if (t === "hello") return this.hello(ws, fields(m, ["t", "v", "device", "name", "index_after", "docs", "account", "generation", "release"], "hello"));
     if (!ws.device) throw new SyncError("invalid", "say hello first");
     const req = m.req;
     if (!isNat(req)) throw new SyncError("invalid", "req");
     this.admit(a);
+    // (every write against the floors as they are now: a floor raised while this socket was open holds at its next write)
+    if (t === "ops" || t === "doc_claim" || t === "doc_fence" || t === "batch" || t === "clear") {
+      const stale = releaseRefusal(ws.release, this.floors, this.registry);
+      if (stale) return this.refuseStale(ws, stale);
+    }
     if (t === "ops") {
       fields(m, ["t", "req", "ops"], "ops");
       const before = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
@@ -352,7 +413,9 @@ export class ReferenceServer {
       const b = checkBatch(m);
       this.owner(a, b.owner);
       const fgen = attemptDoc(() => checkFgen(m.fgen, new Set(b.patches.map((e) => clientOf(e.id)))));
-      const out = await this.batch(a, ws.device, b, fgen);
+      const out = await this.batch(a, ws.device, b, fgen, ws.release);
+      // (a floor raised while the batch waited: refused as any stale write is, nothing stored and nothing answered)
+      if ("stale" in out) return this.refuseStale(ws, out.stale);
       this.answer(ws, "batch", req, { t: "ack", req, batch: out });
       if (out.new > 0) this.changed(a, ws, b.doc, out.head, ws.device);
     } else if (t === "pull") {
@@ -376,6 +439,13 @@ export class ReferenceServer {
     } else throw new SyncError("invalid", "unknown message");
   }
 
+  /** A stale build: told (no `req`, so no request of the page's is answered with it: a build from before the floors
+   * reads an unknown refusal as final), then the socket closed, so what it sent stays its to send again. */
+  private refuseStale(ws: RefSocket, e: SyncError) {
+    ws.deliver({ t: "error", code: e.code, detail: { message: e.message, ...e.detail } });
+    ws.close(4426, "stale build");
+  }
+
   /** An account that takes writes and reads: active, not being deleted. */
   private admit(a: Account) {
     if (a.state === "deleting") throw new SyncError("deleting", "this account's synced data is being deleted");
@@ -394,6 +464,10 @@ export class ReferenceServer {
     if (!isNat(m.index_after)) throw new SyncError("invalid", "index_after");
     if (has(m, "docs") && (!Array.isArray(m.docs) || m.docs.length > LIMITS.helloDocs)) throw new SyncError("limit", "hello: too many docs", { limit: "hello_docs", max: LIMITS.helloDocs });
     this.admit(a);
+    const release = checkRelease(m.release);
+    const stale = releaseRefusal(release, this.floors, this.registry);
+    if (stale) return this.refuseStale(ws, stale);
+    ws.release = release;
     const b = bindingRefusal(a, m.account ?? null, m.generation ?? null);
     if (b) throw new SyncError(b.code === "forbidden" ? "forbidden" : "conflict", "the client's binding isn't this account's", { reason: b.reason });
     const docs = ((m.docs as unknown[] | undefined) ?? []).map((x) => {
@@ -525,7 +599,7 @@ export class ReferenceServer {
   }
 
   /** A batch (§4.1–4.4, r9 §5.1, §5.8): decided, then stored with its recv and chain, or refused whole. */
-  private async batch(a: Account, device: string, b: Batch, fgen: Map<string, number>) {
+  private async batch(a: Account, device: string, b: Batch, fgen: Map<string, number>, release: Release) {
     const writer = `session:${device}`;
     const d = this.docOf(a, b.doc, false);
     if (!d) throw new SyncError("unknown_client", "claim the client first", { client: clientOf(b.patches[0].id) });
@@ -537,12 +611,21 @@ export class ReferenceServer {
     if (hold) {
       this.holds.delete(`${b.doc}:${clientOf(b.patches[0].id)}`);
       this.holds.delete(`${b.doc}:*`);
-      await hold.wait;
+      this.holding++;
+      try {
+        await hold.wait;
+      } finally {
+        this.holding--;
+      }
       // (after the await: the same account generation and the same document, or nothing commits: CORR-173-3's audit)
       this.admit(a);
       if (a.docs.get(b.doc) !== d) throw new SyncError("conflict", "this account's sync changed while the batch waited", { reason: "generation" });
       if (b.epoch !== d.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: d.epoch, head: { epoch: d.epoch, seq: d.head } });
     }
+    // (the floors in the commit's own turn, after any await: a batch admitted before a raise and held across it is
+    // refused, not stored (plan r7.2 §2: the check and the commit are one turn))
+    const stale = releaseRefusal(release, this.floors, this.registry);
+    if (stale) return { stale };
     const sel = this.select(a, d, writer, b, fgen);
     if (sel.fresh.length === 0) return { new: 0, resent: sel.resent, head: this.headOf(d) };
     if (b.expect_head && (b.expect_head.epoch !== d.epoch || b.expect_head.seq !== d.head)) throw new SyncError("conflict", "the document moved on", { head: this.headOf(d) });
@@ -716,5 +799,16 @@ function attemptDoc<T>(f: () => T): T {
     const x = e as { code?: string; message?: string; detail?: Json };
     if (x?.code === "invalid" || x?.code === "limit") throw new SyncError(x.code, x.message ?? "invalid", x.detail);
     throw e;
+  }
+}
+
+/** A blob PUT's `x-sync-release: <n>:<core sha>` (absent or malformed: no release). */
+function releaseHeader(h: string | null): Release {
+  const m = /^([1-9][0-9]{0,9}):([0-9a-f]{40})$/.exec(h ?? "");
+  if (!m) return NO_RELEASE;
+  try {
+    return checkRelease({ n: Number(m[1]), core: m[2] });
+  } catch {
+    return NO_RELEASE;
   }
 }
