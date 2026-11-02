@@ -9,10 +9,12 @@
     "test": "tsc -p . && node --test 'dist/test/*.test.js' 'target/*.test.js'"
   },
   "devDependencies": {
+    "@isomorphic-git/lightning-fs": "4.10.5",
     "@preact/signals-core": "1.14.4",
     "@types/node": "^26.6.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "isomorphic-git": "1.44.9",
     "katex": "^0.19.0",
     "marked": "^18.0.14",
     "mathjax-full": "3.2.2",
