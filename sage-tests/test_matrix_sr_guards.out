@@ -34,9 +34,9 @@ ok
 SagebrushMemoryError symbolic
 SagebrushMemoryError symbolic
 ok
-NotImplementedError
-NotImplementedError
-RuntimeError
+ok
+ok
+ok
 1
 SagebrushMemoryError
 KeyboardInterrupt

@@ -85,7 +85,7 @@ print(sum(S._chars(e) for e in matrix([[x, 1, 2], [3, x, 4], [5, 6, x]]).list())
 print(limited(sum(S._chars(e) for e in matrix([[x, 1, 2], [3, x, 4], [5, 6, x]]).list()), lambda: matrix([[x, 1, 2], [3, x, 4], [5, 6, x]]).echelon_form()))
 print(limited(sum(S._chars(e) for e in matrix(SR, [[2, x]]).list()), lambda: matrix(SR, [[2, x]]).echelon_form()))
 print(limited(10**6, lambda: matrix([[x, 1, 2], [3, x, 4], [5, 6, x]]).echelon_form() is not None))
-# the unsupported sizes are refused before any work
+# (lane 4b-2) det for n >= 4 and the adjugate come from the characteristic polynomial: no elimination, no det
 print(spied('_echelon', lambda: matrix(SR, 4, 4, lambda i, j: x^(i + j)).det()))
 print(spied('det', lambda: matrix(SR, 5, 5, lambda i, j: x^(i + j)).adjugate()))
 print(spied('det', lambda: matrix(SR, 4, 4, lambda i, j: x^(i + j)).adjugate()))
