@@ -3,7 +3,7 @@
 // members (the JSON's framing, indentation, the data: URL's prefix and padding included), at several slice and piece
 // sizes so that cuts land everywhere; and the counter's contract: nothing handed on, no picture read, its cap.
 //   bun web/workspace/export/test-measure.mjs
-import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes } from "./stream";
+import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, outForTest, sizes } from "./stream";
 import { boardTextParts, cleanDocSteps, ipynbObject } from "../file-bytes";
 
 const SER = { cleanDocSteps, boardTextParts };
@@ -65,6 +65,24 @@ for (const [chunk, piece] of [[256 * 1024, 64 * 1024], [4096, 1024], [97, 31], [
     check(n === real.n, `${tag}: a board (pictures this browser has, a carried data: URL, text): counted ${n} = written ${real.n}`);
     check(reads === 0, `${tag}: counting reads no picture's bytes (${reads} slices read)`);
   }
+}
+// (the writer itself, on parts cut anywhere: a surrogate pair split between two parts of one slice (encoded joined: 4
+// bytes), split across a slice's end (two lone halves: 3 + 3), and lone halves; counted = written for every cut)
+{
+  const texts = ["a\ud83d\ude00b", "\ud83d\ude00\ud83d\ude00", "x\ud800y\udc00z", "\udc00\ud800", "é😀€\ud83d"];
+  let bad = [], cases = 0;
+  for (const chunk of [1, 2, 3, 5, 1 << 20]) for (const t of texts) for (let cut = 0; cut <= t.length; cut++) for (const steps of [false, true]) {
+    sizes(chunk, 64 * 1024);
+    const parts = [t.slice(0, cut), t.slice(cut)];
+    let n = 0;
+    const w = outForTest(async (b) => { n += b.length; }, pace());
+    const count = new Counter(Infinity, over);
+    const c = outForTest(async () => { throw new Error("handed on"); }, pace(), count);
+    for (const o of [w, c]) { for (const p of parts) { o.add(p); if (steps) await o.step(); } await o.flush(); }
+    cases++;
+    if (count.bytes !== n) bad.push([chunk, J(t), cut, steps, count.bytes, n]);
+  }
+  check(bad.length === 0, `the writer on ${cases} cuts (pairs split between parts, across a slice's end, lone halves): counted = written${bad.length ? " " + J(bad.slice(0, 5)) : ""}`);
 }
 sizes(256 * 1024, 64 * 1024);
 // (the cap: past max, the counter's own stop, at the first part past it)
