@@ -491,6 +491,16 @@ class Line(Primitive):
         self.xs = [_finite(x) for x in xs]
         self.ys = [_finite(y) for y in ys]
 
+    @property
+    def xdata(self):
+        """The x coordinates (Sage's Line.xdata)."""
+        return self.xs
+
+    @property
+    def ydata(self):
+        """The y coordinates (Sage's Line.ydata)."""
+        return self.ys
+
     def bbox(self):
         return _bbox(self.xs, self.ys)
 
