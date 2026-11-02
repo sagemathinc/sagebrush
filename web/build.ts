@@ -191,8 +191,19 @@ const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(h
 // own and its worker, fetched only when the button is clicked, so the page's start doesn't carry them
 const exportResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "entry.ts")], outdir: join(here, "dist"), naming: "sagebrush-export.js", target: "browser", format: "esm", minify: true });
 const exportWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-export-worker.js", target: "browser", format: "esm", minify: true });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult]];
-for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult]) {
+// "Push to GitHub" (Stage A MVP r1, DEV only, web/gitpush): its panel's chunk and its git worker (isomorphic-git),
+// fetched only when the Storage panel's button is clicked in a browser with the flag
+const gitpushResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "panel.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-panel.js", target: "browser", format: "esm", minify: true });
+// (packages put in place by small modules of its own, web/gitpush/shims: see each)
+const gitShims = { name: "gitpush-shims", setup(b: any) {
+  const shim = (f: string) => () => ({ path: join(here, "gitpush", "shims", f) });
+  b.onResolve({ filter: /^sha\.js\/sha1(\.js)?$/ }, shim("sha1.ts"));
+  b.onResolve({ filter: /^crc-32$/ }, shim("crc32.ts"));
+  b.onResolve({ filter: /^(diff3|clean-git-ref|isomorphic-textencoder)$/ }, shim("unused.ts"));
+} };
+const gitpushWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "git-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-worker.js", target: "browser", format: "esm", minify: true, plugins: [gitShims] });
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
+for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
