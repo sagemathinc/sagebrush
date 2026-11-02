@@ -52,6 +52,9 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
+  // (elliptic curves over GF(p), imported only by EllipticCurve() over a
+  // finite field: its own group, so sage-more's users don't fetch it)
+  if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
   if (/^_?sage/.test(top)) return "sage-more";
   // (MATLAB mode's sparse LU, imported only by a measured sparse solve: its
   // own group, so the other MATLAB extras' users don't fetch it)
