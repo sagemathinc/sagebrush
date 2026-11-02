@@ -89,14 +89,43 @@ fn observe(_site: &'static str, _len: u128) {
     OBSERVED.with(|o| o.borrow_mut().push((_site, _len)));
 }
 
-/// expand, with every vector it would build checked BEFORE it is allocated: the
-/// product step (acc x terms), each power step (acc x terms) and each clone of a
-/// sum's terms; a prospective length over cap refuses with BoundExceeded and
-/// nothing past the check is allocated.  Same algorithm and result as expand
-/// otherwise (expand itself is unchanged).  It returns its refusal instead of
-/// unwinding: in WebAssembly a panic aborts.
+/// expand, with every vector it would build checked BEFORE it is allocated: a
+/// node's operands (its arity), a sum's flattened terms (the sum of its expanded
+/// operands' term counts), the product step (acc x terms), each power step
+/// (acc x terms) and each clone of a sum's terms; a prospective length over cap
+/// refuses with BoundExceeded and nothing past the check is allocated.  Same
+/// algorithm and result as expand otherwise (expand itself is unchanged).  It
+/// returns its refusal instead of unwinding: in WebAssembly a panic aborts.
 pub fn expand_bounded(e: &Expr, cap: usize) -> Result<Expr, BoundExceeded> {
     sagebrush_interrupt::check();
+    // (counted without cloning the operands: children() would allocate them)
+    let arity = match &e.kind {
+        Kind::Add(v) | Kind::Mul(v) | Kind::Fun(_, v) => v.len(),
+        Kind::Pow(..) | Kind::Rel(..) => 2,
+        _ => 0,
+    };
+    if arity > cap {
+        return Err(BoundExceeded { projected: arity as u128 });
+    }
+    observe("operands", arity as u128);
+    if let Kind::Add(v) = &e.kind {
+        // the expanded operands, then their terms in one vector: its length checked first
+        let mut parts = Vec::with_capacity(v.len());
+        let mut total: u128 = 0;
+        for c in v {
+            let x = expand_bounded(c, cap)?;
+            total += match &x.kind {
+                Kind::Add(w) => w.len() as u128,
+                _ => 1,
+            };
+            if total > cap as u128 {
+                return Err(BoundExceeded { projected: total });
+            }
+            parts.push(x);
+        }
+        observe("sum", total);
+        return Ok(add(parts));
+    }
     let mut err = None;
     let e = map(e, &mut |c| {
         if err.is_some() {
@@ -273,6 +302,32 @@ mod expand_bounded_tests {
         assert_eq!(expand_bounded(&parse("sin((a + b)^31)"), 60), Err(BoundExceeded { projected: 62 }));
         assert!(expand_bounded(&parse("1/(a + b)^30"), 60).is_ok());
         assert_eq!(expand_bounded(&parse("1/(a + b)^31"), 60), Err(BoundExceeded { projected: 62 }));
+    }
+
+    #[test]
+    fn a_root_sum_exactly_at_the_cap_is_admitted_and_one_over_is_refused() {
+        // (daybreak3's B1) the root sum's own arity, checked before its operands are mapped
+        let (r, ev) = run(&sum_of("p", 50_000), 50_000);
+        assert_eq!(r.map(|x| nterms(&x)), Ok(50_000));
+        assert!(ev.contains(&("operands", 50_000)) && ev.contains(&("sum", 50_000)));
+        let (r, ev) = run(&sum_of("p", 50_001), 50_000);
+        assert_eq!(r, Err(BoundExceeded { projected: 50_001 }));
+        assert!(ev.is_empty(), "nothing is reached past the arity check: {:?}", ev.len());
+    }
+
+    #[test]
+    fn a_sum_of_expansions_is_checked_on_its_flattened_terms() {
+        // two products of 40,000 terms each: each is admitted, their sum's 80,000 terms are not
+        let e = add(vec![mul2(&sum_of("p", 200), &sum_of("q", 200)), mul2(&sum_of("r", 200), &sum_of("s", 200))]);
+        let (r, ev) = run(&e, 50_000);
+        assert_eq!(r, Err(BoundExceeded { projected: 80_000 }));
+        assert!(!ev.iter().any(|&(s, n)| s == "sum" && n > 50_000), "{:?}", ev.iter().filter(|e| e.0 == "sum").collect::<Vec<_>>());
+        assert!(ev.iter().all(|&(_, n)| n <= 50_000));
+        // and at the cap: 2 x 12,500 + 2 x 12,500
+        let e = add(vec![mul2(&sum_of("p", 2), &sum_of("q", 12_500)), mul2(&sum_of("r", 2), &sum_of("s", 12_500))]);
+        assert_eq!(expand_bounded(&e, 50_000).map(|x| nterms(&x)), Ok(50_000));
+        // a function's arguments: each expansion bounded on its own
+        assert_eq!(expand_bounded(&parse("sin((a + b)^31 + (c + d)^31)"), 60), Err(BoundExceeded { projected: 62 }));
     }
 
     #[test]

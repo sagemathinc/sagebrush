@@ -1780,6 +1780,36 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b-2's characteristic polynomial gates (G0 size, G2 work, G3 each expansion through the engine's expand_bounded, G4 characters and the adjugate's matrix products) and the bounded shift, raised as the memory guard's error"
  },
+ "engine/sym/src/expand.rs :: expand_bounded :: if arity > cap { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: if total > cap as u128 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
+ "engine/sym/src/expand.rs :: expand_bounded :: let x = expand_bounded(c, cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b-2's expand_bounded: a node's arity and a sum's flattened terms checked before they are allocated (daybreak3 B1), raised as the memory guard's error"
+ },
  "engine/sym/src/expand.rs :: expand_bounded :: match expand_bounded(c, cap) { #0": {
   "class": "2",
   "disposition": {

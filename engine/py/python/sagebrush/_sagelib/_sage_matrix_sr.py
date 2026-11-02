@@ -221,7 +221,10 @@ def rank(a):
 #   G2  the work: every entry of the recurrence is kept expanded with its
 #       number of terms, so each expansion's size before like terms combine
 #       (the sum of the products of its operands' term counts) is known
-#       before it starts; their running total is refused past _SR_WORK_MAX;
+#       before it starts; their running total is refused past _SR_WORK_MAX.
+#       (The entries' own expansions, the first n^2, have no operands counted
+#       yet: each is charged when it returns, so the total can pass the budget
+#       by at most one expansion, which G3 caps at _SR_TERMS_MAX.)
 #   G3  each expansion: refused by the engine before it builds more than
 #       _SR_TERMS_MAX terms (expand_bounded), whatever its operands;
 #   G4  the retained working entries: at most _SR_MAX_CHARS characters, and
