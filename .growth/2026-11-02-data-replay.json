@@ -1,10 +1,10 @@
 {
   "v": 1,
-  "reason": "Data replay layer M1 (replay-layer r2): lib/_sbdata.py and Sagebrush's own urllib.request/urllib.error, with urllib.parse and ipaddress vendored unchanged from CPython 3.14, each in a lazy source-only group of its own (mod-urllib, mod-ipaddress, mod-sbdata: new bundles with budgets.json entries; daybreak2 PLAN SIZE CLEAR aa2abd81/d1ebd732). The CLI carries the new sources (lib.gen.js, pyjs.cjs); the worker grows by the library manifest's new entries and four _fs natives (data_root, read_nofollow, lstat_kind, realpath); the notebook +132 by the runner broker's exact fetch allowlist (G-10, __SB_RUNNER_FETCH__), one name per new group; its ceiling raised 233458 -> 233526 (daybreak2, option a). Measured locally with CI's bun 1.4.4 tool: master 98a9f74f against f0db576c; cli/pyjs.cjs +49160 marked 49288 (128 B for drift), the other rows exact.",
+  "reason": "Data replay layer M1 (replay-layer r2): lib/_sbdata.py and Sagebrush's own urllib.request/urllib.error, with urllib.parse and ipaddress vendored unchanged from CPython 3.14, each in a lazy source-only group of its own (mod-urllib, mod-ipaddress, mod-sbdata: new bundles with budgets.json entries; daybreak2 PLAN SIZE CLEAR aa2abd81/d1ebd732). The CLI carries the new sources (lib.gen.js, pyjs.cjs); the worker grows by the library manifest's new entries and four _fs natives (data_root, read_nofollow with its native 50,000,000-byte max check, lstat_kind, realpath); the notebook +132 by the runner broker's exact fetch allowlist (G-10, __SB_RUNNER_FETCH__), one name per new group; its ceiling raised 233458 -> 233526 (daybreak2, option a). Measured locally with CI's bun 1.4.4 tool: master 98a9f74f against 12690920 (after the review fixes RP-SEC-1/2, RP-CODE-3, LIMIT-M1-1); cli/pyjs.cjs +49606 marked 49734 (128 B for drift), the other rows exact.",
   "bytes": {
-    "cli/lib.gen.js": 47304,
-    "cli/pyjs.cjs": 49288,
+    "cli/lib.gen.js": 47448,
+    "cli/pyjs.cjs": 49734,
     "engine/sagebrush-notebook.js": 132,
-    "engine/sagebrush-worker.js": 1469
+    "engine/sagebrush-worker.js": 1628
   }
 }
