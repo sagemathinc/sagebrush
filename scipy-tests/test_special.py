@@ -133,6 +133,41 @@ for name, pairs in TWO.items():
     for a, b in pairs:
         out("%s(%r, %r)" % (name, a, b), lambda: f(a, b))
 
+# (the incomplete gamma's inverses, and the incomplete beta function and its inverses: SciPy's limits and nan
+# outside the domain at the edges, and the body, the tails and large parameters, as stats' distributions call them.
+# Not here, where SciPy's value is wrong (test/scipy-special.test.ts checks Sagebrush's against mpmath there):
+# SCIPY_WRONG's cases, an underflowed root (SciPy gives 2.2e-308 for 0, or nan), out-of-domain y at a < 0.01 (SciPy
+# gives 0, not nan), roots at a or b below 0.01 (SciPy's lose up to 6e-13 to the root's eps/a condition) and the
+# float32 loop (SciPy's computes in single precision))
+SCIPY_WRONG = {("betainc", 0.5, 0.5, 1 - 1e-9), ("betaincc", 0.5, 0.5, 1 - 1e-9), ("betaincinv", 0.05, 0.05, 1e-20)}
+INV_Y = [0, 1e-20, 0.001, 0.1, 0.5, 0.9, 1 - 1e-12, 1, -0.1, 1.1]
+for name in ("gammaincinv", "gammainccinv"):
+    f = getattr(sc, name)
+    for a in [0, 0.05, 0.5, 1, 2.5, 30, 1e4, -1, math.inf]:
+        for y in INV_Y:
+            # (at a = 0 the ends and outside the domain only: inside it SciPy gives nan or 0 by y)
+            if a == 0 and 0 < y < 1:
+                continue
+            out("%s(%r, %r)" % (name, a, y), lambda: f(a, y))
+BX = [0, 1e-10, 0.01, 0.3, 0.5, 0.7, 0.99, 1 - 1e-9, 1, -0.1, 1.1]
+BAB = [(0, 2), (2, 0), (0, 0), (0.5, 0.5), (1, 1), (2.5, 7), (30, 0.5), (0.5, 30), (100, 100), (1e4, 2.5), (5e5, 0.5),
+       (1e-3, 1e-3), (math.inf, 2), (2, math.inf), (-1, 2)]
+for name in ("betainc", "betaincc"):
+    f = getattr(sc, name)
+    for a, b in BAB:
+        for x in BX:
+            if (name, a, b, x) not in SCIPY_WRONG:
+                out("%s(%r, %r, %r)" % (name, a, b, x), lambda: f(a, b, x))
+BAB_INV = [ab for ab in BAB if ab != (1e-3, 1e-3)] + [(0.05, 0.05)]
+for name in ("betaincinv", "betainccinv"):
+    f = getattr(sc, name)
+    for a, b in BAB_INV:
+        for y in INV_Y:
+            if (name, a, b, y) not in SCIPY_WRONG:
+                out("%s(%r, %r, %r)" % (name, a, b, y), lambda: f(a, b, y))
+# (broadcasting and the result type, as a distribution's cdf calls it)
+out("betainc(array)", lambda: sc.betainc(np.array([0.5, 2.0, 7.5]), np.array([[1.0], [3.0]]), 0.25))
+
 # (beta's poles at the nonpositive integers, which cancel for an integer b
 # with 1 - a - b > 0, Cephes's beta_negint; the extremes of rel_entr's and
 # kl_div's ratio; complex log1p and expm1 near 0 and at log1p's pole; the

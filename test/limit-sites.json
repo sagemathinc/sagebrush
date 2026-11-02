@@ -5209,6 +5209,11 @@
   "owner": "special functions",
   "row": "inv-19"
  },
+ "lib/_special.py ::  :: _BETAINC_MAX = 1e8 #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
  "lib/_special.py ::  :: _ZETA_MAX_T = 1e5 #0": {
   "class": "3",
   "owner": "special functions",
@@ -5224,6 +5229,26 @@
   "owner": "special functions",
   "row": "inv-19"
  },
+ "lib/_special.py :: _betainc_check :: if max(a, b) > _BETAINC_MAX and a < _math.inf and b < _math.inf: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special.py :: _betainc_check :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special.py :: _betaincinv_outer :: if max(a, b) > _BETAINC_MAX: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special.py :: _betaincinv_outer :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
  "lib/_special.py :: _hurwitz1 :: if t > _ZETA_MAX_T: #0": {
   "class": "3",
   "owner": "special functions",
@@ -5238,6 +5263,11 @@
   "class": "3",
   "owner": "special functions",
   "row": "inv-19"
+ },
+ "lib/_special.py :: betainc :: scipy's limits: 0 at x = 0, 1 at x = 1, 1 at a = 0 and 0 at b = 0 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "docstring text naming SciPy's limiting values at the domain's ends; it refuses nothing"
  },
  "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
   "class": "1",

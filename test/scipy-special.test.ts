@@ -133,3 +133,24 @@ import scipy
 print("special" in dir(scipy), scipy.special.gamma(5.0), type(scipy.special.gamma(5.0)).__name__)
 `), "True 24.0 float64\n");
 });
+
+test("scipy.special's incomplete beta and the inverses where SciPy's values are wrong: mpmath's (scipy-tests skips them)", () => {
+  // (each against mpmath at 50 digits: SciPy 1.18 loses 1.1e-12 in betainc(0.5, 0.5, 1 - 1e-9), where
+  // 2/pi asin(sqrt(x)) is exact; returns nan for a root of 2e-121, 2.2e-308 for a root that underflows (0), 0 for y
+  // outside [0, 1] at a = 0.001 (nan), 0.49999999999999994 or 6e-13 off where the root's condition is eps/a (ours
+  // within it: 1.2e-13 at a = 0.001; 4.5e-15 for the root of 2e-121, whose tail of 1e-300 carries |log| eps), and
+  // computes its float32 loop in single precision, 8 ulps off)
+  const out = py(`
+import numpy as np
+import scipy.special as sc
+rel = lambda v, r: abs(v - r) / abs(r)
+print(rel(float(sc.betainc(0.5, 0.5, 1 - 1e-9)), 0.9999798683154395) <= 2.3e-16,
+      rel(float(sc.betaincc(0.5, 0.5, 1 - 1e-9)), 2.013168456046863e-05) <= 4e-16,
+      rel(float(sc.betaincinv(2.5, 7, 1e-300)), 2.093718455437426e-121) <= 1e-14,
+      rel(float(sc.gammaincinv(0.001, 0.5)), 5.2442064082779784e-302) <= 2.5e-13,
+      float(sc.betaincinv(0.05, 0.05, 1e-20)), float(sc.betaincinv(0.5, 30, 1e-300)), float(sc.betaincinv(0.001, 0.001, 0.5)),
+      float(sc.gammaincinv(0.001, -0.1)), float(sc.gammainccinv(0.001, 1.1)),
+      repr(sc.betainc(np.float32(2.5), np.float32(3.5), np.float32(0.4))) == "np.float32(0.4869042)")
+`);
+  assert.equal(out.trim(), "True True True True 0.0 0.0 0.5 nan nan True");
+});
