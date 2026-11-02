@@ -44,7 +44,36 @@ test("route: only the two push endpoints, on github.com, with exact names", () =
     ["GET", "/github.com//notes.git/info/refs?service=git-receive-pack"],
     ["GET", "/github.com/" + "a".repeat(101) + "/notes.git/info/refs?service=git-receive-pack"],
     ["GET", "/github.com/octo/notes.git/objects/info/packs"],
+    // (dot segments: the URL parser resolves literal ones before route sees them, so these are already off the
+    // pattern; the encoded and the dot-led forms reach SEGMENT and fail there)
+    ["GET", "/github.com/../notes.git/info/refs?service=git-receive-pack"],
+    ["GET", "/github.com/./notes.git/info/refs?service=git-receive-pack"],
+    ["GET", "/github.com/octo/...git/info/refs?service=git-receive-pack"],
+    ["GET", "/github.com/%2e%2e/notes.git/info/refs?service=git-receive-pack"],
+    ["GET", "/github.com/%2E/notes.git/info/refs?service=git-receive-pack"],
+    ["GET", "/github.com/..x/notes.git/info/refs?service=git-receive-pack"],
   ]) assert.equal(w.route(method, P + path), null, `${method} ${path}`);
+  for (const s of [".", "..", "...", ".git", "%2e", "a/b", "a%2fb", "", "a b"]) assert.equal(w.SEGMENT.test(s), false, s);
+  for (const s of ["a", "a.b", "a..b", "_x", "-x", "x.git"]) assert.equal(w.SEGMENT.test(s), true, s);
+});
+
+test("the built upstream URL: only https://github.com/<owner>/<repo>.git/<the push endpoint>, never a dot segment", async () => {
+  const up = upstream();
+  for (const path of ["/github.com/../x.git/info/refs?service=git-receive-pack", "/github.com/%2e%2e/x.git/info/refs?service=git-receive-pack",
+    "/github.com/./x.git/info/refs?service=git-receive-pack", "/github.com/octo/%2e.git/info/refs?service=git-receive-pack",
+    "/github.com/octo/...git/info/refs?service=git-receive-pack", "/github.com/%2E%2E/%2E%2E.git/git-receive-pack"]) {
+    const r = await w.handle(req(path, path.endsWith("pack") ? { method: "POST", body: "x", headers: { "content-length": "1" } } : {}), env(), up.f);
+    assert.equal(r.status, 400, path);
+  }
+  assert.equal(up.calls.length, 0);
+  await w.handle(req(REFS), env(), up.f);
+  await w.handle(req(RECEIVE, { method: "POST", body: "x", headers: { "content-length": "1" } }), env(), up.f);
+  for (const { url } of up.calls) {
+    const u = new URL(url);
+    assert.equal(u.origin, "https://github.com");
+    assert.match(u.pathname + u.search, /^\/octo\/notes\.git\/(info\/refs\?service=git-receive-pack|git-receive-pack)$/);
+    assert.ok(!u.pathname.split("/").some((s) => s === "." || s === ".."));
+  }
 });
 
 test("origin: only the allowed origins, and no CORS header otherwise", async () => {

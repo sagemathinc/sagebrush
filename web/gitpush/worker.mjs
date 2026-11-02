@@ -18,7 +18,9 @@ const PASS_BACK = ['content-type'];
 export function route(method, input) {
   const u = new URL(input);
   const m = /^\/github\.com\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-receive-pack)$/.exec(u.pathname);
-  if (!m || !SEGMENT.test(m[1]) || !SEGMENT.test(m[2]) || m[2].endsWith('.git')) return null;
+  // (SEGMENT's first character is never a dot, so `.` and `..` can't pass; said again here, as the rule that matters)
+  const dots = (s) => s === '.' || s === '..';
+  if (!m || dots(m[1]) || dots(m[2]) || !SEGMENT.test(m[1]) || !SEGMENT.test(m[2]) || m[2].endsWith('.git')) return null;
   const [, owner, repo, tail] = m;
   if (tail === 'info/refs') {
     if (method !== 'GET' || u.search !== `?service=${SERVICE}`) return null;
