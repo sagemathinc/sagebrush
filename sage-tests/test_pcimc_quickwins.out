@@ -1,0 +1,52 @@
+S01 [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+S02 [11, 13, 15, 17, 19, 21, 23, 25, 27, 29]
+S04 [0, 1, 2, 3, 4]
+S05 [10, 7, 4, 1]
+S06 'generator'
+S07 20
+S09 2
+S10 ERR ValueError: n must be greater than or equal to 2
+S11 ERR ValueError: there are no primes between 8 and 10 (inclusive)
+S12 [2, 3, 5]
+S13 [2, 3, 5]
+S14 []
+S15 [2, 3]
+S17 True
+S18 <class 'int'>
+S19 True
+S22 38
+S23 3
+S24 10
+S25 19.9315685693242
+S26 (2, 36, -24, -1)
+S27 (6, -1, 1)
+S28 <class 'tuple'>
+S29 (1, -35, 104)
+S30 (6, 1)
+S31 11
+S32 1
+S33 3
+S34 5
+S35 3
+S36 3
+S37 3
+S38 ERR AttributeError: 'IntegerModRing_generic_with_category' object has no attribute 'primitive_elemen
+S39 1
+S40 Set of all prime numbers: 2, 3, 5, 7, ...
+S41 [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+S42 7
+S43 True
+S44 False
+S45 [7, 11, 13]
+S46 2
+S47 11
+S48 2
+S50 [5, 7, 11]
+S51 ['7', 'D', '3', 'A']
+S52 [7, 13, 3, 10]
+S53 [6, 4, 0, 1]
+S54 [1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1]
+S55 [1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1]
+S56 16
+S57 []
+S58 ['o', 'i', 'o', 'i']

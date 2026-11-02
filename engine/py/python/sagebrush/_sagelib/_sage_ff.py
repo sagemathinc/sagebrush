@@ -385,6 +385,19 @@ class IntegerModRing_:
         """
         return _elt(self, int(primitive_root(self._n)))
 
+    def primitive_element(self):
+        """A generator of the multiplicative group of the prime field GF(p) (the least one, as
+        Sage's); Zmod(n) has no primitive_element in Sage, nor here.
+
+        EXAMPLES::
+
+            sage: GF(331).primitive_element(), GF(7).primitive_element(), GF(2).primitive_element()
+            (3, 3, 1)
+        """
+        if not self._is_gf:
+            raise AttributeError("'IntegerModRing_generic_with_category' object has no attribute 'primitive_element'")
+        return self.multiplicative_generator()
+
     def __getitem__(self, names):
         return _poly_ring_from_names(self, names)
 
@@ -720,6 +733,9 @@ class IntegerMod:
         """
         n = self._parent._n
         return _Integer(n // _m.gcd(self._v, n))
+
+    # Sage's IntegerMod.order() is the ADDITIVE order (Mod(3, 11).order() = 11)
+    order = additive_order
 
     def multiplicative_order(self):
         """The order in the group of units.
