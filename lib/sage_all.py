@@ -39,11 +39,12 @@ __all__ = [
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
+    "prime_divisors", "prime_factors", "random_prime", "Primes", "randrange", "choice", "sample",
     "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
     "binomial", "factorial", "fibonacci", "catalan_number",
     # enumerative combinatorics (lib/_sage_combinat.py)
     "Partition", "Partitions", "Compositions", "Set", "Subsets", "Combinations", "Permutation", "Permutations",
-    "number_of_partitions", "stirling_number1", "stirling_number2", "bell_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
+    "number_of_partitions", "stirling_number1", "stirling_number2", "bell_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "xsrange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
@@ -230,6 +231,71 @@ def randint(a, b):
     """
     import random as _r
     return _r.randint(int(a), int(b))
+
+
+def randrange(*args, **kwds):
+    """A random integer from range(*args) (Python's random.randrange, as in Sage).
+
+    EXAMPLES::
+
+        sage: all(2 <= randrange(2, 20) < 20 for _ in range(50))
+        True
+    """
+    import random as _r
+    return _r.randrange(*[int(a) for a in args], **kwds)
+
+
+def choice(seq):
+    """A random element of seq (Python's random.choice, as in Sage).
+
+    EXAMPLES::
+
+        sage: choice([1, 10, 11]) in [1, 10, 11]
+        True
+    """
+    import random as _r
+    return _r.choice(seq)
+
+
+def sample(population, k=None, **kwds):
+    """k distinct random elements of population (Python's random.sample, as in Sage).
+
+    EXAMPLES::
+
+        sage: v = sample(list(range(20)), k=3); len(v), len(set(v)), all(0 <= a < 20 for a in v)
+        (3, 3, True)
+    """
+    import random as _r
+    return _r.sample(population, int(k), **kwds)
+
+
+def random_prime(n, proof=None, lbound=2):
+    """A random prime p with lbound <= p <= n, as Sage's.
+
+    EXAMPLES::
+
+        sage: p = random_prime(100, lbound=50); is_prime(p) and 50 <= p <= 100
+        True
+        sage: random_prime(2)
+        2
+        sage: random_prime(1)
+        Traceback (most recent call last):
+        ...
+        ValueError: n must be greater than or equal to 2
+    """
+    import random as _r
+    n, lbound = int(n), max(int(lbound), 2)
+    if n < 2:
+        raise ValueError("n must be greater than or equal to 2")
+    if n < lbound:
+        raise ValueError("n must be at least lbound: %s" % lbound)
+    if next_prime(lbound - 1) > n:
+        raise ValueError("there are no primes between %s and %s (inclusive)" % (lbound, n))
+    while True:
+        # a random point, then the next prime at or above it (wrapping to lbound)
+        p = next_prime(_r.randint(lbound, n) - 1)
+        if p <= n:
+            return Integer(p)
 
 
 def hue(h, s=1, v=1):
@@ -1921,6 +1987,76 @@ def nth_prime(k):
     return prime_range(bound + 1)[int(k) - 1]
 
 
+def prime_divisors(n):
+    """The primes dividing n, in increasing order (Sage's prime_divisors; prime_factors is the same).
+
+    EXAMPLES::
+
+        sage: prime_divisors(360), prime_factors(-12), prime_factors(1)
+        ([2, 3, 5], [2, 3], [])
+    """
+    n = abs(Integer(n))
+    return [] if n == 1 else [Integer(q) for q, _ in factor(n)]
+
+
+prime_factors = prime_divisors
+
+
+class Primes:
+    """The set of all prime numbers, in order (Sage's Primes()): sliceable, iterable, `in`.
+
+    EXAMPLES::
+
+        sage: P = Primes(); P
+        Set of all prime numbers: 2, 3, 5, 7, ...
+        sage: P[0:10], P[3], 7 in P, 8 in P, P.next(10), P.unrank(0)
+        ([2, 3, 5, 7, 11, 13, 17, 19, 23, 29], 7, True, False, 11, 2)
+    """
+
+    def __init__(self, proof=True):
+        pass
+
+    def __repr__(self):
+        return "Set of all prime numbers: 2, 3, 5, 7, ..."
+
+    def __contains__(self, n):
+        try:
+            return Integer(n) == n and is_prime(n)
+        except (TypeError, ValueError):
+            return False
+
+    def __iter__(self):
+        p = Integer(2)
+        while True:
+            yield p
+            p = next_prime(p)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            start, stop, step = i.start or 0, i.stop, i.step or 1
+            if stop is None or start < 0 or stop < 0 or step < 1:
+                raise NotImplementedError("Primes()[a:b] needs 0 <= a <= b (a finite slice)")
+            return [Integer(q) for q in primes_first_n(int(stop))[start::step]]
+        if i < 0:
+            raise IndexError("Primes() has no negative indices")
+        return Integer(nth_prime(int(i) + 1))
+
+    def unrank(self, i):
+        return self[i]
+
+    def next(self, n):
+        return Integer(next_prime(n))
+
+    def first(self):
+        return Integer(2)
+
+    def __eq__(self, other):
+        return isinstance(other, Primes)
+
+    def __hash__(self):
+        return hash("Primes")
+
+
 def prime_pi(x):
     """The number of primes <= x.
 
@@ -2258,19 +2394,22 @@ def valuation(n, p):
     return v
 
 
-def digits(n, base=10):
-    """The digits of n in base, least significant first (as in Sage).
+def digits(n, base=10, digits=None):
+    """The digits of n in base, least significant first (as in Sage); digits=: the symbols to use
+    for 0, 1, ... (n.digits(base=16, digits="0123456789ABCDEF")).
 
     EXAMPLES::
 
         sage: digits(1234), digits(255, 16), digits(10, 2)  # sagebrush only
         ([4, 3, 2, 1], [15, 15], [0, 1, 0, 1])
+        sage: 41943.digits(base=16, digits="0123456789ABCDEF")
+        ['7', 'D', '3', 'A']
     """
     n, out = abs(int(n)), []
     while n:
         n, d = divmod(n, base)
         out.append(d)
-    return out
+    return out if digits is None else [digits[d] for d in out]
 
 
 # ------------------------------------------------------------------ arithmetic
@@ -2361,14 +2500,26 @@ def _xgcd_int(a, b):
     return (g, s, (g - s * a) // b if b else 0)
 
 
-def xgcd(a, b):
-    """(g, s, t) with g = gcd(a, b) = s*a + t*b.
+def xgcd(a, b=None):
+    """(g, s, t) with g = gcd(a, b) = s*a + t*b; for a list v (b omitted), (g, c_1, ..., c_k) with
+    g = gcd(v) = sum(c_i * v_i), folding the pairwise xgcd from the left, as Sage's.
 
     EXAMPLES::
 
         sage: xgcd(240, 46), xgcd(1/3, 2)
         ((2, -9, 47), (1/3, 1, 0))
+        sage: xgcd([30, 42, 70]), xgcd([12, 18]), xgcd([6])
+        ((2, 36, -24, -1), (6, -1, 1), (6, 1))
     """
+    if b is None:
+        v = list(a)
+        if not v:
+            raise ValueError("xgcd of an empty list")
+        g, cs = v[0], [1]
+        for x in v[1:]:
+            g, u, w = xgcd(g, x)
+            cs = [c * u for c in cs] + [w]
+        return tuple([g] + cs)
     if _poly_like(a) or _poly_like(b):
         return a.xgcd(b) if _poly_like(a) else b.parent()(a).xgcd(b)
     if isinstance(a, _Fraction) or isinstance(b, _Fraction):
@@ -2919,6 +3070,24 @@ def srange(start, stop=None, step=1):
         out.append(x)
         x = x + step
     return out
+
+
+def xsrange(start, stop=None, step=1):
+    """srange as an iterator (a generator, as in Sage), for loops that shouldn't build a list.
+
+    EXAMPLES::
+
+        sage: list(xsrange(10, 20)), list(xsrange(11, 31, 2)), list(xsrange(5)), list(xsrange(10, 0, -3))
+        ([10, 11, 12, 13, 14, 15, 16, 17, 18, 19], [11, 13, 15, 17, 19, 21, 23, 25, 27, 29], [0, 1, 2, 3, 4], [10, 7, 4, 1])
+    """
+    if stop is None:
+        start, stop = 0, start
+    if step == 0:
+        raise ValueError("step must not be 0")
+    x = start
+    while (x < stop) if step > 0 else (x > stop):
+        yield x
+        x = x + step
 
 
 def prod(x, z=None, recursion_cutoff=5):

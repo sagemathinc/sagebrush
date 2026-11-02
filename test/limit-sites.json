@@ -5302,6 +5302,11 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
+ "lib/sage_all.py :: Primes.__getitem__ :: raise NotImplementedError(\"Primes()[a:b] needs 0 <= a <= b (a finite slice)\") #0": {
+  "class": "coverage",
+  "owner": "sage2",
+  "reason": "Primes()[a:b] of an open-ended or negative slice: an unsupported form (an infinite list), not a cap"
+ },
  "lib/sage_all.py :: Rational._sqrt_prec :: if prec > _SQRT_MAX_PREC: #0": {
   "class": "3",
   "owner": "real/rational arithmetic",
