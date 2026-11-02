@@ -1491,7 +1491,7 @@ export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 if (ws && local) {
   const side = document.createElement("div");
   side.id = "wssidebar";
-  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;border-right:1px solid #d4d4cb;z-index:30";
+  side.style.cssText = "position:fixed;left:0;top:0;bottom:0;border-right:1px solid #d4d4cb;box-sizing:border-box;z-index:30";
   side.hidden = true;
   document.body.append(side);
   const btn = document.createElement("button");
