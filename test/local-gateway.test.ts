@@ -1753,11 +1753,16 @@ const BUNDLED_PACKAGES: Record<string, { version: string; importers: string[] }>
   // (`sagebrush latex`'s math: src/latex-cli.ts, in its own lazily loaded file, LAZY_REVIEWED below)
   "katex": { version: "0.19.0", importers: ["src/latex-cli.ts"] },
 };
-/** The closure's reviewed lazily loaded modules: file -> {fn, target}. `sagebrush latex`'s module, src/latex-cli.ts, is
- * built as its own file beside the bundle (scripts/build-cli.mjs) and loaded by path only by src/cli.ts's loadLatex,
- * through createRequire. That one createRequire, in that function, is accepted, and the census follows it into the
- * target, so the target's closure is checked like the rest; any other createRequire, or this one elsewhere, fails. */
-const LAZY_REVIEWED: Record<string, { fn: string; target: string }> = { "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts" } };
+/** The closure's reviewed lazily loaded modules: file -> {fn, target, sha256}. `sagebrush latex`'s module,
+ * src/latex-cli.ts, is built as its own file beside the bundle (scripts/build-cli.mjs) and loaded by path only by
+ * src/cli.ts's loadLatex, through createRequire. That one createRequire is accepted only inside that function, once,
+ * and only while the function's whole source (whitespace runs as one space: fnPin) is the reviewed one, its sha256 here:
+ * what the returned require loads (its fixed candidates, all sagebrush-latex.cjs) is part of what is pinned, so any
+ * change to the loader fails until it is reviewed and the pin renewed (astra's L41-LAZY-1). The census then follows it
+ * into the target, whose closure is checked like the rest; any other createRequire fails. */
+const LAZY_REVIEWED: Record<string, { fn: string; target: string; sha256: string }> = {
+  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "b6f9186bfcea6fd8ee8108644176672fa7058ddd06dc22a46aef3b7c5b69c71d" },
+};
 /** The lockfile's package entries, parsed exactly (the `packages:` section's `name@version:` keys). */
 function lockEntries(root: string) {
   const out = new Set<string>();
@@ -1775,17 +1780,19 @@ const CANON_ENTRY = "require.main?.filename ?? process.argv[1]";
 /** The closure's reviewed dynamic-code sites: the compiler's generated accessors and numpy's kernels, each a
  * `new Function` over its own parameters with no module in reach; their count per file, exactly (any other fails). */
 const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "src/runtime/numpy.ts": 3, "src/runtime/object.ts": 4 };
-/** The name of the function declaration a node is in, or null. */
-function enclosingFn(n: any): string | null {
-  for (let p = n.parent; p; p = p.parent) if (tsapi.isFunctionDeclaration(p)) return p.name?.text ?? null;
+/** The function declaration a node is in, or null. */
+function enclosingFn(n: any): any {
+  for (let p = n.parent; p; p = p.parent) if (tsapi.isFunctionDeclaration(p)) return p;
   return null;
 }
+/** A function declaration's pin: the sha256 of its source, each run of whitespace one space. */
+const fnPin = (f: any, sf: any) => createHash("sha256").update(f.getText(sf).replace(/\s+/g, " ")).digest("hex");
 /** The runtime module closure of `entry` under root's tsconfig: every import / export-from, import-equals, require()
  * and import() edge (type-only imports are not runtime), resolved with ts.resolveModuleName; it fails closed (a
  * problem) on a non-literal require or import(), eval, createRequire, X.require(), a Worker whose entry isn't the
  * CLI's own, an unreviewed `new Function`, an unresolved relative specifier, and a bare specifier that is neither a
  * node builtin nor a package.json dependency. */
-function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}, lazy: Record<string, { fn: string; target: string }> = {}) {
+function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}, lazy: Record<string, { fn: string; target: string; sha256: string }> = {}) {
   const cfg = tsapi.readConfigFile(join(root, "tsconfig.json"), tsapi.sys.readFile);
   const options = { ...tsapi.parseJsonConfigFileContent(cfg.config ?? {}, tsapi.sys, root).options, allowJs: true };
   const locks = lockEntries(root);
@@ -1841,9 +1848,10 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
           const a = n.arguments[0];
           if (n.arguments.length === 1 && tsapi.isStringLiteralLike(a)) spec(n, a.text);
           else problems.push(`${at(n)}: a non-literal ${isReq ? "require" : "import()"}`);
-        } else if (tsapi.isIdentifier(c) && c.text === "createRequire" && lazy[r] && enclosingFn(n) === lazy[r].fn) {
-          lazySeen[r] = (lazySeen[r] ?? 0) + 1;
-          queue.push(join(root, lazy[r].target));
+        } else if (tsapi.isIdentifier(c) && c.text === "createRequire" && lazy[r] && enclosingFn(n)?.name?.text === lazy[r].fn) {
+          const pin = fnPin(enclosingFn(n), sf);
+          if (pin !== lazy[r].sha256) problems.push(`${at(n)}: createRequire in ${lazy[r].fn}, whose source isn't the reviewed one (its pin is ${pin})`);
+          else { lazySeen[r] = (lazySeen[r] ?? 0) + 1; queue.push(join(root, lazy[r].target)); }
         } else if (tsapi.isIdentifier(c) && (c.text === "eval" || c.text === "createRequire")) problems.push(`${at(n)}: ${c.text}`);
         else if (tsapi.isPropertyAccessExpression(c) && c.name.text === "require") problems.push(`${at(n)}: ${c.getText(sf)}`);
       } else if (tsapi.isNewExpression(n) && tsapi.isIdentifier(n.expression)) {
@@ -1902,13 +1910,17 @@ for (const [name, files, want] of fxCases) {
 }
 // (the reviewed lazy load, LAZY_REVIEWED: followed into its target, whose closure is checked like the rest; the same
 // createRequire anywhere else fails)
-const LAZY_FX = { "src/cli.ts": { fn: "loadLatex", target: "src/lazy.ts" } };
-const LOADER = 'import { createRequire } from "node:module";\nexport function loadLatex() { return createRequire(__filename)(process.argv[1]); }\n';
+const LOADER_FN = 'export function loadLatex() { return createRequire(__filename)("./lazy-built.cjs"); }';
+const LOADER = 'import { createRequire } from "node:module";\n' + LOADER_FN + "\n";
+const LAZY_FX = { "src/cli.ts": { fn: "loadLatex", target: "src/lazy.ts", sha256: createHash("sha256").update(LOADER_FN.replace(/\s+/g, " ")).digest("hex") } };
 for (const [name, files, want] of [
   ["L41-lazy1 the reviewed lazy load, its target clean: pass", { "src/cli.ts": LOADER, "src/lazy.ts": "export const x = 1;\n" }, "pass"],
   ["L41-lazy2 the reviewed lazy load is followed: its target reaching remote-fake.js fails", { "src/cli.ts": LOADER, "src/lazy.ts": 'export * from "../web/notebook/remote-fake.js";\n' }, "fail"],
   ["L41-lazy3 createRequire in another function of the reviewed file fails", { "src/cli.ts": LOADER + "export function other() { return createRequire(__filename)(process.argv[1]); }\n", "src/lazy.ts": "export const x = 1;\n" }, "fail"],
   ["L41-lazy4 the reviewed lazy load twice in its function fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { createRequire(__filename); return createRequire(__filename)(process.argv[1]); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy5 the reviewed loader's function loading another target (remote-fake.js) fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { return createRequire(__filename)("../web/notebook/remote-fake.js"); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy6 the reviewed loader's returned handle kept and used again fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { const r = createRequire(__filename); r("../web/notebook/remote-fake.js"); return r("./lazy-built.cjs"); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy7 the reviewed loader with a changed argument (process.argv[1]) fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { return createRequire(__filename)(process.argv[1]); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
 ] as [string, Record<string, string>, string][]) {
   test(name, () => {
     const c = runtimeClosure(fixtureTree(files), "src/cli.ts", {}, LAZY_FX);
