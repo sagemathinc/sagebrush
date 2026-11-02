@@ -1,6 +1,6 @@
 # The print order of symbolic sums and products (lane 4p): probe r4's statements, run on Sage 10.9 (counted-4, VM2).
 # Each statement prints ONE line: 'S<nn> ' then str() and latex() joined by ' || ' (newlines -> ' ; '), or 'S<nn> ERR <type>'.
-# Below line 2 the file is probe_r4.sage byte for byte; its 'OBS' comments are the probe's, and its OBS lines are ordinary lines here.
+# From line 4 on, the file is probe_r4.sage from its line 3 on, byte for byte; its 'OBS' comments are the probe's, and its OBS lines are ordinary lines here.
 def show(f):
     # str() and latex() of one expression on one line, separated by ' || '
     try:
