@@ -360,6 +360,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-pylab.src": {
+   "exact": false,
+   "ceiling": 484,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-python-docsearch.src": {
    "exact": false,
    "ceiling": 12339,
@@ -639,6 +646,7 @@
   }
  },
  "epoch": {
+  "engine/lib/mod-pylab.src": 440,
   "sizes": {
    "cli/lib.gen.js": 7200191,
    "cli/pyjs.cjs": 28780108,
