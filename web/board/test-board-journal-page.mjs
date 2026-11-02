@@ -192,6 +192,8 @@ try {
       await openBoard(u, id, how === "pending copy");
       if (how === "none") { await u.ev(setTj("first")); await rowTj(u, id, "first"); }
       else await u.until(`${rowExpr(id)}.then((r) => !!r)`);
+      // (the store's load stamps the row (its j) after the row is made: waited for, not raced (board's diagnosis, #490 CI1))
+      await u.until(`${rowExpr(id)}.then((r) => !!r && Number.isSafeInteger(r.j))`);
       const r = await row(u, id);
       await u.until(`${B}.versions().then((v) => v.length >= 1)`);
       check(!!r && Number.isSafeInteger(r.j) && coherent(r) && (await versions(u)) === 1 && (await pending(u, id)) === null, `test 14 (${how}): its row made first, then stamped by the store's load: one version: ` + J({ j: r?.j, v: await versions(u) }));
