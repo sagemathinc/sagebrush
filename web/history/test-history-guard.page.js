@@ -167,6 +167,18 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "\u0001m/test/00000", kind: "folder", fid: "mapfid" }); tx.objectStore("entries").put({ path: "/notmap", kind: "folder", fid: "notmapfid" }); });
   await settle();
   check(J(sinceC(k).map((x) => x.ident)) === J(["notmapfid"]), `a large move's mapping row (not a path) is no source entry; the same row at a path is caught: ${J(sinceC(k))}`);
+  // (an identity parked by a large move: its row deleted and a staged copy (not a path) carrying the same identity
+  // written in one transaction, landing at a path later: passes; a deletion whose staged copy carries ANOTHER identity:
+  // caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/pk", kind: "folder", ref: null, fid: "pkfid" }); tx.objectStore("entries").put({ path: "/pk3", kind: "folder", ref: null, fid: "pk3fid" }); tx.objectStore("htokens").add(tok("pkfid", 1e9 + 60)); tx.objectStore("htokens").add(tok("pk3fid", 1e9 + 61)); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/pk"); tx.objectStore("entries").put({ path: "\u0001s/test/00000", kind: "folder", fid: "pkfid" }); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("\u0001s/test/00000"); tx.objectStore("entries").put({ path: "/pk2", kind: "folder", ref: null, fid: "pkfid" }); });
+  await settle();
+  check(sinceC(k).length === 0, `an identity parked by a large move (deleted, staged under a non-path key, landing at a path later): passes: ${J(sinceC(k))}`);
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/pk3"); tx.objectStore("entries").put({ path: "\u0001s/test/00001", kind: "folder", fid: "otherfid" }); });
+  await settle();
+  check(J(sinceC(k).map((x) => x.ident)) === J(["pk3fid"]), `control: a deletion whose staged copy carries another identity: caught: ${J(sinceC(k))}`);
   // (a removal with no token: caught; the same during a reset to a new workspace (meta "resetting"): passes)
   k = G.violations.length;
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/c1.txt"));
