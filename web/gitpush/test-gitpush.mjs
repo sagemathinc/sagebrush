@@ -7,7 +7,7 @@
 // push: a change pushed by itself, nothing pushed when nothing changed, and its failure said in the panel.
 //   node web/gitpush/test-gitpush.mjs        (CHROME=… to choose the browser)
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -23,9 +23,13 @@ const git = (...a) => execFileSync("git", a, { encoding: "utf8", env: { ...proce
 const bare = join(tmp, "srv", "octo", "notes.git");
 git("init", "-q", "--bare", bare);
 git("-C", bare, "config", "http.receivepack", "true");
+// (as GitHub does: an empty repository's first pushed branch becomes its default, its HEAD)
+git("-C", bare, "symbolic-ref", "HEAD", "refs/heads/sagebrush/proj");
 // (M2-SEC-1's overlap check: two more repositories, A's private and B's public)
 const bareA = join(tmp, "srv", "alice", "private.git"), bareB = join(tmp, "srv", "bob", "public.git");
-for (const b of [bareA, bareB]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
+// (M4B-DATA-1's check: a repository whose owner is named "fetch", as the copy's scratch folder once was)
+const bareF = join(tmp, "srv", "fetch", "notes.git");
+for (const b of [bareA, bareB, bareF]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
 
 // (the stand-in proxy: the same routes as worker.mjs, CORS for the page, git http-backend behind; every request's
 // Authorization recorded)
@@ -37,7 +41,7 @@ const proxy = createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
   const cors = { "access-control-allow-origin": page, vary: "Origin", "access-control-allow-headers": "authorization, content-type, accept, git-protocol, user-agent", "access-control-allow-methods": "GET, POST" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
-  const m = /^\/github\.com(\/[^/]+\/[^/]+\.git\/(?:info\/refs|git-receive-pack))$/.exec(u.pathname);
+  const m = /^\/github\.com(\/[^/]+\/[^/]+\.git\/(?:info\/refs|git-receive-pack|git-upload-pack))$/.exec(u.pathname);
   seen.push({ path: u.pathname + u.search, auth: req.headers.authorization ?? null });
   if (holdMs) await new Promise((r) => setTimeout(r, holdMs));
   if (!m) { res.writeHead(400, cors); return res.end("no\n"); }
@@ -144,6 +148,32 @@ try {
   check(await until(`(() => { const t = ${P}.textContent.match(/Pushed[^)]*\\)/)?.[0] ?? ""; return !t.includes(${JSON.stringify(first.slice(0, 7))}) && /^Pushed just now/.test(t); })()`, 30000), "a second push: " + (await status()));
   check(JSON.stringify(tree()) === JSON.stringify(["a.txt", "nb.ipynb", "sub/b.bin"]) && show("a.txt") === "hello again\n", "…with the change, and without the removed file");
   check(git("-C", bare, "rev-parse", "sagebrush/proj~1").trim() === first, "…its parent the first push's commit (a fast-forward)");
+  // (M4a) the History list: both versions, newest first; each one's files as it holds them, read-only
+  const second0 = git("-C", bare, "rev-parse", "sagebrush/proj").trim();
+  await ev(`(${btn("/^History$/")}.click(), 1)`);
+  check(await until(`${P}.querySelectorAll(".gphist > li").length === 2`), "(M4a) History lists the two versions");
+  const items = await ev(`[...${P}.querySelectorAll(".gphist > li > button")].map((b) => b.textContent)`);
+  check(items[0].includes(second0.slice(0, 7)) && items[1].includes(first.slice(0, 7)) && items[0].startsWith("Sagebrush: "), "…newest first, with their messages and ids: " + JSON.stringify(items));
+  const openFile = async (li, name) => {
+    await ev(`([...${P}.querySelectorAll(".gphist > li")][${li}].querySelector("button").click(), 1)`);
+    await until(`!![...${P}.querySelectorAll(".gphist > li")][${li}].querySelector(".gpfile")`);
+    const names = await ev(`[...[...${P}.querySelectorAll(".gphist > li")][${li}].querySelectorAll(".gpfile")].map((b) => b.textContent)`);
+    if (name) {
+      await ev(`([...[...${P}.querySelectorAll(".gphist > li")][${li}].querySelectorAll(".gpfile")].find((b) => b.textContent === ${JSON.stringify(name)}).click(), 1)`);
+      await until(`!![...${P}.querySelectorAll(".gphist > li")][${li}].querySelector(".gptext, p.note")`);
+    }
+    return names;
+  };
+  const oldNames = await openFile(1, "a.txt");
+  check(JSON.stringify(oldNames) === JSON.stringify(["a.txt", "gone.txt", "nb.ipynb", "sub/b.bin"]), "…the first version's files: " + JSON.stringify(oldNames));
+  check((await ev(`[...${P}.querySelectorAll(".gphist > li")][1].querySelector(".gptext")?.textContent`)) === "hello" + String.fromCharCode(10), "…a.txt as the first version holds it");
+  const newNames = await openFile(0, "a.txt");
+  check(JSON.stringify(newNames) === JSON.stringify(["a.txt", "nb.ipynb", "sub/b.bin"]), "…the second version's files, without the removed one");
+  check((await ev(`[...${P}.querySelectorAll(".gphist > li")][0].querySelector(".gptext")?.textContent`)) === "hello again" + String.fromCharCode(10), "…and a.txt as the second holds it");
+  await ev(`([...[...${P}.querySelectorAll(".gphist > li")][0].querySelectorAll(".gpfile")].find((b) => b.textContent === "sub/b.bin").click(), 1)`);
+  check(await until(`/Not text: 4 bytes/.test([...${P}.querySelectorAll(".gphist > li")][0].textContent)`), "…a binary file isn't shown as text, and offers Download");
+  check((await ev(`${W}.read("/proj/a.txt").then((r) => new TextDecoder().decode(r.content))`)) === "hello again" + String.fromCharCode(10), "…and viewing history changed nothing in the workspace");
+  await ev(`(${btn("/^History$/")}.click(), 1)`);
   // (M2-SEC-1) while a push is under way, Push now stays off, even when the repository's field changes (its token line
   // redrawn)
   holdMs = 1500;
@@ -159,6 +189,34 @@ try {
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
   await until(`!${btn("/^Push now$/")}.disabled`, 30000);
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === second, "with nothing changed, no new commit");
+  // (M4b) Copy from GitHub branch: an agent's branch, pushed with git, copied into a NEW folder by Upload's rule
+  const agent = join(tmp, "agent");
+  git("clone", "-q", "-b", "sagebrush/proj", bare, agent);
+  git("-C", agent, "checkout", "-q", "-b", "agent/x");
+  writeFileSync(join(agent, "notes.md"), "agent wrote this\n");
+  mkdirSync(join(agent, "sub", "deep"), { recursive: true });
+  writeFileSync(join(agent, "sub", "deep", "x.txt"), "deep\n");
+  mkdirSync(join(agent, ".sagebrush"));
+  writeFileSync(join(agent, ".sagebrush", "history-1.json"), "{}");
+  writeFileSync(join(agent, "a.txt"), "the agent's a\n");
+  git("-C", agent, "add", "-A");
+  git("-C", agent, "commit", "-q", "-m", "agent's edit");
+  git("-C", agent, "push", "-q", "origin", "agent/x");
+  const before4 = await ev(`${W}.read("/proj/a.txt").then((r) => new TextDecoder().decode(r.content))`);
+  const copyIn = (b) => ev(`(() => { const i = ${P}.querySelector("input[placeholder='agent/x']"); i.value = ${JSON.stringify(b)}; ${btn("/^Copy into a new folder$/")}.click(); return 1; })()`);
+  await copyIn("agent/x");
+  check(await until(`/^Copied \\d+ files of agent\\/x \\([0-9a-f]{7}\\) into \\/notes \\(agent-x\\)$/.test([...${P}.querySelectorAll("p.note")].map((p) => p.textContent).find((t) => t.startsWith("Copied") || t.includes("failed") || t.includes("no branch")) ?? "")`, 30000), "(M4b) Copy from GitHub branch: " + (await ev(`[...${P}.querySelectorAll("p.note")].map((p) => p.textContent).filter((t) => /Cop|fail|branch/.test(t)).join(" | ")`)));
+  const text = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content), () => null)`);
+  const NL = String.fromCharCode(10);
+  check((await text("/notes (agent-x)/notes.md")) === "agent wrote this" + NL && (await text("/notes (agent-x)/sub/deep/x.txt")) === "deep" + NL && (await text("/notes (agent-x)/a.txt")) === "the agent's a" + NL, "…its files, in their folders, in a new folder");
+  check(await ev(`${W}.stat("/notes (agent-x)/nb.ipynb").then((e) => e?.kind === "notebook")`), "…its notebook made a notebook (Upload's rule)");
+  check(!(await ev(`${W}.stat("/notes (agent-x)/.sagebrush/history-1.json").then((e) => !!e)`)) && /\.sagebrush\/history-1\.json: Sagebrush's own data/.test(await ev(`${P}.textContent`)), "….sagebrush never copied, and said");
+  check((await text("/proj/a.txt")) === before4, "…and the pushed folder is untouched");
+  await copyIn("agent/x");
+  check(await until(`[...${P}.querySelectorAll("p.note")].some((p) => p.textContent.endsWith("into /notes (agent-x) (2)"))`, 30000) && (await text("/notes (agent-x)/a.txt")) === "the agent's a" + NL, "…a second copy goes to a new folder too, the first left as it was");
+  await copyIn("no/such");
+  check(await until(`[...${P}.querySelectorAll("p.note")].some((p) => p.textContent === "https://github.com/octo/notes.git has no branch no/such.")`, 30000), "…a branch that isn't there: said, and nothing made");
+  check(!(await ev(`${W}.stat("/notes (no-such)").then((e) => !!e)`)), "…no folder for it");
   // (M3) the automatic push: a reload with a fast turn; a change pushed by itself, with no click
   const openSection = async () => {
     check(await openStorage(), "the Storage panel opens");
@@ -195,7 +253,7 @@ try {
   await sleep(2000);
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === moved, "…and its retries never overwrite the server's branch");
   // every request carried the token, and only to the proxy's two routes
-  check(seen.length > 0 && seen.every((s) => s.auth === AUTH && /^\/github\.com\/octo\/notes\.git\/(info\/refs\?service=git-receive-pack|git-receive-pack)$/.test(s.path)), "every request went to the proxy's push routes, with the token: " + JSON.stringify([...new Set(seen.map((s) => s.path))]));
+  check(seen.length > 0 && seen.every((s) => s.auth === AUTH && /^\/github\.com\/octo\/notes\.git\/(info\/refs\?service=git-(receive|upload)-pack|git-(receive|upload)-pack)$/.test(s.path)), "every request went to the proxy's git routes, with the token: " + JSON.stringify([...new Set(seen.map((s) => s.path))]));
   // a wrong token: refused in fixed words; Forget token
   await ev(`(${btn("/^Forget token$/")}.click(), 1)`);
   check(await until(`!!${P}.querySelector("input[type=password]") && ${btn("/^Push now$/")}.disabled`), "Forget token: the token field is back, and Push now waits for one");
@@ -206,6 +264,11 @@ try {
   // (M2-SEC-1) one push owns the worker from begin to end: a second begin is refused, not put in its place; a request
   // naming another run is refused; A's files reach only A; the worker is free again after an end, an abort, or a
   // begin that failed
+  // (the automatic push of this page let go first: its turns made slow, and the one under way, if any, ended)
+  await ev(`(window.__SB_GITPUSH_TEST__.autoMs = 3600000, 1)`);
+  await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.startsWith("sagebrush-gitpush:")))`, 30000);
+  await sleep(1500);
+  await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.startsWith("sagebrush-gitpush:")))`, 30000);
   const ov = await ev(`(async () => {
     const m = await import(new URL("sagebrush-gitpush-panel.js", location.href).href);
     const url = new URL("sagebrush-gitpush-worker.js", location.href).href;
@@ -226,7 +289,20 @@ try {
     const noToken = await err(m.call(url, "begin", { ...common, repo: "https://github.com/carol/none.git", folder: "/c", branch: "sagebrush/c" }));
     const again = await m.call(url, "begin", { ...common, repo: B, folder: "/public", branch: "sagebrush/public" });
     await m.call(url, "abort", { run: again.run });
-    return { second, wrong, wrongEnd, after, noToken, done: !!done.commit, distinct: a.run !== b.run && b.run !== again.run };
+    // (M4B-DATA-1) a push to an owner named "fetch", then a copy (whose scratch was /fetch): the push's local
+    // repository and its history still there after
+    const F = "https://github.com/fetch/notes.git", O = "https://github.com/octo/notes.git";
+    await m.call(url, "setToken", { scope, repo: F, token: ${JSON.stringify(TOKEN)} });
+    await m.call(url, "setToken", { scope, repo: O, token: ${JSON.stringify(TOKEN)} });
+    const f = await m.call(url, "begin", { ...common, repo: F, folder: "/f", branch: "sagebrush/f" });
+    await m.call(url, "put", { run: f.run, files: [{ path: "kept.txt", bytes: new TextEncoder().encode("kept") }] });
+    const fdone = await m.call(url, "end", { run: f.run });
+    const cp = await m.call(url, "fetchBranch", { scope, repo: O, branch: "agent/x", proxy: ${JSON.stringify(proxyUrl)} });
+    await m.call(url, "fetchDone", { id: cp.id });
+    const flog = await m.call(url, "log", { scope, repo: F, branch: "sagebrush/f" });
+    const ffiles = await m.call(url, "files", { scope, repo: F, branch: "sagebrush/f", oid: fdone.commit });
+    return { second, wrong, wrongEnd, after, noToken, done: !!done.commit, distinct: a.run !== b.run && b.run !== again.run,
+      fetchKept: flog.length === 1 && flog[0].oid === fdone.commit && JSON.stringify(ffiles.files) === '["kept.txt"]', copied: cp.files.length };
   })()`);
   check(/Another push is under way here/.test(ov.second), "(M2-SEC-1) a second begin while one runs is refused: " + ov.second);
   check(/no longer under way/.test(ov.wrong) && /no longer under way/.test(ov.wrongEnd), "…a put or end naming another run is refused: " + ov.wrong + " / " + ov.wrongEnd);
@@ -234,6 +310,7 @@ try {
   check(git("-C", bareB, "for-each-ref").trim() === "", "…and B's repository got nothing");
   check(/no longer under way/.test(ov.after), "…a request for the ended run is refused");
   check(/Save a token/.test(ov.noToken) && ov.distinct, "…the worker is free again after an end, an abort, and a begin that failed");
+  check(ov.fetchKept && ov.copied > 0, "(M4B-DATA-1) a copy leaves the local repository of an owner named fetch, and its history, as they were: " + JSON.stringify({ kept: ov.fetchKept, copied: ov.copied }));
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));

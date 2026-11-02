@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "/version.json for agents (the core commit and build time a deploy runs): llms.txt names it, and llms.txt is in the CLI. Measured with bun 1.4.4 at the exact probe merge (pyjs +248).",
+ "bytes": {
+  "cli/pyjs.cjs": 300
+ }
+}
