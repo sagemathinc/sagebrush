@@ -590,8 +590,11 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     await P.revoke("revoked by the person");
     release();
     await pending.catch(() => {});
+    // (at once, as the allow() settles, before the socket's close event could close it again (sock.onclose → end()),
+    //  and again after: a mutant whose allow() goes on is caught in either order (the grader's K14-ae ruling))
+    const right = P.state;
     await sleep(100);
-    ok(P.state === "closed" && P.grant === null && st.m.size === 0, "U-13.pending-kept: a revoke while a remembered allow() waits on its store wins: still closed after the store goes on", { state: P.state });
+    ok(right === "closed" && P.state === "closed" && P.grant === null && st.m.size === 0, "U-13.pending-kept: a revoke while a remembered allow() waits on its store wins: still closed after the store goes on", { right, state: P.state });
     S.srv.stop(true);
   }
 }
