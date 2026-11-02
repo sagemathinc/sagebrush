@@ -16,9 +16,14 @@ on:
   schedule:
     - cron: "17 8 * * *"
 
+# A newer run cancels an older one in its group: a pull request's new revision
+# its obsolete run, and a master push the master runs still queued or running
+# (each master push runs the full tier, so the newest one tests every merge
+# before it).  The schedule and a dispatch are groups of their own, so a merge
+# never cancels them.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   changes:
