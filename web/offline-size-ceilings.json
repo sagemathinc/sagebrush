@@ -1,15 +1,15 @@
 {
   "note": "The offline size gate's sw.js ceilings (scripts/offline-size-gate.mjs; daybreak3's rulings on plan-b8-offline §3). PROVISIONAL: the exact base plus the provisional maximum growth (+32000 raw; +9500 gzip-9 of the normalized sw.js, Rule A / V3). Raw is exact bytes. gzip-9 is node:zlib gzipSync level 9, under the Node and zlib named here, of sw.js with VERSION's 16 declaration bytes and the DIGESTS sha256 of docs-index-python.json and offline-inventory.json zeroed after authentication (the base predates offline-inventory.json: its spans are VERSION and docs-index-python.json's). Another runtime or method fails closed. The final ceilings are the smallest normalized values containing the reviewed head, remeasured when the base changes.",
-  "base": "66e489f0351ad874179bed789876a0dea6e0c286",
+  "base": "2e53a56d562efc97e6355a3066c429a751b80796",
   "toolchain": "node v24.21.0, bun 1.4.4",
   "method": "node:zlib gzipSync level 9",
   "normalized": "rule-A-1/V3: VERSION + DIGESTS sha256 of docs-index-python.json, offline-inventory.json zeroed",
   "node": "v24.21.0",
   "zlib": "1.3.2.1-motley-8002e91",
-  "baseSwRaw": 183093,
-  "baseSwGzip": 42919,
+  "baseSwRaw": 184555,
+  "baseSwGzip": 43265,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 215093,
-  "swGzip": 52419
+  "swRaw": 216555,
+  "swGzip": 52765
 }
