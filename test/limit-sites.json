@@ -5108,6 +5108,14 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_sbdata.py :: _Parser.string :: if n > cap: #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e; #459 CI1 revision 7c10a89d: the run-at-a-time charge): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
  "lib/_sbdata.py :: _check_url :: raise Refused(\"cap:\" + f) #0": {
   "class": "1",
   "disposition": {
