@@ -191,6 +191,13 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const none = await run(dir, "run", "clean.tex");
   check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
 
+  // (a file named latex in the folder: \`sagebrush latex run\` is still the command, never that file run as a script,
+  //  astra's LATEX-RUN-1; for every command)
+  writeFileSync(join(dir, "latex"), "print('THE LOCAL SCRIPT RAN')\n");
+  const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
+  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
+  rmSync(join(dir, "latex"));
+
   // ---- usage
   const u = await run(dir, "render");
   const n = await run(dir, "check", "nope.tex");

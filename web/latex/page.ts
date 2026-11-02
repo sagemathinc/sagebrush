@@ -320,13 +320,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (!live()) return;
       const seen = e && !e.trashed ? `${e.fid}:${e.updated}:${e.size}` : null;
       if (seen === resultsSeen) return;
-      resultsSeen = seen;
       let next: typeof results = { wrapper: null, saved: [] };
       if (e && !e.trashed && (e.size ?? 0) <= RESULTS_MAX) {
         const j = JSON.parse(new TextDecoder().decode((await host.ws.readUpTo(p, RESULTS_MAX)).content));
         if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) next = { wrapper: j.wrapper, saved: j.items };
       }
       if (!live()) return;
+      // (the file counted as seen only once it was read and parsed: one that failed or was malformed is read again
+      //  at the next chance, astra's #519 advisory; its old results stay meanwhile)
+      resultsSeen = seen;
       results.wrapper = next.wrapper; results.saved = next.saved;
       request();
     } catch {}

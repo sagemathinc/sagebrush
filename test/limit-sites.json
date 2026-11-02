@@ -6728,24 +6728,29 @@
  },
  "src/latex-cli.ts ::  :: const PAGES_MAX = 60; #0": {
   "class": "1",
-  "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
  "src/latex-cli.ts ::  :: const TEX_MAX = 4 * 2 ** 20; #0": {
   "class": "1",
-  "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
  "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, delimiter } from \"path\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: an import line"
  },
  "src/latex-cli.ts :: findBrowser :: for (const dir of (env.PATH ?? \"\").split(delimiter)) if (dir) for (const b of [\"google-chrome\", \"google-chrome-stable\", \"chromium\", \"chromium-browser\", \"microsoft-edge\", \"microsoft-edge-stable\", \"brave-browser\"]) cands.push(join(dir, b)); #0": {
   "class": "none",
@@ -6759,19 +6764,75 @@
  },
  "src/latex-cli.ts :: latexCommand :: if (st.size > TEX_MAX) return fail(`${file}: ${st.size} bytes, over the ${TEX_MAX} this reads`); #0": {
   "class": "1",
-  "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states.push({ key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : \"the plot isn't an SVG\" }); failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: return out.join(\"\\n\").slice(-MSG_MAX); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX}:] #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return []; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: key: x.key, s: x.s, ...(typeof x.latex === \"string\" ? { latex: x.latex } : {}), ...(typeof x.src === \"string\" ? { src: x.src } : {}), ...(typeof x.msg === \"string\" ? { msg: x.msg.slice(0, MSG_MAX) } : {}), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
  "src/latex-cli.ts :: screenshots :: for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 }); #0": {
   "class": "1",
-  "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",
