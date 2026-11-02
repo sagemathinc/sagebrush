@@ -405,14 +405,21 @@ def _gammaincc(a, x):
 gammainc = _ufunc("gammainc", 2, _guard("gammainc", _gammainc))
 gammaincc = _ufunc("gammaincc", 2, _guard("gammaincc", _gammaincc))
 
-# (the inverses and the incomplete beta functions: lib/_special.py's, which return SciPy's limits and its nan outside
-# the domain themselves)
-gammaincinv = _ufunc("gammaincinv", 2, _guard("gammaincinv", lambda a, y: float(_S.gammaincinv(a, y))))
-gammainccinv = _ufunc("gammainccinv", 2, _guard("gammainccinv", lambda a, y: float(_S.gammainccinv(a, y))))
-betainc = _ufunc("betainc", 3, _guard("betainc", lambda a, b, x: float(_S.betainc(a, b, x))))
-betaincc = _ufunc("betaincc", 3, _guard("betaincc", lambda a, b, x: float(_S.betaincc(a, b, x))))
-betaincinv = _ufunc("betaincinv", 3, _guard("betaincinv", lambda a, b, y: float(_S.betaincinv(a, b, y))))
-betainccinv = _ufunc("betainccinv", 3, _guard("betainccinv", lambda a, b, y: float(_S.betainccinv(a, b, y))))
+def _ib(name):
+    # (lib/_special_ibeta.py's function: imported at its first call, so that importing scipy.special doesn't fetch
+    # its chunk, mod-special-ibeta, in the browser; it returns SciPy's limits and its nan outside the domain itself)
+    def f(*a):
+        import _special_ibeta
+        return float(getattr(_special_ibeta, name)(*a))
+    return f
+
+
+gammaincinv = _ufunc("gammaincinv", 2, _guard("gammaincinv", _ib("gammaincinv")))
+gammainccinv = _ufunc("gammainccinv", 2, _guard("gammainccinv", _ib("gammainccinv")))
+betainc = _ufunc("betainc", 3, _guard("betainc", _ib("betainc")))
+betaincc = _ufunc("betaincc", 3, _guard("betaincc", _ib("betaincc")))
+betaincinv = _ufunc("betaincinv", 3, _guard("betaincinv", _ib("betaincinv")))
+betainccinv = _ufunc("betainccinv", 3, _guard("betainccinv", _ib("betainccinv")))
 
 
 # ------------------------------------------------------------------ error functions and the normal distribution
