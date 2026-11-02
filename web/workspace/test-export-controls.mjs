@@ -45,6 +45,9 @@ const CONTROLS = [
   ["A5", "an export from a page waits for that page's own saves, and stops on a refused one", X + "entry.ts", "    await host.saveOpen?.();", "", "boardsave", /while this board's save is paused|while this board's last save was refused/, "chunk"],
   ["A6", "a failed stamp after the archive is saved is said as such", X + "run.ts", "    } catch (e) { r.stampFailed = String((e as Error)?.message ?? e); }", "    } catch (e) { throw e; }", "stamp", /a failed status write after the archive is saved/, "chunk"],
   ["D21", "a document is written as a stream, in bounded pieces of work", X + "run.ts", "  if (e.kind === \"notebook\") return notebookSlices(content, ipynbObject, pace);", "  if (e.kind === \"notebook\") return [new TextEncoder().encode(notebookFileText(content))];", "nearcap", /no main-thread task over 50 ms/, "chunk"],
+  // (E1 r2e, daybreak2's r11 review point 3: the compression feed restored to the 1 MiB slice; the activation check fails,
+  // and the >50 ms row may, by the machine: the deflate of a 1 MiB write is the row r11 attributed)
+  ["R-feed", "the compressor is fed at most DEFLATE_FEED (256 KiB) a write, a macrotask between", X + "zip.ts", "export const DEFLATE_FEED = 256 * 1024;", "export const DEFLATE_FEED = 1 << 20;", "nearcap2", /the largest write to a member's compressor|no main-thread task over 50 ms/, "chunk"],
   // ---------------------------------------------------------------- E1 r2a heap plan r2c (frozen e3bd7f07): each rule
   // undone, its own checks FAIL and no other
   // (P-3 and r1's: the folder's manifest line from its record)

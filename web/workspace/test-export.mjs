@@ -1450,6 +1450,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const r = await exportOnce(join(out, "nc2.zip"));
     check(!r.stopped, "near-cap documents without pictures export: " + (r.stopped ?? r.name));
     if (!r.stopped) { const z = inspect(join(out, "nc2.zip")); check(!z.error && z.bad === null && z.mismatch.length === 0, "…valid, every hash right"); }
+    // (E1 r2e, r11: the compressor fed at most DEFLATE_FEED = 256 KiB a write; /Wide.board.json, near the cap and
+    // compressible, activates it)
+    check(!r.stopped && r.stats?.maxDeflateWrite > 0 && r.stats.maxDeflateWrite <= 256 * 1024, `…the largest write to a member's compressor ${r.stats?.maxDeflateWrite} bytes (at most 262144)`);
     const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
     console.log("(long tasks over 50 ms during the export: inside a record read " + JSON.stringify(att.inside) + ", elsewhere " + JSON.stringify(att.outside) + ")");
     check(att.outside.length === 0, "…no main-thread task over 50 ms of the export's own (the clone, cleanDoc, the board's text, the cells, the lines): " + JSON.stringify(att.outside));
