@@ -8,7 +8,84 @@
 
 use crate::expr::*;
 use crate::num::Num;
+use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::collections::HashMap;
+
+// ------------------------------------------------------------------ the sorts of one print
+// The order functions below compare subexpressions through their sorted terms
+// and factors, and each comparison sorts again: without a memo a nested
+// unexpanded product (an adjugate's entries) is sorted again at every level, a
+// cost that grows exponentially with the nesting.  During one print (to_string,
+// to_latex) each distinct subexpression's sorts are computed once.  The keys are
+// the expressions themselves (structural, hashed once), so the memo holds them
+// alive and a freed temporary can't alias another; it is dropped when the
+// outermost print returns.
+
+#[derive(Default)]
+struct Memo {
+    terms: HashMap<Expr, Vec<Expr>>,
+    factors: HashMap<Expr, Vec<Expr>>,
+    p_factors: HashMap<Expr, Vec<Expr>>,
+}
+
+thread_local! {
+    static MEMO: RefCell<Option<Memo>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// (tests) the sorts computed (memo misses and unmemoized calls)
+    static SORTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// f with the memo on (the outermost print creates it and drops it, also on a panic).
+fn with_memo<T>(f: impl FnOnce() -> T) -> T {
+    struct Drop_(bool);
+    impl Drop for Drop_ {
+        fn drop(&mut self) {
+            if self.0 {
+                MEMO.with(|m| *m.borrow_mut() = None);
+            }
+        }
+    }
+    let outer = MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.is_none() {
+            *m = Some(Memo::default());
+            true
+        } else {
+            false
+        }
+    });
+    let _g = Drop_(outer);
+    f()
+}
+
+/// The memoized value of compute(e) in the table pick selects (computed without
+/// the memo outside a print).  The memo isn't borrowed while compute runs: it
+/// recurses into the same tables.
+fn memo(e: &Expr, pick: fn(&mut Memo) -> &mut HashMap<Expr, Vec<Expr>>, compute: impl FnOnce() -> Vec<Expr>) -> Vec<Expr> {
+    #[cfg(test)]
+    let compute = || {
+        SORTS.with(|s| s.set(s.get() + 1));
+        compute()
+    };
+    let hit = MEMO.with(|m| m.borrow_mut().as_mut().map(|m| pick(m).get(e).cloned()));
+    match hit {
+        Some(Some(v)) => v,
+        Some(None) => {
+            let v = compute();
+            MEMO.with(|m| {
+                if let Some(m) = m.borrow_mut().as_mut() {
+                    pick(m).insert(e.clone(), v.clone());
+                }
+            });
+            v
+        }
+        None => compute(),
+    }
+}
 
 // ------------------------------------------------------------------ print order
 
@@ -51,6 +128,10 @@ fn is_numeric_base_power(e: &Expr) -> bool {
 }
 
 fn term_factors(e: &Expr) -> Vec<Expr> {
+    memo(e, |m| &mut m.factors, || term_factors_sorted(e))
+}
+
+fn term_factors_sorted(e: &Expr) -> Vec<Expr> {
     let (_, rest) = split_coeff(e);
     let mut v = match &rest.kind {
         Kind::Mul(f) => f.clone(),
@@ -331,11 +412,11 @@ fn is_deriv(e: &Expr) -> bool {
 
 fn sorted_terms(e: &Expr) -> Vec<Expr> {
     match &e.kind {
-        Kind::Add(v) => {
+        Kind::Add(v) => memo(e, |m| &mut m.terms, || {
             let mut t = v.clone();
             t.sort_by(sum_order);
             t
-        }
+        }),
         _ => vec![e.clone()],
     }
 }
@@ -388,12 +469,14 @@ fn p_deg(e: &Expr) -> i64 {
 
 /// a product's factors (no number), smallest first (P2)
 fn p_factors_up(e: &Expr) -> Vec<Expr> {
-    let mut v: Vec<Expr> = match &e.kind {
-        Kind::Mul(f) => f.iter().filter(|x| !x.is_num()).map(p_norm).collect(),
-        _ => vec![p_norm(e)],
-    };
-    v.sort_by(|a, b| pmul_cmp(a, b));
-    v
+    memo(e, |m| &mut m.p_factors, || {
+        let mut v: Vec<Expr> = match &e.kind {
+            Kind::Mul(f) => f.iter().filter(|x| !x.is_num()).map(p_norm).collect(),
+            _ => vec![p_norm(e)],
+        };
+        v.sort_by(|a, b| pmul_cmp(a, b));
+        v
+    })
 }
 
 fn pcmp(a: &Expr, b: &Expr) -> Ordering {
@@ -516,8 +599,7 @@ const P_POW: u8 = 4;
 const P_ATOM: u8 = 5;
 
 pub fn to_string(e: &Expr) -> String {
-    let (s, _) = sage(e);
-    s
+    with_memo(|| sage(e).0)
 }
 
 /// A term or argument: a lone negative power prints as a fraction (1/x^2),
@@ -766,7 +848,7 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
 // ------------------------------------------------------------------ LaTeX
 
 pub fn to_latex(e: &Expr) -> String {
-    latex(e).0
+    with_memo(|| latex(e).0)
 }
 
 fn lparen(s: (String, u8), need: u8) -> String {
@@ -1179,5 +1261,55 @@ mod print_order_tests {
                 assert!(r.is_some(), "the check accepts the {} mutant on {}", name, s);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod print_memo_tests {
+    //! The sorts of one print are memoized: a nested unexpanded product (an adjugate's entry) is sorted once
+    //! per distinct subexpression, and prints exactly as without the memo.
+    use super::*;
+    use crate::parse::parse;
+
+    /// ((...((x + 1)*(x + y) + 2)*(x + y) + 3)...): depth n
+    fn nested(n: usize) -> Expr {
+        let mut e = parse("x + 1");
+        for k in 0..n {
+            e = add(vec![mul2(&e, &parse("x + y")), int(k as i64 + 2)]);
+        }
+        e
+    }
+
+    fn sorts(f: impl FnOnce() -> String) -> (String, u64) {
+        SORTS.with(|s| s.set(0));
+        let r = f();
+        (r, SORTS.with(|s| s.get()))
+    }
+
+    #[test]
+    fn the_memo_prints_exactly_as_without_it() {
+        for n in 0..7 {
+            let e = nested(n);
+            let (memo, _) = sorts(|| to_string(&e));
+            let (plain, _) = sorts(|| sage(&e).0);
+            assert_eq!(memo, plain, "depth {}", n);
+            assert_eq!(to_latex(&e), latex(&e).0, "depth {}", n);
+        }
+        for s in ["(x + 1)*(x - 1)*sin(x + y) + (a + b)^2*(a - b)", "-(f*h - x*y)*a + (c*h - b*y)*d + (b*f - c*x)*g", "1/2*x^2/y + (x + 1)/(x - 1)"] {
+            let e = parse(s);
+            assert_eq!(to_string(&e), sage(&e).0, "{}", s);
+        }
+    }
+
+    #[test]
+    fn a_nested_product_is_sorted_once_per_subexpression() {
+        // without the memo the sorts grow exponentially with the depth; with it, linearly
+        let (_, s10) = sorts(|| to_string(&nested(10)));
+        let (_, s20) = sorts(|| to_string(&nested(20)));
+        let (_, s40) = sorts(|| to_string(&nested(40)));
+        assert!(s40 - s20 <= 2 * (s20 - s10) + 8, "{} {} {}", s10, s20, s40);
+        assert!(s40 < 40 * 12, "{}", s40);
+        // and the memo is gone after the print
+        assert!(MEMO.with(|m| m.borrow().is_none()));
     }
 }
