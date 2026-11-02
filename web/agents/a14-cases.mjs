@@ -166,19 +166,29 @@ const STAGES = `(() => {
   if (st && st.getDirectory) { const gd = st.getDirectory.bind(st); st.getDirectory = () => { add("opfs getDirectory"); return gd().then((d) => (add("opfs directory"), d), (e) => { add("opfs error " + (e && e.name)); throw e; }); }; }
 })()`;
 // (test-only: the page's FIRST `n` opens of the workspace store each answered `ms` later: the real open is made then
-// and its events passed on; the forced form of a slow first open, A14-22..24)
+// and its events passed on; the forced form of a slow first open, A14-22..24. window.__slowWs counts the delayed opens
+// made, answered (success or error) and settled (an error, or its database closed), so a test waits for a late open
+// to be over instead of assuming it is: the grader's 0bc37cc7, K14-e's A14-24 on a loaded host)
 const SLOW_WS_OPEN = (ms, n = 1) => `(() => {
   const open = indexedDB.open.bind(indexedDB);
+  const st = (window.__slowWs = { made: 0, answered: 0, settled: 0 });
   let left = ${n};
   indexedDB.open = (name, ...a) => {
     if (left <= 0 || name !== "sagebrush-workspace") return open(name, ...a);
     left--;
+    st.made++;
     const fake = new EventTarget(), EV = ["success", "error", "upgradeneeded", "blocked"];
     let real = null;
     for (const k of ["result", "transaction", "error", "readyState", "source"]) Object.defineProperty(fake, k, { get: () => (real ? real[k] : undefined) });
     for (const ev of EV) { let h = null; Object.defineProperty(fake, "on" + ev, { get: () => h, set: (f) => { h = f; } }); }
     setTimeout(() => {
       real = open(name, ...a);
+      real.addEventListener("error", () => { st.answered++; st.settled++; });
+      real.addEventListener("success", () => {
+        st.answered++;
+        const db = real.result, close = db.close.bind(db);
+        db.close = () => { st.settled++; db.close = close; close(); };
+      });
       for (const ev of EV) real.addEventListener(ev, (e) => { const h = fake["on" + ev]; if (h) h.call(fake, e); });
     }, ${ms});
     return fake;
@@ -905,19 +915,19 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
     const shown = await P.ev(wsShown);
     ok(shown.role === "alert" && shown.text === WS_MSG && shown.why === "(IndexedDB sagebrush-workspace did not open in 15 s)" && shown.retry === "Retry" && shown.retryVisible && shown.connectHidden && shown.dialogs === 0, "A14-23: past the 15 s deadline the page says so in words (role=alert; board's copy, the error's own words in the details) with [Retry]; no pairing, no silent demo", shown);
-    await sleep(1500); // (the late first open has answered by now, and was closed unused)
+    await P.until(`((s) => !!s && s.made > 0 && s.settled === s.made)(window.__slowWs)`, 30000); // (waited for, not assumed: the late first open is answered and closed)
     await P.ev(`(() => { window.__a14wsChanges = 0; new MutationObserver((m) => { window.__a14wsChanges += m.length; }).observe(document.querySelector('#ws-error-text'), { childList: true, characterData: true, subtree: true }); document.querySelector('#ws-retry').focus(); return true; })()`);
     await P.key("Enter");
     await P.until(`document.querySelector('#ws-retry').getAttribute('aria-busy') === null && document.querySelector('#ws-retry').textContent === 'Retry'`, 30000);
     const again = await P.ev(wsShown);
     ok(again.text === "Still couldn't open the storage. " + WS_MSG && again.changes > 0 && again.why === shown.why && again.active === "ws-retry" && again.retryVisible && again.connectHidden && again.dialogs === 0, "A14-23.again: a [Retry] that fails again says so anew (the text changes, so the alert re-announces); focus stays on [Retry]", again);
-    await sleep(1500); // (the second late open has answered by now, and was closed unused)
+    await P.until(`((s) => !!s && s.made > 0 && s.settled === s.made)(window.__slowWs)`, 30000); // (waited for, not assumed: the second late open is answered and closed)
     await P.ev(`(() => { window.__a14wsChanges = 0; return true; })()`);
     await P.key("Enter");
     await P.until(`document.querySelector('#ws-retry').getAttribute('aria-busy') === null && document.querySelector('#ws-retry').textContent === 'Retry'`, 30000);
     const again2 = await P.ev(wsShown);
     ok(again2.text === "Still couldn't open the storage. " + WS_MSG && again2.changes > 0 && again2.why === shown.why && again2.active === "ws-retry" && again2.retryVisible && again2.connectHidden && again2.dialogs === 0, "A14-23.again2: a second failed [Retry] (the same prefixed text) re-announces too: the text is cleared, then set again; focus stays on [Retry]", again2);
-    await sleep(1500); // (the third late open has answered by now, and was closed unused)
+    await P.until(`((s) => !!s && s.made > 0 && s.settled === s.made)(window.__slowWs)`, 30000); // (waited for, not assumed: the third late open is answered and closed)
     await P.key("Enter");
     await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 20000);
     // (the dialog takes its focus when it opens: up to 3 s for it, then the check)
@@ -933,7 +943,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000) });
     await P.navigate(`${site}/agents/`);
     await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
-    await sleep(1500); // (the late first open has answered by now, and was closed unused)
+    await P.until(`((s) => !!s && s.made > 0 && s.settled === s.made)(window.__slowWs)`, 30000); // (waited for, not assumed: the late first open is answered and closed)
     await P.ev(`(() => { document.querySelector('#ws-retry').focus(); return true; })()`);
     await P.key("Enter");
     await P.until(`document.querySelector('#ws-error').hidden`, 20000);
@@ -948,7 +958,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.send("Page.addScriptToEvaluateOnNewDocument", { source: SLOW_WS_OPEN(16000) });
     await P.navigate(`${site}/agents/`);
     await P.until(`!document.querySelector('#ws-error').hidden`, 30000);
-    await sleep(1500); // (the late first open has answered by now, and was closed unused)
+    await P.until(`((s) => !!s && s.made > 0 && s.settled === s.made)(window.__slowWs)`, 30000); // (waited for, not assumed: the late first open is answered and closed)
     const before = await P.ev(`(() => { document.activeElement?.blur?.(); document.querySelector('#ws-retry').click(); return document.activeElement?.id || document.activeElement?.tagName; })()`);
     await P.until(`document.querySelector('#ws-error').hidden`, 20000);
     const st = await P.ev(`({ active: document.activeElement?.id || document.activeElement?.tagName, connectVisible: document.querySelector('#connect').checkVisibility(), dialogs: document.querySelectorAll('.sbag-dlg').length })`);
