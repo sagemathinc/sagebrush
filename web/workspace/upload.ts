@@ -15,7 +15,7 @@ import type { Workspace, Entry } from "./api";
 import { freePath, join, nameOf, openableAs, parentOf, safeName, splitExt, uploadAs, type DocKind } from "./paths";
 import { formatError, isBoard } from "../board/doc";
 import { cellId, fromFile } from "../notebook/ipynb.js";
-import { fromMyst, isMystHead } from "../notebook/myst.js";
+import { HEAD_BYTES, TEXT, fromMyst, isMystHead } from "../notebook/myst.js";
 
 export { uploadAs, openableAs, type DocKind } from "./paths";
 
@@ -31,9 +31,14 @@ export function openableAsFile(name: string, head: string | null): DocKind | nul
  * (readUpTo refuses a larger file), within `ms`; null if not read in time, or not at all (the name decides then). */
 export function fileHead(ws: Workspace, path: string, max: number, ms = 300): Promise<string | null> {
   return Promise.race([
-    ws.readUpTo(path, max).then((r) => new TextDecoder().decode(r.content.subarray(0, 4096)), () => null),
+    ws.readUpTo(path, max).then((r) => new TextDecoder(TEXT.encoding, TEXT).decode(r.content.subarray(0, HEAD_BYTES)), () => null),
     new Promise<null>((r) => setTimeout(() => r(null), ms)),
   ]);
+}
+
+/** An uploaded file's first 4096 bytes as text, decoded as fileHead's are (openableAsFile). */
+export async function blobHead(f: Blob): Promise<string> {
+  return new TextDecoder(TEXT.encoding, TEXT).decode(await f.slice(0, HEAD_BYTES).arrayBuffer());
 }
 
 /** A `.board.json`'s text as a board: JSON of this format (or an earlier version), with items. */
@@ -145,8 +150,9 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
   let doc: any;
   // (a .md: a Jupytext MyST notebook, by the same test the menu used (openableAsFile); any other .md isn't one)
   if (as === "notebook" && /\.md$/i.test(name)) {
-    if (!isMystHead(text)) throw new Error(`${name} is not a Jupytext MyST notebook`);
-    doc = fromMyst(name, text, cellId);
+    const t = new TextDecoder(TEXT.encoding, TEXT).decode(content);
+    if (!isMystHead(t)) throw new Error(`${name} is not a Jupytext MyST notebook`);
+    doc = fromMyst(name, t, cellId);
   } else if (as === "notebook") doc = fromFile(name, text, o.mode);
   else {
     if (!o.asBoard) throw new Error("a board is made from it on the board page");

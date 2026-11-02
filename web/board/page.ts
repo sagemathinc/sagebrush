@@ -66,7 +66,7 @@ import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showS
 // that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
-import { uploadFiles, openableAsFile, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
@@ -1043,7 +1043,7 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
     openEntry(e, "here");
   } else if (single && r.kept.length === 1 && !r.made.length) {
     // (a Jupytext MyST .md is a notebook by its first 4 KiB: web/notebook/myst.js)
-    const e = r.kept[0], name = nameOf(e.path), as = openableAsFile(name, /\.md$/i.test(name) ? await files[0].slice(0, 4096).text() : null);
+    const e = r.kept[0], name = nameOf(e.path), as = openableAsFile(name, /\.md$/i.test(name) ? await blobHead(files[0]) : null);
     if (as && confirm(`Open "${name}" as a ${as}?\n\nA converted copy, "${splitExt(name)[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${name}" stays as it is.`)) {
       const err = await openAsHere(w, e, as, mode);
       if (err) return `${said}${refused}. **"${name}" couldn't be opened as a ${as}:** ${err}`;
