@@ -195,7 +195,8 @@ try {
       const D = Object.fromEntries(Object.entries(paired).map(([c, d]) => [c, med(d)]));
       const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...p95(c))]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
-      const resMax = Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)));
+      // (to the microsecond: Chromium's coarsened clock steps exactly 100 us, which float subtraction may read a hair over)
+      const resMax = Math.round(1e6 * Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)))) / 1e6;
       const spread = CONFIGS.filter((c) => spreadStop(p95(c)));
       const fewGc = bname === "firefox" ? CONFIGS.flatMap((c) => runs[c].map((x, r) => [c, r, x.bursts.length]).filter((z) => z[2] < 3)) : [];
       const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(spread.length ? [`instability/spread: ${spread.join(", ")}`] : []), ...(fewGc.length ? [`under 3 GC bursts: ${fewGc.map(([c, r, n]) => `${c}#${r + 1}:${n}`).join(" ")}`] : [])];
