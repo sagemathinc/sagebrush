@@ -144,6 +144,32 @@ try {
   check(await until(`(() => { const t = ${P}.textContent.match(/Pushed[^)]*\\)/)?.[0] ?? ""; return !t.includes(${JSON.stringify(first.slice(0, 7))}) && /^Pushed just now/.test(t); })()`, 30000), "a second push: " + (await status()));
   check(JSON.stringify(tree()) === JSON.stringify(["a.txt", "nb.ipynb", "sub/b.bin"]) && show("a.txt") === "hello again\n", "…with the change, and without the removed file");
   check(git("-C", bare, "rev-parse", "sagebrush/proj~1").trim() === first, "…its parent the first push's commit (a fast-forward)");
+  // (M4a) the History list: both versions, newest first; each one's files as it holds them, read-only
+  const second0 = git("-C", bare, "rev-parse", "sagebrush/proj").trim();
+  await ev(`(${btn("/^History$/")}.click(), 1)`);
+  check(await until(`${P}.querySelectorAll(".gphist > li").length === 2`), "(M4a) History lists the two versions");
+  const items = await ev(`[...${P}.querySelectorAll(".gphist > li > button")].map((b) => b.textContent)`);
+  check(items[0].includes(second0.slice(0, 7)) && items[1].includes(first.slice(0, 7)) && items[0].startsWith("Sagebrush: "), "…newest first, with their messages and ids: " + JSON.stringify(items));
+  const openFile = async (li, name) => {
+    await ev(`([...${P}.querySelectorAll(".gphist > li")][${li}].querySelector("button").click(), 1)`);
+    await until(`!![...${P}.querySelectorAll(".gphist > li")][${li}].querySelector(".gpfile")`);
+    const names = await ev(`[...[...${P}.querySelectorAll(".gphist > li")][${li}].querySelectorAll(".gpfile")].map((b) => b.textContent)`);
+    if (name) {
+      await ev(`([...[...${P}.querySelectorAll(".gphist > li")][${li}].querySelectorAll(".gpfile")].find((b) => b.textContent === ${JSON.stringify(name)}).click(), 1)`);
+      await until(`!![...${P}.querySelectorAll(".gphist > li")][${li}].querySelector(".gptext, p.note")`);
+    }
+    return names;
+  };
+  const oldNames = await openFile(1, "a.txt");
+  check(JSON.stringify(oldNames) === JSON.stringify(["a.txt", "gone.txt", "nb.ipynb", "sub/b.bin"]), "…the first version's files: " + JSON.stringify(oldNames));
+  check((await ev(`[...${P}.querySelectorAll(".gphist > li")][1].querySelector(".gptext")?.textContent`)) === "hello" + String.fromCharCode(10), "…a.txt as the first version holds it");
+  const newNames = await openFile(0, "a.txt");
+  check(JSON.stringify(newNames) === JSON.stringify(["a.txt", "nb.ipynb", "sub/b.bin"]), "…the second version's files, without the removed one");
+  check((await ev(`[...${P}.querySelectorAll(".gphist > li")][0].querySelector(".gptext")?.textContent`)) === "hello again" + String.fromCharCode(10), "…and a.txt as the second holds it");
+  await ev(`([...[...${P}.querySelectorAll(".gphist > li")][0].querySelectorAll(".gpfile")].find((b) => b.textContent === "sub/b.bin").click(), 1)`);
+  check(await until(`/Not text: 4 bytes/.test([...${P}.querySelectorAll(".gphist > li")][0].textContent)`), "…a binary file isn't shown as text, and offers Download");
+  check((await ev(`${W}.read("/proj/a.txt").then((r) => new TextDecoder().decode(r.content))`)) === "hello again" + String.fromCharCode(10), "…and viewing history changed nothing in the workspace");
+  await ev(`(${btn("/^History$/")}.click(), 1)`);
   // (M2-SEC-1) while a push is under way, Push now stays off, even when the repository's field changes (its token line
   // redrawn)
   holdMs = 1500;

@@ -194,7 +194,30 @@ const ops: Record<string, (a: any) => Promise<unknown>> = {
       return (await git.log({ fs, dir: `/${p.owner}/${p.repo}/${branch}`, ref: branch, depth })).map((c) => ({ oid: c.oid, message: c.commit.message, at: c.commit.author.timestamp * 1000 }));
     } catch { return []; }
   },
+  /** (M4a's History) the files of one of the branch's commits, in path order: at most 5,000. */
+  async files({ scope, repo, branch, oid }: { scope: string; repo: string; branch: string; oid: string }) {
+    const at = historyAt(scope, repo, branch, oid);
+    const all = await git.listFiles({ fs: at.fs, dir: at.dir, ref: oid });
+    return { files: all.slice(0, 5000), more: Math.max(0, all.length - 5000) };
+  },
+  /** (M4a's History) one file as that commit holds it: its first VIEW_MAX bytes and its size. Only a path the commit
+   * lists is read (git objects, never the working files). */
+  async read({ scope, repo, branch, oid, path }: { scope: string; repo: string; branch: string; oid: string; path: string }) {
+    const at = historyAt(scope, repo, branch, oid);
+    if (typeof path !== "string" || !(await git.listFiles({ fs: at.fs, dir: at.dir, ref: oid })).includes(path)) throw new Error("That file isn't in this version.");
+    const { blob } = await git.readBlob({ fs: at.fs, dir: at.dir, oid, filepath: path });
+    return { size: blob.length, bytes: blob.slice(0, VIEW_MAX), truncated: blob.length > VIEW_MAX };
+  },
 };
+
+/** At most this much of a file is shown or downloaded from the History list. */
+const VIEW_MAX = 50 * 2 ** 20;
+/** The local repository a History request names, with its commit id checked. */
+function historyAt(scope: string, repo: string, branch: string, oid: string) {
+  const p = parseRepo(repo);
+  if (!p || !BRANCH.test(branch) || typeof oid !== "string" || !/^[0-9a-f]{40}$/.test(oid)) throw new Error("That version can't be shown.");
+  return { fs: new FS(`sagebrush-gitpush:${scope}`), dir: `/${p.owner}/${p.repo}/${branch}` };
+}
 
 self.onmessage = async (ev: MessageEvent) => {
   const { id, op, args } = ev.data ?? {};
