@@ -815,6 +815,23 @@ class IntegerMod:
     def __pos__(self):
         return self
 
+    def __rpow__(self, b):
+        """b ** self for an integer, rational or real b: the power by the
+        exponent's lift, as Sage's (2^Mod(-1, 7) is 2^6).
+
+        EXAMPLES::
+
+            sage: 2^Mod(3, 7), 2^Mod(-1, 7), (1/2)^GF(3)(2), 3^GF(2)(0)
+            (8, 64, 1/4, 1)
+            sage: parent(2^Mod(3, 7)), 2.0^GF(5)(3)
+            (Integer Ring, 8.00000000000000)
+        """
+        if isinstance(b, IntegerMod) or getattr(b, "_is_ffmatrix", False):
+            return NotImplemented
+        if isinstance(b, (int, float, _F)) or type(b).__name__ in ("Rational", "Integer"):
+            return b ** self._v
+        return NotImplemented
+
     def __pow__(self, e, mod=None):
         if isinstance(e, IntegerMod):
             e = e._v
