@@ -185,8 +185,19 @@ const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(h
 // own and its worker, fetched only when the button is clicked, so the page's start doesn't carry them
 const exportResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "entry.ts")], outdir: join(here, "dist"), naming: "sagebrush-export.js", target: "browser", format: "esm", minify: true });
 const exportWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "export", "worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-export-worker.js", target: "browser", format: "esm", minify: true });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult]];
-for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult]) {
+// "Push to GitHub" (Stage A MVP r1, DEV only, web/gitpush): its panel's chunk and its git worker (isomorphic-git),
+// fetched only when the Storage panel's button is clicked in a browser with the flag
+const gitpushResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "panel.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-panel.js", target: "browser", format: "esm", minify: true });
+// (packages put in place by small modules of its own, web/gitpush/shims: see each)
+const gitShims = { name: "gitpush-shims", setup(b: any) {
+  const shim = (f: string) => () => ({ path: join(here, "gitpush", "shims", f) });
+  b.onResolve({ filter: /^sha\.js\/sha1(\.js)?$/ }, shim("sha1.ts"));
+  b.onResolve({ filter: /^crc-32$/ }, shim("crc32.ts"));
+  b.onResolve({ filter: /^(diff3|clean-git-ref|isomorphic-textencoder)$/ }, shim("unused.ts"));
+} };
+const gitpushWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "git-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-worker.js", target: "browser", format: "esm", minify: true, plugins: [gitShims] });
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
+for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -334,6 +345,15 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   ENGINE = { id, api: ENGINE_API, files: Object.fromEntries(Object.entries(files).map(([f, d]) => [f, d.sha256])) };
   console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
 }
+// A board page takes only the 4 KiB MyST rule (web/notebook/myst-head.ts), never the MyST reader
+// (web/notebook/myst.js) or renderer (web/myst): plan-myst-notebooks-p2 r2 §11.3 (its uploads and "Open as a board"
+// need only the rule; a MyST .md opened as a notebook goes to the notebook page)
+function boardMystClosure(what: string, r: any) {
+  const inputs = Object.keys(r.metafile?.inputs ?? {}).map((p) => p.replace(/\\/g, "/"));
+  if (!inputs.some((p) => /(^|\/)web\/notebook\/myst-head\.(js|ts)$/.test(p))) throw new Error(`${what} doesn't contain web/notebook/myst-head.ts`);
+  const heavy = inputs.filter((p) => /(^|\/)web\/notebook\/myst\.js$|(^|\/)web\/myst\//.test(p));
+  if (heavy.length) throw new Error(`${what} contains ${heavy.join(", ")}: a board page takes only web/notebook/myst-head.ts`);
+}
 // Boards (design/board.md), at /board/, with their example documents
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
@@ -344,6 +364,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
     process.exit(1);
   }
   builds.push(["the board", r]);
+  boardMystClosure("the board", r);
   // (the command line's `board render` math, MathJax: in the CLI's bundle,
   // not a page's; built here only to list its packages, so that the
   // packages that carry the CLI name them, src/board-math.ts)
@@ -377,6 +398,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
   const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
+  boardMystClosure("the board without sync (the frame, exports)", ns);
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
   const nosync = readFileSync(join(nosyncDir, "board.js"), "utf8");
   writeFileSync(join(here, "dist", "board", "board-nosync.js"), nosync);

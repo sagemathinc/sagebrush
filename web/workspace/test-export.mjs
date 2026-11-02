@@ -651,6 +651,10 @@ try {
     await startFlow();
     check(await until(flowHas(`/^Save…$/`), 120000), "workerfail a: …and the page's next export runs");
     await panelButton(/^Cancel$/);
+    // (the cancelled export settled before (b): its Save… gone and its lock let go.  Else (b)'s "ready" could be
+    // this flow's Save…, seen 4 ms after the cancel, and (b)'s Save… pressed on it, so its crashing export never ran:
+    // #459's and #479's CI1, Nov 2)
+    check(await until(`!(${flowHas(`/^Save…$/`)})`, 10000) && await until(`${LOCKS}.then((m) => m === 0)`, 10000), "workerfail a: …the cancelled export settled: its Save… gone, its lock let go");
     // (b)
     await hooks(`crashAfter: 1`);
     await clearToast();
