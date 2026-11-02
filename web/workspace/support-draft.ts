@@ -36,7 +36,10 @@ export const DRAFT_DESCRIPTION =
   DRAFT_HINT +
   " kind is bug, pkg (a missing package), feat, book or other; subject is 5 to 180 characters; body 10 to 19,000, in plain text: say what you tried and what happened. There are no attachments: put the relevant text, or a link to a shared Sagebrush document, in the body. The person sees a card on the page; the answer is only {drafted: true, shown: \"card\"}.";
 
-const COCALC_TYPE: Record<DraftKind, string> = { bug: "problem", feat: "task", pkg: "task", book: "task", other: "question" };
+// (always "question": CoCalc's form shows a filled-in body only for a question (and purchase, chat). Its problem and
+// task forms are fields of their own that don't show the body, though it would still be sent: a person must see what
+// they send (packages/frontend/public/support/new-view.tsx, renderBodyFields). The kind is in the subject.)
+const COCALC_TYPE = "question";
 const build = () => (typeof __SB_BUILD__ === "string" && __SB_BUILD__ ? __SB_BUILD__ : "dev");
 
 /** The draft in args, or why it isn't one (a message the agent can act on). */
@@ -73,7 +76,7 @@ export function draftURL(d: Draft, how: { mode: string; via: "webmcp" | "pairing
   if (SUPPORT_DRAFT_TARGET === "sagebrush")
     return "https://support.sagebrush.space/new#draft=" + b64url(JSON.stringify({ v: 1, kind: d.kind, title: d.subject, description: d.body }));
   const q = (s: string) => encodeURIComponent(s);
-  return `https://cocalc.ai/support/new?type=${q(COCALC_TYPE[d.kind])}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q("https://sagebrush.space/")}&context=${q(draftContext(how.mode, how.via))}`;
+  return `https://cocalc.ai/support/new?type=${q(COCALC_TYPE)}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q("https://sagebrush.space/")}&context=${q(draftContext(how.mode, how.via))}`;
 }
 
 // (48px from the bottom: above the site's early-alpha notice, whose variable this doesn't name, since `sagebrush

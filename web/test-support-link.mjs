@@ -48,7 +48,7 @@ function check(file) {
 // plan-support-requests r12), opened only by the person's click on its card. Exactly this shape: the form's own
 // query parameters, each encoded, the page's address fixed (never the page's own), and nothing else.
 const DRAFT_URL =
-  "`https://cocalc.ai/support/new?type=${q(COCALC_TYPE[d.kind])}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q(\"https://sagebrush.space/\")}&context=${q(draftContext(how.mode, how.via))}`";
+  "`https://cocalc.ai/support/new?type=${q(COCALC_TYPE)}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q(\"https://sagebrush.space/\")}&context=${q(draftContext(how.mode, how.via))}`";
 {
   const src = readFileSync(join(here, "workspace", "support-draft.ts"), "utf8");
   const n = src.match(/cocalc\.ai/g)?.length ?? 0;

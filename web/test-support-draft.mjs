@@ -92,7 +92,7 @@ try {
   await trustedClick("Review and send");
   check(await until("window.__opened.length === 1", 5000), "the person's click opens the form");
   const [url, target, features] = await ev("window.__opened[0]");
-  const want = "https://cocalc.ai/support/new?type=task&subject=" + encodeURIComponent(`[sagebrush] pkg: ${SUBJECT}`) + "&body=" + encodeURIComponent(BODY) + "&url=https%3A%2F%2Fsagebrush.space%2F&context=";
+  const want = "https://cocalc.ai/support/new?type=question&subject=" + encodeURIComponent(`[sagebrush] pkg: ${SUBJECT}`) + "&body=" + encodeURIComponent(BODY) + "&url=https%3A%2F%2Fsagebrush.space%2F&context=";
   const ctx = decodeURIComponent(url.slice(want.length));
   check(url.startsWith(want) && /^Sagebrush [0-9a-f]{12}, python, WebMCP$/.test(ctx), `CoCalc's form, filled in, with the context line (${url.slice(0, 120)}… context ${JSON.stringify(ctx)})`);
   check(target === "_blank" && features === "noopener,noreferrer", `in a new tab, without opener or referrer (${target}, ${features})`);
@@ -114,7 +114,8 @@ try {
     const posts = asked.filter((x) => x.method !== "GET" && /cocalc\.ai/.test(x.url));
     const filled = await ev(`[...document.querySelectorAll("input, textarea")].map((e) => e.value).join(" | ").slice(0, 400)`);
     check(!posts.some((x) => /support|ticket/i.test(x.url)), `live: CoCalc's form, opened filled in, sends no ticket without a click (${posts.map((x) => x.method + " " + x.url.slice(0, 80)).join(", ") || "no POSTs"})`);
-    check(filled.includes(SUBJECT), `live: the form is filled in (${JSON.stringify(filled.slice(0, 160))})`);
+    const text = await ev(`document.body.innerText + " " + [...document.querySelectorAll("textarea, [contenteditable]")].map((e) => e.value ?? e.textContent).join(" ")`);
+    check(filled.includes(SUBJECT) && text.includes("ModuleNotFoundError"), `live: the form is filled in, subject and body (${JSON.stringify(filled.slice(0, 160))})`);
   }
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));

@@ -192,7 +192,7 @@ try {
   for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
   ok(await until("window.__opened.length === 1"), "support.draft: the person's click opens the form");
   const [url, target, features] = await ev("window.__opened[0]");
-  ok(target === "_blank" && features === "noopener,noreferrer" && /^https:\/\/cocalc\.ai\/support\/new\?type=task&subject=%5Bsagebrush%5D%20pkg%3A%20Missing%20package%3A%20sympy&body=workspace_read%20works%2C%20but%20sympy%20isn't%20installed\.&url=https%3A%2F%2Fsagebrush\.space%2F&context=Sagebrush%20dev%2C%20notebook%2C%20pairing$/.test(url), `support.draft: in a new tab without opener or referrer, filled in (${url})`);
+  ok(target === "_blank" && features === "noopener,noreferrer" && /^https:\/\/cocalc\.ai\/support\/new\?type=question&subject=%5Bsagebrush%5D%20pkg%3A%20Missing%20package%3A%20sympy&body=workspace_read%20works%2C%20but%20sympy%20isn't%20installed\.&url=https%3A%2F%2Fsagebrush\.space%2F&context=Sagebrush%20dev%2C%20notebook%2C%20pairing$/.test(url), `support.draft: in a new tab without opener or referrer, filled in (${url})`);
   ok(!(await ev(`!!document.querySelector("#supportdraft")`)), "support.draft: the card goes once opened");
   sock.removeEventListener("message", onNet);
 
