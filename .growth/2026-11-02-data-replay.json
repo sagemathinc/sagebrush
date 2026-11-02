@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "reason": "Data replay layer M1 (replay-layer r2): lib/_sbdata.py and Sagebrush's own urllib.request/urllib.error, with urllib.parse and ipaddress vendored unchanged from CPython 3.14, each in a lazy source-only group of its own (mod-urllib, mod-ipaddress, mod-sbdata: new bundles with budgets.json entries; daybreak2 PLAN SIZE CLEAR aa2abd81/d1ebd732). The CLI carries the new sources (lib.gen.js, pyjs.cjs); the worker grows by the library manifest's new entries and four _fs natives (data_root, read_nofollow with its native 50,000,000-byte max check, lstat_kind, realpath); the notebook +132 by the runner broker's exact fetch allowlist (G-10, __SB_RUNNER_FETCH__), one name per new group; its ceiling raised 233458 -> 233526 (daybreak2, option a). Measured with CI's bun 1.4.4 tool and Node 24.21.0: master e6f391dc against the merge 762dd892 (#459's CI1 revision); cli/pyjs.cjs +50237 marked 50365 (128 B for drift), the other rows exact; the notebook ceiling 233526 -> 233566 (master's 233434 + 132).",
+  "reason": "Data replay layer M1 (replay-layer r2): lib/_sbdata.py and Sagebrush's own urllib.request/urllib.error, with urllib.parse and ipaddress vendored unchanged from CPython 3.14, each in a lazy source-only group of its own (mod-urllib, mod-ipaddress, mod-sbdata: new bundles with budgets.json entries; daybreak2 PLAN SIZE CLEAR aa2abd81/d1ebd732). The CLI carries the new sources (lib.gen.js, pyjs.cjs); the worker grows by the library manifest's new entries and four _fs natives (data_root, read_nofollow with its native 50,000,000-byte max check, lstat_kind, realpath); the notebook +132 by the runner broker's exact fetch allowlist (G-10, __SB_RUNNER_FETCH__), one name per new group; its ceiling raised 233458 -> 233526 (daybreak2, option a). Measured by daybreak2 (bun 1.4.4, Node 24.21.0, measure ec7979a4): master d43adff7 against the two-parent probe 5a484d1a of H4 e46f5dbf: lib.gen +48096, pyjs +50461, each marked +128 for drift; notebook +132 (ceiling 233566), worker +1628.",
   "bytes": {
-    "cli/lib.gen.js": 48080,
-    "cli/pyjs.cjs": 50365,
+    "cli/lib.gen.js": 48224,
+    "cli/pyjs.cjs": 50589,
     "engine/sagebrush-notebook.js": 132,
     "engine/sagebrush-worker.js": 1628
   }
