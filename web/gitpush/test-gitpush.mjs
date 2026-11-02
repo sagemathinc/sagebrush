@@ -27,7 +27,9 @@ git("-C", bare, "config", "http.receivepack", "true");
 git("-C", bare, "symbolic-ref", "HEAD", "refs/heads/sagebrush/proj");
 // (M2-SEC-1's overlap check: two more repositories, A's private and B's public)
 const bareA = join(tmp, "srv", "alice", "private.git"), bareB = join(tmp, "srv", "bob", "public.git");
-for (const b of [bareA, bareB]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
+// (M4B-DATA-1's check: a repository whose owner is named "fetch", as the copy's scratch folder once was)
+const bareF = join(tmp, "srv", "fetch", "notes.git");
+for (const b of [bareA, bareB, bareF]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
 
 // (the stand-in proxy: the same routes as worker.mjs, CORS for the page, git http-backend behind; every request's
 // Authorization recorded)
@@ -287,7 +289,20 @@ try {
     const noToken = await err(m.call(url, "begin", { ...common, repo: "https://github.com/carol/none.git", folder: "/c", branch: "sagebrush/c" }));
     const again = await m.call(url, "begin", { ...common, repo: B, folder: "/public", branch: "sagebrush/public" });
     await m.call(url, "abort", { run: again.run });
-    return { second, wrong, wrongEnd, after, noToken, done: !!done.commit, distinct: a.run !== b.run && b.run !== again.run };
+    // (M4B-DATA-1) a push to an owner named "fetch", then a copy (whose scratch was /fetch): the push's local
+    // repository and its history still there after
+    const F = "https://github.com/fetch/notes.git", O = "https://github.com/octo/notes.git";
+    await m.call(url, "setToken", { scope, repo: F, token: ${JSON.stringify(TOKEN)} });
+    await m.call(url, "setToken", { scope, repo: O, token: ${JSON.stringify(TOKEN)} });
+    const f = await m.call(url, "begin", { ...common, repo: F, folder: "/f", branch: "sagebrush/f" });
+    await m.call(url, "put", { run: f.run, files: [{ path: "kept.txt", bytes: new TextEncoder().encode("kept") }] });
+    const fdone = await m.call(url, "end", { run: f.run });
+    const cp = await m.call(url, "fetchBranch", { scope, repo: O, branch: "agent/x", proxy: ${JSON.stringify(proxyUrl)} });
+    await m.call(url, "fetchDone", { id: cp.id });
+    const flog = await m.call(url, "log", { scope, repo: F, branch: "sagebrush/f" });
+    const ffiles = await m.call(url, "files", { scope, repo: F, branch: "sagebrush/f", oid: fdone.commit });
+    return { second, wrong, wrongEnd, after, noToken, done: !!done.commit, distinct: a.run !== b.run && b.run !== again.run,
+      fetchKept: flog.length === 1 && flog[0].oid === fdone.commit && JSON.stringify(ffiles.files) === '["kept.txt"]', copied: cp.files.length };
   })()`);
   check(/Another push is under way here/.test(ov.second), "(M2-SEC-1) a second begin while one runs is refused: " + ov.second);
   check(/no longer under way/.test(ov.wrong) && /no longer under way/.test(ov.wrongEnd), "…a put or end naming another run is refused: " + ov.wrong + " / " + ov.wrongEnd);
@@ -295,6 +310,7 @@ try {
   check(git("-C", bareB, "for-each-ref").trim() === "", "…and B's repository got nothing");
   check(/no longer under way/.test(ov.after), "…a request for the ended run is refused");
   check(/Save a token/.test(ov.noToken) && ov.distinct, "…the worker is free again after an end, an abort, and a begin that failed");
+  check(ov.fetchKept && ov.copied > 0, "(M4B-DATA-1) a copy leaves the local repository of an owner named fetch, and its history, as they were: " + JSON.stringify({ kept: ov.fetchKept, copied: ov.copied }));
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));
