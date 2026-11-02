@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "B3 (William: the files sidebar's toggle is Sagebrush's logo and an arrow, and the sidebar resizes): web/workspace/sidebar-chrome.ts (new), web/index.html and web/board/page.ts are in the CLI's embedded site, so cli/pyjs.cjs grows. Measured locally with bun 1.4.4 + node 24.21.0 (size-record.sh) on master 2e53a56d against the two-parent merge probe 042a52f2 of cbe38aaf: +7436 B; ccb7b6ae adds box-sizing:border-box (22 B) to the board's sidebar. Marker = 7436 + 22 + 128.",
+ "bytes": {
+  "cli/pyjs.cjs": 7586
+ }
+}
