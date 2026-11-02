@@ -91,9 +91,9 @@ At base a931ee43, every A–F row fails at import (`ModuleNotFoundError: No modu
 - `make.py`, `mutants.json` and `HARNESS.md` are listed by sha256 in the packet's SHA256SUMS.
 - `fixtures-manifest.txt` lists every file the generator writes (path, type, size and sha256; symlink targets; FIFOs by type), with its sha256 in SHA256SUMS. A fixture change shows up as a different manifest.
 
-## The review fixes on 5da953fe (family R, 46 rows)
+## The review fixes on 5da953fe (family R, 47 rows)
 
-The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 46, for **208 CLI rows**. The H rows are H1–H6. That makes 215 tests.
+The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and the grader's row rulings. With them, the counts are A 35, B 61, C 16, D 14, E 22, F 14 and R 47, for **209 CLI rows**. The H rows are H1–H6. That makes 216 tests.
 
 - **R1–R5:** `_fs.lstat_kind` is `none` only for ENOENT. Any other error is `error`.
   - R1 is EACCES: a directory with no search permission. It holds only for a non-root user. As root, the row FAILS; it never skips.
@@ -102,15 +102,15 @@ The reviews: astra RP-SEC-1/2, astra3 RP-CODE-1/2/3, daybreak3 LIMIT-M1-1, and t
   - R4 is the ENOENT control.
   - R5 is the ancestor control. The nearest marker's inspection errors (via the real helper, on an ELOOP path) while a valid snapshot sits above it, and the result is `invalid-snapshot`, never the ancestor's bytes.
 - **R6–R15:** numbers and ports accept ASCII digits only.
-  - R6–R11: an Arabic-Indic `٣` or a superscript `²` in the manifest's version, revision and size.
+  - R6–R11: the manifest's version, revision and size each written as ONE non-ASCII digit, an Arabic-Indic `٣` or a superscript `²`. The value starts with it, so these reach the number-start check.
   - R12–R15: `٣`, `²`, a fullwidth `１` and `٣٣` in a port. The ASCII gate refuses these first, so the port's ASCII-digit check is defense in depth.
 - **R16–R31:** `_fs.read_nofollow`'s `max` must be an integer in 0..50,000,000, checked natively before any open.
   - The boundary rows: 0, a file of exactly max bytes vs one of max+1, and 50,000,000 vs 50,000,001.
   - The invalid values: -1, 1.5, `10**30`, `'x'`, True, None, nan, inf and -inf.
   - R30 is the no-open witness: a missing path with an over-ceiling max gives `bad-max` (without the check, it would give `unreadable`). R31 is the missing-path control.
-- **R42–R46** (grader P2): a manifest number that starts with `٣` (R42), and direct calls past the ASCII gate: `_authority('http', 'h:٣' / 'h:²' / 'h:１')` (R43–R45) and `_host('a.٣')` (R46). Each DIGITS line, by trace:
-  - the port line is killed by R43–R45, and the number loop by R6–R11 and R42;
-  - the number-start line alone is EQUIVALENT: `number()` refuses an empty ASCII digit run as not-json, the same result;
+- **R42–R47** (grader P2; R42 and R47 corrected per astra3): two manifest numbers whose first digit is ASCII and whose second is not, version `1٣` (R42) and size `1²` (R47), so the number LOOP meets the non-ASCII digit. Plus direct calls past the ASCII gate: `_authority('http', 'h:٣' / 'h:²' / 'h:１')` (R43–R45) and `_host('a.٣')` (R46). Each DIGITS line, by trace:
+  - the port line is killed by R43–R45, and the number-loop line by R42 and R47. Alone, it is killed by R42 only (13 under isdigit or isdecimal); R6–R11 stop at the number-start check;
+  - the number-start line alone is EQUIVALENT: with it mutated alone, `number()` scans zero ASCII digits and refuses as not-json, the same result. Under the full mutant, it and the loop together kill R6–R11;
   - the IP last-label line alone is EQUIVALENT: `_LABEL` (`[a-z0-9]`, ASCII only) refuses a non-ASCII label first, which R46 pins.
 - **R32–R41:** an escaped lone or reversed surrogate in a url, an entry key or a meta field is `REFUSED surrogate` by the parser, never an uncaught `UnicodeEncodeError`.
   - R40 is the valid-pair control: the pair in a meta field gives `OK 1`.

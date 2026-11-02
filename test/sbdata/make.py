@@ -530,7 +530,7 @@ R("R5", "import _fs\nreal = _fs.lstat_kind\nloop = _fs.realpath('..') + '/loop/x
         "_sbdata._fs = W()\nfetch(%r)\n" % U, "URLERROR invalid-snapshot canary=0", ancestor_with_loop)
 rows["R5"]["cwd"] = "root/a"
 
-# (R6-R11: a manifest number written with an Arabic-Indic decimal digit or a
+# (R6-R11: a manifest number written as one Arabic-Indic decimal digit or one
 # superscript digit, in version, revision and size: not JSON)
 for i, (field, ch) in enumerate([(f, c) for f in ("version", "revision", "size") for c in ("\u0663", "\u00b2")]):
     base_m = manifest({"GET " + U: entry(U, size=1)})
@@ -597,10 +597,16 @@ sur("R40", "OK 1", recorded_by="fixture" + PAIR)
 sur("R41", "REFUSED bad-value:url", url=U + PAIR)
 
 # (R42-R46: grader P2: _authority and _host called directly, past the ASCII
-# gate, so each DIGITS line is reached with a non-ASCII digit; R42: a number
+# gate, so each DIGITS line is reached with a non-ASCII digit; R42 and R47:
+# a number whose first digit is ASCII and whose second is not (1٣, 1²), so the
+# number LOOP meets the non-ASCII digit (R6-R11 stop at the number start)
 # that STARTS with one)
-B("R42", "REFUSED not-json", raw=json.dumps(manifest({"GET " + U: entry(U)}), ensure_ascii=False).replace('"version": 1', '"version": \u0663').encode("utf-8"))
-rows["R42"]["family"] = "R"
+for rid, field, val in (("R42", "version", "1\u0663"), ("R47", "size", "1\u00b2")):
+    text = json.dumps(manifest({"GET " + U: entry(U, size=1)}), ensure_ascii=False)
+    old = '"%s": 1' % field
+    assert text.count(old) == 1
+    B(rid, "REFUSED not-json", raw=text.replace(old, '"%s": %s' % (field, val)).encode("utf-8"))
+    rows[rid]["family"] = "R"
 
 
 def direct(rid, call, exp):
