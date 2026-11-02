@@ -29,7 +29,7 @@ if (!checkOnly) {
   if (!existsSync(join(src, "index.html"))) throw new Error("no web/dist: run `bun web/build.ts` first");
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
-  for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"])
+  for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"])
     cpSync(join(src, f), join(out, f), { recursive: true });
   // the Terminal (⋯ ▸ Terminal, web/shell/): its page module and worker, and the bash package set web/build.ts
   // builds (shell/preview-set.json names it; pkgset/<S>.json pins its package in pkg/), served from the app's own
