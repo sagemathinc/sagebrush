@@ -1,27 +1,24 @@
-// The LaTeX editor's entry from the notebook page (index.html), in a build with it only (__SB_LATEX__; web/build.ts,
-// SAGEBRUSH_LATEX_PREVIEW). Kept small: it is in the page's own script (plan sbspace r5 §5: the DEV bootstrap delta).
-// On only on an allowed host (dev.sagebrush.space exactly; the loopback hosts too in a "test" build), and then only
-// with ?latex=1 or localStorage["sagebrush-latex-preview"] === "1"; nothing else can turn it on. On, it installs the
-// hooks the file browser and the preview call (__sbTex, __sbTexP) and, for /?tex=<fid>, fetches the page
-// (dist/sagebrush-latex.js) and mounts it. Off with ?tex=: a one-line note offering the file's preview.
+// The LaTeX editor's entry from the notebook page (index.html), in a build with it (__SB_LATEX__, on by default:
+// web/build.ts). Kept small: it is in the page's own script. On on the hosts that serve the editor's files (the build's
+// list: sagebrush.space and dev.sagebrush.space; the loopback hosts too in a "test" build), for everyone: no flag (William,
+// Nov 2: on by default). On, it installs the hooks the file browser and the preview call (__sbTex, __sbTexP) and, for
+// /?tex=<fid>, fetches the page (dist/sagebrush-latex.js) and mounts it. Elsewhere (the CLI's page, the desktop app),
+// with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
 import { openPreview } from "../workspace/preview";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
-/** Whether the editor is on here: the host exactly, then the URL flag (byUrl: ?latex=1) or the stored one.
- * (hosts: the build's define, web/build.ts; the unit tests pass their own) */
-export function latexOn(host: string, byUrl: boolean, read: () => string | null, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
-  let stored = false;
-  try { stored = read() == "1"; } catch {}
-  return hosts.includes(host) && (byUrl || stored);
+/** Whether the editor is on here: the host exactly (hosts: the build's define, web/build.ts; the unit tests pass their own). */
+export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
+  return hosts.includes(host);
 }
 
 /** Called once by the notebook page; true if the LaTeX page took the page over. */
 export async function latexBoot(ws: Workspace | null) {
-  const p = new URLSearchParams(location.search), tex = p.get("tex"), byUrl = p.get("latex") == "1";
+  const p = new URLSearchParams(location.search), tex = p.get("tex");
   const g: any = globalThis, el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; }, isTex = (e: Entry) => /\.tex$/i.test(e.path);
-  if (!latexOn(location.hostname, byUrl, () => localStorage.getItem("sagebrush-latex-preview"))) {
+  if (!latexOn(location.hostname)) {
     if (tex === null) return false;
     // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
     const d = el("p", "The LaTeX editor isn't enabled here."), at = ws && (await ws.pathOfFile(tex).catch(() => null));
@@ -30,12 +27,11 @@ export async function latexBoot(ws: Workspace | null) {
     document.body.prepend(d);
     return false;
   }
-  const q = byUrl ? "?latex=1" : "";
   // the file browser: a .tex row with a fid opens the editor; without one, its preview (which says why)
   g.__sbTex = (e: Entry, tab?: boolean) => {
     // (a fid is hex: nothing to encode)
     if (!isTex(e) || !e.fid) return false;
-    const url = "/?tex=" + e.fid + q.replace("?", "&");
+    const url = "/?tex=" + e.fid;
     tab ? open(url, "_blank", "noopener") : location.assign(url);
     return true;
   };
@@ -76,6 +72,6 @@ export async function latexBoot(ws: Workspace | null) {
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(page)).mount(root, { ws, fid: tex, back: () => location.assign("/" + q) });
+  await (await import(page)).mount(root, { ws, fid: tex, back: () => location.assign("/") });
   return true;
 }
