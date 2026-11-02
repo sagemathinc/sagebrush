@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { chmodSync } from "node:fs";
 import { cmpVersion, cpuChoice, measure, measuredEnv, measureTree, median, order, paired, parseVersion, resolveRef, resolveSides, selectBase, summary, ROUNDS } from "./install-timing.mjs";
 import { parsePack, runNpm } from "./npm-pack-metrics.mjs";
+import { targetsOf } from "./web-tests.mjs";
 
 let passed = 0, failures = 0;
 function check(name, ok, detail = "") {
@@ -157,7 +158,8 @@ try {
     check("contract: the summary and upload always run", /name: the summary\n\s+if: always\(\)/.test(wf) && /upload-artifact@[0-9a-f]{40} # v4\.\d+\.\d+\n\s+if: always\(\)/.test(wf));
     check("contract: the same pins as checks", wf.includes('node-version: "24.21.0"') && wf.includes('bun-version: "1.4.4"'));
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
-    check("contract: these tests run in checks", ci.includes("node scripts/test-install-timing.mjs"));
+    // (by their test-discovery target: scripts/web-tests.mjs)
+    check("contract: these tests run in checks", targetsOf("scripts/test-install-timing.mjs").some((t) => ci.includes(`node scripts/web-tests.mjs run ${t}\n`)));
   }
   // ---- a real smoke of every measure, under a hostile parent environment (§7)
   const pack = (pkgDir, out) => {
