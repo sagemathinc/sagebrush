@@ -54,10 +54,29 @@ function changedFiles() {
 const files = process.env.CI_PATHS_FILES
   ? readFileSync(process.env.CI_PATHS_FILES, "utf8").split("\n").filter(Boolean)
   : changedFiles();
-const full = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "push" && ref === "refs/heads/master");
 const matches = (patterns) => files.some((file) => patterns.some((pattern) => pattern.test(file)));
 const every = (patterns) => files.length > 0 && files.every((file) => patterns.some((pattern) => pattern.test(file)));
+
+// The two tiers (CI speed plan option 2, William, Nov 2 2026): a pull request runs the fast tier, unless it has the
+// `full-ci` label or changes a path where a bug loses data or trust: sync, sharing and security (CSP, HTML
+// sanitizing), and data loss (save, Trash, export, purge).  Then it runs the full suite, as every master push, the
+// nightly schedule and a dispatch do.  A save or Trash change inside web/index.html is not seen here: its author adds
+// the label.  (test/ci-paths.test.ts has a case for each path class)
+const fullTierPaths = [
+  // sync and its journals and merges
+  /^web\/sync\//, /^web\/sync-protocol\//, /^web\/journal\//, /^web\/workspace\/[^/]*sync[^/]*$/,
+  /^web\/notebook\/(?:sync-rows|journal|journal-rows|db-merge3|p2c-merge|merge3)[^/]*$/, /^web\/board\/(?:syncdb|journal|merge)\.ts$/,
+  // sharing and security
+  /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
+  // data loss: save, Trash, export, purge, and the workspace's store and its migrations
+  /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
+  /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
+  /^scripts\/check-export-size\.mjs$/,
+];
+const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
+const fullTier = event === "pull_request" && (labels.includes("full-ci") || matches(fullTierPaths));
+const full = event === "workflow_dispatch" || event === "schedule" ||
+  (event === "push" && ref === "refs/heads/master") || fullTier;
 
 // Only these paths are certified as prose-only.  In particular, examples/*.md
 // is executable board input and must not be treated as documentation.
@@ -154,7 +173,7 @@ const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "pull_request" && (matches(webkitPaths) || fallback));
+  (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
 // whenever they, its registry, baseline or tool change, even when the node
