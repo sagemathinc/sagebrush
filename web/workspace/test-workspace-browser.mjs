@@ -1189,6 +1189,51 @@ try {
     }
     check(j.fence && j.writer && j.viewOnly && j.said && j.here && !j.inTrash && j.shown === "T1", "T1: open for editing in another tab, Move to Trash here is refused, said as an error, and nothing moves: " + JSON.stringify(j));
   }
+  // B2 (William): rows selected by their checkboxes; shift-click selects a range; the bar selects or clears all and
+  // downloads the selected files; Esc clears; a row no longer drawn leaves the selection
+  {
+    if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+    await ev(`${W}.create("/b2 notes.txt", { content: "b2" }).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/b2 notes.txt"))})`);
+    const sel = "#wssidebar .frow[data-sel]";
+    const paths = () => ev(`[...document.querySelectorAll(${JSON.stringify(sel)})].map((r) => r.dataset.path)`);
+    const picked = () => ev(`[...document.querySelectorAll("#wssidebar .frow.picked")].map((r) => r.dataset.path)`);
+    const bar = () => ev(`(() => { const b = document.querySelector("#wssidebar .fsel"), a = b.querySelector("input"); return { hidden: b.hidden, text: b.querySelector("span").textContent, all: a.checked, some: a.indeterminate }; })()`);
+    const box = (p, shift = false) => ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))} + " .sel").dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: ${shift} })); return 1; })()`);
+    const ps = await paths();
+    const b0 = await bar();
+    // (Recent's rows: those before the "This browser" heading)
+    const recent = await ev(`(() => { const out = []; for (const el of document.querySelectorAll("#wssidebar .ftree > *")) { if (el.classList.contains("fgrp") && el.textContent !== "Recent") break; if (el.classList.contains("frow")) out.push(!!el.querySelector(".sel")); } return out; })()`);
+    check(ps.length >= 4 && b0.hidden && recent.length > 0 && !recent.some(Boolean), "B2: the tree's rows have checkboxes (Recent's don't), the bar hidden with nothing selected: " + JSON.stringify({ n: ps.length, b0, recent }));
+    await box(ps[0]);
+    const b1 = await bar(), p1 = await picked();
+    check(!b1.hidden && b1.text === "1 selected" && b1.some && JSON.stringify(p1) === JSON.stringify([ps[0]]) && (await ev(`document.querySelector(${JSON.stringify(rowSel(ps[0]))} + " .sel").getAttribute("aria-checked")`)) === "true", "B2: a checkbox's click selects its row (not opened), the bar says 1 selected: " + JSON.stringify({ b1, p1 }));
+    await box(ps[3], true);
+    const p2 = await picked();
+    check(JSON.stringify(p2) === JSON.stringify(ps.slice(0, 4)) && (await bar()).text === "4 selected", "B2: a shift-click selects the range from the last one clicked, in the order shown: " + JSON.stringify({ p2, want: ps.slice(0, 4) }));
+    await box(ps[1]);
+    check(JSON.stringify(await picked()) === JSON.stringify([ps[0], ps[2], ps[3]]), "B2: a click on a selected row's checkbox clears just that one");
+    await shot("b2-selected");
+    // (the bar: Download the selected files only (one here), said; the clicks counted, nothing really saved)
+    await ev(`(() => { window.__b2dl = []; const c = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) window.__b2dl.push(this.download); else c.call(this); }; return 1; })()`);
+    await ev(`(() => { const b = document.querySelector("#wssidebar .fsel"); b.querySelector("input").click(); return 1; })()`);
+    const b3 = await bar();
+    check(b3.all && !b3.some && b3.text === `${ps.length} selected`, "B2: the bar's checkbox selects all shown: " + JSON.stringify(b3));
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Download").click(); return 1; })()`);
+    const files = await ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "file" && ${JSON.stringify(ps)}.includes(e.path)).map((e) => e.path.split("/").pop()).sort())`);
+    check(await until(`JSON.stringify([...window.__b2dl].sort()) === ${JSON.stringify(JSON.stringify(files))} && /downloaded/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`) && files.includes("b2 notes.txt"), "B2: Download downloads the selected files (not folders, notebooks or boards) and says so: " + JSON.stringify({ files, got: await ev("window.__b2dl") }));
+    // (Esc on a row clears it; Space on a focused row selects it)
+    await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(ps[1]))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    check((await bar()).hidden && (await picked()).length === 0, "B2: Esc clears the selection, the bar hidden");
+    await ev(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(ps[1]))}); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })); return 1; })()`);
+    check(JSON.stringify(await picked()) === JSON.stringify([ps[1]]), "B2: Space on a focused row selects it");
+    // (a row no longer drawn leaves the selection: a search that hides it)
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "b2 notes"; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await until(`document.querySelectorAll(${JSON.stringify(sel)}).length === 1`);
+    const b4 = await bar();
+    check(ps[1] === "/b2 notes.txt" ? b4.text === "1 selected" : b4.hidden, "B2: a row a search hides leaves the selection: " + JSON.stringify({ b4, was: ps[1] }));
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Clear").click(); return 1; })()`);
+  }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);
