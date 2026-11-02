@@ -76,6 +76,8 @@ export function draftURL(d: Draft, how: { mode: string; via: "webmcp" | "pairing
   return `https://cocalc.ai/support/new?type=${q(COCALC_TYPE[d.kind])}&subject=${q(`[sagebrush] ${d.kind}: ${d.subject}`)}&body=${q(d.body)}&url=${q("https://sagebrush.space/")}&context=${q(draftContext(how.mode, how.via))}`;
 }
 
+// (48px from the bottom: above the site's early-alpha notice, whose variable this doesn't name, since `sagebrush
+// notebook` takes the notice out of its page by that name: scripts/build-cli.mjs)
 let card: HTMLElement | null = null;
 
 /** Show the draft as the page's one card (a new draft replaces the one shown). */
@@ -87,7 +89,7 @@ export function showSupportDraft(d: Draft, how: { mode: string; via: "webmcp" | 
   el.setAttribute("aria-label", "A support request an agent drafted");
   el.setAttribute("aria-live", "polite");
   el.style.cssText =
-    "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + var(--sb-alpha-banner, 0px));z-index:999;max-width:min(560px,calc(100vw - 24px));box-sizing:border-box;font:14px system-ui,sans-serif;color:#1f2a1c;background:#fff;border:1px solid #cfd5c8;border-radius:10px;padding:12px 14px;box-shadow:0 4px 18px rgba(0,0,0,.18)";
+    "position:fixed;left:50%;transform:translateX(-50%);bottom:48px;z-index:999;max-width:min(560px,calc(100vw - 24px));box-sizing:border-box;font:14px system-ui,sans-serif;color:#1f2a1c;background:#fff;border:1px solid #cfd5c8;border-radius:10px;padding:12px 14px;box-shadow:0 4px 18px rgba(0,0,0,.18)";
   const p = document.createElement("p");
   p.style.cssText = "margin:0 0 4px";
   p.append("An agent drafted a support request: ");
