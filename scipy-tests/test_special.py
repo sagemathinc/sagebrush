@@ -143,7 +143,8 @@ SCIPY_WRONG = {("betainc", 0.5, 0.5, 1 - 1e-9), ("betaincc", 0.5, 0.5, 1 - 1e-9)
 INV_Y = [0, 1e-20, 0.001, 0.1, 0.5, 0.9, 1 - 1e-12, 1, -0.1, 1.1]
 for name in ("gammaincinv", "gammainccinv"):
     f = getattr(sc, name)
-    for a in [0, 0.05, 0.5, 1, 2.5, 30, 1e4, -1, math.inf]:
+    # (and a so large that the quantile rounds to a, up to the largest double: daybreak3's B1)
+    for a in [0, 0.05, 0.5, 1, 2.5, 30, 1e4, -1, math.inf, 1e34, 1.7976931348623157e308]:
         for y in INV_Y:
             # (at a = 0 the ends and outside the domain only: inside it SciPy gives nan or 0 by y)
             if a == 0 and 0 < y < 1:
