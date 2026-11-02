@@ -1,0 +1,40 @@
+# floor/ceil of an exact constant is an Integer (floor(sqrt(1073)) = 32 in Integer Ring; range() takes it), as in Sage;
+# a symbolic argument stays symbolic. From the pcimc survey (07-Computing_DL, 14-Quad_Sieve_Index_Calc). The .out is
+# SageMath 10.9's output of these statements, verbatim (VM2, ~/sage-conda; oracle output c30b5eb3...), minus S26
+# (ceiling(): Sage 10.9 has no ceiling, a NameError; Sagebrush keeps its alias, unchanged here).
+def show(n, f):
+    try:
+        v = f()
+        print('S%02d %s | %s' % (n, repr(v).replace('\n', ' ; '), parent(v)))
+    except Exception as e:
+        print('S%02d ERR %s: %s' % (n, type(e).__name__, str(e)[:80]))
+var('y')
+show(1, lambda: floor(sqrt(1073)))
+show(2, lambda: floor(sqrt(1073)) + 1)
+show(3, lambda: ceil(sqrt(2 * 1073)) - 1)
+show(4, lambda: list(range(1, floor(sqrt(10)) + 1)))
+show(5, lambda: floor(pi))
+show(6, lambda: ceil(pi))
+show(7, lambda: floor(7/2))
+show(8, lambda: floor(-7/2))
+show(9, lambda: ceil(7/2))
+show(10, lambda: floor(-sqrt(2)))
+show(11, lambda: ceil(-sqrt(2)))
+show(12, lambda: floor(sqrt(16)))
+show(13, lambda: floor(log(10^6, 2)))
+show(14, lambda: floor(log(10^6, base=2)))
+show(15, lambda: floor(e^3))
+show(16, lambda: floor(1.5))
+show(17, lambda: floor(-1.5))
+show(18, lambda: ceil(1.5))
+show(19, lambda: floor(5))
+show(20, lambda: floor(y))
+show(21, lambda: ceil(y + 1))
+show(22, lambda: floor(sqrt(y)))
+show(23, lambda: floor(sqrt(10^40 + 1)))
+show(24, lambda: floor(sqrt(2) * 10^20))
+show(25, lambda: floor(sqrt(1073)/2 * log(1073, base=2)))
+show(27, lambda: floor(10^6 / 3))
+show(28, lambda: floor(sqrt(1073)).is_prime())
+show(29, lambda: [i for i in range(floor(sqrt(30)))])
+show(30, lambda: floor(2^(1/3) * 100))
