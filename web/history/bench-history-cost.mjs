@@ -14,8 +14,9 @@
 // Also: the r6.4 backstop, a transaction wait <= 250 ms at p99, judged conservatively on the end-to-end p99 of head and
 // set (the save's latency contains its transaction's wait); every raw p95/p99 and the worst-of-5 reported.
 // STOPs (for daybreak3 + the grader, never a verdict): performance.now()'s resolution over 0.1 ms in any run (measured
-// in the page before each run); a bimodal configuration: across its five rounds, max p95 > 2 x min p95 AND max - min >
-// 5 ms (declared here; the Firefox modes of the INFO run, 4.5 vs 27-32 ms, are what it catches).
+// in the page before each run); the instability/spread STOP (daybreak3, the grader): any configuration whose five round
+// p95s have max > 2 x min AND max - min > 5 ms, decided before the medians; its boundary controls (equal, below, above
+// for each conjunct) run before anything else, and a wrong one is BAD.
 // Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
 // (its default rounds performance.now() to 1 ms), the same for every configuration.
 // Workloads:
@@ -149,6 +150,19 @@ async function firefox() {
   return { ev: (expression) => page.evaluate(expression), close: () => browser.close(), version: browser.version() };
 }
 
+// (the instability/spread STOP, and its boundary controls: each conjunct at equality is NOT past, just above is)
+const spreadStop = (xs) => { const hi = Math.max(...xs), lo = Math.min(...xs); return hi > 2 * lo && hi - lo > 5; };
+for (const [xs, want, what] of [
+  [[5, 10, 6, 7, 8], false, "max = 2 x min exactly (and max - min = 5): not past"],
+  [[5, 10.01, 6, 7, 8], true, "max just above 2 x min, max - min just above 5: past"],
+  [[6, 12, 7, 8, 9], false, "max = 2 x min exactly, max - min 6 > 5: not past (the ratio conjunct)"],
+  [[6, 12.01, 7, 8, 9], true, "max just above 2 x min, max - min > 5: past"],
+  [[4, 9, 5, 6, 7], false, "max > 2 x min, max - min = 5 exactly: not past (the spread conjunct)"],
+  [[4, 9.01, 5, 6, 7], true, "max > 2 x min, max - min just above 5: past"],
+  [[2, 6, 3, 3, 3], false, "max 3 x min but max - min 4 < 5: not past"],
+  [[30, 59, 40, 40, 40], false, "max - min 29 > 5 but max < 2 x min: not past"],
+  [[4, 4, 4, 4, 4], false, "no spread: not past"],
+]) if (spreadStop(xs) !== want) die(`the spread STOP's boundary control: ${what} (${xs.join(", ")})`);
 const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5;
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const report = { master, statistic: "daybreak3: median of within-round paired p95 deltas, T = min(1, max(0.5, 0.05 B))", browsers: {} };
@@ -173,8 +187,8 @@ try {
       const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...p95(c))]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)));
-      const bimodal = CONFIGS.filter((c) => { const xs = p95(c), hi = Math.max(...xs), lo = Math.min(...xs); return hi > 2 * lo && hi - lo > 5; });
-      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(bimodal.length ? [`bimodal: ${bimodal.join(", ")}`] : [])];
+      const spread = CONFIGS.filter((c) => spreadStop(p95(c)));
+      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(spread.length ? [`instability/spread: ${spread.join(", ")}`] : [])];
       const valid = D.aa <= T && D.delay > T, pass = D.head <= T, backstop = p99.head <= 250 && p99.set <= 250;
       const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
       verdicts.push(verdict);
