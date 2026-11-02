@@ -5,9 +5,10 @@ over lib/_special.py's incomplete gamma, beta and Stirling functions.
 
 After two algorithms SciPy's xsf carries (BSD 3-Clause, see NOTICE.md):
 Cephes's incbet (Moshier: its power series, continued fractions and their
-choice) and CDFLIB's translation of DiDonato and Morris's Algorithm 708 (ACM
-TOMS 18, 1992: bgrat, bfrac, basym and brcomp's prefactor); the inverses'
-starts are Numerical Recipes' (invbetai, invgammp).  The accuracy each
+choice, followed closely) and CDFLIB's translation of DiDonato and Morris's
+Algorithm 708 (ACM TOMS 18, 1992: bgrat, bfrac and basym, followed nearly line
+by line; brcomp's prefactor in a form of its own); the inverses are
+Sagebrush's, from Numerical Recipes' starts (invbetai, invgammp).  The accuracy each
 docstring states is measured against mpmath in test/special.test.ts.
 (Under CPython, use SciPy itself.)"""
 
