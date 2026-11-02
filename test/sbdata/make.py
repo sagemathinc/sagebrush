@@ -380,6 +380,12 @@ D("D9", "URLERROR invalid-snapshot canary=0", poisoned("manifest-symlink"), cwd=
 D("D10", "URLERROR no-snapshot canary=0", lambda b: (snap_at(os.path.join(b, "root/c")), os.makedirs(os.path.join(b, "root/a"))), cwd="root/a")
 D("D11", "URLERROR outside-root canary=0", lambda b: (snap_at(os.path.join(b, "root")), snap_at(os.path.join(b, "out"))), cwd="out")
 D("D12", "URLERROR outside-root canary=0", lambda b: (snap_at(os.path.join(b, "root")), snap_at(os.path.join(b, "out")), os.symlink(os.path.join(b, "out"), os.path.join(b, "root/link"))), cwd="root/link")
+# (D12w: D12's layout run in the launcher's worker realm, where os.chdir keeps
+# a LOGICAL cwd (no process.chdir in a Worker): realpath decides containment;
+# the test runs rows marked "worker" as H2b does; grader ruling pending)
+row("D12w", "D", "import os\nos.chdir('link')\nfetch(%r)\n" % U, "URLERROR outside-root canary=0",
+    setup=lambda b: (snap_at(os.path.join(b, "root")), snap_at(os.path.join(b, "out")), os.symlink(os.path.join(b, "out"), os.path.join(b, "root/link"))))
+rows["D12w"]["worker"] = True
 D("D13", "URLERROR outside-root canary=0", lambda b: (os.makedirs(os.path.join(b, "x/ab")), snap_at(os.path.join(b, "x/abc"))), root="x/ab", cwd="x/abc")
 
 # ---------------------------------------------------------------- E: misses, FRED, redaction
