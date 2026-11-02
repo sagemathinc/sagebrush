@@ -842,6 +842,9 @@ try {
       catch (e) { for (const id of ids.slice(checks - c0)) check(false, `${id}: the row threw: ${String(e?.message ?? e).slice(0, 300)}`); }
       finally { await ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; if (sagebrush.shareTest) { sagebrush.shareTest.beforeLeave = undefined; sagebrush.shareTest.beforeAttach = undefined; } window.__leaveGo?.(); return 1; })()`).catch(() => {}); }
     };
+    // (a row whose setup or seam isn't reached stops there: its remaining checks fail at once, rather than each waiting
+    // out its own timeout (a control that takes the seam away then costs seconds, not minutes))
+    const need = (ok, what) => { if (!ok) throw new Error(what); };
     const where = (dir) => ev(`(async () => ({ here: await ${W}.stat(${JSON.stringify(dir)}).then((e) => !!e), inTrash: await ${W}.stat(${JSON.stringify("/Trash/" + dir.slice(1))}).then((e) => !!e) }))()`);
     // (each row's notebooks named after its folder, files and all ("T7 a.ipynb": the page shows the file's name), so no name an earlier row left can stand in)
     const nm = (dir, x) => `${dir.slice(1).replace(/ dir$/, "")} ${x}`, nf = (dir, x) => `${dir}/${nm(dir, x)}.ipynb`;
@@ -858,10 +861,12 @@ try {
     // opens that notebook and gives it the focus.  The stage reached names the path taken)
     for (const [id, dir, large] of [["T7", "/T7 dir", false], ["T8", "/T8 dir", true]]) await row([id, `${id}.restore`], async () => {
       const ready = await setUp(dir, large);
+      need(ready, "its setup wasn't reached");
       const stage = large ? "publishing:large" : "publishing:small";
       await arm([stage]);
       await trashRow(dir);
       const r0 = await at(stage);
+      need(r0, "its seam wasn't reached");
       await navTo(nf(dir, "b"));
       await sleep(800);
       const mid = { shown: await shown(), nav: await navNow(), path: await ev(`window.__b1at.join()`) };
@@ -882,9 +887,11 @@ try {
       await mk(`${dir}/${id} a.ipynb`, `${id} a`);
       if (id === "T9b") await ev(`${W}.create(${JSON.stringify(dir + "/s1/s2/keep.txt")}, { content: "k" }).then(() => 1)`);
       const ready = await openAt(`${dir}/${id} a.ipynb`, `${id} a`);
+      need(ready, "its setup wasn't reached");
       await holdAt("checked");
       await trashRow(dir);
       const r0 = await reached();
+      need(r0, "its seam wasn't reached");
       const p0 = await curPath();
       await ev(`${W}.rename(${JSON.stringify(p0)}, ${JSON.stringify(into)}).then(() => 1)`);
       await release();
@@ -900,9 +907,11 @@ try {
       await mk("/T10 dir/T10 a.ipynb", "T10 a");
       await mk("/T10 c.ipynb", "T10 c");
       const ready = await openAt("/T10 dir/T10 a.ipynb", "T10 a");
+      need(ready, "its setup wasn't reached");
       await holdAt("checked");
       await trashRow("/T10 dir");
       const r0 = await reached();
+      need(r0, "its seam wasn't reached");
       await ev(`(() => { window.__leave = new Promise((r) => (window.__leaveGo = r)); sagebrush.shareTest.beforeLeave = () => window.__leave; return 1; })()`);
       await navTo("/T10 c.ipynb");
       await sleep(400);
@@ -919,10 +928,12 @@ try {
     // the hold let go (the navigation ran), the workspace's lock not held, and the next Move to Trash goes through)
     for (const [id, dir, large] of [["T11", "/T11 dir", false], ["T11L", "/T11L dir", true]]) await row([id], async () => {
       const ready = await setUp(dir, large);
+      need(ready, "its setup wasn't reached");
       const stage = large ? "publishing:large" : "publishing:small";
       await arm([stage], [stage]);
       await trashRow(dir);
       const r0 = await at(stage);
+      need(r0, "its seam wasn't reached");
       await navTo(nf(dir, "b"));
       await sleep(800);
       const mid = await navNow();
@@ -942,9 +953,11 @@ try {
     // move publishes; it isn't opened, said)
     await row(["T12"], async () => {
       const dir = "/T12 dir", ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
       await arm(["lookup"]);
       await trashRow("/T12 dir");
       const r0 = await at("lookup");
+      need(r0, "its seam wasn't reached");
       await navTo(nf(dir, "b"));
       await sleep(800);
       const mid = { shown: await shown(), nav: await navNow() };
@@ -959,9 +972,11 @@ try {
     // the page, before the workspace, and its settling doesn't let the first one's hold go; that is let go once)
     await row(["T13"], async () => {
       const dir = "/T13 dir", ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
       await arm(["publishing:small"]);
       await trashRow("/T13 dir");
       const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
       await navTo(nf(dir, "b"));
       await sleep(400);
       const before = await ev(`sagebrush.trashTest.state().releases`);
@@ -983,9 +998,11 @@ try {
     for (const [id, how] of [["T14a", "open"], ["T14b", "row"], ["T14c", "new"]]) await row([id], async () => {
       const dir = `/${id} dir`;
       const ready = await setUp(dir, false);
+      need(ready, "its setup wasn't reached");
       await arm(["publishing:small"]);
       await trashRow(dir);
       const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
       const was = await shown();
       if (how === "open") await navTo(nf(dir, "b"));
       else if (how === "row") await click(rowSel(nf(dir, "b")));
@@ -1004,15 +1021,18 @@ try {
     // Trash checked right then (held at "leased") is refused; never both)
     await row(["T15"], async () => {
       const ready = await setUp("/T15 dir", false);
+      need(ready, "its setup wasn't reached");
       await mk("/T15 c.ipynb", "T15 c");
       await arm(["publishing:small"]);
       await trashRow("/T15 dir");
       const r0 = await at("publishing:small");
+      need(r0, "its seam wasn't reached");
       await navTo("/T15 c.ipynb");
       await sleep(400);
       await armMore("leased");
       await goOn("publishing:small");
       const r1 = await at("leased");
+      need(r1, "its second seam wasn't reached");
       const rp = await curPath();
       await trashRow(rp);
       const said = await errHas("the page changed meanwhile", 30000);
@@ -1028,9 +1048,11 @@ try {
     // its lease), nothing moved)
     await row(["T16"], async () => {
       const ready = await setUp("/T16 dir", false);
+      need(ready, "its setup wasn't reached");
       await arm(["recovering"]);
       await ev(`(() => { sagebrush.shareTest.beforeAttach = () => { sagebrush.shareTest.beforeAttach = undefined; throw new Error("test: the reopen fails"); }; window.__re = null; sagebrush.trashTest.nav.reopen().then((r) => (window.__re = r)); return 1; })()`);
       const r0 = await at("recovering");
+      need(r0, "its seam wasn't reached");
       await trashRow("/T16 dir");
       const said = await errHas("the page changed meanwhile", 30000);
       const t = await where("/T16 dir");
