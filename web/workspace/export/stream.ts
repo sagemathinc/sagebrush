@@ -115,6 +115,9 @@ class Out {
   }
 }
 
+/** Tests only (test-measure.mjs): the writer itself, to check counting against writing on parts cut anywhere. */
+export const outForTest = (put: (b: Uint8Array) => Promise<void>, pace: Pace, count?: Counter) => new Out(put, pace, count);
+
 /** Slices from a producer, handed on one at a time as the consumer takes them (the producer waits for room); the
  * consumer stopping early (a cap, Cancel) stops the producer at its next slice. */
 export function sliced(produce: (put: (b: Uint8Array) => Promise<void>) => Promise<void>): AsyncIterable<Uint8Array> {
