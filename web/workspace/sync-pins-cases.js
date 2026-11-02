@@ -382,7 +382,9 @@ async function counting(f) {
 // (D11: every transaction on entries reads the large-move record first, one get (r2 §4's adapter cost): a save's five
 // transactions on entries make 5 more requests than before it; PINS.collapseRelease 2 (from 3) keeps the collapsing
 // save at most 60, four under its bound: 38 and 60)
-const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 38, COLLAPSE_WORST = 60;
+// (Stage A L1: the op's history check in the same transaction (web/history/tokens.ts, inert: one hmeta get, A1.3's
+// "inactive is 1") makes every save one request more: 39 and 61, the collapsing save three under its bound)
+const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 39, COLLAPSE_WORST = 61;
 /** 200 overwrites of `path` at a 1 MiB cap: each save's IndexedDB calls, apart for the saves that collapsed. */
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
@@ -447,7 +449,11 @@ async function tail() {
   }
   const p = stats(got.plain), c = stats(got.collapsing), p0 = stats(without.plain), c0 = stats(without.collapsing);
   const same = J(p) === J(p0) && J(c) === J(c0);
-  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= 60 && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
+  // (the call counts are history's INACTIVE cost (what PROD ships); under history's census guard (HISTORY_GUARD=1) history
+  // is active, every save also writing its token: the counts are reported there, judged unguarded; the rest is judged)
+  const guarded = !!window.__historyGuard;
+  const counts = guarded || (p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= COLLAPSE_WORST && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST);
+  check(observed && c.n > 0 && counts && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}${guarded ? " (guarded: counts reported, not judged)" : ""}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
   // (one identity with many pins (kept apart): a release, and a cleanup page, cost the same few calls)
   const recs = await ob.records();
   await counting(() => W.cleanPins(w));
@@ -1505,11 +1511,16 @@ async function upgradeV5() {
   const marker = await get(db5, "meta", W.BACKFILL), prunable = after.prunable, ledger = after.syncLedger;
   delete after.prunable;
   delete after.syncLedger;
+  // (version 10: history's stores, empty; under history's census guard (HISTORY_GUARD=1) hmeta holds the guard's hactive alone)
+  const hist = { htokens: after.htokens, hmeta: after.hmeta };
+  delete after.htokens;
+  delete after.hmeta;
+  const histOk = hist.htokens === J([[], []]) && (hist.hmeta === J([[], []]) || (!!window.__historyGuard && hist.hmeta === J([["hactive"], [true]])));
   const [metaKeys, metaValues] = JSON.parse(after.meta), ji = metaKeys.indexOf("journal");
   // (version 8's one write: the journal's record, not activated, exactly)
   const journal = ji < 0 ? undefined : J(metaValues[ji]);
   after.meta = J([metaKeys.filter((k) => k !== W.BACKFILL && k !== "journal"), metaValues.filter((v, i) => i !== ji && !(v && typeof v === "object" && "after" in v))]);
-  check(db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && ledger === J([[], []]) && marker?.after === 0 && journal === J({ v: 1, active: false }), "version 4 to 5 (and on to 8): every store the same, byte for byte; the pins' index byStorage and the empty stores prunable and syncLedger added; the backfill's marker and the journal's record (not activated) set: " + J({ idx, prunable, marker, journal }));
+  check(histOk && db5.version === W.WS_VERSION && J(after) === J(before) && J(idx) === J(["byStorage"]) && prunable === J([[], []]) && ledger === J([[], []]) && marker?.after === 0 && journal === J({ v: 1, active: false }), "version 4 to 5 (and on to 8): every store the same, byte for byte; the pins' index byStorage and the empty stores prunable and syncLedger added; the backfill's marker and the journal's record (not activated) set: " + J({ idx, prunable, marker, journal }));
   db5.close();
 }
 

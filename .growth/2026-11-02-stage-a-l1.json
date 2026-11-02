@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Stage A L1 (history's change tokens, inert): web/history/tokens.ts plus its writers in the workspace (api, db v10, sync-fetch, sync-replay, sync-pins, sync-view) and the notebook stores (stores.js: IdbStore.save and deleteNotebookRecord). Measured with bun 1.4.4 and node 24.21.0 in CI's build order, on a two-parent probe merge of L1 13cd8910 into master 2e53a56d at equal-length paths: cli/pyjs.cjs +5508, engine/sagebrush-notebook.js +1200; no other row moves. Markers leave tens of bytes for master's drift.",
+ "bytes": {
+  "cli/pyjs.cjs": 5600,
+  "engine/sagebrush-notebook.js": 1240
+ }
+}
