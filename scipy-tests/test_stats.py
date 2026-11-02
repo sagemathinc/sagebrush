@@ -157,4 +157,20 @@ for sz in (2.5, "3", (2, 1.5)):
 # (daybreak3's second R2: an array size, a scalar bool refused, a bool inside a sequence, NumPy integers)
 for sz in (np.array([2, 3]), np.array(2), np.bool_(True), True, (2, True), np.array([1.5]), [2, np.int32(3)], np.int64(4)):
     out("norm.rvs(size=%r)" % (sz,), lambda: st.norm.rvs(size=sz, random_state=0))
+# (daybreak3's third R2: a bool array and a 2-d array are refused; an int8 array and an empty one are sizes)
+for sz in (np.array([[2, 3]]), np.array(True), np.array([True, False]), np.array([2, 3], dtype=np.int8), np.array([], dtype=int)):
+    out("norm.rvs(size=%r)" % (sz,), lambda: st.norm.rvs(size=sz, random_state=0))
 
+
+# (the whole table of size inputs, @sagebrush's list: each as SciPy takes or refuses it, for norm and levy, whose
+# samplers Sagebrush has)
+SIZES = [
+    3, 0, np.int64(3), np.int32(2), True, False, np.bool_(True), 2.0, 2.5, np.float64(2.0), -1,
+    (2, 3), [2, 3], (2, True), [True, 2], (2, 1.5), (2, 2.0), (2, "3"), (), [], (0, 2), (2, np.int64(3)),
+    np.array(3), np.array([2, 3]), np.array([[2, 3]]), np.array(True), np.array([True, False]),
+    np.array(2.0), np.array([2.0, 3.0]), np.array([], dtype=int), np.array([], dtype=float), np.array([2, 3], dtype=np.uint8),
+    (2, -1), np.array([-1]), np.array([], dtype=bool),
+]
+for d in ("norm", "levy"):
+    for sz in SIZES:
+        out("%s.rvs(size=%r: %s)" % (d, sz, type(sz).__name__), lambda: getattr(st, d).rvs(size=sz, random_state=0))
