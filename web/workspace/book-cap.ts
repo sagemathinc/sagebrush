@@ -6,8 +6,8 @@
 // nothing.  Every name passes, in order: the chapter-name rule (D2, with its reason code), the extension (once),
 // normPath (D3), the folder's containment (D4), the entry's kind (D5); each refusal names which.
 import type { Workspace, Entry } from "./api";
-import { normPath, join, within, nameOf, parentOf } from "./paths";
-import { badChapterName, chapterFile } from "./book-names";
+import { join, nameOf, parentOf } from "./paths";
+import { resolveIn } from "./book-names";
 import { isMystHead, HEAD_BYTES, TEXT } from "../notebook/myst-head.js";
 import { convertCopy, findCopy, sha256Hex } from "./upload";
 
@@ -34,26 +34,6 @@ const hold = (phase: string) => (globalThis as any).__sbBookHold?.(phase);
 
 type Binding = { gen: number; ws: Workspace; ref: string; root: string; self: string };
 type Pending = { gen: number; ref: string; target: { label?: string; cell?: string; back?: { name: string; cell: string; number: number } } };
-
-/** A chapter name resolved to a path in the book's folder, or the reason it isn't (D2 → D3 → D4); `open`: a chapter
- * entry, its extension settled (<name> → <name>.md), else `_toc.yml` or an .md name as given. */
-export function resolveIn(root: string, name: string, open: boolean): { path: string } | { refused: string } {
-  const bad = badChapterName(name);
-  if (bad) return { refused: bad };
-  let n = name;
-  if (open) {
-    const f = chapterFile(name);
-    if (!f) return { refused: "extension" };
-    n = f;
-  } else if (name !== "_toc.yml" && !/\.md$/i.test(name)) return { refused: "extension" };
-  let p: string;
-  try { p = normPath(join(root, n)); } catch { return { refused: "path" }; }
-  return insideOf(root, p);
-}
-/** D4, the folder's containment, on a resolved path: its own interface (no name that passes D2 resolves outside). */
-export function insideOf(root: string, p: string): { path: string } | { refused: string } {
-  return within(p, root) && p !== root ? { path: p } : { refused: "outside" };
-}
 
 /** The book access of a page: `mystBook()` (createNotebook's opts.mystBook) gives, for the document open now, a promise
  * of its capability, or of null: not a workspace notebook, not a MyST copy, or its folder has no _toc.yml (found by
@@ -122,7 +102,7 @@ export function bookAccess(host: BookHost) {
         let ref = found.copy?.ref ?? null, said = "";
         if (!ref) {
           const base = file.replace(/\.md$/i, "");
-          const what = target.number ? `chapter ${target.number}${target.title ? `, "${target.title}"` : ""} (${file})` : target.title ? `"${target.title}" (${file})` : `"${file}"`;
+          const what = target.number ? `chapter ${target.number}${target.title ? `, "${target.title}"` : ""} (${file}),` : target.title ? `"${target.title}" (${file}),` : `"${file}"`;
           if (!host.confirm(`Open ${what} as a notebook?\n\nA converted copy, "${base}.ipynb", is made beside it; "${file}" stays as it is.`)) return "cancelled";
           if (!live(b)) return { refused: "stale" };
           try { ref = (await convertCopy(b.ws, e, "notebook", { maxBytes: host.maxBytes, mode: "python", myst: host.myst, said: (m) => { said = m; } })).ref; }
