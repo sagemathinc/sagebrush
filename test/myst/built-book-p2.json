@@ -1,0 +1,511 @@
+{
+ "source": "https://luisfinotti.org/pcimc/ (jupyter-book with sphinx-proof)",
+ "fetched": "2026-11-02T14:24:11+00:00",
+ "chapters": {
+  "00-Intro": {
+   "url": "https://luisfinotti.org/pcimc/00-Intro.html",
+   "html_sha256": "1b4cbb701063ad8ddebf8339182d9f6d62451ba7c53728bb240cbe21911481cd",
+   "titles": [],
+   "eqnos": [],
+   "refs": [
+    {
+     "to": "01-WhatIsCrypto.html",
+     "text": "1. What is Cryptography?"
+    },
+    {
+     "to": "02-Python.html",
+     "text": "2. Introduction to Python, Sage, and Jupyter Notebooks"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "3. Number Theory"
+    },
+    {
+     "to": "04-Modular_Arithmetic.html",
+     "text": "4. Modular Arithmetic"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "5. Powers in \\(\\mathbb{Z}/m\\mathbb{Z}\\)"
+    },
+    {
+     "to": "06-DH_and_ElGamal.html",
+     "text": "6. Discrete Logs, Diffie-Hellman Key Exchange, and the ElGamal Cryptosystem"
+    },
+    {
+     "to": "07-Computing_DL.html",
+     "text": "7. Computing Discrete Logs"
+    },
+    {
+     "to": "08-CRT_Bezout.html",
+     "text": "8. The Chinese Remainder Theorem and Generalized Bezout’s Lemma"
+    },
+    {
+     "to": "09-Improving_DL.html",
+     "text": "9. Improvements on Computations of Discrete Logs"
+    },
+    {
+     "to": "10-RSA.html",
+     "text": "10. The RSA Cryptosystem"
+    },
+    {
+     "to": "11-Primality.html",
+     "text": "11. Primality Testing"
+    },
+    {
+     "to": "12-Factorization.html",
+     "text": "12. Factorization"
+    },
+    {
+     "to": "13-Square_Roots.html",
+     "text": "13. Square Roots Modulo \\(m\\)"
+    },
+    {
+     "to": "14-Quad_Sieve_Index_Calc.html",
+     "text": "14. Quadratic Sieve and Index Calculus"
+    },
+    {
+     "to": "15-Digital_Signatures.html",
+     "text": "15. Digital Signatures"
+    },
+    {
+     "to": "16-Elliptic_Curves.html",
+     "text": "16. Elliptic Curves"
+    },
+    {
+     "to": "17-AES.html",
+     "text": "17. Finite Fields and the Advanced Encryption Standard (AES)"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "Homework"
+    },
+    {
+     "to": "06-DH_and_ElGamal.html",
+     "text": "Diffie-Hellman Key Exchange"
+    },
+    {
+     "to": "06-DH_and_ElGamal.html",
+     "text": "ElGamal Cryptosystem"
+    },
+    {
+     "to": "10-RSA.html",
+     "text": "RSA Cryptosystem"
+    },
+    {
+     "to": "15-Digital_Signatures.html",
+     "text": "RSA"
+    },
+    {
+     "to": "15-Digital_Signatures.html",
+     "text": "ElGamal"
+    },
+    {
+     "to": "15-Digital_Signatures.html",
+     "text": "DSA"
+    },
+    {
+     "to": "16-Elliptic_Curves.html",
+     "text": "elliptic curve"
+    },
+    {
+     "to": "16-Elliptic_Curves.html",
+     "text": "cryptography"
+    },
+    {
+     "to": "16-Elliptic_Curves.html",
+     "text": "digital signature"
+    },
+    {
+     "to": "17-AES.html",
+     "text": "Advanced Encryption Standard (AES)"
+    },
+    {
+     "to": "06-DH_and_ElGamal.html",
+     "text": "discrete logs"
+    },
+    {
+     "to": "07-Computing_DL.html",
+     "text": "Collision (Shank’s Baby-Step/Giant-Step Algorithm)"
+    },
+    {
+     "to": "09-Improving_DL.html",
+     "text": "Pohlig-Hellman Algorithm"
+    },
+    {
+     "to": "14-Quad_Sieve_Index_Calc.html",
+     "text": "Index Calculus"
+    },
+    {
+     "to": "12-Factorization.html",
+     "text": "Pollard’s \\(p-1\\) factorization algorithm"
+    },
+    {
+     "to": "12-Factorization.html",
+     "text": "Factorization via Difference of Squares"
+    },
+    {
+     "to": "14-Quad_Sieve_Index_Calc.html",
+     "text": "Quadratic Sieve"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Number Theory"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Long Division"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Prime Numbers"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Greatest Common Divisor"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Euclidean Algorithm"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Extended Euclidean Algorithm"
+    },
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Fundamental Theorem of Arithmetic"
+    },
+    {
+     "to": "04-Modular_Arithmetic.html",
+     "text": "Congruences"
+    },
+    {
+     "to": "04-Modular_Arithmetic.html",
+     "text": "Integers Modulo \\(m\\)"
+    },
+    {
+     "to": "04-Modular_Arithmetic.html",
+     "text": "units"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "Euler's Theorem"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "Fermat's Little Theorem"
+    },
+    {
+     "to": "08-CRT_Bezout.html",
+     "text": "Chinese Remainder Theorem"
+    },
+    {
+     "to": "11-Primality.html",
+     "text": "Primality Testing"
+    },
+    {
+     "to": "11-Primality.html",
+     "text": "Miller-Rabin Probabilistic Test"
+    },
+    {
+     "to": "13-Square_Roots.html",
+     "text": "Quadratic Reciprocity"
+    },
+    {
+     "to": "13-Square_Roots.html",
+     "text": "Square Roots Modulo \\(m\\)"
+    },
+    {
+     "to": "16-Elliptic_Curves.html",
+     "text": "Elliptic Curves"
+    },
+    {
+     "to": "17-AES.html",
+     "text": "Finite Fields"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "homework assignments"
+    }
+   ]
+  },
+  "03-Number_Theory": {
+   "url": "https://luisfinotti.org/pcimc/03-Number_Theory.html",
+   "html_sha256": "4d13b7ad1820e972d349ec52b34249a7487eaad96d2f18aab73767827cf8f8e2",
+   "titles": [
+    "Theorem 3.1 (Long Division)",
+    "Note",
+    "Example (Long Division)",
+    "Important",
+    "Definition 3.1 (Divisibility)",
+    "Attention",
+    "Definition (Prime and Composite)",
+    "Note",
+    "Important",
+    "Property 3.1 (Properties of the GCD)",
+    "Definition (Relatively Prime)",
+    "Proposition 3.1",
+    "Theorem 3.2",
+    "Algorithm 3.1 (Euclidean Algorithm)",
+    "Homework",
+    "Note",
+    "Lemma 3.1 (Bezout’s Lemma)",
+    "Note",
+    "Note",
+    "Important",
+    "Algorithm 3.2 (Extended Euclidean Algorithm)",
+    "Homework",
+    "Theorem 3.3",
+    "Note",
+    "Homework",
+    "Hint",
+    "Lemma 3.2 (Euclid’s Lemma)",
+    "Theorem 3.4 (Fundamental Theorem of Arithmetic (Prime Factorization))",
+    "Homework",
+    "Note",
+    "Conjecture (Goldbach Conjecture)",
+    "Definition (Twin Primes)",
+    "Conjecture 3.1 (Twin Primes Conjecture)"
+   ],
+   "eqnos": [],
+   "refs": [
+    {
+     "to": "here",
+     "text": "Bezout's Lemma"
+    },
+    {
+     "to": "here",
+     "text": "Prime Factorization"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "here",
+     "text": "Bezout's Lemma"
+    },
+    {
+     "to": "here",
+     "text": "Euclid's Lemma"
+    },
+    {
+     "to": "18-Homework.html",
+     "text": "homework"
+    }
+   ]
+  },
+  "07-Computing_DL": {
+   "url": "https://luisfinotti.org/pcimc/07-Computing_DL.html",
+   "html_sha256": "8ec9a5ebbcd5eaa32f29a51a24c3d6b05384b734d60ed2c7a3eb348d3ee85d7e",
+   "titles": [
+    "Homework",
+    "Algorithm 7.1 (Shank’s Baby-Step/Giant-Step)",
+    "Important",
+    "Homework"
+   ],
+   "eqnos": [],
+   "refs": [
+    {
+     "to": "14-Quad_Sieve_Index_Calc.html",
+     "text": "methods that are even more efficient in special cases"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "Computing Successive Powers"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    }
+   ]
+  },
+  "08-CRT_Bezout": {
+   "url": "https://luisfinotti.org/pcimc/08-CRT_Bezout.html",
+   "html_sha256": "8b73281333ce6580bcfc418b567b344b416854008576a3a5a057337e7356ade6",
+   "titles": [
+    "Theorem 8.1 (Chinese Remainder Theorem (CRT))",
+    "Warning",
+    "Homework",
+    "Warning",
+    "Important",
+    "Lemma 8.1 (Generalized Bezout’s Lemma)",
+    "Definition 8.1 (Assignment Notation)",
+    "Algorithm 8.1 (Generalized Extended Euclidean Algorithm)",
+    "Homework"
+   ],
+   "eqnos": [
+    "(8.1)#",
+    "(8.2)#",
+    "(8.3)#",
+    "(8.4)#"
+   ],
+   "refs": [
+    {
+     "to": "03-Number_Theory.html",
+     "text": "Extended Euclidean Algorithm"
+    },
+    {
+     "to": "here",
+     "text": "(8.2)"
+    },
+    {
+     "to": "here",
+     "text": "(8.2)"
+    },
+    {
+     "to": "here",
+     "text": "(8.2)"
+    },
+    {
+     "to": "here",
+     "text": "(8.2)"
+    },
+    {
+     "to": "here",
+     "text": "(8.2)"
+    },
+    {
+     "to": "here",
+     "text": "(8.3)"
+    },
+    {
+     "to": "here",
+     "text": "#eq-crt"
+    },
+    {
+     "to": "here",
+     "text": "(8.3)"
+    },
+    {
+     "to": "here",
+     "text": "algorithm to find solutions in the CRT"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "here",
+     "text": "Generalized Extended Euclidean Algorithm"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    }
+   ]
+  },
+  "09-Improving_DL": {
+   "url": "https://luisfinotti.org/pcimc/09-Improving_DL.html",
+   "html_sha256": "f508c72754695edeaa3e32a3759093948975947c6fce9bf7954d7cd43f241d8a",
+   "titles": [
+    "Algorithm 9.1 (Discrete Log for Power of Prime Order)",
+    "Proposition 9.1 (Properties of Powers)",
+    "Homework",
+    "Algorithm 9.2 (Pohlig-Hellman Algorithm)",
+    "Note",
+    "Homework",
+    "Important",
+    "Important"
+   ],
+   "eqnos": [
+    "(9.1)#"
+   ],
+   "refs": [
+    {
+     "to": "07-Computing_DL.html",
+     "text": "Shank's Baby-Step/Giant-Step algorithm"
+    },
+    {
+     "to": "07-Computing_DL.html",
+     "text": "Shank's Baby-Step/Giant-Step algorithm"
+    },
+    {
+     "to": "08-CRT_Bezout.html",
+     "text": "assignment"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "chapter about powers"
+    },
+    {
+     "to": "here",
+     "text": "Proposition 9.1"
+    },
+    {
+     "to": "here",
+     "text": "Proposition 9.1"
+    },
+    {
+     "to": "here",
+     "text": "(9.1)"
+    },
+    {
+     "to": "here",
+     "text": "Proposition 9.1"
+    },
+    {
+     "to": "here",
+     "text": "Algorithm 9.1"
+    },
+    {
+     "to": "07-Computing_DL.html",
+     "text": "Shank's Baby-Step/Giant-Step"
+    },
+    {
+     "to": "07-Computing_DL.html",
+     "text": "the number of operations for Shank’s algorithm"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "here",
+     "text": "Algorithm 9.1"
+    },
+    {
+     "to": "08-CRT_Bezout.html",
+     "text": "Chinese Remainder Theorem"
+    },
+    {
+     "to": "08-CRT_Bezout.html",
+     "text": "Generalized Extended Euclidean Algorithm"
+    },
+    {
+     "to": "05-Powers.html",
+     "text": "Fast Powering"
+    },
+    {
+     "to": "here",
+     "text": "Algorithm 9.2"
+    },
+    {
+     "to": "17-Homework.html",
+     "text": "homework"
+    },
+    {
+     "to": "here",
+     "text": "Algorithm 9.1"
+    },
+    {
+     "to": "14-Quad_Sieve_Index_Calc.html",
+     "text": "index calculus"
+    }
+   ]
+  }
+ }
+}

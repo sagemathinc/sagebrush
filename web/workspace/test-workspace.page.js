@@ -1832,7 +1832,9 @@ async function durabilityResetManySmall() {
     const ms = performance.now() - t0;
     W.RESET_HOOK.afterPage = undefined;
     check(pages.length === N / W.RESET_PAGE && pages.every((n) => n <= W.RESET_PAGE), `200,000 small versions: ${W.RESET_PAGE} a page (${pages.length} pages)`);
-    check(ms < 60000, `…the whole reset done in under a minute (${Math.round(ms)} ms)`);
+    // (under history's census guard (HISTORY_GUARD=1) every write is shadowed, so this time is the guard's: reported, not
+    // judged there; the unguarded run of this suite judges it)
+    check(ms < 60000 || !!window.__historyGuard, `…the whole reset done in under a minute (${Math.round(ms)} ms${window.__historyGuard ? ", guarded: not judged" : ""})`);
     check(progress > 0, `…its progress told meanwhile (${progress} records removed at a notice)`);
     w.close();
   }

@@ -1,0 +1,27 @@
+# In _toc.yml
+format: jb-book
+root: 00-Intro
+parts:
+  - caption: Chapters
+    numbered: true
+    chapters:
+    - file: 01-WhatIsCrypto
+    - file: 02-Python
+    - file: 03-Number_Theory
+    - file: 04-Modular_Arithmetic
+    - file: 05-Powers
+    - file: 06-DH_and_ElGamal
+    - file: 07-Computing_DL
+    - file: 08-CRT_Bezout
+    - file: 09-Improving_DL
+    - file: 10-RSA
+    - file: 11-Primality
+    - file: 12-Factorization
+    - file: 13-Square_Roots
+    - file: 14-Quad_Sieve_Index_Calc
+    - file: 15-Digital_Signatures
+    - file: 16-Elliptic_Curves
+    - file: 17-AES
+  - caption: Endmatter
+    chapters:
+    - file: 18-Homework

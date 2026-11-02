@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, copyFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,9 +14,15 @@ import { buildIndex, hook, MAX_DEPTH } from "../web/myst";
 // and what the renderer writes, parsed as a browser parses it, against payloads in every place a value goes.
 
 const dir = __dirname + "/../../test/myst/";
-// (an ES module the browser loads: a .mjs copy for node, imported for real, as tsc would make import() a require)
-const copy = join(mkdtempSync(join(tmpdir(), "sb-myst-")), "myst.mjs");
-copyFileSync(__dirname + "/../../web/notebook/myst.js", copy);
+// (an ES module the browser loads: a copy for node, in a folder that says it's a module, imported for real, as tsc
+// would make import() a require; its import of ./myst-head.js, the 4 KiB rule, given tsc's own build of it)
+const copies = mkdtempSync(join(tmpdir(), "sb-myst-"));
+writeFileSync(join(copies, "package.json"), '{"type":"module"}\n');
+const headUrl = pathToFileURL(__dirname + "/../web/notebook/myst-head.js").href;
+const reader = readFileSync(__dirname + "/../../web/notebook/myst.js", "utf8");
+if (!reader.includes('from "./myst-head.js"')) throw new Error("web/notebook/myst.js doesn't import ./myst-head.js");
+writeFileSync(join(copies, "myst.js"), reader.replace('from "./myst-head.js"', `from ${JSON.stringify(headUrl)}`));
+const copy = join(copies, "myst.js");
 const load = () => new Function("u", "return import(u)")(pathToFileURL(copy).href);
 let n = 0;
 const newId = () => `c${n++}`;
