@@ -2947,6 +2947,198 @@ $("#docinsert").onclick = () => {
 
 // ------------------------------------------------------------ WebMCP
 // Tools for AI agents in the browser (https://developer.chrome.com/docs/ai/webmcp).
+// (William, Nov 2: "It's really really critical that agents can see and verify anything they do." So every tool's
+// answer says what is there now: the notebook's name, its path in the files, its language and cells; a file's entry.)
+const toolJson = (o) => ({ content: [{ type: "text", text: JSON.stringify(o) }] });
+const toolFail = (text) => ({ isError: true, content: [{ type: "text", text }] });
+/** Why args don't fit {name: "string" | "boolean" | "strings"}, with the required names, or null. */
+function argProblem(args, types, required = []) {
+  const a = args ?? {};
+  if (typeof a !== "object" || Array.isArray(a)) return "the arguments are an object";
+  for (const k of Object.keys(a)) if (!(k in types)) return `unknown argument ${JSON.stringify(k.slice(0, 40))}: the arguments are ${Object.keys(types).join(", ") || "none"}`;
+  for (const k of required) if (a[k] === undefined) return `${k} is required`;
+  for (const [k, t] of Object.entries(types)) {
+    const v = a[k];
+    if (v === undefined) continue;
+    if (t === "strings" ? !(Array.isArray(v) && v.every((x) => typeof x === "string")) : typeof v !== t) return `${k} is ${t === "strings" ? "an array of strings" : `a ${t}`}`;
+  }
+  return null;
+}
+const LANGS = ["python", "sage", "magma", "matlab"];
+const notebookPath = async () => {
+  const w = ws ?? (await wsNow());
+  return (w && current.kind === "browser" && current.id ? await w.pathOf("notebook", current.id).catch(() => null) : null) ?? null;
+};
+const notebookInfo = async () => ({ name: docName(), path: await notebookPath(), language: nb.mode, cells: cells().length, code_cells: cells().filter((c) => c.type === "code").length });
+/** The notebook's info once `ok(info)` holds (its file's path follows a rename or a new notebook), or after ms anyway. */
+async function infoWhen(ok, ms = 5000) {
+  const t = Date.now();
+  for (;;) {
+    const i = await notebookInfo();
+    if (ok(i) || Date.now() - t > ms) return i;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+const agentFiles = () => window.sagebrush.workspace ?? null;
+const entryOut = (e) => e && { path: e.path, kind: e.kind, ...(e.mode ? { language: e.mode } : {}), ...(e.size !== undefined ? { size: e.size } : {}), updated: e.updated };
+const MAX_TOOL_TEXT = 1 << 20;
+/** The notebook as a standalone HTML page: its rendered Markdown, its code and its outputs (pictures included), no script. */
+function notebookHtml() {
+  const clean = (el) => {
+    const out = el.cloneNode(true);
+    // (a plot drawn on a canvas, as an image; nothing that runs: scripts, frames, handlers)
+    const from = el.querySelectorAll("canvas"), to = out.querySelectorAll("canvas");
+    to.forEach((c, i) => { try { const img = document.createElement("img"); img.src = from[i].toDataURL("image/png"); img.width = from[i].width; c.replaceWith(img); } catch { c.remove(); } });
+    out.querySelectorAll("script, iframe, object, embed, button, input, select, textarea").forEach((x) => x.remove());
+    for (const x of [out, ...out.querySelectorAll("*")]) for (const a of [...x.attributes]) if (/^on/i.test(a.name) || (/^(href|src)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) x.removeAttribute(a.name);
+    return out.innerHTML;
+  };
+  const body = cells().map((c) =>
+    c.type === "markdown"
+      ? `<section class="md">${c.md?.textContent.trim() ? clean(c.md) : `<pre>${esc(c.ta.value)}</pre>`}</section>`
+      : `<section class="cell"><pre class="code">${esc(c.ta.value)}</pre>${c.out?.childNodes.length ? `<div class="out">${clean(c.out)}</div>` : ""}</section>`).join("\n");
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><title>${esc(docName())}</title>\n<link rel="stylesheet" href="${location.origin}/katex/katex.min.css">\n<style>body{font:16px/1.5 system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1d2b1a}pre.code{background:#f4f5f0;border:1px solid #dde2d6;border-radius:6px;padding:.6rem;overflow:auto}.out{margin:.4rem 0 1.2rem;overflow:auto}.out pre{margin:0}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:2px 6px}</style>\n</head><body>\n<h1>${esc(docName())}</h1>\n${body}\n</body></html>\n`;
+}
+const notebookTools = [
+  {
+    name: "notebook_info",
+    description: "What is open now: the notebook's name, its path in the person's files (null until it is saved there), its language and how many cells it has. Use it to check what new_notebook, rename_notebook and set_language did.",
+    inputSchema: { type: "object", properties: {} },
+    async execute() { return toolJson(await notebookInfo()); },
+  },
+  {
+    name: "new_notebook",
+    description: "Open a new notebook (the one open now is saved and stays in the person's files), optionally named, in a language (python, sage, magma or matlab; default this notebook's), with code cells. Answers notebook_info's fields for the new notebook.",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "Its name (default Untitled)." }, language: { type: "string", enum: LANGS }, cells: { type: "array", items: { type: "string" }, description: "Code cells' sources (default one empty cell)." } } },
+    async execute(args) {
+      const bad = argProblem(args, { name: "string", language: "string", cells: "strings" });
+      if (bad) return toolFail(bad);
+      const { name, language = nb.mode, cells: codes } = args ?? {};
+      if (!LANGS.includes(language)) return toolFail(`language is one of ${LANGS.join(", ")}`);
+      if (name !== undefined && !(name.trim() && name.length <= 200)) return toolFail("name is 1 to 200 characters");
+      if (codes && codes.length > 500) return toolFail("at most 500 cells");
+      saveNow();
+      await openNew(name?.trim() || "Untitled", language, codes?.length ? codes : [""], true);
+      // (saved now, so its file is in the person's files when the answer says where)
+      saveNow();
+      return toolJson(await infoWhen((i) => i.path !== null, 8000));
+    },
+  },
+  {
+    name: "rename_notebook",
+    description: "Rename the open notebook, as the person does by editing its name: its file in the person's files is renamed too (to a free name beside it). Answers notebook_info's fields, with the file's new path.",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "The new name, without .ipynb." } }, required: ["name"] },
+    async execute(args) {
+      const bad = argProblem(args, { name: "string" }, ["name"]);
+      if (bad) return toolFail(bad);
+      const name = args.name.trim().replace(/\.ipynb$/i, "");
+      if (!name || name.length > 200) return toolFail("name is 1 to 200 characters");
+      const before = await notebookPath();
+      nbName.value = name;
+      nbName.dispatchEvent(new Event("input"));
+      const want = safeName(name);
+      const i = await infoWhen((x) => x.path === null || (x.path !== before && splitExt(nameOf(x.path))[0].startsWith(want)));
+      return toolJson(i.path === null ? { ...i, note: "this notebook isn't in the person's files, so only its name changed" } : i);
+    },
+  },
+  {
+    name: "set_language",
+    description: "Set the open notebook's language (python, sage, magma or matlab), only while it has no code: a notebook with code keeps its language (its code is written in it); open a new_notebook in the other language instead. Answers notebook_info's fields.",
+    inputSchema: { type: "object", properties: { language: { type: "string", enum: LANGS } }, required: ["language"] },
+    async execute(args) {
+      const bad = argProblem(args, { language: "string" }, ["language"]);
+      if (bad) return toolFail(bad);
+      if (!LANGS.includes(args.language)) return toolFail(`language is one of ${LANGS.join(", ")}`);
+      if (args.language !== nb.mode) {
+        if (hasCode()) return toolFail(`This notebook is ${LANG_NAME[nb.mode] ?? nb.mode} and has code, so its language isn't changed: open a new_notebook with language "${args.language}", or ask the person to change it.`);
+        setMode(args.language);
+        modeEl.value = args.language;
+      }
+      return toolJson(await notebookInfo());
+    },
+  },
+  {
+    name: "export_notebook",
+    description: "The open notebook as a file: ipynb (Jupyter), script (.py, .sage or .m) or html (a standalone report: rendered Markdown and math, code, outputs and plots as images, no script). Answers the file's name and size and then its text, so you can check it; with download=true the person's browser also saves it, as File > Download does.",
+    inputSchema: { type: "object", properties: { format: { type: "string", enum: ["ipynb", "script", "html"] }, download: { type: "boolean" } }, required: ["format"] },
+    async execute(args) {
+      const bad = argProblem(args, { format: "string", download: "boolean" }, ["format"]);
+      if (bad) return toolFail(bad);
+      const ext = isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py";
+      const f = { ipynb: [".ipynb", "application/json", () => notebookFileText({ ...nb.snapshot(), name: docName() })], script: [ext, ext === ".py" ? "text/x-python" : "text/plain", () => toScript(nb.snapshot())], html: [".html", "text/html", notebookHtml] }[args.format];
+      if (!f) return toolFail("format is ipynb, script or html");
+      const text = f[2](), file = fileBase() + f[0];
+      if (args.download) download(file, text, f[1]);
+      const meta = { file, bytes: new TextEncoder().encode(text).length, downloaded: !!args.download };
+      if (text.length > MAX_TOOL_TEXT) return toolJson({ ...meta, note: `its text is over ${MAX_TOOL_TEXT} characters, so it isn't in this answer` });
+      return { content: [{ type: "text", text: JSON.stringify(meta) }, { type: "text", text }] };
+    },
+  },
+  {
+    name: "list_files",
+    description: "The person's files (the file browser): the entries in a folder (default \"/\"; with recursive, everything under it), each with its path, kind (notebook, board, file or folder), language, size and when it was changed.",
+    inputSchema: { type: "object", properties: { folder: { type: "string" }, recursive: { type: "boolean" } } },
+    async execute(args) {
+      const bad = argProblem(args, { folder: "string", recursive: "boolean" });
+      if (bad) return toolFail(bad);
+      const w = agentFiles();
+      if (!w) return toolFail("the person's files aren't open in this page");
+      try {
+        const all = await w.list(args?.folder ?? "/", { recursive: !!args?.recursive });
+        return toolJson({ entries: all.slice(0, 1000).map(entryOut), ...(all.length > 1000 ? { more: all.length - 1000 } : {}) });
+      } catch (e) { return toolFail(String(e?.message ?? e)); }
+    },
+  },
+  {
+    name: "read_file",
+    description: "A file's contents from the person's files: a data file as text (UTF-8) or base64, a notebook or board as its JSON.",
+    inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    async execute(args) {
+      const bad = argProblem(args, { path: "string" }, ["path"]);
+      if (bad) return toolFail(bad);
+      const w = agentFiles();
+      if (!w) return toolFail("the person's files aren't open in this page");
+      try {
+        const r = await w.read(args.path);
+        const c = r.content;
+        let out;
+        if (typeof c === "string") out = { text: c };
+        else if (c instanceof Uint8Array || c instanceof ArrayBuffer) {
+          const u = c instanceof Uint8Array ? c : new Uint8Array(c);
+          try { out = { text: new TextDecoder("utf-8", { fatal: true }).decode(u) }; } catch { let b = ""; for (const x of u) b += String.fromCharCode(x); out = { base64: btoa(b) }; }
+        } else out = { json: c };
+        const text = JSON.stringify({ entry: entryOut(r.entry), ...out });
+        return text.length > MAX_TOOL_TEXT ? toolFail(`${args.path} is over ${MAX_TOOL_TEXT} characters as an answer: it isn't read here`) : { content: [{ type: "text", text }] };
+      } catch (e) { return toolFail(String(e?.message ?? e)); }
+    },
+  },
+  {
+    name: "write_file",
+    description: "Put a data file (a CSV, text, an image...) in the person's files at path, from text or base64, so notebook code reads it at once: open(\"data.csv\") reads /data.csv. An existing data file is replaced and its old bytes kept as a version; a notebook or board isn't written here. Answers the file's entry.",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, text: { type: "string" }, base64: { type: "string" } }, required: ["path"] },
+    async execute(args) {
+      const bad = argProblem(args, { path: "string", text: "string", base64: "string" }, ["path"]);
+      if (bad) return toolFail(bad);
+      if ((args.text === undefined) === (args.base64 === undefined)) return toolFail("give text or base64, one of them");
+      if (/\.(ipynb|board\.json)$/i.test(args.path)) return toolFail("a notebook or board isn't written here: use new_notebook, or the workspace verbs");
+      const w = agentFiles();
+      if (!w) return toolFail("the person's files aren't open in this page");
+      let content;
+      try { content = args.text !== undefined ? args.text : Uint8Array.from(atob(args.base64), (ch) => ch.charCodeAt(0)); } catch { return toolFail("base64 isn't valid"); }
+      try {
+        const old = await w.stat(args.path);
+        if (old && old.kind !== "file") return toolFail(`${args.path} is a ${old.kind}`);
+        if (old) { const r = await w.read(args.path); await w.write(args.path, content, { base: r.rev ?? r.entry.rev }); }
+        else await w.create(args.path, { content });
+        // (and to the interpreters running now, as an upload is: code reads it at once; the reactive notebook's cells
+        // that read it rerun)
+        const e = await w.stat(args.path);
+        if (e) filePut(e.path, typeof content === "string" ? new TextEncoder().encode(content) : content);
+        return toolJson({ entry: entryOut(await w.stat(args.path)) });
+      } catch (e) { return toolFail(String(e?.message ?? e)); }
+    },
+  },
+];
 const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(box) || "(no output)" }, ...(await nb.pictures(box))] });
 const tools = [
   {
@@ -2998,15 +3190,21 @@ const tools = [
     name: "add_markdown",
     description: "Add a Markdown (text) cell at the end of the notebook and show it rendered: headings, lists, tables, code, links, images and LaTeX math ($...$, $$...$$). Use it to explain results between code cells.",
     inputSchema: { type: "object", properties: { text: { type: "string", description: "The Markdown source." } }, required: ["text"] },
-    async execute({ text }) {
+    async execute(args) {
+      // (a wrong argument is said, never written as "undefined"; the cell's id is said, and whether it was the empty
+      // cell at the end, reused: sim runs 2 and 3, APP-add_markdown)
+      const bad = argProblem(args, { text: "string" }, ["text"]);
+      if (bad) return toolFail(bad);
       const last = cells().at(-1);
-      const cell = last && last.ta.value.trim() === "" ? last : nb.addCell("");
+      const reused = !!last && last.ta.value.trim() === "";
+      const cell = reused ? last : nb.addCell("");
       nb.setType(cell, "markdown");
-      nb.setInput(cell, text);
+      nb.setInput(cell, args.text);
       await nb.renderMd(cell);
-      return { content: [{ type: "text", text: cell.md.textContent.slice(0, 2000) }] };
+      return toolJson({ id: cell.id, reused_empty_cell: reused, rendered: cell.md.textContent.slice(0, 2000) });
     },
   },
+  ...notebookTools,
   {
     name: "edit_notebook",
     description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a name defined by two cells, a cycle). Cell ids come from notebook_graph or read_notebook.",
