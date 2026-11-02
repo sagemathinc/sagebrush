@@ -1,0 +1,95 @@
+{
+ "source": "https://luisfinotti.org/pcimc/ (jupyter-book with sphinx-proof), fetched 2026-11-02 for plan-myst-notebooks r3 R-3",
+ "book": "github.com/lrfinotti/pcimc at 20bd4a76",
+ "chapters": {
+  "09-Improving_DL": {
+   "url": "https://luisfinotti.org/pcimc/09-Improving_DL.html",
+   "html_sha256": "f508c72754695edeaa3e32a3759093948975947c6fce9bf7954d7cd43f241d8a",
+   "titles": [
+    "Algorithm 9.1 (Discrete Log for Power of Prime Order)",
+    "Proposition 9.1 (Properties of Powers)",
+    "Homework",
+    "Algorithm 9.2 (Pohlig-Hellman Algorithm)",
+    "Note",
+    "Homework",
+    "Important",
+    "Important"
+   ],
+   "eqnos": [
+    "(9.1)"
+   ],
+   "refs": [
+    "Shank's Baby-Step/Giant-Step algorithm",
+    "Shank's Baby-Step/Giant-Step algorithm",
+    "assignment",
+    "chapter about powers",
+    "Proposition 9.1",
+    "Proposition 9.1",
+    "(9.1)",
+    "Proposition 9.1",
+    "Algorithm 9.1",
+    "Shank's Baby-Step/Giant-Step",
+    "the number of operations for Shank’s algorithm",
+    "homework",
+    "Algorithm 9.1",
+    "Chinese Remainder Theorem",
+    "Generalized Extended Euclidean Algorithm",
+    "Fast Powering",
+    "Algorithm 9.2",
+    "homework",
+    "Algorithm 9.1",
+    "index calculus"
+   ]
+  },
+  "03-Number_Theory": {
+   "url": "https://luisfinotti.org/pcimc/03-Number_Theory.html",
+   "html_sha256": "4d13b7ad1820e972d349ec52b34249a7487eaad96d2f18aab73767827cf8f8e2",
+   "titles": [
+    "Theorem 3.1 (Long Division)",
+    "Note",
+    "Example (Long Division)",
+    "Important",
+    "Definition 3.1 (Divisibility)",
+    "Attention",
+    "Definition (Prime and Composite)",
+    "Note",
+    "Important",
+    "Property 3.1 (Properties of the GCD)",
+    "Definition (Relatively Prime)",
+    "Proposition 3.1",
+    "Theorem 3.2",
+    "Algorithm 3.1 (Euclidean Algorithm)",
+    "Homework",
+    "Note",
+    "Lemma 3.1 (Bezout’s Lemma)",
+    "Note",
+    "Note",
+    "Important",
+    "Algorithm 3.2 (Extended Euclidean Algorithm)",
+    "Homework",
+    "Theorem 3.3",
+    "Note",
+    "Homework",
+    "Hint",
+    "Lemma 3.2 (Euclid’s Lemma)",
+    "Theorem 3.4 (Fundamental Theorem of Arithmetic (Prime Factorization))",
+    "Homework",
+    "Note",
+    "Conjecture (Goldbach Conjecture)",
+    "Definition (Twin Primes)",
+    "Conjecture 3.1 (Twin Primes Conjecture)"
+   ],
+   "eqnos": [],
+   "refs": [
+    "Bezout's Lemma",
+    "Prime Factorization",
+    "homework",
+    "homework",
+    "homework",
+    "Bezout's Lemma",
+    "Euclid's Lemma",
+    "homework"
+   ]
+  }
+ }
+}
