@@ -21,16 +21,19 @@ const FENCE = "__sagebrush-workspace__";
 // (a workspace's meta keys that say a reset to a new workspace is under way: "resetting" while its own stores are emptied,
 // then "purgeMain" while its notebooks database is.  A NEW lineage: its history's stores are emptied by the same reset
 // (census EXEMPT, A1-T8), so what it removes is recorded nowhere, by design)
+// A flag left set by a reset that stopped part way (a crash) keeps exempting removals until it is cleared: the app's next
+// open resumes that same reset (the flag is its resume state), which finishes emptying the stores and deletes the flag.
 const CTL = ["resetting", "purgeMain"];
+const TRASH = "/Trash";
 
 export function installGuard({ inert = false, skipOpener = () => false, judgeFixtures = false } = {}) {
-  const G = { violations: [], checked: 0, txs: 0, pending: 0, inert, dbs: new Map() };
+  const G = { violations: [], checked: 0, txs: 0, pending: 0, inert, dbs: new Map(), lastWs: null };
   window.__historyGuard = G;
   const classOf = (db) => (db.objectStoreNames.contains("ops") && db.objectStoreNames.contains("entries") ? "workspace" : db.objectStoreNames.contains("notebooks") && db.objectStoreNames.contains("files") ? "notebooks" : null);
   // (each source database's shadow: what the guard knows of its rows, to judge a write a change or not)
   const shadowOf = (db) => {
     let s = G.dbs.get(db.name);
-    if (!s) G.dbs.set(db.name, (s = { kind: classOf(db), byPath: new Map(), ent: new Map(), bytes: new Map(), board: new Map(), nb: new Map(), meta: new Map(), ctl: new Map() }));
+    if (!s) G.dbs.set(db.name, (s = { kind: classOf(db), byPath: new Map(), ent: new Map(), bytes: new Map(), board: new Map(), nb: new Map(), meta: new Map(), ctl: new Map(), trash: new Map(), files: new Map(), pathOf: new Map(), owner: undefined }));
     return s;
   };
   const sum = (b) => { let h = 2166136261 >>> 0; const u = b instanceof Uint8Array ? b : new Uint8Array(b?.buffer ?? b ?? []); for (let i = 0; i < u.length; i++) h = Math.imul(h ^ u[i], 16777619) >>> 0; return `${u.length}:${h}`; };
@@ -57,21 +60,31 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     r.addEventListener("success", () => {
       const db = r.result, k = classOf(db);
       if (!k) return;
+      // (which workspace a notebooks database belongs to: Workspace.open opens the workspace's database, then its
+      // notebooks database, with no other source database between.  Two workspaces opened before a notebooks database
+      // leave it UNPAIRED (owner null), and an unpaired database is judged closed: no reset exempts it, no legacy bytes are
+      // known in it)
+      if (k === "workspace") G.lastWs = G.lastWs === null ? db.name : "\u0000ambiguous";
+      else { const o = shadowOf(db); o.owner = G.lastWs && G.lastWs !== "\u0000ambiguous" ? G.lastWs : null; G.lastWs = null; }
       shadowOf(db);
       if (!db.objectStoreNames.contains("hmeta")) return;
       const s = shadowOf(db);
       // (created now, so queued before any transaction the app makes once it has the connection)
-      const stores = [...SRC[k], "hmeta", ...(k === "workspace" ? ["meta"] : [])].filter((x) => db.objectStoreNames.contains(x));
+      const stores = [...SRC[k], "hmeta", ...(k === "workspace" ? ["meta", "trash"] : ["files"])].filter((x) => db.objectStoreNames.contains(x));
       const tx = db.transaction(stores, inert ? "readonly" : "readwrite");
       if (!inert) tx.objectStore("hmeta").put(true, "hactive");
       const all = (st, f) => { const c = tx.objectStore(st).openCursor(); c.onsuccess = () => { const x = c.result; if (!x) return; f(x.key, x.value); x.continue(); }; };
       all("hmeta", (key, v) => s.meta.set(key, v));
       if (k === "workspace") {
-        all("entries", (key, e) => { if (e && KINDS.has(e.kind)) { const i = identOf(e); s.byPath.set(key, i); s.ent.set(i, entryOf(e)); } });
+        all("entries", (key, e) => { if (e && KINDS.has(e.kind)) { const i = identOf(e); s.byPath.set(key, i); s.pathOf.set(i, key); s.ent.set(i, entryOf(e)); } });
+        if (db.objectStoreNames.contains("trash")) all("trash", (key, b) => s.trash.set(key, sum(b)));
         all("fileBytes", (key, b) => s.bytes.set(key, sum(b)));
         all("boards", (key, b) => s.board.set(key, JSON.stringify([b?.doc, b?.rev])));
         for (const key of CTL) { const g = tx.objectStore("meta").get(key); g.onsuccess = () => { if (g.result !== undefined) s.ctl.set(key, g.result); }; }
-      } else all("notebooks", (key, v) => { if (key !== FENCE) s.nb.set(key, strip(v)); });
+      } else {
+        all("notebooks", (key, v) => { if (key !== FENCE) s.nb.set(key, strip(v)); });
+        all("files", (key, b) => s.files.set(key, sum(b)));
+      }
     });
     return r;
   };
@@ -91,7 +104,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   const txState = (tx) => {
     let t = T.get(tx);
     if (!t) {
-      t = { changed: new Map(), tokens: new Set(), rows: [], order: [], begin: null, ovf: false, exhausted: false, migrated: new Set(), site: null };
+      t = { changed: new Map(), tokens: new Set(), rows: [], order: [], begin: null, ovf: false, exhausted: false, migrated: new Map(), site: null, judged: true, hmetaGone: false };
       T.set(tx, t);
       tx.addEventListener("complete", () => judge(tx, t));
     }
@@ -99,7 +112,8 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   };
   const tx0 = IDBDatabase.prototype.transaction;
   // (a FIXTURE: a transaction a test page's own code opens directly (its caller's frame in cases.js, or any frame
-  // named fixtureTx), setting up a state to test, never the app's: not judged)
+  // named fixtureTx), setting up a state to test, never the app's: not judged, but its writes still kept in the shadow,
+  // so the app's later writes over them are judged against what is really there)
   const callerFrames = () => (new Error().stack ?? "").split("\n").slice(1).filter((l) => !/guard(-install)?\.js/.test(l) && /:\d+:\d+/.test(l));
   const isFixture = (frames) => /\/cases\.js:|fixtureTx/.test(frames[0] ?? "");
   IDBDatabase.prototype.transaction = function (...a) {
@@ -107,6 +121,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     const judged = frames !== null && (judgeFixtures || !isFixture(frames));
     // (the generation it begins with, read by a transaction queued just before it: nothing can commit in between)
     let begin = null;
+    if (frames !== null && !judged) { const tx = tx0.apply(this, a); txState(tx).judged = false; return tx; }
     if (judged && classOf(this) === "workspace") {
       const bt = tx0.call(this, ["ops", "meta"], "readonly"), c = bt.objectStore("ops").openKeyCursor(null, "prev"), f = bt.objectStore("meta").get("opsFloor");
       let last = 0;
@@ -120,12 +135,18 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   };
   const judge = (tx, t) => {
     const db = tx.db, s = shadowOf(db);
+    // (the shadow's effects of what this transaction removed, now that it committed)
+    for (const [i, { store, why }] of t.changed) if (store === "entries" && why === "removed") s.ent.delete(i);
+    for (const [i, { store, why }] of t.removedQuiet ?? []) if (store === "entries" && why === "removed") s.ent.delete(i);
+    if (!t.judged) return;
     G.txs++;
     // (GC: in a guarded run every notebooks database has history's stores; one without them, changed, fails)
     if (!G.inert && s.kind === "notebooks" && !db.objectStoreNames.contains("htokens")) {
       for (const [ident, { store }] of t.changed) G.violations.push({ db: db.name, ident, store, why: "a notebooks database without history's stores in a guarded run", site: t.site });
       return;
     }
+    // (G3: history's state removed outside a reset: the guard (and history) would be switched off silently)
+    if (t.hmetaGone) G.violations.push({ db: db.name, ident: "hmeta", store: "hmeta", why: "history state removed outside a reset", site: t.site });
     if (s.meta.get("hactive") !== true) return;
     // (A5, A1.1, A1-T17, astra3: every token's rev EXACTLY, by its WRITER, not its kind alone:
     //   an index token (the event just before it an op its transaction added: log()): that op's own seq;
@@ -157,14 +178,31 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     for (const [ident, { store, why }] of t.changed) {
       G.checked++;
       if (t.tokens.has(ident) || t.ovf || t.exhausted || s.meta.get("exhausted") === true) continue;
-      // (a data file's bytes put under the fid its entry is given, migrated, in this transaction: the migrator moving
-      // a file's bytes, byte-identical (migrateOne; census EXEMPT, behaviour-checked by its own test))
-      if (store === "fileBytes" && t.migrated.has(ident)) continue;
+      // (G1: a data file's bytes put under the fid its entry is given, migrated, in this transaction: the migrator moving
+      // a file's bytes (migrateOne), passed only if they ARE the legacy bytes: the same sum as the copy it moved from,
+      // in this workspace's Trash store or its own notebooks database's files)
+      if (store === "fileBytes" && t.migrated.has(ident)) {
+        const from = t.migrated.get(ident), had = legacySum(s, db.name, from), now = s.bytes.get(ident);
+        if (had !== undefined && had === now) continue;
+        G.violations.push({ db: db.name, ident, store, why: had === undefined ? `migrated bytes with no legacy copy known (${from.ref})` : "migrated bytes differ from the legacy copy", site: t.site });
+        continue;
+      }
       G.violations.push({ db: db.name, ident, store, why, site: t.site });
     }
   };
-  const purging = (s) => (s.kind === "workspace" ? s.ctl.has("resetting") : [...G.dbs.values()].some((x) => x.ctl.has("purgeMain")));
-  const mark = (t, ident, store, why, s) => { if (s && /removed|cleared/.test(why) && purging(s)) return; t.changed.set(ident, { store, why }); };
+  // (G2: a reset under way, for THIS database: a workspace's own "resetting"; a notebooks database's OWNER's "purgeMain")
+  const purging = (s) => (s.kind === "workspace" ? s.ctl.has("resetting") : !!s.owner && !!G.dbs.get(s.owner)?.ctl.has("purgeMain"));
+  const mark = (t, ident, store, why, s) => {
+    if (s && /removed|cleared/.test(why) && purging(s)) { (t.removedQuiet ??= new Map()).set(ident, { store, why }); return; }
+    t.changed.set(ident, { store, why });
+  };
+  // (the legacy copy's sum a migrated file was moved from: a trashed one's in the workspace's own Trash store, else
+  // in its notebooks database's files; undefined when that database isn't paired, or holds no such copy)
+  const legacySum = (s, wsName, from) => {
+    if (from.trashed) return s.trash.get(from.ref);
+    const main = [...G.dbs.values()].find((x) => x.kind === "notebooks" && x.owner === wsName);
+    return main?.files.get(from.ref);
+  };
 
   const storeOf = (x) => (x instanceof IDBObjectStore ? x : x.objectStore);
   const wrap = (proto, name, f) => {
@@ -182,15 +220,25 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     const st = this, s = shadowOf(tx.db), name = st.name, k = s.kind;
     if (name === "htokens" && !del) { t.tokens.add(value.ident); t.rows.push(value); t.order.push({ token: value }); return; }
     if (name === "hmeta" && !del) { s.meta.set(key, value); if (key === "ovf") t.ovf = true; if (key === "exhausted" && value === true) t.exhausted = true; return; }
-    // (history's state removed (a reset to a new workspace empties hmeta): history inactive here until it is set again)
     if (name === "meta" && k === "workspace") { if (CTL.includes(key)) { if (del) s.ctl.delete(key); else s.ctl.set(key, value); } return; }
-    if (name === "hmeta" && del) { if (key instanceof IDBKeyRange) { for (const k of [...s.meta.keys()]) if (key.includes(k)) s.meta.delete(k); } else s.meta.delete(key); return; }
+    // (history's state removed: by a reset to a new workspace (it empties hmeta: history inactive here until set again),
+    // or, outside one, a violation (G3))
+    if (name === "hmeta" && del) {
+      if (!purging(s)) t.hmetaGone = true;
+      if (key instanceof IDBKeyRange) { for (const x of [...s.meta.keys()]) if (key.includes(x)) s.meta.delete(x); } else s.meta.delete(key);
+      return;
+    }
+    // (the legacy copies a migration may move from: their sums, G1)
+    if (k === "workspace" && name === "trash") { if (key instanceof IDBKeyRange) return; if (del) s.trash.delete(key); else s.trash.set(key, sum(value)); return; }
+    if (k === "notebooks" && name === "files") { if (key instanceof IDBKeyRange) return; if (del) s.files.delete(key); else s.files.set(key, sum(value)); return; }
     if (!SRC[k]?.has(name)) return;
     if (k === "workspace" && name === "entries") {
       if (del) {
         if (key instanceof IDBKeyRange) return; // (only a large move's control rows are deleted by range)
         const i = s.byPath.get(key);
-        if (i) { mark(t, i, name, "removed", s); s.byPath.delete(key); s.ent.delete(i); }
+        s.byPath.delete(key);
+        // (the identity now at ANOTHER path (a move that put its new row first): its old row deleted, nothing removed)
+        if (i && s.pathOf.get(i) === key) { mark(t, i, name, "removed", s); s.pathOf.delete(i); }
         return;
       }
       if (!value || !KINDS.has(value.kind)) return; // (a control row: a large move's record, mappings, queue)
@@ -204,11 +252,14 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
         s.ent.delete(prev);
         t.changed.delete(prev);
       }
-      if (was !== undefined && !was.migrated && n.migrated && value.fid) t.migrated.add(value.fid);
+      // (a move that deleted its old row first: the identity is back, at its new path: not removed)
+      if (t.changed.get(i)?.why === "removed") t.changed.delete(i);
+      if (was !== undefined && !was.migrated && n.migrated && value.fid) t.migrated.set(value.fid, { ref: value.ref, trashed: !!value.trashed || value.path === TRASH || value.path.startsWith(TRASH + "/") });
       if (was === undefined) mark(t, i, name, "added", s);
       else if (contentChanged(was, n)) mark(t, i, name, "content", s);
       s.ent.set(i, n);
       s.byPath.set(value.path, i);
+      s.pathOf.set(i, value.path);
     } else if (name === "fileBytes") {
       if (del) {
         if (s.ent.has(key)) mark(t, key, name, "bytes removed", s); // (orphans, no entry naming them, pass)
@@ -236,8 +287,11 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   wrap(IDBObjectStore.prototype, "add", function (t, tx, a) { onWrite.call(this, t, tx, [a[0], a[1] ?? (this.keyPath ? a[0]?.[this.keyPath] : undefined)]); });
   wrap(IDBObjectStore.prototype, "delete", function (t, tx, a) { onWrite.call(this, t, tx, [undefined, a[0]], true); });
   wrap(IDBObjectStore.prototype, "clear", function (t, tx) {
+    // (G3 and the shadow: the clear's own effects)
     const s = shadowOf(tx.db), name = this.name;
-    if (name === "hmeta") { s.meta.clear(); return; }
+    if (name === "hmeta") { if (!purging(s)) t.hmetaGone = true; s.meta.clear(); return; }
+    if (s.kind === "workspace" && name === "trash") { s.trash.clear(); return; }
+    if (s.kind === "notebooks" && name === "files") { s.files.clear(); return; }
     if (!SRC[s.kind]?.has(name)) return;
     const ids = name === "entries" ? [...s.byPath.values()] : name === "fileBytes" ? [...s.bytes.keys()] : name === "boards" ? [...s.board.keys()] : [...s.nb.keys()];
     for (const i of ids) mark(t, i, name, "cleared", s);
