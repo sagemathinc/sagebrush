@@ -84,9 +84,16 @@ const build = async (entry, naming) => {
 };
 for (const [name, dir] of [["base", base], ["aa", base], ["warm", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
 // (A2: the built bundles' sha256; ws-warm, ws-base and ws-aa come from the same base tree and must be byte-identical; with
-// HCOST_FROZEN_HASHES (a packet's FROZEN-HASHES: "<sha256>  ws-<name>.js" lines) every listed bundle must match, else BAD)
+// HCOST_FROZEN_HASHES (a packet's FROZEN-HASHES: "<sha256>  ws-<name>.js" lines) every listed bundle must match, else BAD.
+// The hash is of the bundle NORMALIZED: Bun writes each module's path as a "// <path>" comment, relative to the cwd and
+// through this run's random temp directory, so each such line is cut to its path from the last web/, src/ or
+// node_modules/ segment; nothing else changes.  The raw sha256 is recorded too)
 const { createHash } = await import("node:crypto");
-const BUNDLE_SHA = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, createHash("sha256").update(readFileSync(join(site, `ws-${n}.js`))).digest("hex")]));
+export const normalizeBundle = (text) => text.split("\n").map((l) => l.replace(/^\/\/ (\S*\/)?((?:web|src|node_modules)\/\S*)$/, "// $2")).join("\n");
+const sha = (x) => createHash("sha256").update(x).digest("hex");
+if (normalizeBundle("// ../../t/sb-hcost-base-AbC123/web/x.ts\ncode // web/y\n// node_modules/.pnpm/p/node_modules/q/i.js") !== "// web/x.ts\ncode // web/y\n// node_modules/q/i.js") die("normalizeBundle's unit row");
+const BUNDLE_RAW = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, sha(readFileSync(join(site, `ws-${n}.js`)))]));
+const BUNDLE_SHA = Object.fromEntries(["base", "aa", "warm", "head", "delay"].map((n) => [n, sha(normalizeBundle(readFileSync(join(site, `ws-${n}.js`), "utf8")))]));
 if (!(BUNDLE_SHA.warm === BUNDLE_SHA.base && BUNDLE_SHA.aa === BUNDLE_SHA.base)) die(`ws-warm, ws-base and ws-aa aren't byte-identical (${BUNDLE_SHA.warm} ${BUNDLE_SHA.base} ${BUNDLE_SHA.aa})`);
 if (process.env.HCOST_FROZEN_HASHES) {
   const want = Object.fromEntries(readFileSync(process.env.HCOST_FROZEN_HASHES, "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/)).map(([h, f]) => [f, h]));
@@ -419,7 +426,7 @@ const MODE = process.env.HCOST_MODE ?? "";
 if (!["INFO", "COUNTED"].includes(MODE)) die("HCOST_MODE: INFO or COUNTED, declared before the run");
 const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
-const report = { mode: MODE, order: ORDER, bundles: BUNDLE_SHA, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
+const report = { mode: MODE, order: ORDER, bundles: BUNDLE_SHA, bundlesRaw: BUNDLE_RAW, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
 console.log(`declared: ${report.declared}; mode ${MODE} (INFO: per-predecessor carry <= U or STOP; COUNTED: reported); a fresh browser process per run with the identical warm-up; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 partial = report;
