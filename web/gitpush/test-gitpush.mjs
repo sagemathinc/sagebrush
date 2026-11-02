@@ -7,7 +7,7 @@
 // push: a change pushed by itself, nothing pushed when nothing changed, and its failure said in the panel.
 //   node web/gitpush/test-gitpush.mjs        (CHROME=… to choose the browser)
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -23,6 +23,8 @@ const git = (...a) => execFileSync("git", a, { encoding: "utf8", env: { ...proce
 const bare = join(tmp, "srv", "octo", "notes.git");
 git("init", "-q", "--bare", bare);
 git("-C", bare, "config", "http.receivepack", "true");
+// (as GitHub does: an empty repository's first pushed branch becomes its default, its HEAD)
+git("-C", bare, "symbolic-ref", "HEAD", "refs/heads/sagebrush/proj");
 // (M2-SEC-1's overlap check: two more repositories, A's private and B's public)
 const bareA = join(tmp, "srv", "alice", "private.git"), bareB = join(tmp, "srv", "bob", "public.git");
 for (const b of [bareA, bareB]) { git("init", "-q", "--bare", b); git("-C", b, "config", "http.receivepack", "true"); }
@@ -37,7 +39,7 @@ const proxy = createServer(async (req, res) => {
   const u = new URL(req.url, "http://x");
   const cors = { "access-control-allow-origin": page, vary: "Origin", "access-control-allow-headers": "authorization, content-type, accept, git-protocol, user-agent", "access-control-allow-methods": "GET, POST" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
-  const m = /^\/github\.com(\/[^/]+\/[^/]+\.git\/(?:info\/refs|git-receive-pack))$/.exec(u.pathname);
+  const m = /^\/github\.com(\/[^/]+\/[^/]+\.git\/(?:info\/refs|git-receive-pack|git-upload-pack))$/.exec(u.pathname);
   seen.push({ path: u.pathname + u.search, auth: req.headers.authorization ?? null });
   if (holdMs) await new Promise((r) => setTimeout(r, holdMs));
   if (!m) { res.writeHead(400, cors); return res.end("no\n"); }
@@ -185,6 +187,34 @@ try {
   await ev(`(${btn("/^Push now$/")}.click(), 1)`);
   await until(`!${btn("/^Push now$/")}.disabled`, 30000);
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === second, "with nothing changed, no new commit");
+  // (M4b) Copy from GitHub branch: an agent's branch, pushed with git, copied into a NEW folder by Upload's rule
+  const agent = join(tmp, "agent");
+  git("clone", "-q", "-b", "sagebrush/proj", bare, agent);
+  git("-C", agent, "checkout", "-q", "-b", "agent/x");
+  writeFileSync(join(agent, "notes.md"), "agent wrote this\n");
+  mkdirSync(join(agent, "sub", "deep"), { recursive: true });
+  writeFileSync(join(agent, "sub", "deep", "x.txt"), "deep\n");
+  mkdirSync(join(agent, ".sagebrush"));
+  writeFileSync(join(agent, ".sagebrush", "history-1.json"), "{}");
+  writeFileSync(join(agent, "a.txt"), "the agent's a\n");
+  git("-C", agent, "add", "-A");
+  git("-C", agent, "commit", "-q", "-m", "agent's edit");
+  git("-C", agent, "push", "-q", "origin", "agent/x");
+  const before4 = await ev(`${W}.read("/proj/a.txt").then((r) => new TextDecoder().decode(r.content))`);
+  const copyIn = (b) => ev(`(() => { const i = ${P}.querySelector("input[placeholder='agent/x']"); i.value = ${JSON.stringify(b)}; ${btn("/^Copy into a new folder$/")}.click(); return 1; })()`);
+  await copyIn("agent/x");
+  check(await until(`/^Copied \\d+ files of agent\\/x \\([0-9a-f]{7}\\) into \\/notes \\(agent-x\\)$/.test([...${P}.querySelectorAll("p.note")].map((p) => p.textContent).find((t) => t.startsWith("Copied") || t.includes("failed") || t.includes("no branch")) ?? "")`, 30000), "(M4b) Copy from GitHub branch: " + (await ev(`[...${P}.querySelectorAll("p.note")].map((p) => p.textContent).filter((t) => /Cop|fail|branch/.test(t)).join(" | ")`)));
+  const text = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content), () => null)`);
+  const NL = String.fromCharCode(10);
+  check((await text("/notes (agent-x)/notes.md")) === "agent wrote this" + NL && (await text("/notes (agent-x)/sub/deep/x.txt")) === "deep" + NL && (await text("/notes (agent-x)/a.txt")) === "the agent's a" + NL, "…its files, in their folders, in a new folder");
+  check(await ev(`${W}.stat("/notes (agent-x)/nb.ipynb").then((e) => e?.kind === "notebook")`), "…its notebook made a notebook (Upload's rule)");
+  check(!(await ev(`${W}.stat("/notes (agent-x)/.sagebrush/history-1.json").then((e) => !!e)`)) && /\.sagebrush\/history-1\.json: Sagebrush's own data/.test(await ev(`${P}.textContent`)), "….sagebrush never copied, and said");
+  check((await text("/proj/a.txt")) === before4, "…and the pushed folder is untouched");
+  await copyIn("agent/x");
+  check(await until(`[...${P}.querySelectorAll("p.note")].some((p) => p.textContent.endsWith("into /notes (agent-x) (2)"))`, 30000) && (await text("/notes (agent-x)/a.txt")) === "the agent's a" + NL, "…a second copy goes to a new folder too, the first left as it was");
+  await copyIn("no/such");
+  check(await until(`[...${P}.querySelectorAll("p.note")].some((p) => p.textContent === "https://github.com/octo/notes.git has no branch no/such.")`, 30000), "…a branch that isn't there: said, and nothing made");
+  check(!(await ev(`${W}.stat("/notes (no-such)").then((e) => !!e)`)), "…no folder for it");
   // (M3) the automatic push: a reload with a fast turn; a change pushed by itself, with no click
   const openSection = async () => {
     check(await openStorage(), "the Storage panel opens");
@@ -221,7 +251,7 @@ try {
   await sleep(2000);
   check(git("-C", bare, "rev-parse", "sagebrush/proj").trim() === moved, "…and its retries never overwrite the server's branch");
   // every request carried the token, and only to the proxy's two routes
-  check(seen.length > 0 && seen.every((s) => s.auth === AUTH && /^\/github\.com\/octo\/notes\.git\/(info\/refs\?service=git-receive-pack|git-receive-pack)$/.test(s.path)), "every request went to the proxy's push routes, with the token: " + JSON.stringify([...new Set(seen.map((s) => s.path))]));
+  check(seen.length > 0 && seen.every((s) => s.auth === AUTH && /^\/github\.com\/octo\/notes\.git\/(info\/refs\?service=git-(receive|upload)-pack|git-(receive|upload)-pack)$/.test(s.path)), "every request went to the proxy's git routes, with the token: " + JSON.stringify([...new Set(seen.map((s) => s.path))]));
   // a wrong token: refused in fixed words; Forget token
   await ev(`(${btn("/^Forget token$/")}.click(), 1)`);
   check(await until(`!!${P}.querySelector("input[type=password]") && ${btn("/^Push now$/")}.disabled`), "Forget token: the token field is back, and Push now waits for one");
@@ -232,6 +262,11 @@ try {
   // (M2-SEC-1) one push owns the worker from begin to end: a second begin is refused, not put in its place; a request
   // naming another run is refused; A's files reach only A; the worker is free again after an end, an abort, or a
   // begin that failed
+  // (the automatic push of this page let go first: its turns made slow, and the one under way, if any, ended)
+  await ev(`(window.__SB_GITPUSH_TEST__.autoMs = 3600000, 1)`);
+  await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.startsWith("sagebrush-gitpush:")))`, 30000);
+  await sleep(1500);
+  await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.startsWith("sagebrush-gitpush:")))`, 30000);
   const ov = await ev(`(async () => {
     const m = await import(new URL("sagebrush-gitpush-panel.js", location.href).href);
     const url = new URL("sagebrush-gitpush-worker.js", location.href).href;
