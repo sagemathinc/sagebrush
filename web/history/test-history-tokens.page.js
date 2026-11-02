@@ -5,7 +5,7 @@ import * as T from "./tokens.js";
 import * as W from "./ws.js";
 import * as S from "./stores.js";
 
-const MUTANTS = ["unsafe", "wrap", "saturate", "rows", "size", "inert"];
+const MUTANTS = ["unsafe", "wrap", "saturate", "rows", "size", "inert", "dedupIdentRev"];
 const M = Object.fromEntries(await Promise.all(MUTANTS.map(async (m) => [m, await import(`./tokens-${m}.js`)])));
 const results = [];
 const check = (ok, what) => results.push([!!ok, what]);
@@ -110,6 +110,18 @@ const ROWS = {
     }
     return out.every(Boolean);
   },
+  // (A1-T12) the same (ident, rev) twice in one transaction: two tokens, two seqs (seq alone tells them apart)
+  async sameRev(Tm) {
+    const db = await fresh({ hactive: true });
+    const tx = db.transaction(["src", "htokens", "hmeta"], "readwrite"), fin = done(tx);
+    await Tm.noteToken(tx, tok("same", { rev: 7 }));
+    await Tm.noteToken(tx, tok("same", { rev: 7 }));
+    await fin;
+    const rows = await rawAll(db, "htokens");
+    const ok = rows.length === 2 && rows[0].seq === 1 && rows[1].seq === 2 && rows.every((r) => r.ident === "same" && r.rev === 7);
+    db.close();
+    return ok;
+  },
   // exhaustion: the last valid seq a token; then the never-cleared terminal state, saves kept, no token, no repeat
   async exhaust(Tm) {
     const db = await fresh({ hactive: true, hseq: MAX - 1, hcount: 0, hbytes: 0 });
@@ -155,7 +167,7 @@ for (const [name, row] of Object.entries(ROWS)) check(await row(T), `row ${name}
 }
 
 // ---- every mutant fails the row that guards against it
-for (const [m, row] of [["unsafe", "exhaust"], ["wrap", "exhaust"], ["saturate", "exhaust"], ["rows", "rows"], ["size", "bytes"], ["inert", "inert"]]) {
+for (const [m, row] of [["unsafe", "exhaust"], ["wrap", "exhaust"], ["saturate", "exhaust"], ["rows", "rows"], ["size", "bytes"], ["inert", "inert"], ["dedupIdentRev", "sameRev"]]) {
   check(!(await ROWS[row](M[m])), `mutant ${m}: FAILS row ${row}`);
 }
 

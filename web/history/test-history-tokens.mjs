@@ -31,6 +31,8 @@ const MUTANTS = {
   size: ["bytes + sz > TOKEN_LIMITS.bytes", "bytes > TOKEN_LIMITS.bytes"],
   // the inactive return removed: a token written while history is off
   inert: ['  if ((await req(meta.get("hactive"))) !== true) return;\n', ""],
+  // (A1-T12: two tokens of the same (ident, rev) are two tokens: a dedup by (ident, rev) dropping the second)
+  dedupIdentRev: ['  // (add, not put: a duplicate seq', '  if (((await req(tx.objectStore("htokens").getAll())) as Token[]).some((r) => r.ident === t.ident && r.rev === t.rev)) return;\n  // (add, not put: a duplicate seq'],
 };
 for (const [name, [a, b]] of Object.entries(MUTANTS)) {
   if (SRC.split(a).length !== 2) {

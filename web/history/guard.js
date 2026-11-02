@@ -107,16 +107,27 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       return;
     }
     if (s.meta.get("hactive") !== true) return;
-    // (A5, A1.1, A1-T17: a workspace token's rev, EXACTLY: the seq of the last op its own transaction added before it
-    // (an op's token: its own op), or, with none before it, the generation the transaction began with)
-    if (s.kind === "workspace" && t.rows.some((r) => r.kind === "file" || r.kind === "folder")) {
+    // (A5, A1.1, A1-T17, astra3: every token's rev EXACTLY, by its WRITER, not its kind alone:
+    //   an index token (the event just before it an op its transaction added: log()): that op's own seq;
+    //   a content token of a board or notebook row (boardRowWrite, a notebook save or delete): that row's rev, 0 for a
+    //   delete;
+    //   any other workspace token (a publication's, a fetch's install): the generation at its write point, the last op
+    //   its transaction added before it, or, with none, the generation the transaction began with)
+    if (t.rows.length) {
       G.pending++;
       Promise.resolve(t.begin).then((begin) => {
-        let last = begin;
+        let last = begin, prev = null;
+        const rowRev = new Map();
         for (const ev of t.order) {
-          if (ev.op) { last = ev.op.result; continue; }
+          if (ev.op) { last = ev.op.result; prev = ev; continue; }
+          if (ev.row) { rowRev.set(ev.row.id, ev.row.rev); prev = ev; continue; }
           const r = ev.token;
-          if ((r.kind === "file" || r.kind === "folder") && r.rev !== last) G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why: `rev ${r.rev}, but the generation at its write point is ${last}` });
+          let want, writer;
+          if (prev?.op) { want = prev.op.result; writer = "an op's"; }
+          else if (r.kind === "board" || r.kind === "notebook") { want = rowRev.get(r.ident); writer = "a row's"; }
+          else { want = last; writer = "a no-op"; }
+          if (s.kind === "workspace" || writer === "a row's") if (r.rev !== want) G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why: `${writer} token: rev ${r.rev}, want ${want}` });
+          prev = ev;
         }
         G.pending--;
       });
@@ -170,12 +181,14 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       s.bytes.set(key, sg);
     } else if (name === "boards") {
       const id = del ? key : value?.id, sg = del ? undefined : JSON.stringify([value?.doc, value?.rev]);
+      t.order.push({ row: { id, rev: del ? 0 : value?.rev } });
       if (s.board.get(id) !== sg) mark(t, id, name, del ? "removed" : "content");
       if (del) s.board.delete(id); else s.board.set(id, sg);
     } else if (name === "notebooks") {
       const id = del ? key : value?.id;
       if (id === FENCE || (!del && key === FENCE)) return;
       const sg = del ? undefined : strip(value);
+      t.order.push({ row: { id, rev: del ? 0 : value?.rev } });
       if (s.nb.get(id) !== sg) mark(t, id, name, del ? "removed" : "content");
       if (del) s.nb.delete(id); else s.nb.set(id, sg);
     }

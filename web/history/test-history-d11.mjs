@@ -6,7 +6,7 @@
 //   nullChain   a mismatched or missing destination given null              -> T4
 //   swallow     a failed token write caught, the save committed             -> T11 (i)
 //   dedupIdent  the sweep-2 token dropped as a duplicate of an ident        -> T10
-//   dedupIdentRev  a token dropped when one of the same (ident, rev) exists -> T12
+//   oldRev      the publication's rev from the plan's record (A1's rec.rev + 1), not the generation -> T12b
 //   republish   the publication's tokens written again at sweep 1          -> T13
 // The cases are in test-history-d11.page.js.
 //   CHROME=google-chrome bun web/history/test-history-d11.mjs
@@ -31,7 +31,7 @@ const MUTANTS = {
   nullChain: [["workspace/sync-replay.ts", ', (p) => pub.get(p), parentOf) : "broken",', ", (p) => pub.get(p), parentOf) : null,"]],
   swallow: [["history/tokens.ts", '  tx.objectStore("htokens").add({ ...row, sz } satisfies Token);', '  try { tx.objectStore("htokens").add({ ...row, sz } satisfies Token); } catch {}']],
   dedupIdent: [["history/tokens.ts", '  // (add, not put: a duplicate seq', '  if (((await req(tx.objectStore("htokens").getAll())) as Token[]).some((r) => r.ident === t.ident)) return;\n  // (add, not put: a duplicate seq']],
-  dedupIdentRev: [["history/tokens.ts", '  // (add, not put: a duplicate seq', '  if (((await req(tx.objectStore("htokens").getAll())) as Token[]).some((r) => r.ident === t.ident && r.rev === t.rev)) return;\n  // (add, not put: a duplicate seq']],
+  oldRev: [["workspace/sync-replay.ts", "            ident: x.top, rev: gen, kind,", "            ident: x.top, rev: rec.rev + 1, kind,"]],
   republish: [["workspace/sync-replay.ts", '          REPLAY.cut?.("sweep1", m);\n', '          REPLAY.cut?.("sweep1", m);\n          if (!(globalThis as any).__republished) { (globalThis as any).__republished = true; for (const y of maps) if (y.top) await noteToken(tx, { ident: y.top, rev: 0, kind: "folder", chain: null }); }\n']],
 };
 for (const [name, patches] of Object.entries(MUTANTS)) {
