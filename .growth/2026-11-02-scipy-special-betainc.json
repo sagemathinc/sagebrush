@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "scipy.stats lane, PR 1 (William's QRPM book corpus: its normal, t, F and binomial tails need them): scipy.special's betainc, betaincc, betaincinv, betainccinv, gammaincinv and gammainccinv. The code is lib/_special_ibeta.py, a lazy chunk of its own (mod-special-ibeta, a new bundle with its budgets row), not lib/_special.py, which is in MATLAB's chunks. The CLI carries the module (lib.gen, pyjs); scipy.special gets its six wrappers (mod-scipy-special +980); the worker's and the notebook page's library manifest list the new chunk (+208, +50). Measured with bun 1.4.4 on master e3ceeb95.",
+ "reason": "scipy.stats lane, PR 1 (William's QRPM book corpus: its normal, t, F and binomial tails need them): scipy.special's betainc, betaincc, betaincinv, betainccinv, gammaincinv and gammainccinv. The code is lib/_special_ibeta.py, a lazy chunk of its own (mod-special-ibeta, a new bundle with its budgets row), not lib/_special.py, which is in MATLAB's chunks. The CLI carries the module (lib.gen, pyjs); scipy.special gets its six wrappers (mod-scipy-special +980); the worker's and the notebook page's library manifest list the new chunk (+208, +50). Measured with bun 1.4.4 on master a39bec34.",
  "bytes": {
-  "cli/lib.gen.js": 10620,
-  "cli/pyjs.cjs": 10804,
+  "cli/lib.gen.js": 10852,
+  "cli/pyjs.cjs": 11012,
   "engine/lib/mod-scipy-special.src": 980,
   "engine/sagebrush-worker.js": 208,
   "engine/sagebrush-notebook.js": 50
