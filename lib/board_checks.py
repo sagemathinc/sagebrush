@@ -917,14 +917,20 @@ def symbolic_equal(answer, expected):
             if va != ve:
                 return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
             continue
-        # (not both exact rationals, as with sin or e^x: the difference in
-        # rigorous intervals; an enclosure without 0 proves they differ, one
-        # with 0 decides nothing. A point outside the domain is skipped.)
+        # (not both exact rationals, as with sin or e^x: each side on its own
+        # in rigorous intervals (RIF); disjoint enclosures prove they differ,
+        # overlapping ones decide nothing. A point where a side isn't defined
+        # (a pole, a log of 0) is skipped: the simplified difference, which
+        # may be defined there, is never what is evaluated.)
         try:
-            r = sage_all.RIF(d.subs(at))
+            ra = sage_all.RIF(a.subs(at))
+            re_ = sage_all.RIF(e.subs(at))
+            ends = [float(t) for t in (ra.lower(), ra.upper(), re_.lower(), re_.upper())]
         except Exception:
             continue
-        if not r.contains_zero():
+        if not all(math.isfinite(t) for t in ends):
+            continue
+        if ends[1] < ends[2] or ends[3] < ends[0]:
             return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
     return Verdict(None, "the check could not decide whether these are equal")
 
