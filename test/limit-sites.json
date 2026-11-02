@@ -7886,7 +7886,7 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: quiet :: const buf = Buffer.alloc(limit + 1); #0": {
+ "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(limit + 1); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
