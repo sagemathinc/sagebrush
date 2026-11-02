@@ -823,7 +823,7 @@ try {
     const at = (stage) => until(`(window.__b1at ?? []).includes(${JSON.stringify(stage)})`, 30000);
     const goOn = (stage) => ev(`(() => { const f = window.__b1go?.[${JSON.stringify(stage)}]; delete window.__b1go?.[${JSON.stringify(stage)}]; f?.(); return 1; })()`);
     const disarm = () => ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; return 1; })()`);
-    const navTo = (p) => ev(`(async () => { const e = await ${W}.stat(${JSON.stringify(p)}); window.__nav = { done: false }; sagebrush.open(e.ref).then((r) => (window.__nav = { done: true, r }), (x) => (window.__nav = { done: true, err: String(x?.message ?? x) })); return 1; })()`);
+    const navTo = (p) => ev(`(async () => { const e = await ${W}.stat(${JSON.stringify(p)}); if (!e) { window.__nav = { done: true, err: "not there" }; return 1; } window.__nav = { done: false }; sagebrush.open(e.ref).then((r) => (window.__nav = { done: true, r }), (x) => (window.__nav = { done: true, err: String(x?.message ?? x) })); return 1; })()`);
     const navNow = () => ev(`window.__nav ?? null`);
     const idle = () => until(`(() => { const s = sagebrush.trashTest.state(); return s.switches === 0 && !s.held; })()`, 20000);
     const toastIs = (txt, ms = 20000) => until(`(document.querySelector("#wssidebar .ftoast")?.textContent ?? "").startsWith(${JSON.stringify(txt)})`, ms);
@@ -834,6 +834,14 @@ try {
     // (a folder of more than D11.chunk (1,000) entries, put straight into the index as a big workspace holds them, so
     // its move takes largeMove's path)
     const fillLarge = (dir) => ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => { const tx = r.result.transaction("entries", "readwrite"), st = tx.objectStore("entries"), t = Date.now(); for (let i = 0; i <= 1000; i++) st.put({ path: ${JSON.stringify(dir)} + "/g" + String(i).padStart(4, "0"), kind: "folder", ref: null, created: t, updated: t }); tx.oncomplete = () => { r.result.close(); ok(1); }; }; })`);
+    // (a row that throws (its seam never reached, an entry already gone, as under a control) fails each of its own checks
+    // not yet made, said, and the run goes on to the next: the closed count stays exact)
+    const row = async (ids, f) => {
+      const c0 = checks;
+      try { await f(); }
+      catch (e) { for (const id of ids.slice(checks - c0)) check(false, `${id}: the row threw: ${String(e?.message ?? e).slice(0, 300)}`); }
+      finally { await ev(`(() => { sagebrush.trashTest.pause = null; for (const f of Object.values(window.__b1go ?? {})) try { f(); } catch {} window.__b1go = {}; if (sagebrush.shareTest) { sagebrush.shareTest.beforeLeave = undefined; sagebrush.shareTest.beforeAttach = undefined; } window.__leaveGo?.(); return 1; })()`).catch(() => {}); }
+    };
     const where = (dir) => ev(`(async () => ({ here: await ${W}.stat(${JSON.stringify(dir)}).then((e) => !!e), inTrash: await ${W}.stat(${JSON.stringify("/Trash/" + dir.slice(1))}).then((e) => !!e) }))()`);
     // (each row's notebooks named after its folder, files and all ("T7 a.ipynb": the page shows the file's name), so no name an earlier row left can stand in)
     const nm = (dir, x) => `${dir.slice(1).replace(/ dir$/, "")} ${x}`, nf = (dir, x) => `${dir}/${nm(dir, x)}.ipynb`;
@@ -848,7 +856,7 @@ try {
     // (T7 small / T8 large: a navigation into what goes, started after the move is admitted and before it publishes,
     // waits; the move publishes; the navigation isn't opened, said, with Restore and open, which puts it all back,
     // opens that notebook and gives it the focus.  The stage reached names the path taken)
-    for (const [id, dir, large] of [["T7", "/T7 dir", false], ["T8", "/T8 dir", true]]) {
+    for (const [id, dir, large] of [["T7", "/T7 dir", false], ["T8", "/T8 dir", true]]) await row([id, `${id}.restore`], async () => {
       const ready = await setUp(dir, large);
       const stage = large ? "publishing:large" : "publishing:small";
       await arm([stage]);
@@ -866,10 +874,10 @@ try {
       const b2 = { ...(await where(dir)), focus: await ev(`document.activeElement?.tagName ?? null`), idle: await idle() };
       check(back && b2.here && !b2.inTrash && b2.focus === "TEXTAREA" && b2.idle, `${id}.restore: Restore and open put it back, opened that notebook and gave it the focus: ` + JSON.stringify(b2));
       await disarm();
-    }
+    });
     // (T9 / T9b: the notebook open here moved INTO what goes (into it, or two folders down) after the page's last
     // check and before the workspace's: refused, the notebook looked up where it is now)
-    for (const [id, dir, into] of [["T9", "/T9 dir", "/T9 dir/r.ipynb"], ["T9b", "/T9b dir", "/T9b dir/s1/s2/r.ipynb"]]) {
+    for (const [id, dir, into] of [["T9", "/T9 dir", "/T9 dir/r.ipynb"], ["T9b", "/T9b dir", "/T9b dir/s1/s2/r.ipynb"]]) await row([id], async () => {
       await freshPage();
       await mk(`${dir}/${id} a.ipynb`, `${id} a`);
       if (id === "T9b") await ev(`${W}.create(${JSON.stringify(dir + "/s1/s2/keep.txt")}, { content: "k" }).then(() => 1)`);
@@ -884,10 +892,10 @@ try {
       const t = { ...(await where(dir)), moved: await ev(`${W}.stat(${JSON.stringify(into)}).then((e) => !!e)`), idle: await idle() };
       check(ready && r0 && said && t.here && !t.inTrash && t.moved && t.idle, `${id}: the notebook open here moved inside what goes before the workspace's check: refused, nothing moved: ` + JSON.stringify(t));
       await dismissAny();
-    }
+    });
     // (T10: a navigation under way (held before it leaves the notebook) when the workspace checks: refused; the
     // navigation then ends where it was going)
-    {
+    await row(["T10"], async () => {
       await freshPage();
       await mk("/T10 dir/T10 a.ipynb", "T10 a");
       await mk("/T10 c.ipynb", "T10 c");
@@ -906,10 +914,10 @@ try {
       const ok = await idle();
       check(ready && r0 && said && t1.here && !t1.inTrash && opened && ok, "T10: a navigation under way when the workspace checks: refused, nothing moved, and the navigation ended where it was going: " + JSON.stringify({ t1, opened }));
       await dismissAny();
-    }
+    });
     // (T11 small / T11L large: the move failing right before it publishes, a navigation waiting: said, nothing moved,
     // the hold let go (the navigation ran), the workspace's lock not held, and the next Move to Trash goes through)
-    for (const [id, dir, large] of [["T11", "/T11 dir", false], ["T11L", "/T11L dir", true]]) {
+    for (const [id, dir, large] of [["T11", "/T11 dir", false], ["T11L", "/T11L dir", true]]) await row([id], async () => {
       const ready = await setUp(dir, large);
       const stage = large ? "publishing:large" : "publishing:small";
       await arm([stage], [stage]);
@@ -929,10 +937,10 @@ try {
       const next = await toastIs(`"${id} next.txt" moved to Trash`);
       const ok = await idle();
       check(ready && r0 && mid && !mid.done && said && opened && t.here && !t.inTrash && t.lockFree && next && ok, `${id}: failing right before it published: said, nothing moved, the waiting navigation ran, no lock held, and the next Move to Trash went through: ` + JSON.stringify({ mid, t, opened, next }));
-    }
+    });
     // (T12: a navigation started while the workspace looks the open notebook up (the hold already taken) waits; the
     // move publishes; it isn't opened, said)
-    {
+    await row(["T12"], async () => {
       const dir = "/T12 dir", ready = await setUp(dir, false);
       await arm(["lookup"]);
       await trashRow("/T12 dir");
@@ -946,10 +954,10 @@ try {
       check(ready && r0 && mid.shown !== nm(dir, "b") && mid.nav && !mid.nav.done && said && t.inTrash && t.shown !== nm(dir, "b") && t.nav?.r === false && t.idle, "T12: a navigation started during the workspace's lookup waited; moved; not opened, said: " + JSON.stringify({ mid, t }));
       await disarm();
       await dismissAny();
-    }
+    });
     // (T13: a second Move to Trash of what is open here while the first is held right before it publishes: refused in
     // the page, before the workspace, and its settling doesn't let the first one's hold go; that is let go once)
-    {
+    await row(["T13"], async () => {
       const dir = "/T13 dir", ready = await setUp(dir, false);
       await arm(["publishing:small"]);
       await trashRow("/T13 dir");
@@ -969,10 +977,10 @@ try {
       check(ready && r0 && said2 && mid.nav && !mid.nav.done && mid.st.held && mid.still && said && after === before + 1 && ok, "T13: a second Move to Trash meanwhile: refused in the page, the first one's hold kept (its navigation still waiting), let go once: " + JSON.stringify({ mid, before, after }));
       await disarm();
       await dismissAny();
-    }
+    });
     // (T14a–c: each way of navigating waits while a move holds the page: Sagebrush's open (by id), a click on the row,
     // File ▸ New (a new notebook, opened once the move is done); into what went: not opened, said)
-    for (const [id, how] of [["T14a", "open"], ["T14b", "row"], ["T14c", "new"]]) {
+    for (const [id, how] of [["T14a", "open"], ["T14b", "row"], ["T14c", "new"]]) await row([id], async () => {
       const dir = `/${id} dir`;
       const ready = await setUp(dir, false);
       await arm(["publishing:small"]);
@@ -991,10 +999,10 @@ try {
       check(ready && r0 && mid === was && moved && end && (how === "new" || t.shown !== nm(dir, "b")) && t.idle, `${id}: ${how} waited while the move was held, then ${how === "new" ? "opened" : "wasn't opened, said"}: ` + JSON.stringify({ was, mid, t }));
       await disarm();
       await dismissAny();
-    }
+    });
     // (T15: the hand-off: a navigation let go by one move counts itself as under way at once, so a second Move to
     // Trash checked right then (held at "leased") is refused; never both)
-    {
+    await row(["T15"], async () => {
       const ready = await setUp("/T15 dir", false);
       await mk("/T15 c.ipynb", "T15 c");
       await arm(["publishing:small"]);
@@ -1015,10 +1023,10 @@ try {
       check(ready && r0 && r1 && said && kept && opened && ok, "T15: a second Move to Trash right as a held navigation was let go: refused (the navigation already counted), and the navigation then opened: " + JSON.stringify({ rp, kept, opened }));
       await disarm();
       await dismissAny();
-    }
+    });
     // (T16: the journal's reopen failing, held in its recovery: a Move to Trash then is refused (the reopen still holds
     // its lease), nothing moved)
-    {
+    await row(["T16"], async () => {
       const ready = await setUp("/T16 dir", false);
       await arm(["recovering"]);
       await ev(`(() => { sagebrush.shareTest.beforeAttach = () => { sagebrush.shareTest.beforeAttach = undefined; throw new Error("test: the reopen fails"); }; window.__re = null; sagebrush.trashTest.nav.reopen().then((r) => (window.__re = r)); return 1; })()`);
@@ -1032,7 +1040,7 @@ try {
       check(ready && r0 && said && t.here && !t.inTrash && ended && ok, "T16: during the journal's reopen's recovery, a Move to Trash was refused, nothing moved: " + JSON.stringify({ t, said, ended }));
       await disarm();
       await dismissAny();
-    }
+    });
     // (after the T cases: a fresh page, with a notebook of its own open outside their folders, so a T case whose move
     // went through (as under the controls K15/K16, its open notebook into Trash with its folder) can't reach the checks
     // after them: #447 r3's run, the ruling for r4)
