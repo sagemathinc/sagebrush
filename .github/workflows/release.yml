@@ -48,9 +48,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+        # (a push run or a dispatch on master: both run the full tier, and a later merge can cancel a commit's push
+        # run (ci.yml's concurrency), so a release of that commit dispatches ci.yml on it first)
         run: |
           ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
-            --jq '[.workflow_runs[] | select(.conclusion == "success" and .event == "push" and .head_branch == "master")] | length')
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "master")] | length')
           [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - run: pnpm run build
       - name: versions match the tag

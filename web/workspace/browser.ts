@@ -8,7 +8,7 @@
 // A data file opens its preview, with its earlier versions; a folder's ⋯
 // deletes older versions in it; the foot's meter opens the Storage panel
 // (preview.ts, step 2b).
-import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
+import { Workspace, WorkspaceError, LIMITS, type Entry, type TrashGate } from "./api";
 import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind } from "./paths";
 import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
@@ -48,7 +48,18 @@ export type BrowserHost = {
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
   saveOpen?: () => Promise<void>;
+  /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
+   * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
+   * moved). None: the page can't, and an open document isn't moved to Trash. */
+  trashing?(e: Entry): Promise<string | void | TrashGate>;
+  /** Every Move to Trash of what is open here, once it has settled (moved, refused or failed): `gate` is what trashing
+   * returned (none if it refused), `moved` what went to Trash if it did (the page releases its navigation hold, and
+   * tells a navigation that waited into it, with `dropped`). */
+  trashDone?(gate: TrashGate | undefined, moved?: TrashMoved): void;
 };
+/** What went to Trash, for a navigation that waited into it (#447 r5c, board's (A)): said as not opened, with Restore
+ * and open while it can still be put back (`open` opens the notebook asked for once it is). */
+export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
 const RECENT = 5;
@@ -106,8 +117,13 @@ const STYLE = `
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
-.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.sbfiles .ftoastslot { flex: none; }
+.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.sbfiles .ftoast span { flex: 1; min-width: 0; }
 .sbfiles .ftoast button { background: none; border: 0; color: #b9e0a5; font: inherit; cursor: pointer; text-decoration: underline; }
+.sbfiles .ftoast.err { background: #fdecea; color: #7a2418; border: 1px solid #e0897c; font-weight: 500; }
+.sbfiles .ftoast.err::before { content: "⚠"; font-weight: 700; }
+.sbfiles .ftoast.err button { color: #7a2418; }
 .sbfmenu { position: fixed; z-index: 1000; background: #fff; border: 1px solid #d4d4cb; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 5px; min-width: 190px; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2421; }
 .sbfmenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 5px; font: inherit; cursor: pointer; color: inherit; }
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
@@ -173,7 +189,7 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean; label?: string } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -195,27 +211,45 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
-  const toastEl = h("div");
+  // (the toast at the foot of the files, under the list (board's (d)): a message never moves a row; while it shows the
+  // list is that much shorter at its bottom, and what it covers scrolls into view)
+  const toastEl = h("div", { className: "ftoastslot" });
   const tree = h("div", { className: "ftree", role: "tree" });
   const foot = h("div", { className: "ffoot" });
   const picker = h("input", { type: "file", multiple: true, hidden: true });
-  root.append(head, search, toastEl, tree, foot, picker);
+  root.append(head, search, tree, toastEl, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void, sticky = false) => {
-    toast = { text, undo, sticky };
+  // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
+  // being reached for)
+  const hideLater = (t: NonNullable<typeof toast>, ms: number) => setTimeout(() => {
+    if (toast !== t) return;
+    if (toastEl.matches(":hover") || toastEl.contains(document.activeElement)) return void hideLater(t, 2000);
+    toast = null;
     renderToast();
-    if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
+  }, ms);
+  const say = (text: string, undo?: () => unknown, sticky = false, error = false, label = "Undo") => {
+    toast = { text, undo, sticky, error, label };
+    renderToast();
+    if (!sticky) hideLater(toast, 10_000);
+  };
+  // (focus once the toast it was in has gone: the row given, else the current one, else the list's first; never the body)
+  const focusList = (path?: string) => {
+    const r = (path ? tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(path)}"]`) : null) ?? tree.querySelector<HTMLElement>(".frow.cur") ?? tree.querySelector<HTMLElement>(".frow");
+    r?.focus();
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
-    const t = h("div", { className: "ftoast", role: "status" }, h("span", { textContent: toast.text }));
-    if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
-    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
+    // (an error looks like one, and is announced as one: role=alert, kept until closed)
+    const t = h("div", { className: toast.error ? "ftoast err" : "ftoast", role: toast.error ? "alert" : "status" }, h("span", { textContent: toast.text }));
+    // (Undo: the focus to the list meanwhile, its row after; another action (Restore and open) takes the focus itself)
+    if (toast.undo) { const label = toast.label ?? "Undo", u = h("button", { textContent: label }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); if (label === "Undo") focusList(); void f(); }; t.append(u); }
+    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Dismiss" }); x.setAttribute("aria-label", "Dismiss"); x.onclick = () => { const had = toastEl.contains(document.activeElement); toast = null; renderToast(); if (had) focusList(); }; t.append(x); }
     toastEl.append(t);
   };
-  const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
+  const sayError = (text: string) => say(text, undefined, true, true);
+  const fail = (e: unknown) => sayError(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
   // (sync, step 5: the foot's line, "Synced · 2 min ago", … (role=status); hidden with sync off and nothing to say)
   const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
@@ -354,7 +388,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // change meanwhile, here or elsewhere, would take the half-typed name
   // away; it is drawn once the name is done)
   let renamingNow = false;
+  // (a row that had the focus keeps it across a redraw: the same path's new row takes it, so a refresh (a file
+  // opened, a change from elsewhere) never drops the focus to the body)
   function render() {
+    const a = document.activeElement as HTMLElement | null;
+    const fp = a && tree.contains(a) ? a.dataset.path : undefined;
+    renderTree();
+    if (fp !== undefined && !tree.contains(document.activeElement)) tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(fp)}"]`)?.focus();
+  }
+  function renderTree() {
     if (renamingNow) return;
     drawnRows = [];
     tree.replaceChildren();
@@ -465,7 +507,39 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   async function toTrash(e: Entry) {
     const cur = host.current?.(), at = cur ? await w.pathOf(cur.kind, cur.ref).catch(() => undefined) : undefined;
-    if (at && within(at, e.path)) return say("That's open here: open something else first");
+    // (the document open here, or a folder it is in: the page saves it and opens another in its place first, so what
+    // goes to Trash is what was last seen, and Undo opens it again; a page that can't, says so and moves nothing)
+    const wasOpen = cur && at && within(at, e.path) ? cur : null;
+    // (the page's own condition for the move, checked by the workspace holding its lock (astra's R2 on #447), and its
+    // navigation held from then until the move settles, told here once it has, whatever happened (astra3's
+    // B1-R4-CODE-1, #447 r5c))
+    let gate: TrashGate | undefined, moved: Entry | undefined;
+    if (wasOpen) {
+      if (!host.trashing) return sayError(`Not moved to Trash: "${nameOf(at!)}" is open on this page, and this page can't close it`);
+      const r = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
+      if (typeof r === "string") { host.trashDone?.(undefined); return sayError(`Not moved to Trash: ${r}`); }
+      gate = r || undefined;
+    }
+    try { await toTrashGated(e, wasOpen, gate, (t) => (moved = t)); }
+    finally {
+      if (wasOpen) host.trashDone?.(gate, moved && {
+        entry: moved,
+        // (a navigation that waited into what went: not opened (board's (A)); Restore and open while it is still there)
+        dropped: (name, open) => {
+          const text = `“${name}” was moved to Trash, so it wasn't opened.`;
+          void w.stat(moved!.path).then((x) => {
+            if (!x || x.created !== moved!.created || x.fid !== moved!.fid) return say(text);
+            say(text, async () => {
+              try { await w.restore(moved!.path, moved!); } catch (err) { await refresh(); return fail(err); }
+              await refresh();
+              await open();
+            }, false, false, "Restore and open");
+          }, () => say(text));
+        },
+      });
+    }
+  }
+  async function toTrashGated(e: Entry, wasOpen: ReturnType<NonNullable<BrowserHost["current"]>> | null, gate: TrashGate | undefined, done: (t: Entry) => void) {
     // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
     if (e.kind === "file" && e.unmoved) {
       if (!confirm(`"${nameOf(e.path)}" is too large to put in Trash (${fmtSize(e.size ?? 0)}, kept by an older version of Sagebrush). Delete it for good? To keep it, Download it first.`)) return;
@@ -476,9 +550,25 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       return refresh();
     }
     try {
-      const t = await w.remove(e.path);
+      // (by its identity: whatever is at that path now, if not the entry chosen (replaced meanwhile, as across the
+      // trashing hook's waits), is refused, astra's R1 on #447)
+      const t = await w.remove(e.path, e, undefined, gate ?? {});
+      done(t);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
-      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).catch(fail).then(refresh));
+      // (and the document that was open, open again where Undo put it back)
+      const reopen = async () => {
+        if (!wasOpen) return;
+        const p = await w.pathOf(wasOpen.kind, wasOpen.ref);
+        const back = p ? await w.stat(p) : undefined;
+        if (back) host.open(back, "here");
+      };
+      // (Undo: back where it was, the document open again, and the focus on its row)
+      say(`"${nameOf(e.path)}" moved to Trash`, async () => {
+        let back: Entry | undefined;
+        try { back = await w.restore(t.path, t); await reopen(); } catch (err) { fail(err); }
+        await refresh();
+        if (back) focusList(back.path);
+      });
     } catch (err) { fail(err); }
     refresh();
   }

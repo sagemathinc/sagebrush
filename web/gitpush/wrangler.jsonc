@@ -1,0 +1,15 @@
+// "Push project to GitHub" proxy (Stage A MVP, M1), DEV only. Not routed or deployed by this file's PR: deploying
+// needs an explicit GO, and adds the DEV route then.
+{
+  "name": "sagebrush-gitpush-dev",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  // Never logs a request: no Workers Logs, no Logpush, no tail of headers or bodies.
+  "observability": { "enabled": false },
+  "logpush": false,
+  "vars": { "ALLOWED_ORIGINS": "https://dev.sagebrush.space" },
+  // 60 git requests a minute per client IP (a push is 2).
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "4801", "simple": { "limit": 60, "period": 60 } }]
+}
