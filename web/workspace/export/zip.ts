@@ -20,6 +20,10 @@ export const SLICE = 1 << 20;
 /** 256 KiB: the archive's own output slices, each one sink.write (E1 r2e: a 1 MiB write to the sink was one ~50 ms
  * task); the spools keep SLICE, and their record and segment rules are unchanged. */
 export const ZIP_OUT = 256 * 1024;
+/** 256 KiB: at most this many uncompressed bytes go to the compressor in one write, a macrotask between writes (E1
+ * r2e, r11: the browser deflates a write inside the task that processes it, ~51 ms per 1 MiB write at 4x).  A feed
+ * quantum only: the source slices, the CRC/SHA copy (one per SLICE) and every spool keep SLICE. */
+export const DEFLATE_FEED = 256 * 1024;
 
 export class ExportStopped extends Error {
   /** `plain`: `why` is a whole sentence, shown as it is (the no-OPFS refusal, @sagebrush's condition) */
@@ -29,8 +33,8 @@ export class ExportStopped extends Error {
 /** The page's slice and Blob accounting for one export (r2c R3, information and the CI assertions): slices made (each
  * SLICE bytes), bytes kept in Blob parts (the no-OPFS spools and the Blob sink: held, not recycled), bytes read back
  * from Blob parts, and the 1 MiB copies each member's slices take to the hash worker (unchanged by r2c, reported). */
-export const counts = { slices: 0, sliceBytes: 0, blobBytes: 0, blobReadBytes: 0, hashCopyBytes: 0, afterStop: 0, postsAfterStop: 0, maxSinkWrite: 0, stopped: false };
-export function resetCounts() { counts.slices = counts.sliceBytes = counts.blobBytes = counts.blobReadBytes = counts.hashCopyBytes = counts.afterStop = counts.postsAfterStop = counts.maxSinkWrite = 0; counts.stopped = false; }
+export const counts = { slices: 0, sliceBytes: 0, blobBytes: 0, blobReadBytes: 0, hashCopyBytes: 0, afterStop: 0, postsAfterStop: 0, maxSinkWrite: 0, maxDeflateWrite: 0, stopped: false };
+export function resetCounts() { counts.slices = counts.sliceBytes = counts.blobBytes = counts.blobReadBytes = counts.hashCopyBytes = counts.afterStop = counts.postsAfterStop = counts.maxSinkWrite = counts.maxDeflateWrite = 0; counts.stopped = false; }
 
 type Slot = { buf: Uint8Array; used: number; back: Promise<void> | null };
 function newSlot(size = SLICE): Slot {
@@ -459,8 +463,16 @@ export class ZipWriter {
           const copy = slice.slice();
           counts.hashCopyBytes += copy.length;
           await this.hooks.crc.ask("hashAdd", { data: copy }, [copy.buffer]);
-          if (writer) await writer.write(slice);
-          else { w.csize += slice.length; await this.emit(slice); }
+          if (writer) {
+            // (the compressor fed DEFLATE_FEED bytes a write at most, views of the slice (no copy), a macrotask between
+            // them; the slice stays lent until its last piece's write resolves, before the next slice is asked for)
+            for (let p = 0; p < slice.length; p += DEFLATE_FEED) {
+              if (p) { await pause(); this.check(); }
+              const piece = slice.subarray(p, Math.min(slice.length, p + DEFLATE_FEED));
+              if (piece.length > counts.maxDeflateWrite) counts.maxDeflateWrite = piece.length;
+              await writer.write(piece);
+            }
+          } else { w.csize += slice.length; await this.emit(slice); }
           this.hooks.progress(slice.length);
           await (this.hooks.slicePause ? new Promise<void>((r) => setTimeout(r, this.hooks.slicePause)) : pause());
         }

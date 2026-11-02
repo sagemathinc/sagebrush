@@ -536,6 +536,13 @@ try {
       // (campaign 3, the frozen parser and gate: MajorGC on the main thread from the click to the handoff, whether or
       // not inside a task; the progress line's longest rewrite gap; the heartbeat's, reported only)
       const win = [(clickT + offset) * 1000, ((page.endT ?? m2) + offset) * 1000];
+      // (E1 r2e, daybreak2's r11 review point 4: the longest compression task on the page's main thread, the browser's own
+      // "CompressionStream Deflate" event, from the click to the handoff; reported every run, never gated here (the >50 ms
+      // long-task rows above are the gate); null when the window can't be mapped)
+      {
+        const d = mapped ? onMain.filter((e) => e.name === "CompressionStream Deflate" && e.ts + (e.dur ?? 0) > win[0] && e.ts < win[1]) : null;
+        console.log(`TRACE-DEFLATE-MAX ${TRACE_RUN} ${d === null ? "null" : d.length ? (Math.max(...d.map((e) => e.dur ?? 0)) / 1000).toFixed(1) + " ms of " + d.length : "none"}`);
+      }
       // (r2, daybreak2's R2: a measure that couldn't be taken is null, never 0: GC needs the mapped window and a main
       // thread; a gap needs two rewrites)
       // (r3, daybreak2's window: from the first writing rewrite, the handoff appended as the series' last point)
