@@ -9,6 +9,7 @@
 #   scripts/test-all.sh --only checks      # one job (or a comma-separated list)
 #   scripts/test-all.sh --keep-going       # report every failing job, not just the first
 #   scripts/test-all.sh --webkit           # also the webkit job (it installs WebKit with sudo apt)
+#   CI_LOCAL_WORKFLOW=$PWD/.github/workflows/nightly.yml scripts/test-all.sh   # the nightly audits (the controls)
 #
 # The prerequisites are DEVELOPMENT.md's. scripts/build-all.sh first is not required: each job builds what it
 # needs, as in CI.
