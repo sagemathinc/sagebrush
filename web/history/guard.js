@@ -20,7 +20,7 @@ const KINDS = new Set(["file", "folder", "notebook", "board"]);
 const FENCE = "__sagebrush-workspace__";
 
 export function installGuard({ inert = false, skipOpener = () => false, judgeFixtures = false } = {}) {
-  const G = { violations: [], checked: 0, txs: 0, inert, dbs: new Map() };
+  const G = { violations: [], checked: 0, txs: 0, pending: 0, inert, dbs: new Map() };
   window.__historyGuard = G;
   const classOf = (db) => (db.objectStoreNames.contains("ops") && db.objectStoreNames.contains("entries") ? "workspace" : db.objectStoreNames.contains("notebooks") && db.objectStoreNames.contains("files") ? "notebooks" : null);
   // (each source database's shadow: what the guard knows of its rows, to judge a write a change or not)
@@ -71,7 +71,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
   const txState = (tx) => {
     let t = T.get(tx);
     if (!t) {
-      t = { changed: new Map(), tokens: new Set(), ovf: false, exhausted: false };
+      t = { changed: new Map(), tokens: new Set(), rows: [], opSeqs: new Set(), ovf: false, exhausted: false };
       T.set(tx, t);
       tx.addEventListener("complete", () => judge(tx, t));
     }
@@ -98,6 +98,20 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       return;
     }
     if (s.meta.get("hactive") !== true) return;
+    // (A5, A1.1: a workspace token's rev, exactly: an op's token names an op this transaction added (each its own
+    // seq); a token of a transaction that added none carries the index's generation, read just after its commit)
+    if (s.kind === "workspace") {
+      const ws = t.rows.filter((r) => r.kind === "file" || r.kind === "folder");
+      const bad = (r, why) => G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why });
+      if (t.opSeqs.size) for (const r of ws) { if (!t.opSeqs.has(r.rev)) bad(r, `rev ${r.rev} is no op of its transaction (${[...t.opSeqs]})`); }
+      else if (ws.length) {
+        G.pending++;
+        const rt = tx0.call(db, ["ops", "meta"], "readonly"), c = rt.objectStore("ops").openKeyCursor(null, "prev"), f = rt.objectStore("meta").get("opsFloor");
+        let last = 0;
+        c.onsuccess = () => { last = c.result?.key ?? 0; };
+        rt.oncomplete = () => { const gen = Math.max(last, f.result ?? 0); for (const r of ws) if (r.rev !== gen) bad(r, `rev ${r.rev} is not the index's generation ${gen}`); G.pending--; };
+      }
+    }
     for (const [ident, { store, why }] of t.changed) {
       G.checked++;
       if (t.tokens.has(ident) || t.ovf || t.exhausted || s.meta.get("exhausted") === true) continue;
@@ -112,12 +126,15 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
     proto[name] = function (...a) {
       const tx = this instanceof IDBCursor ? storeOf(this.source).transaction : this.transaction, t = tx && T.get(tx);
       if (t) f.call(this, t, tx, a);
-      return orig.apply(this, a);
+      const r = orig.apply(this, a);
+      // (each op's seq, as the store gives it: A5's exact-rev check, op by op (astra's A1.1 binding))
+      if (t && name === "add" && this.name === "ops") r.addEventListener("success", () => t.opSeqs.add(r.result));
+      return r;
     };
   };
   const onWrite = function (t, tx, [value, key], del = false) {
     const st = this, s = shadowOf(tx.db), name = st.name, k = s.kind;
-    if (name === "htokens" && !del) { t.tokens.add(value.ident); return; }
+    if (name === "htokens" && !del) { t.tokens.add(value.ident); t.rows.push(value); return; }
     if (name === "hmeta" && !del) { s.meta.set(key, value); if (key === "ovf") t.ovf = true; if (key === "exhausted" && value === true) t.exhausted = true; return; }
     if (!SRC[k]?.has(name)) return;
     if (k === "workspace" && name === "entries") {

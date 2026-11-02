@@ -21,6 +21,11 @@ rmSync(dir, { recursive: true, force: true });
 import { readdirSync, readFileSync, statSync } from "node:fs";
 const web = join(here, ".."), APP_IMPORTERS = new Set(["workspace/api.ts", "workspace/sync-fetch.ts", "workspace/sync-replay.ts", "notebook/stores.js"]);
 const walk = function* (d) { for (const n of readdirSync(d)) { const p = join(d, n); if (/node_modules|\/dist\b/.test(p)) continue; if (statSync(p).isDirectory()) yield* walk(p); else if (/\.(ts|js|mjs|html)$/.test(n)) yield p; } };
+{
+  // (A1.2: tokens.ts's MAX_ANCESTORS is paths.ts's MAX_DEPTH less one)
+  const md = /MAX_DEPTH = (\d+)/.exec(readFileSync(join(web, "workspace/paths.ts"), "utf8"))?.[1], ma = /MAX_ANCESTORS = (\d+)/.exec(readFileSync(join(here, "tokens.ts"), "utf8"))?.[1];
+  if (!(Number(md) === 32 && Number(ma) === Number(md) - 1)) fails.push(`A1.2: MAX_ANCESTORS (${ma}) must be paths.ts MAX_DEPTH (${md}) - 1, and MAX_DEPTH 32`);
+}
 const tokImports = [...readFileSync(join(here, "tokens.ts"), "utf8").matchAll(/^import .* from "([^"]+)";/gm)].map((m) => m[1]);
 if (JSON.stringify(tokImports) !== JSON.stringify(["../workspace/db"])) fails.push("Z1: tokens.ts imports more than ../workspace/db: " + JSON.stringify(tokImports));
 for (const p of walk(web)) {
