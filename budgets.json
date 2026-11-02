@@ -367,6 +367,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-sage-ec-ff.src": {
+   "exact": false,
+   "ceiling": 26309,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-sb-check.src": {
    "exact": false,
    "ceiling": 4791,
@@ -656,6 +663,7 @@
    "engine/lib/mod-pyjs-pretty.src": 24565,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
+   "engine/lib/mod-sage-ec-ff.src": 23918,
    "engine/lib/mod-sb-check.src": 4356,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
