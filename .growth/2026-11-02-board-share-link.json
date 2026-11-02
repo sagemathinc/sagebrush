@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Boards' File > Share (sim run 4, APP-board-share-disabled): the share link's encoding and the board page's #z= opening (bounded inflate, a paused copy), in the board page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +1160).",
+ "reason": "Boards' File > Share (sim run 4, APP-board-share-disabled): the share link's encoding and the board page's #z= opening (bounded inflate, a paused copy), in the board page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +1404, the fail-closed pause included).",
  "bytes": {
-  "cli/pyjs.cjs": 1200
+  "cli/pyjs.cjs": 1450
  }
 }
