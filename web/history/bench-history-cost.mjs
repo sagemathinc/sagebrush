@@ -1,22 +1,29 @@
-// The cost gate of history's change tokens (Stage A layer 1; design stage-a-l1 r2.1 §6 [D2], daybreak3): the added
-// per-save cost with history INACTIVE (what PROD ships) must stay within p95 delta <= 1 ms AND <= 5 % of master's, per
-// workload, in Chromium and in Firefox; and a build with a 2 ms delay injected in noteToken must FAIL that gate (the
-// sensitivity control: the gate sees what it bounds).
+// The cost gate of history's change tokens (Stage A layer 1; design stage-a-l1 r2.1 §6 [D2] as amended by daybreak3's
+// statistic ruling (stage-a-l1-d2-statistic-daybreak3.md) and the grader's G-1..G-5): the added per-save cost with
+// history INACTIVE (what PROD ships), per workload, in Chromium and in Firefox.
 // Builds, each served as its own bundle to the same page: BASE (origin/master's web/, or HCOST_BASE_DIR's tree, the
-// packet's same-day master, its sha in HCOST_BASE_SHA), HEAD (this tree), DELAY (this tree, noteToken with a 2 ms
-// synchronous wait at its top: a timer would let the transaction commit).  Configurations: base, head, delay (hactive
-// unset, the gate) and set (HEAD with hactive SET in the workspace's hmeta: informational for L1, p95 delta <= 3 ms
-// reported).  Each workload runs 3 ROUNDS, each round every configuration once in turn (interleaved, so a drift of the
-// box over the run falls on all four alike), the WORST p95 kept:
+// packet's same-day master, its sha in HCOST_BASE_SHA), AA (the SAME base tree built again under another name: the
+// noise control), HEAD (this tree), DELAY (this tree, noteToken with a 2 ms synchronous wait at its top: a timer would
+// let the transaction commit).  Configurations: base, aa, head, delay (hactive unset) and set (HEAD with hactive SET in
+// the workspace's hmeta: informational for L1, its paired delta <= 3 ms reported).
+// Rounds: 5 per workload; round r runs every configuration once, in CONFIGS rotated by r (a Latin square: each
+// configuration once at each position).  Every run opens its own fresh databases and deletes them after (P5).
+// The statistic (daybreak3): per round, the paired p95 deltas head-base, aa-base, delay-base (and set-base); D(x) = the
+// median of x's five.  B = the median of base's five p95s; T = min(1 ms, max(0.5 ms, 0.05 B)).  Per browser and
+// workload:  VALID only if D(aa) <= T and D(delay) > T (otherwise the leg is VOID, never PASS);  PASS if D(head) <= T.
+// Also: the r6.4 backstop, a transaction wait <= 250 ms at p99, judged conservatively on the end-to-end p99 of head and
+// set (the save's latency contains its transaction's wait); every raw p95/p99 and the worst-of-5 reported.
+// STOPs (for daybreak3 + the grader, never a verdict): performance.now()'s resolution over 0.1 ms in any run (measured
+// in the page before each run); a bimodal configuration: across its five rounds, max p95 > 2 x min p95 AND max - min >
+// 5 ms (declared here; the Firefox modes of the INFO run, 4.5 vs 27-32 ms, are what it catches).
+// Firefox runs in Playwright's own disposable profile with privacy.reduceTimerPrecision and resistFingerprinting off
+// (its default rounds performance.now() to 1 ms), the same for every configuration.
+// Workloads:
 //   files       500 serial writes of a 4 KiB data file (10 files round-robin)
 //   notebooks   500 serial saves of a 50-cell notebook
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
-// Measured: each save's end-to-end latency (the call to its resolve), which contains the transaction's wait (request
-// to oncomplete); so the r6.4 backstop (a transaction wait <= 250 ms at p99) is judged, conservatively, on the
-// end-to-end p99 of head and set.
 //   CHROME=chromium PLAYWRIGHT=<dir with playwright 1.64.1> bun web/history/bench-history-cost.mjs [--out report.json]
-// BROWSERS=chromium,firefox (the default, both) picks the legs; a report names each browser's version (Chromium's from
-// the DevTools protocol, Firefox's from Playwright) and every run's p95 and p99.
+// BROWSERS=chromium,firefox (the default, both) picks the legs.  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -26,7 +33,7 @@ import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname, root = join(here, "../..");
 const site = mkdtempSync(join(tmpdir(), "sb-hcost-site-")), base = mkdtempSync(join(tmpdir(), "sb-hcost-base-")), delay = mkdtempSync(join(tmpdir(), "sb-hcost-delay-"));
-const die = (m) => { console.error("FAIL: " + m); process.exit(1); };
+const die = (m) => { console.error("BAD: " + m); process.exit(2); };
 // (BASE: origin/master's web/ and src/, as a pinned build is made in test-workspace-journal.mjs)
 let master;
 if (process.env.HCOST_BASE_DIR) {
@@ -54,7 +61,7 @@ const build = async (entry, naming) => {
   const b = await Bun.build({ entrypoints: [entry], outdir: site, naming, target: "browser", format: "esm" });
   if (!b.success) die(b.logs.join("\n"));
 };
-for (const [name, dir] of [["base", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
+for (const [name, dir] of [["base", base], ["aa", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
 writeFileSync(join(site, "bench.js"), `
 const N = { files: 500, notebooks: 500, concurrent: 200 };
 const pct = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)]; };
@@ -73,7 +80,15 @@ const activate = (name) => new Promise((ok, no) => {
 });
 const nb = (k) => ({ cells: Array.from({ length: 50 }, (_, i) => ({ id: "c" + i, cell_type: "code", source: "x = " + i + "  # " + k })), mode: "python" });
 let runs = 0;
+// (performance.now()'s resolution: the median of 200 positive steps)
+export function resolution() {
+  const steps = [];
+  let last = performance.now();
+  while (steps.length < 200) { const t = performance.now(); if (t > last) { steps.push(t - last); last = t; } }
+  return pct(steps, 0.5);
+}
 export async function bench(config, workload) {
+  const res = resolution();
   const W = await import("./ws-" + (config === "set" ? "head" : config) + ".js");
   const name = "hcost-" + config + "-" + workload + "-" + (++runs), mainName = name + "-m";
   const w = await W.Workspace.open({ name, mainName });
@@ -86,15 +101,19 @@ export async function bench(config, workload) {
     out.push(performance.now() - t0);
   };
   for (let i = 0; i < 10; i++) { await w.create("/f" + i + ".bin", { content: bytes }); await w.create("/n" + i + ".ipynb"); }
+  let ws = [w];
   if (workload === "concurrent") {
-    const ws = [w, ...(await Promise.all([1, 2, 3].map(() => W.Workspace.open({ name, mainName }))))];
+    ws = [w, ...(await Promise.all([1, 2, 3].map(() => W.Workspace.open({ name, mainName }))))];
     await Promise.all(ws.map(async (x, k) => { for (let i = 0; i < N.concurrent; i++) await one(x, i * 4 + k, i % 2 ? "file" : "nb"); }));
   } else for (let i = 0; i < N[workload]; i++) await one(w, i, workload === "files" ? "file" : "nb");
-  return { n: out.length, p95: pct(out, 0.95), p99: pct(out, 0.99) };
+  const r = { n: out.length, p95: pct(out, 0.95), p99: pct(out, 0.99), res };
+  for (const x of ws) x.close();
+  for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
+  return r;
 }
 `);
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history cost</title><script type="module">import { bench } from "./bench.js"; window.bench = bench; window.ready = true;</script>`);
-const FILES = ["/bench.js", "/ws-base.js", "/ws-head.js", "/ws-delay.js"];
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history cost</title><script type="module">import { bench, resolution } from "./bench.js"; window.bench = bench; window.resolution = resolution; window.ready = true;</script>`);
+const FILES = ["/bench.js", "/ws-base.js", "/ws-aa.js", "/ws-head.js", "/ws-delay.js"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });
@@ -124,30 +143,45 @@ async function chromium() {
 async function firefox() {
   if (!process.env.PLAYWRIGHT) die("PLAYWRIGHT (the directory of playwright 1.64.1) is needed for Firefox");
   const pw = createRequire(join(process.env.PLAYWRIGHT, "package.json"))("playwright");
-  const browser = await pw.firefox.launch(), page = await browser.newPage();
+  const browser = await pw.firefox.launch({ firefoxUserPrefs: { "privacy.reduceTimerPrecision": false, "privacy.resistFingerprinting": false } }), page = await browser.newPage();
   await page.goto(url);
   await page.waitForFunction("window.ready === true");
   return { ev: (expression) => page.evaluate(expression), close: () => browser.close(), version: browser.version() };
 }
 
-const CONFIGS = ["base", "head", "delay", "set"];
-const report = { master, browsers: {} };
-let failed = false;
+const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5;
+const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+const report = { master, statistic: "daybreak3: median of within-round paired p95 deltas, T = min(1, max(0.5, 0.05 B))", browsers: {} };
+const verdicts = [];
 try {
   for (const [bname, open] of [["chromium", chromium], ["firefox", firefox]]) {
     if (!LEGS.includes(bname)) continue;
     const b = await open(), rows = {};
     console.log(`${bname}: ${b.version}`);
     for (const workload of ["files", "notebooks", "concurrent"]) {
-      const runs = Object.fromEntries(CONFIGS.map((c) => [c, []]));
-      for (let r = 0; r < 3; r++) for (const c of CONFIGS) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)})`));
-      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99))))) die(`${bname} ${workload}: a run measured nothing`);
-      const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p95))]));
+      const runs = Object.fromEntries(CONFIGS.map((c) => [c, []])), order = [];
+      for (let r = 0; r < ROUNDS; r++) {
+        const turn = CONFIGS.map((_, k) => CONFIGS[(k + r) % CONFIGS.length]);
+        order.push(turn);
+        for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)})`));
+      }
+      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99) && Number.isFinite(x.res))))) die(`${bname} ${workload}: a run measured nothing`);
+      const p95 = (c) => runs[c].map((x) => x.p95);
+      const B = med(p95("base")), T = Math.min(1, Math.max(0.5, 0.05 * B));
+      const paired = Object.fromEntries(["aa", "head", "delay", "set"].map((c) => [c, runs[c].map((x, r) => x.p95 - runs.base[r].p95)]));
+      const D = Object.fromEntries(Object.entries(paired).map(([c, d]) => [c, med(d)]));
+      const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...p95(c))]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
-      const gate = (x) => x - worst.base <= 1 && x <= worst.base * 1.05;
-      const row = rows[workload] = { runs, worst, p99, headPass: gate(worst.head), delayCaught: !gate(worst.delay), setDelta: worst.set - worst.base, setWithin3: worst.set - worst.base <= 3, backstop: p99.head <= 250 && p99.set <= 250 };
-      if (!row.headPass || !row.delayCaught || !row.backstop) failed = true;
-      console.log(`${bname} ${workload}: p95 base ${worst.base.toFixed(2)} ms, head ${worst.head.toFixed(2)} ms (${row.headPass ? "within" : "PAST"} the gate), delay ${worst.delay.toFixed(2)} ms (${row.delayCaught ? "caught" : "NOT CAUGHT"}); set ${worst.set.toFixed(2)} ms (delta ${row.setDelta.toFixed(2)} ms, ${row.setWithin3 ? "within" : "past"} 3 ms, reported); p99 head ${p99.head.toFixed(2)} set ${p99.set.toFixed(2)} ms (${row.backstop ? "within" : "PAST"} 250 ms)`);
+      const resMax = Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)));
+      const bimodal = CONFIGS.filter((c) => { const xs = p95(c), hi = Math.max(...xs), lo = Math.min(...xs); return hi > 2 * lo && hi - lo > 5; });
+      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(bimodal.length ? [`bimodal: ${bimodal.join(", ")}`] : [])];
+      const valid = D.aa <= T && D.delay > T, pass = D.head <= T, backstop = p99.head <= 250 && p99.set <= 250;
+      const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
+      verdicts.push(verdict);
+      rows[workload] = { verdict, stop, B, T, D, paired, worst, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
+      const f = (x) => x.toFixed(2);
+      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
+      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p95 ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])})`);
     }
     report.browsers[bname] = { version: b.version, rows };
     await b.close();
@@ -158,5 +192,6 @@ try {
 }
 const oi = process.argv.indexOf("--out");
 if (oi > 0) writeFileSync(process.argv[oi + 1], JSON.stringify(report, null, 1));
-console.log(failed ? "FAIL: the cost gate (or its sensitivity control, or the 250 ms backstop) didn't hold" : `ok: history's cost gate, inactive: within 1 ms and 5 % at p95 in every workload (${LEGS.join(" + ")}); the 2 ms delay caught; p99 within 250 ms`);
-process.exit(failed ? 1 : 0);
+const v = verdicts.includes("STOP") ? "STOP" : verdicts.includes("VOID") ? "VOID" : verdicts.includes("FAIL") ? "FAIL" : "PASS";
+console.log(`HCOST: ${v} (${LEGS.join(" + ")}; ${verdicts.join(" ")})`);
+process.exit({ PASS: 0, FAIL: 1, STOP: 3, VOID: 76 }[v]);
