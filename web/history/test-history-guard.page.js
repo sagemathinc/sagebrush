@@ -83,6 +83,57 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   });
   await settle();
   check(J(since(k).map((x) => x.ident)) === J(["cfid4"]), `control (G1): a cursor update of an entry's content, no token: caught: ${J(since(k))}`);
+  // ---- the exact rev (A5, A1-T15, T17, T18): by writer, at the write point
+  const opsTx = (stores, f) => new Promise((ok) => { const tx = w.ws.transaction([...stores, "ops", "meta", "htokens", "hmeta"], "readwrite"); f(tx); tx.oncomplete = () => ok(); tx.onabort = () => ok(); });
+  const genNow = async () => new Promise((ok) => { const tx = w.ws.transaction(["ops", "meta"]), c = tx.objectStore("ops").openKeyCursor(null, "prev"), f = tx.objectStore("meta").get("opsFloor"); let l = 0; c.onsuccess = () => { l = c.result?.key ?? 0; }; tx.oncomplete = () => ok(Math.max(l, f.result ?? 0)); });
+  const waitGuard = () => new Promise((r) => { const f = () => (G.pending === 0 ? r() : setTimeout(f, 20)); f(); });
+  // (three ops in ONE transaction, each with its token at its own seq: none; all at the last seq: exactly two)
+  for (const [label, stamp, want] of [["each at its own op's seq", "own", 0], ["all at the transaction-end seq", "end", 2]]) {
+    const g0 = await genNow(), ids = ["x1", "x2", "x3"].map((x) => x + Math.random().toString(36).slice(2, 6));
+    k = G.violations.length;
+    await opsTx([], (tx) => {
+      ids.forEach((id, i) => {
+        tx.objectStore("ops").add({ op: "mkdir", path: "/" + id, kind: "folder", fid: id, t: 1, device: "d", by: "x" });
+        tx.objectStore("htokens").add({ seq: 1e9 + Math.random() * 1e6, ident: id, rev: stamp === "own" ? g0 + i + 1 : g0 + 3, kind: "folder", chain: [], sz: 1 });
+      });
+    });
+    await waitGuard();
+    check(since(k).filter((v) => /rev/.test(v.why)).length === want, `A1-T17: three ops in one transaction, tokens ${label}: ${want} rev violations (${J(since(k).map((v) => v.why))})`);
+  }
+  // (a no-op token: at the generation the transaction began with, none; one below it, exactly one)
+  for (const [label, d, want] of [["at the begin generation", 0, 0], ["at begin - 1", -1, 1]]) {
+    const g0 = await genNow();
+    k = G.violations.length;
+    await opsTx(["entries"], (tx) => { tx.objectStore("entries").put({ path: "/np" + d + Math.random(), kind: "file", fid: "np" + label.length + d, sha256: "x", size: 1 }); tx.objectStore("htokens").add({ seq: 2e9 + Math.random() * 1e6, ident: "np" + label.length + d, rev: g0 + d, kind: "file", chain: [], sz: 1 }); });
+    await waitGuard();
+    check(since(k).filter((v) => /rev/.test(v.why)).length === want, `A1-T17: a no-op token ${label}: ${want} rev violation (${J(since(k).map((v) => v.why))})`);
+  }
+  // (a no-op token after an op of its own transaction, at s - 5: exactly one)
+  {
+    const g0 = await genNow();
+    k = G.violations.length;
+    await opsTx(["entries"], (tx) => {
+      tx.objectStore("ops").add({ op: "mkdir", path: "/q5", kind: "folder", fid: "q5f", t: 1, device: "d", by: "x" });
+      tx.objectStore("htokens").add({ seq: 3e9, ident: "q5f", rev: g0 + 1, kind: "folder", chain: [], sz: 1 });
+      tx.objectStore("entries").put({ path: "/q5x", kind: "file", fid: "q5x", sha256: "x", size: 1 });
+      tx.objectStore("htokens").add({ seq: 3e9 + 1, ident: "q5x", rev: g0 + 1 - 5, kind: "file", chain: [], sz: 1 });
+    });
+    await waitGuard();
+    check(J(since(k).filter((v) => /rev/.test(v.why)).map((v) => v.ident)) === J(["q5x"]), `A1-T17: a no-op token after an op, at s - 5: exactly one violation (${J(since(k).map((v) => [v.ident, v.why]))})`);
+  }
+  // (T18: a board's content token right after an UNRELATED file op is judged by its writer: the row's rev, no violation)
+  {
+    const g0 = await genNow();
+    k = G.violations.length;
+    await opsTx(["boards"], (tx) => {
+      tx.objectStore("ops").add({ op: "write", path: "/u.txt", kind: "file", fid: "ufid", t: 1, device: "d", by: "x" });
+      tx.objectStore("htokens").add({ seq: 4e9, ident: "ufid", rev: g0 + 1, kind: "file", chain: [], sz: 1 });
+      tx.objectStore("boards").put({ id: "bd18", doc: { title: "t", nodes: [] }, rev: 7, updated: 1 });
+      tx.objectStore("htokens").add({ seq: 4e9 + 1, ident: "bd18", rev: 7, kind: "board", chain: null, sz: 1 });
+    });
+    await waitGuard();
+    check(since(k).filter((v) => /rev/.test(v.why)).length === 0, `A1-T18: a board content token after an unrelated op: judged by its writer (the row's rev), no violation (${J(since(k))})`);
+  }
   w.close?.();
 }
 

@@ -123,7 +123,9 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
           if (ev.row) { rowRev.set(ev.row.id, ev.row.rev); prev = ev; continue; }
           const r = ev.token;
           let want, writer;
-          if (prev?.op) { want = prev.op.result; writer = "an op's"; }
+          // (an index token: the op just before it is ITS op, naming the same identity; an unrelated op before a row's
+          // token doesn't make it one)
+          if (prev?.op && prev.of === r.ident) { want = prev.op.result; writer = "an op's"; }
           else if (r.kind === "board" || r.kind === "notebook") { want = rowRev.get(r.ident); writer = "a row's"; }
           else { want = last; writer = "a no-op"; }
           if (s.kind === "workspace" || writer === "a row's") if (r.rev !== want) G.violations.push({ db: db.name, ident: r.ident, store: "htokens", why: `${writer} token: rev ${r.rev}, want ${want}` });
@@ -148,7 +150,7 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       if (t) f.call(this, t, tx, a);
       const r = orig.apply(this, a);
       // (each op's seq, as the store gives it: A5's exact-rev check, op by op (astra's A1.1 binding))
-      if (t && name === "add" && this.name === "ops") t.order.push({ op: r });
+      if (t && name === "add" && this.name === "ops") t.order.push({ op: r, of: a[0]?.fid ?? a[0]?.ref ?? (a[0]?.path ? `path:${a[0].path}` : null) });
       return r;
     };
   };
