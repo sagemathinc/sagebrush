@@ -13,7 +13,8 @@ const since = (k) => G.violations.slice(k);
 // verdicts on them are set aside here; the exact rev has its own rows below)
 const sinceC = (k) => since(k).filter((v) => !/token: rev /.test(v.why));
 // (a raw readwrite transaction of the app's databases, for the controls: `f(tx)` writes; resolves at commit)
-const raw = (db, stores, f) => new Promise((ok, no) => { const tx = db.transaction(stores, "readwrite"); f(tx); tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); });
+// (a failing fixture names itself: a request's error, then the transaction's abort, never a bare null)
+const raw = (db, stores, f) => new Promise((ok, no) => { const tx = db.transaction(stores, "readwrite"); f(tx); tx.oncomplete = () => ok(); tx.onerror = (e) => no(new Error(`fixture ${J(stores)}: ${e.target?.error?.name ?? "error"} ${e.target?.error?.message ?? ""}`)); tx.onabort = () => no(new Error(`fixture ${J(stores)} aborted: ${tx.error?.name ?? "no error"}`)); });
 const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz: 1 });
 
 // ---- the scenario: every op through the workspace's own code, history active (the guard set hactive at open)
@@ -143,7 +144,7 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   // (a subtree removed with its top, the top's token only: passes; a child removed under a folder that stays, with that
   // folder's token: caught)
   k = G.violations.length;
-  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { for (const [p, f] of [["/S", "sfid"], ["/S/x.txt", "sxfid"], ["/K", "kfid"], ["/K/y.txt", "kyfid"]]) { tx.objectStore("entries").put({ path: p, kind: p.endsWith(".txt") ? "file" : "folder", ref: null, fid: f, ...(p.endsWith(".txt") ? { migrated: true, sha256: "s", size: 1 } : {}) }); tx.objectStore("htokens").add(tok(f, 1e9 + 30 + p.length)); } });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { for (const [p, f, q] of [["/S", "sfid", 31], ["/S/x.txt", "sxfid", 32], ["/K", "kfid", 33], ["/K/y.txt", "kyfid", 34]]) { tx.objectStore("entries").put({ path: p, kind: p.endsWith(".txt") ? "file" : "folder", ref: null, fid: f, ...(p.endsWith(".txt") ? { migrated: true, sha256: "s", size: 1 } : {}) }); tx.objectStore("htokens").add(tok(f, 1e9 + q)); } });
   await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").delete("/S"); tx.objectStore("entries").delete("/S/x.txt"); tx.objectStore("htokens").add(tok("sfid", 1e9 + 40)); });
   await settle();
   check(sinceC(k).length === 0, `a folder removed with its subtree, the folder's token alone: passes: ${J(sinceC(k))}`);

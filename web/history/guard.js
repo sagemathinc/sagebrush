@@ -66,7 +66,9 @@ export function installGuard({ inert = false, skipOpener = () => false, judgeFix
       // notebooks database, with no other source database between.  Two workspaces opened before a notebooks database
       // leave it UNPAIRED (owner null), and an unpaired database is judged closed: no reset exempts it, no legacy bytes are
       // known in it)
-      if (k === "workspace") G.lastWs = G.lastWs === null ? db.name : "\u0000ambiguous";
+      // (a workspace already paired, opened again (the app reopens its database), starts no new pairing; two different
+      // unpaired workspaces in a row still leave the next notebooks database unpaired)
+      if (k === "workspace") { if (![...G.dbs.values()].some((x) => x.kind === "notebooks" && x.owner === db.name)) G.lastWs = G.lastWs === null || G.lastWs === db.name ? db.name : "\u0000ambiguous"; }
       else {
         // (paired once by Workspace.open's order; a later open of the same database (the app's other stores open it too)
         // keeps that pairing; never paired: unpaired)
