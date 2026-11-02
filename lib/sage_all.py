@@ -503,17 +503,22 @@ def parent(x):
 
         sage: parent(2), parent(2/3), parent(1.5)
         (Integer Ring, Rational Field, Real Field with 53 bits of precision)
+        sage: parent(True), parent([1, 2])
+        (<class 'bool'>, <class 'list'>)
     """
+    if isinstance(x, bool):
+        return type(x)  # (before .parent(): bools are ints, which carry Integer's methods here)
     if hasattr(x, "parent"):
         return x.parent()
-    if isinstance(x, bool) or isinstance(x, int):
+    if isinstance(x, int):
         return ZZ
     if isinstance(x, _Fraction):
         return QQ
     if isinstance(x, float):
         from _sage_lang import _RealField
         return _RealField()
-    raise NotImplementedError("parent of %r" % (x,))
+    # anything else (a list, a str, ...): its Python type, as Sage's parent() gives
+    return type(x)
 
 
 from _pyjs_docsearch import search_doc
@@ -2536,6 +2541,208 @@ def xgcd(a, b=None):
     if a < 0:
         a, x0, y0 = -a, -x0, -y0
     return (a, x0, y0)
+
+
+_DL_MUL_NAMES = ("multiplication", "times", "product", "*")
+_DL_ADD_NAMES = ("addition", "plus", "sum", "+")
+
+
+def _dl_group(x, operation, identity, inverse, op):
+    """(identity, inverse, op) of the group of x, as Sage's _parse_group_def."""
+    if operation in _DL_MUL_NAMES or operation in _DL_ADD_NAMES:
+        if identity is not None or inverse is not None or op is not None:
+            raise ValueError("in order to specify custom identity/inverse/op, operation must be 'other'")
+        mul = operation in _DL_MUL_NAMES
+        P = parent(x)
+        try:
+            identity = P.one() if mul else P.zero()
+        except AttributeError:
+            identity = x ** 0 if mul else x * 0
+        return identity, (_operator.inv if mul else _operator.neg), (_operator.mul if mul else _operator.add)
+    if identity is None or inverse is None or op is None:
+        raise ValueError("identity, inverse and operation must all be specified "
+                         "when operation is neither addition nor multiplication")
+    return identity, inverse, op
+
+
+def _dl_multiple(x, n, identity, inverse, op):
+    """x^n (or n*x) in the group given by op, by repeated squaring."""
+    n = int(n)
+    if op is _operator.mul:
+        return x ** n
+    if op is _operator.add:
+        return n * x
+    if n == 0:
+        return identity
+    if n < 0:
+        x, n = inverse(x), -n
+    r = None
+    while n:
+        if n & 1:
+            r = x if r is None else op(r, x)
+        n >>= 1
+        if n:
+            x = op(x, x)
+    return r
+
+
+def bsgs(a, b, bounds, operation="*", identity=None, inverse=None, op=None):
+    """The least i in bounds = (lb, ub) with a^i = b (or i*a = b), by
+    baby-step giant-step; ported from Sage's sage.groups.generic.bsgs.
+
+    EXAMPLES::
+
+        sage: bsgs(Mod(2, 101), Mod(16, 101), (0, 100))
+        4
+        sage: bsgs(Mod(3, 101), Mod(21, 101), (0, 100), operation='+')
+        7
+        sage: bsgs(Mod(2, 101), Mod(16, 101), (10, 20))
+        Traceback (most recent call last):
+        ...
+        ValueError: no solution in bsgs()
+    """
+    identity, inverse, op = _dl_group(a, operation, identity, inverse, op)
+    if bounds is None:
+        raise TypeError("cannot unpack non-iterable NoneType object")
+    lb, ub = bounds
+    lb, ub = Integer(lb), Integer(ub)
+    if lb < 0 or ub < lb:
+        raise ValueError("bsgs() requires 0<=lb<=ub")
+    if a == identity and b != identity:
+        raise ValueError("no solution in bsgs()")
+    ran = 1 + ub - lb
+    c = op(inverse(b), _dl_multiple(a, lb, identity, inverse, op))
+    if ran < 30:
+        d = c
+        for i0 in range(ran):
+            if identity == d:
+                return lb + i0
+            d = op(a, d)
+        raise ValueError("no solution in bsgs()")
+    m = _math.isqrt(ran) + 1
+    table = {}
+    d = c
+    for i0 in range(m):
+        if identity == d:
+            return lb + i0
+        table[d] = lb + i0
+        d = op(d, a)
+    c = op(c, inverse(d))
+    d = identity
+    for i in range(m):
+        j = table.get(d)
+        if j is not None:
+            return i * m + j
+        d = op(c, d)
+    raise ValueError("log of %s to the base %s does not exist in %s" % (b, a, bounds))
+
+
+def discrete_log(a, base, ord=None, bounds=None, operation="*", identity=None, inverse=None, op=None,
+                 algorithm="bsgs", *, verify=True):
+    """An integer n with base^n = a (or n*base = a): Pohlig-Hellman over the
+    factorization of ord (default: the order of base), each prime-order
+    digit by baby-step giant-step; ported from Sage's
+    sage.groups.generic.discrete_log, so bounds, a non-multiple ord and the
+    errors behave as Sage's.  The result is reduced modulo ord.  (The
+    'rho' and 'lambda' algorithms are accepted and solve each digit by
+    baby-step giant-step: the digit is the same.)
+
+    EXAMPLES::
+
+        sage: p = 1019; g = Mod(2, p); discrete_log(Mod(5, p), g)
+        10
+        sage: [discrete_log(Mod(l, p), g) for l in prime_range(20)]
+        [1, 958, 10, 363, 756, 289, 48, 542]
+        sage: discrete_log(Mod(21, 101), Mod(3, 101), operation='+')
+        7
+        sage: discrete_log(Mod(16, 101), Mod(2, 101), bounds=(50, 300))
+        4
+        sage: discrete_log(Mod(3, 7), Mod(6, 7))
+        Traceback (most recent call last):
+        ...
+        ValueError: no discrete log of 3 found to base 6
+        sage: discrete_log(Mod(16, 101), Mod(2, 101), bounds=(10, 20))
+        Traceback (most recent call last):
+        ...
+        ValueError: no discrete log of 16 found to base 2 with bounds (10, 20)
+    """
+    identity, inverse, op = _dl_group(a, operation, identity, inverse, op)
+    mult = op
+
+    def power(x, n):
+        return _dl_multiple(x, n, identity, inverse, op)
+
+    original_a = a
+    if bounds:
+        lb, ub = map(Integer, bounds)
+    if ord is None:
+        if op is _operator.add:
+            ord = base.additive_order()
+        elif op is _operator.mul:
+            if isinstance(base, int):
+                ord = 1 if base == 1 else (2 if base == -1 else Infinity)
+            else:
+                ord = base.multiplicative_order()
+        else:
+            raise ValueError("ord must be specified when operation is neither addition nor multiplication")
+    elif ord != Infinity:
+        ord = Integer(ord)
+    try:
+        if ord == Infinity:
+            if algorithm in ("bsgs", "lambda"):
+                return bsgs(base, a, bounds, identity=identity, inverse=inverse, op=op, operation="other")
+            if algorithm == "rho":
+                raise ValueError("pollard rho algorithm does not work with infinite order elements")
+            raise ValueError("unknown algorithm %s" % algorithm)
+        ord = int(ord)
+        if base == power(base, 0) and a != base:
+            raise ValueError
+        f = list(factor(ord)) if ord > 1 else []
+        l = [0] * len(f)
+        mods = []
+        running_mod = 1
+        offset = 0
+        if bounds:
+            a = mult(a, power(base, -lb))
+            offset = lb
+            bound = ub - lb
+        i = -1
+        for i, (pi, ri) in enumerate(f):
+            gamma = power(base, ord // pi)
+            while gamma == power(gamma, 0) and ri > 0:
+                ord //= pi
+                ri -= 1
+                gamma = power(base, ord // pi)
+            if not bounds:
+                bound = ord - 1
+            running_bound = min(bound, pi ** ri - 1)
+            j = -1
+            for j in range(ri):
+                temp_bound = min(running_bound, pi - 1)
+                h = power(mult(a, power(base, -l[i])), ord // pi ** (j + 1))
+                if algorithm not in ("bsgs", "rho", "lambda"):
+                    raise ValueError("unknown algorithm %s" % algorithm)
+                c = bsgs(gamma, h, (0, temp_bound), identity=identity, inverse=inverse, op=op, operation="other")
+                l[i] += c * pi ** j
+                running_bound //= pi
+                running_mod *= pi
+                if running_mod > bound:
+                    break
+            mods.append(pi ** (j + 1))
+            if running_mod > bound:
+                break
+        l = l[:i + 1]
+        result = (crt(l, mods) + offset) % ord if l else offset % ord
+        if verify and power(base, result) != original_a:
+            raise ValueError
+        return Integer(result)
+    except ValueError:
+        with_bounds = " with bounds %s" % (bounds,) if bounds else ""
+        raise ValueError("no discrete log of %s found to base %s%s" % (original_a, base, with_bounds)) from None
+
+
+discrete_log_generic = discrete_log
+__all__ += ["bsgs", "discrete_log", "discrete_log_generic"]
 
 
 def inverse_mod(a, m):
