@@ -815,10 +815,11 @@ class GraphicsArray:
         """
         _show(self._with(**kwds) if kwds else self, "plots")
 
-    def save(self, filename, figsize=None, **kwds):
+    def save(self, filename, dpi=None, transparent=False, figsize=None, **kwds):
         """Save the grid: SVG for a .svg name, PNG for .png (see
         Graphics.save). figsize is the whole grid's; the other options apply
-        to each graphics, as Sage's.
+        to each graphics, as Sage's. (Sage's second positional parameter is
+        figsize; here it stays dpi, as before: give figsize by name.)
 
         EXAMPLES::
 
@@ -827,8 +828,6 @@ class GraphicsArray:
             sage: G.save(os.path.join(d, 'a.png'), figsize=[8, 3]); open(os.path.join(d, 'a.png'), 'rb').read(4)
             b'\\x89PNG'
         """
-        dpi = kwds.pop("dpi", None)
-        transparent = kwds.pop("transparent", False)
         G = self._with(figsize, **kwds)
         if str(filename).lower().endswith(".png"):
             # (the size and dpi checked before the picture is drawn at them)
