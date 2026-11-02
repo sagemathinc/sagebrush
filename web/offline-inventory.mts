@@ -18,11 +18,11 @@ export const OFFLINE_CAPS = Object.freeze({
 
 export type OfflineItem = {
   id: string;
-  kind: "engine" | "mode" | "package" | "modules" | "docs" | "tzdata";
+  kind: "engine" | "mode" | "package" | "modules" | "docs" | "myst" | "tzdata";
   title: string;
   /** library groups (web/lib-chunks.mts), or a rule naming non-library files */
   groups?: string[];
-  rule?: "engine" | "docs" | "tzdata";
+  rule?: "engine" | "docs" | "myst" | "tzdata";
   /** other items this one needs to be useful offline (shown, never fetched automatically) */
   needs?: string[];
   files: number;
@@ -60,6 +60,7 @@ const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
 function classify(path: string): { rule: "engine" | "docs" | "tzdata" } | { group: string } {
   if (/^sagebrush-engine\.wasm\?h=[0-9a-f]+$/.test(path)) return { rule: "engine" };
   if (/^docs-index(?:-[a-z]+)?\.json$/.test(path)) return { rule: "docs" };
+  if (path === "sagebrush-myst.js") return { rule: "myst" };
   if (path.startsWith("lib/tzdata/")) return { rule: "tzdata" };
   const m = CHUNK.exec(path);
   if (m) return { group: m[1] };
@@ -101,6 +102,7 @@ export function offlineInventory(lazy: string[], stored: Map<string, number>, tr
   for (const id of [...byItem.keys()].filter((k) => k.startsWith("pkg-")).sort()) add({ id, kind: "package", title: packageTitles[id] ?? id.slice(4), groups: [...groupsOf.get(id)!].sort() });
   add({ id: "modules", kind: "modules", title: "Other Python modules", groups: [...(groupsOf.get("modules") ?? [])].sort() });
   add({ id: "docs", kind: "docs", title: "Documentation search", rule: "docs" });
+  add({ id: "myst", kind: "myst", title: "MyST documents", rule: "myst" });
   add({ id: "tzdata", kind: "tzdata", title: "Time zones", rule: "tzdata" });
   if (byItem.size) throw new Error(`offline inventory: unplaced items ${[...byItem.keys()].join(", ")}`);
   const totals = {
