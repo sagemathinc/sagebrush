@@ -660,6 +660,33 @@ const C1 = "clientA1", C2 = "clientB1";
     fr.controls.setFloors({ reload: 0, served: 10 });
   }
 
+  // (a batch held between its checks and its commit, across a raise: the commit's own check refuses it (astra3's
+  // FR-PR0-CODE-1); the same batch with no raise is stored, the positive control)
+  {
+    const D2 = "0123456789b0", C3 = "clientF3";
+    fr.controls.setRegistry([[5, SHA5], [6, "6".repeat(40)]]);
+    fr.controls.setFloors({ reload: 0, compat: 0, served: 10 });
+    const h = await hello("devF0031", { n: 5, core: SHA5 });
+    await h.s.ask({ t: "doc_claim", epoch: 1, doc: D2, client: C3 });
+    let release = fr.controls.holdForward(D2, C3);
+    const r1 = h.s.tell(batch(D2, 1, { [C3]: 0 }, [{ cseq: 1, id: pid(1, C3) }], { kind: "notebook" }));
+    await sleep(20);
+    release();
+    const a1 = await maybe(h.s.next((m) => m.req === r1 || m.t === "error"));
+    check(a1?.t === "ack" && a1.batch?.new === 1, "held batch, no raise: stored and acked (positive control): " + J(a1));
+    release = fr.controls.holdForward(D2, C3);
+    const r2 = h.s.tell(batch(D2, 1, { [C3]: 0 }, [{ cseq: 2, id: pid(2, C3), parents: [pid(1, C3)] }]));
+    await sleep(20);
+    const before = fr.controls.snapshot("acct-floors");
+    fr.controls.setFloors({ reload: 6 });
+    release();
+    const e2 = await maybe(h.s.next((m) => m.req === r2 || m.t === "error"));
+    await sleep(5);
+    check(e2?.code === "stale_build" && e2.req === undefined && h.s.closed() === 4426, "held batch across a raise: stale_build pushed with no req, then the 4426 close: " + J(e2));
+    check(e2?.req !== r2 && !h.s.got.some((m) => m.req === r2) && fr.controls.snapshot("acct-floors") === before, "held batch across a raise: no ack, no change to the account");
+    fr.controls.setFloors({ reload: 0, served: 10 });
+  }
+
   // (with no bound, a build without a release reads the index: only the op from before the raise was written)
   fr.controls.setFloors({ compat: 0 });
   const late = await hello("devF0010");

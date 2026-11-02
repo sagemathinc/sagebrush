@@ -407,7 +407,9 @@ export class ReferenceServer {
       const b = checkBatch(m);
       this.owner(a, b.owner);
       const fgen = attemptDoc(() => checkFgen(m.fgen, new Set(b.patches.map((e) => clientOf(e.id)))));
-      const out = await this.batch(a, ws.device, b, fgen);
+      const out = await this.batch(a, ws.device, b, fgen, ws.release);
+      // (a floor raised while the batch waited: refused as any stale write is, nothing stored and nothing answered)
+      if ("stale" in out) return this.refuseStale(ws, out.stale);
       this.answer(ws, "batch", req, { t: "ack", req, batch: out });
       if (out.new > 0) this.changed(a, ws, b.doc, out.head, ws.device);
     } else if (t === "pull") {
@@ -591,7 +593,7 @@ export class ReferenceServer {
   }
 
   /** A batch (§4.1–4.4, r9 §5.1, §5.8): decided, then stored with its recv and chain, or refused whole. */
-  private async batch(a: Account, device: string, b: Batch, fgen: Map<string, number>) {
+  private async batch(a: Account, device: string, b: Batch, fgen: Map<string, number>, release: Release) {
     const writer = `session:${device}`;
     const d = this.docOf(a, b.doc, false);
     if (!d) throw new SyncError("unknown_client", "claim the client first", { client: clientOf(b.patches[0].id) });
@@ -609,6 +611,10 @@ export class ReferenceServer {
       if (a.docs.get(b.doc) !== d) throw new SyncError("conflict", "this account's sync changed while the batch waited", { reason: "generation" });
       if (b.epoch !== d.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: d.epoch, head: { epoch: d.epoch, seq: d.head } });
     }
+    // (the floors in the commit's own turn, after any await: a batch admitted before a raise and held across it is
+    // refused, not stored (plan r7.2 §2: the check and the commit are one turn))
+    const stale = releaseRefusal(release, this.floors, this.registry);
+    if (stale) return { stale };
     const sel = this.select(a, d, writer, b, fgen);
     if (sel.fresh.length === 0) return { new: 0, resent: sel.resent, head: this.headOf(d) };
     if (b.expect_head && (b.expect_head.epoch !== d.epoch || b.expect_head.seq !== d.head)) throw new SyncError("conflict", "the document moved on", { head: this.headOf(d) });
