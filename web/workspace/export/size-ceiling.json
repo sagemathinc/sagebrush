@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "E1 r2e (daybreak2's r11 review; @sagebrush 05:47Z): the export's lazy chunk and worker, each its own reviewed ceiling, at most 1024 bytes over its bun 1.4.4 size (scripts/check-export-size.mjs). Re-measured with bun 1.4.4 in CI's build order (pnpm install, pnpm run build, build-cli, web/build.ts) on build VM2 at the combined head 3f381b05 (r2e items 1-3 + route (b) + the bounded compression feed): 65227 and 5645 bytes; ceilings +128 and +64. Since r2d-4's 63387 (dcab4488): +1840, all in the chunk: stream.ts's Counter and counting Out (preflight's length-only measure, no slice made), zip.ts's DEFLATE_FEED loop and maxDeflateWrite count; the worker unchanged. History: r2a 48921/5043 (b00fb43f); r2d-4 63387/5645 (+14466/+602, the r2c-r2d review fixes).",
+  "bytes": {
+    "sagebrush-export.js": 65355,
+    "sagebrush-export-worker.js": 5709
+  }
+}
