@@ -594,6 +594,7 @@ jobs:
           # static census of every readwrite site; and the workspace suites again under the guard, history active)
           CHROME=google-chrome bun web/history/test-history-tokens.mjs
           CHROME=google-chrome bun web/history/test-history-guard.mjs
+          CHROME=google-chrome bun web/history/test-history-d11.mjs
           bun web/history/test-history-census.mjs
           HISTORY_GUARD=1 CHROME=google-chrome bun web/workspace/test-workspace.mjs
           HISTORY_GUARD=1 CHROME=google-chrome bun web/workspace/test-workspace-sync-ops.mjs

@@ -264,6 +264,38 @@ for (const [what, method] of [["the hmeta put", "put"], ["the hmeta get", "get"]
   w.close?.();
 }
 
+// ---- A1-T8, A1-T11 (iii): a reset. "new" (a new workspace identity: a new lineage) empties history's stores in BOTH
+// databases where they exist, and creates none where they don't; "keep" (the same data, a new generation: the lineage
+// continues) clears nothing, the exhausted state included
+const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await new Promise((r) => setTimeout(r, 50)); } return false; };
+{
+  const name = `htokw-${++n}`, mainName = `htokm-${n}`;
+  const pre = await openRaw(mainName, { notebooks: { keyPath: "id" }, files: null, htokens: { keyPath: "seq" }, hmeta: null });
+  await rawPut(pre, "hmeta", true, "hactive");
+  pre.close();
+  const w = await W.Workspace.open({ name, mainName });
+  await rawPut(w.ws, "hmeta", true, "hactive");
+  await w.create("/k.txt", { content: "k" });
+  await w.create("/k.ipynb");
+  await rawPut(w.ws, "hmeta", true, "exhausted");
+  await w.reset("keep");
+  check((await rawGet(w.ws, "hmeta", "exhausted")) === true && (await rawAll(w.ws, "htokens")).length > 0, "A1-T11 (iii): reset \"keep\" (a continuing lineage): exhausted NOT cleared, tokens kept");
+  await w.reset("new");
+  const emptied = await until(async () => (await rawAll(w.ws, "htokens")).length === 0 && (await rawAll(w.ws, "hmeta")).length === 0 && (await rawAll(w.main, "htokens")).length === 0 && (await rawAll(w.main, "hmeta")).length === 0);
+  check(emptied, `A1-T8: reset "new" (a new identity, ${J(w.identity)}): history's stores emptied in both databases (exhausted with them: a new lineage)`);
+  w.close?.();
+}
+{
+  const name = `htokw-${++n}`, mainName = `htokm-${n}`;
+  const w = await W.Workspace.open({ name, mainName });
+  await w.create("/z.ipynb");
+  const before = [...w.main.objectStoreNames].sort();
+  await w.reset("new");
+  await until(async () => (await rawAll(w.ws, "htokens")).length === 0);
+  check(J([...w.main.objectStoreNames].sort()) === J(before) && !w.main.objectStoreNames.contains("htokens"), `A1-T8: reset "new" with a notebooks database WITHOUT history's stores: none created (${J(before)})`);
+  w.close?.();
+}
+
 // ---- inert: a notebooks database WITHOUT history's stores (every production one in layer 1) saves as before
 {
   const name = `htokw-${++n}`, mainName = `htokm-${n}`;
