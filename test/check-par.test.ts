@@ -72,10 +72,25 @@ test("check-par passes the wrapper itself, comments, non-spawning std::thread us
       "engine/demo/tests/t.rs": "fn t() { std::thread::spawn(|| ()); }",
       "engine/ledger/src/tests.rs": "fn t() { std::thread::spawn(|| ()); }",
       "engine/interrupt/src/progress.rs": "        let a = std::thread::spawn(move || {",
+      "engine/py/src/serve.rs": "fn s() {\n    std::thread::Builder::new()\n        .name(\"sagebrush-control\".into());\n    let t = std::thread::spawn(move || {\n    });\n}",
     }),
   );
   assert.equal(ok.status, 0, ok.stderr);
   // an exemption is by file and line text: the same call elsewhere fails
   const bad = run(tree({ "engine/interrupt/src/progress.rs": "        let b = std::thread::spawn(move || {" }));
   assert.equal(bad.status, 1);
+  // serve.rs's two entries cover those two lines only: any other spawn there, or the same line in another file, fails
+  // (typed: an array of differently-keyed literals would infer a union with optional undefined keys, not tree()'s Record)
+  const cases: Record<string, string>[] = [
+    { "engine/py/src/serve.rs": "fn s() { std::thread::scope(|_| ()); }" },
+    { "engine/py/src/serve.rs": "fn s() { let u = std::thread::spawn(move || {}); }" },
+    { "engine/py/src/lib.rs": "fn s() { std::thread::Builder::new(); }" },
+    // exact match: forbidden code riding on an exempt line fails
+    { "engine/py/src/serve.rs": "        std::thread::Builder::new(); std::thread::spawn(|| ());" },
+    { "engine/interrupt/src/progress.rs": "        let a = std::thread::spawn(move || {}); rayon::join(|| 1, || 2);" },
+  ];
+  for (const files of cases) {
+    const r = run(tree(files));
+    assert.equal(r.status, 1, JSON.stringify(files));
+  }
 });

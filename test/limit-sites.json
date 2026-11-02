@@ -1630,6 +1630,21 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/py/src/serve.rs :: borrow_file :: const IDLE_RELEASE_LIMIT: std::time::Duration = std::time::Duration::from_millis(250); #0": {
+  "class": "none",
+  "owner": "python (Ctrl-C PR B, the request reader)",
+  "reason": "the request reader's idle release (daybreak2's PR B r5 ruling): after 250 ms with no readable input a fully consumed large buffer is let go; and poll's millisecond timeout. Refuses nothing."
+ },
+ "engine/py/src/serve.rs :: readable_soon :: let end = self.f.now() + IDLE_RELEASE_LIMIT; #0": {
+  "class": "none",
+  "owner": "python (Ctrl-C PR B, the request reader)",
+  "reason": "the request reader's idle release (daybreak2's PR B r5 ruling): after 250 ms with no readable input a fully consumed large buffer is let go; and poll's millisecond timeout. Refuses nothing."
+ },
+ "engine/py/src/serve.rs :: readable_within :: let ms = within.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32; #0": {
+  "class": "none",
+  "owner": "python (Ctrl-C PR B, the request reader)",
+  "reason": "poll's millisecond timeout for the request reader's idle wait, rounded up from full precision (astra R5-3). Refuses nothing."
+ },
  "engine/raster/src/dash.rs :: compare :: fn compare(path: &Path, array: &[f32], offset: f32, width: f32, cap: LineCap, t: Transform, size: u32) -> (usize, u8) { #0": {
   "class": "none",
   "owner": "raster/image I/O"
