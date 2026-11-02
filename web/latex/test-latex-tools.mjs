@@ -10,7 +10,8 @@
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-tools.mjs
 //   (LATEX_SHOTS=dir: the PNGs the tool returned, written there for a look)
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -116,6 +117,43 @@ try {
   check(look.red > 5000 && look.ink > 200, "latex_render: the folder's image drawn, and the math's ink", look);
   const one = await call("latex_render", { frames: [3] });
   check(JSON.parse(one[0].text).shown.length === 1 && JSON.parse(one[0].text).shown[0].n === 3 && one.length === 2, "latex_render: one chosen frame", JSON.parse(one[0].text));
+
+  // ---- the code's saved results (`sagebrush latex run`'s file beside the .tex): drawn in the page, and in its report
+  const SAGE = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{Computed}
+\begin{sagesilent}
+f(x) = x^3 - 2*x
+\end{sagesilent}
+$f'(x) = \sage{diff(f(x), x)}$
+
+\sageplot[width=0.5\textwidth]{plot(f, (x, -2, 2), color='red', thickness=6)}
+\end{frame}
+\end{document}
+`;
+  const cli = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
+  const rdir = mkdtempSync(join(tmpdir(), "sb-latex-tools-run-"));
+  writeFileSync(join(rdir, "sage.tex"), SAGE);
+  try { execFileSync(process.execPath, [cli, "latex", "run", "sage.tex"], { cwd: rdir, stdio: "ignore" }); } catch {}
+  const resultsText = existsSync(join(rdir, "sage.tex.results.json")) ? readFileSync(join(rdir, "sage.tex.results.json"), "utf8") : "";
+  rmSync(rdir, { recursive: true, force: true });
+  check(/"s":"ok"/.test(resultsText), "the results file made by sagebrush latex run (build/cli)", resultsText.slice(0, 200));
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const sfid = await mk("/sage.tex", SAGE);
+  await mk("/sage.tex.results.json", resultsText);
+  await send("Page.navigate", { url: base + "?tex=" + sfid + "&latex=1" });
+  check(await until(`!!document.querySelector(".tex-preview section.slide img.sageplot") && document.querySelector(".tex-preview section.slide").textContent.includes("3x")`, 30000), "the saved results drawn in the editor: the plot and \\sage{}'s result",
+    await ev(`document.querySelector(".tex-preview section.slide")?.textContent?.slice(0, 200)`));
+  const sc = JSON.parse((await call("latex_check"))[0].text);
+  check(sc.code.map((x) => x.state).join(",") === "ok,ok,ok" && !sc.problems.some((x) => x.kind === "code"), "latex_check: the items' states from the results", sc.code);
+  const sr = await call("latex_render");
+  const red = await ev(`(async () => { const i = new Image(); i.src = "data:image/png;base64," + ${JSON.stringify(sr[1]?.data ?? "")}; await i.decode(); const c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, i.width, i.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (d[k] > 180 && d[k + 1] < 80 && d[k + 2] < 80) n++; return n; })()`);
+  check(red > 500, "latex_render: the computed plot drawn in the frame's picture", red);
+  // (an edit of the code: its result, and those after it, no longer shown; asked to run again)
+  await typeInto(SAGE.replace("x^3 - 2*x", "x^3 - 3*x"));
+  const se = JSON.parse((await call("latex_check"))[0].text);
+  check(se.code.every((x) => x.state === "not run") && se.problems.some((x) => /sagebrush latex run/.test(x.message)), "an edit of the code: its results no longer shown, run asked for", se.code);
 
   // ---- an article: pages
   const afid = await mk("/notes.tex", ARTICLE);

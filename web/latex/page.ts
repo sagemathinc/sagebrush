@@ -40,6 +40,8 @@ const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `$
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
+/** The largest results file read (`sagebrush latex run`'s, beside the .tex). */
+const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
@@ -308,8 +310,29 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const images: Record<string, string | { why: string }> = {};
   const blobs = new Set<string>();
   let imageBytes = 0;
+  // (the code's results, paper.tex.results.json beside it: `sagebrush latex run`'s; read when the page opens, when
+  //  the window comes back into focus, and before an agent's tool call; bounded, and checked by the worker and renderer)
+  const results: { wrapper: string | null; saved: unknown[] } = { wrapper: null, saved: [] };
+  let resultsSeen: unknown = undefined;
+  const loadResults = async () => {
+    try {
+      const p = where.path + ".results.json", e = await host.ws.stat(p).catch(() => undefined);
+      if (!live()) return;
+      const seen = e && !e.trashed ? `${e.fid}:${e.updated}:${e.size}` : null;
+      if (seen === resultsSeen) return;
+      resultsSeen = seen;
+      let next: typeof results = { wrapper: null, saved: [] };
+      if (e && !e.trashed && (e.size ?? 0) <= RESULTS_MAX) {
+        const j = JSON.parse(new TextDecoder().decode((await host.ws.readUpTo(p, RESULTS_MAX)).content));
+        if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) next = { wrapper: j.wrapper, saved: j.items };
+      }
+      if (!live()) return;
+      results.wrapper = next.wrapper; results.saved = next.saved;
+      request();
+    } catch {}
+  };
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
@@ -317,7 +340,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   const { src, gate, request } = E;
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
-  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS };
+  void loadResults();
+  window.addEventListener("focus", () => void loadResults(), on);
+  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
 

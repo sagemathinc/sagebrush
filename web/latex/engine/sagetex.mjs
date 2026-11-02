@@ -115,6 +115,22 @@ export function plotOptions(opts) {
   else if (dims.width !== undefined) css.push("height:auto");
   return { style: css.join(";"), ignored };
 }
+// a results file's states (`sagebrush latex run`: [{key, s, latex?, src?, msg?}]) for these items, in order, as long
+// as each is for the very item at its place (its key) and every one before it is too; only ok, error and blocked
+// states, with the fields the renderer shows (each checked again where it is shown: inlineHtml, mathPart)
+export function savedStates(items, saved) {
+  const out = [];
+  for (let k = 0; k < items.length && k < saved.length; k++) {
+    const x = saved[k];
+    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) break;
+    const st = { key: x.key, s: x.s };
+    if (typeof x.latex === "string") st.latex = x.latex;
+    if (typeof x.src === "string") st.src = x.src;
+    if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
+    out.push(st);
+  }
+  return out;
+}
 export function stateOf(states, n, it) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
