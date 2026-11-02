@@ -81,8 +81,9 @@
   header #nbline { flex: 1 1 auto; min-width: 0; margin: 0; }
   header #status { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
   #homelink { text-decoration: none; }
-  .bar #mode { padding: 3px 6px; font-size: 13px; }
   .toolrow { position: static; box-shadow: none !important; margin-top: -4px; }
+  /* (a select as tall as the buttons beside it, in the same font: William, Nov 2) */
+  .bar > select { align-self: stretch; }
   .toolrow[hidden] { display: none; }
   /* (room below the last cell, as in Jupyter: the end of a notebook can come up to the middle of the window, and a
      place kept across a re-render (TimeTravel, web/notebook/anchor.js) is never cut short by the page's end) */
