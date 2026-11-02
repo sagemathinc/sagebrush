@@ -20,6 +20,8 @@
 // 9.1"), labelled equations as "(9.1)"; the chapter number is the notebook's
 // (metadata.sagebrush.myst.chapter, from the .md's name), none if it has none.
 
+import { buildBook, hold, type Book, type BookCap, type BookChapter, type Pending } from "./book";
+
 export const MAX_DEPTH = 8;
 
 /** The boxes' styles, added to the page once with this asset (web/notebook/notebook.js): one box, its kind word
@@ -32,6 +34,9 @@ export const css = `
 .sbnb :is(.mdout, .mb) .myst-eq { display: flex; align-items: center; gap: 1em; } .sbnb :is(.mdout, .mb) .myst-eq > .math { flex: 1; }
 .sbnb :is(.mdout, .mb) :is(.myst-note, .myst-ref-missing) { color: var(--muted); } .sbnb :is(.mdout, .mb) figure { margin: .7em 0; }
 .sbnb :is(.mdout, .mb) details.myst-box > summary { cursor: pointer; margin: .5em 0; }
+.sbnb .myst-bookline { margin: 4px 0 8px; color: var(--muted); } .sbnb .myst-bookline button { font: inherit; }
+.sbnb .myst-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.sbnb :is(.mdout, .mb) .myst-toc ol { margin: .2em 0 .6em; } .sbnb :is(.mdout, .mb) .myst-toc-part { margin: .6em 0 0; font-weight: 600; }
 `;
 
 const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -204,7 +209,7 @@ export type Renderer = { render(src: string): string; inline(src: string): strin
 
 /** The hook web/markdown.ts takes (Options.myst) for one cell's render: its directives and targets numbered
  * from the index, in the order they render; `evals`: its stored {eval} results (text/plain), shown as text. */
-export function hook(idx: MystIndex | null, cell: string, evals?: Map<string, string>) {
+export function hook(idx: MystIndex | null, cell: string, evals?: Map<string, string>, book?: Book | null) {
   let d = 0, t = 0;
   const ds = idx?.directives.get(cell) ?? [], ts = idx?.targets.get(cell) ?? [];
   // (the next occurrence, if it is this directive's; else none: no number rather than a wrong one)
@@ -263,7 +268,13 @@ export function hook(idx: MystIndex | null, cell: string, evals?: Map<string, st
       const lab = (m ? m[2] : text).trim(), shown = m ? m[1].trim() : "";
       const e = idx?.labels.get(lab);
       // (not in this notebook: another chapter's, P2 links it; its own text as text, else its label said so, no dead link)
-      if (!e) return shown ? `<span class="myst-ref-other">${esc(shown)}</span>` : `<span class="myst-ref-missing">${esc(lab)} (in another chapter)</span>`;
+      if (!e) {
+        // (another chapter's, in this notebook's book (P2): a link that reads as that chapter numbers it, followed by
+        // the page's book capability; a label two chapters define: the first's, said)
+        const be = book?.labels.get(lab);
+        if (be) return `<a href="#" class="myst-ref myst-ref-book" data-myst-ref="${esc(lab)}">${esc(shown || be.display)}</a>` + (book!.dups.has(lab) ? `<span class="myst-note"> (label in two chapters)</span>` : "");
+        return shown ? `<span class="myst-ref-other">${esc(shown)}</span>` : `<span class="myst-ref-missing">${esc(lab)} (in another chapter)</span>`;
+      }
       return `<a href="#" class="myst-ref" data-myst-ref="${esc(lab)}">${esc(shown || e!.display)}</a>`;
     }
     return `<code>${esc(text)}</code>`;
@@ -280,7 +291,7 @@ export function hook(idx: MystIndex | null, cell: string, evals?: Map<string, st
       const m = `<div class="math display" data-tex="${esc(tex)}">${esc(tex)}</div>`;
       return dup + (o?.number ? `<div class="myst-eq"${anchor}>${m}<span class="myst-eqno">(${esc(o.number)})</span></div>\n` : anchor ? `<div class="myst-eq"${anchor}>${m}</div>\n` : m + "\n");
     }
-    if (x.name === "tableofcontents") return `<p class="myst-note">The book's table of contents: open _toc.yml's chapters from the file browser.</p>\n`;
+    if (x.name === "tableofcontents") return book ? tocNav(book) : `<p class="myst-note">The book's table of contents: open _toc.yml's chapters from the file browser.</p>\n`;
     if (x.name === "table") return dup + `<figure class="myst-table"${anchor}>${x.arg ? `<figcaption>${r.inline(x.arg)}</figcaption>` : ""}${r.render(x.body)}</figure>\n`;
     if (x.name === "figure") {
       const path = x.arg, alt = x.opts.get("alt") ?? "";
@@ -305,6 +316,25 @@ export function hook(idx: MystIndex | null, cell: string, evals?: Map<string, st
   }
 }
 
+// The book's chapters ({tableofcontents} in a book: P2, agents-ui's A-2): a nav, an ol per part, captions as text; a
+// chapter's number and title (text), a link (by its place in the TOC, a number) if it can be opened as a notebook;
+// the open one marked current, not a link; a missing one by its name, said so
+function tocNav(book: Book): string {
+  const item = (c: BookChapter, i: number) => {
+    const words = (c.number ? `${c.number} · ` : "") + (c.present ? c.title || c.entry : c.entry) + (c.file && !c.present ? " (not in this folder)" : "");
+    if (i === book.own) return `<li><span aria-current="page">${esc(words)}</span></li>`;
+    return c.present && c.myst ? `<li><a href="#" class="myst-toc-ch" data-myst-chapter="${i}">${esc(words)}</a></li>` : `<li>${esc(words)}</li>`;
+  };
+  let out = "";
+  const roots = book.chapters.map((c, i) => [c, i] as const).filter(([c]) => c.root);
+  if (roots.length) out += `<ol>${roots.map(([c, i]) => item(c, i)).join("")}</ol>`;
+  book.parts.forEach((p, k) => {
+    const cs = book.chapters.map((c, i) => [c, i] as const).filter(([c]) => !c.root && c.part === k);
+    out += (p.caption ? `<p class="myst-toc-part">${esc(p.caption)}</p>` : "") + `<ol>${cs.map(([c, i]) => item(c, i)).join("")}</ol>`;
+  });
+  return `<nav class="myst-toc" aria-label="Contents">${out}</nav>\n`;
+}
+
 // a directive shown as its text: a box naming it, its source escaped
 function asText(x: Directive): string {
   return `<div class="myst-box myst-unknown"><p class="myst-title">${esc(x.name)}</p><pre>${esc(x.raw)}</pre></div>\n`;
@@ -313,12 +343,19 @@ function asText(x: Directive): string {
 // ---------------------------------------------------------------- in a notebook (web/notebook/notebook.js)
 
 type Cell = { id: string; type?: string; el: HTMLElement; md: HTMLElement; ta: HTMLTextAreaElement; metadata?: any };
-type Notebook = { root: HTMLElement; cells: () => Cell[]; renderMd: (c: Cell) => unknown; h: (tag: string, cls: string, props?: object) => HTMLElement };
+type Notebook = { root: HTMLElement; cells: () => Cell[]; renderMd: (c: Cell) => unknown; h: (tag: string, cls: string, props?: object) => HTMLElement; book?: () => Promise<BookCap | null> };
+
+const BOOK_REFUSED = {
+  unsupported: "This book's table of contents isn't supported, so chapters open one at a time.",
+  large: "This book is too large to link its chapters; chapters open one at a time.",
+};
 
 /** What a notebook needs from this asset, once it has loaded it: its styles added to the page (once), references
  * followed by a click, and `hookFor(cell)` for each Markdown cell's render.  The index is built from the Markdown
  * cells, again when they changed (a cell's text, or the cells themselves); `editing`: a block of a cell being
- * written, drawn as typed: the index as it was, its boxes unnumbered there rather than numbered wrongly. */
+ * written, drawn as typed: the index as it was, its boxes unnumbered there rather than numbered wrongly.
+ * `nb.book` (the workspace page's, P2): the open document's book capability, as a promise; its book is built in the
+ * background (web/myst/book.ts) and the cells drawn again with it, unless another document opened meanwhile. */
 export function attach(nb: Notebook) {
   if (!document.querySelector("style[data-sbnb-myst]")) {
     // (after the notebook's own styles: the page's still win)
@@ -327,32 +364,132 @@ export function attach(nb: Notebook) {
     const own = document.querySelector("style[data-sbnb]");
     if (own) own.after(st); else document.head.prepend(st);
   }
-  let idx: MystIndex | null = null, key = "";
-  // a reference followed: its target found through the index when clicked (an edit may have renumbered anchors)
+  let idx: MystIndex | null = null, key = "", chapterUsed = -1;
+  // the book: the promise of the document's capability it is for, its capability, the book, its build's stop
+  let bookP: Promise<BookCap | null> | null = null, cap: BookCap | null = null, book: Book | null = null, stop: AbortController | null = null;
+  let line: HTMLElement | null = null;
+  // (said for a screen reader: cleared, then set on the next frame, so a repeat is said too: A-4)
+  const live = nb.h("div", "myst-live");
+  live.setAttribute("aria-live", "polite");
+  nb.root.append(live);
+  const announce = (t: string) => { live.textContent = ""; requestAnimationFrame(() => { live.textContent = t; }); };
+  // (another document opened, MyST or not: this one's lines go; the page's getter gives a new promise per document,
+  // and for one that isn't a MyST copy answers without reading anything)
+  const cellsEl = nb.root.querySelector(".cells");
+  if (cellsEl) new MutationObserver(() => { const p = nb.book?.() ?? null; if (p !== bookP) switchTo(p); }).observe(cellsEl, { childList: true });
+  const cellOf = (el: Element) => nb.cells().find((c) => c.el.contains(el));
+  const drawAll = () => { for (const c of nb.cells()) if (c.type === "markdown" && c.el.classList.contains("rendered")) nb.renderMd(c); };
+  // a line at the notebook's top (the book's refusal, or the way back): one at a time, gone with the document
+  const showLine = (el: HTMLElement | null) => {
+    line?.remove();
+    line = el;
+    if (el) { el.classList.add("myst-bookline"); nb.root.prepend(el); }
+  };
+  // the target shown: scrolled to; its anchor focused if drawn, else its cell's text (edit mode kept): N-1
+  const reveal = (cell: Cell | undefined, anchor?: number) => {
+    if (!cell) return;
+    const at = anchor && cell.el.classList.contains("rendered") ? (cell.md.querySelector(`[data-myst-anchor="${anchor}"]`) as HTMLElement | null) : null;
+    (at ?? cell.el).scrollIntoView({ block: "center" });
+    if (at) { at.setAttribute("tabindex", "-1"); at.focus({ preventScroll: true }); }
+    else if (cell.el.classList.contains("rendered")) { cell.el.setAttribute("tabindex", "-1"); cell.el.focus({ preventScroll: true }); }
+    else cell.ta.focus({ preventScroll: true });
+  };
+  // what the chapter that opened this one asked to be shown here, and the way back to it (A-3)
+  const arrived = (c: BookCap, t: Pending) => {
+    let said = "";
+    if (t.label) {
+      const e = idx?.labels.get(t.label);
+      reveal(e ? nb.cells().find((x) => x.id === e.cell) : undefined, e?.anchor);
+      if (e) said = e.display;
+    } else if (t.cell) reveal(nb.cells().find((x) => x.id === t.cell));
+    const n = book && book.own >= 0 ? book.chapters[book.own].number : 0;
+    announce(`Opened ${n ? `chapter ${n}` : "the chapter"}${said ? `: ${said}` : ""}`);
+    if (t.back) {
+      const back = t.back, div = nb.h("div", ""), b = nb.h("button", "", { type: "button", textContent: `← Back to ${back.number ? `Chapter ${back.number}` : back.name}` });
+      // (with this document's capability: the one that opened this was the last document's)
+      b.addEventListener("click", () => void follow(b, () => c.open(back.name, { cell: back.cell, number: back.number })));
+      div.append(b);
+      showLine(div);
+    }
+  };
+  // a chapter opened from a click: cancelled, focus back on what was clicked; refused, said there (not an alert)
+  const follow = async (a: HTMLElement, go: () => ReturnType<BookCap["open"]>) => {
+    a.parentElement?.querySelector(":scope > .myst-said")?.remove();
+    const r = await go();
+    if (r === "cancelled") a.focus();
+    else if (typeof r === "object" && r.refused !== "stale") {
+      const s = nb.h("span", "myst-note myst-said", { textContent: ` ${r.refused}` });
+      s.setAttribute("role", "status");
+      a.after(s);
+    }
+  };
+  // another chapter of the book, opened (a reference's target, or a TOC entry), with the way back here
+  const open = (a: HTMLElement, ch: BookChapter, label?: string) => {
+    const c = cap, b = book;
+    if (!c || !b) return;
+    const own = b.own >= 0 ? b.chapters[b.own] : null, from = cellOf(a);
+    const back = own && from ? { name: own.entry, cell: from.id, number: own.number } : undefined;
+    void follow(a, () => c.open(ch.entry, { label, number: ch.number, title: ch.title, back }));
+  };
+  // a book for the document open now: the last one's build stopped, its lines gone; this one's built, then drawn
+  const switchTo = (p: Promise<BookCap | null> | null) => {
+    stop?.abort();
+    bookP = p; cap = null; book = null; stop = null;
+    showLine(null);
+    if (!p) return;
+    p.then(async (c) => {
+      if (bookP !== p || !c) return;
+      cap = c;
+      const ctl = (stop = new AbortController());
+      const r = await buildBook(c, ctl.signal);
+      await hold("before-publish");
+      // (published only for the document it was built for: g4)
+      if (bookP !== p || ctl.signal.aborted || !c.live()) return;
+      if (r && "book" in r) { book = r.book; idx = null; drawAll(); }
+      else if (r) { const d = nb.h("div", "", { textContent: BOOK_REFUSED[r.refused] }); d.setAttribute("role", "status"); showLine(d); }
+      const t = c.take();
+      if (t) arrived(c, t);
+    }, () => {});
+  };
+  // a reference followed: its target found through the index when clicked (an edit may have renumbered anchors);
+  // one in another chapter, through the book; a TOC entry, its chapter
   nb.root.addEventListener("click", (e) => {
-    const a = (e.target as Element | null)?.closest?.("a.myst-ref") as HTMLElement | null;
+    const el = e.target as Element | null;
+    const ch = el?.closest?.("a.myst-toc-ch") as HTMLElement | null;
+    if (ch && nb.root.contains(ch)) {
+      e.preventDefault();
+      const c = book?.chapters[Number(ch.dataset.mystChapter)];
+      if (c) open(ch, c);
+      return;
+    }
+    const a = el?.closest?.("a.myst-ref") as HTMLElement | null;
     if (!a || !nb.root.contains(a)) return;
     e.preventDefault();
-    const ent = idx?.labels.get(a.dataset.mystRef ?? "");
-    const cell = ent && nb.cells().find((c) => c.id === ent.cell);
-    if (!cell) return;
-    const at = cell.el.classList.contains("rendered") ? cell.md.querySelector(`[data-myst-anchor="${ent.anchor}"]`) : null;
-    (at ?? cell.el).scrollIntoView({ block: "center" });
+    const lab = a.dataset.mystRef ?? "";
+    const ent = idx?.labels.get(lab);
+    if (ent) { reveal(nb.cells().find((c) => c.id === ent.cell), ent.anchor); return; }
+    const be = book?.labels.get(lab);
+    if (be && book) open(a, book.chapters[be.chapter], lab);
   });
   return {
     hookFor(cell: Cell, editing: boolean, chapter: number) {
+      const p = nb.book?.() ?? null;
+      if (p !== bookP) switchTo(p);
+      // (in a book, its own chapter's number is the TOC's)
+      if (book && book.own >= 0) chapter = book.chapters[book.own].number;
       const md = nb.cells().filter((c) => c.type === "markdown"), k = md.map((c) => c.id).join(",");
-      if (!idx || (!editing && (k !== key || idx.texts.get(cell.id) !== cell.ta.value))) {
+      if (!idx || chapter !== chapterUsed || (!editing && (k !== key || idx.texts.get(cell.id) !== cell.ta.value))) {
         const again = !!idx;
         idx = buildIndex(md.map((c) => ({ id: c.id, text: c.ta.value })), chapter);
         key = k;
+        chapterUsed = chapter;
         // (an edit can renumber what follows: the other cells shown are drawn again)
         if (again) queueMicrotask(() => { for (const c of md) if (c !== cell && c.el.classList.contains("rendered")) nb.renderMd(c); });
       }
       // (its stored {eval} results: text/plain only, shown as text)
       const ue = cell.metadata?.user_expressions;
       const evals = Array.isArray(ue) ? new Map<string, string>(ue.filter((u: any) => typeof u?.expression === "string" && typeof u?.result?.data?.["text/plain"] === "string").map((u: any) => [u.expression, u.result.data["text/plain"]])) : undefined;
-      return hook(idx, editing ? "" : cell.id, evals);
+      return hook(idx, editing ? "" : cell.id, evals, book);
     },
   };
 }
