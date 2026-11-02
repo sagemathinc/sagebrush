@@ -30,7 +30,7 @@ __all__ = [
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
-    "conway_polynomial", "Hom", "VectorSpace", "random_matrix",
+    "conway_polynomial", "Hom", "VectorSpace", "random_matrix", "jacobian",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
@@ -40,7 +40,10 @@ __all__ = [
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
-    "binomial", "factorial", "fibonacci", "catalan_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
+    "binomial", "factorial", "fibonacci", "catalan_number",
+    # enumerative combinatorics (lib/_sage_combinat.py)
+    "Partition", "Partitions", "Compositions", "Set", "Subsets", "Combinations", "Permutation", "Permutations",
+    "number_of_partitions", "stirling_number1", "stirling_number2", "bell_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
@@ -49,7 +52,7 @@ __all__ = [
     "sin", "cos", "tan", "cot", "sec", "csc", "asin", "acos", "atan", "arcsin", "arccos", "arctan",
     "arccot", "arcsec", "arccsc", "atan2", "arctan2", "sinh", "cosh", "tanh", "coth", "sech", "csch",
     "arcsinh", "arccosh", "arctanh", "asinh", "acosh", "atanh", "exp", "log", "ln", "floor", "ceil",
-    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "real", "imag", "real_part", "imag_part", "conjugate",
+    "ceiling", "gamma", "erf", "sgn", "sign", "heaviside", "laplace", "inverse_laplace", "real", "imag", "real_part", "imag_part", "conjugate",
     "psi", "log_gamma", "zetaderiv", "hurwitz_zeta", "beta", "erfc", "erfi", "erfinv", "exp_integral_e1", "Ei",
     "exp_integral_ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec", "legendre_P", "gen_legendre_P",
     "diff", "derivative", "integrate", "integral", "integrate_steps", "numerical_integral",
@@ -74,7 +77,7 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
                         tanh, coth, sech, csch, arcsinh, arccosh, arctanh, asinh, acosh, atanh, exp,
-                        log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, diff,
+                        log, ln, floor, ceil, ceiling, gamma, erf, sgn, sign, heaviside, laplace, inverse_laplace, diff,
                         psi, log_gamma, zeta, zetaderiv, hurwitz_zeta, beta, erfc, erfi, erfinv, exp_integral_e1,
                         Ei, exp_integral_ei, dilog, polylog, lambert_w, elliptic_kc, elliptic_ec, legendre_P,
                         gen_legendre_P,
@@ -142,6 +145,8 @@ from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles,
 from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
+from _sage_combinat import (Partition, Partitions, Compositions, Set, Subsets, Combinations, Permutation, Permutations,
+                           number_of_partitions, stirling_number1, stirling_number2, bell_number)
 from _sage_polyhedra import Polyhedron, polytopes
 from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
 from _sage_milp import MixedIntegerLinearProgram
@@ -405,6 +410,24 @@ def random_matrix(base, nrows, ncols=None, **kwds):
 from _sage_matrix import (matrix, MatrixSpace, identity_matrix, zero_matrix, diagonal_matrix, CC, vector,
                           block_matrix, block_diagonal_matrix, column_matrix, kernel)
 Matrix = matrix
+
+
+def jacobian(functions, variables):
+    """The Jacobian matrix of functions (one function or a list) in the
+    variables, over SR.
+
+    EXAMPLES::
+
+        sage: var('y')
+        y
+        sage: jacobian([x*y, x + y], [x, y])
+        [y x]
+        [1 1]
+        sage: jacobian(x^2*y, [x, y])
+        [2*x*y   x^2]
+    """
+    import _sage_matrix_sr
+    return _sage_matrix_sr.jacobian(functions, variables)
 
 
 def parent(x):

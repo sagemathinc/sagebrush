@@ -30,6 +30,15 @@ body.wsfiles .tex-page.tex-embed { left: auto; }
   .tex-page.tex-embed .tex-left { border-right: 0; border-bottom: 1px solid #ccc; }
 }
 .tex-page.tex-embed.tex-only-preview .tex-left { display: none !important; }
+/* (a box narrower than 520 px, by its own width, not the window's: the agents pane at 320-520 px, as dragged; source
+   above, preview below, each the box's full width, so the source isn't ~18 characters a line and display equations
+   and their numbers fit; board's B2-1 and O-1) */
+.tex-page.tex-embed { container: sb-tex / inline-size; }
+@container sb-tex (max-width: 520px) {
+  .tex-page.tex-embed .tex-main { flex-direction: column; }
+  .tex-page.tex-embed .tex-left, .tex-page.tex-embed .tex-right { flex: 1 1 50%; display: block; }
+  .tex-page.tex-embed .tex-left { border-right: 0; border-bottom: 1px solid #ccc; }
+}
 `;
 let styled = false;
 

@@ -11,8 +11,8 @@
 // a close that gets through (a second Esc, a programmatic close) shows it again,
 // and opening Share again only shows it (UI-4, UI-B1).
 import { Selection, reasonText, type Bounds } from "./selection";
-import { startDeps, type WorkerLike } from "./deps-client";
-import type { CellKind, Unfollowed } from "./file-deps";
+import { startDeps, type WorkerLike } from "../deps/deps-client";
+import type { CellKind, Unfollowed } from "../deps/file-deps";
 import type { LazyFile } from "./upload";
 
 export interface ShareDialogHost {

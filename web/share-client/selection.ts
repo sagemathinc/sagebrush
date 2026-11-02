@@ -14,7 +14,7 @@
 //     changes a touched box (CORR-SHAREUX-3, UI-7);
 //   - a suggestion only ever checks a box (never unchecks one), and only an
 //     untouched one, of the current generation.
-import type { Reason } from "./file-deps";
+import type { Reason } from "../deps/file-deps";
 
 export type RowState = "analyzing" | "not-analyzed" | "done";
 export interface Row {
