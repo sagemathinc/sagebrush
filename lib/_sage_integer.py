@@ -423,15 +423,26 @@ def nth_root(n, k, truncate_mode=False):
 
 # ------------------------------------------------------------------ digits and bits
 
-def digits(n, base=10):
-    """The digits of n in the given base, least significant first.
+def digits(n, base=10, digits=None):
+    """The digits of n in the given base, least significant first; digits=: the symbols for 0, 1, ...
 
     EXAMPLES::
 
-        sage: ZZ(1234).digits(), ZZ(10).digits(2)
-        ([4, 3, 2, 1], [0, 1, 0, 1])
+        sage: ZZ(1234).digits(), ZZ(10).digits(2), ZZ(41943).digits(base=16, digits="0123456789ABCDEF")
+        ([4, 3, 2, 1], [0, 1, 0, 1], ['7', 'D', '3', 'A'])
     """
-    return _sa().digits(n, base)
+    return _sa().digits(n, base, digits)
+
+
+def bits(n):
+    """The bits of n, least significant first (n.digits(2)).
+
+    EXAMPLES::
+
+        sage: ZZ(41943).bits()
+        [1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1]
+    """
+    return _sa().digits(n, 2)
 
 
 def ndigits(n, base=10):
@@ -653,7 +664,7 @@ METHODS = {name: globals()[name] for name in (
     "is_even", "is_odd", "is_one", "is_zero", "is_unit", "is_integral",
     "sqrt", "isqrt", "nth_root", "digits", "ndigits", "divisors", "number_of_divisors",
     "prime_divisors", "prime_factors", "next_prime", "previous_prime", "next_probable_prime",
-    "binomial", "factorial", "binary", "str", "nbits", "popcount", "abs",
+    "binomial", "factorial", "binary", "str", "nbits", "bits", "popcount", "abs",
     "inverse_mod", "powermod", "gcd", "lcm", "xgcd", "mod", "quo_rem", "valuation",
     "euler_phi", "sigma", "moebius", "n", "N", "numerical_approx", "parent",
     "floor", "ceil", "round", "squarefree_part", "kronecker")}

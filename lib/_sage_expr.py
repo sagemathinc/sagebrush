@@ -3737,14 +3737,18 @@ def gen_legendre_P(n, m, x):
     return r
 
 
-def log(v, b=None):
-    """log(x), the natural logarithm; log(x, b) = log(x)/log(b).
+def log(v, b=None, base=None):
+    """log(x), the natural logarithm; log(x, b) = log(x, base=b) = log(x)/log(b).
 
     EXAMPLES::
 
-        sage: log(1), log(e), log(8, 2), log(x).diff(x)
-        (0, 1, 3, 1/x)
+        sage: log(1), log(e), log(8, 2), log(x).diff(x), log(8, base=2)
+        (0, 1, 3, 1/x, 3)
     """
+    if base is not None:
+        if b is not None:
+            raise TypeError("log() got both b and base")
+        b = base
     if b is None:
         return _log1(v)
     if isinstance(v, int) and isinstance(b, int) and v > 0 and b > 1:
