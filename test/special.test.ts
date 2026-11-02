@@ -61,6 +61,9 @@ const TOL: Record<string, [number, number, number?]> = {
   ellipk: [1e-15, 1e-300], ellipe: [1e-15, 1e-300], ellipj: [1.5e-15, 0], legendre_all: [2e-14, 0],
   gammainc: [6e-15, 1e-300], gammaincc: [6e-15, 1e-300], gammainc_scaled: [6e-15, 1e-300],
   besselj: [6e-15, 1e-300], bessely: [3e-15, 1e-300],
+  // (the incomplete beta function: 5e-15 measured per unit max(1, |log value|); its inverse and the incomplete
+  // gamma's, relative to the root, 1.4e-14 and 9e-15 (a >= 0.05 in the cases: below it a root's condition is eps/a))
+  betainc: [8e-15, 1e-300], betaincc: [8e-15, 1e-300], betaincinv: [2.5e-14, 1e-300], gammaincinv: [1.5e-14, 1e-300],
 };
 // (J_nu(x) and Y_nu(x) oscillate for |x| > |nu| with an envelope near sqrt(2/(pi |x|)):
 // there its error is measured against that, an absolute accuracy next to
@@ -73,7 +76,7 @@ const besselFloor = (args: any[]): number => {
 // rounding of log(x^a e^-x / Gamma(a+1)) or of a (lambda - 1 - log lambda),
 // and beta's with |betaln|, as exp(betaln) turns its absolute error into a
 // relative one: it is measured per unit max(1, |log |value||))
-const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled", "beta"]);
+const LOG_SCALED = new Set(["gammainc", "gammaincc", "gammainc_scaled", "beta", "betainc", "betaincc"]);
 // (betaln of negative arguments, through _betaln_signed's reflections: a
 // bound of its own, the positive arguments' staying as small as it is)
 const NEG_TOL: Record<string, number> = { betaln: 2.5e-15 };

@@ -38,7 +38,8 @@ import _special as _S
 
 __all__ = [
     "gamma", "gammaln", "loggamma", "psi", "digamma", "polygamma", "rgamma",
-    "zeta", "beta", "betaln", "gammainc", "gammaincc",
+    "zeta", "beta", "betaln", "gammainc", "gammaincc", "gammaincinv", "gammainccinv",
+    "betainc", "betaincc", "betaincinv", "betainccinv",
     "erf", "erfc", "erfcx", "erfi", "erfinv", "erfcinv",
     "ndtr", "log_ndtr", "ndtri", "exp1", "expi", "lambertw", "spence",
     "ellipk", "ellipe", "jv", "yv", "j0", "j1", "y0", "y1",
@@ -403,6 +404,15 @@ def _gammaincc(a, x):
 
 gammainc = _ufunc("gammainc", 2, _guard("gammainc", _gammainc))
 gammaincc = _ufunc("gammaincc", 2, _guard("gammaincc", _gammaincc))
+
+# (the inverses and the incomplete beta functions: lib/_special.py's, which return SciPy's limits and its nan outside
+# the domain themselves)
+gammaincinv = _ufunc("gammaincinv", 2, _guard("gammaincinv", lambda a, y: float(_S.gammaincinv(a, y))))
+gammainccinv = _ufunc("gammainccinv", 2, _guard("gammainccinv", lambda a, y: float(_S.gammainccinv(a, y))))
+betainc = _ufunc("betainc", 3, _guard("betainc", lambda a, b, x: float(_S.betainc(a, b, x))))
+betaincc = _ufunc("betaincc", 3, _guard("betaincc", lambda a, b, x: float(_S.betaincc(a, b, x))))
+betaincinv = _ufunc("betaincinv", 3, _guard("betaincinv", lambda a, b, y: float(_S.betaincinv(a, b, y))))
+betainccinv = _ufunc("betainccinv", 3, _guard("betainccinv", lambda a, b, y: float(_S.betainccinv(a, b, y))))
 
 
 # ------------------------------------------------------------------ error functions and the normal distribution
