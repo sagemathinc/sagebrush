@@ -52,9 +52,11 @@ const site = mkdtempSync(join(tmpdir(), "sb-hcost-site-")), base = mkdtempSync(j
 const OUT = (() => { const i = process.argv.indexOf("--out"); return i > 0 ? process.argv[i + 1] : null; })();
 let partial = null;
 const writePartial = (reason) => { if (OUT && partial) try { writeFileSync(OUT, JSON.stringify({ ...partial, partial: true, reason })); } catch {} };
-const die = (m) => { console.error("BAD: " + m); writePartial("BAD: " + m); process.exit(2); };
+// (r4: every exit path first kills the browser process groups this bench created (a detached Chromium would outlive it))
+let reapAll = () => {};
+const die = (m) => { console.error("BAD: " + m); writePartial("BAD: " + m); reapAll(); process.exit(2); };
 // (a bound's SIGTERM or an interrupt: the report so far too, then the conventional status)
-for (const [sig, code] of [["SIGTERM", 143], ["SIGINT", 130]]) process.on(sig, () => { console.error(`BAD: ${sig}`); writePartial(`BAD: ${sig} (a bound or an interrupt)`); process.exit(code); });
+for (const [sig, code] of [["SIGTERM", 143], ["SIGINT", 130]]) process.on(sig, () => { console.error(`BAD: ${sig}`); writePartial(`BAD: ${sig} (a bound or an interrupt)`); reapAll(); process.exit(code); });
 // (BASE: origin/master's web/ and src/, as a pinned build is made in test-workspace-journal.mjs)
 let master;
 if (process.env.HCOST_BASE_DIR) {
@@ -182,9 +184,12 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 } });
 const url = `http://127.0.0.1:${server.port}/`, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// (a browser as one function: evaluate(expr) in a page at `url`)
+// (a browser as one function: evaluate(expr) in a page at `url`.  r4: Chromium gets --password-store=basic: with a fresh
+// profile per run, Chrome 155 on the VMs otherwise waits for the system keyring over D-Bus (no session bus there) until
+// D-Bus's 25 s timeout before the first navigation commits (probes on VM1, 2026-11-02: 25.2 s -> 0.2 s); it selects the
+// password store's backend only)
 async function chromium() {
-  const profile = mkdtempSync(join(tmpdir(), "sb-hcost-")), chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
+  const profile = mkdtempSync(join(tmpdir(), "sb-hcost-")), chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
   GROUPS.add(chrome.pid);
   const port = await devtoolsPort(profile);
   let targets;
@@ -219,6 +224,7 @@ const censusMarks = () => [join(tmpdir(), "sb-hcost-"), ...(process.env.PLAYWRIG
 // its name; (2) every process in a process group this bench created (a Chromium's, which survives reparenting); (3) every
 // process naming a browser profile or the staged Firefox.  The ps command itself is never counted.  Pure, with rows)
 const GROUPS = new Set();
+reapAll = () => { for (const g of GROUPS) { try { process.kill(-g, "SIGKILL"); } catch {} } };
 const censusOf = (psText, root, groups, marks) => {
   const procs = psText.split("\n").map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map((m) => ({ pid: +m[1], ppid: +m[2], pgid: +m[3], args: m[4] }));
   const kids = new Map(); for (const p of procs) (kids.get(p.ppid) ?? kids.set(p.ppid, []).get(p.ppid)).push(p);
@@ -423,14 +429,39 @@ const carryOf = (seq) => {
   const a = carryOf(mk([["base", 0.5], ["tail", 0.9], ["aa", 0.02], ["head", 0.05], ["tail", 0.9], ["set", 0.04], ["delay", 0.06]]));
   if (a.nAfter !== 2 || a.nOther !== 2 || Math.abs(a.afterTail - 0.03) > 1e-12 || Math.abs(a.other - 0.055) > 1e-12 || Math.abs(a.carry - 0.025) > 1e-12) die(`the carryover's unit row: chronology, tail excluded, first run excluded (${JSON.stringify(a)})`);
 }
+// (William's product decision, Nov 2 (via @sagebrush; daybreak3 da757ee7/dd266a96, the grader 5d03cd68): Firefox's
+// performance legs are REPORT-ONLY: run, computed and reported in full, never deciding D2.  D2 is Chromium's alone.
+// Report-only covers the performance verdict only: a Firefox leg that can't run (launch, teardown, census, version,
+// warm-up, malformed evidence) is still a run STOP or BAD.  overallOf decides from the gating rows; its unit rows)
+const GATING = ["chromium"], REPORT_ONLY = ["firefox"];
+const overallOf = (rows) => {
+  const v = rows.filter((r) => GATING.includes(r.browser)).map((r) => r.verdict);
+  if (v.length === 0) return "STOP";
+  return v.includes("STOP") ? "STOP" : v.includes("VOID") ? "VOID" : v.includes("FAIL") ? "FAIL" : "PASS";
+};
+{
+  const R = (b, v) => ({ browser: b, verdict: v });
+  for (const [rows, want, what] of [
+    [[R("chromium", "PASS"), R("chromium", "PASS"), R("chromium", "PASS"), R("firefox", "VOID"), R("firefox", "STOP"), R("firefox", "FAIL")], "PASS", "a planted Firefox VOID/STOP/FAIL leaves D2 to Chromium: PASS"],
+    [[R("chromium", "PASS"), R("chromium", "VOID"), R("chromium", "PASS"), R("firefox", "PASS")], "VOID", "a planted Chromium VOID: VOID"],
+    [[R("chromium", "FAIL"), R("firefox", "PASS")], "FAIL", "a Chromium FAIL: FAIL"],
+    [[R("chromium", "PASS"), R("chromium", "STOP"), R("firefox", "PASS")], "STOP", "a Chromium STOP: STOP"],
+    [[R("firefox", "PASS")], "STOP", "no gating row: STOP (D2 undecidable)"],
+  ]) if (overallOf(rows) !== want) die(`overallOf's unit row: ${what}`);
+}
 // (a sticky STOP during the run: launch failure, a non-zero census, a version change; the report so far, then STOP)
-const stopNow = (why) => { console.log(`HCOST: STOP (${why})`); writePartial(`STOP: ${why}`); process.exit(3); };
+let CURRENT = null;
+const stopNow = async (why) => {
+  console.log(`HCOST: STOP (${why})`); writePartial(`STOP: ${why}`);
+  if (CURRENT) { try { await Promise.race([CURRENT.close(), sleep(15000)]); } catch {} }
+  reapAll(); process.exit(3);
+};
 const MODE = process.env.HCOST_MODE ?? "";
 if (!["INFO", "COUNTED"].includes(MODE)) die("HCOST_MODE: INFO or COUNTED, declared before the run");
 const CONFIGS = ["base", "aa", "head", "delay", "set", "tail"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
-const report = { mode: MODE, order: ORDER, bundles: BUNDLE_SHA, bundlesRaw: BUNDLE_RAW, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
-console.log(`declared: ${report.declared}; mode ${MODE} (INFO: per-predecessor carry <= U or STOP; COUNTED: reported); a fresh browser process per run with the identical warm-up; Firefox scale ${FF_SCALE}`);
+const report = { gating: GATING, reportOnly: REPORT_ONLY, mode: MODE, order: ORDER, bundles: BUNDLE_SHA, bundlesRaw: BUNDLE_RAW, master, statistic: "daybreak3's settlement: A, median paired p50 deltas vs T50 = min(1, max(0.5, 0.05 B50)); B, median paired q deltas vs U = 0.01; head p99 <= 250 ms", declared: "DELAY: D_p50 > T50; TAIL: D_q > U and D_q' > U; in every workload and browser; A/A within T50 and U", browsers: {} };
+console.log(`declared: ${report.declared}; D2 gates on ${GATING.join(", ")} only, ${REPORT_ONLY.join(", ")} REPORT-ONLY (William, Nov 2); mode ${MODE} (INFO: per-predecessor carry <= U or STOP; COUNTED: reported); a fresh browser process per run with the identical warm-up; Firefox scale ${FF_SCALE}`);
 const verdicts = [];
 partial = report;
 let crash = null;
@@ -439,21 +470,33 @@ try {
     if (!LEGS.includes(bname)) continue;
     const rows = {}, leg = report.browsers[bname] = { version: null, scale: bname === "firefox" ? FF_SCALE : 1, launches: 0, warm: [], rows };
     // (one fresh process per run: census 0, launch, the warm-up, the run, close and reap)
+    leg.timing = [];
     const fresh = async (fn) => {
-      if (!(await censusZero())) stopNow(`${bname}: ${census()} browser process(es) left before a launch`);
+      const t = [Date.now()];
+      if (!(await censusZero())) await stopNow(`${bname}: ${census()} browser process(es) left before a launch`);
+      t.push(Date.now());
       let b;
-      try { b = await open(); } catch (e) { stopNow(`${bname}: the launch failed: ${String(e?.message ?? e).slice(0, 300)}`); }
+      try { b = await open(); } catch (e) { await stopNow(`${bname}: the launch failed: ${String(e?.message ?? e).slice(0, 300)}`); }
+      CURRENT = b; t.push(Date.now());
       leg.launches++;
       if (leg.version === null) { leg.version = b.version; console.log(`${bname}: ${b.version}`); }
-      else if (b.version !== leg.version) stopNow(`${bname}: the version changed between launches (${leg.version} -> ${b.version})`);
+      else if (b.version !== leg.version) await stopNow(`${bname}: the version changed between launches (${leg.version} -> ${b.version})`);
       try {
         const wu = await b.ev("window.warm()");
-        leg.warm.push(wu);
+        leg.warm.push(wu); t.push(Date.now());
         // (A2: exactly the declared 100 saves; no database left behind; the evidence kept apart, never in a measured row)
-        if (wu.saves !== 100 || !Array.isArray(wu.lat) || wu.lat.length !== 100) stopNow(`${bname}: the warm-up made ${wu.saves} saves, not 100`);
-        if (!Array.isArray(wu.left) || wu.left.length !== 0) stopNow(`${bname}: the warm-up left database(s) ${JSON.stringify(wu.left)}`);
-        return await fn(b);
-      } finally { await b.close(); if (!(await censusZero())) stopNow(`${bname}: ${census()} browser process(es) left after a close`); }
+        if (wu.saves !== 100 || !Array.isArray(wu.lat) || wu.lat.length !== 100) await stopNow(`${bname}: the warm-up made ${wu.saves} saves, not 100`);
+        if (!Array.isArray(wu.left) || wu.left.length !== 0) await stopNow(`${bname}: the warm-up left database(s) ${JSON.stringify(wu.left)}`);
+        const x = await fn(b); t.push(Date.now());
+        return x;
+      } finally {
+        await b.close(); CURRENT = null; t.push(Date.now());
+        if (!(await censusZero())) await stopNow(`${bname}: ${census()} browser process(es) left after a close`);
+        t.push(Date.now());
+        // (the phases, ms: census-before, launch, warm-up, run, close, census-after)
+        const ph = t.slice(1).map((v, i) => v - t[i]); leg.timing.push(ph);
+        if (process.env.HCOST_TRACE) console.error(`trace ${bname} ${ph.join(" ")}`);
+      }
     };
     for (const workload of ["files", "notebooks", "concurrent"]) {
       const runs = Object.fromEntries(CONFIGS.map((c) => [c, []])), order = [], chrono = [];
@@ -479,11 +522,11 @@ try {
       const stop = [...(resStop(resMax) ? [`performance.now() resolution ${Math.round(resMax * 1000)} us > 100 us`] : []), ...(spread.length ? [`instability/spread (p50): ${spread.join(", ")}`] : []), ...(MODE === "INFO" && carryPast ? [`carryover: |q after tail - q after others| ${(100 * carry.carry).toFixed(2)} pp > U`] : [])];
       const m = { T50, aaP50: D.aa, aaQ: DQ.aa, delayP50: D.delay, tailQ: DQ.tail, tailQa: DQA, headP50: D.head, headQ: DQ.head, headP99: p99.head };
       const verdict = verdictOf(stop, m), backstop = p99.head <= 250;
-      verdicts.push(verdict);
+      verdicts.push({ browser: bname, verdict });
       delete report.inProgress;
       rows[workload] = { verdict, stop, carry, chrono, B50, T50, U, D, DQ, DQA, P50, Q, QA, qa, p99, resMax, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2), pp = (x) => (100 * x).toFixed(2) + " pp";
-      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us; carryover q after tail ${pp(carry.afterTail)} vs after others ${pp(carry.other)}: ${pp(carry.carry)} (${carryPast ? "PAST" : "within"} U${MODE === "INFO" ? "" : ", reported"})`);
+      console.log(`${bname} ${workload}: ${REPORT_ONLY.includes(bname) ? `REPORT-ONLY (computed: ${verdict})` : verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B50 ${f(B50)} ms, T50 ${f(T50)} ms; paired p50 medians A/A ${f(D.aa)} (${D.aa <= T50 ? "within" : "PAST"}), head ${f(D.head)} (${D.head <= T50 ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T50 ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); paired q medians A/A ${pp(DQ.aa)} (${DQ.aa <= U ? "within" : "PAST"}), head ${pp(DQ.head)} (${DQ.head <= U ? "within" : "PAST"}), tail ${pp(DQ.tail)} (${DQ.tail > U ? "caught" : "NOT CAUGHT"}), tail base-anchored ${pp(DQA)} (${DQA > U ? "caught" : "NOT CAUGHT"}); p99 head ${f(p99.head)} (${backstop ? "within" : "PAST"} 250 ms) set ${f(p99.set)} ms; resolution ${Math.round(resMax * 1000)} us; carryover q after tail ${pp(carry.afterTail)} vs after others ${pp(carry.other)}: ${pp(carry.carry)} (${carryPast ? "PAST" : "within"} U${MODE === "INFO" ? "" : ", reported"})`);
       console.log(`  per-predecessor mean q: ${Object.entries(carry.byPred).map(([p, q]) => `${p} ${pp(q)}`).join("; ")}`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p50 ${of(c, "p50").map(f).join(" / ")}; p90 ${of(c, "p90").map(f).join(" / ")}; p95 ${of(c, "p95").map(f).join(" / ")}; p99 ${of(c, "p99").map(f).join(" / ")}; max ${of(c, "max").map(f).join(" / ")}; q ${of(c, "q").map(pp).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
@@ -497,6 +540,7 @@ try {
 }
 if (crash) die(`crash: ${String(crash?.stack ?? crash).slice(0, 2000)}`);
 if (OUT) writeFileSync(OUT, JSON.stringify(report));
-const v = verdicts.includes("STOP") ? "STOP" : verdicts.includes("VOID") ? "VOID" : verdicts.includes("FAIL") ? "FAIL" : "PASS";
-console.log(`HCOST: ${v} (${LEGS.join(" + ")}; ${verdicts.join(" ")})`);
+const v = overallOf(verdicts);
+const list = (bs) => verdicts.filter((r) => bs.includes(r.browser)).map((r) => r.verdict).join(" ");
+console.log(`HCOST: ${v} (gating ${GATING.join("+")}: ${list(GATING) || "none"}; report-only ${REPORT_ONLY.join("+")}: ${list(REPORT_ONLY) || "none"})`);
 process.exit({ PASS: 0, FAIL: 1, STOP: 3, VOID: 76 }[v]);
