@@ -297,3 +297,31 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
   }
   assert.equal(classify(["web/index.html"], "bug,full-ci-later").full, "false");
 });
+
+test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
+  const ALL = ["notebook", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const pick = (files: string[]) => {
+    const o = classify(files);
+    return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
+  };
+  // the board: its browser groups and web-runner (the board frame); no export, lookalike, terminal or notebook
+  for (const f of ["web/board/frame.ts", "web/graph/spring.ts", "examples/primes.json", "packages/sagebrush-board/test.mjs"]) {
+    assert.deepEqual(pick([f]), { groups: ["board-a", "board-b", "board-c", "board-unit"], runner: "true", export: "false", lookalike: "false" }, f);
+  }
+  // the terminal panel: its group alone
+  assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
+  // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)
+  assert.deepEqual(pick(["web/workspace/browser.ts"]), { groups: ["board-unit"], runner: "true", export: "true", lookalike: "true" });
+  // two areas: their union
+  assert.deepEqual(pick(["web/shell/panel.ts", "web/workspace/browser.ts"]).groups, ["board-unit", "terminal"]);
+  // the core page and any other web file: everything
+  for (const f of ["web/index.html", "web/build.ts", "web/worker.ts", "web/notebook/kernel.ts", "web/board/frame.ts\nweb/index.html"]) {
+    assert.deepEqual(pick(f.split("\n")), { groups: ALL, runner: "true", export: "true", lookalike: "true" }, f);
+  }
+  // the runtime (a library module): every browser group and web-runner, but not the workspace's export and lookalike
+  assert.deepEqual(pick(["lib/scipy/special.py"]), { groups: ALL, runner: "true", export: "false", lookalike: "false" });
+  // the full tier: everything; prose: nothing
+  assert.deepEqual(pick(["web/shell/panel.ts"].concat(["web/sync/doc.ts"])), { groups: ALL, runner: "true", export: "true", lookalike: "true" });
+  assert.deepEqual(pick(["README.md"]), { groups: [], runner: "false", export: "false", lookalike: "false" });
+});
+
