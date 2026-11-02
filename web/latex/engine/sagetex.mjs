@@ -132,7 +132,14 @@ export function savedStates(items, saved) {
   for (let k = 0; k < items.length && k < saved.length; k++) {
     const x = saved[k], lang = LANG[items[k].mode] || "sage";
     if (broken.has(lang)) continue;
-    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) { broken.add(lang); continue; }
+    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) {
+      // (both languages: the item's now, and the one its saved result was of, read from the saved key's mode; a
+      //  pycode turned sagesilent leaves no Python result after it standing; astra's LATEX-LANG-1)
+      broken.add(lang);
+      let was = null; try { const m = JSON.parse(x && typeof x.key === "string" ? x.key : "null"); was = Array.isArray(m) ? LANG[m[0]] : null; } catch {}
+      if (was) broken.add(was); else for (const l of new Set(Object.values(LANG))) broken.add(l);
+      continue;
+    }
     const st = { key: x.key, s: x.s };
     if (typeof x.latex === "string") st.latex = x.latex;
     if (typeof x.src === "string") st.src = x.src;

@@ -244,6 +244,29 @@ plt.savefig("pyfig.svg")
   const le = await run(dir, "check", "langs.tex", "--json");
   check("an edit in one language: only that language's later results dropped", le.json.code.map((x) => x.state.split(":")[0]).join(",") === "ok,not run,not run,ok,ok,ok,not run,not run,ok,ok,error,blocked,not run", le.json.code.map((x) => x.state));
 
+  // (an item that changes language: the later results of both languages are dropped, astra's LATEX-LANG-1, both ways)
+  const SWAP = String.raw`\documentclass{article}
+\begin{document}
+\begin{pycode}
+a = 123
+\end{pycode}
+Python's a: \py{a}. Sage: $\sage{2^5}$.
+\end{document}
+`;
+  writeFileSync(join(dir, "swap.tex"), SWAP);
+  const sw0 = await run(dir, "run", "swap.tex", "--json");
+  check("swap: run first", sw0.code === 0 && sw0.json.items.map((x) => x.state).join(",") === "ok,ok,ok", sw0.json?.items);
+  writeFileSync(join(dir, "swap.tex"), SWAP.replace("\\begin{pycode}", "\\begin{sagesilent}").replace("\\end{pycode}", "\\end{sagesilent}"));
+  const sw1 = await run(dir, "check", "swap.tex", "--json");
+  check("pycode turned sagesilent: the later Python and Sage results dropped", sw1.json.code.map((x) => x.state).join(",") === "not run,not run,not run", sw1.json?.code);
+  await run(dir, "render", "swap.tex", "-o", "swap.html");
+  check("pycode turned sagesilent: the old Python value isn't shown", !readFileSync(join(dir, "swap.html"), "utf8").includes(">123<"), null);
+  // (the reverse: a Sage block turned Python, from a run of the Sage version)
+  await run(dir, "run", "swap.tex");
+  writeFileSync(join(dir, "swap.tex"), SWAP);
+  const sw2 = await run(dir, "check", "swap.tex", "--json");
+  check("sagesilent turned pycode: the later Python and Sage results dropped", sw2.json.code.map((x) => x.state).join(",") === "not run,not run,not run", sw2.json?.code);
+
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
