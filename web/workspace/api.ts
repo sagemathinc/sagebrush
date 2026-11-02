@@ -1630,7 +1630,7 @@ export class Workspace {
    * first free `name (2)`, …); nothing of its contents removed. */
   /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything moves. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted = {}): Promise<Entry> {
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted & { still?: () => boolean } = {}): Promise<Entry> {
     const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
@@ -1641,6 +1641,9 @@ export class Workspace {
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
+      // (the caller's own condition, checked holding the lock, right before the move: a page that switched meanwhile
+      // to a document inside what goes refuses here, B1's astra R2 on #447)
+      if (opts.still && !opts.still()) throw new WorkspaceError("conflict", "the page changed meanwhile (a document in it was opened), so it wasn't moved to Trash");
       return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
     }, signal, collect);
   }

@@ -594,6 +594,170 @@ try {
   const after = await ev(`(async () => ({ trashed: await ${W}.read("/Trash/undo.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), back: await ${W}.stat("/undo.txt").then((e) => !!e), moved: await ${W}.read("/original-moved.txt").then((r) => new TextDecoder().decode(r.content)).catch(() => null), said: document.querySelector("#wssidebar .ftoast")?.textContent ?? "" }))()`);
   check(after.trashed === "UNRELATED" && !after.back && after.moved === "original", "Undo after the file was restored elsewhere and another trashed under its name: nothing moved: " + JSON.stringify(after));
   check(/already restored or deleted/.test(after.said), "…and it says so: " + JSON.stringify(after.said));
+  // (B1) …an error, said as one: role=alert, styled apart, kept until Dismissed (a ✕ named "Dismiss"); Dismissing it
+  // from the keyboard puts the focus back in the list, never on the body
+  const errToast = await ev(`(() => { const t = document.querySelector("#wssidebar .ftoast"); const x = [...(t?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "✕"); return { err: !!t?.classList.contains("err"), role: t?.getAttribute("role") ?? null, bg: t ? getComputedStyle(t).backgroundColor : null, close: x?.getAttribute("aria-label") ?? null }; })()`);
+  check(errToast.err && errToast.role === "alert" && errToast.bg === "rgb(253, 236, 234)" && errToast.close === "Dismiss", "B1-err: an error is said as one (role=alert, its own colours, a ✕ named Dismiss): " + JSON.stringify(errToast));
+  const dis = await ev(`(() => { const x = [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "✕"); x?.focus(); x?.click(); const a = document.activeElement; return { gone: !document.querySelector("#wssidebar .ftoast"), active: a?.classList.contains("frow") ? "row" : a?.tagName }; })()`);
+  check(dis.gone && dis.active === "row", "B1-dismiss: Dismiss from the keyboard puts the focus on a row of the list, never the body: " + JSON.stringify(dis));
+  // (B1, William Nov 1) Move to Trash on the notebook OPEN here: no "open something else first"
+  {
+    const toastTxt = `document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`;
+    const press = (label) => ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === ${JSON.stringify(label)})?.click(); return 1; })()`);
+    const trashRow = async (p) => { await until(`!!document.querySelector(${JSON.stringify(rowSel(p))})`); await click(rowSel(p) + " .more"); await menu("Move to Trash"); };
+    const openNb = (p, name, code) => ev(`${W}.create(${JSON.stringify(p)}, { content: { name: ${JSON.stringify(name)}, mode: "python", cells: [{ id: "c", code: ${JSON.stringify(code)} }] } }).then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+    const shown = () => ev(`document.querySelector("#nbname").value`);
+    const isAt = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e)`);
+    // (the trashing hook held once, at `stage`, by its test-only seam (sagebrush.trashTest.pause, unset in production))
+    const holdAt = (stage) => ev(`(() => { window.__b1at = null; sagebrush.trashTest.pause = (s) => { if (s !== ${JSON.stringify(stage)}) return; sagebrush.trashTest.pause = null; window.__b1at = s; return new Promise((r) => (window.__b1go = r)); }; return 1; })()`);
+    const reached = () => until(`window.__b1at !== null`, 30000);
+    const release = () => ev(`(() => { window.__b1go?.(); return 1; })()`);
+    const dismissAny = () => press("✕");
+    // (each T case starts on a freshly loaded page, so nothing one leaves (a save that failed and is still pending) can
+    // reach the next: the grader's ruling (d)(i) on #447 r2)
+    const freshPage = async () => { await go(base); await until(`!!${W}`, 60000); if (await ev(`${S}.hidden`)) await click("#wsfilesbtn"); await until(`!${S}.hidden`); };
+    // (its save failing: not moved, and said so, in board's words; it stays open, where it was)
+    check((await openNb("/B1 open.ipynb", "B1 open", "first")) === 1 && (await until(`document.querySelector("#nbname").value === "B1 open"`)), "B1: the notebook to trash is open here");
+    await ev(`(() => { const nb = sagebrush.notebook; window.__b1saved = nb.saved; nb.saved = () => Promise.reject(new Error("disk full")); return 1; })()`);
+    await trashRow("/B1 open.ipynb");
+    const refused = await until(`(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "").startsWith("Not moved to Trash: its changes couldn't be saved (disk full).")`);
+    const rs = await ev(`(async () => { const nb = sagebrush.notebook; nb.saved = window.__b1saved; return { shown: document.querySelector("#nbname").value, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }; })()`);
+    await shot("b1-error");
+    check(refused && rs.shown === "B1 open" && rs.here && !rs.trash, "B1-save: its save failing, it isn't moved: said as an error, and it stays open: " + JSON.stringify(rs));
+    await dismissAny();
+    // (moved: saved first, another opened in its place; the toast at the foot of the files, under the list, which
+    // doesn't move)
+    await ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "edited, not saved yet"); return 1; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/B1 open.ipynb"))})`);
+    const top0 = await ev(`document.querySelector("#wssidebar .ftree").getBoundingClientRect().top`);
+    await trashRow("/B1 open.ipynb");
+    const moved = await until(`/"B1 open\\.ipynb" moved to Trash/.test(${toastTxt})`);
+    const st = await ev(`(async () => { const t = document.querySelector("#wssidebar .ftoast"), tr = document.querySelector("#wssidebar .ftree"); return { shown: document.querySelector("#nbname").value, top: tr.getBoundingClientRect().top, below: t ? t.getBoundingClientRect().top >= tr.getBoundingClientRect().bottom - 1 : null, role: t?.getAttribute("role") ?? null, undo: [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.tagName ?? null, trashed: await ${W}.read("/Trash/B1 open.ipynb").then((r) => r.content?.cells?.[0]?.code ?? null).catch((e) => "unread: " + e), here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e) }; })()`);
+    check(moved && st.undo === "BUTTON" && st.role === "status" && st.shown !== "B1 open" && !st.here, "B1-move: the open notebook moved to Trash from the file browser, another opened in its place, a status with an Undo button: " + JSON.stringify(st));
+    check(st.trashed === "edited, not saved yet", "B1-savedfirst: what it had yet to save was saved first, so Trash has what was last seen: " + JSON.stringify(st.trashed));
+    await shot("b1-moved");
+    check(st.top === top0 && st.below === true, `B1-place: the toast is under the list, which didn't move: top ${top0} -> ${st.top}, below ${st.below}`);
+    // (Undo kept while it holds the focus, past its 10 s)
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.focus(); return 1; })()`);
+    await sleep(11_000);
+    check(/"B1 open\.ipynb" moved to Trash/.test(await ev(toastTxt)), "B1-keep: the toast stays past 10 s while its Undo holds the focus");
+    await press("Undo");
+    const back = await until(`document.querySelector("#nbname").value === "B1 open"`);
+    const bk = await ev(`(async () => ({ code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/B1 open.ipynb").then((e) => !!e), trash: await ${W}.stat("/Trash/B1 open.ipynb").then((e) => !!e) }))()`);
+    check(back && bk.here && !bk.trash && bk.code === "edited, not saved yet", "B1-undo: Undo puts it back and opens it again, as it was last seen: " + JSON.stringify(bk));
+    check(await until(`document.activeElement?.dataset?.path === "/B1 open.ipynb"`, 5000), "B1-undofocus: after Undo the focus is on its row: " + (await ev(`document.activeElement?.dataset?.path ?? document.activeElement?.tagName`)));
+    // …and a folder the open notebook is in: the same, another opened that isn't in it
+    await openNb("/B1 dir/inner.ipynb", "inner", "inside");
+    await until(`document.querySelector("#nbname").value === "inner"`);
+    await trashRow("/B1 dir");
+    const fmoved = await until(`/"B1 dir" moved to Trash/.test(${toastTxt})`);
+    const fs = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, inTrash: await ${W}.stat("/Trash/B1 dir/inner.ipynb").then((e) => !!e) }))()`);
+    check(fmoved && fs.shown !== "inner" && fs.inTrash, "B1-folder: a folder holding the open notebook goes to Trash too, another (not in it) opened: " + JSON.stringify(fs));
+    await press("Undo");
+    check(await until(`document.querySelector("#nbname").value === "inner"`), "B1-folderundo: …and Undo opens the notebook in it again");
+    // (astra R1, T2) the path replaced while the hook waits: what is there now is NOT moved, and the conflict is said
+    for (const [id, sel, open, moveTo, fresh] of [["T2", "/T2 a.ipynb", "/T2 a.ipynb", "/T2 moved.ipynb", "/T2 a.ipynb"], ["T2.folder", "/T2 dir", "/T2 dir/x.ipynb", "/T2 dir moved", "/T2 dir/new.txt"]]) {
+      const nm = open.split("/").pop().replace(/\.ipynb$/, "");
+      await freshPage();
+      await openNb(open, nm, "t2");
+      await until(`document.querySelector("#nbname").value === ${JSON.stringify(nm)}`);
+      await holdAt("switched");
+      await trashRow(sel);
+      const r0 = await reached();
+      await ev(`(async () => { await ${W}.rename(${JSON.stringify(sel)}, ${JSON.stringify(moveTo)}); await ${W}.create(${JSON.stringify(fresh)}, { content: ${JSON.stringify(fresh)}.endsWith(".ipynb") ? { name: "REPLACEMENT", mode: "python", cells: [{ id: "r", code: "REPLACEMENT" }] } : "REPLACEMENT" }); return 1; })()`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`);
+      const t = await ev(`(async () => ({ fresh: await ${W}.read(${JSON.stringify(fresh)}).then((r) => typeof r.content === "string" ? r.content : r.content?.cells ? r.content.cells[0]?.code : new TextDecoder().decode(r.content)).catch(() => null), inTrash: await ${W}.stat(${JSON.stringify("/Trash/" + sel.slice(1))}).then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.fresh === "REPLACEMENT" && !t.inTrash, `${id}: the path replaced while it waited: what is there now isn't moved, and it is said: ` + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (astra R2, T3) an edit after the save, and ITS save failing: nothing moves, the edit is kept, it stays open
+    {
+      await freshPage();
+      await openNb("/T3.ipynb", "T3", "t3");
+      await until(`document.querySelector("#nbname").value === "T3"`);
+      await holdAt("saved");
+      await trashRow("/T3.ipynb");
+      const r0 = await reached();
+      await ev(`(() => { const nb = sagebrush.notebook, s = nb.store; window.__t3store = s; window.__t3save = s.save; s.save = () => Promise.reject(new Error("disk full")); nb.setInput(nb.cells()[0], "T3 edit"); return 1; })()`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, code: sagebrush.notebook.snapshot().cells[0]?.code ?? null, here: await ${W}.stat("/T3.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T3.ipynb").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "T3" && t.code === "T3 edit" && t.here && !t.inTrash, "T3: an edit after the save, its save failing: nothing moves, and the edit is kept, open here: " + JSON.stringify(t));
+      await ev(`(async () => { window.__t3store.save = window.__t3save; await sagebrush.notebook.saved().catch(() => {}); return 1; })()`);
+      await dismissAny();
+    }
+    // (astra R2, T4) a page switch in between. T4: while it switched, a notebook INSIDE the folder opened: nothing
+    // moves. T4.same: before it switched, another notebook opened: nothing moves, and that one stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T4 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T4 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
+      await holdAt("switched");
+      await trashRow("/T4 dir");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T4 dir/b.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T4: a notebook inside the folder opened while it switched: nothing moves, and that notebook stays open: " + JSON.stringify(t));
+      await dismissAny();
+      await freshPage();
+      await ev(`${W}.create("/T4 other.ipynb", { content: { name: "T4 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T4s.ipynb", "T4s", "s");
+      await until(`document.querySelector("#nbname").value === "T4s"`);
+      await holdAt("saved");
+      await trashRow("/T4s.ipynb");
+      const r1 = await reached();
+      await ev(`${W}.stat("/T4 other.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said1 = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const u = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T4s.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T4s.ipynb").then((e) => !!e) }))()`);
+      check(r1 && said1 && u.shown === "T4 other" && u.here && !u.inTrash, "T4.same: another notebook opened before it switched: nothing moves, and the one opened stays open: " + JSON.stringify(u));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T5) another notebook opened while Trash's OWN switch waits inside open(), after every check of the
+    // hook: that switch is dropped before it detaches anything; nothing moves, and the notebook opened stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T5 other.ipynb", { content: { name: "T5 other", mode: "python", cells: [{ id: "c", code: "o" }] } }).then(() => 1)`);
+      await openNb("/T5.ipynb", "T5", "t5");
+      await until(`document.querySelector("#nbname").value === "T5"`);
+      await holdAt("beforeDetach");
+      await trashRow("/T5.ipynb");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T5 other.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T5.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T5.ipynb").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "T5 other" && t.here && !t.inTrash, "T5: another notebook opened while Trash's own switch waited (after its checks): that switch is dropped, nothing moves, the one opened stays open: " + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (astra R2 on r2, T6) a notebook INSIDE the folder opened after the hook's last check, before the move: the
+    // workspace's own check, holding its lock, refuses it; nothing moves, and that notebook stays open
+    {
+      await freshPage();
+      await ev(`${W}.create("/T6 dir/b.ipynb", { content: { name: "b", mode: "python", cells: [{ id: "c", code: "b" }] } }).then(() => 1)`);
+      await openNb("/T6 dir/a.ipynb", "a", "a");
+      await until(`document.querySelector("#nbname").value === "a"`);
+      await holdAt("checked");
+      await trashRow("/T6 dir");
+      const r0 = await reached();
+      await ev(`${W}.stat("/T6 dir/b.ipynb").then((e) => sagebrush.open(e.ref)).then(() => 1)`);
+      await release();
+      const said = await until(`!!document.querySelector("#wssidebar .ftoast.err")`, 20000);
+      const t = await ev(`(async () => ({ shown: document.querySelector("#nbname").value, here: await ${W}.stat("/T6 dir/b.ipynb").then((e) => !!e), inTrash: await ${W}.stat("/Trash/T6 dir").then((e) => !!e), said: document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "" }))()`);
+      check(r0 && said && t.shown === "b" && t.here && !t.inTrash, "T6: a notebook inside the folder opened after the last check, before the move: the workspace refuses under its lock, nothing moves: " + JSON.stringify(t));
+      await dismissAny();
+    }
+    // (after the T cases: a fresh page, with a notebook of its own open outside their folders, so a T case whose move
+    // went through (as under the controls K15/K16, its open notebook into Trash with its folder) can't reach the checks
+    // after them: #447 r3's run, the ruling for r4)
+    await freshPage();
+    await openNb("/After T.ipynb", "After T", "after");
+    await until(`document.querySelector("#nbname").value === "After T"`);
+  }
   // the typed title's rename, its notebook moved and another put at its path
   // while the rename waited for the lock: this notebook gets the name, the
   // other is untouched (CORR-5D2-3)
@@ -663,6 +827,43 @@ try {
   check(mr[0] >= 0 && mr[1] >= 0 && mr[2] <= mr[4] && mr[3] <= mr[5] && mr[6] === "auto", "a menu on a 320×240 screen stays inside it: " + JSON.stringify(mr));
   await ev(`(() => { document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()); return 1; })()`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // (grader R1 on #447, T1) open for editing in ANOTHER tab (sync's journal: that tab holds its writer lock): Move to
+  // Trash from this tab's files is refused, said as an error, and nothing moves. (The fence switched to the journal
+  // for this check only, and put back after it.)
+  {
+    const FENCE = "__sagebrush-workspace__";
+    const idbDo = (body) => ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onerror = () => no(String(r.error)); r.onsuccess = () => { const db = r.result; const tx = db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks"); ${body} }; })`);
+    const fence0 = await idbDo(`const g = st.get(${JSON.stringify(FENCE)}); g.onsuccess = () => { db.close(); ok(g.result ?? null); };`);
+    const t1 = await ev(`${W}.create("/T1.ipynb", { content: { name: "T1", mode: "python", cells: [{ id: "c", code: "t1" }] } }).then((e) => e.ref)`);
+    let t1tab = null, j = { fence: !!fence0 };
+    try {
+      if (fence0) await idbDo(`st.put(${JSON.stringify({ ...fence0, phase: "journal", journal: 1 })}); tx.oncomplete = () => { db.close(); ok(1); };`);
+      t1tab = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(base + "?nb=" + encodeURIComponent(t1))}`, { method: "PUT" })).json();
+      const wsT = new WebSocket(t1tab.webSocketDebuggerUrl);
+      await new Promise((r) => (wsT.onopen = r));
+      let nT = 0; const waitT = new Map();
+      wsT.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waitT.has(d.id)) { waitT.get(d.id)(d.result ?? d.error); waitT.delete(d.id); } };
+      const evT = async (expression) => { const id = ++nT; const r = await new Promise((ok) => { waitT.set(id, ok); wsT.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); return r?.result?.value; };
+      for (let i = 0; i < 300 && !(await evT(`!!(window.sagebrush?.notebook?.store?.journaled && !sagebrush.notebook.store.viewOnly && sagebrush.notebook.snapshot().name === "T1")`).catch(() => false)); i++) await sleep(100);
+      j.writer = await evT(`!!(sagebrush.notebook.store?.journaled && !sagebrush.notebook.store.viewOnly)`).catch(() => false);
+      await go(base + "?nb=" + encodeURIComponent(t1));
+      j.viewOnly = await until(`!!(${W} && sagebrush.notebook?.store?.journaled && sagebrush.notebook.store.viewOnly && sagebrush.notebook.snapshot().name === "T1")`, 30000);
+      if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+      await until(`!!document.querySelector(${JSON.stringify(rowSel("/T1.ipynb"))})`);
+      await click(rowSel("/T1.ipynb") + " .more");
+      await menu("Move to Trash");
+      j.said = await until(`/open for editing in another tab/.test(document.querySelector("#wssidebar .ftoast.err")?.textContent ?? "")`, 20000);
+      j.here = await ev(`${W}.stat("/T1.ipynb").then((e) => !!e)`);
+      j.inTrash = await ev(`${W}.stat("/Trash/T1.ipynb").then((e) => !!e)`);
+      j.shown = await ev(`document.querySelector("#nbname").value`);
+    } finally {
+      if (t1tab) await send("Target.closeTarget", { targetId: t1tab.id });
+      if (fence0) await idbDo(`st.put(${JSON.stringify(fence0)}); tx.oncomplete = () => { db.close(); ok(1); };`);
+      await go(base);
+      await until(`!!${W}`, 60000);
+    }
+    check(j.fence && j.writer && j.viewOnly && j.said && j.here && !j.inTrash && j.shown === "T1", "T1: open for editing in another tab, Move to Trash here is refused, said as an error, and nothing moves: " + JSON.stringify(j));
+  }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);
@@ -678,7 +879,8 @@ try {
 } finally {
   chrome.kill();
   await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  // (a profile Chrome is still writing as it exits: tried again, and never allowed to lose the checks' report)
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) { console.error("note: the profile wasn't removed: " + (e?.code ?? e)); }
 }
 if (fails.length) {
   console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));
