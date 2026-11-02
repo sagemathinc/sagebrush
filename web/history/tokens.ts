@@ -39,6 +39,12 @@ export function tokenSize(t: Omit<Token, "sz">): number {
  * production one, saves exactly as before). */
 export const hasHistoryStores = (tx: IDBTransaction) => HIST_STORES.every((s) => tx.objectStoreNames.contains(s));
 
+/** Whether history is active in this transaction's database (one read): for a writer with work to do before its
+ * tokens (several identities, or a lookup per token), so that the inactive case does none of it. */
+export async function historyActive(tx: IDBTransaction): Promise<boolean> {
+  return hasHistoryStores(tx) && (await req(tx.objectStore("hmeta").get("hactive"))) === true;
+}
+
 /** Record one changed identity, in the save's own transaction (`tx`, readwrite, with HIST_STORES in its scope when
  * the database has them).  Returns at once, after one read, unless history is active, before any ancestry walk.
  * Nothing here is caught: a failed request aborts the whole transaction, so the save fails visibly through its
