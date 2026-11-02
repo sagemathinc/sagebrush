@@ -317,15 +317,16 @@ C("C7", "URLERROR invalid-blob canary=0", blobs_dir_symlink)
 C("C8", "URLERROR invalid-blob canary=0", xx_dir_symlink)
 C("C9", "URLERROR invalid-blob canary=0", blob_dir)
 # (C10a: a FIFO, no writer: the test's 5 s deadline turns a hang into FAIL;
-# C10b: a FIFO whose writer, started by the test, sends exactly BODY: only
-# the regular-file check refuses it)
+# C10b: a FIFO whose writer, started by the test, sends exactly BODY: refused
+# by the regular-file check, and, without it, by the length check, since the
+# read is bounded by fstat's size (0 for a FIFO) and returns at most 1 byte)
 C("C10a", "URLERROR invalid-blob canary=0", fifo)
 C("C10b", "URLERROR invalid-blob canary=0", fifo)
 rows["C10b"]["fifo_writer"] = BODY.decode()
 # (C10c: an EMPTY entry whose blob is a FIFO with no writer: only the
-# regular-file check refuses it, since a 0-byte read of it matches size 0 and
-# sha256(b"") (grader ruling on the 0fc0bfe4 DEV pass: C10b alone no longer
-# kills M-regular-file once the read is bounded by fstat's size)
+# regular-file check refuses it; without it, the read (a 1-byte buffer)
+# returns 0 bytes at EOF, which match size 0 and sha256(b"") (grader ruling
+# on the 0fc0bfe4 DEV pass: C10b alone no longer kills M-regular-file)
 C("C10c", "URLERROR invalid-blob canary=0", fifo, body=b"")
 C("C11", "SERVED %s " % sha(b""), body=b"")
 C("C12", "SERVED %s " % S, hardlink_inside)
