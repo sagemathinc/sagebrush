@@ -3,11 +3,12 @@
 // for "Open as a notebook" (a converted copy beside the file; the .md is only
 // read, never written: plan-myst-notebooks r3 §2.2, §8.4, §8.5).
 //
-// A file is MyST if (isMystHead): its first line is exactly "---", the front
-// matter's closing "---" line is within its first 4096 bytes, and the front
-// matter has jupytext.text_representation.format_name: myst.  CRLF is read as
-// LF first (a textarea can't keep it anyway); a byte-order mark makes it not
-// MyST.  The front matter is read by a closed grammar (nested "key: value"
+// A file is MyST if (isMystHead), judged from its first 4096 bytes alone (its
+// UTF-8 bytes, cut before decoding: what the file browser reads, so the menu and
+// the conversion always agree): its first line is exactly "---", the front
+// matter's closing "---" line ends within those bytes, and the front matter has
+// jupytext.text_representation.format_name: myst.  CRLF is read as LF (a
+// textarea can't keep it anyway); a byte-order mark makes it not MyST.  The front matter is read by a closed grammar (nested "key: value"
 // maps, nothing else: no anchors, aliases, tags or flow collections), so
 // nothing in it can do anything; what it doesn't understand is kept as text.
 //
@@ -20,10 +21,28 @@
 // metadata.sagebrush.myst.seps, so the cells and seps give the body back byte
 // for byte (mystBody): nothing read is lost.
 
-/** Whether a file's text (its first 4096 bytes are enough) is a Jupytext MyST notebook. */
+export const HEAD_BYTES = 4096;
+// (a byte-order mark kept, not stripped: every decoder of a head or a .md does the same: TEXT)
+const enc = new TextEncoder(), dec = new TextDecoder("utf-8", { ignoreBOM: true });
+/** How a MyST head or file's bytes are decoded, wherever they are: UTF-8, a byte-order mark kept. */
+export const TEXT = { encoding: "utf-8", ignoreBOM: true };
+
+/** Whether a file is a Jupytext MyST notebook, from its text (the whole file, or its first HEAD_BYTES bytes
+ * decoded): only its first HEAD_BYTES UTF-8 bytes are looked at, so either gives the same answer. */
 export function isMystHead(text) {
-  const fm = frontMatter(lf(String(text ?? "").slice(0, 4096 + 16)));
-  return !!fm && fm.end <= 4096 && fm.data?.jupytext?.text_representation?.format_name === "myst";
+  const t = String(text ?? "");
+  // (at most HEAD_BYTES + 1 code units hold the first HEAD_BYTES bytes: each is at least one byte)
+  const some = t.slice(0, HEAD_BYTES + 1), bytes = enc.encode(some);
+  // (whole: the file is shorter than a head; text of exactly HEAD_BYTES bytes may be a head cut from a longer file,
+  //  so it is judged as one: its closing line must end with its newline there, either way the same answer)
+  const whole = some.length === t.length && bytes.length < HEAD_BYTES;
+  // (a CR as the head's last byte is half of a CRLF cut by it, not a line's end)
+  let raw = dec.decode(bytes.subarray(0, HEAD_BYTES));
+  if (!whole && raw.endsWith("\r")) raw = raw.slice(0, -1);
+  const head = lf(raw);
+  const fm = frontMatter(head);
+  // (its closing line ended inside the head: a newline after it there, or the file is no longer than the head)
+  return !!fm && (whole || head[fm.end - 1] === "\n") && fm.data?.jupytext?.text_representation?.format_name === "myst";
 }
 
 const lf = (s) => s.replace(/\r\n?/g, "\n");
@@ -80,9 +99,9 @@ const OPEN = /^ {0,3}(`{3,}|~{3,}|:{3,})(.*)$/;
 
 /** A Jupytext MyST notebook's document (as fromFile's), from its text. */
 export function fromMyst(name, text, cellId) {
+  if (!isMystHead(text)) throw new Error(`${name} is not a Jupytext MyST notebook`);
   const t = lf(String(text));
   const fm = frontMatter(t);
-  if (!fm || fm.end > 4096 || fm.data?.jupytext?.text_representation?.format_name !== "myst") throw new Error(`${name} is not a Jupytext MyST notebook`);
   const body = t.slice(fm.end);
   const lines = body.split("\n");
   // (line i starts at offset at[i])

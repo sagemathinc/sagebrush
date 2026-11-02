@@ -63,6 +63,48 @@ test("R-1: which files are MyST (the 4 KiB rule), and the reader's edge cases", 
   assert.ok(!isMystHead("# x\n" + head(MYST_FM) + body), "format_name: myst outside the front matter: not MyST");
   assert.ok(!isMystHead(head(MYST_FM).replace(/\n---\n$/, "\n") + body), "an unclosed front matter: not MyST");
   assert.throws(() => fromMyst("x.md", "# not myst\n", newId), /not a Jupytext MyST notebook/);
+  // the 4 KiB rule in UTF-8 bytes, cut before decoding (astra's finding on 911e5662): the whole text and its first
+  // 4096 bytes decoded, as the file browser reads them, always give the same answer
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const head4k = (s: string) => dec.decode(enc.encode(s).subarray(0, 4096));
+  // a front matter padded so its closing "---\n" ends at exactly `bytes` UTF-8 bytes into the file
+  const padded = (bytes: number, fill: string, eol = "\n") => {
+    const fm = (pad: string) => ["---", ...MYST_FM.split("\n"), `title: ${pad}`, "---", ""].join(eol);
+    let pad = "";
+    while (enc.encode(fm(pad + fill)).length <= bytes) pad += fill;
+    while (enc.encode(fm(pad + "x")).length <= bytes) pad += "x";
+    const t = fm(pad);
+    assert.equal(enc.encode(t).length, bytes, `the vector's front matter is ${bytes} bytes`);
+    return t + "Text.\n\n```{code-cell} ipython3\n1\n```\n".replace(/\n/g, eol);
+  };
+  const cjk = head(MYST_FM + "\ntitle: " + "界".repeat(1500)) + body;
+  assert.ok(cjk.length < 4096 && enc.encode(cjk).length > 4096, "astra's vector: under 4096 code units, over 4096 bytes");
+  // (a CJK character straddling the cut: its first two bytes the head's last two, the closing line after it)
+  const straddle = (() => {
+    const pre = ["---", ...MYST_FM.split("\n"), "title: "].join("\n");
+    const k = 4094 - enc.encode(pre).length;
+    const t = pre + "x".repeat(k) + "界\n---\n" + body;
+    assert.deepEqual([...enc.encode(t).subarray(4094, 4097)], [...enc.encode("界")], "the straddle vector: 界 at bytes 4094..4096");
+    return t;
+  })();
+  for (const [what, t, want] of [
+    ["a 1500-character CJK title (over 4096 bytes)", cjk, false],
+    ["a front matter of 4095 bytes (ASCII)", padded(4095, "a"), true],
+    ["a front matter of exactly 4096 bytes (ASCII)", padded(4096, "a"), true],
+    ["a front matter of 4097 bytes (ASCII)", padded(4097, "a"), false],
+    ["a front matter of 4095 bytes (CJK)", padded(4095, "界"), true],
+    ["a front matter of exactly 4096 bytes (CJK)", padded(4096, "界"), true],
+    ["a front matter of 4097 bytes (CJK)", padded(4097, "界"), false],
+    ["a CJK character straddling the cut, the closing line after it", straddle, false],
+    ["CRLF: 4095 bytes with its CRs", padded(4095, "a", "\r\n"), true],
+    ["CRLF: exactly 4096 bytes with its CRs", padded(4096, "a", "\r\n"), true],
+    ["CRLF: 4097 bytes with its CRs, the cut between its last \\r and \\n (under 4096 as LF)", padded(4097, "a", "\r\n"), false],
+  ] as const) {
+    assert.equal(isMystHead(t), want, `${what}: the whole text`);
+    assert.equal(isMystHead(head4k(t)), want, `${what}: its first 4096 bytes, decoded`);
+    if (want) assert.ok(fromMyst("v.md", t, newId).cells.length > 0, `${what}: read`);
+    else assert.throws(() => fromMyst("v.md", t, newId), /not a Jupytext MyST notebook/, `${what}: refused by the reader too`);
+  }
   // CRLF: read as LF (said in the reader), the invariant against the LF text
   const crlf = (head(MYST_FM) + body).replace(/\n/g, "\r\n");
   assert.ok(isMystHead(crlf), "CRLF front matter: MyST");

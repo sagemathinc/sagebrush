@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Jupytext MyST notebooks, P1 (plan-myst-notebooks r3, UI tier). The renderer, its styles and its notebook glue are the new lazy asset engine/sagebrush-myst.js (10788 B, its budgets.json entry); the notebook component keeps only markdown.ts's MystHook option and a 10-line loader in notebook.js (+479 B, with a ceiling raise of 479 B to keep its 64 B headroom); the page (in the CLI's embedded web/dist) also gets the reader (web/notebook/myst.js) and Open as a notebook. Measured with bun 1.4.4 / node 24.21.0 (size-measure.mjs, key ec7979a4) on master 8139e206 vs this branch merged with it, both built at build paths of equal length (cli/pyjs.cjs embeds its build directory's path): engine/sagebrush-notebook.js 233394 -> 233873 (+479); cli/pyjs.cjs 25199810 -> 25224133 (+24323); the pyjs marker allows 77 B over that.",
+ "reason": "Jupytext MyST notebooks, P1 (plan-myst-notebooks r3, UI tier). The renderer, its styles and its notebook glue are the new lazy asset engine/sagebrush-myst.js (10788 B, its budgets.json entry); the notebook component keeps only markdown.ts's MystHook option and a 10-line loader in notebook.js (+479 B, with a ceiling raise of 479 B to keep its 64 B headroom); the page (in the CLI's embedded web/dist, with the board frame's page) also gets the reader (web/notebook/myst.js, its byte-bounded head) and Open as a notebook. Measured with bun 1.4.4 / node 24.21.0 (size-measure.mjs, key ec7979a4) on master 8139e206 vs this branch's head 9067463e, both built at build paths of equal length (cli/pyjs.cjs embeds its build directory's path): engine/sagebrush-notebook.js 233394 -> 233873 (+479); cli/pyjs.cjs 25199810 -> 25224789 (+24979); the pyjs marker allows 71 B over that.",
  "bytes": {
-  "cli/pyjs.cjs": 24400,
+  "cli/pyjs.cjs": 25050,
   "engine/sagebrush-notebook.js": 479
  }
 }

@@ -5,8 +5,8 @@
 //    again, made anew (never over the old one) when the .md changed; a taken name is never written over; any
 //    other .md isn't a notebook.
 // B. The built site, served by web/serve.py with every request it gets logged (so the service worker's install
-//    and precache count too), in a fresh profile: an ordinary notebook, even with MyST-looking text, makes no
-//    request for sagebrush-myst.js; a MyST notebook makes exactly one, and is drawn: its boxes numbered as the
+//    and precache count too), in a fresh profile: an ordinary notebook, even with MyST-looking text, and a
+//    non-MyST .md (its menu, its preview) make no request for sagebrush-myst.js; a MyST notebook makes exactly one, and is drawn: its boxes numbered as the
 //    book's build numbers them, its math typeset, a reference followed to its target.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -84,6 +84,21 @@ async function browser() {
     await sleep(1500);
     ok(!(await b.ev("!!document.querySelector('.myst-box')")), "B: ...its MyST-looking text not drawn as MyST");
     ok(asked() === 0, `B: an ordinary notebook (fresh profile, install and precache counted): ${asked()} requests for sagebrush-myst.js (want 0)`);
+    // a non-MyST .md (MyST-looking text, no jupytext front matter) in the page's workspace: its row's menu offers a
+    // board, not a notebook (its head read: fileHead, openableAsFile), its preview drawn; nothing fetched for MyST
+    const made = await b.ev(`window.sagebrush.workspace ? window.sagebrush.workspace.create("/notes.md", { content: new TextEncoder().encode("# Notes\\n\\n:::{note}\\nlooks like MyST, isn't\\n:::\\n") }).then(() => "made", (e) => String(e)) : "no workspace"`);
+    ok(made === "made", "B: a non-MyST .md put in the page's workspace: " + made);
+    await b.ev(`(document.querySelector("#filesbtn").click(), true)`);
+    ok(await b.until(`!!document.querySelector('.frow[data-path="/notes.md"]')`, 20000), "B: ...listed in the file browser");
+    await b.ev(`(document.querySelector('.frow[data-path="/notes.md"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 40 })), true)`);
+    ok(await b.until(`[...document.querySelectorAll(".sbfmenu [role=menuitem]")].some((x) => x.textContent === "Open as a board")`, 10000), "B: ...its menu offers it as a board");
+    const items = await b.ev(`[...document.querySelectorAll(".sbfmenu [role=menuitem]")].map((x) => x.textContent)`);
+    ok(!items.includes("Open as a notebook"), "B: ...not as a notebook: " + JSON.stringify(items));
+    await b.ev(`([...document.querySelectorAll(".sbfmenu [role=menuitem]")].find((x) => x.textContent === "Preview and versions").click(), true)`);
+    ok(await b.until(`!!document.querySelector(".sbfprev") && document.querySelector(".sbfprev").textContent.includes("looks like MyST")`, 10000), "B: ...its preview drawn");
+    await sleep(1500);
+    ok(asked() === 0, `B: a non-MyST .md (fresh profile; its menu, its head read, its preview): ${asked()} requests for sagebrush-myst.js (want 0)`);
+    await b.ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), document.querySelector(".sbfprev")?.remove(), true)`);
     // a MyST notebook: the asset fetched once, then drawn
     let k = 0;
     const doc = fromMyst("09-Improving_DL.md", chapter, () => `x${k++}`);
