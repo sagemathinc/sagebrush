@@ -1482,6 +1482,14 @@ class Matrix:
             return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows], other.ncols())
         if isinstance(other, SeriesVector):
             return other._matvec(self)
+        import _sage_ffmat
+        if isinstance(other, _sage_ffmat.FFVector):
+            # (a matrix over ZZ times a vector over GF(q): in GF(q), as Sage
+            # coerces; over QQ or another ring, Sage's TypeError)
+            if self._base is _sa().ZZ and self.ncols() == len(other):
+                # (by shape: a matrix with no rows keeps its columns)
+                return _sage_ffmat.matrix(other._base, self.nrows(), self.ncols(), [x for r in self._rows for x in r]) * other
+            raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
         if isinstance(other, Vector):
             ov = _raw_entries(other)
             v = Vector(_norm(sum((a * b for a, b in zip(r, ov)), 0)) for r in self._rows)
@@ -2959,6 +2967,12 @@ def vector(*args):
     # read once, boundedly (a generator was read twice: by the finite-field
     # test, then empty)
     entries = _bounded_list(args[0])
+    sa = _sa()
+    if ring is sa.ZZ or ring is sa.QQ:
+        # (vector(ZZ, [GF(2)(1), ...]): the residues lifted, as Sage's
+        # conversion of Z/nZ into ZZ or QQ; the book's 12-Factorization)
+        import _sage_ff
+        entries = [x._v if isinstance(x, _sage_ff.IntegerMod) else x for x in entries]
     if type(ring).__name__ == "SeriesRing_" and not ring._laurent:
         # a vector of power series (the D_p-valued p-adic L-series): the
         # entries in the ring, the ring kept through arithmetic
