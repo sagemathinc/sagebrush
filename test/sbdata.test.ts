@@ -16,7 +16,10 @@ import { join } from "node:path";
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(ROOT, "dist", "src", "cli.js");
 const SPY = join(ROOT, "test", "sbdata", "spy.cjs");
-const DEADLINE_MS = 5000;
+// (scaled by SAGEBRUSH_TIME_SCALE where the machine is slower than the test's, as
+// the other wall-clock bounds are: CI sets 2 for node-tests and 3 for engine-node,
+// where a row's process alone takes 2-3.5 s; unset, as in the counted runs, 5 s)
+const DEADLINE_MS = 5000 * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
 
 const work = mkdtempSync(join(tmpdir(), "sbdata-"));
 const fx = join(work, "fx");
