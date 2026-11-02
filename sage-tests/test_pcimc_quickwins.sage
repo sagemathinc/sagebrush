@@ -1,8 +1,9 @@
 # Functions the pcimc cryptography book (github.com/lrfinotti/pcimc) uses: xsrange, random_prime, prime_factors,
 # prime_divisors, randrange/choice/sample, log(base=), xgcd(list), Mod.order(), GF(p).primitive_element(), Primes(),
 # Integer.digits(digits=), Integer.bits(). The .out is SageMath 10.9's output of these statements (VM2, ~/sage-conda),
-# verbatim; the statements omitted from the oracle run are type() checks (ours are Python ints) and log(10^6, base=2)'s
-# printed form (Sage: 6*log(10)/log(2)); its value is checked (S22).
+# verbatim; the statements omitted from the oracle run are type() checks (S03, S08, S16, S49, S59: ours are Python ints),
+# log(10^6, base=2)'s printed form (S21; Sage: 6*log(10)/log(2)); its value is checked (S22), and S20 (a malformed
+# check: two independent samples compared). See test_pcimc_quickwins.deviations.md.
 def show(n, f):
     try:
         v = f()
