@@ -16,12 +16,19 @@ function repo(files: Record<string, string>): string {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), text);
   }
-  for (const args of [["init", "-q"], ["add", "-A"]]) assert.equal(spawnSync("git", args, { cwd: dir }).status, 0);
+  for (const args of [
+    ["init", "-q"],
+    ["add", "-A"],
+  ])
+    assert.equal(spawnSync("git", args, { cwd: dir }).status, 0);
   return dir;
 }
 
 function cli(dir: string, ...args: string[]) {
-  return spawnSync(process.execPath, [script, ...args], { cwd: dir, encoding: "utf8" });
+  return spawnSync(process.execPath, [script, ...args], {
+    cwd: dir,
+    encoding: "utf8",
+  });
 }
 
 // (a suite that appends its name, arguments and FLAVOR to log.txt, then exits with CODE or 0)
@@ -35,8 +42,12 @@ const workflow = (...targets: string[]) =>
 
 test("web-tests: the plan follows order, then the path; a file's header lines keep their order", () => {
   const dir = repo({
-    "web/test-b.mjs": suite("// ci: web order=10\n// ci: web order=30 env=FLAVOR=x -- one two"),
-    "web/a/test-a.mjs": suite("// ci: web order=20 runner=bun chrome\n// ci: other test"),
+    "web/test-b.mjs": suite(
+      "// ci: web order=10\n// ci: web order=30 env=FLAVOR=x -- one two",
+    ),
+    "web/a/test-a.mjs": suite(
+      "// ci: web order=20 runner=bun chrome\n// ci: other test",
+    ),
     ".github/workflows/ci.yml": workflow("web", "other"),
   });
   const r = cli(dir, "plan");
@@ -59,7 +70,10 @@ test("web-tests run: in order, with each run's environment and arguments; the fi
   });
   const r = cli(dir, "run", "web");
   assert.equal(r.status, 3);
-  assert.equal(readFileSync(join(dir, "log.txt"), "utf8"), "test-1.mjs -\ntest-2.mjs a b y\ntest-3.mjs -\n");
+  assert.equal(
+    readFileSync(join(dir, "log.txt"), "utf8"),
+    "test-1.mjs -\ntest-2.mjs a b y\ntest-3.mjs -\n",
+  );
   assert.match(r.stdout, /^START web: node web\/test-1\.mjs$/m);
   assert.match(r.stderr, /FAILED web: node web\/test-3\.mjs \(exit 3\)/);
   assert.equal(cli(dir, "run", "nothing").status, 1);
@@ -75,7 +89,10 @@ test("web-tests check: a suite without a header, a target no workflow runs, a wo
   const r = cli(dir, "check");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /web\/test-2\.mjs: no "\/\/ ci:" header/);
-  assert.match(r.stderr, /scripts\/test-3\.mjs: target lost isn't run by any workflow/);
+  assert.match(
+    r.stderr,
+    /scripts\/test-3\.mjs: target lost isn't run by any workflow/,
+  );
   assert.match(r.stderr, /ci\.yml: runs target ghost, which no suite names/);
   assert.doesNotMatch(r.stderr, /test-1/);
 });
@@ -86,14 +103,32 @@ test("web-tests check: inline is a suite a workflow's command names (a comment d
     "web/test-2.mjs": suite("// ci: none (needs a DEV account)"),
     "web/test-3.mjs": suite("// ci: web"),
   };
-  const named = repo({ ...files, ".github/workflows/ci.yml": workflow("web") + "          node web/test-1.mjs \"$X\"\n" });
+  const named = repo({
+    ...files,
+    ".github/workflows/ci.yml":
+      workflow("web") + '          node web/test-1.mjs "$X"\n',
+  });
   assert.equal(cli(named, "check").status, 0, cli(named, "check").stderr);
-  const comment = repo({ ...files, ".github/workflows/ci.yml": workflow("web") + "          # node web/test-1.mjs\n          node web/test-3.mjs\n" });
+  const comment = repo({
+    ...files,
+    ".github/workflows/ci.yml":
+      workflow("web") +
+      "          # node web/test-1.mjs\n          node web/test-3.mjs\n",
+  });
   const r = cli(comment, "check");
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /web\/test-1\.mjs: "ci: inline" but no workflow names it/);
-  assert.match(r.stderr, /web\/test-3\.mjs: a workflow names it, but its header isn't "ci: inline"/);
-  const both = repo({ "web/test-1.mjs": suite("// ci: none (x)\n// ci: web"), ".github/workflows/ci.yml": workflow("web") });
+  assert.match(
+    r.stderr,
+    /web\/test-1\.mjs: "ci: inline" but no workflow names it/,
+  );
+  assert.match(
+    r.stderr,
+    /web\/test-3\.mjs: a workflow names it, but its header isn't "ci: inline"/,
+  );
+  const both = repo({
+    "web/test-1.mjs": suite("// ci: none (x)\n// ci: web"),
+    ".github/workflows/ci.yml": workflow("web"),
+  });
   assert.match(cli(both, "check").stderr, /"ci: none" with other headers/);
 });
 
@@ -106,7 +141,10 @@ test("web-tests: a malformed header is an error naming its line", () => {
     ["// ci: web env=A=b;c", /unknown option/],
     ["// ci: none", /needs its reason in parentheses/],
   ] as const) {
-    const dir = repo({ "web/test-1.mjs": suite(header), ".github/workflows/ci.yml": workflow("web") });
+    const dir = repo({
+      "web/test-1.mjs": suite(header),
+      ".github/workflows/ci.yml": workflow("web"),
+    });
     const r = cli(dir, "check");
     assert.equal(r.status, 1, header);
     assert.match(r.stderr, message, header);
