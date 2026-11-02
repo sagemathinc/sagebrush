@@ -10,7 +10,7 @@
 //   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
@@ -145,8 +145,18 @@ const logs = []; // (the page's errors and warnings: shown when something fails)
 const urls = new Map(); // (request id -> URL, to name a failed request)
 const bad = []; // (the failed requests and non-2xx responses: shown when something fails)
 let loads = 0; // (the page's load events so far)
+// (logging only, A14 r2.8 per @sagebrush's ruling: each request's start, status and end, ms after the spawn, printed
+// once for the first pairing load, so a slow first load names the request that held it)
+const timing = new Map();
+let firstLoadLogged = false;
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  try { // (recorded for the first pairing load only; never throws)
+    if (firstLoadLogged) {}
+    else if (m.method === "Network.requestWillBeSent") timing.set(m.params.requestId, { url: m.params.request.url, start: Date.now() - t0 });
+    else if (m.method === "Network.responseReceived" && timing.has(m.params.requestId)) timing.get(m.params.requestId).status = m.params.response.status;
+    else if ((m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") && timing.has(m.params.requestId)) timing.get(m.params.requestId).end = Date.now() - t0;
+  } catch {}
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
@@ -279,10 +289,27 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 async function pair() {
   const before = loads;
   stamp("pair: navigate");
+  if (!firstLoadLogged) timing.clear();
   await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${daemon.port}` });
   // (the page loaded before its Connect is looked for: a load that never comes fails here, with the page's state)
   const t1 = Date.now();
   while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  if (!firstLoadLogged) {
+    // (to its own file beside the row's tmp files, never stdout: the logs the verdict reads are unchanged; a logging
+    // failure only writes "timing-unavailable" and never changes the result)
+    firstLoadLogged = true;
+    const file = join(process.env.TMPDIR || tmpdir(), "first-load-requests.txt");
+    try {
+      const lines = [...timing.values()].sort((a, b) => a.start - b.start).map((r) => {
+        let path = r.url;
+        try { const u = new URL(r.url); path = u.origin === site ? u.pathname : r.url; } catch {}
+        return `+${r.start}ms ${r.status ?? "-"} ${r.end == null ? "pending" : `+${r.end}ms`} ${path.slice(0, 160)}`;
+      });
+      appendFileSync(file, `== ${process.argv.slice(1).join(" ").slice(0, 120)} (navigate ${stamps.find((s) => s.startsWith("pair: navigate"))})\n${lines.join("\n")}\n`);
+    } catch (err) {
+      try { appendFileSync(file, `timing-unavailable: ${String(err).slice(0, 200)}\n`); } catch {}
+    }
+  }
   if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
   // (the Connect dialog's own button: the page's hint by Send (A14) can carry a "Connect" too)
   await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
