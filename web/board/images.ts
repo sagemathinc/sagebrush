@@ -173,6 +173,13 @@ export class Images {
   private urls = new Map<string, string>();
   private blobs = new Map<string, Blob>();
 
+  /** Lets every picture go, their object URLs revoked (an Images made for one use, as the export's per board). */
+  dispose(): void {
+    for (const u of this.urls.values()) URL.revokeObjectURL(u);
+    this.urls.clear();
+    this.blobs.clear();
+  }
+
   /** The address to show a picture at (once ensure() has it). */
   url(name: string): string | undefined {
     return this.urls.get(name);
