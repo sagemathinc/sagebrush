@@ -1441,8 +1441,9 @@ async function controlStop(cookie) {
  * CASES=floors: the old front's page bundle, built from `dir` and proved to be 98a9f74fb's (plan p0-harness r2 §2),
  * or a throw before any browser starts.  (1) HEAD is OLD_SHA (in the pr-head mode, P0-0 reports it instead); (2) the
  * checkout is clean, and its web/ made read-only before the build; (3) every input of the bundle, by its resolved path:
- * the one harness entry (exactly the two re-exports below), a product file of the checkout whose bytes equal
- * `git show <pin>:<path>`, or a dependency under <dir>/node_modules's resolved directory (listed with its sha256);
+ * the one harness entry (exactly the re-exports below), a product file of the checkout whose bytes equal
+ * `git show <pin>:<path>`, a dependency under <dir>/node_modules's resolved directory (listed with its sha256), or a
+ * `node:` builtin the browser target polyfills (Bun's own; listed);
  * anything else, a product file of another tree reached through a link included, is escaped and refused; and the old
  * protocol.ts must be among the inputs; (4) the bundle's sha256, which the page's own load must match (P0-0).
  */
@@ -1457,7 +1458,16 @@ function oldFront(dir, outdir) {
   const root = realpathSync(dir), web = root + "/web/";
   const nm = existsSync(join(dir, "node_modules")) ? realpathSync(join(dir, "node_modules")) + "/" : null;
   const entryPath = join(outdir, "p0-entry.ts");
-  const entry = `export * from ${J(web + "workspace/index.ts")};\nexport { refusalOf } from ${J(web + "sync-protocol/protocol.ts")};\n`;
+  // (the old workspace, its refusalOf (P0-0), and its document sync as its own test bundles it (test-doc-sync.mjs):
+  // the notebook journal, its history, DocSync, and the journal's rows, for P0-c's real durable path)
+  const entry = [
+    `export * from ${J(web + "workspace/index.ts")};`,
+    `export { refusalOf } from ${J(web + "sync-protocol/protocol.ts")};`,
+    `export * as N from ${J(web + "notebook/journal.js")};`,
+    `export * as H from ${J(web + "notebook/history.js")};`,
+    `export * as DS from ${J(web + "workspace/doc-sync.ts")};`,
+    `export * as JR from ${J(web + "notebook/journal-rows.js")};`,
+  ].join("\n") + "\n";
   writeFileSync(entryPath, entry);
   return { head, root, nm, entryPath, entry, sha, git };
 }
@@ -1467,11 +1477,13 @@ async function buildOldFront(dir, outdir) {
   if (!b.success) throw new Error("the old front's bundle: " + b.logs.map(String).join("\n"));
   const inputs = [];
   for (const key of Object.keys(b.metafile.inputs)) {
+    // (a Node builtin the browser target polyfills, such as node:events: Bun's own, never a file of any tree; listed)
+    if (/^node:[a-z_/]+$/.test(key)) { inputs.push({ path: key, class: "builtin", sha256: null }); continue; }
     const abs = resolve(process.cwd(), key);
     if (!existsSync(abs)) throw new Error(`the old front's bundle has an input that isn't a file: ${key}`);
     const real = realpathSync(abs), bytes = readFileSync(real);
     if (real === realpathSync(o.entryPath)) {
-      if (bytes.toString() !== o.entry) throw new Error("the harness entry isn't exactly its two re-exports");
+      if (bytes.toString() !== o.entry) throw new Error("the harness entry isn't exactly its re-exports");
       inputs.push({ path: "(entry)", class: "entry", sha256: o.sha(bytes) });
     } else if (real.startsWith(o.root + "/") && !(o.nm && real.startsWith(o.nm)) && !real.startsWith(o.root + "/node_modules/")) {
       const rel = real.slice(o.root.length + 1);
@@ -1536,7 +1548,7 @@ try {
     waitingOn = "the old front's bundle and its provenance (OLD_FRONT)";
     floorsFront.prov = await buildOldFront(OLD_FRONT, site);
     const by = (c) => floorsFront.prov.inputs.filter((i) => i.class === c).length;
-    console.log(`  old front: ${floorsFront.prov.head} (${SENSITIVITY ?? "normal"} mode), bundle ${floorsFront.prov.bundle}; inputs: ${by("product")} product, ${by("dependency")} dependency, ${by("entry")} entry`);
+    console.log(`  old front: ${floorsFront.prov.head} (${SENSITIVITY ?? "normal"} mode), bundle ${floorsFront.prov.bundle}; inputs: ${by("product")} product, ${by("dependency")} dependency, ${by("builtin")} builtin, ${by("entry")} entry`);
     if (process.env.P0_PROVENANCE_OUT) writeFileSync(process.env.P0_PROVENANCE_OUT, J(floorsFront.prov, null, 1) + "\n");
     copyFileSync(join(here, "sync-floor-cases.js"), join(site, "cases.js"));
     writeFileSync(join(site, "floors.html"), `<!doctype html><meta charset="utf-8"><title>sync floors: the old front</title><script>window.ACCOUNTS = ${J(FLOOR_ACCOUNTS)}; window.OLD_SHA = ${J(OLD_SHA)};</script><script type="module">import { runFloors } from "./cases.js"; window.runFloors = runFloors; window.ready = true;</script>`);
@@ -1629,6 +1641,8 @@ try {
     const out = await answer();
     results = out.results;
     for (const row of out.rows) console.log(`ROW ${row.id} ${row.ok ? "PASS" : "FAIL"}${row.ok ? "" : " " + row.kinds.join(",")}`);
+    // (a stop: a row past its limit, or whose cleanup failed or didn't end; the rows after it didn't run)
+    if (out.stopped) { console.log(`STOPPED ${out.stopped}`); fails.push(`the floor rows stopped: ${out.stopped}`); }
     const fb = await barrier("the floor rows");
     for (const l of fb.late) console.log(`  late (the barrier): ${l}`);
     control1(refHolds.size === 0 && forwards.size === 0 && ref.controls.holding() === 0, "(control) the floor rows left no hold armed or waiting: " + J({ refHolds: refHolds.size, handles: forwards.size, holding: ref.controls.holding() }));
