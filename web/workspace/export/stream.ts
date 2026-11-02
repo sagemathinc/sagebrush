@@ -8,6 +8,7 @@
 //   of the same type, and each stand-in then written as the picture's real data: URL, read from its bytes in slices.
 import type { Images } from "../../board/images";
 import type { BoardDoc } from "../../board/doc";
+import { jsonLen, utf8Len } from "./bytes";
 
 const enc = new TextEncoder();
 /** At most this many UTF-16 units go into one slice (so at most 768 KiB of UTF-8, under the pump's 1 MiB), and a
@@ -23,12 +24,35 @@ const safeCut = (s: string, j: number) => (j < s.length && j > 0 && high(s.charC
 
 export type Pace = { signal: AbortSignal; breathe(): Promise<void>; stopped(): never };
 
-/** The text being written: pieces gathered, and handed on as one encoded slice once there are CHUNK units. */
+/** Preflight's measure of a member (E1 r2e item 4, route (b)): what the same writer would hand on, counted in UTF-8
+ * bytes as encoding each slice would give them, with nothing joined, encoded or read to count it.  Past `max`, `over`. */
+export class Counter {
+  bytes = 0;
+  constructor(readonly max: number, readonly over: () => never) {}
+  add(n: number) { this.bytes += n; if (this.bytes > this.max) this.over(); }
+}
+
+/** The text being written: pieces gathered, and handed on as one encoded slice once there are CHUNK units; or, with a
+ * Counter (preflight), only counted: the same calls, the same slice boundaries, no text kept.  Peak live in counting:
+ * the part being added, nothing else (a picture's bytes aren't read at all: base64's length is arithmetic). */
 class Out {
   private parts: string[] = [];
   private n = 0;
-  constructor(private put: (b: Uint8Array) => Promise<void>, private pace: Pace) {}
-  add(s: string) { this.parts.push(s); this.n += s.length; }
+  /** (counting: the last part added since the slice began ends with a high surrogate, so a low one starting the next
+   * part completes the pair, which the slice's encoding writes as 4 bytes, not 3 + 3) */
+  private high = false;
+  constructor(private put: (b: Uint8Array) => Promise<void>, private pace: Pace, private count?: Counter) {}
+  add(s: string) {
+    this.n += s.length;
+    if (!this.count) { this.parts.push(s); return; }
+    if (!s.length) return;
+    let b = utf8Len(s);
+    if (this.high && (s.charCodeAt(0) & 0xfc00) === 0xdc00) b -= 2;
+    this.high = (s.charCodeAt(s.length - 1) & 0xfc00) === 0xd800;
+    this.count.add(b);
+  }
+  /** (counting: a part of `units` UTF-16 units and `bytes` UTF-8 bytes that ends in no lone high surrogate) */
+  private addLen(units: number, bytes: number) { this.n += units; this.high = false; this.count!.add(bytes); }
   /** Between two values: the slice handed on once it is full, a yield once 8 ms of work have passed, Cancel seen. */
   async step() {
     if (this.pace.signal.aborted) this.pace.stopped();
@@ -37,6 +61,8 @@ class Out {
   }
   async flush() {
     if (!this.n) return;
+    // (counting: a slice's end, where encoding starts over: a pair split across it is two lone halves there too)
+    if (this.count) { this.n = 0; this.high = false; return; }
     const s = this.parts.join("");
     this.parts = []; this.n = 0;
     await this.put(enc.encode(s));
@@ -52,11 +78,37 @@ class Out {
   /** A string as JSON.stringify writes it: a long one escaped in pieces (escaping is per character; a cut never
    * splits a surrogate pair, which would be escaped as two lone halves). */
   async str(s: string) {
+    // (counting: JSON's escaped form measured, not built (jsonLen); an escaped piece never ends in a raw lone high
+    // surrogate: JSON.stringify escapes a lone one, and a cut never splits a pair.  Its units: a bound on the escaped
+    // text's, used only to pace, as writing does with the text it builds)
+    if (this.count) {
+      if (s.length <= PIECE) { this.addLen(s.length + 2, jsonLen(s)); return; }
+      this.addLen(1, 1);
+      for (let i = 0; i < s.length;) {
+        const j = safeCut(s, Math.min(s.length, i + PIECE));
+        this.addLen(j - i, jsonLen(s.slice(i, j)) - 2); i = j;
+        await this.step();
+      }
+      this.addLen(1, 1);
+      return;
+    }
     if (s.length <= PIECE) { this.add(JSON.stringify(s)); return; }
     this.add('"');
     for (let i = 0; i < s.length;) {
       const j = safeCut(s, Math.min(s.length, i + PIECE));
       this.add(JSON.stringify(s.slice(i, j)).slice(1, -1)); i = j;
+      await this.step();
+    }
+    this.add('"');
+  }
+  /** A picture as the data: URL FileReader.readAsDataURL makes, its bytes read in slices (a multiple of 3 each but the
+   * last, so the slices' base64 joined is the whole's); counting, its length only: 4 per 3 bytes, the last group padded. */
+  async picture(b: Blob) {
+    this.add(`"data:${b.type || "application/octet-stream"};base64,`);
+    for (let at = 0; at < b.size; at += PICTURE_SLICE) {
+      const to = Math.min(b.size, at + PICTURE_SLICE);
+      if (this.count) { const k = 4 * Math.ceil((to - at) / 3); this.addLen(k, k); }
+      else this.add(base64(new Uint8Array(await b.slice(at, to).arrayBuffer())));
       await this.step();
     }
     this.add('"');
@@ -212,8 +264,16 @@ async function value(v: any, ind: string, out: Out): Promise<void> {
  * over the captured record, its cells made one at a time as they are written (each through ipynbObject over a
  * document of that one cell: its cells are independent of each other), long texts' lines split as they go. */
 export function notebookSlices(doc: any, ipynbObject: (doc: any, toLines: (t: unknown) => unknown) => any, pace: Pace): AsyncIterable<Uint8Array> {
-  return sliced(async (put) => {
-    const out = new Out(put, pace);
+  return sliced((put) => notebookOut(new Out(put, pace), doc, ipynbObject));
+}
+/** notebookSlices' bytes, counted (preflight's measure: no slice made). */
+export async function notebookBytes(doc: any, ipynbObject: (doc: any, toLines: (t: unknown) => unknown) => any, pace: Pace, count: Counter): Promise<number> {
+  await notebookOut(new Out(noPut, pace, count), doc, ipynbObject);
+  return count.bytes;
+}
+const noPut = async (): Promise<void> => { throw new Error("a counting writer hands on no slice"); };
+async function notebookOut(out: Out, doc: any, ipynbObject: (doc: any, toLines: (t: unknown) => unknown) => any): Promise<void> {
+  {
     const cells: unknown[] = Array.isArray(doc?.cells) ? doc.cells : [];
     const top = ipynbObject({ ...doc, cells: [] }, toLines);
     top.cells = new LazyArray(cells.length, (i) => ipynbObject({ ...doc, cells: [cells[i]] }, toLines).cells[0]);
@@ -221,7 +281,7 @@ export function notebookSlices(doc: any, ipynbObject: (doc: any, toLines: (t: un
     if (skipped(v)) throw new Error("a notebook with no JSON value");
     await value(v, "", out);
     await out.flush();
-  });
+  }
 }
 
 // ---- a board
@@ -333,8 +393,15 @@ export type BoardKit = {
  * data: URL the document already carries is stood in for, before the clone, and written as it is.
  */
 export function boardSlices(doc: BoardDoc, images: Images, kit: BoardKit, pace: Pace): AsyncIterable<Uint8Array> {
-  return sliced(async (put) => {
-    const out = new Out(put, pace);
+  return sliced((put) => boardOut(new Out(put, pace), doc, images, kit, pace));
+}
+/** boardSlices' bytes, counted (preflight's measure: no slice made, no picture read). */
+export async function boardBytes(doc: BoardDoc, images: Images, kit: BoardKit, pace: Pace, count: Counter): Promise<number> {
+  await boardOut(new Out(noPut, pace, count), doc, images, kit, pace);
+  return count.bytes;
+}
+async function boardOut(out: Out, doc: BoardDoc, images: Images, kit: BoardKit, pace: Pace): Promise<void> {
+  {
     const stand = new Map<string, Blob | string>(), tag = nonce();
     let i = 0;
     const standIn = (type: string) => `data:${type};base64,SBX${tag}${i++}`;
@@ -359,17 +426,10 @@ export function boardSlices(doc: BoardDoc, images: Images, kit: BoardKit, pace: 
         const b = stand.get(p.s);
         if (b === undefined) await out.str(p.s);
         else if (typeof b === "string") await out.str(b);
-        else {
-          out.add(`"data:${b.type || "application/octet-stream"};base64,`);
-          for (let at = 0; at < b.size; at += PICTURE_SLICE) {
-            out.add(base64(new Uint8Array(await b.slice(at, Math.min(b.size, at + PICTURE_SLICE)).arrayBuffer())));
-            await out.step();
-          }
-          out.add('"');
-        }
+        else await out.picture(b);
       }
       if (++parts % 256 === 0) await out.step();
     }
     await out.flush();
-  });
+  }
 }
