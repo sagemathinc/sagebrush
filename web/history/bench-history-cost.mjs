@@ -2,14 +2,21 @@
 // per-save cost with history INACTIVE (what PROD ships) must stay within p95 delta <= 1 ms AND <= 5 % of master's, per
 // workload, in Chromium and in Firefox; and a build with a 2 ms delay injected in noteToken must FAIL that gate (the
 // sensitivity control: the gate sees what it bounds).
-// Builds, each served as its own bundle to the same page: BASE (origin/master's web/), HEAD (this tree), DELAY (this
-// tree, noteToken with a 2 ms synchronous wait at its top: a timer would let the transaction commit).  Workloads, per
-// build, run 3 times, the WORST p95 kept:
+// Builds, each served as its own bundle to the same page: BASE (origin/master's web/, or HCOST_BASE_DIR's tree, the
+// packet's same-day master, its sha in HCOST_BASE_SHA), HEAD (this tree), DELAY (this tree, noteToken with a 2 ms
+// synchronous wait at its top: a timer would let the transaction commit).  Configurations: base, head, delay (hactive
+// unset, the gate) and set (HEAD with hactive SET in the workspace's hmeta: informational for L1, p95 delta <= 3 ms
+// reported).  Each workload runs 3 ROUNDS, each round every configuration once in turn (interleaved, so a drift of the
+// box over the run falls on all four alike), the WORST p95 kept:
 //   files       500 serial writes of a 4 KiB data file (10 files round-robin)
 //   notebooks   500 serial saves of a 50-cell notebook
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
-// Measured: each save's end-to-end latency (the call to its resolve).
+// Measured: each save's end-to-end latency (the call to its resolve), which contains the transaction's wait (request
+// to oncomplete); so the r6.4 backstop (a transaction wait <= 250 ms at p99) is judged, conservatively, on the
+// end-to-end p99 of head and set.
 //   CHROME=chromium PLAYWRIGHT=<dir with playwright 1.64.1> bun web/history/bench-history-cost.mjs [--out report.json]
+// BROWSERS=chromium,firefox (the default, both) picks the legs; a report names each browser's version (Chromium's from
+// the DevTools protocol, Firefox's from Playwright) and every run's p95 and p99.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -21,9 +28,18 @@ const here = new URL(".", import.meta.url).pathname, root = join(here, "../..");
 const site = mkdtempSync(join(tmpdir(), "sb-hcost-site-")), base = mkdtempSync(join(tmpdir(), "sb-hcost-base-")), delay = mkdtempSync(join(tmpdir(), "sb-hcost-delay-"));
 const die = (m) => { console.error("FAIL: " + m); process.exit(1); };
 // (BASE: origin/master's web/ and src/, as a pinned build is made in test-workspace-journal.mjs)
-const master = spawnSync("git", ["rev-parse", "origin/master"], { cwd: root, encoding: "utf8" }).stdout.trim();
-if (!/^[0-9a-f]{40}$/.test(master)) die("origin/master isn't known here");
-if (spawnSync("sh", ["-c", `git archive ${master} web src | tar -x -C '${base}'`], { cwd: root }).status !== 0) die("master couldn't be unpacked");
+let master;
+if (process.env.HCOST_BASE_DIR) {
+  master = process.env.HCOST_BASE_SHA ?? "";
+  if (!/^[0-9a-f]{40}$/.test(master)) die("HCOST_BASE_SHA (the base tree's commit) is needed with HCOST_BASE_DIR");
+  for (const d of ["web", "src"]) cpSync(join(process.env.HCOST_BASE_DIR, d), join(base, d), { recursive: true, filter: (p) => !/node_modules/.test(p) });
+} else {
+  master = spawnSync("git", ["rev-parse", "origin/master"], { cwd: root, encoding: "utf8" }).stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(master)) die("origin/master isn't known here");
+  if (spawnSync("sh", ["-c", `git archive ${master} web src | tar -x -C '${base}'`], { cwd: root }).status !== 0) die("master couldn't be unpacked");
+}
+const LEGS = (process.env.BROWSERS ?? "chromium,firefox").split(",");
+if (!LEGS.length || LEGS.some((b) => !["chromium", "firefox"].includes(b))) die("BROWSERS: chromium and/or firefox");
 symlinkSync(join(root, "node_modules"), join(base, "node_modules"));
 // (DELAY: this tree's web/ with the injected wait)
 cpSync(join(root, "web"), join(delay, "web"), { recursive: true, filter: (p) => !/node_modules/.test(p) });
@@ -41,13 +57,27 @@ const build = async (entry, naming) => {
 for (const [name, dir] of [["base", base], ["head", root], ["delay", delay]]) await build(join(dir, "web/workspace/index.ts"), `ws-${name}.js`);
 writeFileSync(join(site, "bench.js"), `
 const N = { files: 500, notebooks: 500, concurrent: 200 };
-const p95 = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(0.95 * s.length) - 1)]; };
+const pct = (xs, q) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)]; };
+// (hactive SET: one raw write into the workspace database's hmeta, as no production setter exists)
+const activate = (name) => new Promise((ok, no) => {
+  const r = indexedDB.open(name);
+  r.onerror = () => no(r.error);
+  r.onsuccess = () => {
+    const db = r.result;
+    if (!db.objectStoreNames.contains("hmeta")) { db.close(); return no(new Error("no hmeta in " + name)); }
+    const tx = db.transaction("hmeta", "readwrite");
+    tx.objectStore("hmeta").put(true, "hactive");
+    tx.oncomplete = () => { db.close(); ok(); };
+    tx.onabort = () => { db.close(); no(tx.error); };
+  };
+});
 const nb = (k) => ({ cells: Array.from({ length: 50 }, (_, i) => ({ id: "c" + i, cell_type: "code", source: "x = " + i + "  # " + k })), mode: "python" });
 let runs = 0;
-export async function bench(build, workload) {
-  const W = await import("./ws-" + build + ".js");
-  const name = "hcost-" + build + "-" + workload + "-" + (++runs), mainName = name + "-m";
+export async function bench(config, workload) {
+  const W = await import("./ws-" + (config === "set" ? "head" : config) + ".js");
+  const name = "hcost-" + config + "-" + workload + "-" + (++runs), mainName = name + "-m";
   const w = await W.Workspace.open({ name, mainName });
+  if (config === "set") await activate(name);
   const bytes = new Uint8Array(4096).fill(7), out = [];
   const one = async (w, i, kind) => {
     const t0 = performance.now();
@@ -60,7 +90,7 @@ export async function bench(build, workload) {
     const ws = [w, ...(await Promise.all([1, 2, 3].map(() => W.Workspace.open({ name, mainName }))))];
     await Promise.all(ws.map(async (x, k) => { for (let i = 0; i < N.concurrent; i++) await one(x, i * 4 + k, i % 2 ? "file" : "nb"); }));
   } else for (let i = 0; i < N[workload]; i++) await one(w, i, workload === "files" ? "file" : "nb");
-  return { n: out.length, p95: p95(out) };
+  return { n: out.length, p95: pct(out, 0.95), p99: pct(out, 0.99) };
 }
 `);
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>history cost</title><script type="module">import { bench } from "./bench.js"; window.bench = bench; window.ready = true;</script>`);
@@ -88,7 +118,8 @@ async function chromium() {
   await send("Page.enable"); await send("Runtime.enable");
   await send("Page.navigate", { url });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
-  return { ev, close: () => { ws.close(); try { process.kill(-chrome.pid, "SIGKILL"); } catch {} rmSync(profile, { recursive: true, force: true }); } };
+  const version = (await send("Browser.getVersion")).product;
+  return { ev, version, close: () => { ws.close(); try { process.kill(-chrome.pid, "SIGKILL"); } catch {} rmSync(profile, { recursive: true, force: true }); } };
 }
 async function firefox() {
   if (!process.env.PLAYWRIGHT) die("PLAYWRIGHT (the directory of playwright 1.64.1) is needed for Firefox");
@@ -99,24 +130,26 @@ async function firefox() {
   return { ev: (expression) => page.evaluate(expression), close: () => browser.close(), version: browser.version() };
 }
 
+const CONFIGS = ["base", "head", "delay", "set"];
 const report = { master, browsers: {} };
 let failed = false;
 try {
   for (const [bname, open] of [["chromium", chromium], ["firefox", firefox]]) {
+    if (!LEGS.includes(bname)) continue;
     const b = await open(), rows = {};
+    console.log(`${bname}: ${b.version}`);
     for (const workload of ["files", "notebooks", "concurrent"]) {
-      const worst = {};
-      for (const build of ["base", "head", "delay"]) {
-        let w = 0;
-        for (let r = 0; r < 3; r++) w = Math.max(w, (await b.ev(`window.bench(${JSON.stringify(build)}, ${JSON.stringify(workload)})`)).p95);
-        worst[build] = w;
-      }
+      const runs = Object.fromEntries(CONFIGS.map((c) => [c, []]));
+      for (let r = 0; r < 3; r++) for (const c of CONFIGS) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)})`));
+      if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99))))) die(`${bname} ${workload}: a run measured nothing`);
+      const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p95))]));
+      const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
       const gate = (x) => x - worst.base <= 1 && x <= worst.base * 1.05;
-      rows[workload] = { ...worst, headPass: gate(worst.head), delayCaught: !gate(worst.delay) };
-      if (!rows[workload].headPass || !rows[workload].delayCaught) failed = true;
-      console.log(`${bname} ${workload}: p95 base ${worst.base.toFixed(2)} ms, head ${worst.head.toFixed(2)} ms (${rows[workload].headPass ? "within" : "PAST"} the gate), delay ${worst.delay.toFixed(2)} ms (${rows[workload].delayCaught ? "caught" : "NOT CAUGHT"})`);
+      const row = rows[workload] = { runs, worst, p99, headPass: gate(worst.head), delayCaught: !gate(worst.delay), setDelta: worst.set - worst.base, setWithin3: worst.set - worst.base <= 3, backstop: p99.head <= 250 && p99.set <= 250 };
+      if (!row.headPass || !row.delayCaught || !row.backstop) failed = true;
+      console.log(`${bname} ${workload}: p95 base ${worst.base.toFixed(2)} ms, head ${worst.head.toFixed(2)} ms (${row.headPass ? "within" : "PAST"} the gate), delay ${worst.delay.toFixed(2)} ms (${row.delayCaught ? "caught" : "NOT CAUGHT"}); set ${worst.set.toFixed(2)} ms (delta ${row.setDelta.toFixed(2)} ms, ${row.setWithin3 ? "within" : "past"} 3 ms, reported); p99 head ${p99.head.toFixed(2)} set ${p99.set.toFixed(2)} ms (${row.backstop ? "within" : "PAST"} 250 ms)`);
     }
-    report.browsers[bname] = rows;
+    report.browsers[bname] = { version: b.version, rows };
     await b.close();
   }
 } finally {
@@ -125,5 +158,5 @@ try {
 }
 const oi = process.argv.indexOf("--out");
 if (oi > 0) writeFileSync(process.argv[oi + 1], JSON.stringify(report, null, 1));
-console.log(failed ? "FAIL: the cost gate (or its sensitivity control) didn't hold" : "ok: history's cost gate, inactive: within 1 ms and 5 % at p95 in every workload and both browsers; the 2 ms delay caught");
+console.log(failed ? "FAIL: the cost gate (or its sensitivity control, or the 250 ms backstop) didn't hold" : `ok: history's cost gate, inactive: within 1 ms and 5 % at p95 in every workload (${LEGS.join(" + ")}); the 2 ms delay caught; p99 within 250 ms`);
 process.exit(failed ? 1 : 0);
