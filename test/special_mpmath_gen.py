@@ -454,7 +454,7 @@ for nu, x in [(0.49999999999999994, 1e-300), (0.5000000000000001, 1e-300), (0.49
         add("bessely", (nu, x), mp.bessely(nu, x))
 # (the incomplete beta function and its inverse, and the incomplete gamma's inverse (scipy.stats' distributions):
 # the body about the mean, each tail, a or b large and small, the regions of lib/_special.py's methods (Cephes's
-# series and fractions, Algorithm 708's bgrat, bfrac and basym); at 60 digits, by 2F1 (DLMF 8.17.7) on the side
+# series and fractions, Algorithm 708's bgrat, bfrac and basym; lib/_special_ibeta.py); at 60 digits, by 2F1 (DLMF 8.17.7) on the side
 # below the mean, whose series converges there; the inverses' roots by bisection-safeguarded root finding.
 # Appended after everything above, under a seed of its own)
 random.seed(20261102)

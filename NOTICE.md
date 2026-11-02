@@ -260,6 +260,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 (`include/xsf/binom.h`) and the integer-degree Legendre polynomial,
 `eval_legendre_l` (`include/xsf/orthogonal_eval.h`).
 
+`lib/_special_ibeta.py` (the incomplete beta function, its inverse and the
+incomplete gamma function's inverse) follows two of the algorithms xsf
+carries: Cephes's `incbet` (`include/xsf/cephes/incbet.h`: its power series,
+its two continued fractions incbcf and incbd, and its choice among them),
+and CDFLIB's translation of DiDonato and Morris's Algorithm 708 (ACM TOMS
+18, 1992; `include/xsf/cdflib.h`: `bgrat`, `bfrac`, `basym` and `brcomp`'s
+prefactor), written from the published algorithms and their structure, not
+as line-by-line translations; the inverses' starting values are Numerical
+Recipes' (invbetai, invgammp), formulas only.
+
 ```
 BSD 3-Clause License
 

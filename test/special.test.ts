@@ -15,6 +15,7 @@ const cases: [string, any[], any][] = JSON.parse(readFileSync(__dirname + "/../.
 const program = `
 import json, sys
 import _special as S
+import _special_ibeta as SI
 cases = json.loads(sys.stdin.read())
 def dec(v):
     return complex(float(v[0]), float(v[1])) if isinstance(v, list) else float(v)
@@ -26,7 +27,7 @@ for name, args, want in cases:
     if name == "legendre_all":
         a = [int(a[0]), a[1], ("unnorm", "sch", "norm")[int(a[2])]]
     try:
-        v = getattr(S, name)(*a)
+        v = getattr(S if hasattr(S, name) else SI, name)(*a)
         if isinstance(v, (tuple, list)):
             out.append([repr(float(t)) for t in v])
             continue
