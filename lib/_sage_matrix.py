@@ -2297,6 +2297,102 @@ class Matrix:
         """
         return [self._out(self._rows[i][i]) for i in range(min(self.nrows(), self.ncols()))]
 
+    def nullity(self):
+        """The left nullity: nrows - rank (Sage's nullity).
+
+        EXAMPLES::
+
+            sage: matrix(QQ, 3, 4, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).nullity()
+            1
+        """
+        return int(self.nrows() - self.rank())
+
+    left_nullity = nullity
+
+    def right_nullity(self):
+        """ncols - rank.
+
+        EXAMPLES::
+
+            sage: B = matrix(QQ, 3, 4, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); (B.right_nullity(), B.left_nullity())
+            (2, 1)
+        """
+        return int(self.ncols() - self.rank())
+
+    def _eigen_roots(self, base_field):
+        """(A, [(eigenvalue, multiplicity)]) as Sage's diagonalization uses them: A over
+        base_field (if given), its characteristic polynomial's roots in its base field,
+        ordered as Sage's roots() over QQ gives them (multiplicity, then the value
+        descending)."""
+        if not self.is_square():
+            raise TypeError("not a square matrix")
+        A = self.change_ring(base_field) if base_field is not None else self
+        R = A.base_ring()
+        if not (hasattr(R, "is_field") and R.is_field()):
+            raise ValueError("matrix entries must be from a field")
+        if hasattr(R, "is_exact") and not R.is_exact():
+            raise ValueError("base field must be exact, but {} is not".format(R))
+        evals = sorted(A.charpoly().roots(), key=lambda t: (t[1], -t[0]))
+        return A, evals
+
+    def is_diagonalizable(self, base_field=None):
+        """Whether self is diagonalizable over its base field (or base_field):
+        the eigenvalues' algebraic multiplicities fill the dimension and each
+        equals its geometric multiplicity (Sage's algorithm).
+
+        EXAMPLES::
+
+            sage: matrix(QQ, 3, [-1, 2, 2, 2, 2, -1, 2, -1, 2]).is_diagonalizable()
+            True
+            sage: matrix(QQ, [[1, 1], [0, 1]]).is_diagonalizable(), matrix(QQ, [[0, -1], [1, 0]]).is_diagonalizable()
+            (False, False)
+            sage: matrix(ZZ, [[2, 1], [1, 2]]).is_diagonalizable()
+            Traceback (most recent call last):
+            ...
+            ValueError: matrix entries must be from a field
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            return False
+        n = A.nrows()
+        for e, am in evals:
+            if am != (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().dimension():
+                return False
+        return True
+
+    def diagonalization(self, base_field=None):
+        """(D, P) with D diagonal and P^-1 self P = D: the eigenvalues in the
+        order of Sage's roots(), each eigenspace's echelon basis as P's
+        columns (Sage's algorithm); a ValueError if not diagonalizable.
+
+        EXAMPLES::
+
+            sage: D, P = matrix(QQ, 3, [-1, 2, 2, 2, 2, -1, 2, -1, 2]).diagonalization(); D
+            [-3  0  0]
+            [ 0  3  0]
+            [ 0  0  3]
+            sage: P
+            [   1    1    0]
+            [-1/2    0    1]
+            [-1/2    2   -1]
+            sage: matrix(QQ, [[1, 1], [0, 1]]).diagonalization()
+            Traceback (most recent call last):
+            ...
+            ValueError: not diagonalizable
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            raise ValueError("not diagonalizable over {}".format(A.base_ring()))
+        n = A.nrows()
+        dia, bas = [], []
+        for e, am in evals:
+            b = (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().basis()
+            if len(b) != am:
+                raise ValueError("not diagonalizable")
+            dia += [e] * am
+            bas += list(b)
+        return _sa().diagonal_matrix(dia), _sa().matrix(bas).transpose()
+
     def dense_matrix(self):
         """The matrix itself (matrices are dense).
 
