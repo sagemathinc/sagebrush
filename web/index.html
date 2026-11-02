@@ -112,6 +112,9 @@
   #docsearch { font: 13px system-ui, sans-serif; width: 15em; max-width: 40vw; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); }
   #docresults { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(600px, 92vw); max-height: 70vh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
   #docresults[hidden] { display: none; }
+  /* (its results open: the toolbar, which holds them, over the file browser (B7, William Nov 1): its z-index 9 would
+     keep them under the browser's 20 wherever they reach it; a phone's toolbar is above it already) */
+  html:not(.phone) .bar:has(#docresults:not([hidden])) { z-index: 21; }
   #docresults li { padding: 5px 8px; border-radius: 5px; cursor: pointer; }
   #docresults li[aria-selected=true] { background: var(--code); }
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
