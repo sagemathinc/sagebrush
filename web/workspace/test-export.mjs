@@ -99,7 +99,10 @@ const openFiles = async () => {
 };
 /** The test hooks for this page (run.ts's TestHooks), with the handed-over archive kept in window.__exp (and the
  * handoff's cleanup let run at once). */
-const hooks = (extra = "") => ev(`(() => { window.__exp = null; window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__exp = { blob, name, then }; }, stats: {}, ${extra} }; return 1; })()`);
+// (onHand stamps the handoff, window.__handT: the near-cap scenarios' long tasks end there, as the counted harness's
+// window does (test-export-scale.mjs, click to handoff); the harness's own read-back of the archive after it (base64 on
+// the page's thread, exportOnce) is the test's, not the export's)
+const hooks = (extra = "") => ev(`(() => { window.__exp = null; window.__handT = 0; window.__SB_EXPORT_TEST__ = { noPicker: true, onHand: (blob, name, then) => { window.__handT = performance.now(); window.__exp = { blob, name, then }; }, stats: {}, ${extra} }; return 1; })()`);
 /** The handoff's cleanup let run (the test has read the archive), then its end awaited: no export's lock left. */
 const LOCKS = `navigator.locks.query().then((q) => q.held.filter((l) => l.name.startsWith("sagebrush-export:")).length)`;
 const handed = async () => {
@@ -1399,7 +1402,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const wn = await ev(readWatch);
     // (each long task over 50 ms: inside a record's read (a capture, the workspace's IndexedDB read of one value), or
     // not; none may be outside one)
-    const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
+    const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50 || (window.__handT && s >= window.__handT)) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
     console.log("(long tasks over 50 ms during the near-cap export: inside a record read " + JSON.stringify(att.inside) + ", elsewhere " + JSON.stringify(att.outside) + ")");
     check(!nc.stopped, "near-cap documents export: " + (nc.stopped ?? nc.name));
     if (!nc.stopped) { const z = inspect(join(out, "nc.zip")); check(!z.error && z.bad === null && z.mismatch.length === 0, "…valid, every hash right"); }
@@ -1453,7 +1456,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     // (E1 r2e, r11: the compressor fed at most DEFLATE_FEED = 256 KiB a write; /Wide.board.json, near the cap and
     // compressible, activates it)
     check(!r.stopped && r.stats?.maxDeflateWrite > 0 && r.stats.maxDeflateWrite <= 256 * 1024, `…the largest write to a member's compressor ${r.stats?.maxDeflateWrite} bytes (at most 262144)`);
-    const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
+    const att = await ev(`(() => { const iv = [], open = {}; for (const [w, e, t] of window.__probe) { if (w !== "capture") continue; if (e === 0) open.c = t; else if (open.c !== undefined) { iv.push([open.c, t]); delete open.c; } } const out = [], inside = []; for (const [s, d] of window.__tasks) { if (d <= 50 || (window.__handT && s >= window.__handT)) continue; (iv.some(([a, b]) => s >= a - 1 && s + d <= b + 1) ? inside : out).push(Math.round(d)); } return { inside, outside: out }; })()`);
     console.log("(long tasks over 50 ms during the export: inside a record read " + JSON.stringify(att.inside) + ", elsewhere " + JSON.stringify(att.outside) + ")");
     check(att.outside.length === 0, "…no main-thread task over 50 ms of the export's own (the clone, cleanDoc, the board's text, the cells, the lines): " + JSON.stringify(att.outside));
     check(att.inside.every((d) => d <= 200), "…each record's read at most 200 ms: " + JSON.stringify(att.inside));
