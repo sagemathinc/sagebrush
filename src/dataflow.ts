@@ -65,6 +65,12 @@ const STAR_EXAMPLES: Record<string, [string, string]> = {
   sympy: ["import sympy as sp", "symbols, solve"],
 };
 
+/** The modules whose `from m import *` is allowed (not in marimo's strict
+ * mode): their names are ambient, as builtins are. The cell defines none of
+ * them, so they make no edges and no conflicts, and a cell that defines one
+ * of these names explicitly wins; a cell that reads one depends on no cell. */
+export const STAR_AMBIENT = new Set(["math", "cmath", "random", "numpy", "matplotlib.pyplot", "pylab", "sage.all"]);
+
 /** Why `from m import *` is refused, and the way forward (Sagebrush's words). */
 export function importStarMessage(mod: string): string {
   const m = mod || "m";
@@ -428,7 +434,11 @@ class Visitor {
   }
   visit_ImportFrom(node: Node): void {
     const mod = `${".".repeat(node.level ?? 0)}${node.module ?? ""}`;
-    if (node.names.some((a: Node) => a.name === "*")) throw new ImportStarError(importStarMessage(mod));
+    if (node.names.some((a: Node) => a.name === "*")) {
+      // (an allowed module's names are ambient: the cell defines none of them)
+      if (!this.strict && STAR_AMBIENT.has(mod)) return;
+      throw new ImportStarError(importStarMessage(mod));
+    }
     for (const a of node.names) {
       const n = this.aliasName(a);
       this.define(n, "import");
