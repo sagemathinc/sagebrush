@@ -541,7 +541,9 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    # (E1 #436: the whole controls step, 57 controls at about 30 s each, plus test-export and the scale harness, measured
+    # at about 33 min; CI1 at ff1de421 was cancelled at 30 during the controls. @sagebrush's OK, Nov 2 07:20Z)
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
