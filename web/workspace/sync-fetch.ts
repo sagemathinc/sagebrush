@@ -55,9 +55,22 @@ export async function finalize(w: Workspace, ns: string, it: FetchItem, why: str
     if (!e || e.fetch !== it.sha256 || (e.rev ?? 0) !== it.rev) return;
     const n: Entry = { ...e };
     delete n.fetch;
+    n.fetchFailed = { why, at: Date.now(), final: true };
     st.put(n);
     meta.delete(urlKey(ns, it.fid));
     meta.put({ ...it, url: undefined, exp: undefined, why }, finalKey(ns, it.fid));
+  }));
+}
+
+/** A download of `it` that failed and will be tried again: why, on its entry (by identity, while it still waits for
+ * these bytes), so its row says so rather than "on another device" (B5, Nov 1 2026); gone once it is installed. */
+export async function noteFetchFailed(w: Workspace, ns: string, it: FetchItem, why: string) {
+  await w.locked(() => inTx(w.ws, ["entries"], "readwrite", async (tx) => {
+    await fenceCheck(tx, []);
+    const st = tx.objectStore("entries");
+    const e = (await req(st.index("byIdent").get(it.fid))) as Entry | undefined;
+    if (!e || e.fetch !== it.sha256 || (e.rev ?? 0) !== it.rev) return;
+    st.put({ ...e, fetchFailed: { why: why.slice(0, 200), at: Date.now() } });
   }));
 }
 
@@ -82,6 +95,7 @@ export async function install(w: Workspace, ns: string, it: FetchItem, bytes: Ui
       const n: Entry = { ...e };
       delete n.remote;
       delete n.fetch;
+      delete n.fetchFailed;
       st.put(n);
       return "installed";
     }),

@@ -258,6 +258,50 @@ try {
   ok(!has("r1 original"), "[B11] …not r1.txt's first version (never read: only the one put after it was)");
   ok(!has("r2 secret"), "[B12] …not r2.txt's new version (never read: only the one before it was)");
   ok(Object.keys(bundled.blobs).length === 7, "[B13] …and nothing else: 7 files: " + Object.keys(bundled.blobs).length);
+
+  // ---- [T-r1] a resumed session's new read of a version put before (astra's follow-up on #445, the grader's case): a
+  // new notebook's session is given nothing, then the page puts f.txt and g.txt (neither read); that version is resumed
+  // in a new tab of this browser (the blobs are here: the precondition, checked by reading f.txt there); a new cell
+  // there reads f.txt; the bundle exported there carries f.txt's version, never g.txt's
+  await a.ev(`document.querySelector('#filebtn').click(); document.querySelector('[data-f="new"]').click(); true`);
+  await a.until("sagebrush.notebook.cells().length === 1", 5000);
+  await a.until("sagebrush.kernel.ready", 15000);
+  await sleep(500);
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "x = 1"); return true; })()`);
+  await sleep(700);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
+  await drop("f.txt", "f for the resumed read");
+  await drop("g.txt", "g never read");
+  await sleep(800);
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], "y = 2"); return true; })()`);
+  await sleep(700);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
+  await sleep(700);
+  await a.ev("(() => { sagebrush.notebook.flush(); return true; })()");
+  const rHead = await a.ev("sagebrush.history.head()");
+  const rToks = await a.ev("sagebrush.history.records('file').filter((f) => /^\\/?[fg]\\.txt$/.test(f.path)).map((f) => [f.path.replace(/^\\//, ''), typeof f.tok === 'string'])");
+  const rUrl = await resumeUrl(rHead);
+  const t3 = await (await fetch(`http://127.0.0.1:${port}/json/new?` + encodeURIComponent(new URL(rUrl, base).href), { method: "PUT" })).json();
+  const c = await tab(t3.webSocketDebuggerUrl);
+  try {
+    await c.send("Page.bringToFront");
+    await c.until("window.sagebrush?.replayReport !== undefined", 60000);
+    await c.ev(`(() => { sagebrush.notebook.addCell(${JSON.stringify("print(open('f.txt').read())")}); return true; })()`);
+    await sleep(700);
+    await c.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells().at(-1)); return true; })()");
+    const got = (await c.ev(outs)).at(-1).trim();
+    if (got !== "f for the resumed read") throw new Error(`[T-r1] precondition: the resumed session doesn't have f.txt's bytes (${JSON.stringify(got)}, file records ${JSON.stringify(rToks)}): STOP, not a carry FAIL`);
+    await sleep(500);
+    const craw = await c.ev("sagebrush.bundle().then((u) => { let s = ''; for (const x of u) s += String.fromCharCode(x); return btoa(s); })");
+    const cb = JSON.parse(gunzipSync(Buffer.from(craw, "base64")).toString("utf8"));
+    const sha = (t) => createHash("sha256").update(t).digest("hex");
+    const chas = (t) => Object.prototype.hasOwnProperty.call(cb.blobs, sha(t));
+    ok(chas("f for the resumed read"), "[T-r1] a resumed session's new read of a version put before it carries that version in the bundle: " + JSON.stringify({ blobs: Object.keys(cb.blobs).length }));
+    ok(!chas("g never read"), "[T-r1s] …never its unread sibling");
+  } finally {
+    c.ws.close();
+    await fetch(`http://127.0.0.1:${port}/json/close/` + t3.id);
+  }
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
