@@ -24,7 +24,7 @@
 import type { Entry, Op, Workspace } from "./api";
 import { inTx, req, hex } from "./db";
 import { TRASH, join, parentOf, splitExt, nameOf } from "./paths";
-import { noteToken, chainOf, historyActive } from "../history/tokens";
+import { noteToken, chainOf, historyActive, indexGeneration } from "../history/tokens";
 import { D11, RW, MAPS, MapSet, mapKey, queueKey, stageOf, under, nkeyOf, entriesOf, recordOf, dropView, FENCE_READ, type ERecord, type Mapping } from "./sync-rewrite";
 import { genKey, genPrefix, idbStore, crecordKey, ledgerNs, againNs } from "./sync-confirmed";
 import { VIEW_STORES, applyView, viewer, noteListed, type ListedWhy, type Viewer } from "./sync-view";
@@ -931,12 +931,13 @@ async function step(w: Workspace, ns: string, m0: Marker, cap: number): Promise<
       // logical view now published, a folder's token standing for its subtree.  Sweep 2's op for the top, later, is a
       // second token for the same move)
       if (await historyActive(tx0)) {
-        const pub = await entriesOf(tx0);
+        // (rev: the index's generation at this publication, as every workspace token's (A1.1): no op is logged here)
+        const pub = await entriesOf(tx0), gen = await indexGeneration(tx0);
         for (const x of maps) {
           if (!x.top) continue;
           const e = await pub.get(x.to), kind = e?.kind ?? "folder";
           await noteToken(tx0, {
-            ident: x.top, rev: rec.rev + 1, kind,
+            ident: x.top, rev: gen, kind,
             chain: e && (e.fid === x.top || e.ref === x.top) ? () => chainOf(x.to, !!e.trashed || x.to === TRASH || x.to.startsWith(TRASH + "/"), (p) => pub.get(p), parentOf) : "broken",
           });
         }

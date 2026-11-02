@@ -45,6 +45,21 @@ export async function historyActive(tx: IDBTransaction): Promise<boolean> {
   return hasHistoryStores(tx) && (await req(tx.objectStore("hmeta").get("hactive"))) === true;
 }
 
+/** The workspace index's generation in this transaction (its latest op seq, or meta's opsFloor if larger: the same
+ * rule as Workspace.generation, web/workspace/db.ts "ops"): a workspace token's `rev` (design r2.2 A1.1).  The token
+ * of an op carries that op's seq, which is the generation after it; a change committed with no op of its own (a
+ * confirmed large move's publication, a fetch's install) carries the generation it was committed at.  Not unique, never
+ * a key: tokens are told apart and ordered by `seq` alone.  The transaction must have "ops" and "meta" in scope. */
+export async function indexGeneration(tx: IDBTransaction): Promise<number> {
+  const last = await new Promise<number>((ok, no) => {
+    const c = tx.objectStore("ops").openKeyCursor(null, "prev");
+    c.onsuccess = () => ok((c.result?.key as number | undefined) ?? 0);
+    c.onerror = () => no(c.error);
+  });
+  const floor = ((await req(tx.objectStore("meta").get("opsFloor"))) as number | undefined) ?? 0;
+  return Math.max(last, floor);
+}
+
 /** Record one changed identity, in the save's own transaction (`tx`, readwrite, with HIST_STORES in its scope when
  * the database has them).  Returns at once, after one read, unless history is active, before any ancestry walk.
  * Nothing here is caught: a failed request aborts the whole transaction, so the save fails visibly through its
