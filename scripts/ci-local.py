@@ -58,6 +58,7 @@ import argparse
 import ctypes
 import hashlib
 import itertools
+import json
 import os
 import re
 import shutil
@@ -102,7 +103,24 @@ def matrix_of(job):
     keys = list(m)
     if not keys:
         return [{}]
-    return [dict(zip(keys, combo)) for combo in itertools.product(*(m[k] for k in keys))]
+    return [dict(zip(keys, combo)) for combo in itertools.product(*(values_of(m[k]) for k in keys))]
+
+
+def values_of(v):
+    """A matrix key's values: a list, or `${{ fromJSON(needs.changes.outputs.NAME) }}`, the changes job's selection,
+    which here is the full tier's (scripts/ci-paths.mjs as a dispatch: every value)."""
+    if isinstance(v, list):
+        return v
+    t = re.fullmatch(r"\$\{\{\s*fromJSON\(needs\.changes\.outputs\.([A-Za-z0-9_]+)\)\s*\}\}", str(v).strip())
+    if not t:
+        raise Unsupported(f"a matrix value that isn't a list or the changes job's output: {v}")
+    env = {**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch"}
+    out = subprocess.run(["node", os.path.join(ROOT, "scripts", "ci-paths.mjs")], env=env, cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout
+    for line in out.splitlines():
+        if line.startswith(t.group(1) + "="):
+            return json.loads(line.split("=", 1)[1])
+    raise Unsupported(f"scripts/ci-paths.mjs has no output {t.group(1)}")
 
 
 def substitute(text, ctx, lenient=False):

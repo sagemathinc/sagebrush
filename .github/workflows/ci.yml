@@ -43,6 +43,10 @@ jobs:
       engine_full: ${{ steps.paths.outputs.engine_full }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       webkit: ${{ steps.paths.outputs.webkit }}
+      web_groups: ${{ steps.paths.outputs.web_groups }}
+      web_runner: ${{ steps.paths.outputs.web_runner }}
+      web_export: ${{ steps.paths.outputs.web_export }}
+      web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
@@ -548,7 +552,8 @@ jobs:
   # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
   web-export:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (test-export alone: about 4.5 min on #459's runs)
     timeout-minutes: 20
@@ -589,7 +594,8 @@ jobs:
 
   web-runner:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -648,6 +654,9 @@ jobs:
           CHROME=google-chrome bun web/workspace/test-workspace-crash.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-crash-v4.mjs
           CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
+          # (the notebook journal, 16 s, here in the fast tier: it evaluates slices of web/index.html, so any edit there
+          # can break it (#466's CI1); moved from web-runner-sync, which runs on the full tier only)
+          CHROME=google-chrome bun web/notebook/test-journal.mjs
           # (the board journal's store, Workspace.journalWrite and the kind)
           CHROME=google-chrome bun web/board/test-board-journal.mjs
           bun web/workspace/test-doc-sync-switch.mjs
@@ -700,7 +709,8 @@ jobs:
   # each, run nightly (nightly.yml); the same setup and server)
   web-lookalike:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the report alone: 25 s on #459's run 41470481644)
     timeout-minutes: 15
@@ -737,9 +747,10 @@ jobs:
           kill -0 "$server_pid"
           CHROME=google-chrome node web/workspace/test-workspace-lookalike.mjs
 
-  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the notebook
-  # journal and the documents' sync, about 6.5 min of it, run here, in parallel; the same setup and server; @sagebrush,
-  # Oct 30.  Never a longer timeout: split again if either job nears its limit)
+  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the
+  # documents' sync runs here, in parallel; the same setup and server; @sagebrush, Oct 30.  The notebook journal, 16 s,
+  # went back to web-runner in the fast tier (CI speed iv).  Never a longer timeout: split again if either job nears
+  # its limit)
   web-runner-sync:
     needs: changes
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
@@ -765,7 +776,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: the notebook journal and the documents' sync
+      - name: the documents' sync
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -778,7 +789,6 @@ jobs:
           trap 'exit 143' TERM
           sleep 1
           kill -0 "$server_pid"
-          CHROME=google-chrome bun web/notebook/test-journal.mjs
           CHROME=google-chrome bun web/workspace/test-doc-sync.mjs
       # (the agents chat's notebook and LaTeX artifacts, web/agents (the artifacts plan r2 + r2.1): the agents page built
       # (SAGEBRUSH_AGENTS=1) without the LaTeX editor and tested, then with it (SAGEBRUSH_LATEX_PREVIEW=test) and tested
@@ -951,11 +961,13 @@ jobs:
 
   web-browser:
     needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_groups != '[]'
     strategy:
       fail-fast: false
       matrix:
-        group: [notebook, board-a, board-b, board-c, board-unit, terminal, remote-preview]
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, board-a, board-b, board-c,
+        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
+        group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
     # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)

@@ -206,6 +206,35 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // otherwise first ran on master (@sagebrush, Oct 30).  Those jobs need engine-wasm, which engine_smoke selects.
 const engineFull = full || matches([/^src\/runtime\//]);
 
+// The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
+// directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
+// worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
+// workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
+// alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
+const webAreas = {
+  board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\//, /^packages\/sagebrush-board\//],
+  shell: [/^web\/shell\//],
+  workspace: [/^web\/workspace\//],
+};
+const webFiles = files.filter((file) => webPaths.some((pattern) => pattern.test(file)));
+const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) => pattern.test(file)));
+const webCore = webFiles.some((file) => !Object.values(webAreas).some((patterns) => patterns.some((pattern) => pattern.test(file))));
+const allWeb = full || workflowOrBuild || fallback || webCore;
+const webRuntime = allWeb || runtime;
+const webGroups = [
+  ["notebook", webRuntime],
+  ["board-a", webRuntime || inArea("board")],
+  ["board-b", webRuntime || inArea("board")],
+  ["board-c", webRuntime || inArea("board")],
+  // (board-unit also runs the export's measure and reminder units)
+  ["board-unit", webRuntime || inArea("board") || inArea("workspace")],
+  ["terminal", webRuntime || inArea("shell")],
+  ["remote-preview", webRuntime],
+].filter(([, selected]) => web && selected).map(([group]) => group);
+// (web-runner: the runner, the workspace, the board frame and the notebook's merges)
+const webRunner = web && (webRuntime || inArea("board") || inArea("workspace"));
+const webWorkspace = web && (allWeb || inArea("workspace"));
+
 const outputs = {
   full,
   docs_only: docsOnly,
@@ -218,6 +247,10 @@ const outputs = {
   engine_full: engineFull,
   engine_cpython: engineCpython,
   webkit,
+  web_groups: JSON.stringify(webGroups),
+  web_runner: webRunner,
+  web_export: webWorkspace,
+  web_lookalike: webWorkspace,
   census,
   unsafe_sweep: unsafeSweep,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
