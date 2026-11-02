@@ -24,6 +24,7 @@ import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
+import { setDataRoot } from "./runtime/modules";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -55,6 +56,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --figures DIR
            keep the figures shown (plt.show(), a plot's display) as SVG files
            in DIR; without it, they are in a directory removed at exit
+  --data-root DIR
+           the folder whose .sagebrush-data snapshots urllib.request may
+           replay (default: the starting directory); nothing above it is used
   --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
@@ -545,6 +549,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   let emit = false, inspect = false, quiet = false;
   let pkgset: string | null = process.env.SAGEBRUSH_PKGSET || null;
   let cmd: string | null = null, mod: string | null = null, file: string | null = null;
+  let dataRootArg: string | null = null;
   while (argv.length) {
     const a = argv[0];
     if (a === "--emit") emit = true;
@@ -562,6 +567,16 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
         return;
       }
       pkgset = argv[0];
+    } else if (a === "--data-root") {
+      // (the data replay layer's root, lib/_sbdata.py: an existing directory;
+      // default, the starting directory)
+      argv.shift();
+      if (!argv.length || !existsSync(argv[0])) {
+        process.stderr.write(`--data-root takes an existing directory\n${USAGE}`);
+        process.exitCode = 2;
+        return;
+      }
+      dataRootArg = argv[0];
     } else if (a === "--figures") {
       // (figures to keep, in DIR: made if it isn't there)
       argv.shift();
@@ -609,6 +624,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     }
     argv.shift();
   }
+  // (fixed before any Python runs: a program can't move it, replay-layer r2 §2.2)
+  setDataRoot(dataRootArg ?? process.cwd());
   // (a file that can't be read: CPython's message and exit status, not a stack trace)
   if (file !== null && file !== "-") {
     try {
