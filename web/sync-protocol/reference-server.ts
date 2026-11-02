@@ -123,6 +123,8 @@ export class ReferenceServer {
   private making = new Map<string, Promise<Account>>();
   private sessions = new Map<string, Session>();
   private holds = new Map<string, { wait: Promise<void>; release: () => void }>();
+  /** batches that took a hold and are waiting for its release (the test's entered-hold boundary) */
+  private holding = 0;
   private fakes = new Map<string, Fake[]>();
   private nowMs: number | null = null;
   /** The force-reload floors and the release registry (n -> core sha); none by default, so every build may write. */
@@ -145,6 +147,8 @@ export class ReferenceServer {
       this.holds.set(`${doc}:${client ?? "*"}`, { wait, release });
       return () => release();
     },
+    /** How many batches have taken a hold and wait for its release now. */
+    holding: (): number => this.holding,
     /** The next `n` answers to messages of type `t` dropped, or refused with `error`. */
     fake: (t: string, f: Fake, n = 1) => { this.fakes.set(t, [...(this.fakes.get(t) ?? []), ...Array(n).fill(f)]); },
     /** A session ended: its sockets get `revoked` and close 4401. */
@@ -157,6 +161,8 @@ export class ReferenceServer {
       const d = this.accounts.get(account)?.docs.get(doc);
       return d ? Object.fromEntries([...d.clients].map(([k, c]) => [k, { ...c }])) : null;
     },
+    /** The floors in force now, a copy. */
+    floors: (): Floors => ({ ...this.floors }),
     /** The floors in force (any not given keep theirs). */
     setFloors: (f: Partial<Floors>) => { this.floors = { ...this.floors, ...f }; },
     /** The release registry: [n, core sha] pairs. */
@@ -605,7 +611,12 @@ export class ReferenceServer {
     if (hold) {
       this.holds.delete(`${b.doc}:${clientOf(b.patches[0].id)}`);
       this.holds.delete(`${b.doc}:*`);
-      await hold.wait;
+      this.holding++;
+      try {
+        await hold.wait;
+      } finally {
+        this.holding--;
+      }
       // (after the await: the same account generation and the same document, or nothing commits: CORR-173-3's audit)
       this.admit(a);
       if (a.docs.get(b.doc) !== d) throw new SyncError("conflict", "this account's sync changed while the batch waited", { reason: "generation" });
