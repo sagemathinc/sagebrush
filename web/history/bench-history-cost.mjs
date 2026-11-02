@@ -115,7 +115,7 @@ export async function bench(config, workload, scale = 1) {
   } else for (let i = 0; i < N[workload] * scale; i++) await one(w, i, workload === "files" ? "file" : "nb");
   const wall = performance.now() - wall0, p50 = pct(out, 0.5), stalled = out.map((x) => x > 3 * p50), bursts = [];
   for (let i = 0, k = 0; i <= stalled.length; i++) { if (i < stalled.length && stalled[i]) k++; else { if (k >= 10) bursts.push(k); k = 0; } }
-  const r = { n: out.length, wall, p50, p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, bursts, res };
+  const r = { n: out.length, wall, p50, p90: pct(out, 0.9), p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, bursts, res };
   for (const x of ws) x.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
   return r;
@@ -171,6 +171,10 @@ for (const [xs, want, what] of [
   [[30, 59, 40, 40, 40], false, "max - min 29 > 5 but max < 2 x min: not past"],
   [[4, 4, 4, 4, 4], false, "no spread: not past"],
 ]) if (spreadStop(xs) !== want) die(`the spread STOP's boundary control: ${what} (${xs.join(", ")})`);
+// (the quantile each leg's statistic uses: HCOST_Q_CHROMIUM / HCOST_Q_FIREFOX, p50 | p90 | p95, default p95; under
+// review for Firefox, where p95 sits on the incremental-GC knee: l1-d2-o1-power-r1)
+const QUANT = Object.fromEntries(["chromium", "firefox"].map((b) => [b, process.env["HCOST_Q_" + b.toUpperCase()] ?? "p95"]));
+if (Object.values(QUANT).some((q) => !["p50", "p90", "p95"].includes(q))) die("HCOST_Q_*: p50, p90 or p95");
 const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
 if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
@@ -189,9 +193,9 @@ try {
         for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`));
       }
       if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99) && Number.isFinite(x.res))))) die(`${bname} ${workload}: a run measured nothing`);
-      const p95 = (c) => runs[c].map((x) => x.p95);
+      const q = QUANT[bname], p95 = (c) => runs[c].map((x) => x[q]);
       const B = med(p95("base")), T = Math.min(1, Math.max(0.5, 0.05 * B));
-      const paired = Object.fromEntries(["aa", "head", "delay", "set"].map((c) => [c, runs[c].map((x, r) => x.p95 - runs.base[r].p95)]));
+      const paired = Object.fromEntries(["aa", "head", "delay", "set"].map((c) => [c, runs[c].map((x, r) => x[q] - runs.base[r][q])]));
       const D = Object.fromEntries(Object.entries(paired).map(([c, d]) => [c, med(d)]));
       const worst = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...p95(c))]));
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
@@ -205,10 +209,10 @@ try {
       verdicts.push(verdict);
       rows[workload] = { verdict, stop, B, T, D, paired, worst, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2);
-      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
-      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p95 ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])}); p50 ${runs[c].map((x) => f(x.p50)).join(" / ")}; max ${runs[c].map((x) => f(x.max)).join(" / ")}; stalled ${runs[c].map((x) => x.stalled).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
+      console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired ${q} medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
+      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} ${q} ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])}); p50 ${runs[c].map((x) => f(x.p50)).join(" / ")}; max ${runs[c].map((x) => f(x.max)).join(" / ")}; stalled ${runs[c].map((x) => x.stalled).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
-    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
+    report.browsers[bname] = { version: b.version, quantile: QUANT[bname], scale: bname === "firefox" ? FF_SCALE : 1, rows };
     await b.close();
   }
 } finally {
