@@ -5796,6 +5796,31 @@
   "owner": "real/rational arithmetic",
   "row": "inv-15"
  },
+ "lib/sage_permgroup.py ::  :: _ISO_MAX = 5040 #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: if n > _ISO_MAX: #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: raise NotImplementedError(\"is_isomorphic of permutation groups of order %d (above %d) is not available in Sagebrush yet\" % (n, _ISO_MAX)) #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: there is none. Groups of order above _ISO_MAX, or a search past #0": {
+  "class": "none",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "is_isomorphic's docstring describing its refusals: matched words, no limit"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic.extends :: raise NotImplementedError(\"is_isomorphic: the isomorphism search passed %d steps; not available in Sagebrush for these groups yet\" % _ISO_STEPS) #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
   "disposition": {
