@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "reason": "Engine gaps from agent simulation run 3: board_checks.symbolic_equal proves wrong answers with sin or e^x by RIF enclosures (lib/board_checks.py), matplotlib.patches with Axes.add_patch and fill (lib/matplotlib/), PermutationGroup.is_isomorphic (lib/sage_permgroup.py), with docstring examples. Measured with bun 1.4.4 (size-record.sh) on master 14a131e4 vs this PR's content head 7d509097: cli/lib.gen.js +4572, cli/pyjs.cjs +6312, engine/lib/mod-board-checks.src +955, engine/lib/mod-matplotlib.src +6278, engine/lib/sage.pre +23441, engine/lib/sage.src +3995, engine/lib/sci.pre +9014, engine/lib/sci.src +2850, engine/sagebrush-worker.js +41; no other row moves.",
+ "bytes": {
+  "cli/lib.gen.js": 4572,
+  "cli/pyjs.cjs": 6312,
+  "engine/lib/mod-board-checks.src": 955,
+  "engine/lib/mod-matplotlib.src": 6278,
+  "engine/lib/sage.pre": 23441,
+  "engine/lib/sage.src": 3995,
+  "engine/lib/sci.pre": 9014,
+  "engine/lib/sci.src": 2850,
+  "engine/sagebrush-worker.js": 41
+ }
+}
