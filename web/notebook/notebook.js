@@ -252,6 +252,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {string} [opts.assetBase] where sagebrush-math.js and sagebrush-viewer3d.js are (default: the page)
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
+ * @param {() => Promise<object | null>} [opts.mystBook] a MyST notebook's book (the workspace page's: web/workspace/book-cap.ts)
  * @returns {import("./types").Notebook}
  */
 export function createNotebook(root, opts = {}) {
@@ -337,7 +338,7 @@ export function createNotebook(root, opts = {}) {
     if (!m) return undefined;
     if (myst) return myst.hookFor(cell, editing, +m.chapter || 0);
     mystLoading ??= import(asset("sagebrush-myst.js")).then((mod) => {
-      myst = mod.attach({ root, cells, renderMd, h });
+      myst = mod.attach({ root, cells, renderMd, h, book: opts.mystBook });
       for (const c of cells()) if (c.type === "markdown" && c.el.classList.contains("rendered")) renderMd(c);
     }, () => { mystLoading = null; });
   }

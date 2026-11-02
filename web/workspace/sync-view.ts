@@ -27,7 +27,7 @@ const keyOf = (p: string) => p.normalize("NFC");
 const nkeyOf = (p: string) => parentOf(p) + "\u0000" + nameOf(p).normalize("NFC");
 const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/", p + "0", false, true));
 /** The view's stores: what a confirmed page's transaction takes when it applies the view. */
-export const VIEW_STORES = ["entries", "ops", "outbox", "pending", "pins", "adoptJournal", "fileBytes", "meta", "versions", "versionBytes", "prunable"];
+export const VIEW_STORES = ["entries", "ops", "outbox", "pending", "pins", "adoptJournal", "fileBytes", "meta", "versions", "versionBytes", "prunable", "htokens", "hmeta"];
 const listedKey = (ns: string) => `sync:${ns}:listed`;
 /** Paths listed in the Sync panel's list (in a transaction with meta). */
 export async function noteListed(meta: IDBObjectStore, ns: string, listed: [string, ListedWhy][]) {
