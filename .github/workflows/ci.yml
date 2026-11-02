@@ -20,9 +20,10 @@ on:
 # its obsolete run, and a master push the master runs still queued or running
 # (each master push runs the full tier, so the newest one tests every merge
 # before it).  The schedule and a dispatch are groups of their own, so a merge
-# never cancels them.
+# never cancels them; a dispatch's group is its commit's, so a dispatch on
+# another commit (a release's, say) never cancels it either.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -543,17 +544,14 @@ jobs:
           bun web/test-no-site-build.mjs
           bun web/test-reproducible-build.mjs
 
-  # "Export all current files (.zip)" (E1): its browser test, the scale test's CI pass (70,000 entries, past Zip64:
-  # zipfile and unzip -t, the counts, the spool, the live-growth bound; the timing passes stay local) and the controls
-  # (each rule undone in a copy of the chunk, its named check failing).  Its own job: the three would push web-runner
-  # past its bound (grader's Q10).
+  # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
+  # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
   web-export:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (E1 #436: the whole controls step, 57 controls at about 30 s each, plus test-export and the scale harness, measured
-    # at about 33 min; CI1 at ff1de421 was cancelled at 30 during the controls. @sagebrush's OK, Nov 2 07:20Z)
-    timeout-minutes: 60
+    # (test-export alone: about 4.5 min on #459's runs)
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -572,7 +570,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: the export, at scale, and its controls
+      - name: the export
         shell: bash
         run: |
           set -eo pipefail
@@ -588,9 +586,6 @@ jobs:
           sleep 1
           kill -0 "$server_pid"
           CHROME=google-chrome node web/workspace/test-export.mjs
-          CHROME=google-chrome node web/workspace/test-export-scale.mjs --ci
-          CHROME=google-chrome node web/workspace/test-export-controls.mjs
-          node web/workspace/test-export-campaign-check.mjs
 
   web-runner:
     needs: changes
@@ -708,14 +703,14 @@ jobs:
           CHROME=google-chrome node web/board/test-idb-stall.mjs
           node web/board/test-idb-within.mjs
 
-  # (the Storage panel's lookalike report and its controls, split from web-runner, whose 20 minutes they overran on #408's
-  # first run 41233997009: each control rebuilds the site, about 21 min for all of them on a local 8-CPU run, so this job
-  # has twice that; the same setup and server)
+  # (the Storage panel's lookalike report, split from web-runner on #408; its controls, which rebuild the site once
+  # each, run nightly (nightly.yml); the same setup and server)
   web-lookalike:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 45
+    # (the report alone: 25 s on #459's run 41470481644)
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -734,7 +729,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: the lookalike report and its controls
+      - name: the lookalike report
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -748,7 +743,6 @@ jobs:
           sleep 1
           kill -0 "$server_pid"
           CHROME=google-chrome node web/workspace/test-workspace-lookalike.mjs
-          CHROME=google-chrome node web/workspace/test-workspace-lookalike-controls.mjs
 
   # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the notebook
   # journal and the documents' sync, about 6.5 min of it, run here, in parallel; the same setup and server; @sagebrush,

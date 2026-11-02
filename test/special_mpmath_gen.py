@@ -452,5 +452,72 @@ for nu, x in [(0.49999999999999994, 1e-300), (0.5000000000000001, 1e-300), (0.49
               (0.49999999999999994, 1.5), (1.4999999999999998, 2.0)]:
     with mp.workdps(60):
         add("bessely", (nu, x), mp.bessely(nu, x))
+# (the incomplete beta function and its inverse, and the incomplete gamma's inverse (scipy.stats' distributions):
+# the body about the mean, each tail, a or b large and small, the regions of lib/_special.py's methods (Cephes's
+# series and fractions, Algorithm 708's bgrat, bfrac and basym; lib/_special_ibeta.py); at 60 digits, by 2F1 (DLMF 8.17.7) on the side
+# below the mean, whose series converges there; the inverses' roots by bisection-safeguarded root finding.
+# Appended after everything above, under a seed of its own)
+random.seed(20261102)
+
+
+def _ibeta_lower(a, b, x):
+    a, b, x = mp.mpf(a), mp.mpf(b), mp.mpf(x)
+    return x ** a * (1 - x) ** b / (a * mp.beta(a, b)) * mp.hyp2f1(a + b, 1, a + 1, x, maxterms=10 ** 7, maxprec=40000)
+
+
+def _ibeta(a, b, x, upper):
+    a, b, x = mp.mpf(a), mp.mpf(b), mp.mpf(x)
+    if x < a / (a + b):
+        v = _ibeta_lower(a, b, x)
+        return 1 - v if upper else v
+    w = _ibeta_lower(b, a, 1 - x)
+    return w if upper else 1 - w
+
+
+def _root(f, lo, hi):
+    # (bisection in log space to 60 digits' worth, the function monotone on (lo, hi))
+    lo, hi = mp.mpf(lo), mp.mpf(hi)
+    flo = f(lo)
+    if (flo < 0) == (f(hi) < 0):
+        # (no root in the bracket: below 1e-300, a root the doubles can't hold)
+        return None
+    for _ in range(400):
+        mid = mp.sqrt(lo * hi) if lo > 0 else hi / 2
+        fm = f(mid)
+        if (fm < 0) == (flo < 0):
+            lo, flo = mid, fm
+        else:
+            hi = mid
+        if hi - lo <= mp.mpf(10) ** -50 * hi:
+            break
+    return (lo + hi) / 2
+
+
+_bi = []
+for _ in range(50):
+    a, b = LU(0.05, 1e5), LU(0.05, 1e5)
+    m = a / (a + b)
+    sd = math.sqrt(m * (1 - m) / (a + b + 1))
+    x = min(max(random.gauss(m, 3 * sd), 1e-12), 1 - 1e-12) if random.random() < 0.7 else U(0, 1)
+    _bi.append((a, b, x))
+_bi += [(8e4, 0.13, 0.9999857496945765), (2.55, 99908.0, 4.468679231270587e-05), (71332.0, 5397.0, 0.9293277100616266),
+        (5e5, 0.5, 0.999999), (0.5, 0.5, 0.3), (1.0, 1.0, 0.7), (30.0, 0.5, 0.99), (0.5, 30.0, 1e-3), (1e3, 1e3, 0.51)]
+with mp.workdps(60):
+    for a, b, x in _bi:
+        add("betainc", (a, b, x), _ibeta(a, b, x, False))
+        add("betaincc", (a, b, x), _ibeta(a, b, x, True))
+    for _ in range(30):
+        a, b = LU(0.05, 1e4), LU(0.05, 1e4)
+        y = random.choice([U(0, 1), LU(1e-200, 1e-3), 1 - LU(1e-12, 1e-3)])
+        # (the root in x's terms near 0, in 1 - x's near 1: each side's 2F1, monotone, bisected)
+        r = _root(lambda t: _ibeta(a, b, t, False) - y, mp.mpf(10) ** -300, 1 - mp.mpf(10) ** -40)
+        if r is not None and mp.mpf(2) ** -1022 < r < 1 - mp.mpf(10) ** -12:
+            add("betaincinv", (a, b, y), r)
+    for _ in range(30):
+        a = LU(0.05, 1e5)
+        y = random.choice([U(0, 1), LU(1e-200, 1e-3), 1 - LU(1e-12, 1e-3)])
+        r = _root(lambda t: _gammainc_ref(a, t, False) - y, mp.mpf(10) ** -300, 100 * a + 1000)
+        if r is not None and r > mp.mpf(2) ** -1022:
+            add("gammaincinv", (a, y), r)
 json.dump(out, open(__file__.replace("special_mpmath_gen.py", "special-mpmath.json"), "w"), indent=0)
 print(len(out), "cases")
