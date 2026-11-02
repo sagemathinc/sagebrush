@@ -368,6 +368,18 @@ export function gitpushProxy(): string | null {
   } catch { return null; }
 }
 
+/** "Push to GitHub"'s automatic push (Stage A MVP M3), started by the page once its workspace is open: with the flag,
+ * its chunk loaded a little after the page starts, pushing every 10 minutes when something changed; without it, nothing. */
+export function startGitpushAuto(w: Workspace, url: (file: string) => string): void {
+  const proxy = gitpushProxy();
+  if (!proxy) return;
+  const delay = (globalThis as any).__SB_GITPUSH_TEST__?.autoDelayMs ?? 20_000;
+  setTimeout(() => {
+    import(url("sagebrush-gitpush-panel.js")).then((m) => m.startAuto(w, { say() {}, fail() {}, workerUrl: url("sagebrush-gitpush-worker.js"), proxy, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }))
+      .catch((e) => console.warn("Push to GitHub:", e));
+  }, delay);
+}
+
 /** The Storage panel (§6.3). */
 export async function openStorage(w: Workspace, host: StorageHost): Promise<void> {
   const { box, close, onClose } = panel("Storage");
