@@ -305,6 +305,16 @@ function sinkOf(c: unknown): number[] | undefined {
 export type AdmitCheck = { op: AdmitOp; role: "target" | "source" | "destination" | "child"; path: string; entry: Entry | undefined; chain: Entry[] };
 export type AdmitOp = "stat" | "read" | "list" | "create" | "write" | "mkdir" | "rename" | "duplicate" | "remove";
 type Admitted = { admit?: (c: AdmitCheck) => void };
+/** A page's own condition on remove() (B1, #447): `still`, asked holding the lock before anything moves (false, and
+ * nothing is moved); `recheck`, asked again right before the move publishes (its commit, or a large move's
+ * publication), after every other wait (false, and nothing is published, astra3's B1-R4-CODE-1); `pause`, a test seam
+ * at those two points (unset in production: the page passes it only when its test seam is armed). */
+export type TrashGate = { still?: () => boolean | Promise<boolean>; recheck?: () => boolean; pause?: (stage: "publishing:small" | "publishing:large") => Promise<void> };
+const pageMoved = () => new WorkspaceError("conflict", "the page changed meanwhile (a document in it was opened), so it wasn't moved to Trash");
+async function passGate(gate: TrashGate, stage: "publishing:small" | "publishing:large") {
+  if (gate.pause) await gate.pause(stage);
+  if (gate.recheck && !gate.recheck()) throw pageMoved();
+}
 /** What an `admit` throws to say "outside the caller's scope": the one refusal list() filters on (an entry it
  * refuses is left out).  Anything else an admit throws (a revocation, a fault) is the verb's error, list's too. */
 export class OutOfScope extends Error {}
@@ -1675,7 +1685,7 @@ export class Workspace {
    * first free `name (2)`, …); nothing of its contents removed. */
   /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything moves. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted & { still?: () => boolean } = {}): Promise<Entry> {
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted & TrashGate = {}): Promise<Entry> {
     const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
@@ -1687,9 +1697,10 @@ export class Workspace {
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
       if (!dest) throw new WorkspaceError("limit", "Trash is full: empty it first");
       // (the caller's own condition, checked holding the lock, right before the move: a page that switched meanwhile
-      // to a document inside what goes refuses here, B1's astra R2 on #447)
-      if (opts.still && !opts.still()) throw new WorkspaceError("conflict", "the page changed meanwhile (a document in it was opened), so it wasn't moved to Trash");
-      return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }))[0];
+      // to a document inside what goes refuses here, B1's astra R2 on #447; admitted, the page holds its navigation
+      // until this settles, and the move asks `recheck` again right before it publishes, astra3's B1-R4-CODE-1)
+      if (opts.still && !(await opts.still())) throw pageMoved();
+      return (await this.move(q, dest, "remove", { from: q, at: this.now(), id: hex(8) }, opts))[0];
     }, signal, collect);
   }
 
@@ -3276,7 +3287,7 @@ export class Workspace {
    * transaction of the index: every entry moves, or none does
    * (design/capabilities.md §2a).  A data file whose bytes aren't there
    * moves alone, as before. */
-  private async move(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null): Promise<Entry[]> {
+  private async move(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null, gate: TrashGate = {}): Promise<Entry[]> {
     // (a folder of more than D11.chunk entries is moved in chunks (D11): published at once, rewritten after)
     const large = await inTx(this.ws, "entries", "readonly", async (tx) => {
       const ev = await entriesOf(tx);
@@ -3284,7 +3295,7 @@ export class Workspace {
       const st = tx.objectStore("entries"), top: Entry | undefined = await req(st.get(a));
       return top?.kind === "folder" && ((await req(st.count(under(a)))) as number) > D11.chunk ? top : null;
     });
-    if (large) return [await this.largeMove(a, b, op, trashed)];
+    if (large) return [await this.largeMove(a, b, op, trashed, gate)];
     const t = this.now();
     const read = async () => inTx(this.ws, "entries", "readonly", async (tx) => {
       const st = tx.objectStore("entries"), top: Entry | undefined = await req(st.get(a));
@@ -3314,6 +3325,7 @@ export class Workspace {
     // (a file too large to move beside the index stays where its bytes are, so it isn't moved; nothing is)
     const stuck = old.find((e) => e.kind === "file" && e.unmoved);
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
+    await passGate(gate, "publishing:small");
     const ops: Op[] = [];
     const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
       await fenceCheck(tx, [a, b]);
@@ -3356,7 +3368,7 @@ export class Workspace {
    * tree (sync-rewrite.ts), and the rows under `a` are rewritten a page at a time by the rewrite's driver, whichever
    * tab holds its lock.  Returns the top as moved.  Refused `busy` while another large move is being applied.
    */
-  private async largeMove(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null): Promise<Entry> {
+  private async largeMove(a: string, b: string, op: "rename" | "remove" | "restore", trashed?: Entry["trashed"] | null, gate: TrashGate = {}): Promise<Entry> {
     const t = this.now(), to = (p: string) => b + p.slice(a.length);
     // (pages of rows from `a`'s subtree, in key order, with `f` for each page)
     const pages = async (f: (page: Entry[]) => Promise<boolean | void>) => {
@@ -3417,6 +3429,7 @@ export class Workspace {
           for (const key of found) if (!(await this.isStale("files", key))) throw new WorkspaceError("exists", `${key} is there already (as a file not yet listed)`);
         }
       });
+      await passGate(gate, "publishing:large");
       // (the publication: the top moved, its op logged, the record published, one transaction (r4 §1))
       const ops: Op[] = [];
       const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
