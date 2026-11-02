@@ -484,7 +484,7 @@ import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, normPath, kindOf, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
@@ -2982,6 +2982,7 @@ async function infoWhen(ok, ms = 5000) {
 const agentFiles = () => window.sagebrush.workspace ?? null;
 const entryOut = (e) => e && { path: e.path, kind: e.kind, ...(e.mode ? { language: e.mode } : {}), ...(e.size !== undefined ? { size: e.size } : {}), updated: e.updated };
 const MAX_TOOL_TEXT = 1 << 20;
+const MAX_NOTEBOOK_SOURCE = 8 * 2 ** 20;
 /** The notebook as a standalone HTML page: its rendered Markdown, its code and its outputs (pictures included), no script. */
 function notebookHtml() {
   const clean = (el) => {
@@ -3017,6 +3018,9 @@ const notebookTools = [
       if (!LANGS.includes(language)) return toolFail(`language is one of ${LANGS.join(", ")}`);
       if (name !== undefined && !(name.trim() && name.length <= 200)) return toolFail("name is 1 to 200 characters");
       if (codes && codes.length > 500) return toolFail("at most 500 cells");
+      // (its source bounded as the agent protocol bounds a document's content: 8 MiB of UTF-8)
+      const bytes = codes ? new TextEncoder().encode(codes.join("")).length : 0;
+      if (bytes > MAX_NOTEBOOK_SOURCE) return toolFail(`the cells are ${bytes} bytes of source, at most ${MAX_NOTEBOOK_SOURCE}`);
       saveNow();
       await openNew(name?.trim() || "Untitled", language, codes?.length ? codes : [""], true);
       // (saved now, so its file is in the person's files when the answer says where)
@@ -3120,21 +3124,25 @@ const notebookTools = [
       const bad = argProblem(args, { path: "string", text: "string", base64: "string" }, ["path"]);
       if (bad) return toolFail(bad);
       if ((args.text === undefined) === (args.base64 === undefined)) return toolFail("give text or base64, one of them");
-      if (/\.(ipynb|board\.json)$/i.test(args.path)) return toolFail("a notebook or board isn't written here: use new_notebook, or the workspace verbs");
+      // (the path as the workspace takes it, first: "/x.ipynb/" is /x.ipynb, a notebook, and refused; "//" and "./" are
+      // no paths: astra's advisory on #516)
+      let path;
+      try { path = normPath(args.path); } catch (e) { return toolFail(String(e?.message ?? e)); }
+      if (kindOf(path) !== "file") return toolFail(`${path} is a ${kindOf(path)}: a notebook or board isn't written here (use new_notebook, or the workspace verbs)`);
       const w = agentFiles();
       if (!w) return toolFail("the person's files aren't open in this page");
       let content;
       try { content = args.text !== undefined ? args.text : Uint8Array.from(atob(args.base64), (ch) => ch.charCodeAt(0)); } catch { return toolFail("base64 isn't valid"); }
       try {
-        const old = await w.stat(args.path);
-        if (old && old.kind !== "file") return toolFail(`${args.path} is a ${old.kind}`);
-        if (old) { const r = await w.read(args.path); await w.write(args.path, content, { base: r.rev ?? r.entry.rev }); }
-        else await w.create(args.path, { content });
+        const old = await w.stat(path);
+        if (old && old.kind !== "file") return toolFail(`${path} is a ${old.kind}`);
+        if (old) { const r = await w.read(path); await w.write(path, content, { base: r.rev ?? r.entry.rev }); }
+        else await w.create(path, { content });
         // (and to the interpreters running now, as an upload is: code reads it at once; the reactive notebook's cells
         // that read it rerun)
-        const e = await w.stat(args.path);
+        const e = await w.stat(path);
         if (e) filePut(e.path, typeof content === "string" ? new TextEncoder().encode(content) : content);
-        return toolJson({ entry: entryOut(await w.stat(args.path)) });
+        return toolJson({ entry: entryOut(e) });
       } catch (e) { return toolFail(String(e?.message ?? e)); }
     },
   },
