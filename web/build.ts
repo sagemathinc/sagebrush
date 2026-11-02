@@ -334,6 +334,15 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   ENGINE = { id, api: ENGINE_API, files: Object.fromEntries(Object.entries(files).map(([f, d]) => [f, d.sha256])) };
   console.log(`engine ${id} (api ${ENGINE_API}): web/dist/engine/${id}/`);
 }
+// A board page takes only the 4 KiB MyST rule (web/notebook/myst-head.js), never the MyST reader
+// (web/notebook/myst.js) or renderer (web/myst): plan-myst-notebooks-p2 r2 §11.3 (its uploads and "Open as a board"
+// need only the rule; a MyST .md opened as a notebook goes to the notebook page)
+function boardMystClosure(what: string, r: any) {
+  const inputs = Object.keys(r.metafile?.inputs ?? {}).map((p) => p.replace(/\\/g, "/"));
+  if (!inputs.some((p) => /(^|\/)web\/notebook\/myst-head\.js$/.test(p))) throw new Error(`${what} doesn't contain web/notebook/myst-head.js`);
+  const heavy = inputs.filter((p) => /(^|\/)web\/notebook\/myst\.js$|(^|\/)web\/myst\//.test(p));
+  if (heavy.length) throw new Error(`${what} contains ${heavy.join(", ")}: a board page takes only web/notebook/myst-head.js`);
+}
 // Boards (design/board.md), at /board/, with their example documents
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
@@ -344,6 +353,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
     process.exit(1);
   }
   builds.push(["the board", r]);
+  boardMystClosure("the board", r);
   // (the command line's `board render` math, MathJax: in the CLI's bundle,
   // not a page's; built here only to list its packages, so that the
   // packages that carry the CLI name them, src/board-math.ts)
@@ -377,6 +387,7 @@ for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new E
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
   const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
+  boardMystClosure("the board without sync (the frame, exports)", ns);
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
   const nosync = readFileSync(join(nosyncDir, "board.js"), "utf8");
   writeFileSync(join(here, "dist", "board", "board-nosync.js"), nosync);
