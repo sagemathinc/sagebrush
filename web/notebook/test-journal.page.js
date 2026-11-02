@@ -1580,6 +1580,12 @@ async function syncWireRows() {
 // ---- DEV's switch on the notebook page (astra's DEVSW-2, daybreak3): the page's own reopenJournaled, shownReadOnly and
 // docSyncReload, as index.html has them, run with what they use given to them; and the switch over a real workspace
 async function switchFunctions(deps) {
+  // (navLease: the page's navigation lease (B1, #447 r5c), defined outside this slice; here a lease with no Move to
+  // Trash hold, as in these tests: its end a no-op, nothing went to Trash meanwhile. A test's own deps may override it.
+  // Set on the test's own object: the functions read deps live (`with`), and the tests change them as they go)
+  if (!("navLease" in deps)) deps.navLease = async () => Object.assign(() => {}, { after: null });
+  // (trashTest: the page's Move to Trash test hooks (B1), none here: no pauses)
+  if (!("trashTest" in deps)) deps.trashTest = {};
   const src = await (await fetch("./page-src.html")).text();
   const a = src.indexOf("// (DEV's switch, after the journal's activation"), b = src.indexOf("let journalKit = null;", a);
   if (a < 0 || b < 0) throw new Error("the page's switch functions weren't found");
