@@ -1,18 +1,19 @@
 """Plotting an elliptic curve over QQ or RR (E.plot(), plot(E)): Sage
 10.9's EllipticCurve_generic.plot, ported line by line.  Loaded on first
 use, so the start doesn't carry it.
-
-EXAMPLES::
-
-    sage: import _sage_ec_plot
-    sage: _sage_ec_plot.plot(EllipticCurve([0, -1]))
-    Graphics object consisting of 1 graphics primitive
 """
 
 
 def plot(E, xmin=None, xmax=None, components='both', **args):
     """The real points of E, as Sage draws them (see
-    EllipticCurve_rational_field.plot)."""
+    EllipticCurve_rational_field.plot).
+
+    EXAMPLES::
+
+        sage: import _sage_ec_plot
+        sage: _sage_ec_plot.plot(EllipticCurve([0, -1]))
+        Graphics object consisting of 1 graphics primitive
+    """
 
     import math
     from _sage_ec import _real_roots_in

@@ -3815,6 +3815,136 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
  },
+ "lib/_sage_ec_plot.py :: plot :: I.append((r[-1], xmax, '<')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((r[0], xmax, '<')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((xmin, xmax, '=')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((xmin, xmax, '=')) #1": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: def plot(E, xmin=None, xmax=None, components='both', **args): #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: elif xmax >= r[1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: elif xmin >= xmax: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if components in ['bounded', 'both'] and len(r) > 1 and (xmin < r[1] or xmax > r[0]): #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if components in ['unbounded', 'both'] and xmax > r[-1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax >= r[1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is not None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is not None: #1": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmin is None or xmax is None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: raise ValueError(\"xmax must be None if xmin is a tuple\") #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: raise ValueError(\"xmin must be less than xmax\") #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: span = xmaxs - xmins #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmax = float(xmax) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmax = xmaxs + .02 * span #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs = [] #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs = max(xmaxs) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(flex + 2 * (flex - r[-1])) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(max(roots(branch(ymax)) + roots(branch(ymin)))) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(r[1]) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmin, xmax = xmin #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: ymax = 2.5 * max([f1(a) for a in critx]) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4772,135 +4902,15 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: I.append((r[-1], xmax, '<')) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: I.append((r[0], xmax, '<')) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: I.append((xmin, xmax, '=')) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: I.append((xmin, xmax, '=')) #1": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: def plot(self, xmin=None, xmax=None, components='both', **args): #0": {
   "class": "none",
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: elif xmax >= r[1]: #0": {
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: return _sage_ec_plot.plot(self, xmin, xmax, components, **args) #0": {
   "class": "none",
   "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: elif xmin >= xmax: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if components in ['bounded', 'both'] and len(r) > 1 and (xmin < r[1] or xmax > r[0]): #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if components in ['unbounded', 'both'] and xmax > r[-1]: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if xmax >= r[1]: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if xmax is None: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if xmax is not None: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if xmax is not None: #1": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: if xmin is None or xmax is None: #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: raise ValueError(\"xmax must be None if xmin is a tuple\") #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: raise ValueError(\"xmin must be less than xmax\") #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: span = xmaxs - xmins #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmax = float(xmax) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmax = xmaxs + .02 * span #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmaxs = [] #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmaxs = max(xmaxs) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmaxs.append(flex + 2 * (flex - r[-1])) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmaxs.append(max(roots(branch(ymax)) + roots(branch(ymin)))) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmaxs.append(r[1]) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: xmin, xmax = xmin #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: ymax = 2.5 * max([f1(a) for a in critx]) #0": {
-  "class": "none",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
