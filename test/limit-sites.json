@@ -3815,6 +3815,11 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
  },
+ "lib/_sage_ec_rr.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4901,11 +4906,6 @@
   "class": "none",
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
- },
- "lib/_sage_modular.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
-  "class": "coverage",
-  "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
