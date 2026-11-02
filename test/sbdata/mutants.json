@@ -1,0 +1,247 @@
+{
+ "_doc": "Replay layer controls: one mutant per defense, each with its exact expected FAIL set (row ids from make.py; H rows from the test). Anchors (mutations.tsv) are written against the code after it exists, each anchor exactly once; the FAIL sets below are frozen now. Every row not listed must PASS under that mutant.",
+ "M-host-case": [
+  "A1"
+ ],
+ "M-trailing-dot": [
+  "A2"
+ ],
+ "M-default-port": [
+  "A3",
+  "A4"
+ ],
+ "M-unreserved-decode": [
+  "A8",
+  "A9",
+  "A11"
+ ],
+ "M-malformed-pct": [
+  "A12",
+  "A13"
+ ],
+ "M-dot-segments": [
+  "A15",
+  "A16",
+  "A17",
+  "A18"
+ ],
+ "M-userinfo": [
+  "A19",
+  "E15"
+ ],
+ "M-empty-host-labels": [
+  "A20",
+  "A21"
+ ],
+ "M-ip-literal": [
+  "A22"
+ ],
+ "M-port-range": [
+  "A24a",
+  "A24b"
+ ],
+ "M-ascii-gate": [
+  "A25",
+  "A26"
+ ],
+ "M-method": [
+  "A29a",
+  "A29b",
+  "A29c",
+  "F12"
+ ],
+ "M-scheme": [
+  "A30a"
+ ],
+ "M-generic-json-parser": [
+  "B8c",
+  "B8d",
+  "B8e",
+  "B12",
+  "B13",
+  "B19",
+  "B20",
+  "B22b",
+  "B26"
+ ],
+ "M-version-format": [
+  "B4",
+  "B5"
+ ],
+ "M-required-fields": [
+  "B6-endpoint",
+  "B6-url",
+  "B6-method",
+  "B6-status",
+  "B6-fetched_at",
+  "B6-sha256",
+  "B6-size",
+  "B6-content_type",
+  "B6-via",
+  "B6-source",
+  "B6-terms",
+  "B6-recorded_by"
+ ],
+ "M-sha-format": [
+  "B7a",
+  "B7b",
+  "B7c"
+ ],
+ "M-size-domain": [
+  "B8a",
+  "B8b"
+ ],
+ "M-key-mismatch": [
+  "B14"
+ ],
+ "M-cap-entries": [
+  "B9b"
+ ],
+ "M-cap-url": [
+  "B10b",
+  "B10d"
+ ],
+ "M-cap-key-derived": [
+  "B10e"
+ ],
+ "M-cap-metadata": [
+  "B11b",
+  "B11d"
+ ],
+ "M-cap-folder": [
+  "B16b"
+ ],
+ "M-cap-entry-size": [
+  "B17b"
+ ],
+ "M-cap-file-bytes": [
+  "B18b"
+ ],
+ "M-encoding": [
+  "B21a",
+  "B21b"
+ ],
+ "M-via-enum": [
+  "B15a"
+ ],
+ "M-converted-from": [
+  "B15b"
+ ],
+ "M-source-host": [
+  "B24"
+ ],
+ "M-manifest-fred": [
+  "B25a",
+  "B25b"
+ ],
+ "M-revision": [
+  "B27"
+ ],
+ "M-manifest-credential": [
+  "B28"
+ ],
+ "M-sha-recheck-skipped": [
+  "C2",
+  "C14b"
+ ],
+ "M-length-check-off": [
+  "C13"
+ ],
+ "M-reread-after-verify": [
+  "C1",
+  "H5"
+ ],
+ "M-nofollow-dropped": [
+  "C6",
+  "D9"
+ ],
+ "M-component-symlink": [
+  "C7",
+  "C8",
+  "D5"
+ ],
+ "M-regular-file": [
+  "C10b"
+ ],
+ "M-nonblock-dropped": [
+  "C10a"
+ ],
+ "M-farthest-wins": [
+  "D2"
+ ],
+ "M-walk-above-root": [
+  "D4"
+ ],
+ "M-d6-fallback": [
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "E22"
+ ],
+ "M-prefix-containment": [
+  "D13"
+ ],
+ "M-no-realpath-cwd": [
+  "D12"
+ ],
+ "M-fred-removed": [
+  "E2",
+  "E3",
+  "E4",
+  "E5"
+ ],
+ "M-fred-after-lookup": [
+  "E3"
+ ],
+ "M-fred-hosts-api-only": [
+  "E4",
+  "E5"
+ ],
+ "M-redact-raw-name": [
+  "E9"
+ ],
+ "M-redact-case": [
+  "E7",
+  "E8"
+ ],
+ "M-redact-substring": [
+  "E12",
+  "E13",
+  "E14"
+ ],
+ "M-redact-first-only": [
+  "E10"
+ ],
+ "M-redact-blank": [
+  "E11"
+ ],
+ "M-redact-userinfo": [
+  "E15"
+ ],
+ "M-redact-fragment": [
+  "E16"
+ ],
+ "M-redact-unparseable": [
+  "E17"
+ ],
+ "M-header-refusal": [
+  "F6",
+  "F7",
+  "F8",
+  "F9",
+  "F10",
+  "F11"
+ ],
+ "M-head-from-get": [
+  "F14"
+ ],
+ "M-spy-not-in-worker": [
+  "H2",
+  "H3"
+ ],
+ "M-forbidden-import": [
+  "H1"
+ ]
+}

@@ -1791,6 +1791,15 @@ function chdir(p: string) {
   }
 }
 
+// The data replay layer's root (_fs.data_root): set once by the host before
+// any Python runs (the CLI: --data-root DIR, else its starting directory),
+// as a realpath; null on a host that sets none.
+let dataRoot: string | null = null;
+export function setDataRoot(dir: string): void {
+  if (dataRoot !== null) return; // (the first host setting wins)
+  dataRoot = require("fs").realpathSync(dir);
+}
+
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
 
 newBuiltinModule("_fs", (m) => {
@@ -1879,6 +1888,57 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
   fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
   fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
+  // (the data replay layer, lib/_sbdata.py, replay-layer r2 §2.2-2.3: the
+  // trusted data root fixed before any Python runs (null where the host set
+  // none: replay then fails closed); a no-follow, nonblocking, regular-file-
+  // only read of at most max bytes + 1 (the caller compares the length), or
+  // a refusal code, never a host path; lstat's kind, device and inode; and
+  // realpath, which os lacks (no os.readlink))
+  fn(m, "data_root", () => dataRoot);
+  fn(m, "read_nofollow", (path: string, max: any) => {
+    const limit = Number(max);
+    let fd = -1;
+    try {
+      fd = fs.openSync(at(path), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) return "not-regular";
+      if (st.size > limit) return "too-large";
+      const buf = Buffer.alloc(limit + 1);
+      let n = 0;
+      while (n < buf.length) {
+        let k = 0;
+        try {
+          k = fs.readSync(fd, buf, n, buf.length - n, null);
+        } catch (e: any) {
+          if (e?.code === "EAGAIN") break; // (no more bytes now: a nonblocking descriptor)
+          throw e;
+        }
+        if (k <= 0) break;
+        n += k;
+      }
+      return new PyBytes(new Uint8Array(buf.subarray(0, n)));
+    } catch (e: any) {
+      return e?.code === "ELOOP" ? "symlink" : "unreadable";
+    } finally {
+      if (fd >= 0) try { fs.closeSync(fd); } catch {}
+    }
+  });
+  fn(m, "lstat_kind", (path: string) => {
+    try {
+      const st = fs.lstatSync(at(path), { bigint: true });
+      const kind = st.isSymbolicLink() ? "link" : st.isDirectory() ? "dir" : st.isFile() ? "file" : "other";
+      return tuple([kind, String(st.dev), String(st.ino)]);
+    } catch {
+      return tuple(["none", "", ""]);
+    }
+  });
+  fn(m, "realpath", (path: string) => {
+    try {
+      return fs.realpathSync(at(path));
+    } catch {
+      return null;
+    }
+  });
   // (this process's CPU time, all its threads, user and system apart, in
   // seconds: for tests' diagnostics, sbx's CPU ratio, shard-7 proposal r1;
   // time.process_time() is their sum)
