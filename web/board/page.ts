@@ -66,7 +66,7 @@ import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showS
 // that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
-import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
@@ -303,6 +303,12 @@ function takeConverted(id: string): string {
 // copy, made beside it, opened, the file left as it is; one replaced
 // meanwhile (another fid), or that isn't a board, said, nothing made
 let openAsFailed = "";
+// (a Jupytext MyST .md sent here (agents-ui's N-2): its notice offers the notebook page, by a link focused once shown)
+let offerNotebook = false;
+// the notebook page's address that opens a workspace file as a notebook (index.html ?openas)
+const asNotebook = (e: { path: string; fid: string }) => "/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid);
+// (a name as Markdown text: its marks escaped)
+const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
 {
   const at = q.get("openas"), fid = q.get("fid");
   if (at !== null && !embedded()) {
@@ -314,7 +320,12 @@ let openAsFailed = "";
       if (!e || e.kind !== "file" || e.fid !== fid) throw new Error(`"${at}" isn't there any more`);
       const made = await convertedAsBoard(ws, e, "python");
       q.set("doc", "local:" + made.ref);
-    } catch (err) { openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`; }
+    } catch (err) {
+      if (err instanceof MystNotebookError && fid !== null) {
+        openAsFailed = `**"${mdText(nameOf(at))}" is a Jupytext MyST notebook,** so no board was made from it. [Open it as a notebook](<${asNotebook({ path: at, fid })}>)`;
+        offerNotebook = true;
+      } else openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`;
+    }
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
@@ -1053,6 +1064,8 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
 }
 // (a data file opened as a document: its converted copy, made beside it, opened; the original stays; why not, if not)
 async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Promise<string | null> {
+  // (a Jupytext MyST .md as a notebook: the notebook page reads it, which this page's bundle doesn't carry the reader for)
+  if (as === "notebook" && /\.md$/i.test(e.path)) { location.assign(asNotebook(e as { path: string; fid: string })); return null; }
   try {
     const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode, said: (m) => carryNotice(m) });
     openEntry(made, "here");
@@ -1400,6 +1413,12 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// (N-2's offer focused once the caption shows it)
+if (offerNotebook) {
+  let tries = 0;
+  const focusOffer = () => { const a = document.querySelector<HTMLAnchorElement>('a[href^="/?openas="]'); if (a) a.focus(); else if (++tries < 50) setTimeout(focusOffer, 100); };
+  focusOffer();
+}
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || pairLink())) mountAgentPairing(ws, { button: floatingButton() });
