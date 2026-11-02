@@ -34,7 +34,18 @@ const ARG = /^[^\s'"$`\\;&|<>()*?]+$/;
 const WORKFLOWS = ".github/workflows";
 
 export function suites() {
-  const out = execFileSync("git", ["ls-files", "-z", "--", "web/**/test-*.mjs", "web/test-*.mjs", "scripts/test-*.mjs"], { encoding: "utf8" });
+  const out = execFileSync(
+    "git",
+    [
+      "ls-files",
+      "-z",
+      "--",
+      "web/**/test-*.mjs",
+      "web/test-*.mjs",
+      "scripts/test-*.mjs",
+    ],
+    { encoding: "utf8" },
+  );
   return [...new Set(out.split("\0").filter(Boolean))].sort();
 }
 
@@ -44,18 +55,35 @@ export function parseHeader(text, where = "") {
   const target = words.shift();
   if (target === "none" || target === "inline") {
     const reason = words.join(" ");
-    if (!/^\(.+\)$/.test(reason)) throw new Error(`${where}: "ci: ${target}" needs its reason in parentheses`);
+    if (!/^\(.+\)$/.test(reason))
+      throw new Error(
+        `${where}: "ci: ${target}" needs its reason in parentheses`,
+      );
     return { kind: target, reason };
   }
-  if (!TARGET.test(target ?? "")) throw new Error(`${where}: "${target}" is not a target (JOB, JOB/GROUP, JOB.N)`);
-  const run = { kind: "run", target, order: Infinity, runner: "node", test: false, env: [], args: [] };
+  if (!TARGET.test(target ?? ""))
+    throw new Error(
+      `${where}: "${target}" is not a target (JOB, JOB/GROUP, JOB.N)`,
+    );
+  const run = {
+    kind: "run",
+    target,
+    order: Infinity,
+    runner: "node",
+    test: false,
+    env: [],
+    args: [],
+  };
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     let m;
     if (w === "--") {
       run.args = words.slice(i + 1);
       const bad = run.args.find((a) => !ARG.test(a));
-      if (bad !== undefined) throw new Error(`${where}: argument ${JSON.stringify(bad)} needs a shell: make the suite inline`);
+      if (bad !== undefined)
+        throw new Error(
+          `${where}: argument ${JSON.stringify(bad)} needs a shell: make the suite inline`,
+        );
       break;
     } else if ((m = /^order=(-?[0-9]+)$/.exec(w))) run.order = Number(m[1]);
     else if ((m = /^runner=(node|bun)$/.exec(w))) run.runner = m[1];
@@ -64,7 +92,8 @@ export function parseHeader(text, where = "") {
     else if ((m = /^env=(.*)$/.exec(w)) && ENV.test(m[1])) run.env.push(m[1]);
     else throw new Error(`${where}: unknown option ${JSON.stringify(w)}`);
   }
-  if (run.test && run.runner !== "node") throw new Error(`${where}: test is node --test`);
+  if (run.test && run.runner !== "node")
+    throw new Error(`${where}: test is node --test`);
   return run;
 }
 
@@ -81,21 +110,41 @@ export function headers(file, text) {
 // The targets a suite's header names (a path from the repository's root): for a suite's own workflow contract.
 export function targetsOf(file) {
   const root = fileURLToPath(new URL("..", import.meta.url));
-  return headers(file, readFileSync(join(root, file), "utf8")).filter((h) => h.kind === "run").map((h) => h.target);
+  return headers(file, readFileSync(join(root, file), "utf8"))
+    .filter((h) => h.kind === "run")
+    .map((h) => h.target);
 }
 
 export function command(run) {
-  return [...run.env, run.runner, ...(run.test ? ["--test"] : []), run.file, ...run.args].join(" ");
+  return [
+    ...run.env,
+    run.runner,
+    ...(run.test ? ["--test"] : []),
+    run.file,
+    ...run.args,
+  ].join(" ");
 }
 
 function allHeaders() {
-  return suites().map((file) => ({ file, found: headers(file, readFileSync(file, "utf8")) }));
+  return suites().map((file) => ({
+    file,
+    found: headers(file, readFileSync(file, "utf8")),
+  }));
 }
 
 function plan(all, target) {
-  const runs = all.flatMap(({ found }) => found).filter((h) => h.kind === "run" && (target === undefined || h.target === target));
+  const runs = all
+    .flatMap(({ found }) => found)
+    .filter(
+      (h) => h.kind === "run" && (target === undefined || h.target === target),
+    );
   // (stable: within a file, its header lines' order)
-  return runs.sort((a, b) => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0) || a.order - b.order || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return runs.sort(
+    (a, b) =>
+      (a.target < b.target ? -1 : a.target > b.target ? 1 : 0) ||
+      a.order - b.order ||
+      (a.file < b.file ? -1 : a.file > b.file ? 1 : 0),
+  );
 }
 
 function workflowText() {
@@ -111,23 +160,46 @@ export function check(all, workflows) {
   const named = new Set();
   // (commands only: the workflows' comments don't count)
   for (const { f, text } of workflows) {
-    const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
-    for (const m of code.matchAll(/node scripts\/web-tests\.mjs run ([^\s"']+)/g)) ran.set(m[1], f);
-    for (const m of code.matchAll(/(?:web|scripts)\/[A-Za-z0-9_./-]*test-[A-Za-z0-9_.-]+\.mjs/g)) named.add(m[0]);
+    const code = text
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .join("\n");
+    for (const m of code.matchAll(
+      /node scripts\/web-tests\.mjs run ([^\s"']+)/g,
+    ))
+      ran.set(m[1], f);
+    for (const m of code.matchAll(
+      /(?:web|scripts)\/[A-Za-z0-9_./-]*test-[A-Za-z0-9_.-]+\.mjs/g,
+    ))
+      named.add(m[0]);
   }
   const targets = new Set();
   for (const { file, found } of all) {
-    if (found.length === 0) problems.push(`${file}: no "// ci:" header in its first ${HEAD_LINES} lines`);
+    if (found.length === 0)
+      problems.push(
+        `${file}: no "// ci:" header in its first ${HEAD_LINES} lines`,
+      );
     const kinds = new Set(found.map((h) => h.kind));
-    if (kinds.has("none") && kinds.size > 1) problems.push(`${file}: "ci: none" with other headers`);
-    if (kinds.has("inline") && !named.has(file)) problems.push(`${file}: "ci: inline" but no workflow names it`);
-    if (!kinds.has("inline") && named.has(file)) problems.push(`${file}: a workflow names it, but its header isn't "ci: inline"`);
-    for (const h of found) if (h.kind === "run") {
-      targets.add(h.target);
-      if (!ran.has(h.target)) problems.push(`${file}: target ${h.target} isn't run by any workflow (node scripts/web-tests.mjs run ${h.target})`);
-    }
+    if (kinds.has("none") && kinds.size > 1)
+      problems.push(`${file}: "ci: none" with other headers`);
+    if (kinds.has("inline") && !named.has(file))
+      problems.push(`${file}: "ci: inline" but no workflow names it`);
+    if (!kinds.has("inline") && named.has(file))
+      problems.push(
+        `${file}: a workflow names it, but its header isn't "ci: inline"`,
+      );
+    for (const h of found)
+      if (h.kind === "run") {
+        targets.add(h.target);
+        if (!ran.has(h.target))
+          problems.push(
+            `${file}: target ${h.target} isn't run by any workflow (node scripts/web-tests.mjs run ${h.target})`,
+          );
+      }
   }
-  for (const [t, f] of ran) if (!targets.has(t)) problems.push(`${f}: runs target ${t}, which no suite names`);
+  for (const [t, f] of ran)
+    if (!targets.has(t))
+      problems.push(`${f}: runs target ${t}, which no suite names`);
   return problems;
 }
 
@@ -143,15 +215,26 @@ function main(argv) {
     }
     const problems = check(all, workflowText());
     for (const p of problems) console.error(p);
-    const runs = all.flatMap(({ found }) => found).filter((h) => h.kind === "run").length;
-    console.log(`${all.length} suites, ${runs} runs: ${problems.length ? `${problems.length} problems` : "ok"}`);
+    const runs = all
+      .flatMap(({ found }) => found)
+      .filter((h) => h.kind === "run").length;
+    console.log(
+      `${all.length} suites, ${runs} runs: ${problems.length ? `${problems.length} problems` : "ok"}`,
+    );
     return problems.length ? 1 : 0;
   }
   if (cmd === "plan") {
     const json = rest.includes("--json");
     const target = rest.find((a) => a !== "--json");
     const runs = plan(allHeaders(), target);
-    if (json) console.log(JSON.stringify(runs.map((r) => ({ target: r.target, command: command(r) })), null, 1));
+    if (json)
+      console.log(
+        JSON.stringify(
+          runs.map((r) => ({ target: r.target, command: command(r) })),
+          null,
+          1,
+        ),
+      );
     else for (const r of runs) console.log(`${r.target}\t${command(r)}`);
     return 0;
   }
@@ -163,22 +246,39 @@ function main(argv) {
     }
     for (const r of runs) {
       console.log(`START ${r.target}: ${command(r)}`);
-      const env = { ...process.env, ...Object.fromEntries(r.env.map((e) => [e.slice(0, e.indexOf("=")), e.slice(e.indexOf("=") + 1)])) };
-      const res = spawnSync(r.runner, [...(r.test ? ["--test"] : []), r.file, ...r.args], { stdio: "inherit", env });
+      const env = {
+        ...process.env,
+        ...Object.fromEntries(
+          r.env.map((e) => [
+            e.slice(0, e.indexOf("=")),
+            e.slice(e.indexOf("=") + 1),
+          ]),
+        ),
+      };
+      const res = spawnSync(
+        r.runner,
+        [...(r.test ? ["--test"] : []), r.file, ...r.args],
+        { stdio: "inherit", env },
+      );
       if (res.error) {
         console.error(`web-tests: ${r.runner}: ${res.error.message}`);
         return 127;
       }
       if (res.status !== 0) {
-        console.error(`FAILED ${r.target}: ${command(r)} (${res.signal ?? `exit ${res.status}`})`);
+        console.error(
+          `FAILED ${r.target}: ${command(r)} (${res.signal ?? `exit ${res.status}`})`,
+        );
         // (as the shell reports a signal: 128 + its number)
         return res.status ?? 128 + (constants.signals[res.signal] ?? 0);
       }
     }
     return 0;
   }
-  console.error("usage: node scripts/web-tests.mjs run TARGET | plan [TARGET] [--json] | check");
+  console.error(
+    "usage: node scripts/web-tests.mjs run TARGET | plan [TARGET] [--json] | check",
+  );
   return 2;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exitCode = main(process.argv.slice(2));
+if (import.meta.url === `file://${process.argv[1]}`)
+  process.exitCode = main(process.argv.slice(2));
