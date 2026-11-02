@@ -24,7 +24,8 @@
 //   notebooks   500 serial saves of a 50-cell notebook
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
 //   CHROME=chromium PLAYWRIGHT=<dir with playwright 1.64.1> bun web/history/bench-history-cost.mjs [--out report.json]
-// BROWSERS=chromium,firefox (the default, both) picks the legs.  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
+// BROWSERS=chromium,firefox (the default, both) picks the legs.  HCOST_FF_SCALE (default 1) multiplies every Firefox
+// workload's save count (O1, under review: runs long enough to span several of Firefox's incremental-GC cycles).  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -88,7 +89,7 @@ export function resolution() {
   while (steps.length < 200) { const t = performance.now(); if (t > last) { steps.push(t - last); last = t; } }
   return pct(steps, 0.5);
 }
-export async function bench(config, workload) {
+export async function bench(config, workload, scale = 1) {
   const res = resolution();
   const W = await import("./ws-" + (config === "set" ? "head" : config) + ".js");
   const name = "hcost-" + config + "-" + workload + "-" + (++runs), mainName = name + "-m";
@@ -105,8 +106,8 @@ export async function bench(config, workload) {
   let ws = [w];
   if (workload === "concurrent") {
     ws = [w, ...(await Promise.all([1, 2, 3].map(() => W.Workspace.open({ name, mainName }))))];
-    await Promise.all(ws.map(async (x, k) => { for (let i = 0; i < N.concurrent; i++) await one(x, i * 4 + k, i % 2 ? "file" : "nb"); }));
-  } else for (let i = 0; i < N[workload]; i++) await one(w, i, workload === "files" ? "file" : "nb");
+    await Promise.all(ws.map(async (x, k) => { for (let i = 0; i < N.concurrent * scale; i++) await one(x, i * 4 + k, i % 2 ? "file" : "nb"); }));
+  } else for (let i = 0; i < N[workload] * scale; i++) await one(w, i, workload === "files" ? "file" : "nb");
   const r = { n: out.length, p95: pct(out, 0.95), p99: pct(out, 0.99), res };
   for (const x of ws) x.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
@@ -163,7 +164,8 @@ for (const [xs, want, what] of [
   [[30, 59, 40, 40, 40], false, "max - min 29 > 5 but max < 2 x min: not past"],
   [[4, 4, 4, 4, 4], false, "no spread: not past"],
 ]) if (spreadStop(xs) !== want) die(`the spread STOP's boundary control: ${what} (${xs.join(", ")})`);
-const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5;
+const CONFIGS = ["base", "aa", "head", "delay", "set"], ROUNDS = 5, FF_SCALE = +(process.env.HCOST_FF_SCALE ?? 1);
+if (!(Number.isInteger(FF_SCALE) && FF_SCALE >= 1 && FF_SCALE <= 20)) die("HCOST_FF_SCALE: an integer 1..20");
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const report = { master, statistic: "daybreak3: median of within-round paired p95 deltas, T = min(1, max(0.5, 0.05 B))", browsers: {} };
 const verdicts = [];
@@ -177,7 +179,7 @@ try {
       for (let r = 0; r < ROUNDS; r++) {
         const turn = CONFIGS.map((_, k) => CONFIGS[(k + r) % CONFIGS.length]);
         order.push(turn);
-        for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)})`));
+        for (const c of turn) runs[c].push(await b.ev(`window.bench(${JSON.stringify(c)}, ${JSON.stringify(workload)}, ${bname === "firefox" ? FF_SCALE : 1})`));
       }
       if (CONFIGS.some((c) => runs[c].some((x) => !(x.n > 0 && Number.isFinite(x.p95) && Number.isFinite(x.p99) && Number.isFinite(x.res))))) die(`${bname} ${workload}: a run measured nothing`);
       const p95 = (c) => runs[c].map((x) => x.p95);
@@ -197,7 +199,7 @@ try {
       console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
       for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p95 ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])})`);
     }
-    report.browsers[bname] = { version: b.version, rows };
+    report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
     await b.close();
   }
 } finally {
