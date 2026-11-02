@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Agents draft support requests, people send them (the addendum to plan-support-requests r12): the WebMCP tool draft_support_request, its card and the draft's checks and URL (web/workspace/support-draft.ts), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +7728).",
+ "bytes": {
+  "cli/pyjs.cjs": 7800
+ }
+}
