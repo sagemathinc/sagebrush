@@ -1,12 +1,14 @@
 {
  "v": 1,
- "reason": "Curves over QQ: E.plot() / plot(E) ported from Sage 10.9 (ranges, components, horizontal tangents), base_extend/change_ring to QQ, ZZ, GF(p), Zmod(p) (lib/_sage_modular.py); line([]) with no primitive and Line.xdata/ydata (lib/sage_plot.py, lib/_graphics.py), with docstring examples. No new chunk. Re-measured by CI's size gate (run 41504742663) on the merge with master e3ceeb95 (the regenerated docs-index's line/line2d records included): cli/lib.gen.js +3660, cli/pyjs.cjs +8040, engine/lib/core.pre +1664, engine/lib/core.src +246, engine/lib/sage.pre +35042, engine/lib/sage.src +9104; no other row moves.",
+ "reason": "Curves over QQ: E.plot() / plot(E) ported from Sage 10.9 (ranges, components, horizontal tangents), base_extend/change_ring to QQ, ZZ, GF(p), Zmod(p) (lib/_sage_modular.py); line([]) with no primitive and Line.xdata/ydata (lib/sage_plot.py, lib/_graphics.py), with docstring examples. No new chunk. Measured with bun 1.4.4 (size-record.sh) on master 6eed8215 vs this PR's content head b1c77add: cli/lib.gen.js +3904, cli/pyjs.cjs +8236, engine/lib/core.pre +1664, engine/lib/core.src +246, engine/lib/sage-more.src +5890, engine/lib/sage.pre +7573, engine/lib/sage.src +3471, engine/sagebrush-worker.js +31; no other row moves.",
  "bytes": {
-  "cli/lib.gen.js": 3660,
-  "cli/pyjs.cjs": 8040,
+  "cli/lib.gen.js": 3904,
+  "cli/pyjs.cjs": 8236,
   "engine/lib/core.pre": 1664,
   "engine/lib/core.src": 246,
-  "engine/lib/sage.pre": 35042,
-  "engine/lib/sage.src": 9104
+  "engine/lib/sage-more.src": 5890,
+  "engine/lib/sage.pre": 7573,
+  "engine/lib/sage.src": 3471,
+  "engine/sagebrush-worker.js": 31
  }
 }
