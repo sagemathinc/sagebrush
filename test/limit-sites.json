@@ -3775,6 +3775,46 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
+ "lib/_sage_ec_ff.py :: EllipticCurvePoint_finite_field._other :: raise TypeError(\"unsupported operand parent(s) for +: '%s' and '%s'\" % (self.parent(), _sa().parent(Q))) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ec_ff.py :: EllipticCurve_finite_field.change_ring :: raise NotImplementedError(\"change_ring of an elliptic curve over %s to %s is not available in Sagebrush yet\" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "change_ring/base_extend of a curve over GF(p) to a ring other than a prime field or Zmod(p) of the same p (e.g. GF(p^k), QQ): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: EllipticCurve_finite_field.lift_x :: raise NotImplementedError(\"lift_x(extend=True) over a finite field is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "lift_x(extend=True) (points over a quadratic extension): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: _count :: raise NotImplementedError(\"the number of points of an elliptic curve over GF(p) with p >= 2^64 \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "the number of points over GF(p) for p >= 2^64 with j-invariant not 0 or 1728: Sage uses PARI's SEA, which Sagebrush lacks (an unsupported algorithm, not a cap)"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise NotImplementedError(\"elliptic curves over %s (not a field) are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "elliptic curves over a ring other than GF(p)/Zmod(p) with p prime (Zmod(n) composite, GF(p^k)): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "elliptic curves over a ring other than GF(p)/Zmod(p) with p prime (Zmod(n) composite, GF(p^k)): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise TypeError(\"unsupported operand parent(s) for -: '%s' and '%s'\" % (_sa().parent(c), R)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise TypeError(\"unsupported operand parent(s) for -: '%s' and '%s'\" % (c._parent, R)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",

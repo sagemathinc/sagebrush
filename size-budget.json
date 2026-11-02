@@ -49,6 +49,7 @@
   "engine/lib/mod-pyjs-pretty.src": 24565,
   "engine/lib/mod-python-docsearch.src": 11218,
   "engine/lib/mod-python-examples.src": 27977,
+  "engine/lib/mod-sage-ec-ff.src": 23918,
   "engine/lib/mod-sb-check.src": 4356,
   "engine/lib/mod-sbdata.src": 20193,
   "engine/lib/mod-sbx.src": 48044,
