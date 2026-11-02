@@ -42,7 +42,9 @@
  ],
  "M-ascii-gate": [
   "A25",
-  "A26"
+  "A26",
+  "B23a",
+  "B23b"
  ],
  "M-method": [
   "A29a",
@@ -149,6 +151,7 @@
  ],
  "M-reread-after-verify": [
   "C1",
+  "H2b",
   "H5"
  ],
  "M-nofollow-dropped": [
@@ -167,7 +170,12 @@
   "C10a"
  ],
  "M-farthest-wins": [
-  "D2"
+  "D2",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9"
  ],
  "M-walk-above-root": [
   "D4"
@@ -184,7 +192,7 @@
   "D13"
  ],
  "M-no-realpath-cwd": [
-  "D12"
+  "D12w"
  ],
  "M-fred-removed": [
   "E2",
@@ -196,6 +204,7 @@
   "E3"
  ],
  "M-fred-hosts-api-only": [
+  "B25b",
   "E4",
   "E5"
  ],
@@ -207,8 +216,6 @@
   "E8"
  ],
  "M-redact-substring": [
-  "E12",
-  "E13",
   "E14"
  ],
  "M-redact-first-only": [
@@ -238,7 +245,7 @@
   "F14"
  ],
  "M-spy-not-in-worker": [
-  "H2",
+  "H2b",
   "H3"
  ],
  "M-forbidden-import": [
