@@ -119,4 +119,4 @@ New mutants:
 - `M-surrogate-check-removed`;
 - `M-rc-unchecked`, which fails H6.
 
-Re-anchored: `M-ip-literal`, `M-port-range` and `M-cap-file-bytes` (whose read is now `ENTRY_CAP`, inside the native ceiling). The sets in mutants.json are traced by reading, and the DEV cross-check confirms them.
+Re-anchored: `M-ip-literal`, `M-port-range` and `M-cap-file-bytes` (whose read is now `ENTRY_CAP`, inside the native ceiling). The sets in mutants.json are traced by reading only: no DEV cross-check has run on this head yet. All 66 sets and the fail-first are to be re-derived with the exit status in force, and any set change will be reported with its trace before the freeze.
