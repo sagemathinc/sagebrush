@@ -368,6 +368,7 @@ export class WorkerKernel {
     if (m.overflow) rec.overflow = true;
     if (m.extra) rec.extra = m.extra;
     if (m.unused) rec.unused = m.unused;
+    if (m.files?.sources?.length) rec.sources = m.files.sources;
     if (m.error) rec.error = true;
     if (this.interrupted.delete(m.id)) rec.status = "interrupted";
     this.emit("run", rec);

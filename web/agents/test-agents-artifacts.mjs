@@ -745,13 +745,39 @@ try {
       await editorCases(w);
     }
     // (the narrow panes: the pane's width forced by a test-only style, in a 1400 px window; removed after)
-    for (const pw of [320, 330, 460]) {
+    // (B2-1/O-1: the editor's own box under 520 px stacks source above preview, each its full width; at 760 they're side
+    //  by side; the display equations in view need no sideways scroll and their numbers don't sit on the formula)
+    const stackJs = `(() => { const e = ${ED}, b = e.getBoundingClientRect(), l = e.querySelector('.tex-left').getBoundingClientRect(), r = e.querySelector('.tex-right').getBoundingClientRect();
+      return { box: Math.round(b.width), lw: Math.round(l.width), rw: Math.round(r.width), stacked: r.top >= l.bottom - 1 && l.height > 100 && r.height > 100, side: Math.abs(r.top - l.top) <= 1 && r.left >= l.right - 1 }; })()`;
+    const eqJs = `(() => { const right = ${ED}.querySelector('.tex-right'), vr = right.getBoundingClientRect(); right.scrollTop = 0;
+      const seen = [];
+      for (const d of right.querySelectorAll('.dmath')) {
+        const dr = d.getBoundingClientRect();
+        if (dr.height === 0 || dr.top < vr.top || dr.bottom > vr.bottom) continue;
+        // (the numbers: KaTeX's .katex-tag, an .eqn-num per numbered line (align), or a \\tag's .tag)
+        const tags = [...d.querySelectorAll('.katex-tag .eqn-num, .katex-tag, .tag')].map((t) => t.getBoundingClientRect()).filter((t) => t.width > 0);
+        // (the formula: every leaf element of the rendering outside the number, with a box)
+        const bases = [...d.querySelectorAll('.katex-html *')].filter((x) => x.childElementCount === 0 && !x.closest('.katex-tag, .tag')).map((x) => x.getBoundingClientRect()).filter((x) => x.width > 0 && x.height > 0);
+        const over = tags.some((t) => bases.some((x) => x.right > t.left + 0.5 && x.left < t.right - 0.5 && x.bottom > t.top && x.top < t.bottom));
+        seen.push({ scroll: d.scrollWidth - d.clientWidth, tags: tags.length, bases: bases.length, over });
+      }
+      return seen; })()`;
+    const stackCases = async (pw) => {
+      const st = await ev(stackJs);
+      if (st.box < 520) ok(st.stacked && st.lw >= st.box - 2 && st.rw >= st.box - 2, `B2-1@pane${pw}: under 520 px the source is above the preview, each the editor's full width`, st);
+      else ok(st.side, `B2-1@pane${pw}: at 520 px or more the source and preview are side by side`, st);
+      await sleep(300);
+      const eq = await ev(eqJs);
+      ok(eq.length > 0 && eq.some((e) => e.tags > 0) && eq.every((e) => e.scroll <= 2 && e.bases > 0 && !e.over), `O-1@pane${pw}: the display equations in view (at least one, with a number) need no sideways scroll (2 px of rounding allowed), and their numbers don't sit on the formula`, eq);
+    };
+    for (const pw of [320, 330, 460, 760]) {
       await size(1400); await sleep(400);
       await ev(`(() => { const st = document.createElement('style'); st.id = 'sbtest-pane'; st.textContent = 'body.has-artifact:not(.fullscreen) #artifacts { width: ${pw}px !important; }'; document.head.append(st); return true; })()`);
       await sleep(800);
       try {
         const got = await ev(`Math.round(document.querySelector('#artifacts').getBoundingClientRect().width)`);
         ok(got === pw, `A4/A8 pane@${pw}: the pane forced to ${pw} px`, { got });
+        await stackCases(pw);
         await editorCases(`pane${pw}`);
       } finally {
         await ev(`(document.getElementById('sbtest-pane')?.remove(), true)`); await sleep(400);

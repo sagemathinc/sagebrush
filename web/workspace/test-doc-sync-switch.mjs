@@ -1,6 +1,7 @@
-// DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): it fails closed.  Every combination of its
-// three conditions (the origin, the server's `available`, a running sync client): on only for DEV's own origin with
-// both others true; PROD's origin never, whatever else holds; nothing asked past the first failing condition.  And,
+// The switch for notebooks' contents (web/workspace/doc-sync-switch.ts), DEV's and PROD's: it fails closed.  Every
+// combination of its three conditions (the origin, the server's `available`, a running sync client): on only for
+// DEV's or PROD's own origin exactly with both others true; any other origin (look-alikes, http:, www.) never,
+// whatever else holds; nothing asked past the first failing condition.  And,
 // read from the sources, no way for a page, a URL or storage to widen it: the allowed origins are a frozen constant,
 // the pages call the gate without an origins argument, and only the switch's own block turns DOC_SYNC on.  Then the
 // switch's turning on (enableDocSync) with every failure injected, and a board page's following (followDocSync).
@@ -17,10 +18,11 @@ const check = (ok, what) => results.push([!!ok, what]);
 const J = JSON.stringify;
 
 const DEV = "https://dev.sagebrush.space", PROD = "https://sagebrush.space";
-check(J(DOC_SYNC_ORIGINS) === J([DEV]) && Object.isFrozen(DOC_SYNC_ORIGINS), "the allowed origins: DEV's only, frozen: " + J(DOC_SYNC_ORIGINS));
+check(J(DOC_SYNC_ORIGINS) === J([DEV, PROD]) && Object.isFrozen(DOC_SYNC_ORIGINS), "the allowed origins: DEV's and PROD's exactly, frozen: " + J(DOC_SYNC_ORIGINS));
 let pushed = "no throw";
-try { DOC_SYNC_ORIGINS.push(PROD); } catch (e) { pushed = "threw"; }
-check(pushed === "threw" && !DOC_SYNC_ORIGINS.includes(PROD), "the allowed origins can't be added to at run time");
+const OTHER = "https://evil.test";
+try { DOC_SYNC_ORIGINS.push(OTHER); } catch (e) { pushed = "threw"; }
+check(pushed === "threw" && !DOC_SYNC_ORIGINS.includes(OTHER), "the allowed origins can't be added to at run time");
 
 // (each status answer: what the fake fetch gives, and whether it is `available`)
 const statuses = {
@@ -28,32 +30,35 @@ const statuses = {
   "200 not available": () => new Response(J({ available: false, reason: "not_allowlisted", state: "off" }), { status: 200 }),
   "200 available as a string": () => new Response(J({ available: "true" }), { status: 200 }),
   "200 not JSON": () => new Response("<html>", { status: 200 }),
-  "404 (no sync route: PROD's site)": () => new Response("not found", { status: 404 }),
+  "404 (no sync route: a site without sync)": () => new Response("not found", { status: 404 }),
   "401": () => new Response(J({ error: "sign in first" }), { status: 401 }),
   "503 whose body says available": () => new Response(J({ available: true }), { status: 503 }),
   "202 whose body says available": () => new Response(J({ available: true }), { status: 202 }),
   "a network failure": () => { throw new TypeError("failed to fetch"); },
 };
 const clients = { running: async () => true, "not running": async () => false, "a failure": async () => { throw new Error("x"); }, "a truthy non-true": async () => "yes" };
-const origins = [DEV, PROD, "http://localhost:8000", "http://127.0.0.1:5173", "https://dev.sagebrush.space.evil.test", "https://DEV.sagebrush.space", "null", ""];
+const origins = [DEV, PROD, "http://localhost:8000", "http://127.0.0.1:5173", "https://dev.sagebrush.space.evil.test", "https://sagebrush.space.evil.test", "http://sagebrush.space", "https://www.sagebrush.space", "https://DEV.sagebrush.space", "null", ""];
 let cases = 0, wrong = [];
 for (const origin of origins) for (const [sname, sf] of Object.entries(statuses)) for (const [cname, cf] of Object.entries(clients)) {
   let asked = 0, askedClient = 0;
   const fetchFn = async (url) => { asked++; if (url !== origin + "/api/sync/v1/status") throw new Error("asked " + url); return sf(); };
   const got = await docSyncAllowed({ origin, fetch: fetchFn, clientRunning: () => { askedClient++; return cf(); } });
-  const want = origin === DEV && sname === "200 available" && cname === "running";
+  const ours = origin === DEV || origin === PROD;
+  const want = ours && sname === "200 available" && cname === "running";
   cases++;
   if (got !== want) wrong.push(`${origin} / ${sname} / ${cname}: ${got}`);
   // (nothing asked past the first failing condition)
-  if (origin !== DEV && (asked || askedClient)) wrong.push(`${origin}: asked the server or the client on an origin that isn't DEV's`);
-  if (origin === DEV && sname !== "200 available" && askedClient) wrong.push(`${origin} / ${sname}: asked the client after the server said no`);
+  if (!ours && (asked || askedClient)) wrong.push(`${origin}: asked the server or the client on an origin that isn't DEV's or PROD's`);
+  if (ours && sname !== "200 available" && askedClient) wrong.push(`${origin} / ${sname}: asked the client after the server said no`);
 }
-check(wrong.length === 0, `the gate over ${cases} combinations: on only for DEV + available + a running client; nothing asked past a failing condition: ` + J(wrong.slice(0, 5)));
+check(wrong.length === 0, `the gate over ${cases} combinations: on only for DEV or PROD + available + a running client; nothing asked past a failing condition: ` + J(wrong.slice(0, 5)));
 const prodAll = await docSyncAllowed({ origin: PROD, fetch: async () => statuses["200 available"](), clientRunning: async () => true });
-check(prodAll === false, "PROD's origin with every other condition true: off");
-check(docSyncOrigin(PROD) === false && docSyncOrigin(DEV) === true, "docSyncOrigin: DEV yes, PROD no");
-check((await docSyncAvailable(DEV, async () => statuses["200 available"]())) === true && (await docSyncAvailable(DEV, async () => statuses["404 (no sync route: PROD's site)"]())) === false, "docSyncAvailable: 200 available yes, 404 no");
-check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_NOTE.some((t) => /sagebrush\.space \(not DEV\) is a separate site/.test(t)) && DOC_SYNC_NOTE.some((t) => /Boards don't sync yet/.test(t)), "the Sync panel's note says the activation lasts, that PROD isn't affected, and that boards don't sync yet");
+check(prodAll === true, "PROD's origin with every other condition true: on");
+const prodOff = await docSyncAllowed({ origin: PROD, fetch: async () => statuses["200 not available"](), clientRunning: async () => true });
+check(prodOff === false, "PROD's origin when the server says not available (off the allowlist): off");
+check(docSyncOrigin(PROD) === true && docSyncOrigin(DEV) === true && docSyncOrigin("https://www.sagebrush.space") === false && docSyncOrigin("http://sagebrush.space") === false, "docSyncOrigin: DEV and PROD yes, www. and http: no");
+check((await docSyncAvailable(DEV, async () => statuses["200 available"]())) === true && (await docSyncAvailable(DEV, async () => statuses["404 (no sync route: a site without sync)"]())) === false, "docSyncAvailable: 200 available yes, 404 no");
+check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_NOTE.some((t) => /dev\.sagebrush\.space and sagebrush\.space are separate sites/.test(t)) && !DOC_SYNC_NOTE.some((t) => /DEV only/.test(t)) && DOC_SYNC_NOTE.some((t) => /Boards don't sync yet/.test(t)), "the Sync panel's note says the activation lasts, that the two sites are separate, and that boards don't sync yet (and never 'DEV only')");
 
 // ---- from the sources: no reachable override
 const files = [];
@@ -259,5 +264,5 @@ function followRig(active) {
 
 const fails = results.filter(([ok]) => !ok).map(([, w]) => w);
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  ")); process.exit(1); }
-console.log(`ok: the DEV switch for notebooks' contents fails closed, ${results.length} checks`);
+console.log(`ok: the switch for notebooks' contents (DEV and PROD) fails closed, ${results.length} checks`);
 if (process.env.SHOW) for (const [, w] of results) console.log("  " + w);

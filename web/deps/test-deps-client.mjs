@@ -1,7 +1,7 @@
-// The page's side of the Share dialog's analysis (web/share-client/deps-client.ts,
+// The page's side of the Share dialog's analysis (web/deps/deps-client.ts,
 // share-ux-plan r2 §3): progressive results, stop, the fail-safes, generations.
 // A fake worker runs the worker's protocol in-process (the real fileDeps).
-//   bun web/share-client/test-deps-client.mjs
+//   bun web/deps/test-deps-client.mjs
 import { startDeps } from "./deps-client.ts";
 import { fileDeps } from "./file-deps.ts";
 

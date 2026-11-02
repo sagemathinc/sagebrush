@@ -1,9 +1,9 @@
-// fileDeps (web/share-client/file-deps.ts): which workspace files the Share
+// fileDeps (web/deps/file-deps.ts): which workspace files the Share
 // dialog pre-checks, from a notebook's code (share-ux-plan r2 §2).  The
 // cases are python's (PY-SHARE-1/2/3) and astra3's (CORR-SHAREUX-2) from
 // the plan's review, the plan's own, and #170's review (python's PY-170-1..3
 // and N-170-1/2, astra3's CORR-170-ASTRA-1..4).
-//   bun web/share-client/test-file-deps.mjs
+//   bun web/deps/test-file-deps.mjs
 import { fileDeps, workspacePath } from "./file-deps.ts";
 
 let checks = 0;

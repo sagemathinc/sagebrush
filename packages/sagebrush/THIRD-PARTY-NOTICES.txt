@@ -220,6 +220,13 @@ and event handling), DOP853's coefficients (`_ivp/dop853_coefficients.py`,
 Hairer's), and the argument handling of `quad`, `nquad`, `odeint`,
 `trapezoid`, `cumulative_trapezoid` and `simpson`.
 
+`lib/scipy/special.py` follows SciPy 1.18's `scipy/special`: the argument
+handling of `comb`, `perm` and `factorial` and the formula of `polygamma`
+(`_basic.py`), `logsumexp`, `softmax` and `log_softmax` (`_logsumexp.py`),
+and the formulas of `log_ndtr` (`_faddeeva.cxx`); its ufuncs' type
+resolution, poles and domains follow SciPy's behaviour. Two of its
+functions are ported from xsf, SciPy's special-function library (below).
+
 `quad` in `lib/scipy/integrate.py` is a code translation, not only an
 implementation of the published algorithm: `_qags`, `_qk21`, `_qk15i`,
 `_qpsrt` and `_qelg` translate QUADPACK's Fortran routines dqagse/dqagie,

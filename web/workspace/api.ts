@@ -91,6 +91,9 @@ export type Entry = {
   /** a data file listed from the server: the SHA-256 whose bytes are to be fetched (the fetch queue, index byFetch:
    * design/sync-client.md L1); gone once they are installed, or once the file is written here */
   fetch?: string;
+  /** a data file whose bytes couldn't be downloaded yet (B5): why, and when; `final` when it is set apart for good
+   * (sync-fetch.ts finalize), else it is tried again; gone once they are installed or the server lists new bytes */
+  fetchFailed?: { why: string; at: number; final?: boolean };
 };
 /** An op's identity as the op left it (design/sync-client.md §3): its identity, the folder it is in (that
  * folder's fid; null for the root, or for something put in Trash itself), its name, its kind, a data file's
