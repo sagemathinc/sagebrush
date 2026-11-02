@@ -1,0 +1,49 @@
+// The offline inventory's build-time controls (plan-b8-offline r3.4 §2-§3; cases K2, K3): every LAZY path in exactly
+// one item, no paths or hashes in the inventory, a library group no rule places refused, and a catalog over each cap
+// refused.  Run on a built web/dist (its sw.js LAZY and DIGESTS) and on synthetic lists.
+//
+//   bun web/build.ts && node web/test-offline-inventory.mjs
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { OFFLINE_CAPS, itemOfGroup, offlineInventory } from "./offline-inventory.mts";
+
+let failures = 0;
+const ok = (c, name) => (console.log((c ? "ok   " : "FAIL ") + name), c || failures++);
+const refuses = (f, re) => { try { f(); return false; } catch (e) { return re.test(String(e)); } };
+const here = new URL(".", import.meta.url).pathname;
+const sw = readFileSync(join(here, "dist", "sw.js"), "utf8");
+const literal = (name) => JSON.parse(new RegExp(`^const ${name} = (.*);$`, "m").exec(sw)[1]);
+const LAZY = literal("LAZY"), DIGESTS = literal("DIGESTS");
+const invText = readFileSync(join(here, "dist", "offline-inventory.json"), "utf8"), inv = JSON.parse(invText);
+
+// K3: the built inventory partitions LAZY exactly, and names no path or hash
+const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
+const owner = (p) => {
+  const hits = inv.items.filter((it) => it.rule === "engine" ? /^sagebrush-engine\.wasm/.test(p) : it.rule === "docs" ? /^docs-index(-[a-z]+)?\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("lib/tzdata/") : (it.groups ?? []).includes(CHUNK.exec(p)?.[1]));
+  return hits.map((it) => it.id);
+};
+const owners = LAZY.map(owner);
+ok(owners.every((o) => o.length === 1), `K3: each of the ${LAZY.length} LAZY paths is in exactly one item (${owners.filter((o) => o.length !== 1).length} not)`);
+const files = Object.fromEntries(inv.items.map((it) => [it.id, owners.filter((o) => o[0] === it.id).length]));
+ok(inv.items.every((it) => it.files === files[it.id] && it.files > 0), "K3: each item's file count is its paths' count, and none is empty");
+const stored = Object.fromEntries(inv.items.map((it) => [it.id, LAZY.filter((_, i) => owners[i][0] === it.id).reduce((t, p) => t + DIGESTS[p.split("?")[0]].size, 0)]));
+ok(inv.items.every((it) => it.stored === stored[it.id]), "K3: each item's stored bytes are its files' DIGESTS sizes");
+ok(inv.totals.files === LAZY.length && inv.totals.stored === Object.values(stored).reduce((a, b) => a + b, 0), "K3: the totals are the sums");
+ok(!/lib\/|\.json|\?h=|[0-9a-f]{16}/.test(invText), "K3: the inventory names no path and no hash");
+
+// K2: a group no rule places, and each cap exceeded, are refused by the build
+ok(refuses(() => itemOfGroup("brand-new-group"), /belongs to no item/), "K2: a library group no rule places is refused");
+ok(itemOfGroup("core") === "python" && itemOfGroup("sci") === "scientific" && itemOfGroup("sage-x") === "sage" && itemOfGroup("pkg-foo") === "pkg-foo" && itemOfGroup("mod-bar") === "modules", "K2: the rules place the known groups");
+const h = "0123456789abcdef";
+const lazy = (n) => Array.from({ length: n }, (_, i) => `lib/core.src.${(h + i.toString(16)).slice(-16)}.json`);
+const sizes = (ps, s) => new Map(ps.map((p) => [p, s]));
+const build = (ps, s, t) => offlineInventory(ps, sizes(ps, s), sizes(ps, t));
+ok(!refuses(() => build(lazy(OFFLINE_CAPS.files), 1, 1), /./), "K2: exactly the file cap passes");
+ok(refuses(() => build(lazy(OFFLINE_CAPS.files + 1), 1, 1), /files >/), "K2: one file over the cap is refused");
+ok(!refuses(() => build(lazy(4), OFFLINE_CAPS.stored / 4, 1), /./) && refuses(() => offlineInventory(lazy(4), new Map(lazy(4).map((p, i) => [p, OFFLINE_CAPS.stored / 4 + (i === 0 ? 1 : 0)])), sizes(lazy(4), 1)), /stored bytes >/), "K2: the stored cap: exactly passes, 1 byte over is refused");
+ok(!refuses(() => build(lazy(2), 1, OFFLINE_CAPS.transfer / 2), /./) && refuses(() => offlineInventory(lazy(2), sizes(lazy(2), 1), new Map(lazy(2).map((p, i) => [p, OFFLINE_CAPS.transfer / 2 + i]))), /transfer bytes >/), "K2: the transfer cap: exactly passes, 1 byte over is refused");
+ok(!refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry, 1), /./) && refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry + 1, 1), /an entry of/), "K2: the largest-entry cap: exactly passes, 1 byte over is refused");
+ok(refuses(() => offlineInventory(["lib/core.src.0123456789abcdef.json", "lib/core.src.0123456789abcdef.json"], sizes(["lib/core.src.0123456789abcdef.json"], 1), sizes(["lib/core.src.0123456789abcdef.json"], 1)), /twice/), "K2: a path listed twice is refused");
+ok(refuses(() => build(["something/else.bin"], 1, 1), /belongs to no item/), "K2: a LAZY path of no item is refused");
+console.log(failures ? `${failures} failure(s)` : "offline inventory: all controls pass");
+process.exit(failures ? 1 : 0);

@@ -245,6 +245,14 @@ export class WorkerKernel {
       // said once it has taken 300 ms, until it is here, in the status and
       // ("loading" event) on the cells waiting for it
       if (m.libChunk !== undefined) return keepChunk(m.libChunk);
+      // (a group the library couldn't load, offline or not: the cells show its item's download button, plan-b8-offline
+      // §10; only the item's id and a few fields, checked here, never the traceback)
+      if (m.offlineMissing !== undefined) {
+        const o = m.offlineMissing;
+        if (o && typeof o.item === "string" && /^[a-z0-9-]{1,64}$/.test(o.item) && (o.code === "SB_OFFLINE_MISSING" || o.code === "SB_FETCH_FAILED"))
+          this.emit("offline-missing", { code: o.code, item: o.item, group: String(o.group).slice(0, 64), offline: o.offline === true, ...(Number.isInteger(o.status) ? { status: o.status } : {}) });
+        return;
+      }
       if (m.pkgUsed !== undefined) {
         if (w === this.worker && Array.isArray(m.pkgUsed)) pkgPins.set(this.uid, m.pkgUsed.filter((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d)));
         return pinPackages();
