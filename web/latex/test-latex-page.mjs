@@ -87,7 +87,7 @@ const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
-  // ---- the flag: off (no ?latex=1, nothing stored): ?tex= shows the note, and nothing of the editor is fetched
+  // ---- no flag (on by default; ?latex=1 below is ignored, kept from when it was the switch)
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
@@ -690,9 +690,8 @@ try {
   requests.length = 0;
   await go(base + "?tex=" + fid);
   await sleep(1500);
-  check(await ev(`!document.querySelector(".tex-page") && document.body.innerText.includes("The LaTeX editor isn't enabled here.")`), "flag off: the note, no editor");
-  check(latexFetches().length === 0, "flag off: no LaTeX file fetched", latexFetches());
-  check(await ev(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Preview it")`), "flag off: the note offers the file's preview");
+  // (on by default, William Nov 2: no ?latex=1, nothing stored, and ?tex= opens the editor on an allowed host)
+  check(await until(`!!document.querySelector(".tex-page") && !document.body.innerText.includes("The LaTeX editor isn't enabled here.")`, 20000), "on by default: ?tex= opens the editor with no flag");
   // ---- a middle-click on a file row (board i1c01 U1): a new tab of the editor only for a .tex file it takes; any
   // other file (or the flag off), nothing, as before the editor: no preview here, no tab
   await mk("/mid.txt", enc("plain\n")); const midFid = await mk("/mid.tex", enc(DOC));
@@ -714,7 +713,7 @@ try {
   };
   const nothing = (r) => r && r.opened.length === 0 && !r.preview && r.here;
   const mOff = await middle("");
-  check(mOff.rows && nothing(mOff["/mid.txt"]) && nothing(mOff["/mid.tex"]), "flag off: a middle-click on a file does nothing (no preview here, no tab)", mOff);
+  check(mOff.rows && nothing(mOff["/mid.txt"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
@@ -985,7 +984,7 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "Folder"]), "A0: the editor off: New offers no LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
   check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();

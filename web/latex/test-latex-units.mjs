@@ -291,14 +291,12 @@ check("box-file-bad-refused-even-with-env", !!boxClass("timing", "fast\n").error
 check("box-no-file-env", boxClass("build", null).box === "build" && boxClass("timing", null).box === "timing", null);
 check("box-none-refused", !!boxClass(undefined, null).error && !!boxClass("", null).error && !!boxClass("fast", null).error, null);
 
-// ---- boot.ts: the flag
-const DEV = ["dev.sagebrush.space"];   // (the DEV build's hosts, as web/build.ts defines them)
-const on = (host, search, stored) => latexOn(host, new URLSearchParams(search).get("latex") == "1", () => stored, DEV);
-check("flag-dev-url", on("dev.sagebrush.space", "?latex=1", null) && on("dev.sagebrush.space", "", "1"), null);
-check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sagebrush.space", "?latex=0", "0"), null);
-check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);
-check("flag-lookalike-hosts", !on("x.dev.sagebrush.space", "?latex=1", "1") && !on("dev.sagebrush.space.evil", "?latex=1", "1"), null);
-check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space", "127.0.0.1"]) && !latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space"]), null);
+// ---- boot.ts: on by default, on the hosts that serve the editor (William, Nov 2: no flag)
+const SITE = ["sagebrush.space", "dev.sagebrush.space"];   // (the site build's hosts, as web/build.ts defines them)
+check("on-site-hosts", latexOn("sagebrush.space", SITE) && latexOn("dev.sagebrush.space", SITE), null);
+check("off-elsewhere", !latexOn("127.0.0.1", SITE) && !latexOn("localhost", SITE) && !latexOn("tauri.localhost", SITE), null);
+check("off-lookalike-hosts", !latexOn("x.dev.sagebrush.space", SITE) && !latexOn("dev.sagebrush.space.evil", SITE) && !latexOn("sagebrush.space.evil", SITE), null);
+check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) && !latexOn("127.0.0.1", SITE), null);
 
 // ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
