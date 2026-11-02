@@ -526,6 +526,148 @@ const C1 = "clientA1", C2 = "clientB1";
   s9.s.close();
 }
 
+// ---- the force-reload floors (plan force-reload r7.2 §1-§2): a server of their own, so the floors touch nothing above
+{
+  const fr = new ReferenceServer(), F = await signedIn(fr, "acct-floors");
+  await F.call("POST", "/api/sync/v1/enable");
+  const SHA5 = "5".repeat(40), SHA4 = "4".repeat(40), OTHER = "e".repeat(40);
+  const floorsOf = async () => (await fr.fetch(new Request("https://ref.test/api/client-floor"))).json();
+  // (a page's hello with a release, or none; what came back: welcomed, or the pushed refusal and the close code)
+  const hello = async (device, release) => {
+    const s = await socket(fr, F, null);
+    s.s.send(J({ t: "hello", v: 2, device, name: device, index_after: 0, ...(release ? { release } : {}) }));
+    const first = await s.next((m) => m.t === "welcome" || m.t === "error");
+    await sleep(5);
+    return { s, first, closed: s.closed() };
+  };
+  const refusedStale = (r, why) => r.first.t === "error" && r.first.code === "stale_build" && r.first.req === undefined && r.first.detail?.why === why && r.closed === 4426;
+
+  const f0 = await floorsOf();
+  check(J(f0) === J({ reload: 0, compat: 0, served: 0 }), "floors: none by default: " + J(f0));
+  const st0 = await (await F.call("GET", "/api/sync/v1/status")).json();
+  check(st0.reload === 0 && st0.compat === 0 && st0.served === 0, "floors: on status too: " + J(st0));
+  const legacy0 = await hello("devF0001");
+  check(legacy0.first.t === "welcome", "no floor: a build without a release is welcomed");
+  legacy0.s.s.close();
+
+  fr.controls.setRegistry([[4, SHA4], [5, SHA5]]);
+  fr.controls.setFloors({ reload: 5, served: 10 });
+  check(J(await floorsOf()) === J({ reload: 5, compat: 0, served: 10 }), "client-floor: the floors as set");
+  const cf = await fr.fetch(new Request("https://ref.test/api/client-floor"));
+  check(/max-age=30/.test(cf.headers.get("cache-control") ?? "") && cf.headers.get("x-content-type-options") === "nosniff", "client-floor: briefly cacheable, nosniff");
+  check(refusedStale(await hello("devF0002"), "below"), "a build without a release, under a floor: told stale_build (no req), closed 4426 (T1, Q-2)");
+  check(refusedStale(await hello("devF0003", { n: 4, core: SHA4 }), "below"), "bound - 1 (n 4 < 5): refused (T1)");
+  const at = await hello("devF0004", { n: 5, core: SHA5 });
+  check(at.first.t === "welcome", "bound (n 5): welcomed (T1)");
+  check(refusedStale(await hello("devF0005", { n: 5, core: OTHER }), "unknown"), "a registered n with another sha (a dev build copying n): refused, unknown (T23)");
+  check(refusedStale(await hello("devF0006", { n: 6, core: SHA5 }), "unknown"), "an unregistered n: refused, unknown (T23)");
+  const bad = await hello("devF0007", { n: 0, core: SHA5 });
+  check(bad.first.t === "error" && bad.first.code === "invalid", "a malformed release: invalid");
+
+  // (a floor raised while a socket is open: its next write is refused, its reads still answered, its request never
+  // answered with the refusal)
+  const mk = (dseq, path) => ({ dseq, t: Date.now(), by: "person", op: "mkdir", path, kind: "folder" });
+  const okw = await at.s.ask({ t: "ops", ops: [mk(1, "/f")] });
+  check(J(okw.ops) === J([{ dseq: 1, seq: 1 }]), "bound: a write is admitted: " + J(okw));
+  fr.controls.setFloors({ reload: 6 });
+  fr.controls.setRegistry([[4, SHA4], [5, SHA5], [6, "6".repeat(40)]]);
+  // (waits that answer null rather than stop the run: a mutant fails its rows, it doesn't crash the section)
+  const maybe = (p) => p.catch(() => null);
+  const rq = at.s.tell({ t: "pull_index", after: 0 });
+  const rd = await maybe(at.s.next((m) => m.req === rq || m.t === "error"));
+  await sleep(5);
+  check(rd?.t === "index" && at.s.closed() === null, "a raised floor: a read is still answered, the socket open (M11)");
+  const r = at.s.tell({ t: "ops", ops: [mk(2, "/g")] });
+  const pushed = await maybe(at.s.next((m) => m.t === "error" || m.req === r));
+  await sleep(5);
+  check(pushed?.code === "stale_build" && pushed.req === undefined && at.s.closed() === 4426, "a floor raised while open: the next write gets stale_build pushed, then the close (T3)");
+  check(pushed?.req !== r && !at.s.got.some((m) => m.req === r), "that write's request is never answered (its op stays the page's to send again)");
+
+  // (a rollback: the served release lowered under R lowers the bound; C is never capped by the served release)
+  fr.controls.setFloors({ reload: 6, served: 4 });
+  check((await hello("devF0008", { n: 4, core: SHA4 })).first.t === "welcome", "a rollback (served 4 < R 6): bound 4, n 4 welcomed (T8)");
+  fr.controls.setFloors({ reload: 0, served: 4 });
+  check(fr.controls.raiseCompat(5) === 1, "C raised to 5: epoch 1");
+  check(refusedStale(await hello("devF0009", { n: 4, core: SHA4 }), "below"), "C 5 above the served 4: n 4 refused (C is not capped, T8)");
+
+  // (C's publication: strict raise, pending until finalized, seconds)
+  const cr = async () => (await F.call("GET", "/api/sync/v1/compat")).json();
+  fr.controls.setNow(1_000_000);
+  const p1 = await cr();
+  check(p1.compat === 5 && p1.epoch === 1 && p1.state === "pending" && p1.set_at === null && p1.d1now === 1000, "compat after the raise: pending, no stamp, d1now in seconds: " + J(p1));
+  check(fr.controls.raiseCompat(5) === null && (await cr()).epoch === 1, "a raise to the same value changes nothing (K3)");
+  check(fr.controls.raiseCompat(4) === null && (await cr()).compat === 5, "a lower raise changes nothing");
+  check(fr.controls.finalizeCompat(2) === false, "finalize of another epoch: nothing");
+  check(fr.controls.finalizeCompat(1) === true && fr.controls.finalizeCompat(1) === false, "finalize: once");
+  const f1 = await cr();
+  check(f1.state === "final" && f1.set_at === 1000 && f1.epoch === 1, "compat after finalize: final, stamped in seconds: " + J(f1));
+  check(fr.controls.raiseCompat(5) === null && J(await cr()) === J(f1), "a same-value raise after finalize: epoch, state and set_at identical (K3)");
+  const cres = await F.call("GET", "/api/sync/v1/compat");
+  check(cres.headers.get("cache-control") === "no-store", "compat: no-store");
+  fr.controls.setNow(null);
+
+  // (a blob PUT: the release at its start; refused with a retry, never as final)
+  const bytes = new TextEncoder().encode("floors"), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const put = (h) => F.call("PUT", `/api/sync/v1/blob/${sha}`, bytes, { "content-length": String(bytes.length), ...h });
+  const p0 = await put({});
+  const pj = await p0.json();
+  check(p0.status === 409 && pj.error === "stale_build" && pj.retry_after === 60000, "a blob PUT without a release, under a floor: 409 stale_build with a retry, not 400/413: " + J(pj));
+  fr.controls.setRegistry([[4, SHA4], [5, SHA5]]);
+  fr.controls.setFloors({ reload: 0, served: 10 });
+  const p5 = await put({ "x-sync-release": `5:${SHA5}` });
+  check(p5.status === 200, "a blob PUT from a registered release at the bound: stored");
+  const pw = await put({ "x-sync-release": `5:${OTHER}` });
+  check(pw.status === 409 && (await pw.json()).why === "unknown", "a blob PUT with a wrong sha: refused, unknown");
+  // (every state-changing message, table-driven (astra's D-1 binding: the close on EVERY stale write path): a release
+  // welcomed under no floor, then the floor raised over it; each message gets the pushed stale_build (no req), the
+  // 4426 close, no answer, and the account's state unchanged)
+  {
+    const D = "0123456789af", C = "clientF1";
+    fr.controls.setRegistry([[5, SHA5], [6, "6".repeat(40)]]);
+    const cases = {
+      ops: () => ({ t: "ops", ops: [mk(9, "/t")] }),
+      doc_claim: () => ({ t: "doc_claim", epoch: 1, doc: D, client: "clientF2" }),
+      doc_fence: () => ({ t: "doc_fence", epoch: 1, doc: D, clients: [{ client: C, target: 1 }] }),
+      batch: () => batch(D, 1, { [C]: 0 }, [{ cseq: 2, id: pid(2, C), parents: [pid(1, C)] }]),
+      clear: () => ({ t: "clear", doc: D, expect_head: { epoch: 1, seq: 1 }, root: patches([{ cseq: 2, id: pid(2, C) }]), fgen: { [C]: 0 } }),
+    };
+    // (a document with a claimed client and one batch, so each message would change something if it were admitted)
+    fr.controls.setFloors({ reload: 0, compat: 0, served: 10 });
+    const set = await hello("devF0011", { n: 5, core: SHA5 });
+    await set.s.ask({ t: "doc_claim", epoch: 1, doc: D, client: C });
+    const b1 = await set.s.ask(batch(D, 1, { [C]: 0 }, [{ cseq: 1, id: pid(1, C) }], { kind: "notebook" }));
+    check(b1.t === "ack", "per-path: the setup's batch is stored: " + J(b1));
+    set.s.s.close();
+    for (const [t, msg] of Object.entries(cases)) {
+      fr.controls.setFloors({ reload: 0, compat: 0, served: 10 });
+      const w = await hello({ ops: "devF0021", doc_claim: "devF0022", doc_fence: "devF0023", batch: "devF0024", clear: "devF0025" }[t], { n: 5, core: SHA5 });
+      check(w.first.t === "welcome", `per-path ${t}: welcomed under no floor`);
+      fr.controls.setFloors({ reload: 6 });
+      const before = fr.controls.snapshot("acct-floors");
+      const r = w.s.tell(msg());
+      const e = await maybe(w.s.next((m) => m.t === "error" || m.req === r));
+      await sleep(5);
+      check(e?.code === "stale_build" && e.req === undefined && w.s.closed() === 4426, `per-path ${t}: stale_build pushed with no req, then the 4426 close: ` + J(e));
+      check(e?.req !== r && !w.s.got.some((m) => m.req === r) && fr.controls.snapshot("acct-floors") === before, `per-path ${t}: no answer, no change to the account`);
+    }
+    // (hello itself, and the blob PUT: refused with nothing recorded)
+    const beforeH = fr.controls.snapshot("acct-floors");
+    check(refusedStale(await hello("devF0099", { n: 5, core: SHA5 }), "below") && fr.controls.snapshot("acct-floors") === beforeH, "per-path hello: refused, closed 4426, no device recorded");
+    const beforeP = fr.controls.snapshot("acct-floors");
+    const bytes2 = new TextEncoder().encode("floors, per path"), sha2 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes2))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const pp = await F.call("PUT", `/api/sync/v1/blob/${sha2}`, bytes2, { "content-length": String(bytes2.length), "x-sync-release": `5:${SHA5}` });
+    check(pp.status === 409 && fr.controls.snapshot("acct-floors") === beforeP, "per-path blob PUT: 409, nothing stored");
+    fr.controls.setFloors({ reload: 0, served: 10 });
+  }
+
+  // (with no bound, a build without a release reads the index: only the op from before the raise was written)
+  fr.controls.setFloors({ compat: 0 });
+  const late = await hello("devF0010");
+  check(late.first.t === "welcome", "no bound again: a build without a release is welcomed");
+  const idx = await late.s.ask({ t: "pull_index", after: 0 });
+  check(J(idx.ops.map((o) => o.path)) === J(["/f"]), "the write refused after the raise wrote nothing: " + J(idx.ops.map((o) => o.path)));
+}
+
 } catch (e) {
   fails.push(`stopped after "${lastCheck.slice(0, 80)}": ${e?.message ?? e}`);
 }
