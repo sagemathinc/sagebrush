@@ -29,12 +29,14 @@ for (const P of [IDBObjectStore.prototype, IDBIndex.prototype]) for (const k of 
 /** A large swap: folders A (/a) and B (/b), 15 files each, confirmed at each other's place. */
 function swapSpec() {
   const confirmed = [], local = [], tops = [];
+  // (the same identities in every scenario: rows compare one build's run with another's (A1-T5, T13), so an identity
+  // must name the same folder or file in both; each scenario has its own databases)
   for (const [name, from, to] of [["A", "/a", "/b"], ["B", "/b", "/a"]]) {
-    const f = hex(16);
+    const f = name.toLowerCase() + "0".repeat(15);
     tops.push(f);
     confirmed.push([f, to, "folder"]);
     local.push([f, from, "folder"]);
-    for (let i = 0; i < 15; i++) { const id = hex(16); confirmed.push([id, `${to}/${name}${i}.txt`, "file"]); local.push([id, `${from}/${name}${i}.txt`, "file"]); }
+    for (let i = 0; i < 15; i++) { const id = name.toLowerCase() + (i + 1).toString(16).padStart(15, "0"); confirmed.push([id, `${to}/${name}${i}.txt`, "file"]); local.push([id, `${from}/${name}${i}.txt`, "file"]); }
   }
   return { confirmed, local, tops };
 }

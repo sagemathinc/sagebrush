@@ -83,6 +83,46 @@ const tok = (ident, seq) => ({ seq, ident, rev: 1, kind: "file", chain: null, sz
   });
   await settle();
   check(J(since(k).map((x) => x.ident)) === J(["cfid4"]), `control (G1): a cursor update of an entry's content, no token: caught: ${J(since(k))}`);
+  // (an identity GIVEN (the migrator's fillIdentity): the entry named by its path, then the same kind and document
+  // under an fid, no token: passes; given with its kind changed: a new identity, caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/g1", kind: "folder", ref: null }); tx.objectStore("entries").put({ path: "/g2", kind: "folder", ref: null }); tx.objectStore("htokens").add(tok("path:/g1", 1e9 + 10)); tx.objectStore("htokens").add(tok("path:/g2", 1e9 + 11)); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").put({ path: "/g1", kind: "folder", ref: null, fid: "gfid1", ident: "gfid1" }));
+  await settle();
+  check(since(k).length === 0, `an identity given (the same folder, now named by its fid), no token: passes: ${J(since(k))}`);
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").put({ path: "/g2", kind: "file", ref: null, fid: "gfid2", sha256: "x", size: 1 }));
+  await settle();
+  check(J(since(k).map((x) => x.ident)) === J(["gfid2"]), `control: an "identity given" that changes the kind is a new identity: caught: ${J(since(k))}`);
+  // (a hash recorded where none was (fillHash): passes; a recorded hash changed, no token: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/h1.txt", kind: "file", ref: null, fid: "hfid1", migrated: true, size: 3 }); tx.objectStore("htokens").add(tok("hfid1", 1e9 + 12)); });
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").put({ path: "/h1.txt", kind: "file", ref: null, fid: "hfid1", migrated: true, size: 3, sha256: "s" }));
+  await settle();
+  check(since(k).length === 0, `a hash recorded where none was (the migrator's fillHash), no token: passes: ${J(since(k))}`);
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").put({ path: "/h1.txt", kind: "file", ref: null, fid: "hfid1", migrated: true, size: 3, sha256: "t" }));
+  await settle();
+  check(J(since(k).map((x) => x.ident)) === J(["hfid1"]), `control: a recorded hash changed, no token: caught: ${J(since(k))}`);
+  // (a legacy file's bytes moved in under the fid it is given, marked migrated, in one transaction (migrateOne): passes;
+  // its bytes changed afterwards, no token: caught)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => { tx.objectStore("entries").put({ path: "/m1.txt", kind: "file", ref: "/m1.txt", size: 2 }); tx.objectStore("htokens").add(tok("path:/m1.txt", 1e9 + 13)); });
+  await raw(w.ws, ["entries", "fileBytes", "htokens", "hmeta"], (tx) => { tx.objectStore("fileBytes").put(new Uint8Array([1, 2]), "mfid1"); tx.objectStore("entries").put({ path: "/m1.txt", kind: "file", ref: "/m1.txt", fid: "mfid1", ident: "mfid1", migrated: true, size: 2, sha256: "m" }); });
+  await settle();
+  check(since(k).length === 0, `a legacy file's bytes moved in under its given fid, migrated in the same transaction: passes: ${J(since(k))}`);
+  await raw(w.ws, ["fileBytes", "htokens", "hmeta"], (tx) => tx.objectStore("fileBytes").put(new Uint8Array([9, 9]), "mfid1"));
+  await settle();
+  check(J(since(k).map((x) => x.ident)) === J(["mfid1"]), `control: a migrated file's bytes changed later, no token: caught: ${J(since(k))}`);
+  // (a removal with no token: caught; the same during a reset to a new workspace (meta "resetting"): passes)
+  k = G.violations.length;
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/c1.txt"));
+  await settle();
+  check(J(since(k).map((x) => x.ident)) === J(["cfid1"]), `control: a removal with no token, no reset under way: caught: ${J(since(k))}`);
+  k = G.violations.length;
+  await raw(w.ws, ["meta"], (tx) => tx.objectStore("meta").put({ to: "test", seq: 0 }, "resetting"));
+  await raw(w.ws, ["entries", "htokens", "hmeta"], (tx) => tx.objectStore("entries").delete("/c2.txt"));
+  await raw(w.ws, ["meta"], (tx) => tx.objectStore("meta").delete("resetting"));
+  await settle();
+  check(since(k).length === 0, `a removal during a reset to a new workspace (a new lineage, its history emptied with it): passes: ${J(since(k))}`);
   // ---- the exact rev (A5, A1-T15, T17, T18): by writer, at the write point
   const opsTx = (stores, f) => new Promise((ok) => { const tx = w.ws.transaction([...stores, "ops", "meta", "htokens", "hmeta"], "readwrite"); f(tx); tx.oncomplete = () => ok(); tx.onabort = () => ok(); });
   const genNow = async () => new Promise((ok) => { const tx = w.ws.transaction(["ops", "meta"]), c = tx.objectStore("ops").openKeyCursor(null, "prev"), f = tx.objectStore("meta").get("opsFloor"); let l = 0; c.onsuccess = () => { l = c.result?.key ?? 0; }; tx.oncomplete = () => ok(Math.max(l, f.result ?? 0)); });
