@@ -26,7 +26,7 @@ export async function guardFails(ev) {
   await ev("new Promise((r) => { const f = () => ((window.__historyGuard?.pending ?? 0) === 0 ? r(true) : setTimeout(f, 20)); f(); })");
   const g = JSON.parse(await ev("JSON.stringify({ v: window.__historyGuard?.violations ?? null, checked: window.__historyGuard?.checked ?? 0, txs: window.__historyGuard?.txs ?? 0 })"));
   if (g.v === null) return ["history guard: not installed in the page"];
-  const out = g.v.slice(0, 50).map((x) => `history guard: ${x.db}/${x.store} changed ${x.ident} (${x.why}) with no token in its transaction`);
+  const out = g.v.slice(0, 50).map((x) => `history guard: ${x.db}/${x.store} changed ${x.ident} (${x.why}) with no token in its transaction${x.site ? ` [made at ${x.site.slice(0, 300)}]` : ""}`);
   if (g.checked === 0) out.push(`history guard: judged no change at all (${g.txs} transactions): not exercising anything`);
   if (process.env.SHOW) console.log(`history guard: ${g.checked} changes judged in ${g.txs} transactions, ${g.v.length} violations`);
   return out;

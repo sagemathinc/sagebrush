@@ -2,7 +2,7 @@
 // grader's rows A1-T1..T13) in headless Chromium, with real IndexedDB: this build's workspace and its mutants, each made
 // here by exact patches of a copy of web/, each of which must FAIL the rows that guard against it:
 //   noA1        no publication tokens (L1 without A1)                       -> T1, T2
-//   sepTx       the publication's tokens in a later, separate transaction   -> T2
+//   sepTx       the publication's tokens in a later, separate transaction   -> T2 (closed connection tolerated: the mutant's own noise isn't a page error)
 //   nullChain   a mismatched or missing destination given null              -> T4
 //   swallow     a failed token write caught, the save committed             -> T11 (i)
 //   dedupIdent  the sweep-2 token dropped as a duplicate of an ident        -> T10
@@ -27,7 +27,7 @@ const build = async (entry, naming) => {
 const PUB = "      if (await historyActive(tx0)) {\n";
 const MUTANTS = {
   noA1: [["workspace/sync-replay.ts", PUB, "      if (false && (await historyActive(tx0))) {\n"]],
-  sepTx: [["workspace/sync-replay.ts", PUB, "      if (await historyActive(tx0)) setTimeout(() => { const t2 = w.ws.transaction([\"entries\", \"htokens\", \"hmeta\", \"ops\", \"meta\"], \"readwrite\"); void (async () => { for (const x of maps) if (x.top) await noteToken(t2, { ident: x.top, rev: 0, kind: \"folder\", chain: null }); })(); }, 300);\n      if (false) {\n"]],
+  sepTx: [["workspace/sync-replay.ts", PUB, "      if (await historyActive(tx0)) setTimeout(() => { try { const t2 = w.ws.transaction([\"entries\", \"htokens\", \"hmeta\", \"ops\", \"meta\"], \"readwrite\"); void (async () => { for (const x of maps) if (x.top) await noteToken(t2, { ident: x.top, rev: 0, kind: \"folder\", chain: null }); })().catch(() => {}); } catch {} }, 300);\n      if (false) {\n"]],
   nullChain: [["workspace/sync-replay.ts", ', (p) => pub.get(p), parentOf) : "broken",', ", (p) => pub.get(p), parentOf) : null,"]],
   swallow: [["history/tokens.ts", '  tx.objectStore("htokens").add({ ...row, sz } satisfies Token);', '  try { tx.objectStore("htokens").add({ ...row, sz } satisfies Token); } catch {}']],
   dedupIdent: [["history/tokens.ts", '  // (add, not put: a duplicate seq', '  if (((await req(tx.objectStore("htokens").getAll())) as Token[]).some((r) => r.ident === t.ident)) return;\n  // (add, not put: a duplicate seq']],
@@ -79,7 +79,10 @@ try {
   const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 2000)); return r.result.value; };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
-  for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  // (the page loaded: up to 60 s on a busy machine; not loaded, the page's own errors are the failure, not "run is not a function")
+  let ready = false;
+  for (let i = 0; i < 1200 && !(ready = await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  if (!ready) throw new Error("the page never got ready in 60 s; its errors: " + (errors.join(" | ") || "none reported"));
   const results = await ev("window.run()");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   // (a mutant's page errors are expected (a broken build may throw); this build's are not: the cases catch per run)

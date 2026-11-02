@@ -254,13 +254,19 @@ for (const [what, method] of [["the hmeta put", "put"], ["the hmeta get", "get"]
   await w.mkdir("/D/E/F");
   const made = (await rawAll(w.ws, "htokens")).slice(before), ops = (await w.ops()).filter((o) => o.op === "mkdir" && ["/D", "/D/E", "/D/E/F"].includes(o.path));
   check(made.length === 3 && ops.length === 3 && made.every((t) => ops.some((o) => o.fid === t.ident && o.seq === t.rev)) && new Set(made.map((t) => t.rev)).size === 3, `A1-T17: mkdir /D/E/F in one transaction: 3 tokens, each at its own op's seq (${J(made.map((t) => t.rev))} vs ${J(ops.map((o) => o.seq))})`);
-  // (A1-T18: a board's index event (its file renamed: log) carries the op's seq; its content event (boardRowWrite) the row's rev)
+  // (A1-T18: a board's index event (its file renamed: log) carries the op's seq; its content event (boardRowWrite) the row's rev.
+  // One call may write both, in either order (a rename also rewrites the row; a write also logs its op): each is looked
+  // for among the call's tokens, by its writer's rev, not as the last token)
+  const since = async (k) => (await rawAll(w.ws, "htokens")).slice(k).filter((t) => t.ident === bd.ref && t.kind === "board");
+  let k0 = (await rawAll(w.ws, "htokens")).length;
   await w.rename("/A/plan.board.json", "/A/plan3.board.json");
-  const idx = await last(), rop = (await w.ops()).filter((o) => o.op === "rename").at(-1);
-  check(idx?.ident === bd.ref && idx.kind === "board" && idx.rev === rop?.seq, `A1-T18: a board's index event (rename): its token's rev is the op's seq (${idx?.rev} = ${rop?.seq})`);
+  const idx = await since(k0), rop = (await w.ops()).filter((o) => o.op === "rename").at(-1);
+  check(rop !== undefined && idx.some((t) => t.rev === rop.seq), `A1-T18: a board's index event (rename): a token whose rev is the op's seq (${J(idx.map((t) => t.rev))} has ${rop?.seq})`);
+  k0 = (await rawAll(w.ws, "htokens")).length;
   await w.write("/A/plan3.board.json", { title: "plan3", nodes: [] });
-  const con = await last(), row = await rawGet(w.ws, "boards", bd.ref);
-  check(con?.ident === bd.ref && con.kind === "board" && con.rev === row?.rev, `A1-T18: its content event (write): its token's rev is the row's rev (${con?.rev} = ${row?.rev})`);
+  const con = await since(k0), row = await rawGet(w.ws, "boards", bd.ref), wop = (await w.ops()).filter((o) => o.op === "write").at(-1);
+  check(row !== undefined && con.some((t) => t.rev === row.rev), `A1-T18: its content event (write): a token whose rev is the row's rev (${J(con.map((t) => t.rev))} has ${row?.rev})`);
+  check(con.every((t) => t.rev === row?.rev || t.rev === wop?.seq), `A1-T18: and no other rev among the write's tokens (row ${row?.rev}, op ${wop?.seq}: ${J(con.map((t) => t.rev))})`);
   w.close?.();
 }
 

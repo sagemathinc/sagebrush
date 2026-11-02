@@ -78,7 +78,10 @@ try {
   const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 2000)); return r.result.value; };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
-  for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  // (the page loaded: up to 60 s on a busy machine; not loaded, the page's own errors are the failure, not "run is not a function")
+  let ready = false;
+  for (let i = 0; i < 1200 && !(ready = await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  if (!ready) throw new Error("the page never got ready in 60 s; its errors: " + (errors.join(" | ") || "none reported"));
   const results = await ev("window.run()");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
