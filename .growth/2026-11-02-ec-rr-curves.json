@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Curves over RR: EllipticCurve_real_field and its points (lib/_sage_ec_rr.py, loaded on first use; hooks in lib/_sage_modular.py): base_extend(RR), lift_x over RR (and lift_x of a float on a curve over QQ), Sage's group law, xy, plot, with docstring examples. No new chunk. Measured with bun 1.4.4 (size-record.sh) on #488's head 22476fe8 (this PR is stacked on it) vs this PR's content head 9ef6c181: cli/lib.gen.js +3084, cli/pyjs.cjs +3752, engine/lib/sage-more.src +10543, engine/lib/sage.pre +3166, engine/lib/sage.src +1087, engine/sagebrush-worker.js +29; no other row moves.",
+ "bytes": {
+  "cli/lib.gen.js": 3084,
+  "cli/pyjs.cjs": 3752,
+  "engine/lib/sage-more.src": 10543,
+  "engine/lib/sage.pre": 3166,
+  "engine/lib/sage.src": 1087,
+  "engine/sagebrush-worker.js": 29
+ }
+}
