@@ -1903,7 +1903,7 @@ newBuiltinModule("_fs", (m) => {
       const st = fs.fstatSync(fd);
       if (!st.isFile()) return "not-regular";
       if (st.size > limit) return "too-large";
-      const buf = Buffer.alloc(limit + 1);
+      const buf = new Uint8Array(limit + 1);
       let n = 0;
       while (n < buf.length) {
         let k = 0;
@@ -1916,7 +1916,7 @@ newBuiltinModule("_fs", (m) => {
         if (k <= 0) break;
         n += k;
       }
-      return new PyBytes(new Uint8Array(buf.subarray(0, n)));
+      return new PyBytes(buf.slice(0, n));
     } catch (e: any) {
       return e?.code === "ELOOP" ? "symlink" : "unreadable";
     } finally {
