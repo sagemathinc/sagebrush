@@ -646,7 +646,6 @@
   }
  },
  "epoch": {
-  "engine/lib/mod-csv.src": 45697,
   "sizes": {
    "cli/lib.gen.js": 7200191,
    "cli/pyjs.cjs": 28780108,
@@ -669,6 +668,7 @@
    "engine/lib/mod-contextlib.src": 29725,
    "engine/lib/mod-copy.src": 9103,
    "engine/lib/mod-copyreg.src": 8446,
+   "engine/lib/mod-csv.src": 45697,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
    "engine/lib/mod-encodings.src": 18178,
