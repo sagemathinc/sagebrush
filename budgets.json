@@ -395,6 +395,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-special-ibeta.src": {
+   "exact": false,
+   "ceiling": 27309,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-sbx.src": {
    "exact": false,
    "ceiling": 52848,
@@ -600,7 +607,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 235356,
+   "ceiling": 235422,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -688,6 +695,7 @@
    "engine/lib/mod-sage-ec-ff.src": 23918,
    "engine/lib/mod-sb-check.src": 4356,
    "engine/lib/mod-sbdata.src": 20193,
+   "engine/lib/mod-special-ibeta.src": 24827,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-scipy-special.src": 41877,
