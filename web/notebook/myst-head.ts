@@ -24,7 +24,7 @@ export const TEXT = { encoding: "utf-8", ignoreBOM: true };
 
 /** Whether a file is a Jupytext MyST notebook, from its text (the whole file, or its first HEAD_BYTES bytes
  * decoded): only its first HEAD_BYTES UTF-8 bytes are looked at, so either gives the same answer. */
-export function isMystHead(text) {
+export function isMystHead(text: unknown): boolean {
   const t = String(text ?? "");
   // (at most HEAD_BYTES + 1 code units hold the first HEAD_BYTES bytes: each is at least one byte)
   const some = t.slice(0, HEAD_BYTES + 1), bytes = enc.encode(some);
@@ -40,10 +40,10 @@ export function isMystHead(text) {
   return !!fm && (whole || head[fm.end - 1] === "\n") && fm.data?.jupytext?.text_representation?.format_name === "myst";
 }
 
-export const lf = (s) => s.replace(/\r\n?/g, "\n");
+export const lf = (s: string) => s.replace(/\r\n?/g, "\n");
 
 // The front matter: its text, where the body starts, and its closed parse (or null)
-export function frontMatter(t) {
+export function frontMatter(t: string): { yaml: string; end: number; data: any } | null {
   if (!t.startsWith("---\n")) return null;
   const close = /^---[ \t]*$/m;
   const rest = t.slice(4);
@@ -58,9 +58,9 @@ export function frontMatter(t) {
 // Nested "key: value" maps by indentation; a value is a plain or quoted scalar.
 // Anything else (lists, flow collections, anchors, aliases, tags, multi-line
 // scalars) is not understood: that key's value is null.  Never throws.
-export function closedYaml(src) {
+export function closedYaml(src: string): any {
   const root = Object.create(null);
-  const stack = [{ indent: -1, obj: root }];
+  const stack: { indent: number; obj: any }[] = [{ indent: -1, obj: root }];
   for (const line of src.split("\n")) {
     if (!line.trim() || /^\s*#/.test(line)) continue;
     const m = /^( *)([A-Za-z0-9_.-]+):(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
@@ -81,7 +81,7 @@ export function closedYaml(src) {
   }
   return root;
 }
-function scalar(raw) {
+function scalar(raw: string): string | null {
   if (/^[&*!|>[{]/.test(raw)) return null;
   const q = /^"((?:[^"\\]|\\.)*)"$|^'((?:[^']|'')*)'$/.exec(raw);
   if (q) return q[1] !== undefined ? q[1].replace(/\\(.)/g, "$1") : q[2].replace(/''/g, "'");

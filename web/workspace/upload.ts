@@ -147,7 +147,7 @@ export class MystNotebookError extends Error {}
 
 /** The sha256 of a file's bytes, in hex: what a MyST copy records of its .md (metadata.sagebrush.source). */
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource))].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 /** A MyST .md's notebook copy beside it made from these same bytes (`source`, their sha256: plan-myst-notebooks r3
