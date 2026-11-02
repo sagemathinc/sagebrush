@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("workspace_tools", os.path.join(HERE, "python", "sagebrush", "workspace_tools.py"))
@@ -498,6 +499,77 @@ def test_stat_null_is_absence():
         refused(page, name, args, "protocol")
 
 
+def _support_tools():
+    """sagebrush/support_tools.py alone, its import of sagebrush.workspace_tools answered with this
+    file's WS; sys.modules is put back after, so the server test below imports the real package."""
+    saved = {k: sys.modules.get(k) for k in ("sagebrush", "sagebrush.workspace_tools")}
+    try:
+        pkg = sys.modules["sagebrush"] = types.ModuleType("sagebrush")
+        pkg.workspace_tools = sys.modules["sagebrush.workspace_tools"] = WS
+        spec = importlib.util.spec_from_file_location("sagebrush.support_tools", os.path.join(HERE, "python", "sagebrush", "support_tools.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+class DraftPage:
+    """A page that answers support.draft as web/workspace/agent-pair.ts does (or with answer), recording each request."""
+
+    def __init__(self, answer=None, error=None):
+        self.requests, self.answer, self.error = [], answer, error
+
+    def request(self, method, params, timeout):
+        self.requests.append((method, params))
+        if self.error is not None:
+            raise self.error
+        return {"drafted": True, "shown": "card"} if self.answer is None else self.answer
+
+
+def test_support_draft():
+    """support_draft (plan-support-draft-tool ADDENDUM.md §4, §6): one tool, its parameters the page's
+    verb support.draft from the schema; arguments checked before the page sees them; the only answer
+    accepted is {drafted: true, shown: "card"}; and no tool sends anything."""
+    ST = _support_tools()
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    assert [t["name"] for t in ST.SUPPORT_TOOLS] == ["support_draft"] and ST.NAMES == {"support_draft"}
+    t = ST.SUPPORT_TOOLS[0]
+    assert t["inputSchema"] == {k: x for k, x in schema["verbs"]["support.draft"]["params"].items() if k != "$schema"}
+    assert t["description"].startswith(schema["verbs"]["support.draft"]["description"])
+    assert t["annotations"]["readOnlyHint"] is False and t["annotations"]["openWorldHint"] is False
+    # (the schema's verbs outside the workspace are exactly support.draft: nothing that sends)
+    assert sorted(m for m in schema["verbs"] if not m.startswith("workspace.")) == ["support.draft"]
+    good = {"kind": "pkg", "subject": "Package request: foo", "body": "pip install foo fails: no such package"}
+    page = DraftPage()
+    for args in [
+        {}, {"subject": "short", "body": "x"},  # body is required, and 10 or more
+        {"subject": "abcd", "body": good["body"]},  # subject is 5 or more
+        dict(good, kind="urgent"),  # not one of the kinds
+        dict(good, send=True), dict(good, email="a@b.c"),  # no other key: nothing that sends, no email
+        dict(good, subject="x" * 181), dict(good, body="x" * 19001),
+    ]:
+        _, sc, is_err = ST.call(page, "support_draft", args)
+        assert is_err and sc["error"]["code"] == "invalid", (args, sc)
+    assert page.requests == []
+    _, sc, is_err = ST.call(None, "support_draft", good)
+    assert is_err and sc["error"]["code"] == "not_connected"
+    content, sc, is_err = ST.call(page, "support_draft", good)
+    assert not is_err and sc == {"result": {"drafted": True, "shown": "card"}, "error": None}, sc
+    assert page.requests == [("support.draft", good)] and "sends it themselves" in content[0]["text"]
+    # only the exact answer: not drafted 1, no extra field (a URL, a handle), not null
+    for answer in [{"drafted": 1, "shown": "card"}, {"drafted": True, "shown": "card", "url": "https://cocalc.ai/support/new"},
+                   {"drafted": True}, ["drafted"], "card", 0]:
+        _, sc, is_err = ST.call(DraftPage(answer=answer), "support_draft", good)
+        assert is_err and sc["error"]["code"] == "protocol", (answer, sc)
+    _, sc, is_err = ST.call(DraftPage(error=WS.PageError("invalid", "this page doesn't show support requests")), "support_draft", good)
+    assert is_err and sc["error"] == {"code": "invalid", "message": "this page doesn't show support requests"}
+
+
 def test_through_the_server():
     # (the installed package, whose engine is built: in CI, after
     # pip install engine/py/dist/*.whl; elsewhere it may be absent, and this
@@ -525,6 +597,7 @@ def test_through_the_server():
     tools = {t["name"]: t for t in rpc(2, "tools/list", {})["result"]["tools"]}
     assert all(("workspace_" + v) in tools for v in WS.VERBS) and "sage" in tools and "workspace_connect" in tools
     assert tools["workspace_read"]["outputSchema"] == WS.OUTPUT_SCHEMA
+    assert [n for n in tools if n.startswith("support")] == ["support_draft"] and "support_draft" in mcp_server.INSTRUCTIONS
     # arguments are checked first (nothing invalid reaches a page), then the link
     r = rpc(30, "tools/call", {"name": "workspace_list", "arguments": {}})
     assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "invalid", r
