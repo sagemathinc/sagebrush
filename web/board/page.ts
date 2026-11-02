@@ -101,6 +101,40 @@ const LOCAL_LIST = "sagebrush-boards", MODES = ["python", "sage", "magma", "matl
 const LOCAL_MAX = 200, TITLE_MAX = 200;
 // (why nothing is kept: said, and no board presented as kept, HARD-7F9-1)
 const STORAGE_REFUSED = "this browser's storage for this site is full, or turned off";
+// (a board's share link, File > Share: its JSON deflated, base64url, in the fragment; at most this long, about what
+// a browser takes in its address bar)
+const MAX_LINK = 2_000_000;
+const b64url = (u: Uint8Array) => { let b = ""; for (let i = 0; i < u.length; i += 0x8000) b += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+async function shareLinkOf(json: string): Promise<string> {
+  const z = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+  const url = location.origin + location.pathname + "#z=" + b64url(z);
+  if (url.length > MAX_LINK) throw new Error(`this board is ${(url.length / 1e6).toFixed(1)} MB as a link, more than a browser's address takes (${MAX_LINK / 1e6} MB): share it as a file instead (File > Download > HTML)`);
+  return url;
+}
+/** A share link's board text: base64url, inflated, at most `max` bytes (refused past it, never cut). */
+async function inflateLink(z: string, max: number): Promise<string> {
+  let bytes: Uint8Array;
+  try { bytes = Uint8Array.from(atob(z.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)); } catch { throw new Error("the link is damaged (not base64url)"); }
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.length;
+      if (n > max) { await reader.cancel(); throw new Error(`the board is over ${Math.round(max / 2 ** 20)} MB`); }
+      parts.push(value);
+    }
+  } catch (e) {
+    if (/ MB$/.test(String((e as Error)?.message))) throw e;
+    throw new Error("the link is damaged (it doesn't inflate)");
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.length; }
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(all); } catch { throw new Error("the link is damaged (not UTF-8)"); }
+}
 type LocalBoard = { id: string; title: string; mode: string; at: number };
 const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const localKey = (id: string) => "sagebrush-board:local:" + id;
@@ -327,6 +361,25 @@ const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
       } else openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`;
     }
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
+  }
+}
+// #z=<base64url of the deflated JSON>: a board shared as a link (File > Share, mount.ts): opened once as the person's
+// own copy, its code paused until they run it (as a board brought in from a file), the fragment cleared; at most
+// LIMITS.maxBoardBytes once inflated
+let sharedFailed = "";
+if (location.hash.startsWith("#z=") && !embedded() && !q.has("doc")) {
+  const z = location.hash.slice(3);
+  history.replaceState(null, "", location.pathname + location.search);
+  try {
+    const d = boardFromText(await inflateLink(z, LIMITS.maxBoardBytes), "Shared board");
+    if (!isBoard(d)) throw new Error("it isn't a board");
+    const id = ws ? await makeInWorkspace(ws, d, true) : makeLocal(d);
+    if (!id) throw new Error(STORAGE_REFUSED);
+    pauseBoard(id);
+    q.set("doc", "local:" + id);
+    history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:"));
+  } catch (err) {
+    sharedFailed = `**This shared board couldn't be opened:** ${String((err as Error)?.message ?? err)}`;
   }
 }
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
@@ -1352,6 +1405,8 @@ const host: BoardHost = {
     return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (a link to this site's board page: not from a file served on this computer, nor a board in another page)
+  shareLink: file ? undefined : shareLinkOf,
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
@@ -1411,6 +1466,10 @@ const host: BoardHost = {
 if (openAsFailed && host.store) {
   const load0 = host.store.load.bind(host.store);
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
+}
+if (sharedFailed && host.store) {
+  const load0 = host.store.load.bind(host.store);
+  host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: sharedFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
 // (N-2's offer focused once the caption shows it)

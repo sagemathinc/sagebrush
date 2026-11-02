@@ -130,6 +130,9 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** a link that opens a copy of the board: its JSON (pictures inlined) in the address's fragment, never sent to a
+   * server; File > Share copies it (none: Share is disabled) */
+  shareLink?(json: string): Promise<string>;
   /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
    * key is left to the browser, as on a page that is itself a saved board
    * (an exported file), whose ⋯ menu still downloads it again */
@@ -316,7 +319,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     keys: { newNotebook: "newnotebook", newBoard: "newboard", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
       newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
-      saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
+      saveCopy: !host.duplicate, share: !host.shareLink, delete: !host.files?.delete,
     },
     downloads: [
       { key: "download", label: ".board.json" },
@@ -1649,6 +1652,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
   }
   $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
+  // File > Share: a link holding the whole board (sim run 4: agents built their talks as boards, and had no link to
+  // present from). Copied, and shown in the caption, so whoever made it, a person or an agent, can see it.
+  $("share").onclick = async () => {
+    if (!doc || !host.shareLink) return;
+    try {
+      const url = await host.shareLink(canonical(await images.inline(doc)));
+      let copied = false;
+      try { await navigator.clipboard.writeText(url); copied = true; } catch {}
+      const a = Object.assign(document.createElement("a"), { href: url, textContent: "the link", target: "_blank", rel: "noopener" });
+      a.dataset.sbb = "sharelink";
+      const p = document.createElement("span");
+      p.append(copied ? "Link copied: " : "Here is ", a, ". It holds the whole board in the address (after #, never sent to a server); whoever opens it gets a copy of their own, its code paused until they run it.");
+      say(p);
+    } catch (e) {
+      fail(e);
+    }
+  };
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });
     const bad = formatError(d);

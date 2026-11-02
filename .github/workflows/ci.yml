@@ -688,6 +688,8 @@ jobs:
           CHROME=google-chrome node web/workspace/test-workspace-browser.mjs
           CHROME=google-chrome node web/workspace/test-workspace-preview.mjs
           CHROME=google-chrome node web/workspace/test-workspace-filemenu.mjs
+          # (a board's share link: File > Share, and the copy the link opens, its code paused)
+          CHROME=google-chrome node web/board/test-board-share.mjs
           CHROME=google-chrome node web/workspace/test-workspace-upload.mjs
           bun web/board/test-own-names.mjs
           bun web/board/test-edit-state.mjs
