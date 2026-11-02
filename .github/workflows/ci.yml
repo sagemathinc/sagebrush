@@ -631,6 +631,8 @@ jobs:
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
+          # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
+          CHROME=google-chrome bun web/notebook/test-myst.mjs
           CHROME=google-chrome bun web/workspace/test-workspace.mjs
           # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
           # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
