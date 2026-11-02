@@ -15,8 +15,9 @@
 //           batch held across a raise, refused in the commit's own turn (a push, then 4426); after the close and a
 //           refused reconnect its pending rows are the same rows (ids, cseqs, bytes, stored patches), the notebook not
 //           stopped (not final), and nothing stored on the server
-//   K-F1, K-F2  the row machinery's own controls (P0B-CODE-2): a row whose body outlives its limit is ended and drained,
-//           its late calls refused; a cleanup that never ends fails the run (a stop), never the next row's start
+//   K-F1..K-F4  the row machinery's own controls (P0B-CODE-2): a row whose body outlives its limit is ended and
+//           drained, its late calls refused; a cleanup that never ends is a stop; a `held` answer that never comes is
+//           a stop within the poll's bound; a resource acquired after the row's end is disposed, never left open
 // Every row gets its own context (its checks, what it opened, whether it has ended): no row writes another's.  A row
 // that times out, or whose cleanup fails or doesn't end, STOPS the run: no later row runs on state not proved clean.
 import * as W from "./ws.js";
@@ -39,7 +40,7 @@ class RowEnded extends Error {}
 /** A row's context: its id, its checks' failed kinds, what it opened, and whether it has ended.  Every helper takes it. */
 function rowContext(id, limits) {
   const r = {
-    id, kinds: new Set(), clients: [], ws: [], ended: false, lateCalls: 0, limits,
+    id, kinds: new Set(), clients: [], disposers: [], ended: false, lateCalls: 0, disposedLate: 0, limits,
     check(ok, what, kind) {
       results.push([!!ok, `${id}: ${what}`]);
       if (!ok) r.kinds.add(kind);
@@ -51,6 +52,20 @@ function rowContext(id, limits) {
       const res = await fetch("/__ctl", { method: "POST", body: J({ cmd, ...extra }), signal: AbortSignal.timeout(10_000) });
       return { status: res.status, body: await res.json() };
     },
+    /** A resource the row opened, kept for its cleanup's census; one acquired after the row ended is disposed at
+     * once and refused (RowEnded), so nothing a late body opens outlives the row */
+    async acquire(thing, dispose, what) {
+      if (r.ended) {
+        r.lateCalls++;
+        r.disposedLate++;
+        try { await dispose(thing); } catch {}
+        throw new RowEnded(`${id}: ${what} acquired after the row ended (disposed)`);
+      }
+      r.disposers.push({ what, dispose: () => dispose(thing) });
+      return thing;
+    },
+    /** Refused once the row has ended (before an acquisition starts) */
+    live(what) { if (r.ended) { r.lateCalls++; throw new RowEnded(`${id}: ${what} after the row ended`); } },
     /** f() true within ms (polled every 50 ms), else false; refused once the row has ended */
     async until(f, ms) {
       const end = Date.now() + ms;
@@ -71,21 +86,23 @@ let acct = 0;
 async function account(row) {
   const id = window.ACCOUNTS[acct++];
   if (!id) throw new Error("out of floor-row accounts");
-  if (row.ended) throw new RowEnded(`${row.id}: sign-in after the row ended`);
+  row.live("sign-in");
   const s = await post("/auth/dev", { token: "dev-token", account_id: id });
+  row.live("sign-in's answer");
   if (!s.ok) throw new Error("sign-in: " + s.status);
   const e = await post("/api/sync/v1/enable", {});
+  row.live("enable's answer");
   if (!e.ok) throw new Error("enable: " + e.status + " " + (await e.text()));
   return id;
 }
 async function workspace(row) {
+  row.live("a workspace");
   localStorage.clear();
   const tag = `${row.id}-${Math.random().toString(36).slice(2, 8)}`;
-  const w = await W.Workspace.open({ name: `ws-floor-${tag}`, mainName: `main-floor-${tag}` });
-  row.ws.push(w);
-  return w;
+  return row.acquire(await W.Workspace.open({ name: `ws-floor-${tag}`, mainName: `main-floor-${tag}` }), (w) => w.close(), "a workspace");
 }
 function client(row, w, opts = {}) {
+  row.live("a client");
   const c = new W.SyncClient(w, { origin: location.origin, ...opts });
   c.run = c.start();
   row.clients.push(c);
@@ -270,7 +287,8 @@ async function p0c(row) {
   W.registerJournalWriter("notebooks");
   W.registerJournalWriter("boards");
   await w.activateJournal();
-  const hdb = await W.openHistoryDb();
+  row.live("the journal's activation");
+  const hdb = await row.acquire(await W.openHistoryDb(), (db) => db.close(), "the history database");
   W.N.DOC_SYNC.on = true;
   const kit = W.N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
   const ds = new W.DS.DocSync({ retryMs: 200, askMs: 5000 });
@@ -282,6 +300,7 @@ async function p0c(row) {
   const nb = crypto.randomUUID();
   const st = new kit.JournalStore(w.main, hdb, nb, { name: "t", mode: "python", cells: [{ id: "a", code: "A1" }] }, W.H);
   await st.load();
+  await row.acquire(st, (x) => x.release(), "the notebook's store");
   ds.kick(nb);
   const first = await row.until(async () => { await ds.idle(); return ds.events.some((e) => e.t === "ack" && e.doc === nb) && (await W.JR.readJournal(hdb, nb)).lrows === 0; }, 15_000);
   const js0 = await W.JR.readJournal(hdb, nb);
@@ -337,19 +356,57 @@ async function kf1(row) {
 async function kf2(row) {
   row.clients.push({ stop: () => new Promise(() => {}), run: Promise.resolve() });
 }
+/** K-F3: nothing to do; its runRow is given a `held` that never answers (until aborted) */
+async function kf3() {}
+/** K-F4: an acquisition that starts before the row's limit and completes after it: the resource is disposed when it
+ * arrives, refused (RowEnded), and the census holds only what was acquired in time */
+async function kf4(row) {
+  const early = { closed: false };
+  await row.acquire(early, (x) => { x.closed = true; }, "an early resource");
+  row.early = early;
+  const late = { closed: false };
+  row.late = late;
+  await row.acquire(await new Promise((r) => setTimeout(() => r(late), 600)), (x) => { x.closed = true; }, "a delayed resource");
+  row.lateBodyReached = true;
+}
 
 const ROWS = [["P0-0", p00], ["P0-pos", p0pos], ["P0-a", p0a], ["P0-b", p0b], ["P0-c", p0c]];
-/** each row's wall limit (plan r2 §3.2), its drain after an end, its cleanup's bound, and the hold's finite wait */
+/** each row's wall limit (plan r2 §3.2), its drain after an end, each cleanup step's bound, and the holds' finite wait */
 const LIMITS = { rowMs: 60_000, drainMs: 10_000, cleanupMs: 10_000, holdingMs: 5000 };
+/** the runner's `held` answer, each request aborted by `signal` or after 2 s */
+const heldOf = (signal) => fetch("/__ctl", { method: "POST", body: J({ cmd: "held" }), signal: AbortSignal.any([signal, AbortSignal.timeout(2000)]) }).then((r) => r.json());
+
+/** Holds at 0 (holding, refHolds, handles), polled within `ms`: the WHOLE poll is bounded (a deadline race, and every
+ * request aborted at its end), so a `held` that never answers can't hold the run.  Answers {ok, h, stalled} */
+async function holdsZero(held, ms) {
+  const ac = new AbortController();
+  const end = Date.now() + ms;
+  const poll = (async () => {
+    let h = null;
+    while (!ac.signal.aborted) {
+      h = await held(ac.signal).catch(() => null);
+      if (h && h.holding === 0 && h.refHolds === 0 && h.handles === 0) return { ok: true, h };
+      if (Date.now() >= end) return { ok: false, h };
+      await sleep(50);
+    }
+    return { ok: false, h };
+  })();
+  try {
+    return await Promise.race([poll, sleep(ms + 250).then(() => ({ ok: false, h: null, stalled: true }))]);
+  } finally {
+    ac.abort();
+  }
+}
 
 /**
  * One row: its body raced against its limit; at its end (normal or not) the context is ended, so a body still running
- * stops at its next call, and the body is drained (awaited, bounded); then its cleanup: its clients stopped and their
- * loops ended, its workspaces closed, its holds released and the floors reset, and `holding` 0 within a finite wait.
- * Answers {stop: why} when the run can't go on: the body outlived its limit, or didn't drain, or the cleanup threw,
- * didn't end, or left a hold.
+ * stops at its next call or acquisition (a late acquisition is disposed), and the body is drained (awaited, bounded);
+ * then its cleanup, each step bounded: its clients stopped and their loops ended, everything it acquired disposed
+ * (latest first), its holds released and the floors reset, and its holds at 0 within a bounded poll.  Answers
+ * {stop: why} when the run can't go on: the body outlived its limit or didn't drain, or a cleanup step threw or didn't
+ * end, or the holds weren't 0.  `io.held`: the controls' stand-in for the runner's `held` (K-F3).
  */
-async function runRow(id, f, limits = LIMITS) {
+async function runRow(id, f, limits = LIMITS, io = { held: heldOf }) {
   const row = rowContext(id, limits);
   window.progress = { name: id, checks: results.length };
   let stop = null;
@@ -370,26 +427,19 @@ async function runRow(id, f, limits = LIMITS) {
     if (r !== "ok") { row.check(false, `cleanup: ${what}: ${r}`, "cleanup"); stop ??= `${id}: cleanup ${what} ${r}`; }
   };
   for (const c of row.clients) await step("a client's stop and loop", (async () => { await c.stop(); await c.run; })());
-  for (const w of row.ws) await step("a workspace's close", (async () => w.close())());
+  for (const d of [...row.disposers].reverse()) await step(`dispose ${d.what}`, (async () => d.dispose())());
   let end = null;
   await step("floorsRowEnd", (async () => { const res = await fetch("/__ctl", { method: "POST", body: J({ cmd: "floorsRowEnd" }), signal: AbortSignal.timeout(10_000) }); end = { status: res.status, body: await res.json() }; })());
-  const quiet = await (async () => {
-    const t = Date.now() + limits.holdingMs;
-    for (;;) {
-      const h = await fetch("/__ctl", { method: "POST", body: J({ cmd: "held" }) }).then((r) => r.json()).catch(() => null);
-      if (h && h.holding === 0 && h.refHolds === 0 && h.handles === 0) return h;
-      if (Date.now() > t) return h;
-      await sleep(50);
-    }
-  })();
-  const clean = end?.status === 200 && end.body.refHolds === 0 && end.body.bound === 0 && quiet?.holding === 0 && quiet?.refHolds === 0 && quiet?.handles === 0;
-  row.check(clean, "the row's end: its holds released, none waiting (holding 0 within a finite wait), the floors reset (bound 0): " + J({ end: end?.body, held: quiet }), "cleanup");
+  const quiet = await holdsZero(io.held, limits.holdingMs);
+  row.quiet = quiet;
+  const clean = end?.status === 200 && end.body.refHolds === 0 && end.body.bound === 0 && quiet.ok;
+  row.check(clean, "the row's end: its holds released, none waiting (holding 0 within a bounded poll), the floors reset (bound 0): " + J({ end: end?.body, held: quiet }), "cleanup");
   if (!clean) stop ??= `${id}: holds or floors not clean at its end`;
   rows.push({ id, ok: row.kinds.size === 0, kinds: [...row.kinds] });
   return { row, stop };
 }
 
-/** The row machinery's controls, each on short limits and outside the run's stop: K-F1 and K-F2 must each come out as
+/** The row machinery's controls, each on short limits and outside the run's stop: K-F1..K-F4 must each come out as
  * stated, or the run stops before any row */
 async function controls() {
   const k1 = await runRow("K-F1", kf1, { rowMs: 200, drainMs: 3000, cleanupMs: 1000, holdingMs: 1000 });
@@ -398,12 +448,29 @@ async function controls() {
   const k2 = await runRow("K-F2", kf2, { rowMs: 5000, drainMs: 1000, cleanupMs: 300, holdingMs: 1000 });
   const ok2 = typeof k2.stop === "string" && /cleanup a client's stop and loop timeout/.test(k2.stop) && k2.row.kinds.has("cleanup");
   rows.pop();
-  // (the controls' own failures are expected: replaced by one verdict line each)
-  for (const id of ["K-F1", "K-F2"]) for (let i = results.length - 1; i >= 0; i--) if (results[i][1].startsWith(id + ": ")) results.splice(i, 1);
+  // (K-F3: a `held` that never answers, except by its abort: the poll ends within its bound, the request aborted, a stop)
+  let aborted = 0;
+  const never = (signal) => new Promise((_, no) => signal.addEventListener("abort", () => { aborted++; no(new Error("aborted")); }));
+  const t3 = performance.now();
+  const k3 = await runRow("K-F3", kf3, { rowMs: 5000, drainMs: 1000, cleanupMs: 1000, holdingMs: 500 }, { held: never });
+  const e3 = performance.now() - t3;
+  const ok3 = k3.stop === "K-F3: holds or floors not clean at its end" && k3.row.quiet?.stalled === true && aborted === 1 && e3 < 500 + 250 + 1500;
+  rows.pop();
+  // (K-F4: a delayed acquisition completing after the row's end: disposed on arrival and refused; the early one kept in
+  // the census and disposed by the cleanup; the census exactly the early one)
+  const k4 = await runRow("K-F4", kf4, { rowMs: 200, drainMs: 3000, cleanupMs: 1000, holdingMs: 1000 });
+  const ok4 = k4.stop === "K-F4: timed out" && k4.row.drained === "ended" && k4.row.disposedLate === 1 && k4.row.late?.closed === true && k4.row.early?.closed === true
+    && k4.row.disposers.length === 1 && k4.row.disposers[0].what === "an early resource" && !k4.row.lateBodyReached;
+  rows.pop();
+  // (the controls' own expected failures are replaced by one verdict line each)
+  for (const id of ["K-F1", "K-F2", "K-F3", "K-F4"]) for (let i = results.length - 1; i >= 0; i--) if (results[i][1].startsWith(id + ": ")) results.splice(i, 1);
   results.push([ok1, `K-F1: a body past its limit is ended, its late call refused (RowEnded), and drained; the run told to stop: ${J({ stop: k1.stop, drained: k1.row.drained, lateCalls: k1.row.lateCalls, reached: !!k1.row.lateBodyReached })}`]);
   results.push([ok2, `K-F2: a client whose stop never ends: its cleanup step times out, which is a stop: ${J({ stop: k2.stop })}`]);
-  rows.push({ id: "K-F1", ok: ok1, kinds: ok1 ? [] : ["control"] }, { id: "K-F2", ok: ok2, kinds: ok2 ? [] : ["control"] });
-  return ok1 && ok2;
+  results.push([ok3, `K-F3: a held answer that never comes: the poll ends within its bound, its request aborted, a stop: ${J({ stop: k3.stop, stalled: k3.row.quiet?.stalled, aborted, ms: Math.round(e3) })}`]);
+  results.push([ok4, `K-F4: a resource acquired after the row's end is disposed on arrival and refused; the census holds exactly the early one, disposed by the cleanup: ${J({ stop: k4.stop, disposedLate: k4.row.disposedLate, late: k4.row.late?.closed, early: k4.row.early?.closed, census: k4.row.disposers.map((d) => d.what) })}`]);
+  const ok = [ok1, ok2, ok3, ok4];
+  ["K-F1", "K-F2", "K-F3", "K-F4"].forEach((id, i) => rows.push({ id, ok: ok[i], kinds: ok[i] ? [] : ["control"] }));
+  return ok.every(Boolean);
 }
 
 /** The floor rows, in order (`only`: one row's id, the pr-head control's "P0-0"); window.__report says when it's done.
