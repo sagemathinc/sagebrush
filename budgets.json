@@ -157,6 +157,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-csv.src": {
+   "exact": false,
+   "ceiling": 50266,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-ctypes.src": {
    "exact": false,
    "ceiling": 9101,
@@ -236,7 +243,7 @@
   },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 14870,
+   "ceiling": 14972,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -639,6 +646,7 @@
   }
  },
  "epoch": {
+  "engine/lib/mod-csv.src": 45697,
   "sizes": {
    "cli/lib.gen.js": 7200191,
    "cli/pyjs.cjs": 28780108,
