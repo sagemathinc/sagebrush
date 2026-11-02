@@ -382,7 +382,9 @@ async function counting(f) {
 // (D11: every transaction on entries reads the large-move record first, one get (r2 §4's adapter cost): a save's five
 // transactions on entries make 5 more requests than before it; PINS.collapseRelease 2 (from 3) keeps the collapsing
 // save at most 60, four under its bound: 38 and 60)
-const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 38, COLLAPSE_WORST = 60;
+// (Stage A L1: the op's history check in the same transaction (web/history/tokens.ts, inert: one hmeta get, A1.3's
+// "inactive is 1") makes every save one request more: 39 and 61, the collapsing save three under its bound)
+const PLAIN_BOUND = 40, COLLAPSE_BOUND = 64, PLAIN_WORST = 39, COLLAPSE_WORST = 61;
 /** 200 overwrites of `path` at a 1 MiB cap: each save's IndexedDB calls, apart for the saves that collapsed. */
 async function overwrites(w, path) {
   const big = new Uint8Array(64 * 1024);
@@ -447,7 +449,7 @@ async function tail() {
   }
   const p = stats(got.plain), c = stats(got.collapsing), p0 = stats(without.plain), c0 = stats(without.collapsing);
   const same = J(p) === J(p0) && J(c) === J(c0);
-  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= 60 && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
+  check(observed && c.n > 0 && p.max <= PLAIN_BOUND && c.max <= COLLAPSE_BOUND && c.max <= COLLAPSE_WORST && p.max === PLAIN_WORST && c.max === COLLAPSE_WORST && same && longest < 50 && (await totalRight(w)) && (await pinBytes(w)) <= 2 ** 20, `a 50,000-op tail, then 200 overwrites at a 1 MiB cap: each save at most ${PLAIN_BOUND} IndexedDB calls (${COLLAPSE_BOUND} for one that collapses), the worst exactly ${PLAIN_WORST} and ${COLLAPSE_WORST}, the same as with no tail, its longest task under 50 ms, the pinned bytes within the cap: ` + J({ plain: p, collapsing: c, noTail: { plain: p0, collapsing: c0 }, longestTask: Math.round(longest), observed, timerLate: Math.round(late), pinBytes: await pinBytes(w), over: got.seen }));
   // (one identity with many pins (kept apart): a release, and a cleanup page, cost the same few calls)
   const recs = await ob.records();
   await counting(() => W.cleanPins(w));
