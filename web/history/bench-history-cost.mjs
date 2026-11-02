@@ -25,7 +25,11 @@
 //   concurrent  4 workspaces open on one database (4 tabs' worth, in one page), each 200 saves, files and notebooks mixed
 //   CHROME=chromium PLAYWRIGHT=<dir with playwright 1.64.1> bun web/history/bench-history-cost.mjs [--out report.json]
 // BROWSERS=chromium,firefox (the default, both) picks the legs.  HCOST_FF_SCALE (default 1) multiplies every Firefox
-// workload's save count (O1, under review: runs long enough to span several of Firefox's incremental-GC cycles).  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
+// workload's save count (O1, daybreak3 + the grader: 6, i.e. 3000 / 3000 / 4 x 1200, runs long enough to span several
+// of Firefox's incremental-GC cycles).  Each run also reports its wall time, p50/p95/p99/max, its stalled saves (over 3
+// x the run's own p50) and its bursts (10 or more consecutive stalled saves, in completion order): the declared marker
+// of one incremental major-GC cycle (diag-r1: the GC cycle is a 1-2 s burst of uniformly slowed saves).  A Firefox run
+// with fewer than 3 bursts is a STOP (the grader's G-1).  Exit: 0 PASS, 1 FAIL, 2 BAD, 3 STOP, 76 VOID.
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -102,13 +106,16 @@ export async function bench(config, workload, scale = 1) {
     else await w.write("/n" + (i % 10) + ".ipynb", nb(i));
     out.push(performance.now() - t0);
   };
+  const wall0 = performance.now();
   for (let i = 0; i < 10; i++) { await w.create("/f" + i + ".bin", { content: bytes }); await w.create("/n" + i + ".ipynb"); }
   let ws = [w];
   if (workload === "concurrent") {
     ws = [w, ...(await Promise.all([1, 2, 3].map(() => W.Workspace.open({ name, mainName }))))];
     await Promise.all(ws.map(async (x, k) => { for (let i = 0; i < N.concurrent * scale; i++) await one(x, i * 4 + k, i % 2 ? "file" : "nb"); }));
   } else for (let i = 0; i < N[workload] * scale; i++) await one(w, i, workload === "files" ? "file" : "nb");
-  const r = { n: out.length, p95: pct(out, 0.95), p99: pct(out, 0.99), res };
+  const wall = performance.now() - wall0, p50 = pct(out, 0.5), stalled = out.map((x) => x > 3 * p50), bursts = [];
+  for (let i = 0, k = 0; i <= stalled.length; i++) { if (i < stalled.length && stalled[i]) k++; else { if (k >= 10) bursts.push(k); k = 0; } }
+  const r = { n: out.length, wall, p50, p95: pct(out, 0.95), p99: pct(out, 0.99), max: Math.max(...out), stalled: stalled.filter(Boolean).length, bursts, res };
   for (const x of ws) x.close();
   for (const d of [name, mainName]) await new Promise((ok) => { const q = indexedDB.deleteDatabase(d); q.onsuccess = q.onerror = q.onblocked = () => ok(); });
   return r;
@@ -190,14 +197,15 @@ try {
       const p99 = Object.fromEntries(CONFIGS.map((c) => [c, Math.max(...runs[c].map((x) => x.p99))]));
       const resMax = Math.max(...CONFIGS.flatMap((c) => runs[c].map((x) => x.res)));
       const spread = CONFIGS.filter((c) => spreadStop(p95(c)));
-      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(spread.length ? [`instability/spread: ${spread.join(", ")}`] : [])];
+      const fewGc = bname === "firefox" ? CONFIGS.flatMap((c) => runs[c].map((x, r) => [c, r, x.bursts.length]).filter((z) => z[2] < 3)) : [];
+      const stop = [...(resMax > 0.1 ? [`performance.now() resolution ${resMax.toFixed(4)} ms > 0.1 ms`] : []), ...(spread.length ? [`instability/spread: ${spread.join(", ")}`] : []), ...(fewGc.length ? [`under 3 GC bursts: ${fewGc.map(([c, r, n]) => `${c}#${r + 1}:${n}`).join(" ")}`] : [])];
       const valid = D.aa <= T && D.delay > T, pass = D.head <= T, backstop = p99.head <= 250 && p99.set <= 250;
       const verdict = stop.length ? "STOP" : !valid ? "VOID" : pass && backstop ? "PASS" : "FAIL";
       verdicts.push(verdict);
       rows[workload] = { verdict, stop, B, T, D, paired, worst, p99, resMax, valid, pass, backstop, setWithin3: D.set <= 3, order, runs };
       const f = (x) => x.toFixed(2);
       console.log(`${bname} ${workload}: ${verdict}${stop.length ? " (" + stop.join("; ") + ")" : ""}: B ${f(B)} ms, T ${f(T)} ms; paired medians A/A ${f(D.aa)} (${D.aa <= T ? "within" : "PAST"}), head ${f(D.head)} (${pass ? "within" : "PAST"}), delay ${f(D.delay)} (${D.delay > T ? "caught" : "NOT CAUGHT"}), set ${f(D.set)} ms (${D.set <= 3 ? "within" : "past"} 3 ms, reported); p99 head ${f(p99.head)} set ${f(p99.set)} ms (${backstop ? "within" : "PAST"} 250 ms); resolution <= ${resMax.toFixed(4)} ms`);
-      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p95 ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])})`);
+      for (const c of CONFIGS) console.log(`  ${c.padEnd(5)} p95 ${p95(c).map(f).join(" / ")} (worst ${f(worst[c])}); p50 ${runs[c].map((x) => f(x.p50)).join(" / ")}; max ${runs[c].map((x) => f(x.max)).join(" / ")}; stalled ${runs[c].map((x) => x.stalled).join(" / ")}; bursts ${runs[c].map((x) => "[" + x.bursts.join(",") + "]").join(" ")}; wall s ${runs[c].map((x) => (x.wall / 1000).toFixed(1)).join(" / ")}`);
     }
     report.browsers[bname] = { version: b.version, scale: bname === "firefox" ? FF_SCALE : 1, rows };
     await b.close();
