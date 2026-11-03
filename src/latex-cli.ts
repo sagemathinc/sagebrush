@@ -319,7 +319,14 @@ function pageHtml(name: string, body: string, beamer: boolean): string {
 
 /** The browser to use: $CHROME (or $SAGEBRUSH_CHROME), else the usual places, else null. */
 export function findBrowser(env = process.env, platform = process.platform): string | null {
-  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) return existsSync(env[k]!) ? env[k]! : null;
+  // (CHROME=/path/to/it, or a command's name looked up on PATH as a shell would: CI sets CHROME=google-chrome)
+  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) {
+    const v = env[k]!;
+    if (/[\\/]/.test(v)) return existsSync(v) ? v : null;
+    const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);
+    const names = platform === "win32" && !/\.exe$/i.test(v) ? [v + ".exe", v] : [v];
+    return dirs.flatMap((d) => names.map((n) => join(d, n))).find((p) => existsSync(p) && statSync(p).isFile()) ?? null;
+  }
   const cands: string[] = [];
   if (platform === "darwin") {
     for (const app of ["Google Chrome", "Chromium", "Microsoft Edge", "Brave Browser", "Google Chrome Canary"]) {
