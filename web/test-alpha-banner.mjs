@@ -1,3 +1,4 @@
+// ci: checks.3 order=50
 // The early-alpha notice (web/alpha-banner.js, SECURITY.md): shown on
 // sagebrush.space's own pages, never in a frame, never once dismissed; and
 // put only in the site's pages, never in the board template (which the frame

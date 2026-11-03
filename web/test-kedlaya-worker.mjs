@@ -1,3 +1,5 @@
+// ci: web-browser/notebook order=240
+// ci: inline (ci.yml)
 // Kedlaya's Frobenius matrix in the browser worker (plan-kedlaya-optin r6;
 // for WebKit, plan-kedlaya-webkit-ci r4): the worker's JavaScript engine and
 // host, and Stop during four stages, sent by the page through the shared

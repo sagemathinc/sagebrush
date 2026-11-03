@@ -1,3 +1,4 @@
+// ci: checks.3 order=100
 // The site asset budget gate's check 1 (scripts/site-asset-budget.mjs): the reviewed PROD differences are accepted
 // exactly, and every broader change is refused. Each case builds three small trees (base PROD, PROD, DEV) and runs the
 // gate on them, reading only check 1's line.

@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=90 runner=bun
 // Three documents merged by records (cached.ts merge3): what one side
 // changed is taken; what both changed, ours, and listed; records added or
 // removed on one side are; an item whose page or group the other side

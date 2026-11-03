@@ -1,3 +1,4 @@
+// ci: web-runner order=20 chrome
 // G-10 (plan r2..r2.3.1): what the runner's fetch broker fetches for its interpreter, in headless Chromium, on the
 // notebook page. Each forged request comes from the interpreter's own worker, the dedicated worker in the runner's
 // sandboxed frame (found by the frame it belongs to, CDP auto-attach), posting `{brokerFetch}` as a compromised

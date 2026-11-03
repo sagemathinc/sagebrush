@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=130 runner=bun
 // The library's chunks with packages (web/lib-chunks.mts): a package's
 // module that a mode's start imported (recorded at its package path,
 // "pkg:<dir>/<path>", src/compile.ts) gets its compiled code in the

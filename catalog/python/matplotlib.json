@@ -18,6 +18,154 @@
     "upstream_version": "Matplotlib 3.11.1"
   },
   {
+    "name": "matplotlib.axes.Axes.semilogy",
+    "kind": "method",
+    "signature": "(self, *args, **kwargs)",
+    "summary": "plot with a log y axis: the y axis made a log one (base 10), then plot(*args) with the other keywords.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.semilogy([0, 1, 2, 3], [1, 10, 100, 1000], 'o-', label='10^n')\nax.set_title('Exponential growth')\nax.legend()\nplt.show()",
+        "expected": "[figure 1: Plot: \"Exponential growth\"; line \"10^n\" through 4 points; x from -0.15 to 3.15, y from 0.7079 to 1413 log scale]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.semilogx",
+    "kind": "method",
+    "signature": "(self, *args, **kwargs)",
+    "summary": "plot with a log x axis: the x axis made a log one (base 10), then plot(*args) with the other keywords.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nimport numpy as np\nfig, ax = plt.subplots()\nn = np.array([1, 10, 100, 1000])\nax.semilogx(n, np.log10(n), label='log10')\nax.legend()\nplt.show()",
+        "expected": "[figure 1: Plot: line \"log10\" through 4 points; x from 0.7079 to 1413 log scale, y from -0.15 to 3.15]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.loglog",
+    "kind": "method",
+    "signature": "(self, *args, **kwargs)",
+    "summary": "plot with both axes log ones (base 10), then plot(*args) with the other keywords.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nimport numpy as np\nfig, ax = plt.subplots()\nn = np.array([1, 10, 100, 1000])\nax.loglog(n, n ** 2, label='n^2')\nax.loglog(n, n ** 3, label='n^3')\nax.legend()\nplt.show()",
+        "expected": "[figure 1: Plot: line \"n^2\" through 4 points, line \"n^3\" through 4 points; x from 0.7079 to 1413 log scale, y from 0.3548 to 2.818e+09 log scale]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_xscale",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The x axis's scale: 'linear', or 'log' after set_xscale('log'), semilogx or loglog.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nprint(ax.get_xscale())\nax.set_xscale('log')\nprint(ax.get_xscale())",
+        "expected": "linear\nlog\n[figure 1: Plot: empty; x from 1 to 10 log scale, y from 0 to 1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_yscale",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The y axis's scale: 'linear', or 'log' after set_yscale('log'), semilogy or loglog.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.semilogy([1, 2], [1, 100])\nprint(ax.get_yscale(), ax.get_xscale())",
+        "expected": "log linear\n[figure 1: Plot: line through 2 points; x from 0.95 to 2.05, y from 0.7943 to 125.9 log scale]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.semilogy",
+    "kind": "function",
+    "signature": "(*args, **kwargs)",
+    "summary": "plot on the current Axes with a log y axis (base 10).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nimport numpy as np\nt = np.arange(0, 5)\nplt.semilogy(t, 2.0 ** t, label='2^t')\nplt.title('Doubling')\nplt.legend()\nplt.show()",
+        "expected": "[figure 1: Plot: \"Doubling\"; line \"2^t\" through 5 points; x from -0.2 to 4.2, y from 0.8706 to 18.38 log scale]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.semilogx",
+    "kind": "function",
+    "signature": "(*args, **kwargs)",
+    "summary": "plot on the current Axes with a log x axis (base 10).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.semilogx([1, 10, 100], [0, 1, 2])\nplt.show()",
+        "expected": "[figure 1: Plot: line through 3 points; x from 0.7943 to 125.9 log scale, y from -0.1 to 2.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.loglog",
+    "kind": "function",
+    "signature": "(*args, **kwargs)",
+    "summary": "plot on the current Axes with both axes log ones (base 10).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.loglog([1, 10, 100], [1, 100, 10000], 's-')\nplt.title('A power law')\nplt.show()",
+        "expected": "[figure 1: Plot: \"A power law\"; line through 3 points; x from 0.7943 to 125.9 log scale, y from 0.631 to 1.585e+04 log scale]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture.",
+      "A log axis here is base 10; base= (or basex=, basey=) of another base is NotImplementedError. subs= and nonpositive= are accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
     "name": "matplotlib.pyplot.bar",
     "kind": "function",
     "signature": "(x, height, width=0.8, bottom=None, *, align='center', **kwargs)",
@@ -120,6 +268,60 @@
     ],
     "differs": [
       "Rectilinear Axes only: projection='3d' or 'polar' raises NotImplementedError.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.add_patch",
+    "kind": "method",
+    "signature": "(self, p)",
+    "summary": "Add a patch (matplotlib.patches: Rectangle, Circle, Ellipse, Polygon) to the Axes; returns the patch.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfrom matplotlib.patches import Rectangle, Circle\nfig, ax = plt.subplots()\nax.add_patch(Rectangle((0, 0), 2, 1, color='tab:blue', label='box'))\nax.add_patch(Circle((3, 0.5), 0.5, color='tab:orange'))\nax.set_xlim(-1, 4)\nax.set_ylim(-1, 2)\nax.set_title('Patches')\nplt.show()",
+        "expected": "[figure 1: Plot: \"Patches\"; filled region \"box\", filled region; x from -1 to 4, y from -1 to 2]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.fill",
+    "kind": "method",
+    "signature": "(self, *args, data=None, **kwargs)",
+    "summary": "Filled polygons: fill(x, y), fill(x, y, 'color'), several x, y groups; returns the list of Polygons.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.fill([0, 1, 0.5], [0, 0, 1], 'g', alpha=0.5, label='triangle')\nax.set_title('A filled triangle')\nplt.show()",
+        "expected": "[figure 1: Plot: \"A filled triangle\"; filled region \"triangle\"; x from -0.05 to 1.05, y from -0.05 to 1.05]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.fill",
+    "kind": "function",
+    "signature": "(*args, data=None, **kwargs)",
+    "summary": "Filled polygons on the current Axes: fill(x, y), fill(x, y, 'color'); returns the list of Polygons.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nimport numpy as np\nt = np.linspace(0, 2 * np.pi, 7)\nplt.fill(np.cos(t), np.sin(t), 'tab:purple')\nplt.title('A hexagon')\nplt.show()",
+        "expected": "[figure 1: Plot: \"A hexagon\"; filled region; x from -1.1 to 1.1, y from -0.9526 to 0.9526]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
       "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
     ],
     "status": "partial",

@@ -19,6 +19,8 @@ export interface ToolTarget {
   images: Record<string, string | { why: string }>;
   /** The page's own styles (style.ts PAGE_CSS), for the pictures. */
   css: string;
+  /** Read the code's saved results again (a `sagebrush latex run` may have written them since). */
+  refresh?: () => Promise<void>;
 }
 
 const DEFAULT_SHOTS = 12;
@@ -40,6 +42,7 @@ const NONE = "No LaTeX document is open in this page: open a .tex file first.";
 
 /** The preview of the source as it is now: waits for the reply (and its patch) to an edit made just before. */
 async function settled(t: ToolTarget, ms = 15000): Promise<boolean> {
+  await t.refresh?.();
   const t0 = performance.now();
   while (performance.now() - t0 < ms) {
     if (t.current() && t.lastCheck()) return true;
@@ -71,13 +74,14 @@ export function registerLatexTools() {
         type: "object",
         properties: {
           frames: { type: "array", items: { type: "number" }, description: `Frame (or page) numbers, from 1; default the first ${DEFAULT_SHOTS}` },
+          steps: { type: "boolean", description: "Each frame at each of its overlay steps (\\pause, <2->, \\only), as Present shows them; default false: all steps at once, as the preview shows them" },
         },
       },
-      async execute({ frames }: { frames?: number[] } = {}) {
+      async execute({ frames, steps }: { frames?: number[]; steps?: boolean } = {}) {
         const t = target;
         if (!t) return text(NONE);
         if (!(await settled(t))) return text("The preview hasn't caught up with the source yet: try again in a moment.");
-        try { return await (await load()).latexRender(t, frames); }
+        try { return await (await load()).latexRender(t, frames, steps); }
         catch (e) { return text("Couldn't draw the pictures: " + String((e as Error)?.message ?? e)); }
       },
     },

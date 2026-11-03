@@ -1,3 +1,4 @@
+// ci: none (its PNG cases need $CHROME as a path on the runner, not google-chrome: the web-latex follow-up wires it)
 // `sagebrush latex check|render` (src/latex-cli.ts, built as build/cli/sagebrush-latex.cjs) on real files in a temp
 // folder, through the CLI's own bundle: what an agent runs to verify a .tex and see it. Check's problems and their
 // lines, frames, images and exit codes; render's HTML (self-contained, no script); beamer frames as slides (titles,
@@ -129,6 +130,7 @@ try {
   check("render-default-path", d.code === 0 && existsSync(join(dir, "clean.html")) && d.out.startsWith("wrote clean.html"), d);
 
   // ---- render --png: what the agent looks at
+  // (CHROME as CI sets it, a command's name (CHROME=google-chrome), is the CLI's to look up on PATH: passed as it is)
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
     if (process.env.LATEX_CLI_PNG === "1") check("png-browser-found", false, "no Chromium-family browser (CHROME=...)");
@@ -144,8 +146,72 @@ try {
     check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, pages, files });
     const dims = files.map((f) => { const b = readFileSync(join(dir, "png", f)); return b.subarray(0, 8).toString("hex") === "89504e470d0a1a0a" ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; });
     check("png-slide-size-16-9", dims.length === 5 && dims.every((x) => x && x[0] === 1024 && Math.abs(x[1] - 576) <= 1), dims);
+    // (--steps: each frame at each overlay step)
+    writeFileSync(join(dir, "ov.tex"), "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{S}\n\\begin{itemize}\n\\item<1-> a\n\\item<2-> b\n\\end{itemize}\n\\pause\n\\pause\nc\n\\end{frame}\n\\begin{frame}{T}\nt\n\\end{frame}\n\\end{document}\n");
+    const st = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "ov.tex", "--png", "ovpng", "--steps", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const sp = st.json?.png?.pages ?? [];
+    const ovFiles = existsSync(join(dir, "ovpng")) ? readdirSync(join(dir, "ovpng")).sort() : [];
+    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { files: ovFiles, pages: sp });
+    const bytes = ovFiles.map((f) => readFileSync(join(dir, "ovpng", f)).toString("base64"));
+    check("png --steps: the steps' pictures differ", bytes[0] !== bytes[1] && bytes[1] !== bytes[2], null);
+    // (--pdf: printed by the same browser, a beamer document one page per frame, of the slide's size)
+    const pd = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--pdf", "talk.pdf", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const pdfBytes = existsSync(join(dir, "talk.pdf")) ? readFileSync(join(dir, "talk.pdf")) : Buffer.alloc(0);
+    const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
+    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
   }
+
+  // ---- run: the SageTeX code, in order, in one session; its results beside the file, shown by check and render
+  const SAGE = String.raw`\documentclass{beamer}
+\usepackage{sagetex}
+\begin{document}
+\begin{frame}{Computed}
+\begin{sagesilent}
+f(x) = x^3 - 2*x
+print("printed, not a result")
+\end{sagesilent}
+The derivative is $\sage{diff(f(x), x)}$; $2^{64}+1 = \sage{factor(2^64+1)}$.
+
+\sageplot[width=0.5\textwidth]{plot(f, (x, -2, 2))}
+\end{frame}
+\begin{frame}{A failure}
+$\sage{1/0}$ then $\sage{2+2}$.
+\end{frame}
+\end{document}
+`;
+  writeFileSync(join(dir, "sage.tex"), SAGE);
+  const before = await run(dir, "check", "sage.tex", "--json");
+  check("run-before: not run yet, said how", before.code === 0 && before.json.code.every((x) => x.state === "not run") && before.json.problems.some((x) => x.kind === "code" && /sagebrush latex run sage\.tex/.test(x.message)), before.json?.problems);
+  const ran = await run(dir, "run", "sage.tex", "--json");
+  const res = existsSync(join(dir, "sage.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "sage.tex.results.json"), "utf8")) : null;
+  check("run: exit 1 (an item failed), results file written", ran.code === 1 && res?.format === "sagebrush-latex-results" && res.version === 1 && res.items.length === 6, { code: ran.code, err: ran.err, res: res && res.items.map((x) => x.s) });
+  check("run: states in order, fail-stop", JSON.stringify(res?.items.map((x) => x.s)) === JSON.stringify(["ok", "ok", "ok", "ok", "error", "blocked"]) && ran.json.items[4].line === lineOf(SAGE, "$\\sage{1/0}"), { items: ran.json?.items });
+  check("run: results are Sage's", res.items[1].latex === "3 \\, x^{2} - 2" && /274177/.test(res.items[2].latex) && /^data:image\/svg\+xml;base64,/.test(res.items[3].src), res.items.slice(1, 4).map((x) => (x.latex ?? x.src ?? "").slice(0, 60)));
+  check("run: the error's traceback is the item's, not the session script's", /ZeroDivisionError/.test(res.items[4].msg) && !/driver\.sage/.test(res.items[4].msg), res.items[4].msg);
+  const after = await run(dir, "check", "sage.tex", "--json");
+  check("check after run: the states, the failure at its line", after.code === 1 && after.json.code.map((x) => x.state.split(":")[0]).join(",") === "ok,ok,ok,ok,error,blocked"
+    && after.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === lineOf(SAGE, "$\\sage{1/0}") && /ZeroDivisionError: division by zero/.test(x.message)), after.json?.problems);
+  await run(dir, "render", "sage.tex", "-o", "sage.html");
+  const sh = readFileSync(join(dir, "sage.html"), "utf8");
+  check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
+  // (item 3 changed: items 1 and 2 keep their results, 3 on are not run until the next run)
+  writeFileSync(join(dir, "sage.tex"), SAGE.replace("factor(2^64+1)", "factor(2^32+1)"));
+  const edited = await run(dir, "check", "sage.tex", "--json");
+  check("an edit: the results before it kept, those from it on not run", edited.json.code.map((x) => x.state).join(",") === "ok,ok,not run,not run,not run,not run", edited.json?.code);
+  // (a timeout: what ran before it is kept)
+  writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
+  const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
+  check("run --timeout: stopped, earlier results kept", slow.code === 1 && slow.json.items.map((x) => x.state).join(",") === "ok,error,blocked" && /timeout/.test(slow.json.items[1].message), slow.json?.items ?? slow.err);
+  const none = await run(dir, "run", "clean.tex");
+  check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
+
+  // (a file named latex in the folder: \`sagebrush latex run\` is still the command, never that file run as a script,
+  //  astra's LATEX-RUN-1; for every command)
+  writeFileSync(join(dir, "latex"), "print('THE LOCAL SCRIPT RAN')\n");
+  const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
+  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
+  rmSync(join(dir, "latex"));
 
   // ---- usage
   const u = await run(dir, "render");

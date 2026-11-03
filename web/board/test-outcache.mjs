@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=110 runner=bun
 // outcache.ts (design/outputs.md, section 2): what a board's cache keeps
 // when it is over its cap (unmarked entries first, least recently used
 // first; marked ones only if they alone are over it), and which boards a

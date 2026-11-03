@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=40 runner=bun
 // A board as an SVG file without a browser (svg.ts, `sagebrush board render
 // --svg`): every example board's pages render, the same bytes each time
 // (their hashes below: a change meant to change the look updates them);

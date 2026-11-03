@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The LaTeX page's agent tools (agent-tools.ts: latex_check, latex_render, registered with navigator.modelContext),
 // in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, served by web/serve.py: what an agent
 // in the browser runs to verify a .tex and see it. A stand-in navigator.modelContext (before the page's scripts)
@@ -10,7 +11,8 @@
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-tools.mjs
 //   (LATEX_SHOTS=dir: the PNGs the tool returned, written there for a look)
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -116,6 +118,93 @@ try {
   check(look.red > 5000 && look.ink > 200, "latex_render: the folder's image drawn, and the math's ink", look);
   const one = await call("latex_render", { frames: [3] });
   check(JSON.parse(one[0].text).shown.length === 1 && JSON.parse(one[0].text).shown[0].n === 3 && one.length === 2, "latex_render: one chosen frame", JSON.parse(one[0].text));
+
+  // ---- Present (present.ts): the slides full screen, step by step through their overlays; and latex_render's steps
+  const OV = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}{Step by step}
+\begin{itemize}[<+->]
+\item First, the question.
+\item Then, an idea.
+\end{itemize}
+\only<3>{Only on three.}
+\end{frame}
+\begin{frame}{Second}
+Plain.
+\end{frame}
+\end{document}
+`;
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const ofid = await mk("/ov.tex", OV);
+  await send("Page.navigate", { url: base + "?tex=" + ofid + "&latex=1" });
+  check(await until(`document.querySelectorAll(".tex-preview section.slide").length === 2 && !document.querySelector(".tex-present-btn").hidden`, 30000), "a beamer document: Present offered");
+  const oc = JSON.parse((await call("latex_check"))[0].text);
+  check(oc.frames.map((f) => f.steps).join(",") === "3,1", "latex_check: each frame's overlay steps", oc.frames);
+  await ev(`document.querySelector(".tex-present-btn").click(), 1`);
+  const P = `document.querySelector(".tex-present")`;
+  check(await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.dataset.step === "1"`, 15000), "Present: the presenter open at frame 1, step 1");
+  const vis = () => ev(`[...${P}.querySelectorAll("li")].map((li) => getComputedStyle(li).visibility).join(",") + "|" + (${P}.querySelector(".tp-stage").textContent.includes("Only on three") && getComputedStyle(${P}.querySelector('[data-ovm="only"]')).display !== "none")`);
+  const v1 = await vis();
+  const key = async (k, code) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: { ArrowRight: 39, ArrowLeft: 37, Escape: 27, End: 35 }[k] }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+  await key("ArrowRight", "ArrowRight");
+  const v2 = await vis();
+  await key("ArrowRight", "ArrowRight");
+  const v3 = await vis();
+  check(v1 === "visible,hidden|false" && v2 === "visible,visible|false" && v3 === "visible,visible|true", "Present: Right steps through the overlays (an item at a time, then \\only<3>)", { v1, v2, v3 });
+  await key("ArrowRight", "ArrowRight");
+  check(await until(`${P}.dataset.frame === "2" && ${P}.dataset.step === "1" && ${P}.textContent.includes("2 / 2")`, 5000), "Present: after the last step, the next frame", await ev(`${P}.textContent.slice(-40)`));
+  await key("ArrowLeft", "ArrowLeft");
+  check(await until(`${P}.dataset.frame === "1" && ${P}.dataset.step === "3"`, 5000), "Present: Left goes back to the last step of the frame before");
+  const box = await ev(`(() => { const r = ${P}.querySelector(".tp-stage > .slide").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), innerWidth, innerHeight]; })()`);
+  check(Math.abs(box[0] / box[1] - 16 / 9) < 0.02 && (Math.abs(box[0] - box[2]) <= 1 || Math.abs(box[1] - box[3]) <= 1), "Present: the slide as large as the window allows, 16:9", box);
+  // (an edit while presenting: shown at once)
+  await typeInto(OV.replace("Then, an idea.", "Then, a better idea."));
+  check(await until(`${P}.querySelector(".tp-stage").textContent.includes("a better idea")`, 15000), "Present: an edit shows at once");
+  await key("Escape", "Escape");
+  check(await until(`!${P}`, 5000), "Present: Escape stops it");
+  const rs = await call("latex_render", { steps: true });
+  const rsum = JSON.parse(rs[0].text);
+  check(rs.length === 1 + 4 && rsum.shown.map((x) => x.n + "." + x.step).join(",") === "1.1,1.2,1.3,2.1" && rsum.shown.every((x) => png(rs[1 + rsum.shown.indexOf(x)].data)?.[0] === 1024), "latex_render steps: each frame at each step", rsum.shown);
+  check(rs[1].data !== rs[2].data && rs[2].data !== rs[3].data, "latex_render steps: the steps' pictures differ");
+  await typeInto(OV);
+
+  // ---- the code's saved results (`sagebrush latex run`'s file beside the .tex): drawn in the page, and in its report
+  const SAGE = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{Computed}
+\begin{sagesilent}
+f(x) = x^3 - 2*x
+\end{sagesilent}
+$f'(x) = \sage{diff(f(x), x)}$
+
+\sageplot[width=0.5\textwidth]{plot(f, (x, -2, 2), color='red', thickness=6)}
+\end{frame}
+\end{document}
+`;
+  const cli = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
+  const rdir = mkdtempSync(join(tmpdir(), "sb-latex-tools-run-"));
+  writeFileSync(join(rdir, "sage.tex"), SAGE);
+  try { execFileSync(process.execPath, [cli, "latex", "run", "sage.tex"], { cwd: rdir, stdio: "ignore" }); } catch {}
+  const resultsText = existsSync(join(rdir, "sage.tex.results.json")) ? readFileSync(join(rdir, "sage.tex.results.json"), "utf8") : "";
+  rmSync(rdir, { recursive: true, force: true });
+  check(/"s":"ok"/.test(resultsText), "the results file made by sagebrush latex run (build/cli)", resultsText.slice(0, 200));
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const sfid = await mk("/sage.tex", SAGE);
+  await mk("/sage.tex.results.json", resultsText);
+  await send("Page.navigate", { url: base + "?tex=" + sfid + "&latex=1" });
+  check(await until(`!!document.querySelector(".tex-preview section.slide img.sageplot") && document.querySelector(".tex-preview section.slide").textContent.includes("3x")`, 30000), "the saved results drawn in the editor: the plot and \\sage{}'s result",
+    await ev(`document.querySelector(".tex-preview section.slide")?.textContent?.slice(0, 200)`));
+  const sc = JSON.parse((await call("latex_check"))[0].text);
+  check(sc.code.map((x) => x.state).join(",") === "ok,ok,ok" && !sc.problems.some((x) => x.kind === "code"), "latex_check: the items' states from the results", sc.code);
+  const sr = await call("latex_render");
+  const red = await ev(`(async () => { const i = new Image(); i.src = "data:image/png;base64," + ${JSON.stringify(sr[1]?.data ?? "")}; await i.decode(); const c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, i.width, i.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (d[k] > 180 && d[k + 1] < 80 && d[k + 2] < 80) n++; return n; })()`);
+  check(red > 500, "latex_render: the computed plot drawn in the frame's picture", red);
+  // (an edit of the code: its result, and those after it, no longer shown; asked to run again)
+  await typeInto(SAGE.replace("x^3 - 2*x", "x^3 - 3*x"));
+  const se = JSON.parse((await call("latex_check"))[0].text);
+  check(se.code.every((x) => x.state === "not run") && se.problems.some((x) => /sagebrush latex run/.test(x.message)), "an edit of the code: its results no longer shown, run asked for", se.code);
 
   // ---- an article: pages
   const afid = await mk("/notes.tex", ARTICLE);

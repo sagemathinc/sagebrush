@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=10 runner=bun
 // The switch for notebooks' contents (web/workspace/doc-sync-switch.ts), DEV's and PROD's: it fails closed.  Every
 // combination of its three conditions (the origin, the server's `available`, a running sync client): on only for
 // DEV's or PROD's own origin exactly with both others true; any other origin (look-alikes, http:, www.) never,

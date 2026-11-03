@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=120
 // A board's questions answered with their controls (board.ts askEl), in
 // headless Chromium: a radio button, checkboxes, a text, a number (one it
 // doesn't take said, not kept), a scale, a yes/no box, and the reader's own

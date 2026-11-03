@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -717,6 +718,41 @@ try {
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
+  // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
+  // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
+  // middle-click in a new tab; any other file still its preview, the board kept
+  {
+    // (a board of the workspace's own: the file panel is a workspace board's, not an example's)
+    await go(base); await until(`!!${W}`, 60000);
+    const bref = await ev(`${W}.create("/u1.board.json").then((e) => e.ref)`);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + "board/?doc=local:" + bref);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.txt")})`, 30000);
+    const mid = rows && await ev(`(async () => {
+      window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
+      document.querySelector(${sel("/mid.tex")}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+      await new Promise((s) => setTimeout(s, 500));
+      return { opened: window.__opened, board: location.pathname };
+    })()`);
+    const txt = rows && await ev(`(async () => {
+      document.querySelector(${sel("/mid.txt")}).click();
+      await new Promise((s) => setTimeout(s, 800));
+      const p = !!document.querySelector(".sbfprev");
+      document.querySelector(".sbfprev")?.remove();
+      return { preview: p, board: location.pathname };
+    })()`);
+    let left = false, editor = false;
+    if (rows) {
+      await mark();
+      await ev(`(() => { document.querySelector(${sel("/mid.tex")}).click(); return 1; })()`);
+      left = await fresh(`location.pathname === "/" && location.search === "?tex=${midFid}"`, 30000).then(() => true, () => false);
+      editor = left && await until(`!!document.querySelector(".tex-page")`, 20000);
+    }
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    check(rows && mid && mid.opened.length === 1 && mid.opened[0].includes("?tex=" + midFid) && mid.board.startsWith("/board") && txt && txt.preview && txt.board.startsWith("/board") && left && editor,
+      "U1: with a board open, a .tex file in the file panel opens the LaTeX editor (a click here, a middle-click in a new tab); another file still previews, the board kept", { rows, mid, txt, left, editor });
+  }
   // on, by the URL: no LaTeX file fetched before a .tex is opened
   requests.length = 0;
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
@@ -1165,6 +1201,65 @@ try {
   const hb = await until(`!!document.querySelector(".tex-preview .errchip") && document.querySelector(".tex-preview").textContent.includes("End text.")`, 20000);
   check(hb && await ev(`document.querySelector(".tex-preview .errchip").textContent.includes("not finished") && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "a half-typed \\begin{: a note, and the document after it still renders", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
+  // ---- Print / Save as PDF (William, Nov 2): the button prints the rendered preview alone; the agent's route
+  {
+    const fp = await mk("/t/print.tex", enc("\\documentclass{article}\n\\begin{document}\n\\section{Printed}\nA formula $$\\int_0^1 x^2\\,dx = \\frac13$$ in it.\n\\end{document}\n"));
+    await open(fp);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Printed") && !!document.querySelector(".tex-preview .katex")`, 20000);
+    const b = await ev(`(() => { const b = document.querySelector(".tex-head .tex-printbtn"); if (!b) return null;
+      window.__printed = []; const real = window.print; window.print = () => window.__printed.push(document.documentElement.classList.contains("tex-print"));
+      b.click(); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
+    await sleep(50);
+    const after = await ev(`document.documentElement.classList.contains("tex-print")`);
+    check(b && b.label === "Print / Save as PDF" && JSON.stringify(b.printed) === "[true]" && !after, "Print / Save as PDF: the preview's button opens the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
+    check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
+    await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const shown = await ev(`(() => { const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : "absent"; };
+      return { head: d(".tex-head"), banner: d(".tex-banner"), left: d(".tex-left"), preview: d(".tex-preview"), sidebar: d("#wssidebar"), page: getComputedStyle(document.querySelector(".tex-page")).position, katex: d(".tex-preview .katex") }; })()`);
+    check(shown.head === "none" && shown.banner === "none" && shown.left === "none" && shown.preview !== "none" && (shown.sidebar === "none" || shown.sidebar === "absent") && shown.page === "static" && shown.katex !== "none",
+      "…in print, only the rendered preview: no header, banner, source or file browser; its math there", shown);
+    const pdf = await send("Page.printToPDF", { printBackground: false });
+    const bytes = Buffer.from(pdf?.data ?? "", "base64");
+    check(bytes.subarray(0, 5).toString() === "%PDF-" && bytes.length > 2000, "…and a browser an agent drives prints it to a PDF (Page.printToPDF): " + bytes.length + " bytes");
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    await ev(`(window.sagebrush.latex.printMode(false), 1)`);
+    check(!(await ev(`document.documentElement.classList.contains("tex-print")`)) && (await ev(`getComputedStyle(document.querySelector(".tex-head")).display`)) !== "none", "…printMode(false): the page as it was");
+  }
+  // ---- \neq and the other \not relations (William, Nov 2: the slash below and left of the "="; the preview's .rlap rule,
+  // for LaTeX's \rlap, also styled the .rlap KaTeX builds \not from): each slash across its relation, in an article and
+  // a slide; and LaTeX's own \rlap and \llap on their line, starting (ending) where they are
+  for (const [name, cls] of [["neq-article", "article"], ["neq-beamer", "beamer"]]) {
+    const body = "For every $n \\neq 0$, $a \\not\\in B$, $x \\notin S$, $A \\not\\subset B$, $a \\not= b$.\n\nAAA\\rlap{XY}lap and ri\\llap{ZW}ght.\n";
+    const src = cls === "beamer" ? "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{Not}\n" + body + "\\end{frame}\n\\end{document}\n" : "\\documentclass{article}\n\\begin{document}\n" + body + "\\end{document}\n";
+    const fn = await mk("/t/" + name + ".tex", enc(src));
+    await open(fn);
+    await until(`document.querySelectorAll(".tex-preview .katex").length >= 5 && !!document.querySelector(".tex-preview .tex-llap")`, 20000);
+    const g = await ev(`(() => {
+      const r = (e) => e.getBoundingClientRect(), cy = (b) => (b.top + b.bottom) / 2, cx = (b) => (b.left + b.right) / 2;
+      // (KaTeX's \\not: the slash in an .rlap before its relation; \\notin: a "/" in an .llap after the \\in; the relation is
+      // the nearest glyph on that side in the same .katex-base)
+      const slashes = [...document.querySelectorAll(".tex-preview .katex :is(.rlap, .llap) > .katex-inner")].map((inner) => {
+        const right = inner.parentElement.classList.contains("rlap"), vbox = inner.closest(".katex-vbox");
+        const rels = [...vbox.closest(".katex-base").querySelectorAll(".mrel")].filter((m) => !m.firstElementChild && m.textContent.trim() && !vbox.contains(m));
+        const rel = right ? rels.find((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING) : rels.findLast((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_PRECEDING);
+        if (!rel) return { rel: null };
+        const s = r(inner.firstElementChild ?? inner), e = r(rel);
+        // (the share of the slash's height inside the relation's: at least half, William's DEV report, Nov 3)
+        const over = Math.max(0, Math.min(s.bottom, e.bottom) - Math.max(s.top, e.top)) / Math.max(1e-6, s.bottom - s.top);
+        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1), over: +over.toFixed(2) };
+      });
+      // (a lap's text against the paragraph text beside it: the same line box, by the bottom of their glyph boxes)
+      const textBeside = (o, after) => { const n = after ? o.nextSibling : o.previousSibling, g = document.createRange(); g.setStart(n, after ? 0 : n.length - 2); g.setEnd(n, after ? 2 : n.length); return g.getBoundingClientRect(); };
+      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o?.firstElementChild; if (!o || !i) return null; const a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
+        return { start: +(b.left - a.left).toFixed(1), end: +(b.right - a.left).toFixed(1), dBottom: +(gb.bottom - t.bottom).toFixed(1), w: +(b.right - b.left).toFixed(1) }; };
+      return { slashes, rlap: lap("tex-rlap"), llap: lap("tex-llap") };
+    })()`);
+    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && s.over >= 0.5 && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
+      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it: at least half its height inside the relation's`, g.slashes);
+    check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
+      `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
+  }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);
