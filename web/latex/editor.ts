@@ -25,6 +25,9 @@ export type EditorOpts = {
   // the image names: the same object is sent with every request; a host that resolves them fills it and calls request()
   images?: Record<string, string | { why: string }>;
   onImageRefs?(refs: string[], tok: Token): void;
+  // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
+  // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
+  sage?: { wrapper: string | null; saved: unknown[] };
   onEdit?(): void;                // after each edit by the person (not setText), once the request for it is made
 };
 
@@ -93,7 +96,7 @@ export function createEditor(o: EditorOpts) {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
   };
   // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
   let lastCheck: { text: string; rev: number; check: any } | null = null;
