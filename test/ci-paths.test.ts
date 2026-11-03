@@ -299,7 +299,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
 });
 
 test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
-  const ALL = ["notebook", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const ALL = ["notebook", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
   const pick = (files: string[]) => {
     const o = classify(files);
     return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
