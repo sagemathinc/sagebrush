@@ -1496,7 +1496,7 @@ nbName.addEventListener("input", () => { document.title = `${nbName.value} — S
 // is written first, every save after it waits for it and goes to the new name; none in between.
 let localStore = null, localRenameTimer = null;
 function localRenameSoon() {
-  if (!LOCAL || !localStore) return;
+  if (!LOCAL || !localStore || localStore.failed) return;
   clearTimeout(localRenameTimer);
   localRenameTimer = setTimeout(() => {
     const p = (localStore.queue ?? Promise.resolve()).then(localRename, localRename);
@@ -1504,6 +1504,10 @@ function localRenameSoon() {
   }, 800);
 }
 async function localRename() {
+  // (after a failure (store.failed: a rename "kept", a file not read), nothing more is renamed, nor saved, from this
+  // page until the notebook is opened again: checked here, when the queued task runs, so one queued before the failure
+  // stops too: astra on #531)
+  if (localStore.failed) return;
   const at = LOCAL.path, i = at.lastIndexOf("/"), folder = i < 0 ? "" : at.slice(0, i + 1);
   const base = safeName(docName());
   if (folder + base + ".ipynb" === at) return;

@@ -5,7 +5,7 @@
 // link out of DIR is refused (LOCAL-RENAME-1). And the server's api/rename refuses what it must (fs-move.ts: test/fs-move.test.ts).
 //   node web/test-local-rename.mjs [bundle]     (default build/cli/pyjs.cjs; CHROME=... for the browser)
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, symlinkSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
@@ -103,13 +103,26 @@ try {
   paused.length = 0; pausedUrls.length = 0;
   await rename("kept here");
   for (let i = 0; i < 100 && !paused.length; i++) await sleep(100);
+  // (a second title edit while the first rename is held: its rename task is queued behind it, and must refuse when it
+  // runs after "kept": astra on e9d8a754)
+  await rename("queued behind");
+  await sleep(1500);
   await fulfill(paused.shift(), 409, { code: "kept", message: "kept as .again (2).ipynb.sagebrush-rename-0123456789ab", stage: ".again (2).ipynb.sagebrush-rename-0123456789ab" });
   await sleep(1500);
-  ok(pausedUrls.length === 1, `"kept": no other name is tried (${pausedUrls.length} request)`);
+  ok(pausedUrls.length === 1, `"kept": no other name is tried, and the rename queued behind it does nothing (${pausedUrls.length} request)`);
   ok(/kept as \.again \(2\)\.ipynb\.sagebrush-rename-0123456789ab/.test(await ev(`document.querySelector("#status").textContent`)) && (await ev("location.pathname")) === "/nb/again%20(2).ipynb/", "…the page says where the file is kept, and stays at its address");
   await setCode("x = 'after kept'");
   await sleep(2500);
   ok(read("again (2).ipynb") === before && !(read("kept here.ipynb") ?? "").length && /not saved/.test(await ev(`document.querySelector("#saved").textContent`)), "…and saves nothing more (an edit after it isn't written anywhere)");
+  // (astra on e9d8a754) another title edit after "kept", and a rename already queued when it came: no rename request
+  // more, the address and every file left as they are
+  const filesNow = () => readdirSync(dir).filter((f) => f.endsWith(".ipynb")).sort().join(",");
+  const filesBefore = filesNow();
+  paused.length = 0; pausedUrls.length = 0;
+  await rename("another title");
+  await sleep(2500);
+  ok(pausedUrls.length === 0 && (await ev("location.pathname")) === "/nb/again%20(2).ipynb/" && filesNow() === filesBefore, `another title edit after "kept": no rename request, the address and the files as they were (${pausedUrls.length} requests)`);
+
   await send("Fetch.disable");
   // (the route says which: a taken name is code "exists")
   writeFileSync(join(dir, "c.ipynb"), "{}"); writeFileSync(join(dir, "d.ipynb"), "{}");
