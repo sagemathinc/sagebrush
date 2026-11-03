@@ -1564,23 +1564,20 @@ M.newBuiltinModule("traceback", (m) => {
   };
   const chainOf = (g: Record<string, any>) => (Object.hasOwn(g, "chain") ? O.truth(g.chain) : true);
   // (the exception: value if given, else exc; both or neither of value and
-  // tb. A tb can't be honored here: this runtime has no traceback objects
-  // (sys.exc_info()[2] and __traceback__ are None), so an explicit tb is
-  // refused; None only where it drops nothing, an exception with no frames,
-  // as one never raised: astra's CORR-484-2)
-  const frameless = (e: any) => {
-    if (e === null || typeof e !== "object") return true;
-    try {
-      return caughtFrames(e).length === 0;
-    } catch {
-      return false;
-    }
-  };
+  // tb. This runtime has no traceback objects: sys.exc_info()[2] and
+  // __traceback__ are None. So tb=None is taken as the exception's own
+  // traceback, and it is formatted with its frames: that is what both common
+  // idioms mean, format_exception(*sys.exc_info()) and
+  // format_exception(type(e), e, e.__traceback__), and with them the output
+  // is CPython's. The deviation: a literal None for a raised exception also
+  // prints its frames, where CPython prints only the exception's lines
+  // (@sagebrush's ruling A, narrowing astra's CORR-484-2). Any other tb
+  // can't be honored and is refused.)
   const target = (g: Record<string, any>) => {
     const hasV = Object.hasOwn(g, "value"), hasT = Object.hasOwn(g, "tb");
     if (hasV !== hasT) raise(T.ValueError, "Both or neither of value and tb must be given");
     const e = hasV ? g.value : g.exc;
-    if (hasT && (g.tb !== null || !frameless(e)))
+    if (hasT && g.tb !== null)
       raise(T.NotImplementedError, "traceback objects are not supported here (sys.exc_info()[2] and __traceback__ are None): pass the exception alone, format_exception(e)");
     return e;
   };
