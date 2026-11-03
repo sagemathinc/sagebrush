@@ -198,18 +198,113 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "sage.tex"), SAGE.replace("factor(2^64+1)", "factor(2^32+1)"));
   const edited = await run(dir, "check", "sage.tex", "--json");
   check("an edit: the results before it kept, those from it on not run", edited.json.code.map((x) => x.state).join(",") === "ok,ok,not run,not run,not run,not run", edited.json?.code);
+  // ---- run, three languages: PythonTeX and MATLAB items in sessions of their own, fail-stop within each language
+  const LANGS = String.raw`\documentclass{article}
+\usepackage{pythontex}
+\begin{document}
+\begin{pycode}
+import math
+print("squares", [k * k for k in range(4)])
+\end{pycode}
+Root two is \py{round(math.sqrt(2), 4)}; \pyc{print("printed inline")}.
+\begin{matlabcode}
+A = [1 2; 3 4];
+d = det(A)
+\end{matlabcode}
+The determinant is \matlab{det(A)} and $\operatorname{tr} A = \matlab{trace(A)}$.
+\begin{pyblock}
+print(no_such_name)
+\end{pyblock}
+Python after the failure: \py{1 + 1}. Sage still runs: $\sage{2^10}$. MATLAB still runs: \matlab{3 * 7}.
+\begin{matlabblock}
+x = [1 2
+\end{matlabblock}
+MATLAB after it: \matlab{1}.
+\begin{pycode}
+import matplotlib.pyplot as plt
+plt.plot([0, 1, 2], [0, 1, 4])
+plt.savefig("pyfig.svg")
+\end{pycode}
+\end{document}
+`;
+  writeFileSync(join(dir, "langs.tex"), LANGS);
+  const lr = await run(dir, "run", "langs.tex", "--json");
+  const lres = existsSync(join(dir, "langs.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "langs.tex.results.json"), "utf8")).items : [];
+  const st2 = (lr.json?.items ?? []).map((x) => x.lang + ":" + x.mode + ":" + x.state).join(",");
+  check("run: three languages, each fail-stop within itself", lr.code === 1 && st2 === "Python:pycode:ok,Python:py:ok,Python:pyc:ok,MATLAB:mcode:ok,MATLAB:matlab:ok,MATLAB:matlab:ok,Python:pyblock:error,Python:py:blocked,SageTeX:sage:ok,MATLAB:matlab:ok,MATLAB:mblock:error,MATLAB:matlab:blocked,Python:pycode:blocked", st2);
+  check("run: Python's values and printed output", /squares \[0, 1, 4, 9\]/.test(lres[0]?.out) && lres[1]?.text === "1.4142" && /printed inline/.test(lres[2]?.out), lres.slice(0, 3));
+  check("run: MATLAB's values and output", lres[4]?.text === "-2" && lres[5]?.text === "5" && /d =/.test(lres[3]?.out) && lres[9]?.text === "21", lres.slice(3, 6).concat(lres[9]));
+  check("run: the failures' messages (a Python NameError, a MATLAB syntax error)", /NameError: name 'no_such_name' is not defined/.test(lres[6]?.msg) && /^MATLAB syntax/.test(lres[10]?.msg ?? "") && lres[8]?.latex === "1024", [lres[6]?.msg, lres[10]?.msg, lres[8]]);
+  await run(dir, "render", "langs.tex", "-o", "langs.html");
+  const lh = readFileSync(join(dir, "langs.html"), "utf8");
+  check("render: the values as text, output in a block, the chips named by language", lh.includes('<span class="coderes">1.4142</span>') && lh.includes('<span class="coderes">-2</span>') && /<pre class="verbatim codeout">squares \[0, 1, 4, 9\]<\/pre>/.test(lh) && lh.includes("Python item 8: not run: an earlier Python item failed"), null);
+  const lc = await run(dir, "check", "langs.tex", "--json");
+  check("check: a failed Python item an error at its line, named by language", lc.json.problems.some((x) => x.kind === "code" && x.severity === "error" && /^Python item 7 \(pyblock\) failed: NameError/.test(x.message) && x.line === lineOf(LANGS, "\\begin{pyblock}")), lc.json.problems.filter((x) => x.kind === "code"));
+  // (an edit of a Python item: the Python items from it on are dropped, the Sage and MATLAB ones kept)
+  writeFileSync(join(dir, "langs.tex"), LANGS.replace("round(math.sqrt(2), 4)", "round(math.sqrt(3), 4)"));
+  const le = await run(dir, "check", "langs.tex", "--json");
+  check("an edit in one language: only that language's later results dropped", le.json.code.map((x) => x.state.split(":")[0]).join(",") === "ok,not run,not run,ok,ok,ok,not run,not run,ok,ok,error,blocked,not run", le.json.code.map((x) => x.state));
+
+  // (an item that changes language: the later results of both languages are dropped, astra's LATEX-LANG-1, both ways)
+  const SWAP = String.raw`\documentclass{article}
+\begin{document}
+\begin{pycode}
+a = 123
+\end{pycode}
+Python's a: \py{a}. Sage: $\sage{2^5}$.
+\end{document}
+`;
+  writeFileSync(join(dir, "swap.tex"), SWAP);
+  const sw0 = await run(dir, "run", "swap.tex", "--json");
+  check("swap: run first", sw0.code === 0 && sw0.json.items.map((x) => x.state).join(",") === "ok,ok,ok", sw0.json?.items);
+  writeFileSync(join(dir, "swap.tex"), SWAP.replace("\\begin{pycode}", "\\begin{sagesilent}").replace("\\end{pycode}", "\\end{sagesilent}"));
+  const sw1 = await run(dir, "check", "swap.tex", "--json");
+  check("pycode turned sagesilent: the later Python and Sage results dropped", sw1.json.code.map((x) => x.state).join(",") === "not run,not run,not run", sw1.json?.code);
+  await run(dir, "render", "swap.tex", "-o", "swap.html");
+  check("pycode turned sagesilent: the old Python value isn't shown", !readFileSync(join(dir, "swap.html"), "utf8").includes(">123<"), null);
+  // (the reverse: a Sage block turned Python, from a run of the Sage version)
+  await run(dir, "run", "swap.tex");
+  writeFileSync(join(dir, "swap.tex"), SWAP);
+  const sw2 = await run(dir, "check", "swap.tex", "--json");
+  check("sagesilent turned pycode: the later Python and Sage results dropped", sw2.json.code.map((x) => x.state).join(",") === "not run,not run,not run", sw2.json?.code);
+
+  // (two blocks switched, astra's case: [pycode a=123, matlabcode b=456, \matlab{b}] with both blocks turned sagesilent:
+  //  every later result dropped, so the MATLAB value 456 can't stand)
+  const TWO = String.raw`\documentclass{article}
+\begin{document}
+\begin{pycode}
+a = 123
+\end{pycode}
+\begin{matlabcode}
+b = 456;
+\end{matlabcode}
+MATLAB's b: \matlab{b}.
+\end{document}
+`;
+  writeFileSync(join(dir, "two.tex"), TWO);
+  const tw0 = await run(dir, "run", "two.tex", "--json");
+  check("two switches: run first", tw0.code === 0 && tw0.json.items.map((x) => x.state).join(",") === "ok,ok,ok", tw0.json?.items);
+  writeFileSync(join(dir, "two.tex"), TWO.replace(/\\(begin|end)\{(pycode|matlabcode)\}/g, "\\$1{sagesilent}"));
+  const tw1 = await run(dir, "check", "two.tex", "--json");
+  await run(dir, "render", "two.tex", "-o", "two.html");
+  check("two blocks switched to sagesilent: every later result dropped, the stale 456 not shown", tw1.json.code.map((x) => x.state).join(",") === "not run,not run,not run" && !readFileSync(join(dir, "two.html"), "utf8").includes(">456<"), tw1.json?.code);
+  // (a same-language change keeps the other languages' results: the per-language rule)
+  writeFileSync(join(dir, "two.tex"), TWO.replace("a = 123", "a = 124"));
+  const tw2 = await run(dir, "check", "two.tex", "--json");
+  check("a same-language edit: only its language's later results dropped", tw2.json.code.map((x) => x.state).join(",") === "not run,ok,ok", tw2.json?.code);
+
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
   check("run --timeout: stopped, earlier results kept", slow.code === 1 && slow.json.items.map((x) => x.state).join(",") === "ok,error,blocked" && /timeout/.test(slow.json.items[1].message), slow.json?.items ?? slow.err);
   const none = await run(dir, "run", "clean.tex");
-  check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
+  check("run, no code: says so", none.code === 0 && /no code to run/.test(none.out), none);
 
   // (a file named latex in the folder: \`sagebrush latex run\` is still the command, never that file run as a script,
   //  astra's LATEX-RUN-1; for every command)
   writeFileSync(join(dir, "latex"), "print('THE LOCAL SCRIPT RAN')\n");
   const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
-  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
+  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
   rmSync(join(dir, "latex"));
 
   // ---- usage

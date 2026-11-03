@@ -7432,7 +7432,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
- "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, LANG } from \"../web/latex/engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -7455,21 +7455,37 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
- "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; } #0": {
+ "src/latex-cli.ts :: msgOf :: const out = typeof g?.out === \"string\" && g.out ? { out: g.out.slice(-MSG_MAX * 16) } : {}; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
  },
- "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states.push({ key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : \"the plot isn't an SVG\" }); failed = true; continue; } #0": {
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states[k] = { key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }; failed = true; continue; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states[k] = { key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : \"the plot isn't an SVG\" }; failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(v) > MAX_RESULT) { states[k] = { key, s: \"error\", msg: `the value is over ${MAX_RESULT} bytes` }; failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
  },
  "src/latex-cli.ts :: msgOf :: return out.join(\"\\n\").slice(-MSG_MAX); #0": {
   "class": "1",
@@ -7479,13 +7495,21 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
- "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX}:] #0": {
+ "src/latex-cli.ts :: readResults :: ...(typeof x.text === \"string\" ? { text: x.text } : {}), ...(typeof x.out === \"string\" ? { out: x.out.slice(0, MSG_MAX * 16) } : {}), #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
-  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX * 16}:] #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on its results (a value or LaTeX result MAX_RESULT, a plot's SVG 2 MiB, printed output 64 KiB) and the results file it reads: output and parser protection of a local command"
  },
  "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return []; #0": {
   "class": "1",

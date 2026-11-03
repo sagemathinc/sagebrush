@@ -11,7 +11,7 @@ export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, m
 // every name counts as "known": an undefined control sequence is EMITTED (the renderer decides how to show it)
 // instead of being dropped with E-UNDEF-CS
 const ALL_KNOWN = { has: () => true };
-const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
+const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*", "matlabcode", "matlabblock",
   "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode"]);
 const MAX_VERB = 1 << 20;   // characters kept from one verbatim block
 // s03 (William's report: a self-recursive \newcommand hung the page): every machine also stops at a WALL-CLOCK bound
@@ -280,6 +280,9 @@ export class Machine extends CoreMachine {
     // page's executor runs the ordered items, with consent, in the runner). Code in verbatim, comments or false
     // conditional branches never reaches these.
     P.prim("sage", function () { this.mark(Object.assign({ k: "sage", mode: "sage" }, this.readSageArg())); });
+    // (PythonTeX's \py{expr}, its value, and \pyc{code}, what it prints; Sagebrush's \matlab{expr}, a MATLAB value:
+    //  code items too, run by `sagebrush latex run` in a session of their own language, never executed here)
+    for (const [nm, mode] of [["py", "py"], ["pyc", "pyc"], ["matlab", "matlab"]]) P.prim(nm, function () { this.mark(Object.assign({ k: "sage", mode }, this.readSageArg())); });
     P.prim("sageplot", function () {
       const o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
       const opts = [o1, o2].filter((o) => o !== null).map((o) => this.toks2str(o).trim());
@@ -291,8 +294,8 @@ export class Machine extends CoreMachine {
     // SageTeX commands this preview doesn't support: their arguments are consumed RAW here, never expanded, so a
     // \sage inside them can't become a hidden item (astra4 S1E01-A3); a chip shows each one
     for (const [nm, nargs] of [["sagestr", 1], ["sagetexpause", 0], ["sagetexunpause", 0], ["sagetexindent", 1],
-      // (PythonTeX's inline commands: the same "not run" chip; its code environments are shown as code)
-      ["py", 1], ["pyc", 1], ["pys", 1], ["pyb", 1]]) P.prim(nm, function () {
+      // (PythonTeX's other inline commands: the same "not run" chip)
+      ["pys", 1], ["pyb", 1]]) P.prim(nm, function () {
       for (let k = 0; k < nargs; k++) this.readArgRaw();
       this.mark({ k: "sageunsup", name: nm });
     });

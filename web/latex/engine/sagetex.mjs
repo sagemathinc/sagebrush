@@ -16,7 +16,13 @@ export function utf8len(s) {
   for (const ch of String(s)) { const c = ch.codePointAt(0); n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; }
   return n;
 }
-const SAGE_ENVS = new Set(["sageblock", "sagesilent"]);
+const SAGE_ENVS = new Set(["sageblock", "sagesilent", "pycode", "pyblock", "matlabcode", "matlabblock"]);
+// a code environment's item mode: what runs it (sagebrush latex run: SageTeX in Sage, PythonTeX in Python, MATLAB in
+// MATLAB) and whether its code is shown (the *block ones)
+const ENV_MODE = { sageblock: "block", sagesilent: "silent", pycode: "pycode", pyblock: "pyblock", matlabcode: "mcode", matlabblock: "mblock" };
+/** A mode's language: the session its items run in, in document order, fail-stop within it. */
+export const LANG = { sage: "sage", plot: "sage", block: "sage", silent: "sage", py: "python", pyc: "python", pycode: "python", pyblock: "python", matlab: "matlab", mcode: "matlab", mblock: "matlab" };
+const SHOWN = new Set(["block", "pyblock", "mblock"]);
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);
 export const isCodeEnv = (env) => SAGE_ENVS.has(env);
 
@@ -49,7 +55,7 @@ export function itemOf(e) {
     if (!it.err && it.mode === "plot") { const o = plotOptions(it.opts); if (o.ignored.length) { it.err = "plotopts"; it.name = o.ignored.join(", "); } }
     return it;
   }
-  const it = { mode: e.env === "sageblock" ? "block" : "silent", opts: [] };
+  const it = { mode: ENV_MODE[e.env] || "silent", opts: [], env: e.env };
   if (e.inarg) it.err = "inarg";
   else if (e.unterminated) it.err = "unterminated";
   else if (e.truncated) it.err = "truncated";
@@ -59,11 +65,12 @@ export function itemOf(e) {
     else if (utf8len(d.code) > MAX_CODE) it.err = "toolong";
     else it.code = d.code;
   }
-  if (it.mode === "block") it.shown = String(e.text).replace(/\r\n/g, "\n");
+  if (SHOWN.has(it.mode)) it.shown = String(e.text).replace(/\r\n/g, "\n");
   return it;
 }
 // what makes two items the same code (the executor's identity uses the same key)
 export const itemKey = (it) => JSON.stringify([it.mode, it.code === undefined ? null : it.code, it.opts, it.err || null, WRAPPER_VERSION]);
+const TEXT_MODES = new Set(["py", "matlab"]), OUT_MODES = new Set(["pyc"]);
 
 const WHY = {
   cs: (it) => "this preview supports only plain Sage expressions inside \\sage{}: \\" + it.name + " is a TeX command",
@@ -74,7 +81,7 @@ const WHY = {
   empty: () => "the argument is empty",
   toolong: () => "the code is over 64 KiB (UTF-8)",
   inarg: () => "a code block inside a command's argument can't be read",
-  unterminated: (it) => "no \\end{" + (it.mode === "block" ? "sageblock" : "sagesilent") + "}",
+  unterminated: (it) => "no \\end{" + (it.env || (it.mode === "block" ? "sageblock" : "sagesilent")) + "}",
   truncated: () => "the code block is over 1 MiB",
   tabs: () => "the indentation mixes tabs and spaces",
   optstoolong: () => "the \\sageplot options are over 1 KiB",
@@ -115,19 +122,33 @@ export function plotOptions(opts) {
   else if (dims.width !== undefined) css.push("height:auto");
   return { style: css.join(";"), ignored };
 }
-// a results file's states (`sagebrush latex run`: [{key, s, latex?, src?, msg?}]) for these items, in order, as long
-// as each is for the very item at its place (its key) and every one before it is too; only ok, error and blocked
+// a results file's states (`sagebrush latex run`: [{key, s, latex?, src?, text?, out?, msg?}]) for these items, each as
+// long as it is for the very item at its place (its key) and every one before it in its language is too; only ok, error and blocked
 // states, with the fields the renderer shows (each checked again where it is shown: inlineHtml, mathPart)
 export function savedStates(items, saved) {
-  const out = [];
-  for (let k = 0; k < items.length && k < saved.length; k++) {
-    const x = saved[k];
-    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) break;
+  // (by language: each language runs in a session of its own, so a changed item drops its result and the later ones
+  //  of its language, no other; but an item whose language changed (a pycode turned sagesilent), a saved result that
+  //  isn't one, or no saved result at its place, drops every later result of every language: @sagebrush's ruling on
+  //  astra's LATEX-LANG-1, so no value of code that is gone can stand)
+  const out = [], broken = new Set();
+  for (let k = 0; k < items.length; k++) {
+    const x = saved[k], lang = LANG[items[k].mode] || "sage";
+    const ok = x && typeof x === "object" && ["ok", "error", "blocked"].includes(x.s) && typeof x.key === "string";
+    if (!ok || x.key !== itemKey(items[k])) {
+      let was = null;
+      if (ok) try { const m = JSON.parse(x.key); was = Array.isArray(m) ? LANG[m[0]] || null : null; } catch {}
+      if (was !== lang) break;
+      broken.add(lang);
+      continue;
+    }
+    if (broken.has(lang)) continue;
     const st = { key: x.key, s: x.s };
     if (typeof x.latex === "string") st.latex = x.latex;
     if (typeof x.src === "string") st.src = x.src;
     if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
-    out.push(st);
+    if (typeof x.text === "string" && utf8len(x.text) <= MAX_RESULT) st.text = x.text;
+    if (typeof x.out === "string") st.out = x.out.slice(0, 65536);
+    out[k] = st;
   }
   return out;
 }
@@ -141,6 +162,8 @@ export function stateOf(states, n, it) {
 // inside a math region (plan r4 section 6): the placeholder this item contributes to the region's TeX string
 export function mathPart(st, it) {
   if (st.s === "ok" && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return "{" + st.latex + "}";
+  // (\py and \matlab in math: their value as TeX, as PythonTeX puts it in; KaTeX, trust off, typesets or refuses it)
+  if (st.s === "ok" && TEXT_MODES.has(it.mode) && typeof st.text === "string" && utf8len(st.text) <= MAX_RESULT) return "{" + st.text + "}";
   if (st.s === "pending" || st.s === "notrun") return "{\\text{…}}";
   return "{\\boxed{\\text{?}}}";
 }
@@ -148,10 +171,11 @@ export function mathPart(st, it) {
 const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: "not run: an earlier item failed" };
 const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
 // n: the item's number in the document (1-based), named in the chip so a reader can tell which code it is about
-function chip(st, esc, inline, n) {
+const LANG_NAME = { sage: "Sage", python: "Python", matlab: "MATLAB" };
+function chip(st, esc, inline, n, it) {
   const cls = "sagechip s-" + (LABEL[st.s] ? st.s : "error");
   const msg = String(st.msg || LABEL[st.s] || "error").slice(0, 4000);
-  const who = n ? "Sage item " + n + ": " : "";
+  const who = n ? (LANG_NAME[it ? LANG[it.mode] : "sage"] || "Sage") + " item " + n + ": " : "";
   if (st.s === "error" && !inline) return '<pre class="' + cls + '">' + esc(who + msg) + "</pre>";
   // (the last line of a traceback; with the executor's "(... isn't defined here ...)" note, the line before it too)
   const lines = msg.split("\n").filter((l) => l.trim());
@@ -161,17 +185,22 @@ function chip(st, esc, inline, n) {
 // outside math: \sage as standalone inline math (math: the renderer's KaTeX call), \sageplot as an image
 export function inlineHtml(st, it, esc, math, n) {
   if (st.s === "ok" && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return math(st.latex);
+  // (outside math: \py's and \matlab's value, \pyc's printed output, as text; never read as TeX)
+  if (st.s === "ok" && TEXT_MODES.has(it.mode) && typeof st.text === "string") return '<span class="coderes">' + esc(st.text) + "</span>";
+  if (st.s === "ok" && OUT_MODES.has(it.mode)) return '<span class="coderes">' + esc(String(st.out || "").replace(/\n$/, "")) + "</span>";
   if (st.s === "ok" && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
-    if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
+    if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n, it);
     return '<img class="sageplot" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
   }
-  return chip(st.s === "ok" ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
+  return chip(st.s === "ok" ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, it);
 }
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
 // not-yet-run state
 export function blockHtml(st, it, esc, n) {
-  let h = it.mode === "block" ? '<pre class="verbatim code sageblock">' + esc(it.shown || "") + "</pre>" : "";
-  if (st.s !== "ok") h += '<div class="sagestate">' + chip(st, esc, false, n) + "</div>";
+  let h = SHOWN.has(it.mode) ? '<pre class="verbatim code sageblock">' + esc(it.shown || "") + "</pre>" : "";
+  // (a PythonTeX or MATLAB block's printed output, as text: PythonTeX would read it as TeX, this preview never does)
+  if (st.s === "ok" && it.mode !== "block" && it.mode !== "silent" && typeof st.out === "string" && st.out.trim()) h += '<pre class="verbatim codeout">' + esc(st.out.replace(/\n$/, "")) + "</pre>";
+  if (st.s !== "ok") h += '<div class="sagestate">' + chip(st, esc, false, n, it) + "</div>";
   return h;
 }

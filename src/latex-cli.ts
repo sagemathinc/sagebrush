@@ -16,7 +16,8 @@ import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex } from "../web/latex/engine/render.mjs";
-import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION, LANG } from "../web/latex/engine/sagetex.mjs";
+import { matlabToPython } from "./matlab";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
@@ -157,7 +158,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
 export const resultsPath = (file: string) => join(dirname(file), basename(file) + ".results.json");
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000;
-type State = { key: string; s: "ok" | "error" | "blocked"; latex?: string; src?: string; msg?: string };
+type State = { key: string; s: "ok" | "error" | "blocked"; latex?: string; src?: string; msg?: string; text?: string; out?: string };
 
 /** The results file's states, or [] if there is none or it isn't one (never trusted beyond its shape). */
 function readResults(file: string): State[] {
@@ -168,16 +169,25 @@ function readResults(file: string): State[] {
     if (j?.format !== RESULTS_FORMAT || j.version !== 1 || j.wrapper !== WRAPPER_VERSION || !Array.isArray(j.items)) return [];
     return j.items.filter((x: any) => x && typeof x.key === "string" && ["ok", "error", "blocked"].includes(x.s)).map((x: any) => ({
       key: x.key, s: x.s, ...(typeof x.latex === "string" ? { latex: x.latex } : {}), ...(typeof x.src === "string" ? { src: x.src } : {}), ...(typeof x.msg === "string" ? { msg: x.msg.slice(0, MSG_MAX) } : {}),
+      ...(typeof x.text === "string" ? { text: x.text } : {}), ...(typeof x.out === "string" ? { out: x.out.slice(0, MSG_MAX * 16) } : {}),
     }));
   } catch { return []; }
 }
 
-// the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
-// latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
-// session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
+// the sessions' script, one per language (Sage, Python, MATLAB), in one namespace, the language's items in order
+// until one fails, each result written at once (a session stopped by the timeout keeps what ran before it); the
+// items' printing is captured as their output, kept apart from their values:
+//   Sage: preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its latex(); \sageplot: its SVG);
+//   Python: exec'd (pycode, pyblock, \pyc) or eval'd (\py: its str());
+//   MATLAB: translated to Python by the CLI (matlabToPython, cell by cell, as the notebook runs MATLAB), then exec'd
+//   with _matlab's errors kept for the result (\matlab{e}: num2str(e), as text)
 const DRIVER = `import json, io, sys, traceback
-from sagebrush.preparse import preparse as _sbtx_pp
-_sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
+_sbtx_in, _sbtx_outp, _sbtx_lang = sys.argv[1], sys.argv[2], sys.argv[3]
+if _sbtx_lang == "sage":
+    from sagebrush.preparse import preparse as _sbtx_pp
+if _sbtx_lang == "matlab":
+    import _matlab as _sbtx_m
+    _sbtx_m.host_shows_errors()
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
 _sbtx_g = dict(globals())
@@ -190,24 +200,34 @@ for _sbtx_it in _sbtx_items:
     _sbtx_buf = io.StringIO()
     _sbtx_old = sys.stdout
     sys.stdout = _sbtx_buf
+    _sbtx_mode = _sbtx_it["mode"]
     try:
-        _sbtx_code = _sbtx_pp(_sbtx_it["code"])
-        if _sbtx_it["mode"] == "sage":
+        _sbtx_code = _sbtx_pp(_sbtx_it["code"]) if _sbtx_lang == "sage" else _sbtx_it["code"]
+        if _sbtx_mode == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
-        elif _sbtx_it["mode"] == "plot":
+        elif _sbtx_mode == "plot":
             _sbtx_v = eval(_sbtx_code, _sbtx_g)
             if not hasattr(_sbtx_v, "_repr_svg_"):
                 raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
             _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+        elif _sbtx_mode == "py":
+            _sbtx_r = {"s": "ok", "text": str(eval(_sbtx_code, _sbtx_g))}
         else:
             exec(_sbtx_code, _sbtx_g)
             _sbtx_r = {"s": "ok"}
+            if _sbtx_lang == "matlab":
+                if _sbtx_m.cell_failed():
+                    _sbtx_r = {"s": "error", "msg": str(_sbtx_m.cell_error() or "the MATLAB code stopped on an error")}
+                elif _sbtx_mode == "matlab":
+                    _sbtx_v = _sbtx_g.get("sbtxval")
+                    _sbtx_r["text"] = "\\n".join(_sbtx_v.rows()) if hasattr(_sbtx_v, "rows") else str(_sbtx_v)
     except BaseException:
         _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
-        _sbtx_failed = True
     finally:
         sys.stdout = _sbtx_old
-    _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX}:]
+    if _sbtx_r["s"] == "error":
+        _sbtx_failed = True
+    _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX * 16}:]
     _sbtx_out.append(_sbtx_r)
     with open(_sbtx_outp, "w") as _sbtx_f:
         json.dump(_sbtx_out, _sbtx_f)
@@ -215,32 +235,18 @@ for _sbtx_it in _sbtx_items:
 
 /** The session's own last words: its stderr's last lines, without the runtime's version line. */
 const sessionError = (err: string) => err.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() && !/^(Node\.js|Bun) v[0-9.]+/.test(l.trim())).slice(-4).join("\n");
-/** The command line of this sagebrush in Sage mode, to run the session in (the bundle that loaded this file). */
-function sageCommand(cli: string | undefined): string[] | null {
-  if (!cli || !existsSync(cli)) return null;
-  return [process.execPath, cli, "--sage"];
-}
+const LANG_NAME: Record<string, string> = { sage: "SageTeX", python: "Python", matlab: "MATLAB" };
 
-async function runCommand(file: string, text: string, timeout: number, json: boolean, cli: string | undefined): Promise<number> {
-  const items = new Engine({}).update(text, { cold: true }).sageItems as any[];
-  const report = (o: any, code: number) => { if (json) process.stdout.write(JSON.stringify(o, null, 2) + "\n"); return code; };
-  if (!items.length) {
-    if (!json) process.stdout.write(`${file}: no SageTeX code to run\n`);
-    return report({ file, items: [], results: null }, 0);
-  }
-  const cmd = sageCommand(cli);
-  if (!cmd) return fail("can't find this sagebrush's own bundle to run the code in");
+/** One language's items run in a session of this sagebrush (the bundle that loaded this file): each one's result, in
+ * order, as far as the session got, and how the session ended. */
+async function runSession(cli: string, lang: string, run: { mode: string; code: string }[], cwd: string, timeout: number) {
   const tmp = mkdtempSync(join(tmpdir(), "sb-latex-run-"));
-  const runnable = items.map((it) => (it.err ? null : { mode: it.mode, code: it.code }));
-  // (only the items up to the first refused one are run: a refused item fails, and stops the rest, as in the page)
-  const firstBad = runnable.findIndex((x) => x === null);
-  const toRun = (firstBad < 0 ? runnable : runnable.slice(0, firstBad)) as { mode: string; code: string }[];
-  writeFileSync(join(tmp, "items.json"), JSON.stringify(toRun));
-  writeFileSync(join(tmp, "driver.sage"), DRIVER);
-  const outp = join(tmp, "out.json");
-  const t0 = Date.now();
+  const driver = join(tmp, lang === "sage" ? "driver.sage" : "driver.py"), outp = join(tmp, "out.json");
+  writeFileSync(join(tmp, "items.json"), JSON.stringify(run));
+  writeFileSync(driver, DRIVER);
+  const args = [cli, ...(lang === "sage" ? ["--sage"] : []), driver, join(tmp, "items.json"), outp, lang];
   const done = await new Promise<{ code: number | null; timedOut: boolean; err: string }>((res) => {
-    const p = spawn(cmd[0], [...cmd.slice(1), join(tmp, "driver.sage"), join(tmp, "items.json"), outp], { cwd: dirname(resolve(file)), stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(process.execPath, args, { cwd, stdio: ["ignore", "ignore", "pipe"] });
     let err = "", timedOut = false;
     p.stderr!.on("data", (d) => { if (err.length < 16384) err += d; });
     const t = setTimeout(() => { timedOut = true; p.kill("SIGKILL"); }, timeout * 1000);
@@ -250,38 +256,77 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
   rmSync(tmp, { recursive: true, force: true });
-  const states: State[] = [];
-  let failed = false;
-  // (a traceback without the session script's own frames: the item's code is the "<string>" one)
+  return { got, ...done };
+}
+
+/** A MATLAB item as the Python its session runs (\matlab{e}: its value, num2str(e), into sbtxval), or why it can't be. */
+function matlabCode(it: any, n: number): { code: string } | { why: string } {
+  const src = it.mode === "matlab" ? `sbtxval = num2str(${it.code});\n` : String(it.code);
+  try { return { code: matlabToPython(src, `MATLAB item ${n}`, { cell: true }) }; }
+  catch (e: any) { return { why: String(e?.message ?? e).split("\n")[0] }; }
+}
+
+async function runCommand(file: string, text: string, timeout: number, json: boolean, cli: string | undefined): Promise<number> {
+  const items = new Engine({}).update(text, { cold: true }).sageItems as any[];
+  const report = (o: any, code: number) => { if (json) process.stdout.write(JSON.stringify(o, null, 2) + "\n"); return code; };
+  if (!items.length) {
+    if (!json) process.stdout.write(`${file}: no code to run (SageTeX, PythonTeX or MATLAB)\n`);
+    return report({ file, items: [], results: null }, 0);
+  }
+  if (!cli || !existsSync(cli)) return fail("can't find this sagebrush's own bundle to run the code in");
+  const t0 = Date.now();
+  // (each language in a session of its own, in document order within it; a failure stops the rest of its language:
+  //  a refused item, or a MATLAB item that doesn't translate, is a failure before its session starts)
+  const states: (State | undefined)[] = items.map(() => undefined);
   const msgOf = (x: any) => {
+    // (a traceback without the session script's own frames: the item's code is the "<string>" one)
     const lines = String(x?.msg ?? "").split("\n"), out: string[] = [];
-    for (let i = 0; i < lines.length; i++) { if (/^\s*File ".*driver\.sage", line \d+/.test(lines[i])) { if (/^\s{4,}\S/.test(lines[i + 1] ?? "") && !/^\s*File /.test(lines[i + 1])) i++; continue; } out.push(lines[i]); }
+    for (let i = 0; i < lines.length; i++) { if (/^\s*File ".*driver\.(sage|py)", line \d+/.test(lines[i])) { if (/^\s{4,}\S/.test(lines[i + 1] ?? "") && !/^\s*File /.test(lines[i + 1])) i++; continue; } out.push(lines[i]); }
     return out.join("\n").slice(-MSG_MAX);
   };
-  for (let k = 0; k < items.length; k++) {
-    const it = items[k], key = itemKey(it), g = got[k];
-    if (failed) { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); continue; }
-    if (it.err) { states.push({ key, s: "error", msg: "this item can't be run (" + it.err + ")" }); failed = true; continue; }
-    if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
-    if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
-    if (g.s === "blocked") { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); failed = true; continue; }
-    if (it.mode === "sage") {
-      const l = String(g.latex ?? "");
-      if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; }
-      states.push({ key, s: "ok", latex: l });
-    } else if (it.mode === "plot") {
-      const svg = String(g.svg ?? "");
-      if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : "the plot isn't an SVG" }); failed = true; continue; }
-      states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64") });
-    } else states.push({ key, s: "ok" });
+  for (const lang of ["sage", "python", "matlab"]) {
+    const idx = items.map((it, k) => (LANG[it.mode] === lang ? k : -1)).filter((k) => k >= 0);
+    if (!idx.length) continue;
+    const run: { mode: string; code: string }[] = [];
+    let stop: { k: number; msg: string } | null = null;
+    for (const k of idx) {
+      const it = items[k];
+      if (it.err) { stop = { k, msg: "this item can't be run (" + it.err + ")" }; break; }
+      if (lang === "matlab") { const m = matlabCode(it, k + 1); if ("why" in m) { stop = { k, msg: "MATLAB syntax: " + m.why }; break; } run.push({ mode: it.mode, code: m.code }); }
+      else run.push({ mode: it.mode, code: it.code });
+    }
+    const done = run.length ? await runSession(cli, lang, run, dirname(resolve(file)), timeout) : { got: [], timedOut: false, err: "", code: 0 };
+    let failed = false;
+    for (let q = 0; q < idx.length; q++) {
+      const k = idx[q], it = items[k], key = itemKey(it), g = done.got[q];
+      const out = typeof g?.out === "string" && g.out ? { out: g.out.slice(-MSG_MAX * 16) } : {};
+      if (failed) { states[k] = { key, s: "blocked", msg: "not run: an earlier " + LANG_NAME[lang] + " item failed" }; continue; }
+      if (stop && stop.k === k) { states[k] = { key, s: "error", msg: stop.msg }; failed = true; continue; }
+      if (!g) { states[k] = { key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }; failed = true; continue; }
+      if (g.s !== "ok") { states[k] = { key, s: "error", msg: g.s === "error" ? msgOf(g) : "not run: an earlier item failed", ...out }; failed = true; continue; }
+      if (it.mode === "sage") {
+        const l = String(g.latex ?? "");
+        if (Buffer.byteLength(l) > MAX_RESULT) { states[k] = { key, s: "error", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }; failed = true; continue; }
+        states[k] = { key, s: "ok", latex: l, ...out };
+      } else if (it.mode === "plot") {
+        const svg = String(g.svg ?? "");
+        if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states[k] = { key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : "the plot isn't an SVG" }; failed = true; continue; }
+        states[k] = { key, s: "ok", src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64"), ...out };
+      } else if (it.mode === "py" || it.mode === "matlab") {
+        const v = String(g.text ?? "");
+        if (Buffer.byteLength(v) > MAX_RESULT) { states[k] = { key, s: "error", msg: `the value is over ${MAX_RESULT} bytes` }; failed = true; continue; }
+        states[k] = { key, s: "ok", text: v, ...out };
+      } else states[k] = { key, s: "ok", ...out };
+    }
   }
+  const all = states as State[];
   const rp = resultsPath(file);
-  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states }) + "\n");
-  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
-  const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
+  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: all }) + "\n");
+  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), lang: LANG_NAME[LANG[it.mode]] ?? "SageTeX", line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: all[k].s, ...(all[k].s === "error" ? { message: all[k].msg } : {}) }));
+  const ms = Date.now() - t0, bad = all.some((x) => x.s === "error");
   if (!json) {
-    process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
-    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: SageTeX item ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item failed"}\n`);
+    process.stdout.write(`${file}: ran ${all.filter((x) => x.s === "ok").length} of ${items.length} code item${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
+    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${l.lang} item ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item of its language failed"}\n`);
   }
   return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
 }

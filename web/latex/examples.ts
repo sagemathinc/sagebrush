@@ -135,8 +135,9 @@ const pythontex = String.raw`\documentclass{article}
 \begin{document}
 \section*{PythonTeX}
 
-\emph{In this preview:} PythonTeX code is not run yet, so its results are missing; the code is shown as
-written. A full run (latex, then pythontex, then latex again) runs the Python and puts the results in.
+\emph{In this preview:} \texttt{sagebrush latex run} runs the PythonTeX code (\texttt{pycode}, \texttt{pyblock},
+\texttt{\textbackslash py}, \texttt{\textbackslash pyc}) with Sagebrush's Python, in order, and keeps the results beside
+this file; the preview then shows them (printed output as text). Until then each result is a placeholder.
 
 \begin{pycode}
 from math import comb, factorial
@@ -166,8 +167,17 @@ const matlab = String.raw`\documentclass{article}
 A MATLAB listing, typeset with \texttt{listings} (the \texttt{matlab-prettifier} package gives a closer MATLAB look
 in a full LaTeX run).
 
-\emph{In this preview:} the code is shown, not run. To compute with it, open a notebook in MATLAB mode (File,
-New, Notebook, then choose MATLAB) and paste it there; then copy the results back.
+\emph{In this preview:} a listing is only shown. Code in a \texttt{matlabcode} block (or
+\texttt{matlabblock}, which also shows it) and \texttt{\textbackslash matlab\{...\}} values are run by
+\texttt{sagebrush latex run} with Sagebrush's MATLAB, in order, and the preview shows the results. (They are
+Sagebrush's own: LaTeX has no standard package for running MATLAB.)
+
+\begin{matlabblock}
+B = [2 -1 0; -1 2 -1; 0 -1 2];
+lambda = eig(B)'
+\end{matlabblock}
+
+The smallest eigenvalue is \matlab{min(eig(B))}.
 
 \begin{lstlisting}
 % the eigenvalues of a symmetric matrix
