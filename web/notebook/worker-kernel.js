@@ -234,6 +234,8 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (the files permission's shared word, a plain worker's: setWritable sets it at once; a runner's stays in its frame)
+        this.writableWord = m.writable ? new Int32Array(m.writable) : null;
         this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
@@ -488,6 +490,12 @@ export class WorkerKernel {
 
   /** Send the worker anything else (files). */
   post(msg) { this.worker?.postMessage(msg); }
+  /** Whether this document may change files (the page's `files` permission): a run in flight sees it at its next write
+   * (the shared word, a plain worker's here, a runner's in its frame), and the worker keeps it for the next run. */
+  setWritable(on) {
+    if (this.writableWord) Atomics.store(this.writableWord, 0, on ? 1 : 0);
+    this.post({ fsWritable: !!on });
+  }
 
   // Interrupt what is running: KeyboardInterrupt in the worker (Python loops
   // and the Rust engines check a flag shared with this page), keeping every
