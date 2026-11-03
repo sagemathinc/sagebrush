@@ -140,11 +140,16 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
     const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity;
     note(o.only ? await reactive.run(o.only, { budget }) : await reactive.runAll());
     // (a cell out of time stops the scheduler's run, as Stop does in a notebook; the interpreter is still there: the
-    //  others run, but not what reads a cell out of time; with `only`, just what was asked)
+    //  others run, but not what reads a cell out of time. With `only`, what was asked; with descendantsWithinMs, also
+    //  its descendants that weren't reached, each within the budget by its last time, in page order: one that timed
+    //  out stays stale, the independent ones after it still run (daybreak3's DB3-RS-3))
     const asked = new Set(o.only ?? cells.map((c) => c.key));
+    const optional = o.only && budget > 0 ? reactive.graph.closure(o.only, { inclusive: false }) : new Set<string>();
     for (let round = 0; round < cells.length && timedOut.size && !interp.dead(); round++) {
       const blocked = reactive.graph.closure([...timedOut]);
-      const left = cells.map((c) => c.key).filter((id) => asked.has(id) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id));
+      let spent = 0;
+      const left = cells.map((c) => c.key).filter((id) => (asked.has(id) || optional.has(id)) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id))
+        .filter((id) => asked.has(id) || (spent += reactive.times.get(id) ?? 0) <= budget);
       if (!left.length) break;
       const before = reactive.outcome.size;
       note(await reactive.run(left, { budget }));

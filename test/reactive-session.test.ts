@@ -84,6 +84,19 @@ test("reactive-session: the editor's Run: N, its ancestors, then its descendants
   } finally { await interp.close(); }
 });
 
+test("reactive-session: the editor's Run: an optional descendant out of time stays stale; independent ones after it still run (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "root", code: "r = 1" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "afterslow", code: "print('reads slow', s)" }, { key: "fast", code: "print('fast', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["slow", 1], ["afterslow", 1], ["fast", 1]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.timedOut.has("slow"), "the slow descendant ran out of time");
+    assert.equal(out.get("fast"), "fast 1\n", "the independent descendant after it still ran");
+    assert.equal(out.get("afterslow"), undefined, "what reads the slow one didn't");
+    assert.equal(interp.dead(), null);
+  } finally { await interp.close(); }
+});
+
 test("reactive-session: a cell over its time is interrupted; what reads it isn't run; others are", async () => {
   const interp = await startInterpreter({ mode: "python", entry: CLI });
   try {

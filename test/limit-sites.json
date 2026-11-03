@@ -8249,6 +8249,14 @@
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
+ "src/reactive-session.ts :: note :: .filter((id) => asked.has(id) || (spent += reactive.times.get(id) ?? 0) <= budget); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the descendants' autorun budget in the timed-out rounds: the descendants of the cells asked for that weren't reached, each within the budget by its last measured time (daybreak3's DB3-RS-3 on #557)"
+ },
  "src/reactive-session.ts :: note :: const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity; #0": {
   "class": "1",
   "disposition": {
@@ -8256,6 +8264,14 @@
   },
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "the descendants' autorun budget (the editor's Run passes the plan's 2 s; latex run --item N and the default: 0, only N and its stale ancestors; run all: every cell), by each cell's last measured time, a slower one left stale (@sagebrush's ruling on #557)"
+ },
+ "src/reactive-session.ts :: note :: const optional = o.only && budget > 0 ? reactive.graph.closure(o.only, { inclusive: false }) : new Set<string>(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the descendants' autorun budget in the timed-out rounds: the descendants of the cells asked for that weren't reached, each within the budget by its last measured time (daybreak3's DB3-RS-3 on #557)"
  },
  "src/reactive-session.ts :: note :: note(await reactive.run(left, { budget })); #0": {
   "class": "1",
