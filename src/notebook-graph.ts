@@ -26,6 +26,16 @@
 //     multiple definition: it defines the same thing.
 //   - Files (setFiles): a cell that wrote a file in its last run runs before
 //     the cells that read it.
+//   - Late reads (unless `strict`): a name a cell reads only inside a
+//     def's body (src/dataflow.ts `late`) is read when the
+//     function is called, not when the cell runs, so it makes no edge (the
+//     cell is still its reader, for the one-definition rule). A cell whose
+//     top-level code uses another cell's def or class is ordered after the
+//     definers of that def's late reads instead, as calling it reads them
+//     (William's B1, Nov 2: `class G(...): def _cdf(...): np.where(...)` in
+//     one cell and `import numpy as np; G().cdf(...)` in another are no cycle).
+//   - A cycle error says why each cell on one cycle runs after the one before
+//     it (`path`, cycleText).
 //   - A cycle error goes to every cell in a strongly connected component:
 //     every cell on a cycle.  marimo records, for each edge added, one path
 //     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
@@ -41,7 +51,19 @@ export type CellError =
   | { kind: "import-star"; message: string }
   // (reading: the cell reads a name several cells define, under #1477's relaxation)
   | { kind: "multiple-definition"; name: string; cells: string[]; reading?: true }
-  | { kind: "cycle"; cells: string[] };
+  | { kind: "cycle"; cells: string[]; path?: CycleStep[] };
+
+/**
+ * Why cell `to` runs after cell `from`: it uses `name`, which `from` defines
+ * ("uses"); it uses `name`, another cell's def whose code reads `late`, which
+ * `from` defines ("calls"); it deletes `name`, which `from` uses or defines
+ * ("deletes", "deletes-def"); it changes `name`'s object, which `from`
+ * changes too ("updates"); it reads `name`, whose object `from` changes
+ * ("updated"). `def`: the statement of `from` that defines the name `to`
+ * needs, as written, and what it is (`defKind`).
+ */
+type Reason = { kind: "uses" | "deletes" | "deletes-def" | "updates" | "updated"; name: string } | { kind: "calls"; name: string; late: string };
+export type CycleStep = { from: string; to: string; def?: string; defKind?: "import" | "def" | "value" } & Reason;
 
 interface Node {
   id: string;
@@ -141,6 +163,8 @@ export interface AnalysisView {
   readonly mutations?: SetView<string>;
   readonly imports?: MapView<string, string>;
   readonly unbinds?: SetView<string>;
+  readonly late?: SetView<string>;
+  readonly lateBy?: MapView<string, SetView<string>>;
 }
 const analysisViews = new WeakSet<object>();
 /** A private, read-only copy of an analysis (one already made is itself). */
@@ -153,12 +177,70 @@ export function analysisView(a: CellAnalysis | AnalysisView): AnalysisView {
     ...(a.mutations ? { mutations: new SetView(a.mutations) } : {}),
     ...(a.imports ? { imports: new MapView<string, string>(a.imports) } : {}),
     ...(a.unbinds ? { unbinds: new SetView(a.unbinds) } : {}),
+    ...(a.late ? { late: new SetView(a.late) } : {}),
+    ...(a.lateBy ? { lateBy: new MapView<string, SetView<string>>([...a.lateBy].map(([k, ns]) => [k, new SetView(ns)] as const)) } : {}),
   });
   analysisViews.add(v);
   return v;
 }
 /** An error, copied and frozen (with its list of cells). */
-export const frozenError = (e: CellError): CellError => Object.freeze("cells" in e ? { ...e, cells: Object.freeze([...e.cells]) as string[] } : { ...e });
+export const frozenError = (e: CellError): CellError =>
+  Object.freeze(
+    "cells" in e
+      ? { ...e, cells: Object.freeze([...e.cells]) as string[], ...("path" in e && e.path ? { path: Object.freeze(e.path.map((x) => Object.freeze({ ...x }))) as CycleStep[] } : {}) }
+      : { ...e },
+  );
+
+/**
+ * A cycle error in words, as marimo's (William's B1): which name links each
+ * cell on the cycle to the next, one line each ("cell 2 -> np -> cell 1":
+ * cell 1 uses np, which cell 2 defines), then how to resolve it, with the
+ * statement to move. `label` names a cell ("cell 2"), `written` a name as the
+ * cell's code writes it, `noun` what a cell is called ("item" on a board).
+ */
+export function cycleText(e: { cells: string[]; path?: CycleStep[] }, label: (id: string) => string, written: (n: string) => string = (n) => n, noun = "cell"): string {
+  if (!e.path?.length) {
+    const list = e.cells.map(label).join(", ").replace(/, ([^,]*)$/, " and $1");
+    return `${list} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
+  }
+  const link = (x: CycleStep): string => {
+    const n = written(x.name);
+    switch (x.kind) {
+      case "uses": return n;
+      case "calls": return `${written(x.late)} (used by ${n})`;
+      case "deletes": case "deletes-def": return `${n} (deleted)`;
+      case "updates": case "updated": return `${n} (changed)`;
+    }
+  };
+  const lines = e.path.map((x) => `  ${label(x.from)} -> ${link(x)} -> ${label(x.to)}`);
+  // (the fix: an import moved or repeated; else a def or class moved, whose
+  // body reads names only when called; a value needs what it is computed from)
+  const fix = e.path.find((x) => x.defKind === "import") ?? e.path.find((x) => x.defKind === "def");
+  const names = [...new Set(e.path.map((x) => written(x.kind === "calls" ? x.late : x.name)))].join(", ").replace(/, ([^,]*)$/, " and $1");
+  const how = !fix
+    ? `To resolve it, compute one of ${names} without the others: a value can't depend on itself.`
+    : fix.defKind === "import"
+      ? `To resolve it, move \`${fix.def}\` into a ${noun} of its own above ${label(fix.to)}, or add it to ${label(fix.to)} too (the same import may be in several ${noun}s).`
+      : `To resolve it, move \`${fix.def}\` (with its body) out of ${label(fix.from)}, into a ${noun} of its own above ${label(fix.to)}.`;
+  return [`This ${noun} is in a cycle:`, ...lines, how].join("\n");
+}
+
+// The statement of a cell's code that defines `name` at its top level, as
+// written: an import, a def, a class or an assignment (or undefined).
+function definition(code: string, name: string, imported?: string): { def: string; defKind: "import" | "def" | "value" } | undefined {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lines = code.split("\n");
+  if (imported !== undefined) {
+    const re = new RegExp(`^(import|from)\\b.*\\b${esc}\\b`);
+    const line = lines.find((l) => re.test(l));
+    if (line) return { def: line.trim(), defKind: "import" };
+  }
+  const re = new RegExp(`^(?:(?:async\\s+)?def\\s+${esc}\\b|class\\s+${esc}\\b|${esc}\\s*(?::[^=]*)?=(?!=)|(?:[\\w\\s,]+,\\s*)?${esc}\\s*(?:,[\\w\\s,]*)?=(?!=))`);
+  const line = lines.find((l) => re.test(l));
+  if (!line) return undefined;
+  const t = line.trim();
+  return { def: t.length > 80 ? t.slice(0, 77) + "..." : t, defKind: /^(async\s+def|def|class)\s/.test(t) ? "def" : "value" };
+}
 // Lists by key, each frozen, in a view.
 const listsView = (m: Map<string, string[]>) => new MapView<string, string[]>([...m].map(([k, l]) => [k, Object.freeze(l) as string[]] as const));
 
@@ -271,6 +353,10 @@ export class NotebookGraph {
     const errorsOf = new Map<string, CellError[]>();
     const definers = new Map<string, string[]>();
     const readers = new Map<string, string[]>();
+    // (the readers whose reads order cells: not late reads, unless strict)
+    const eagerReaders = new Map<string, string[]>();
+    // (why each edge is there: its first reason)
+    const why = new Map<string, CycleStep>();
     const deleters = new Map<string, string[]>();
     const updatersOf = new Map<string, string[]>();
     const addError = (id: string, e: CellError) => {
@@ -291,13 +377,18 @@ export class NotebookGraph {
       // (ours: `except E as x` binds x, then deletes it: a definition, after
       // which x is gone, as in plain Python)
       if (!this.strict) for (const n of a.unbinds ?? []) if (!a.defs.has(n)) push(definers, n, id);
-      for (const n of a.refs) push(readers, n, id);
+      for (const n of a.refs) {
+        push(readers, n, id);
+        if (this.strict || !a.late?.has(n)) push(eagerReaders, n, id);
+      }
       for (const n of a.deleted) push(deleters, n, id);
     }
-    const edge = (p: string, c: string) => {
+    const edge = (p: string, c: string, reason?: Reason) => {
       if (p === c) return;
       childrenOf.get(p)!.add(c);
       parentsOf.get(c)!.add(p);
+      const k = p + "\u0000" + c;
+      if (reason && !why.has(k)) why.set(k, { from: p, to: c, ...reason } as CycleStep);
     };
     for (const [name, ds] of definers) {
       const rs = readers.get(name);
@@ -309,24 +400,56 @@ export class NotebookGraph {
         // #1477: and on the cells reading it, which may be the ones that made it an error
         if (!this.strict) for (const r of rs ?? []) if (!ds.includes(r)) addError(r, { kind: "multiple-definition", name, cells: ds, reading: true });
       }
-      for (const r of rs ?? []) for (const d of ds) edge(d, r);
+      for (const r of eagerReaders.get(name) ?? []) for (const d of ds) edge(d, r, { kind: "uses", name });
+    }
+    // Late reads (ours, unless strict): a cell using another cell's def or
+    // class at its top level runs after the definers of what that def reads
+    // when called, and of what the defs it reads in turn read
+    if (!this.strict) {
+      for (const [id, node] of this.nodes) {
+        const a = node.analysis;
+        if (!a) continue;
+        for (const n of a.refs) {
+          if (a.late?.has(n)) continue;
+          for (const d of definers.get(n) ?? []) {
+            if (d === id) continue;
+            const seen = new Set<string>();
+            const queue: [string, string][] = [[d, n]];
+            while (queue.length) {
+              const [cell, def] = queue.shift()!;
+              const by = this.nodes.get(cell)?.analysis?.lateBy;
+              for (const m of [...(by?.get(def) ?? []), ...(by?.get("*") ?? [])]) {
+                if (seen.has(m)) continue;
+                seen.add(m);
+                for (const e of definers.get(m) ?? []) {
+                  edge(e, id, { kind: "calls", name: n, late: m });
+                  queue.push([e, m]);
+                }
+              }
+            }
+          }
+        }
+      }
     }
     // a cell deleting a name runs after the others reading it (and, ours,
     // after the cell defining it: there is nothing to delete before)
-    for (const [name, xs] of deleters) for (const r of readers.get(name) ?? []) for (const x of xs) edge(r, x);
-    if (!this.strict) for (const [name, xs] of deleters) for (const d of definers.get(name) ?? []) for (const x of xs) edge(d, x);
+    for (const [name, xs] of deleters) for (const r of eagerReaders.get(name) ?? []) for (const x of xs) edge(r, x, { kind: "deletes", name });
+    if (!this.strict) for (const [name, xs] of deleters) for (const d of definers.get(name) ?? []) for (const x of xs) edge(d, x, { kind: "deletes-def", name });
     // Mutation tracking (ours, unless strict): the cells mutating a name's
     // object (its updaters) run after its definer, in page order, and before
     // the cells reading it.
     if (!this.strict) {
       for (const [id, node] of this.nodes) for (const n of node.analysis?.mutations ?? []) if (definers.has(n)) push(updatersOf, n, id);
       for (const [name, us] of updatersOf) {
-        for (let i = 0; i + 1 < us.length; i++) edge(us[i], us[i + 1]);
-        for (const r of readers.get(name) ?? []) if (!us.includes(r)) for (const u of us) edge(u, r);
+        for (let i = 0; i + 1 < us.length; i++) edge(us[i], us[i + 1], { kind: "updates", name });
+        for (const r of eagerReaders.get(name) ?? []) if (!us.includes(r)) for (const u of us) edge(u, r, { kind: "updated", name });
       }
     }
     for (const scc of this.components((v) => childrenOf.get(v)!)) {
-      if (scc.length > 1) for (const id of scc) addError(id, { kind: "cycle", cells: scc });
+      if (scc.length > 1) {
+        const path = this.cyclePath(scc, childrenOf, why);
+        for (const id of scc) addError(id, { kind: "cycle", cells: scc, ...(path ? { path } : {}) });
+      }
     }
     // Files (ours): a cell that wrote a file in its last run, before one that
     // read it.  Edges found by running, so never made into cycles: one that
@@ -357,6 +480,39 @@ export class NotebookGraph {
   /** The cells that read a file in their last run. */
   readersOf(path: string): string[] {
     return this.ids.filter((id) => this.files.get(id)?.reads.includes(path));
+  }
+
+  // One cycle through a component's first cell (the shortest, by breadth
+  // first), as the reasons of its edges; undefined if one lacks a reason.
+  private cyclePath(scc: string[], childrenOf: Map<string, Set<string>>, why: Map<string, CycleStep>): CycleStep[] | undefined {
+    const inside = new Set(scc), start = scc[0];
+    const prev = new Map<string, string>();
+    const queue = [start];
+    while (queue.length) {
+      const v = queue.shift()!;
+      for (const c of childrenOf.get(v) ?? []) {
+        if (!inside.has(c)) continue;
+        if (c === start) {
+          const cells = [v];
+          while (cells[0] !== start) cells.unshift(prev.get(cells[0])!);
+          cells.push(start);
+          const steps = cells.slice(1).map((c2, i) => why.get(cells[i] + "\u0000" + c2));
+          if (!steps.every((x) => x)) return undefined;
+          return (steps as CycleStep[]).map((x) => {
+            if (x.kind !== "uses" && x.kind !== "calls") return x;
+            const n = x.kind === "calls" ? x.late : x.name;
+            const node = this.nodes.get(x.from)!;
+            const d = definition(node.code, n, node.analysis?.imports?.get(n));
+            return d ? { ...x, ...d } : x;
+          });
+        }
+        if (!prev.has(c) && c !== start) {
+          prev.set(c, v);
+          queue.push(c);
+        }
+      }
+    }
+    return undefined;
   }
 
   /** the strongly connected components (Tarjan), each in page order, over `children` (build()'s edges) */

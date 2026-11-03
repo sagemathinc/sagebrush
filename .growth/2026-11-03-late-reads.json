@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Reactive notebook, William's B1: names read only in a def's body order no cells (src/dataflow.ts late/lateBy, src/notebook-graph.ts), a cycle's message as marimo's with the concrete fix (cycleText), the analyzer worker passes late reads, tests. Measured with bun 1.4.4 (size-record.sh) on master a0537848 vs this PR's content head 73f6cd1f: cli/pyjs.cjs +10373, engine/sagebrush-analyze.js +1127, engine/sagebrush-notebook.js +3109, engine/sagebrush-worker.js +522; no other row moves. engine/sagebrush-notebook.js's ceiling is raised to its measured landing 238566 + 64 = 238630 (William's ceiling rule).",
+ "bytes": {
+  "cli/pyjs.cjs": 10373,
+  "engine/sagebrush-analyze.js": 1127,
+  "engine/sagebrush-notebook.js": 3109,
+  "engine/sagebrush-worker.js": 522
+ }
+}
