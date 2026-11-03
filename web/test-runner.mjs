@@ -201,13 +201,17 @@ const STUCK_DIAG = `(() => {
   window.Worker = class extends W {
     constructor(u, o) {
       super(u, o);
-      const r = { url: String(u).slice(-60), at: Date.now(), first: null, ready: null, n: 0, said: [], sent: [], errors: [], messageerrors: 0 };
+      // (said and sent: the last 20 of each, beside their totals; ids: every message carrying an id, each way, so a
+      // run's id,code and id,start show however many startup messages came first: sync-docs' review)
+      const r = { url: String(u).slice(-60), at: Date.now(), first: null, ready: null, n: 0, nSent: 0, said: [], sent: [], ids: [], errors: [], messageerrors: 0 };
       d.workers.push(r);
-      this.addEventListener("message", (e) => { r.n++; r.first ??= Date.now(); if (e.data?.ready) r.ready ??= Date.now(); if (r.said.length < 20) r.said.push(kinds(e.data)); });
+      const keep = (a, x) => { a.push(x); if (a.length > 20) a.shift(); };
+      const id = (way, m) => { if (m && typeof m === "object" && m.id !== undefined && r.ids.length < 200) r.ids.push({ at: Date.now(), way, id: m.id, kinds: kinds(m) }); };
+      this.addEventListener("message", (e) => { r.n++; r.first ??= Date.now(); if (e.data?.ready) r.ready ??= Date.now(); keep(r.said, kinds(e.data)); id("said", e.data); });
       this.addEventListener("error", (e) => { if (r.errors.length < 5) r.errors.push({ at: Date.now(), message: String(e.message || e.type).slice(0, 200) }); });
       this.addEventListener("messageerror", () => r.messageerrors++);
       const post = W.prototype.postMessage;
-      this.postMessage = (m, t) => { if (r.sent.length < 20) r.sent.push({ at: Date.now(), kinds: kinds(m) }); return t === undefined ? post.call(this, m) : post.call(this, m, t); };
+      this.postMessage = (m, t) => { r.nSent++; keep(r.sent, { at: Date.now(), kinds: kinds(m) }); id("sent", m); return t === undefined ? post.call(this, m) : post.call(this, m, t); };
     }
   };
   const watch = () => {
@@ -228,7 +232,7 @@ async function reportStuck({ navAt, runAt }) {
   if (r.fail) return console.log("  stuck: diagnostics unavailable (" + r.fail + ")");
   const v = JSON.parse(r.value);
   for (const w of v.diag?.workers ?? [])
-    console.log("  stuck worker: " + JSON.stringify({ ...w, at: at(w.at), first: at(w.first), ready: at(w.ready), sent: w.sent.map((x) => `${at(x.at)}:${x.kinds}`), errors: w.errors.map((e) => `${at(e.at)}:${e.message}`) }).slice(0, 1500));
+    console.log("  stuck worker: " + JSON.stringify({ ...w, at: at(w.at), first: at(w.first), ready: at(w.ready), sent: w.sent.map((x) => `${at(x.at)}:${x.kinds}`), ids: w.ids.slice(-40).map((x) => `${at(x.at)}:${x.way}:${x.id}:${x.kinds}`), errors: w.errors.map((e) => `${at(e.at)}:${e.message}`) }).slice(0, 2500));
   if (!v.diag) console.log("  stuck: no diagnostics on the page (the script didn't run)");
   console.log("  stuck #status: " + JSON.stringify((v.diag?.status ?? []).map((x) => `${at(x.at)}:${x.text}`)).slice(0, 1500));
   // (sync-docs: the run still pending in the kernel, its start barrier, the runner's own state)
@@ -529,8 +533,12 @@ try {
     // (test-only diagnostics for the grader's open investigation of this case's timeouts, #488 and #552: on the stuck
     // page, each Worker the page makes (the plain worker) with what it was sent and said, and #status as it changes)
     // (Page.enable first: without it the script is accepted, an identifier returned, and never run)
-    await send("Page.enable");
-    const diag = await send("Page.addScriptToEvaluateOnNewDocument", { source: STUCK_DIAG });
+    // (STUCK_DIAG=0: without the probe, which wraps the very Worker under suspicion: the grader's observer-effect batch)
+    let diag = null;
+    if (process.env.STUCK_DIAG !== "0") {
+      await send("Page.enable");
+      diag = await send("Page.addScriptToEvaluateOnNewDocument", { source: STUCK_DIAG });
+    }
     const ctxBefore = contexts.length;
     const navAt = Date.now();
     await send("Page.navigate", { url: new URL("./", base).href });
