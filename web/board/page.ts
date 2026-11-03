@@ -684,7 +684,7 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
 // A board's title is its file's name, as a notebook's is (William's B2, the notebook page's wsRenameSoon): a title
-// changed here renames its file in the workspace, after the saves before it, to a free name beside it (never over
+// changed by an edit on this page (mount.ts titleEdited; never a change from elsewhere) renames its file in the workspace, after the saves before it, to a free name beside it (never over
 // another), only this board (its identity checked holding the lock). A rename in the file browser retitles the board
 // instead (renamed, below), which then matches its file and renames nothing.
 let boardRenameTimer: ReturnType<typeof setTimeout> | undefined, boardRenameGen = 0;
@@ -1223,7 +1223,7 @@ const host: BoardHost = {
       // (a board on this computer: the file is its only copy, written by whoever writes it; nothing kept here)
       if (fromLocal) return;
       if (unsaved) throw new Error(STORAGE_REFUSED);
-      if (local && ws) { const r = wsSave(source.slice(6), d); boardRenameSoon(source.slice(6), d.title); return r; }
+      if (local && ws) return wsSave(source.slice(6), d);
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
       if (local && !listLocal(source.slice(6), d)) throw new Error(STORAGE_REFUSED);
     },
@@ -1379,6 +1379,9 @@ const host: BoardHost = {
     return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (a title changed by an edit on this page: its file renamed to follow; a change from elsewhere, an agent's write
+  // or another tab's, is never a rename: CI on #531)
+  titleEdited: (t) => { if (local && ws) boardRenameSoon(source.slice(6), t); },
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
