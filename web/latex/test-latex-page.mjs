@@ -1352,6 +1352,24 @@ try {
     const r2 = { hook: await ev(`window.__reuse`), otherResults: await read("/m0/again.tex.results.json"), takenResults: await read("/m0/last.tex.results.json") };
     check(r2.hook === 1 && r2.otherResults === "OTHER" && r2.takenResults === null, "M0: another document's results file made at the freed name stays where it is", r2);
     await ev(`(window.__sbTexRenamed = undefined, 1)`);
+    // (daybreak3 M0-SEM-1: renamed elsewhere while the field is open, then Escape: the name it has now is shown)
+    await ev(`(${T}.click(), 1)`);
+    const open1 = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
+    await ev(`${W}.rename("/m0/last.tex", "/m0/elsewhere.tex").then(() => 1)`);
+    await sleep(300);
+    if (open1) await ev(`(document.querySelector(".tex-head .tex-titlein").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    const caught = await until(`${T}?.textContent === "elsewhere.tex" && document.title.startsWith("elsewhere.tex")`, 5000);
+    check(open1 && caught, "M0: renamed elsewhere while the name is being edited, then Escape: the new name shown", await ev(`[${T}?.textContent, document.title]`));
+  }
+  // (daybreak3 M0-SEM-2: a file that can't be saved here (a NUL in it): its name is plain text, no rename offered)
+  {
+    const T = `document.querySelector(".tex-head .tex-title")`;
+    await open(await mk("/m0/nul.tex", [65, 0, 66, 10]));
+    await until(`${T}?.textContent === "nul.tex"`, 20000);
+    const plain = await ev(`(() => { const t = ${T}; return { role: t.getAttribute("role"), tab: t.tabIndex, tip: t.title, cls: t.className }; })()`);
+    await ev(`(${T}.click(), 1)`); await sleep(400);
+    const noField = await ev(`!document.querySelector(".tex-head .tex-titlein")`);
+    check(plain.role === null && plain.tab === -1 && !/rename/i.test(plain.tip) && !/renamable/.test(plain.cls) && noField, "M0: a file that can't be saved here: no rename offered (no button role, no tab stop, no click to rename)", { plain, noField });
   }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
