@@ -130,6 +130,18 @@ ${"many words ".repeat(14000)}
   const tl = (cl.json?.problems ?? []).filter((x) => x.kind === "toolarge");
   check("check-frame-too-large-warning-with-line", cl.code === 0 && BIGSVG.length > 128 * 1024 && cl.json.frames.length === 2 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === lineOf(LARGE, "\\begin{frame}{Long}")
     && /^this slide is too large \(\d+ KiB, over 128 KiB\): the preview and Present show a placeholder instead/.test(tl[0].message), { code: cl.code, problems: cl.json?.problems });
+  // (render shows what check says: that frame's placeholder, inside its own slide, the picture's frame whole; and a
+  //  frame over CHUNK_MAX, 2 MiB, still a slide too: the deck's frames all kept)
+  const HUGE = LARGE.replace("\\end{document}", "\\begin{frame}{Huge}\n" + "more words ".repeat(200000) + "\n\\end{frame}\n\\end{document}");
+  writeFileSync(join(dir, "huge.tex"), HUGE);
+  const rl = await run(dir, "render", "huge.tex", "-o", "huge.html", "--json");
+  const hh = existsSync(join(dir, "huge.html")) ? readFileSync(join(dir, "huge.html"), "utf8") : "";
+  const frameOf = (k) => { const i = hh.indexOf(`<section class="slide" data-frame="${k}"`); return i < 0 ? "" : hh.slice(i, hh.indexOf("</section>", i) + 10); };
+  const ch = await run(dir, "check", "huge.tex", "--json");
+  check("render-too-large-frames-placeholders-in-their-slides", rl.code === 0 && (hh.match(/<section class="slide"/g) || []).length === 3 && frameOf(1).includes('src="data:image/svg+xml;base64,')
+    && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(2)) && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(3))
+    && !hh.includes("many words many words") && !hh.includes("more words more words"), { code: rl.code, slides: (hh.match(/<section class="slide"/g) || []).length, f2: frameOf(2).slice(0, 300), f3: frameOf(3).slice(0, 300) });
+  check("check-frame-over-2MiB-warning", ch.json?.frames?.length === 3 && (ch.json?.problems ?? []).some((x) => x.kind === "toolarge" && x.line === lineOf(HUGE, "\\begin{frame}{Huge}") && /over 2048 KiB/.test(x.message)), ch.json?.problems);
 
   // ---- render: one self-contained HTML file
   const r = await run(dir, "render", "talk.tex", "-o", "out.html", "--json");

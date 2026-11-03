@@ -92,7 +92,11 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
   const n = bytes(h), w = weight(h);
   const ph = (why: string, open = "", close = "") => { tooLarge?.(why, n); return [open + placeholder(why, n) + close]; };
   if (w <= PIECE_TARGET && n <= CHUNK_MAX) return [h];
-  if (n > CHUNK_MAX) return ph("this block is too large to display in the prototype");
+  if (n > CHUNK_MAX) {
+    // (a slide over it too keeps its own open tag, found without parsing it all: every frame still a slide)
+    const so = /^<section\s[^>]*?\bclass="(?:[^"]*\s)?slide(?:\s[^"]*)?"[^>]*>/.exec(h.slice(0, 4096));
+    return so && h.endsWith("</section>") ? ph("this slide is too large to display in the prototype", so[0], "</section>") : ph("this block is too large to display in the prototype");
+  }
   const o = outer(h);
   if (!o) return ph("this block is too large to display in the prototype");
   const cls = (/\sclass="([^"]*)"/.exec(o.open) || [])[1] || "";
