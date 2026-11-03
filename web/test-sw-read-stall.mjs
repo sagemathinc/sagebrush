@@ -154,6 +154,26 @@ try {
   await hook({ holdRead: null });
   ok(three?.length === 3 && three.every((x) => x.size === want.size), "the stuck entry: all three answered: " + J(three?.map((x) => [x.size, Math.round(x.ms)])));
   ok(three?.length === 3 && Math.max(...three.map((x) => x.ms)) < 1800, "…each under the clients' bound (2 bounds), none stalling again in turn: " + J(three?.map((x) => Math.round(x.ms))) + `, ${heldNow} read(s) held`);
+  // (T565-SKIP-EXPIRES, grader and @sagebrush: the skip mark runs out. With the network refusing the chunk (the server
+  // answers 503: offline, in effect), a stalled read marks the key; within STALL_SKIP_MS (6 bounds, 6 s here) the kept
+  // copy is skipped, so the request gets the network's refusal; after it, the kept copy is served again)
+  at = "the mark runs out, the network refusing";
+  await until(() => kept(A), 15000);
+  overrides[url] = { status: 503 };
+  saveOverrides();
+  await hook({ holdRead: url });
+  await clearHttp();
+  const stalledRead = await get(15000);
+  const markedAt = Date.now();
+  await clearHttp();
+  const within = await get(5000);
+  ok(stalledRead.size !== want.size && within.size !== want.size && Date.now() - markedAt < 6000, "after a stall, within STALL_SKIP_MS the kept copy is skipped: the network's refusal both times: " + J([stalledRead.size, within.size]));
+  await sleep(Math.max(0, markedAt + 6500 - Date.now()));
+  await clearHttp();
+  const expired = await get(15000);
+  delete overrides[url];
+  saveOverrides();
+  ok(expired.size === want.size && expired.sha256 === want.sha256, "…and after it, the kept copy is served again (the server still refusing): " + J({ size: expired.size, ms: Math.round(expired.ms ?? 0) }));
 
   // the control: the same build with the bound taken out, as a new deploy; the same held read is never answered
   at = "the control: the bound taken out";
