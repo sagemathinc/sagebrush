@@ -961,13 +961,13 @@ const CMDS = {
   hyperref: function (nodes, i, ctx, flow) { const [, j] = this.opt(nodes, i); const [b, j2] = this.arg(nodes, j); flow.html(this.inline(b, ctx), ctx.st); return j2; },
   texorpdfstring: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
   ensuremath: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html(this.math(this.mathStr(a), false), ctx.st); return j; },
-  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   frame: function (nodes, i, ctx, flow) {
-    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
@@ -988,8 +988,8 @@ const CMDS = {
   hphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom hph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   vphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom vph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   smash: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="smash">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
-  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
   marginpar: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   todo: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar todo">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   hspace: function (nodes, i, ctx, flow) { const [, j0] = this.star(nodes, i); const [a, j] = this.arg(nodes, j0); const w = cssDim(this.str(a)); flow.html('<span class="hsp" style="width:' + (w || "0") + '"></span>', ctx.st); return j; },
@@ -1059,7 +1059,7 @@ Renderer.prototype.makebox = function (nodes, i, ctx, flow, framed) {
   if (o) { const [p, j2] = this.opt(nodes, j); if (p) { pos = this.str(p).trim()[0] || "c"; j = j2; } }
   const [a, j3] = this.arg(nodes, j);
   const al = pos === "l" ? "left" : pos === "r" ? "right" : pos === "s" ? "justify" : "center";
-  flow.html('<span class="' + (framed ? "fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
+  flow.html('<span class="' + (framed ? "tex-fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
   return j3;
 };
 Renderer.prototype.dimen = function (nodes, i) {   // a TeX <dimen> written as characters: "1.5em plus 1pt minus .5pt"
