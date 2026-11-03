@@ -112,9 +112,9 @@ const sagetex = String.raw`\documentclass{article}
 \begin{document}
 \section*{SageTeX}
 
-\emph{In this preview:} SageTeX code is found and listed, but not run yet: running it needs the Sage
-compute backend, which is not connected. Each \texttt{\textbackslash sage\{...\}} shows as a placeholder.
-A full LaTeX run (latex, then sage, then latex again) fills in the results.
+\emph{In this preview:} SageTeX code is found and listed; each \texttt{\textbackslash sage\{...\}} shows as a
+placeholder until the code is run. \texttt{sagebrush latex run} runs it with Sagebrush's Sage, in order, and
+keeps the results beside this file; the preview then shows them, with the plot.
 
 \begin{sagesilent}
 f(x) = x^3 - 2*x + 1

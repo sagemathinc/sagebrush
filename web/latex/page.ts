@@ -40,6 +40,8 @@ const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `$
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
+/** The largest results file read (`sagebrush latex run`'s, beside the .tex). */
+const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
@@ -149,7 +151,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   noteShown();
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), dirty: () => false };
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
@@ -201,7 +203,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, status, tools);
+  // Print / Save as PDF (William, Nov 2: "an easy PDF download, so a person can print out something or archive it"; a
+  // full LaTeX environment with direct PDF generation is out of scope): the browser prints the rendered preview only
+  // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
+  const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
+  printBtn.onclick = () => printPreview();
+  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -308,8 +315,31 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const images: Record<string, string | { why: string }> = {};
   const blobs = new Set<string>();
   let imageBytes = 0;
+  // (the code's results, paper.tex.results.json beside it: `sagebrush latex run`'s; read when the page opens, when
+  //  the window comes back into focus, and before an agent's tool call; bounded, and checked by the worker and renderer)
+  const results: { wrapper: string | null; saved: unknown[] } = { wrapper: null, saved: [] };
+  let resultsSeen: unknown = undefined;
+  const loadResults = async () => {
+    try {
+      const p = where.path + ".results.json", e = await host.ws.stat(p).catch(() => undefined);
+      if (!live()) return;
+      const seen = e && !e.trashed ? `${e.fid}:${e.updated}:${e.size}` : null;
+      if (seen === resultsSeen) return;
+      let next: typeof results = { wrapper: null, saved: [] };
+      if (e && !e.trashed && (e.size ?? 0) <= RESULTS_MAX) {
+        const j = JSON.parse(new TextDecoder().decode((await host.ws.readUpTo(p, RESULTS_MAX)).content));
+        if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) next = { wrapper: j.wrapper, saved: j.items };
+      }
+      if (!live()) return;
+      // (the file counted as seen only once it was read and parsed: one that failed or was malformed is read again
+      //  at the next chance, astra's #519 advisory; its old results stay meanwhile)
+      resultsSeen = seen;
+      results.wrapper = next.wrapper; results.saved = next.saved;
+      request();
+    } catch {}
+  };
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
@@ -317,7 +347,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   const { src, gate, request } = E;
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
-  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS };
+  void loadResults();
+  window.addEventListener("focus", () => void loadResults(), on);
+  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
 
@@ -408,7 +440,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });
   void host.ws.stat(cmPath()).then((e) => { if (e && !e.trashed && live()) void comments(); }, () => {});
-  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); };
+  // (the agent's route to a PDF, documented in llms.txt: window.sagebrush.latex.print() opens the same dialog;
+  // printMode(true) puts the page in its print layout for a browser an agent drives, whose own print-to-PDF (CDP
+  // Page.printToPDF) then makes the file, and printMode(false) puts it back)
+  const sb = ((globalThis as any).sagebrush ??= {});
+  const handle = { print: () => printPreview(), printMode: (on: boolean) => document.documentElement.classList.toggle("tex-print", !!on), fid: host.fid };
+  sb.latex = handle;
+  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   current = { dispose: () => dispose(), dirty: isDirty };
 
   // ---- saving (r6b E5): the opened file only, last write wins
@@ -448,3 +486,32 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   void parentOf; void enc;
 }
+
+/** The preview printed alone (PRINT_CSS, while <html> has tex-print): the browser's dialog, with "Save as PDF". */
+export function printPreview() {
+  const html = document.documentElement;
+  html.classList.add("tex-print");
+  const done = () => html.classList.remove("tex-print");
+  window.addEventListener("afterprint", done, { once: true });
+  try { window.print(); } finally { setTimeout(() => { if (html.classList.contains("tex-print")) done(); }, 0); }
+}
+
+/** The print layout, only while <html> has tex-print: the rendered preview alone (no editor, header, banner, comments'
+ * margin or file browser), on the page's own margins, with breaks kept off headings, math, floats and tables. */
+export const PRINT_CSS = `
+@media print {
+  @page { margin: 18mm 16mm; }
+  html.tex-print body > :not(:has(.tex-page)) { display: none !important; }
+  html.tex-print body { background: #fff !important; }
+  html.tex-print .tex-page { position: static !important; display: block !important; inset: auto !important; left: 0 !important; background: #fff !important; z-index: auto; }
+  html.tex-print .tex-page > :not(.tex-main), html.tex-print .tex-left, html.tex-print .tex-right > :not(.tex-preview), html.tex-print .tex-newmenu { display: none !important; }
+  html.tex-print .tex-main, html.tex-print .tex-right { display: block !important; overflow: visible !important; background: none !important; padding: 0 !important; border: 0 !important; }
+  html.tex-print .tex-page .page { max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; zoom: 1 !important; }
+  html.tex-print .tex-preview .pc { content-visibility: visible !important; contain-intrinsic-size: none !important; }
+  html.tex-print .tex-preview .ch.sync-flash { outline: none !important; }
+  html.tex-print .tex-preview h1, html.tex-print .tex-preview h2, html.tex-print .tex-preview h3, html.tex-print .tex-preview h4 { break-after: avoid; page-break-after: avoid; }
+  html.tex-print .tex-preview .dmath, html.tex-print .tex-preview .float, html.tex-print .tex-preview table.tabular, html.tex-print .tex-preview img.graphic, html.tex-print .tex-preview .titleblock, html.tex-print .tex-preview .thmhead { break-inside: avoid; page-break-inside: avoid; }
+  html.tex-print .tex-preview .dmath { overflow: visible !important; }
+  html.tex-print .tex-preview h1.chapter, html.tex-print .tex-preview h1.part { break-before: page; }
+}
+`;

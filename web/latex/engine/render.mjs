@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -49,12 +49,12 @@ const dimPt = (s) => { const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|
 // (a source position marker, {k:"pos", at}, isn't a node: it goes on the next node as n.p, so arguments read past it)
 export function buildTree(events, items = []) {
   const root = { t: "g", kids: [] }; const st = [root];
-  let pos = -1;
+  let pos = -1, last = -1;   // (last: the latest marker, kept: a code item's source position, it.at)
   const top = () => st[st.length - 1];
   for (const e of events) {
     const before = top().kids.length, at = top();
     if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } continue; }
-    if (e.k === "pos") { pos = e.at; continue; }
+    if (e.k === "pos") { pos = last = e.at; continue; }
     switch (e.k) {
       case "o": { const g = { t: "g", kids: [] }; top().kids.push(g); st.push(g); break; }
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
@@ -65,10 +65,10 @@ export function buildTree(events, items = []) {
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
       case "verbenv": {
         const v = { t: "V", env: e.env, text: e.text };
-        if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); items.push(v.it); }
+        if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); v.it.at = last; items.push(v.it); }
         top().kids.push(v); break;
       }
-      case "sage": { const it = itemOf(e); top().kids.push({ t: "S", n: items.length, it }); items.push(it); break; }
+      case "sage": { const it = itemOf(e); it.at = last; top().kids.push({ t: "S", n: items.length, it }); items.push(it); break; }
       case "sageunsup": top().kids.push({ t: "U", name: e.name }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
@@ -822,6 +822,9 @@ class Renderer {
     this.sageItems = []; this.sageStates = (this.opts.sage && Array.isArray(this.opts.sage.states)) ? this.opts.sage.states : [];
     this.sageShown = new Set(); this.mathFails = [];
     const nodes = buildTree(events, this.sageItems);
+    // (saved results, `sagebrush latex run`'s file: item n's counts while it and every item before it are the code that
+    //  was run, the code running in order in one session; sagetex.mjs savedStates)
+    if (this.opts.sage && Array.isArray(this.opts.sage.saved)) this.sageStates = savedStates(this.sageItems, this.opts.sage.saved);
     // preamble: definitions and metadata only (its text output is discarded)
     const di = nodes.findIndex((x) => x.t === "doc");
     const pre = di >= 0 ? nodes.slice(0, di) : [];
@@ -1151,5 +1154,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }
