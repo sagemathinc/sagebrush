@@ -125,9 +125,10 @@ test("Sage var(): names of any script define; a private one with keywords is the
 });
 
 test("import * is refused in Sagebrush's words: why, and the way forward (no 'marimo')", () => {
+  // (strict: marimo's analysis refuses every star import; ours allows a few modules, see below)
   const msg = (code: string) => {
     try {
-      analyzeCell(code, "c1");
+      analyzeCell(code, "c1", { strict: true });
     } catch (e: any) {
       assert.ok(e instanceof ImportStarError, String(e));
       return String(e.message);
@@ -142,4 +143,18 @@ test("import * is refused in Sagebrush's words: why, and the way forward (no 'ma
   // (a module with no example of its own: generic names; a relative import keeps its dots)
   assert.match(msg("from os.path import *"), /`import os\.path`\) or the names you use \(`from os\.path import a, b`\)/);
   assert.match(msg("x = 1\nfrom ..pkg import *"), /`from \.\.pkg import \*`/);
+});
+
+test("from m import * is allowed for the ambient modules (their names are builtins' kind: no definitions, no edges)", () => {
+  for (const m of ["math", "cmath", "random", "numpy", "matplotlib.pyplot", "pylab", "sage.all"]) {
+    const a = analyzeCell(`from ${m} import *\nx = 1`, "c1");
+    assert.deepEqual([...a.defs.keys()].sort(), ["x"], m);
+  }
+  // (a cell reading such a name depends on no cell; one that defines it explicitly defines it)
+  const r = analyzeCell("y = plot(sqrt(2))", "c2");
+  assert.ok(r.refs.has("plot") && r.refs.has("sqrt"));
+  assert.deepEqual([...analyzeCell("def plot(): pass", "c3").defs.keys()], ["plot"]);
+  // other modules, and marimo's strict mode, still refuse with the message
+  assert.throws(() => analyzeCell("from os import *", "c1"), ImportStarError);
+  assert.throws(() => analyzeCell("from numpy import *", "c1", { strict: true }), ImportStarError);
 });

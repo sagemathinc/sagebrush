@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "from m import * for math, cmath, random, numpy, matplotlib.pyplot, pylab, sage.all: ambient names (src/dataflow.ts STAR_AMBIENT), a small lib/pylab.py, tests. Re-measured with bun 1.4.4 (size-record.sh) on master 9fe74dda vs head 53dfaa8c: cli/lib.gen.js +212, cli/pyjs.cjs +679, engine/sagebrush-analyze.js +120, engine/sagebrush-notebook.js +42, engine/sagebrush-worker.js +315; no other row moves. Markers: exact, except cli/pyjs.cjs 711 (+679 measured, plus 32 B of margin, as it moves with master). engine/lib/mod-pylab.src (lib/pylab.py) is a new bundle, authorized by its budgets.json row (epoch 440, ceiling 484 = epoch + floor(epoch/10)).",
+ "bytes": {
+  "cli/lib.gen.js": 212,
+  "cli/pyjs.cjs": 711,
+  "engine/sagebrush-analyze.js": 120,
+  "engine/sagebrush-notebook.js": 42,
+  "engine/sagebrush-worker.js": 315
+ }
+}

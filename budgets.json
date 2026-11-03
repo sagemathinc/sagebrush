@@ -367,6 +367,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-pylab.src": {
+   "exact": false,
+   "ceiling": 484,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-python-docsearch.src": {
    "exact": false,
    "ceiling": 12339,
@@ -712,6 +719,7 @@
    "engine/lib/mod-pyjs-magic.src": 21074,
    "engine/lib/mod-pyjs-open.src": 8323,
    "engine/lib/mod-pyjs-pretty.src": 24565,
+   "engine/lib/mod-pylab.src": 440,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sage-ec-ff.src": 23918,
