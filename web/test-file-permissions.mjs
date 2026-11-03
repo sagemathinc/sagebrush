@@ -249,9 +249,21 @@ try {
   await ev("(sagebrush.notebook.restart?.() ?? document.querySelector('#restart').click(), 1)");
   await setCode("print('fresh2')"); await runAll();
   await until("/fresh2/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
+  // (a second live interpreter, another notebook's, which would be given the change if it were taken)
+  await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
+  await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
+  await sleep(800);
+  const seen = async (tag) => { await setCode(`import os; print('${tag}', os.path.exists('stale.txt'))`); await runAll(); await until(`/${tag} (True|False)/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')`, 30000); return /True/.test(await out()); };
+  check((await seen("B0")) === false, "(a second notebook's interpreter running, without /stale.txt)");
+  // (the queue held while the old worker's message arrives: only the sender check can refuse it there)
+  await ev("(window.__rel = sagebrush.files.holdDrain(), 1)");
   await ev(`(window.__oldMsg({ data: { fsChanged: "/stale.txt", data: new Uint8Array([7]) } }), 1)`);
+  await sleep(300);
+  check((await ev("sagebrush.files.queue().paths")) === 0, "a change from the worker before a restart, arriving after it, the queue held: not queued");
+  check((await seen("B1")) === false, "…nor given to another live interpreter");
+  await ev("(window.__rel(), 1)");
   await sleep(1500);
-  check((await files()) === true && !(await stat("/stale.txt")) && (await ev("sagebrush.files.queue().paths")) === 0, "a change from the worker before a restart, arriving after it: not queued, not kept, file changes still allowed");
+  check((await files()) === true && !(await stat("/stale.txt")), "…and, the queue released, kept nowhere, file changes still allowed");
   await ev(`(sagebrush.kernel.worker.onmessage({ data: { fsChanged: "/cur-ctl.txt", data: new Uint8Array([7]) } }), 1)`);
   check(await until(`${W}.stat("/cur-ctl.txt").then((e) => !!e)`, 15000), "control: the same change from the current worker is kept");
 

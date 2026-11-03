@@ -1,10 +1,12 @@
 {
  "v": 1,
- "reason": "No-mutation mode (William, Nov 2; plan-no-mutation r3, astra CLEAR 5fe204ad): the page's one permissions record (web/notebook/permissions.js), the file layer's refusal at every change (web/shims/fs.ts), the worker's and the runner frame's shared writable word, the page's check at a change and at the queue's write, the bar and the ⋯ item; and #559's ?run removal (cherry-picked, -60). Measured with bun 1.4.4 at the exact probe merge on master c06c81398: pyjs +5504, the runner page +302, the notebook component +166, the worker +998.",
+ "reason": "No-mutation mode (William, Nov 2; plan-no-mutation r3, astra CLEAR): the page's permissions record (web/notebook/permissions.js: in effect at once, denials never evicted), the file layer's refusal at every change and open()'s append (web/shims/fs.ts, lib/_pyjs_open.py, src/runtime/modules.ts may_append), the shared writable word, the change's authority asked at the workspace's locked admission, the File menu's switch, the app's disk files as the person's. Measured with node 24.21.0 and bun 1.4.4 at the exact probe merge 778c13a7 of head 991ad729 onto master 3e11954d: pyjs +7631, worker +1219, runner page +302, notebook component +168, mod-pyjs-open.src +63, lib.gen.js +8; each marker a little over its measure.",
  "bytes": {
-  "cli/pyjs.cjs": 5600,
+  "cli/pyjs.cjs": 7700,
+  "cli/lib.gen.js": 64,
+  "engine/lib/mod-pyjs-open.src": 100,
   "engine/runner/index.html": 320,
   "engine/sagebrush-notebook.js": 200,
-  "engine/sagebrush-worker.js": 1050
+  "engine/sagebrush-worker.js": 1300
  }
 }
