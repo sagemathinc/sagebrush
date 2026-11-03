@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "B8 offline (plan-b8-offline r3.4): the engine worker's lazy-library loader (web/lib-lazy.ts) gains onOfflineMissing, the item names, the offline / could-not-fetch errors and the HTTP status, and its manifest maps each group to its offline item (web/build.ts, web/offline-inventory.mts), so a load that fails offline can name what to download. The worker and the notebook carry the loader; cli/pyjs.cjs embeds the web build. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master c26ead62 vs the probe merge 0ab6827f: cli/pyjs.cjs +468, engine/sagebrush-notebook.js +349, engine/sagebrush-worker.js +2415; no other row moves.",
+ "reason": "B8 offline (plan-b8-offline r3.4): the engine worker's lazy-library loader (web/lib-lazy.ts) gains onOfflineMissing, the item names, the offline / could-not-fetch errors and the HTTP status, and its manifest maps each group to its offline item (web/build.ts, web/offline-inventory.mts), so a load that fails offline can name what to download. The worker and the notebook carry the loader; cli/pyjs.cjs embeds the web build. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 9aaa53ab vs the probe merge 10cc720a: cli/pyjs.cjs +496, engine/sagebrush-notebook.js +349, engine/sagebrush-worker.js +2466; no other row moves.",
  "bytes": {
   "cli/pyjs.cjs": 560,
   "engine/sagebrush-notebook.js": 360,
-  "engine/sagebrush-worker.js": 2460
+  "engine/sagebrush-worker.js": 2510
  }
 }
