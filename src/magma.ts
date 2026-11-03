@@ -1961,7 +1961,7 @@ export function checkPageOrder(po: unknown): Map<string, { to: string; mode: "de
   const plain = (o: unknown): o is Record<string, unknown> => typeof o === "object" && o !== null && !Array.isArray(o) && [Object.prototype, null].includes(Object.getPrototypeOf(o));
   if (!plain(po)) throw new PageOrderError("not a plain object");
   const names = Object.keys(po);
-  if (names.length > 1024 || Object.getOwnPropertySymbols(po).length) throw new PageOrderError("too many entries");
+  if (names.length > 1024) throw new PageOrderError("too many entries");
   for (const name of names) {
     const e = po[name];
     if (!PO_NAME.test(name) || !plain(e)) throw new PageOrderError(`bad entry for ${JSON.stringify(name).slice(0, 40)}`);
