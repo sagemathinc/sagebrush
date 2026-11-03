@@ -283,7 +283,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const { RunnerWorker } = await import("../notebook/runner-worker.js");
   const { WorkerKernel } = await import("../notebook/worker-kernel.js");
   const mod = { RunnerWorker: class extends RunnerWorker { constructor(src, o) { made.runners.push(o); super(src, o); } }, WorkerKernel };
-  const eng = { ...sandboxEngine(new URL("http://localhost/sagebrush/")), module: async () => mod };
+  const eng = sandboxEngine(mod, new URL("http://localhost/sagebrush/"));
   const session = sessionOf(eng, 3000);
   const t0 = Date.now();
   const first = await session().then(() => "started", (e) => e.message);

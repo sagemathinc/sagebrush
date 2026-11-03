@@ -122,15 +122,18 @@ export const resultsText = (states) => JSON.stringify({ format: RESULTS_FORMAT, 
 // the next Run starts a new runner (the sandbox again, never anything else).
 export const SANDBOX_FAILED = "Sage couldn't start in the sandbox; reload and try again";
 export const SANDBOX_START_MS = 60_000;
-/** The engine's parts for Run: the notebook module beside the page and its runner, with no fallback. */
-export function sandboxEngine(base) {
+/** The engine's parts for Run: the hosting page's own kernel and runner classes (index.html's, where it runs code in
+ * the runner: `classes` {WorkerKernel, RunnerWorker}), the runner page beside it at `base`, with no fallback. */
+export function sandboxEngine(classes, base) {
   return {
-    module: () => import(new URL("sagebrush-notebook.js", base).href),
+    module: async () => classes,
     worker: (mod) => new mod.RunnerWorker(new URL("runner/", base).href, {}),
   };
 }
+/** Why Run can't run here: a page without the runner (the desktop app; a browser the site doesn't run the runner in). */
+export const NO_SANDBOX = "Run needs the sandbox Sagebrush runs code in, which this browser doesn't have here: open the file in Chrome or Edge on sagebrush.space";
 /** A Sage session, started once on the first call and kept; a start that fails is forgotten (the next call starts
- * again). `eng`: sandboxEngine(base) (a test's fake). Resolves to the kernel, ready; rejects with SANDBOX_FAILED. */
+ * again). `eng`: sandboxEngine(classes, base). Resolves to the kernel, ready; rejects with SANDBOX_FAILED. */
 export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   let start = null;
   const get = () => (start ??= (async () => {

@@ -16,7 +16,7 @@ import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import { EXAMPLES, type Example } from "./examples";
-import { sessionOf, sandboxEngine, runIn, runAndSave } from "./run-core.mjs";
+import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
@@ -37,11 +37,11 @@ const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
 const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
 let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
 const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
-// (Run's Sage session, run-core.mjs: the notebook module beside this module, fetched on the first Run, and its
-// interpreter in the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
+// (Run's Sage session, run-core.mjs: the hosting page's kernel and runner classes (Host.sandbox), its interpreter in
+// the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
 // for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
 // current only while it is the last one asked for, on a page not disposed of)
-const sageSession = sessionOf(sandboxEngine(new URL(".", import.meta.url)));
+let sageSession: ReturnType<typeof sessionOf> | null = null;
 let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
@@ -58,7 +58,8 @@ export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, 
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
-type Host = { ws: Workspace; fid: string; back(): void };
+// (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
+type Host = { ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
 // (a reply's piece: its group, its HTML and, from the worker, its UTF-8 size)
@@ -384,7 +385,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
   const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
   runBtn.onclick = async () => {
-    if (running) { sageSession.kernel?.interrupt(); say("stopping…"); return; }
+    if (running) { sageSession?.kernel?.interrupt(); say("stopping…"); return; }
+    if (!host.sandbox) { say(NO_SANDBOX); return; }
+    const session = (sageSession ??= sessionOf(sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
@@ -396,7 +399,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     try {
       const r = await runAndSave({
         items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
-        session: async () => { const k = await sageSession(); if (current()) runBtn.textContent = "Running…"; return k; },
+        session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
         exec: runIn,
       });
       if (r.stale || !current()) return;
