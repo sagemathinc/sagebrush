@@ -362,6 +362,9 @@ export type StorageHost = PreviewHost & {
   exportUrl?: (file: string) => string;
   /** this tab's open documents saved, before an export reads them */
   saveOpen?: () => Promise<void>;
+  /** (U3) the panel opened to download one folder as a zip: that folder's export starts at once (its own flow, the same
+   * as Export all's, scoped to the folder: entry.ts openExport's `root`) */
+  exportRoot?: string;
 };
 
 /** How long ago `at` was, in words: "just now", "5 min ago", "3 h ago", "yesterday", "9 days ago". */
@@ -496,19 +499,20 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     // (closing the panel cancels the export it shows: entry.ts)
     const closed = new AbortController();
     onClose(() => closed.abort());
-    const start = async () => {
+    const start = async (root?: string) => {
       if (running) return;
       running = true;
       go.disabled = true;
       try {
         const m = await import(host.exportUrl!("sagebrush-export.js"));
         const kit = { isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
-        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit, closed: closed.signal }, flow);
+        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit, closed: closed.signal }, flow, root ? { root } : {});
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
     };
     const go = button("Export all current files (.zip)", () => void start());
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
     void stamp();
+    if (host.exportRoot) void start(host.exportRoot);
   }
   // ("Push to GitHub", Stage A MVP r1, DEV only: offered only on DEV or a local page, in a browser whose flag
   // (localStorage "sagebrush.gitpush") names the push proxy; its flow is the lazy chunk's, web/gitpush)
