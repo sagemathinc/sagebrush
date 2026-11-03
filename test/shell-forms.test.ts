@@ -71,6 +71,8 @@ const SETUP = "class L(list): pass\nx = L(['old0'])\nx.y = 'oldy'\na = 'A'\nb = 
 const KEPT = "print(x is X0, x[0], x.y, a, b, y)";
 
 test("until the bridge, every shell form of the oracle refuses, and assigns nothing", async () => {
+  // (the oracle's 18 cells with a shell form and 3 without: an edit can't quietly shrink the loop)
+  assert.deepEqual([oracle.transform.filter((t: any) => ipy(t.py) !== null).length, oracle.transform.length], [18, 21]);
   const s = await session();
   for (const { src, py } of oracle.transform) {
     const form = ipy(py) !== null;
