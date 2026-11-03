@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The notebook agent tools' follow-up to #516 (astra's advisory): write_file canonicalizes the path before judging its kind, and new_notebook's source is capped at 8 MiB, in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge: +200 over #516's +13244.",
+ "bytes": {
+  "cli/pyjs.cjs": 256
+ }
+}

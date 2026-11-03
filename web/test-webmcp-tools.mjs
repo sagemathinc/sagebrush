@@ -82,6 +82,8 @@ try {
   // a fresh notebook: set_language with no code; the reused empty cell said
   info = await json("new_notebook", { name: "Data" });
   check(info.language === "sage" && info.code_cells === 1, "new_notebook: by default in the language of the notebook before");
+  const big = await call("new_notebook", { cells: ["x".repeat(4 * 2 ** 20), "é".repeat(2 * 2 ** 20 + 1)] });
+  check(big.error && /bytes of source, at most 8388608$/.test(big.texts[0]) && (await json("notebook_info")).name === "Data", `new_notebook: source over 8 MiB is refused, nothing opened (${big.texts[0]})`);
   info = await json("set_language", { language: "python" });
   check(info.language === "python" && (await ev("sagebrush.notebook.mode")) === "python" && (await ev(`document.querySelector("#mode").value`)) === "python", "set_language: a notebook with no code changes, and the page's language menu says so");
   const md2 = await json("add_markdown", { text: "# Data" });
@@ -90,6 +92,14 @@ try {
   // write_file / read_file / list_files: a CSV in the person's files, read by code
   check((await call("write_file", { path: "/data.csv" })).error, "write_file: text or base64 is required");
   check((await call("write_file", { path: "/x.ipynb", text: "{}" })).error, "write_file: not a notebook");
+  // (the path canonicalized before the kind is judged: astra's advisory on #516)
+  for (const [path, why] of [["/x.ipynb/", "a trailing slash"], ["/y.board.json/", "a board, with a trailing slash"], ["//x.ipynb", "a double slash"], ["/./x.ipynb", "./"], ["/a/../x.ipynb", ".."], ["x.csv", "a relative path"]]) {
+    const r = await call("write_file", { path, base64: "e30=" });
+    check(r.error, `write_file refuses ${why}: ${path} (${r.texts[0]})`);
+  }
+  check(!(await files()).some((p) => /\/(x\.ipynb|y\.board\.json)$/.test(p)), "…and no notebook or board was made");
+  const ws1 = await json("write_file", { path: "/notes.txt/", text: "hello" });
+  check(ws1.entry?.path === "/notes.txt", `write_file: a data file's trailing slash is the file (${ws1.entry?.path})`);
   const w1 = await json("write_file", { path: "/data.csv", text: "x,y\n1,2\n3,5\n" });
   check(w1.entry?.path === "/data.csv" && w1.entry.kind === "file" && w1.entry.size === 12, `write_file: the file's entry (${JSON.stringify(w1)})`);
   const r1 = await json("read_file", { path: "/data.csv" });
