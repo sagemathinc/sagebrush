@@ -14,13 +14,20 @@
 
 const KEY = "sagebrush-permissions", HOST_MADE = "sagebrush-host-made";
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k) ?? "null") ?? d; } catch { return d; } };
-const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+// (the explicit choices kept: allows past ALLOWS_KEPT go, oldest first (a forgotten allow falls back to the default, never
+// more than it); a "don't allow" is never dropped to make room (astra's NM-DENY-2): past DENIALS_KEPT it is held in this
+// page and set() says it wasn't kept)
+export const ALLOWS_KEPT = 2000, DENIALS_KEPT = 20000;
 
 /** The page's one record. `doc`: the document's id as the page knows it (a notebook's, "local:…", "file:…"). */
 export function createPermissions() {
   const made = new Map(); // doc -> "person" | "host" | "elsewhere" (this page's knowledge of its provenance)
   const listeners = new Set();
+  // (the choices this page couldn't keep in storage: they hold here, over what storage says, until the page closes)
+  const unkept = new Map(); // doc -> { files }
   const explicit = () => read(KEY, {});
+  const choice = (doc) => unkept.get(doc) ?? explicit()[doc];
   return {
     /** The host, as it opens `doc`: its provenance from its own metadata (absent: unknown, which counts as elsewhere). */
     provenance(doc, how) { made.set(doc, how === "person" || how === "host" ? how : "elsewhere"); listeners.forEach((f) => f(doc)); },
@@ -28,27 +35,36 @@ export function createPermissions() {
     may(doc, perm) {
       if (perm === "network") return false;
       if (perm !== "files" || !doc) return false;
-      const set = explicit()[doc];
+      const set = choice(doc);
       if (set && typeof set.files === "boolean") return set.files;
       // (the page's own record of its bundled examples first: a reopen finds the workspace entry's "elsewhere" there)
       const how = read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc);
       return how === "person" || how === "host";
     },
-    /** The person's own choice for `doc` (the page's handlers, only for an isTrusted click): kept, and told. */
+    /** The person's own choice for `doc` (the page's handlers, only for an isTrusted click): in effect at once, kept,
+     * and told.  Returns whether it was kept in this browser's storage (false: it holds in this page only, the
+     * caller says so). */
     set(doc, perm, on) {
-      if (perm !== "files" || !doc) return;
+      if (perm !== "files" || !doc) return true;
+      unkept.set(doc, { files: !!on }); // (in effect first, whatever storage does)
       const all = explicit();
-      all[doc] = { ...(all[doc] ?? {}), files: !!on };
-      const keys = Object.keys(all);
-      if (keys.length > 2000) for (const k of keys.slice(0, keys.length - 2000)) delete all[k];
-      write(KEY, all);
+      delete all[doc];
+      all[doc] = { files: !!on }; // (the latest choice last: the oldest allows go first)
+      const allows = Object.keys(all).filter((k) => all[k]?.files !== false);
+      for (const k of allows.slice(0, Math.max(0, allows.length - ALLOWS_KEPT))) delete all[k];
+      const denials = Object.keys(all).length - Math.min(allows.length, ALLOWS_KEPT);
+      let kept = denials <= DENIALS_KEPT || on;
+      if (!kept) delete all[doc];
+      kept = write(KEY, all) && kept;
+      if (kept) unkept.delete(doc);
       listeners.forEach((f) => f(doc));
+      return kept;
     },
     /** Told when `doc`'s permissions may have changed. */
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     /** The record, read-only (the tests', and U11's adapter's): what it decides for `doc` now. */
     record(doc) {
-      const set = explicit()[doc] ?? null;
+      const set = choice(doc) ?? null;
       return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", explicit: set, files: this.may(doc, "files"), network: false };
     },
   };

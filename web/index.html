@@ -835,6 +835,10 @@ function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
   let j = null;
+  // (each worker this kernel starts, its generation: a change is this document's to keep only while the worker that
+  // made it is still the document's interpreter and the document may change files, asked again where it is kept)
+  let gen = 0;
+  const authority = () => { const g = gen; return () => owner === null || (perms.may(owner, "files") && kernels.get(owner)?.kernel === k && gen === g); };
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
@@ -845,6 +849,7 @@ function makeKernel(owner) {
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
+      gen++;
       // (first: whether this document may change files, before its files or any run)
       // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
       // separate question, not this page's to answer)
@@ -873,8 +878,9 @@ function makeKernel(owner) {
         return true;
       }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
-      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data);
-      fileChanged(m.fsChanged, m.data, owner);
+      const may = authority();
+      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data, may);
+      fileChanged(m.fsChanged, m.data, owner, may);
       // (the other interpreters see the browser's files as they are)
       for (const o of liveKernels()) if (o !== k) o.post({ fsPut: m.fsChanged, data: m.data });
       return true;
@@ -935,8 +941,10 @@ function useKernel(id) {
 // asynchronous, and the empty file Python creates must not land after what
 // it then writes (it did on Windows).
 const diskWrites = new Map();
-function writeDisk(path, data) {
-  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
+// (`may`: the change's authority, asked again as the write starts: a write queued behind others isn't made once its
+// document can't change files, or its interpreter isn't the document's now)
+function writeDisk(path, data, may = () => true) {
+  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => (may() ? TAURI.fs.writeFile(path, data) : undefined)).catch((e) => console.warn(e));
   diskWrites.set(path, next);
 }
 // The notebook is reactive (design/reactive-notebook.md).  ?reactive=0 in
@@ -1675,8 +1683,14 @@ function filesShown() {
   filesPermEl.textContent = on ? "Don't allow file changes" : "Allow file changes";
   if (on) filesBarEl.hidden = true;
 }
-const setFiles = (e, on) => { if (e?.isTrusted === true && current.id) perms.set(current.id, "files", on); };
-$("#filesallow").onclick = (e) => { setFiles(e, true); if (e.isTrusted) statusEl.textContent = "Changes allowed for this notebook: run the cell again"; };
+// (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
+const setFiles = (e, on) => {
+  if (e?.isTrusted !== true || !current.id) return false;
+  if (perms.set(current.id, "files", on)) return true;
+  statusEl.textContent = `${on ? "File changes allowed" : "File changes stopped"} for this notebook in this page only: this browser couldn't keep the choice, so a reload forgets it`;
+  return false;
+};
+$("#filesallow").onclick = (e) => { if (setFiles(e, true)) statusEl.textContent = "Changes allowed for this notebook: run the cell again"; };
 filesPermEl.onclick = (e) => setFiles(e, !(current.id && perms.may(current.id, "files")));
 // (a change of it reaches that document's interpreter at once: its next write; one that may no longer change files
 // never keeps a plain worker (a fresh interpreter, in the sandbox, or none); one allowed whose interpreter was the
@@ -2830,9 +2844,11 @@ let FILE_QUEUE_MAX = 256 * 2 ** 20;
 const fileQueue = new Map(); // path -> Uint8Array | null (the latest state not yet kept)
 let fileQueueBytes = 0, fileDraining = null, fileQueueRefused = 0;
 const queuedBytes = (d) => (d ? d.length : 0);
-// (`doc`: whose interpreter made the change, checked again as the queue writes it: allowed then, astra's CLEAR)
-const fileQueueDoc = new Map(); // path -> doc
-function fileChanged(path, data, doc = null) {
+// (`doc`: whose interpreter made the change; `may`: its authority (the document's permission, and that interpreter's
+// generation still the document's), asked as the queue takes it and again where it is kept: inside the workspace's
+// locked create, write or remove, before any effect, and in the old store's own transaction (astra's NM-ADMIT-1))
+const fileQueueDoc = new Map(); // path -> { doc, may }
+function fileChanged(path, data, doc = null, may = () => true) {
   const before = fileQueue.has(path) ? queuedBytes(fileQueue.get(path)) : 0;
   if (fileQueueBytes - before + queuedBytes(data) > FILE_QUEUE_MAX) {
     fileQueueRefused++;
@@ -2841,12 +2857,13 @@ function fileChanged(path, data, doc = null) {
   }
   fileQueue.delete(path); // (re-inserted: a path's place is its latest change)
   fileQueue.set(path, data);
-  fileQueueDoc.set(path, doc);
+  fileQueueDoc.set(path, { doc, may });
   fileQueueBytes += queuedBytes(data) - before;
   fileDraining ??= drainFiles();
 }
-// (tests: the queue held before it writes, to change a permission while a change waits: astra's revoked-queued case)
-let fileDrainHold = null;
+// (tests: the queue held before it writes, to change a permission while a change waits: astra's revoked-queued case;
+// and held after its own check, before the change is kept (astra's NM-ADMIT-1): only the admission decides then)
+let fileDrainHold = null, fileAdmitHold = null;
 async function drainFiles() {
   try {
     if (fileDrainHold) await fileDrainHold;
@@ -2854,12 +2871,21 @@ async function drainFiles() {
       const [path, data] = fileQueue.entries().next().value;
       fileQueue.delete(path);
       fileQueueBytes -= queuedBytes(data);
-      const doc = fileQueueDoc.get(path) ?? null;
+      const { doc = null, may = () => true } = fileQueueDoc.get(path) ?? {};
       fileQueueDoc.delete(path);
-      if (doc !== null && !perms.may(doc, "files")) { if (doc === current.id) filesBar(true); continue; }
+      const refused = () => { if (doc !== null && doc === current.id) filesBar(true); };
+      if (!may()) { refused(); continue; }
       // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
       try {
-        if ((await wsFile(path, data, { keepEmpty: false })) === "fallback") await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+        const how = await wsFile(path, data, { keepEmpty: false, may });
+        if (how === "denied") refused();
+        if (how === "fallback") {
+          if (fileAdmitHold) await fileAdmitHold;
+          // (the old store: asked in its own transaction, as it writes)
+          let ok = true;
+          await idb(db, "files", "readwrite", (st) => ((ok = may()) ? (data === null ? st.delete(path) : st.put(data, path)) : undefined));
+          if (!ok) refused();
+        }
       } catch (e) { statusEl.textContent = `${path}: ${e?.message ?? e}`; }
     }
   } finally { fileDraining = null; }
@@ -2871,6 +2897,7 @@ window.sagebrush.files = {
   queue: () => ({ paths: fileQueue.size, bytes: fileQueueBytes, draining: !!fileDraining, refused: fileQueueRefused }),
   setQueueMax: (n) => { FILE_QUEUE_MAX = n; },
   holdDrain: () => { let go; fileDrainHold = new Promise((r) => (go = r)); return () => { fileDrainHold = null; go(); }; },
+  holdAdmit: () => { let go; fileAdmitHold = new Promise((r) => (go = r)); return () => { fileAdmitHold = null; go(); }; },
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
@@ -3535,17 +3562,26 @@ async function wsForgetNotebook(id) {
 }
 // A data file written (bytes) or deleted (null) through the workspace:
 // "kept"; "refused" (a limit, or storage refused it: said, nothing written);
-// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before)
+// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before);
+// "denied" (`opts.may`, the change's authority, asked holding the workspace's lock: no longer, nothing changed)
+class NotAdmitted extends Error {}
 async function wsFile(path, data, opts = {}) {
+  const { may, ...put } = opts;
+  const admit = may ? () => { if (!may()) throw new NotAdmitted("this notebook can't change files now"); } : undefined;
   const w = await wsNow();
   if (!w) return "fallback";
   try {
     if (data === null) {
       if (!(await w.stat(path))) return "fallback";
-      await w.remove(path);
-    } else await w.putFile(path, data, opts);
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.remove(path, undefined, undefined, admit ? { admit } : {});
+    } else {
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.putFile(path, data, admit ? { ...put, admit } : put);
+    }
     return "kept";
   } catch (e) {
+    if (e instanceof NotAdmitted) return "denied";
     // (with the workspace, never the old store instead: a file kept beside the index is read from there,
     // so bytes put the old way would be lost unseen; said, and the interpreter still has them)
     statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
