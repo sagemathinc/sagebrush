@@ -130,6 +130,9 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** an edit made on this page changed the board's title (never a change from elsewhere, nor a load): the board page
+   * renames its file to follow (William's B2) */
+  titleEdited?(title: string): void;
   /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
    * key is left to the browser, as on a page that is itself a saved board
    * (an exported file), whose ⋯ menu still downloads it again */
@@ -1260,6 +1263,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the document as shown: its pictures' bytes are kept apart, by the
     // host's images; not kept, said, HARD-7F9-1)
     try { host.store?.save(doc!); unkept = null; } catch (e: any) { unkept = e; say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
+    if (!unkept && (prev?.title ?? "") !== (doc!.title ?? "")) host.titleEdited?.(doc!.title ?? "");
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
