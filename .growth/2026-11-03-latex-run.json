@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "#561 (the LaTeX editor's Run) adds no code to cli/pyjs.cjs: Run is in the lazily loaded sagebrush-latex.js. The +80 is the embedded notebook page (index.html, +59 B raw): latexBoot is given the page's own runner and kernel classes where it runs code in the runner (index.html's RUNNER), so Run never fetches a module or falls back to a plain worker. Measured exactly (probe merge 7e34e6d1 of ffe1bdac into master c06c8139, node 24.21.0, bun 1.4.4, CI's build order): /scratch/sagebrush-reviews/latex561-size-ffe1bdac.",
+ "bytes": {
+  "cli/pyjs.cjs": 96
+ }
+}
