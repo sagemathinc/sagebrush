@@ -31,6 +31,8 @@ const LATEX_SITE_HOSTS = ["sagebrush.space", "dev.sagebrush.space"];
 const LATEX_DEFINE = LATEX
   ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? [...LATEX_SITE_HOSTS, "127.0.0.1", "localhost"] : [...LATEX_SITE_HOSTS, ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
   : { __SB_LATEX__: "false" };
+// (the board page: the hosts where a .tex file in its file panel opens the LaTeX editor (U1); none in a build without it)
+const BOARD_TEX_HOSTS = LATEX ? (LATEX_DEFINE as Record<string, string>).__SB_LATEX_HOSTS__ : "[]";
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
 const shims: Record<string, string> = {
@@ -371,7 +373,7 @@ function boardMystClosure(what: string, r: any) {
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
     // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
-    define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
+    define: { __SB_LATEX__: "false", __SB_LATEX_HOSTS__: BOARD_TEX_HOSTS, __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -409,7 +411,7 @@ function boardMystClosure(what: string, r: any) {
   // __SB_NO_SYNC__, never reached, and the stub keeps the modules themselves, and the client behind them, out of
   // this copy)
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
-  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
+  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_LATEX_HOSTS__: BOARD_TEX_HOSTS, __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
   boardMystClosure("the board without sync (the frame, exports)", ns);
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
