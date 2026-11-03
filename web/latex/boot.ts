@@ -55,8 +55,9 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   return (e: KeyboardEvent) => { const it = fileMenuKey(e); if (it) { e.preventDefault(); menu.querySelector<HTMLElement>(`[data-item="${it}"]:not([disabled])`)?.click(); } };
 }
 
-/** Called once by the notebook page; true if the LaTeX page took the page over. */
-export async function latexBoot(ws: Workspace | null) {
+/** Called once by the notebook page; true if the LaTeX page took the page over. `sandbox`: the page's own runner
+ * and kernel classes where it runs code in the runner (index.html's RUNNER), for the editor's Run; null elsewhere. */
+export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null = null) {
   const p = new URLSearchParams(location.search), tex = p.get("tex");
   const el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; };
   if (!latexOn(location.hostname)) {
@@ -89,6 +90,6 @@ export async function latexBoot(ws: Workspace | null) {
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }) });
+  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }) });
   return true;
 }

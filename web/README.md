@@ -15,7 +15,7 @@ and `index.html` is a small notebook UI:
   pictures from Python (sanitized before they are inserted), coordinates
   under the mouse, controls whose changes rerun the function in ~10–30 ms.
 - Light/dark/system themes; Python/Sage switch; shareable links in the URL
-  fragment and `?run` to run on load.
+  fragment (nothing runs on open: the person presses Run all).
 - Accessibility: labelled controls and cells, an ARIA menu with arrow keys,
   Esc then Tab leaves a cell, a live region announcing finished cells and
   console output, WCAG AA contrast in both themes, reduced motion.

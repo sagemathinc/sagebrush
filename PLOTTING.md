@@ -344,9 +344,9 @@ open('D-vortices.html', 'w').write(plot.get_snapshot())   # a standalone interac
 - `scipy.io.loadmat`/`savemat`, `zlib`, `base64` and `numpy.frombuffer`
   are implemented for this in the browser runtime.
 
-A link can open a published notebook with its data and run it in the
-browser:
-`https://sagebrush.space/?open=NOTEBOOK.ipynb&file=DATA.mat&run`. Both are
+A link can open a published notebook with its data in the browser, where
+the reader presses Run all:
+`https://sagebrush.space/?open=NOTEBOOK.ipynb&file=DATA.mat`. Both are
 URLs, and `file=` can repeat. See the JFM demo at
 [sagebrush.space/demo/jfm](https://sagebrush.space/demo/jfm/), which is
 built by `web/demo/jfm/build.sh`.
