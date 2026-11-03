@@ -1,4 +1,4 @@
-// ci: web-runner order=490 chrome
+// ci: web-runner order=500 chrome
 // The one File menu (web/workspace/filemenu.ts, design/workspace-files.md
 // §3) on both pages, in headless Chromium against the built site: the same
 // items in the same order; New ▸ (Notebook, Board, Folder, From an

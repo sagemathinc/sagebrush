@@ -1,4 +1,4 @@
-// ci: web-runner order=160 runner=bun
+// ci: web-runner order=170 runner=bun
 // The page's side of a pairing (agent-pair.ts) against a fake sagebrush-mcp: a loopback WebSocket that answers
 // the hello and sends verbs, and an in-memory workspace behind forAgent.  What it shows: the hello, nothing done
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts

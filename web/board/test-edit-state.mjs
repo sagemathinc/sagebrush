@@ -1,4 +1,4 @@
-// ci: web-runner order=520 runner=bun
+// ci: web-runner order=530 runner=bun
 // editState (web/board/edit-state.ts; web/board-host-protocol.md, "Editing"):
 // a host's merge and checks of the edits its frame sends.  Run with Bun:
 //   bun web/board/test-edit-state.mjs
