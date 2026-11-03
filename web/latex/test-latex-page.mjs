@@ -1,4 +1,4 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -753,10 +753,22 @@ try {
     check(rows && mid && mid.opened.length === 1 && mid.opened[0].includes("?tex=" + midFid) && mid.board.startsWith("/board") && txt && txt.preview && txt.board.startsWith("/board") && left && editor,
       "U1: with a board open, a .tex file in the file panel opens the LaTeX editor (a click here, a middle-click in a new tab); another file still previews, the board kept", { rows, mid, txt, left, editor });
   }
-  // on, by the URL: no LaTeX file fetched before a .tex is opened
-  requests.length = 0;
+  // on, by the URL: no LaTeX file fetched before a .tex is opened. Counted from a blank page (T568-EAGER-FETCH-RACE): the
+  // case before leaves the editor open, and its worker's script could still be asked for after the list was cleared and
+  // before the next navigation, counted against the new page; at about:blank the editor's document and worker are gone
+  const fromBlank = async () => { await send("Page.navigate", { url: "about:blank" }); await until(`location.href === "about:blank"`, 10000); await sleep(200); requests.length = 0; };
+  await fromBlank();
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
+  // (its control: the same page with an eager fetch of a LaTeX file added fails that check)
+  {
+    await fromBlank();
+    const eager = await send("Page.addScriptToEvaluateOnNewDocument", { source: `if (location.protocol.startsWith("http")) fetch("/sagebrush-latex-worker.js").catch(() => {});` });
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
+    const seen = latexFetches();
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: eager.identifier });
+    check(seen.length > 0, "…its control: a page that fetches a LaTeX file eagerly is caught by the same count", seen);
+  }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
   // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
   // the new document, whose timeOrigin is after the mark, and only after the delay)
@@ -1259,6 +1271,58 @@ try {
       `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it: at least half its height inside the relation's`, g.slashes);
     check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
+  }
+  // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
+  // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
+  // preview toggle (and after File ▾, where the page has it); never on open; a Run made stale by opening another file
+  // in place writes nothing; without the runner (?runner=0 on loopback), it says why and runs nothing.
+  {
+    const RUN_DOC = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nvar('t')\nx = 2^10\n\\end{sagesilent}\nWe have $x = \\sage{x}$ and $\\int_0^1 t^2\\,dt = \\sage{integrate(t^2, t, 0, 1)}$.\n\\begin{sagesilent}\nx = 7\n\\end{sagesilent}\nNow $x = \\sage{x}$.\n\\end{document}\n";
+    const resultsOf = (p) => ev(`${W}.stat(${JSON.stringify(p + ".results.json")}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p + ".results.json")}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    const fr = await mk("/t/run.tex", enc(RUN_DOC));
+    const n0 = requests.length;
+    await open(fr);
+    await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    const bar = await ev(`(() => { const h = [...document.querySelector(".tex-head").children]; const i = (c) => h.findIndex((e) => e.classList.contains(c));
+      const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
+    check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
+      "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
+    await sleep(1500);
+    const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
+    check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (the click: its labels as they change, then the results)
+    const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
+      const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
+      o.observe(b, { childList: true, characterData: true, subtree: true }); b.click(); setTimeout(() => { o.disconnect(); res(seen); }, 180000); })`);
+    check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
+    const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
+    await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
+    const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
+    check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
+    const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
+    check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
+      "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (a Run made stale: another file opened in place while it runs; it writes nothing)
+    const fs = await mk("/t/run-stale.tex", enc(RUN_DOC.replace("x = 2^10", "x = 2^10\n_s = sum(i for i in range(2*10^6))")));
+    const fo = await mk("/t/run-other.tex", enc(DOC));
+    await open(fs);
+    await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const started = await until(`document.querySelector(".tex-head .tex-run")?.textContent === "Running…"`, 60000);
+    await ev(`(window.__sbTex({ path: "/t/run-other.tex", fid: ${JSON.stringify(fo)} }), 1)`);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello")`, 20000);
+    await sleep(15000);
+    check(started && (await resultsOf("/t/run-stale.tex")) === null, "Run: a Run made stale (another file opened in place while it runs) writes no results", { started });
+    // (no runner here: ?runner=0 on a loopback host; Run says why, and runs nothing)
+    const fn0 = await mk("/t/run-none.tex", enc(RUN_DOC));
+    const n1 = requests.length;
+    await open(fn0, "&latex=1&runner=0");
+    await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const said = await statusIs(/Run needs the sandbox/, 10000);
+    await sleep(1000);
+    check(said && !requests.slice(n1).some((u) => /\/runner\//.test(u)) && (await resultsOf("/t/run-none.tex")) === null, "Run: without the runner, it says why and runs nothing (no plain worker, no results)", { said });
   }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));

@@ -2299,11 +2299,11 @@ export class Workspace {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
   }
 
-  /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through. */
-  async putFile(p: string, bytes: unknown, opts: { keepEmpty?: boolean } = {}): Promise<Entry> {
-    const q = path(p);
+  /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through.  `opts.admit` (the host's, AdmitCheck): asked holding the lock by whichever verb makes the change, create's or write's, the race's write included. */
+  async putFile(p: string, bytes: unknown, opts: { keepEmpty?: boolean } & Admitted = {}): Promise<Entry> {
+    const q = path(p), admit = admitOf(opts.admit);
     const e = await this.stat(q);
-    if (!e) return this.create(q, { content: bytes }).catch(async (err) => {
+    if (!e) return this.create(q, { content: bytes, ...(admit ? { admit } : {}) }).catch(async (err) => {
       // (made meanwhile, by another tab: written over instead)
       if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return (await this.write(q, bytes, opts)).entry;
       throw err;

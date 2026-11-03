@@ -200,6 +200,8 @@
   #exlist { max-height: 62vh; overflow: auto; }
   #exlist button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; }
   #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
+  #filesbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
+  #filesbar[hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
@@ -403,6 +405,7 @@
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
+  <div id="filesbar" role="status" hidden>This notebook wants to change files. <button id="filesallow">Allow changes for this notebook</button></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
@@ -535,6 +538,7 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
+import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -762,6 +766,25 @@ let db = null, replaying = false;
 let replayEnded = null, docSwitch = null, docSyncNeedsReload = false;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
+// (what each document's code may do here: change files, reach the network; the one host record, permissions.js)
+const perms = createPermissions();
+// (a document whose code can't change files never runs in a plain worker, which has this page's network: its interpreter
+// is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
+const NEEDS_RUNNER = window.__TAURI__
+  // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
+  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
+  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
+class RefusingWorker {
+  constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
+  postMessage(m) {
+    const say = (d) => setTimeout(() => this.onmessage?.({ data: d }));
+    if (m && m.init !== undefined) return say({ ready: true, version: "" });
+    if (!m || typeof m !== "object" || m.id === undefined) return;
+    if (m.code !== undefined || m.interact !== undefined) { say({ id: m.id, stream: "stderr", text: this.text }); say({ id: m.id, done: true, error: true, ms: 0 }); }
+    else say({ id: m.id, skipped: true });
+  }
+  terminate() {}
+}
 let kernel = null, journal = null; // the current notebook's
 // A notebook's optional package set (plan-modular-packages-r4 §4.4): the one
 // it pins (metadata pkgset), or else the site's latest (pkgset/latest.json,
@@ -814,14 +837,28 @@ function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
   let j = null;
+  // (each worker this kernel starts, its generation: a change is this document's to keep only while the worker that
+  // made it is still the document's interpreter and the document may change files, asked again where it is kept)
+  // (its generation is the worker's own, given at its start: a message is judged by the worker that sent it, not by
+  // when it arrives, so an earlier worker's late message is never the current one's, astra's NM-ADMIT-1 r2)
+  let gen = 0;
+  const gens = new WeakMap(); // worker -> its generation
+  const authority = (w) => { const g = gens.get(w); return () => owner === null || (g !== undefined && perms.may(owner, "files") && kernels.get(owner)?.kernel === k && k.worker === w && gen === g); };
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
-      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) }) : new Worker("sagebrush-worker.js", { type: "module", name });
+      // (a document whose code can't change files never gets a plain worker: astra's no-mutation CLEAR)
+      const plain = () => (owner !== null && !perms.may(owner, "files") ? new RefusingWorker(NEEDS_RUNNER) : new Worker("sagebrush-worker.js", { type: "module", name }));
+      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: plain }) : plain();
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
+      gens.set(w, ++gen);
+      // (first: whether this document may change files, before its files or any run)
+      // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
+      // separate question, not this page's to answer)
+      if (!LOCAL) w.postMessage({ fsWritable: owner === null || perms.may(owner, "files") });
       // the notebook's optional package set, pinned, before any code (plan-modular-packages-r4 §4.4;
       // the kernel holds every run until this is done); a replayed session's is the one it recorded
       const replayed = j?.replayPkgset();
@@ -834,12 +871,23 @@ function makeKernel(owner) {
       const sent = LOCAL ? [] : await sendFiles(w);
       await j?.filesSent([...diskFiles, ...(sent ?? [])]);
     },
-    onMessage: (m) => {
+    onMessage: (m, sender) => {
+      // (a change the interpreter refused: the bar, for the document shown)
+      if (m.fsRefused !== undefined) { if (owner !== null && owner === current.id) filesBar(true); return true; }
       if (m.fsChanged === undefined) return false;
       if (replaying && k === kernel) return true; // a replay rewrites old files: not into the browser's
+      // (from a worker this kernel no longer runs: kept nowhere, given to no interpreter)
+      if (sender !== k.worker) return true;
+      // (the host's own check, which decides: a change from a document that may not change files is kept nowhere, nor
+      // given to the other interpreters; nor one from an interpreter no longer this document's)
+      if (owner !== null && (!perms.may(owner, "files") || kernels.get(owner)?.kernel !== k)) {
+        if (owner === current.id && !/^\/tmp(\/|$)/.test(m.fsChanged)) filesBar(true);
+        return true;
+      }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
-      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data);
-      fileChanged(m.fsChanged, m.data);
+      const may = authority(sender);
+      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data, may);
+      fileChanged(m.fsChanged, m.data, owner, may);
       // (the other interpreters see the browser's files as they are)
       for (const o of liveKernels()) if (o !== k) o.post({ fsPut: m.fsChanged, data: m.data });
       return true;
@@ -900,8 +948,10 @@ function useKernel(id) {
 // asynchronous, and the empty file Python creates must not land after what
 // it then writes (it did on Windows).
 const diskWrites = new Map();
-function writeDisk(path, data) {
-  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
+// (`may`: the change's authority, asked again as the write starts: a write queued behind others isn't made once its
+// document can't change files, or its interpreter isn't the document's now)
+function writeDisk(path, data, may = () => true) {
+  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => (may() ? TAURI.fs.writeFile(path, data) : undefined)).catch((e) => console.warn(e));
   diskWrites.set(path, next);
 }
 // The notebook is reactive (design/reactive-notebook.md).  ?reactive=0 in
@@ -1093,6 +1143,8 @@ window.sagebrush = {
   lockWait: LOCK_WAIT,
   notebook: nb, kernels, get kernel() { return kernel; }, get history() { return nbHistory; },
   get consoleKernel() { return consoleKernel; },
+  // (what the notebook shown may do, read-only: permissions.js; the tests', and U11's adapter's)
+  permissions: () => (current.id ? perms.record(current.id) : null),
   // (tests: the reactive notebook's analyzer and its worker)
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
@@ -1200,6 +1252,10 @@ async function resumeFrom(srcId, at) {
   h.close();
   // the history up to the next version (with the journal of that time)
   const id = newId();
+  // (a copy of the person's own session: its source's permission to change files, as Save a copy's (a source that
+  // can't change files, by its provenance or the person's don't-allow, gives a copy that can't either))
+  perms.provenance(srcId, await provenanceOf(srcId, "browser"));
+  madeAs.set(id, perms.may(srcId, "files") ? "person" : "elsewhere");
   const rows = (await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([srcId, ""], [srcId, "\uffff"])))) ?? [];
   await idb(hdb, "history", "readwrite", (st) => {
     let r = null;
@@ -1461,7 +1517,8 @@ const exDlg = $("#exdlg");
       b.textContent = k;
       b.onclick = () => {
         exDlg.close();
-        openNew(k, g.toLowerCase(), EXAMPLES[k]);
+        // (Sagebrush's own example: it may change files, as the person's own notebooks may: permissions.js)
+        openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
         history.replaceState(null, "", location.pathname + flagQuery);
       };
       $("#exlist").append(b);
@@ -1581,6 +1638,10 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   for (const f of beforeSwitch) await f();
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
+  // (its permissions' provenance, from the host's own metadata only (this page's madeAs, the workspace entry's made),
+  // never the document's, a file's or a URL's: known before its interpreter starts, so one of the person's own never
+  // starts as one that can't change files and is restarted (permissions.js; the app on Windows, #563))
+  const how = kind === "browser" && madeAs.has(id) ? madeAs.get(id) : await provenanceOf(id, kind);
   // (Move to Trash's own switch (B1): it leaves only the notebook it was asked to; another opened here meanwhile wins,
   // and this switch is dropped before it detaches anything (astra's R2 on #447))
   if (guard) {
@@ -1592,6 +1653,9 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   docGen++;
   ttShow(false);
   current = { id, kind };
+  perms.provenance(id, how);
+  filesBar(false);
+  filesShown();
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
@@ -1624,14 +1688,62 @@ const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } :
 // (design/capabilities.md §6): "person" for New, "elsewhere" for an example, a share link or a file
 // opened, a copy's source's for Save a copy; a notebook not made here has none (unknown))
 const madeAs = new Map();
+// (a notebook's provenance as the host keeps it: its workspace entry's `made` (absent: unknown, elsewhere); the local
+// server's, a disk file's, a remote one's: elsewhere)
+async function provenanceOf(id, kind) {
+  // (the app: a notebook file the person opened from their own disk, by the open dialog or a file association, is
+  // their own, as in Jupyter on one's own computer (@sagebrush's ruling on #563, Nov 3); a remote one stays elsewhere)
+  if (kind === "file" && window.__TAURI__ && /^file:/.test(id)) return "person";
+  if (kind !== "browser") return "elsewhere";
+  try {
+    const w = await wsNow(), p = w && (await w.pathOf("notebook", id)), e = p && (await w.stat(p));
+    return e?.made === "person" ? "person" : "elsewhere";
+  } catch { return "elsewhere"; }
+}
+// The files permission of the notebook shown (permissions.js): the bar, shown at a refused change, and ⋯'s item; both
+// set the one record, and only from the person's own (isTrusted) click
+const filesBarEl = $("#filesbar");
+function filesBar(on) { filesBarEl.hidden = !on || !current.id || perms.may(current.id, "files"); }
+function filesShown() {
+  const on = !!current.id && perms.may(current.id, "files");
+  const fp = document.getElementById("filesperm"); // (the File menu's, drawn again with it)
+  if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
+  if (on) filesBarEl.hidden = true;
+}
+// (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
+const setFiles = (e, on) => {
+  if (e?.isTrusted !== true || !current.id) return false;
+  if (perms.set(current.id, "files", on)) return true;
+  statusEl.textContent = `${on ? "File changes allowed" : "File changes stopped"} for this notebook in this page only: this browser couldn't keep the choice, so a reload forgets it`;
+  return false;
+};
+$("#filesallow").onclick = (e) => { if (setFiles(e, true)) statusEl.textContent = "Changes allowed for this notebook: run the cell again"; };
+// (a change of it reaches that document's interpreter at once: its next write; one that may no longer change files
+// never keeps a plain worker (a fresh interpreter, in the sandbox, or none); one allowed whose interpreter was the
+// refusing one, a fresh one)
+perms.onChange((doc) => {
+  const e = kernels.get(doc), on = perms.may(doc, "files");
+  if (e) {
+    e.kernel.setWritable?.(on);
+    const w = e.kernel.worker, inner = w?.inner ?? w;
+    if (!on && inner instanceof Worker) e.kernel.restart?.("\nThis notebook can't change files now, so its interpreter was restarted in the sandbox; variables are gone.\n");
+    if (on && inner instanceof RefusingWorker) e.kernel.restart?.();
+  }
+  if (doc === current.id) filesShown();
+});
 async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
   const id = newId();
+  // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
+  // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
+  if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
   return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+// (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
+const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
 async function openId(id, guard = null, intent = null) {
   const end = await navLease();
@@ -1785,7 +1897,7 @@ async function openDiskFile(path) {
     const { dir, sep, name } = splitPath(path);
     nb.flush();
     if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
-    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode)); }
+    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode), false, "person"); }
     // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
     diskFiles = [];
     let total = 0;
@@ -2446,12 +2558,16 @@ function drawFileMenu() {
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
+      { after: "share", key: "filesperm", label: "Don't allow file changes", title: "Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
+  fileMenu.querySelector('[data-f="filesperm"]').id = "filesperm";
+  filesShown();
 }
 // (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
 function openEntry(e, how = "here") {
@@ -2582,6 +2698,8 @@ fileMenu.addEventListener("click", async (e) => {
   if (!b || b.dataset.group || b.disabled || !b.dataset.f) return;
   toggleFileMenu(false);
   switch (b.dataset.f) {
+    // (the person's own click only: setFiles checks isTrusted)
+    case "filesperm": setFiles(e, !(current.id && perms.may(current.id, "files"))); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
@@ -2804,7 +2922,11 @@ let FILE_QUEUE_MAX = 256 * 2 ** 20;
 const fileQueue = new Map(); // path -> Uint8Array | null (the latest state not yet kept)
 let fileQueueBytes = 0, fileDraining = null, fileQueueRefused = 0;
 const queuedBytes = (d) => (d ? d.length : 0);
-function fileChanged(path, data) {
+// (`doc`: whose interpreter made the change; `may`: its authority (the document's permission, and that interpreter's
+// generation still the document's), asked as the queue takes it and again where it is kept: inside the workspace's
+// locked create, write or remove, before any effect, and in the old store's own transaction (astra's NM-ADMIT-1))
+const fileQueueDoc = new Map(); // path -> { doc, may }
+function fileChanged(path, data, doc = null, may = () => true) {
   const before = fileQueue.has(path) ? queuedBytes(fileQueue.get(path)) : 0;
   if (fileQueueBytes - before + queuedBytes(data) > FILE_QUEUE_MAX) {
     fileQueueRefused++;
@@ -2813,18 +2935,35 @@ function fileChanged(path, data) {
   }
   fileQueue.delete(path); // (re-inserted: a path's place is its latest change)
   fileQueue.set(path, data);
+  fileQueueDoc.set(path, { doc, may });
   fileQueueBytes += queuedBytes(data) - before;
   fileDraining ??= drainFiles();
 }
+// (tests: the queue held before it writes, to change a permission while a change waits: astra's revoked-queued case;
+// and held after its own check, before the change is kept (astra's NM-ADMIT-1): only the admission decides then)
+let fileDrainHold = null, fileAdmitHold = null;
 async function drainFiles() {
   try {
+    if (fileDrainHold) await fileDrainHold;
     while (fileQueue.size) {
       const [path, data] = fileQueue.entries().next().value;
       fileQueue.delete(path);
       fileQueueBytes -= queuedBytes(data);
+      const { doc = null, may = () => true } = fileQueueDoc.get(path) ?? {};
+      fileQueueDoc.delete(path);
+      const refused = () => { if (doc !== null && doc === current.id) filesBar(true); };
+      if (!may()) { refused(); continue; }
       // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
       try {
-        if ((await wsFile(path, data, { keepEmpty: false })) === "fallback") await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+        const how = await wsFile(path, data, { keepEmpty: false, may });
+        if (how === "denied") refused();
+        if (how === "fallback") {
+          if (fileAdmitHold) await fileAdmitHold;
+          // (the old store: asked in its own transaction, as it writes)
+          let ok = true;
+          await idb(db, "files", "readwrite", (st) => ((ok = may()) ? (data === null ? st.delete(path) : st.put(data, path)) : undefined));
+          if (!ok) refused();
+        }
       } catch (e) { statusEl.textContent = `${path}: ${e?.message ?? e}`; }
     }
   } finally { fileDraining = null; }
@@ -2835,6 +2974,8 @@ window.sagebrush.files = {
   add: (list) => addFiles(list),
   queue: () => ({ paths: fileQueue.size, bytes: fileQueueBytes, draining: !!fileDraining, refused: fileQueueRefused }),
   setQueueMax: (n) => { FILE_QUEUE_MAX = n; },
+  holdDrain: () => { let go; fileDrainHold = new Promise((r) => (go = r)); return () => { fileDrainHold = null; go(); }; },
+  holdAdmit: () => { let go; fileAdmitHold = new Promise((r) => (go = r)); return () => { fileAdmitHold = null; go(); }; },
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
@@ -3499,17 +3640,26 @@ async function wsForgetNotebook(id) {
 }
 // A data file written (bytes) or deleted (null) through the workspace:
 // "kept"; "refused" (a limit, or storage refused it: said, nothing written);
-// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before)
+// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before);
+// "denied" (`opts.may`, the change's authority, asked holding the workspace's lock: no longer, nothing changed)
+class NotAdmitted extends Error {}
 async function wsFile(path, data, opts = {}) {
+  const { may, ...put } = opts;
+  const admit = may ? () => { if (!may()) throw new NotAdmitted("this notebook can't change files now"); } : undefined;
   const w = await wsNow();
   if (!w) return "fallback";
   try {
     if (data === null) {
       if (!(await w.stat(path))) return "fallback";
-      await w.remove(path);
-    } else await w.putFile(path, data, opts);
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.remove(path, undefined, undefined, admit ? { admit } : {});
+    } else {
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.putFile(path, data, admit ? { ...put, admit } : put);
+    }
     return "kept";
   } catch (e) {
+    if (e instanceof NotAdmitted) return "denied";
     // (with the workspace, never the old store instead: a file kept beside the index is read from there,
     // so bytes put the old way would be lost unseen; said, and the interpreter still has them)
     statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
@@ -3755,7 +3905,10 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   }
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
-  else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  else if (!(last && (await openId(last)))) {
+    // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
+    await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  }
   booted();
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
