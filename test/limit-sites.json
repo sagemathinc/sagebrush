@@ -4897,6 +4897,16 @@
   "owner": "number fields",
   "row": "inv-28"
  },
+ "lib/_sage_nf.py :: NumberField :: NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt(2) + sqrt(3)).minpoly() #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
+ "lib/_sage_nf.py :: NumberField :: raise NotImplementedError(\"relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; \" #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
  "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
   "owner": "number fields"
