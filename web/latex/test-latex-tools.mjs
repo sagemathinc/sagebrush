@@ -1,4 +1,4 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: web-browser/latex order=10 chrome
 // The LaTeX page's agent tools (agent-tools.ts: latex_check, latex_render, registered with navigator.modelContext),
 // in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, served by web/serve.py: what an agent
 // in the browser runs to verify a .tex and see it. A stand-in navigator.modelContext (before the page's scripts)
