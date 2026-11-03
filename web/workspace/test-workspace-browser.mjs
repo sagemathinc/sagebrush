@@ -1245,6 +1245,46 @@ try {
     check(ps[1] === "/b2 notes.txt" ? b4.text === "1 selected" : b4.hidden, "B2: a row a search hides leaves the selection: " + JSON.stringify({ b4, was: ps[1] }));
     await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Clear").click(); return 1; })()`);
   }
+  // U4 (William, Nov 2): rows dragged onto a folder move into it: the selection, as Rename moves one, said, with Undo; a
+  // folder never into itself; a drag from outside still uploads (above)
+  {
+    await ev(`${W}.mkdir("/u4 dest").then(() => ${W}.create("/u4 one.txt", { content: "1" })).then(() => ${W}.create("/u4 two.txt", { content: "2" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify("#wssidebar .frow[data-sel][data-path=\"/u4 two.txt\"]")}) && !!document.querySelector(${JSON.stringify("#wssidebar .frow[data-sel][data-path=\"/u4 dest\"]")})`);
+    // (the tree's row, not Recent's: Recent's rows aren't selectable or draggable, and come first)
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    // (a drag: dragstart on a row, dragover and drop on the target, one DataTransfer carried through, as a real drag does)
+    const drag = (from, to) => ev(`(() => {
+      const f = document.querySelector(${JSON.stringify(treeRow(from))}), t = document.querySelector(${JSON.stringify(treeRow(to))});
+      const dt = new DataTransfer();
+      f.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const over = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+      t.dispatchEvent(over);
+      // (accepted: the target marked as one (.drop), which the list does only for a drop it takes; a synthetic
+      // DataTransfer keeps no dropEffect)
+      const accepted = over.defaultPrevented && t.classList.contains("drop");
+      t.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      f.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
+      return { accepted, types: [...dt.types] };
+    })()`);
+    const box = (p) => ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))} + " .sel").click(); return 1; })()`);
+    await box("/u4 one.txt"); await box("/u4 two.txt");
+    const d1 = await drag("/u4 one.txt", "/u4 dest");
+    const moved = await until(`${W}.stat("/u4 dest/u4 one.txt").then((a) => ${W}.stat("/u4 dest/u4 two.txt").then((b) => !!a && !!b))`, 10000);
+    const gone = await ev(`${W}.stat("/u4 one.txt").then((a) => ${W}.stat("/u4 two.txt").then((b) => !a && !b))`);
+    const said = await until(`/Moved 2 items to "u4 dest"/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    check(d1.accepted && moved && gone && said, "U4: the selection dragged onto a folder moves into it, said: " + JSON.stringify({ d1, moved, gone, said }));
+    // (Undo: both back where they were)
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.click(); return 1; })()`);
+    const back = await until(`${W}.stat("/u4 one.txt").then((a) => ${W}.stat("/u4 two.txt").then((b) => !!a && !!b))`, 10000);
+    check(back, "U4: Undo moves them back");
+    // (a folder onto itself: refused at the dragover, nothing moved)
+    const d2 = await drag("/u4 dest", "/u4 dest");
+    await new Promise((r) => setTimeout(r, 500));
+    check(!d2.accepted && (await ev(`${W}.stat("/u4 dest").then((x) => !!x && x.kind === "folder")`)), "U4: a folder can't be dropped into itself: " + JSON.stringify(d2));
+    // (one row, not selected, dragged alone)
+    const d3 = await drag("/u4 two.txt", "/u4 dest");
+    check(d3.accepted && (await until(`${W}.stat("/u4 dest/u4 two.txt").then((x) => !!x)`, 10000)), "U4: one row dragged alone moves alone: " + JSON.stringify(d3));
+  }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);
