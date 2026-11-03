@@ -2493,6 +2493,231 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_csv.py ::  :: _DIALECT_KWS = (\"dialect\", \"delimiter\", \"doublequote\", \"escapechar\", \"lineterminator\", #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _INT_MAX = 2**31 - 1 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _SSIZE_MAX = 2**63 - 1 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _field_limit = 128 * 1024 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: Dialect :: \"_delimiter\", \"_quotechar\", \"_escapechar\", \"_lineterminator\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect :: delimiter = property(lambda self: self._delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: (dialect, delimiter, doublequote, escapechar, lineterminator, quotechar, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_char(\"delimiter\", d_delimiter, d_lineterminator, True) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_chars(\"delimiter\", \"escapechar\", d_delimiter, d_escapechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_chars(\"delimiter\", \"quotechar\", d_delimiter, d_quotechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: d_delimiter = _set_char(\"delimiter\", delimiter, \",\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: delimiter = getattr_(delimiter, \"delimiter\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: if (isinstance(dialect, Dialect) and delimiter is _NULL and doublequote is _NULL #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: set_(self, \"_delimiter\", d_delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__setattr__ :: if name in (\"delimiter\", \"escapechar\", \"lineterminator\", \"quotechar\", \"quoting\"): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: _set_int :: if not -_INT_MAX - 1 <= src <= _INT_MAX: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: _set_int :: raise OverflowError(\"Python int too large to convert to C int\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: field_size_limit :: \"\"\"Sets an upper limit on parsed fields. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: Returns old limit. If limit is not given, no new limit is set and #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: _field_limit = new_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: def field_size_limit(*args, **kwargs): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: global _field_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if k != \"new_limit\": #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if new_limit is not _NULL: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if not -_SSIZE_MAX - 1 <= new_limit <= _SSIZE_MAX: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if type(new_limit) is not int: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: new_limit = args[0] if args else kwargs.get(\"new_limit\", _NULL) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: old_limit = _field_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise OverflowError(\"Python int too large to convert to C ssize_t\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(\"limit must be an integer\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(f\"field_size_limit() got an unexpected keyword argument '{k}'\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(f\"field_size_limit() takes at most 1 argument ({len(args) + len(kwargs)} given)\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: return old_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: the old limit is returned\"\"\" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._add_char :: if len(self._field) >= _field_limit: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._add_char :: raise Error(f\"field larger than field limit ({_field_limit})\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #1": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #2": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: raise Error(f\"'{d._delimiter}' expected after '{d._quotechar}'\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: if c == d._delimiter or c == d._escapechar or c == d._quotechar or c == \"\\n\" or c == \"\\r\" or c in lt: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: if not field and d._delimiter == \" \" and d._skipinitialspace: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: raise Error(\"empty field must be quoted if delimiter is a space \" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: rec.append(d._delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: special = (d._delimiter, d._escapechar, d._quotechar, \"\\n\", \"\\r\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
  "lib/_display_budget.py ::  :: LIMITS = {\"steps\": 1 << 23, \"chars\": 1 << 26} #0": {
   "class": "1",
   "owner": "visualization/display",
@@ -4897,6 +5122,16 @@
   "owner": "number fields",
   "row": "inv-28"
  },
+ "lib/_sage_nf.py :: NumberField :: NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt(2) + sqrt(3)).minpoly() #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
+ "lib/_sage_nf.py :: NumberField :: raise NotImplementedError(\"relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; \" #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
  "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
   "owner": "number fields"
@@ -5229,6 +5464,106 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: _fields = (\"nobs\", \"minmax\", \"mean\", \"variance\", \"skewness\", \"kurtosis\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: minmax = property(lambda self: self[1]) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: PearsonRResult.confidence_interval :: raise NotImplementedError(\"scipy.stats.PearsonRResult.confidence_interval: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: _rank1 :: val = {\"average\": (pos + end + 2) / 2.0, \"min\": pos + 1.0, \"max\": end + 1.0, \"dense\": float(dense)}[method] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: \"\"\"(nobs, (min, max), mean, variance (ddof), skewness, kurtosis (Fisher's)), as SciPy's\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: maxs = _out([float(np.max(r)) for r in rows], shape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: return DescribeResult(np.int64(n), (mins, maxs), means, vars_, sk, ku) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: an axis of a 2-d array is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: kurtosis :: raise NotImplementedError(\"scipy.stats.kurtosis: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: axis and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: if method not in (\"average\", \"min\", \"max\", \"dense\", \"ordinal\"): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: skew :: raise NotImplementedError(\"scipy.stats.skew: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
  "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
   "class": "3",
   "owner": "special functions",
@@ -5348,6 +5683,181 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/csv.py ::  :: \"field_size_limit\", \"reader\", \"writer\", #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: * delimiter - specifies a one-character string to use as the #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: field contains either the quotechar or the delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: field_size_limit, \\ #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: immediately follow a delimiter. It defaults to False, which #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: means that spaces immediately following a delimiter is part #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: the delimiter when quoting is set to QUOTE_NONE. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Dialect :: delimiter = None #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Dialect :: delimiter, quotechar, escapechar, doublequote, skipinitialspace, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer :: \"Sniffs\" the format of a CSV file (i.e. delimiter, quotechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: (delimiters is None or k in delimiters)): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: 5) the character that best meets its goal is the delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: The delimiter /should/ occur the same number of times on #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: def _guess_delimiter(self, data, delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: threshold = 0.9 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: while len(delims) == 0 and consistency >= threshold: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: If there is no quotechar the delimiter can't be determined #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: The quote with the most wins, same with the delimiter. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: by the same character (the probable delimiter). #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: def _guess_quote_and_delimiter(self, data, delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: if key and (delimiters is None or key in delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: def sniff(self, sample, delimiters=None): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: delimiter, skipinitialspace = self._guess_delimiter(sample, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: delimiters) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: dialect.delimiter = delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: if not delimiter: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: if not delimiter: #1": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: quotechar, doublequote, delimiter, skipinitialspace = \\ #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: raise Error(\"Could not determine delimiter\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: self._guess_quote_and_delimiter(sample, delimiters) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel_tab :: \"\"\"Describe the usual properties of Excel-generated TAB-delimited files.\"\"\" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel_tab :: delimiter = '\\t' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: unix_dialect :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
  },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
@@ -6720,6 +7230,58 @@
   "class": "1",
   "owner": "notebook/kernel",
   "row": "src-17"
+ },
+ "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts ::  :: const PAGES_MAX = 60; #0": {
+  "class": "1",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
+  "disposition": {
+   "1": "shared"
+  }
+ },
+ "src/latex-cli.ts ::  :: const TEX_MAX = 4 * 2 ** 20; #0": {
+  "class": "1",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
+  "disposition": {
+   "1": "shared"
+  }
+ },
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, delimiter } from \"path\"; #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: findBrowser :: for (const dir of (env.PATH ?? \"\").split(delimiter)) if (dir) for (const b of [\"google-chrome\", \"google-chrome-stable\", \"chromium\", \"chromium-browser\", \"microsoft-edge\", \"microsoft-edge-stable\", \"brave-browser\"]) cands.push(join(dir, b)); #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: latexCommand :: if (st.size > TEX_MAX) return fail(`${file}: ${st.size} bytes, over the ${TEX_MAX} this reads`); #0": {
+  "class": "1",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
+  "disposition": {
+   "1": "shared"
+  }
+ },
+ "src/latex-cli.ts :: screenshots :: for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 }); #0": {
+  "class": "1",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command",
+  "disposition": {
+   "1": "shared"
+  }
  },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",

@@ -1,0 +1,31 @@
+# Small engine gaps from agent simulation run 2 (Sage 10.9): Expression.minpoly, NumberField of a list, no global
+# simplify_full, a generator declaration after a semicolon; one line per statement
+def show(n, f):
+    try:
+        print('S%02d %s' % (n, str(f()).replace('\n', ' ; ')))
+    except Exception as e:
+        print('S%02d ERR %s: %s' % (n, type(e).__name__, str(e)[:200]))
+var("x")
+a = sqrt(2) + sqrt(3)
+show(1, lambda: a.minpoly())
+show(3, lambda: parent(a.minpoly()))
+show(4, lambda: sqrt(2).minpoly())
+show(5, lambda: (2^(1/3)).minpoly())
+show(6, lambda: (1 + sqrt(5)).minpoly(var='t'))
+show(7, lambda: x.minpoly())
+show(8, lambda: pi.minpoly())
+show(10, lambda: SR(3/2).minpoly())
+show(11, lambda: NumberField([x^2-2, x^2-3], 'a'))
+show(12, lambda: NumberField([x^2-2, x^2-3], 'a').absolute_degree())
+show(13, lambda: NumberField([x^2-2, x^2-3]))
+show(14, lambda: simplify_full(x^2 + 2*x + x))
+show(15, lambda: 'simplify_full' in globals())
+show(16, lambda: (sin(x)^2 + cos(x)^2).simplify_full())
+z = 1; R.<t> = PolynomialRing(QQ)
+show(17, lambda: R)
+show(18, lambda: t^2 + z)
+show(19, lambda: full_simplify(sin(x)^2 + cos(x)^2))
+show(20, lambda: (sqrt(2)*sqrt(3)).minpoly())
+show(21, lambda: (sqrt(2) + 1/2).minpoly())
+show(22, lambda: I.minpoly())
+show(23, lambda: (sqrt(-3)).minpoly())

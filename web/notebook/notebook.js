@@ -1083,7 +1083,7 @@ export function createNotebook(root, opts = {}) {
       case "cycle":
         return `${labels(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
       case "import-star":
-        return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
+        return e.message;
       default:
         return /^SyntaxError\b/.test(e.message ?? "") ? e.message : `SyntaxError: ${e.message}`;
     }
