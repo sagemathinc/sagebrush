@@ -1,3 +1,4 @@
+// ci: web-runner order=480 chrome
 // A board's title is its file's name, as a notebook's is (William's B2), in headless Chromium against the built site:
 // a title changed on the board page renames its file in the person's files, to a free name beside it (" (2)" when it is
 // taken: never over another board), and a later edit keeps it there; the other board is left as it was.

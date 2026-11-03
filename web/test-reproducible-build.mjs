@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=70 runner=bun
 // Builds are reproducible whatever the checkout's path: a second build of
 // the same commit, from a checkout at a different path (and path length),
 // writes byte-identical engine files and the same engine id, and no built

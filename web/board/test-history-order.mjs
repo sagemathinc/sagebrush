@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=100
 // TimeTravel's versions, recorded once an edit is drawn (mount.ts), with a
 // fake history whose opening can be held (daybreak's repros of ca3bf8d):
 // another document shown while the first's history opens: each document's

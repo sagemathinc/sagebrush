@@ -1,3 +1,4 @@
+// ci: web-runner order=115 chrome
 // Renaming a notebook of `sagebrush notebook DIR` (src/notebook.ts; William's B2), in headless Chromium: its title is
 // its file's name, so editing the title renames the FILE, to a free name beside it (" (2)" when the name is taken:
 // never over another file), and then the page's address and its "saved to" say the new name; later saves go there,

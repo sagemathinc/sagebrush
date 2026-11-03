@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=80
 // Pictures on a board (web/board/images.ts): pasted, dropped, chosen with
 // the toolbar's Image or a note's + Image; kept in this browser by a hash of
 // their bytes, so the document holds only their names and sizes (and a large

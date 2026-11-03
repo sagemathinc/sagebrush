@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=130 runner=bun
 // boardMerge3 (web/board/merge.ts; plan-board-open-edit r7 §3), on records as
 // history.ts makes them: fixed cases (astra's probes among them) and seeded
 // random boards and edits: symmetry, determinism, merge3(x, x, y) == y, and no

@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=50 runner=bun
 // RemoteKernel (remote-kernel.js) and its client (remote-client.js) against
 // an in-memory fake of CoCalc's compute gateway (remote-fake.js): DPoP
 // proofs and nonces; https only, no redirects; size caps at their exact

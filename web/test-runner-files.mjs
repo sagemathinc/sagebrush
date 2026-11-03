@@ -1,3 +1,4 @@
+// ci: web-runner order=30 chrome
 // The runner's files mode (web/notebook/runner-worker.js), as a downloaded
 // board uses it: a page that is not cross-origin isolated (no
 // SharedArrayBuffer, as in a file:// page) gives the runner the engine's

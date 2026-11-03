@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=20
 // Stickers (doc.ts DocSticker, stickers.ts, board.ts): an emoji or a CoCalc
 // icon by name, drawn without a frame, the emoji as tall as the sticker; an
 // icon the host draws when it can, else the emoji close to it, else a mark

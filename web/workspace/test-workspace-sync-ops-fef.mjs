@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=80 runner=bun chrome
 // astra's probes on sync-ops fefc4d6b (CORR-9C2-1, residual: a subclass of Uint8Array whose slice returns a view;
 // CORR-9C2-2, residual: old-way bytes adopted then migrated, the adopt's own op carrying the hash), with their
 // cases in astra-fef-cases.js:

@@ -1,3 +1,4 @@
+// ci: checks.2 order=10 runner=bun
 // Framing (security audit G-1): every HTML route the site serves says who may
 // frame it, so another site can't put a page of ours in a frame and steer the
 // clicks on it (clickjacking: the agents page's Allow and "Remember this
