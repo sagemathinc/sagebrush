@@ -55,6 +55,23 @@ interface RefData {
 /** marimo's is_local: `_x` (not `__x`), and `__` itself. */
 export const isLocal = (name: string): boolean => name === "__" || (name.startsWith("_") && !name.startsWith("__"));
 
+// (names to show in the message's example, for the modules people star-import most)
+const STAR_EXAMPLES: Record<string, [string, string]> = {
+  pylab: ["import pylab as plt", "plot, show"],
+  "matplotlib.pyplot": ["import matplotlib.pyplot as plt", "plot, show"],
+  numpy: ["import numpy as np", "array, linspace"],
+  math: ["import math", "sqrt, pi"],
+  "sage.all": ["import sage.all as sage", "EllipticCurve, QQ"],
+  sympy: ["import sympy as sp", "symbols, solve"],
+};
+
+/** Why `from m import *` is refused, and the way forward (Sagebrush's words). */
+export function importStarMessage(mod: string): string {
+  const m = mod || "m";
+  const [whole, names] = STAR_EXAMPLES[mod] ?? [`import ${m}`, "a, b"];
+  return `\`from ${m} import *\` can't be used here: Sagebrush reruns the cells that use a cell's names when it changes, so it must know which names each cell defines, and \`import *\` doesn't say. Import the module (\`${whole}\`) or the names you use (\`from ${m} import ${names}\`).`;
+}
+
 export class ImportStarError extends Error {
   override name = "ImportStarError";
 }
@@ -390,7 +407,7 @@ class Visitor {
   aliasName(alias: Node): string {
     if (alias.asname == null) {
       const base = alias.name.split(".")[0];
-      if (base === "*") throw new ImportStarError("Importing symbols with `import *` is not allowed in marimo.");
+      if (base === "*") throw new ImportStarError(importStarMessage(""));
       return base;
     }
     alias.asname = this.mangle(alias.asname);
@@ -410,6 +427,8 @@ class Visitor {
     }
   }
   visit_ImportFrom(node: Node): void {
+    const mod = `${".".repeat(node.level ?? 0)}${node.module ?? ""}`;
+    if (node.names.some((a: Node) => a.name === "*")) throw new ImportStarError(importStarMessage(mod));
     for (const a of node.names) {
       const n = this.aliasName(a);
       this.define(n, "import");
