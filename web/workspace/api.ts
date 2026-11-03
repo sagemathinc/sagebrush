@@ -311,6 +311,8 @@ const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "str
 const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
 /** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
 type Collect = { collect?: number[] };
+/** What a rename was asked for: the entry by its identity, and optionally the revision read (rename's `expect`). */
+export type RenameExpect = Pick<Entry, "kind" | "ref" | "fid" | "created"> & { rev?: number };
 function sinkOf(c: unknown): number[] | undefined {
   if (c === undefined) return undefined;
   if (!Array.isArray(c)) throw new WorkspaceError("invalid", "collect is a list the call appends its op seqs to");
@@ -1351,6 +1353,15 @@ export class Workspace {
       return this.readNow(p, admit);
     });
   }
+  /** An entry's revision as readNow gives it (a notebook's record's, a board's record's, a data file's), its contents
+   * not there: undefined. */
+  private async revNow(e: Entry): Promise<number | undefined> {
+    if (e.kind === "folder") return 0;
+    if (e.kind === "file") return e.rev ?? 0;
+    const c = await this.contents(e);
+    if (c === undefined) return undefined;
+    return e.kind === "notebook" ? c.rev ?? 0 : (c as BoardRecord).rev;
+  }
   private async readNow(p: string, admit?: (c: AdmitCheck) => void): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
     const e = await this.mustStat(p);
     if (e.kind === "folder") return { entry: e, content: await this.list(e.path, admit ? { admit } : {}), rev: 0 };
@@ -1648,12 +1659,14 @@ export class Workspace {
   /** `opts.expect`: the entry the rename was asked for, by its identity
    * (a document's ref, a data file's fid, and when it was made): checked
    * holding the lock, a WorkspaceError("conflict") if what is at `from` now
-   * is another (moved away meanwhile, something else put there: CORR-4B2-1). */
+   * is another (moved away meanwhile, something else put there: CORR-4B2-1).  `expect.rev`: also the revision read
+   * (read's `rev`), checked holding the lock: written since, a WorkspaceError("conflict"), nothing moved (a rename
+   * decided on what was read, never applied to what another wrote after: astra's BOARD-RENAME-1 on #531). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, after `expect` and before anything moves, about
    * both ends: `from` (role "source") and `to` (role "destination"). */
-  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry>;
-  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry | undefined>;
-  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted = {}): Promise<Entry | undefined> {
+  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: RenameExpect } & Collect & Admitted): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: RenameExpect } & Collect & Admitted): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: RenameExpect } & Collect & Admitted = {}): Promise<Entry | undefined> {
     const a = path(from), b = path(to), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
@@ -1663,6 +1676,7 @@ export class Workspace {
       if (opts.expect) {
         const x = opts.expect, cur = await this.stat(a);
         if (!cur || cur.kind !== x.kind || cur.created !== x.created || cur.fid !== x.fid || (cur.kind !== "file" && cur.ref !== x.ref)) throw new WorkspaceError("conflict", `${a} was moved or replaced meanwhile`);
+        if (x.rev !== undefined && (await this.revNow(cur)) !== x.rev) throw new WorkspaceError("conflict", `${a} was changed meanwhile`);
       }
       await this.admitAt(admit, "rename", "source", a);
       await this.admitAt(admit, "rename", "destination", b);
