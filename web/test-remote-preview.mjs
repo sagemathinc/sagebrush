@@ -19,7 +19,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 const profile = mkdtempSync(join(tmpdir(), "sb-remote-preview-"));
-let server = null, chrome = null, ws = null;
+let server = null, chrome = null, ws = null, ev = null; // (ev here: the failure-state dump below uses it)
 try {
   const serve = startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
   const port = await serve.port;
@@ -39,7 +39,7 @@ try {
     else if (m.method === "Fetch.requestPaused") paused.push(m.params);
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-  const ev = async (expression) => {
+  ev = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r.result?.value;
