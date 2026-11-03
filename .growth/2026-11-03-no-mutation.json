@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "No-mutation mode (William, Nov 2; plan-no-mutation r3, astra CLEAR 5fe204ad): the page's one permissions record (web/notebook/permissions.js), the file layer's refusal at every change (web/shims/fs.ts), the worker's and the runner frame's shared writable word, the page's check at a change and at the queue's write, the bar and the ⋯ item; and #559's ?run removal (cherry-picked, -60). Measured with bun 1.4.4 at the exact probe merge on master c06c81398.",
+ "bytes": {
+  "cli/pyjs.cjs": 5500,
+  "engine/runner/index.html": 320
+ }
+}

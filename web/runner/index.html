@@ -97,11 +97,8 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
-        // (the files permission's shared word stays here too: the page's {fsWritable} sets it, below)
-        if (d && d.ready && d.writable) {
-          writable = new Int32Array(d.writable);
-          d = { ...d, writable: null };
-        }
+        // (may it change files: the page's {fsWritable})
+        if (d && d.ready && d.writable) { writable = new Int32Array(d.writable); d = { ...d, writable: null }; }
         // (the shared progress slots stay here too: a SharedArrayBuffer can't
         // cross to the page, and this frame doesn't relay them)
         if (d && d.ready && d.progress) d = { ...d, progress: null };
@@ -120,7 +117,6 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           }
           return;
         }
-        // (whether this document may change files: at once, for a run in flight; and passed on, below)
         if (d && typeof d.fsWritable === "boolean" && writable) Atomics.store(writable, 0, d.fsWritable ? 1 : 0);
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
