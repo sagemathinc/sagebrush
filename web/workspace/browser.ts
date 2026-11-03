@@ -243,6 +243,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // closed, a search) leaves the selection, so an action never reaches a row out of sight)
   const selected = new Set<string>();
   let anchor: string | null = null;
+  // (U4: the rows being dragged within the list, by path; their drag data's type, which a drop from outside never has)
+  let dragging: string[] | null = null;
+  const MOVE_TYPE = "application/x-sagebrush-paths";
   const selAll = h("input", { type: "checkbox" });
   selAll.setAttribute("aria-label", "Select all shown");
   const selCount = h("span");
@@ -388,6 +391,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       r.dataset.sel = "1";
       if (selected.has(e.path)) r.classList.add("picked");
       r.append(cb);
+      // (U4: a row dragged onto a folder moves there; a selected row carries the whole selection)
+      r.draggable = true;
+      r.addEventListener("dragstart", (ev) => {
+        if (renamingNow || !ev.dataTransfer) return void ev.preventDefault();
+        dragging = selected.has(e.path) ? [...selected] : [e.path];
+        ev.dataTransfer.setData(MOVE_TYPE, JSON.stringify(dragging));
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
     }
     r.append(chev, ic, name, si, meta, more);
     if (!trashView) drawnRows.push({ e, si });
@@ -762,24 +774,87 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const pick = (folder: string) => { pickFolder = folder; picker.click(); };
   picker.onchange = () => { const fs = [...(picker.files ?? [])]; picker.value = ""; if (fs.length) upload(fs, pickFolder); };
 
-  function dropTarget(el: HTMLElement, folder: string) {
+  // (U4: of the rows being dragged, those that can move into `folder`: not one already there, not a folder into itself
+  // or below itself, and not one inside another being moved (it goes with its folder))
+  const movable = (folder: string) => {
+    const d = dragging ?? [];
+    return d.filter((p) => parentOf(p) !== folder && !within(folder, p) && !d.some((q) => q !== p && within(p, q)));
+  };
+  // (files dropped from outside: uploaded into the folder; rows of this list dropped: moved into it. `folder` is the
+  // folder's path, or for the list itself where the drop lands: a file row's own folder, else the top folder)
+  function dropTarget(el: HTMLElement, folder: string | ((ev: DragEvent) => string)) {
+    const at = (ev: DragEvent) => (typeof folder === "string" ? folder : folder(ev));
     el.addEventListener("dragover", (ev) => {
-      if (!ev.dataTransfer?.types.includes("Files")) return;
+      const types = ev.dataTransfer?.types ?? [];
+      const rows = types.includes(MOVE_TYPE);
+      if (!types.includes("Files") && !rows) return;
       ev.preventDefault();
       ev.stopPropagation();
       tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop"));
+      if (rows && !movable(at(ev)).length) { ev.dataTransfer!.dropEffect = "none"; return; }
+      if (rows) ev.dataTransfer!.dropEffect = "move";
       el.classList.add("drop");
     });
     el.addEventListener("dragleave", () => el.classList.remove("drop"));
     el.addEventListener("drop", (ev) => {
+      if (ev.dataTransfer?.types.includes(MOVE_TYPE)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        el.classList.remove("drop");
+        const to = at(ev), paths = movable(to);
+        dragging = null;
+        if (paths.length) void moveInto(to, paths);
+        return;
+      }
       if (!ev.dataTransfer?.files.length) return;
       ev.preventDefault();
       ev.stopPropagation();
       el.classList.remove("drop");
-      upload([...ev.dataTransfer.files], folder);
+      upload([...ev.dataTransfer.files], at(ev));
     });
   }
-  dropTarget(tree, "/");
+  dropTarget(tree, (ev) => {
+    const r = (ev.target as Element | null)?.closest?.<HTMLElement>(".frow[data-path]");
+    return r ? parentOf(r.dataset.path!) : "/";
+  });
+  // (U4: rows moved into a folder, one at a time, each the way Rename moves one: a document found by its id wherever it
+  // is now, checked holding the lock, the page told so it retitles what it has open. A name already taken there, or a
+  // move that fails, is said and the rest still move; Undo moves back what moved)
+  async function moveInto(folder: string, paths: string[]) {
+    const where = folder === "/" ? "the top folder" : `"${nameOf(folder)}"`;
+    const moved: { from: string; to: string; e: Entry }[] = [], problems: string[] = [];
+    const expect = (e: Entry) => ({ kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+    for (const p of paths) {
+      const e = entries.find((x) => x.path === p);
+      if (!e) { problems.push(`"${nameOf(p)}" is gone`); continue; }
+      try {
+        const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
+        if (!from) { problems.push(`"${nameOf(p)}" was moved or deleted meanwhile`); continue; }
+        const to = join(folder, nameOf(from));
+        if (await w.stat(to)) { problems.push(`${where} already has a "${nameOf(from)}"`); continue; }
+        host.renaming?.(e);
+        const got = await w.rename(from, to, { retitle: !host.retitles?.(e), expect: expect(e) });
+        host.renamed?.(got, from);
+        moved.push({ from, to: got.path, e: got });
+      } catch (err) {
+        problems.push(`"${nameOf(p)}": ${err instanceof WorkspaceError && err.code === "conflict" ? "moved or replaced meanwhile" : String((err as Error)?.message ?? err)}`);
+      }
+    }
+    if (folder !== "/" && moved.length) { open.add(folder); saveOpen(); }
+    for (const m of moved) selected.delete(m.from);
+    await refresh();
+    paintSel();
+    const undo = async () => {
+      for (const m of [...moved].reverse()) {
+        try { host.renaming?.(m.e); host.renamed?.(await w.rename(m.to, m.from, { retitle: !host.retitles?.(m.e), expect: expect(m.e) }), m.to); }
+        catch (err) { fail(err); break; }
+      }
+      await refresh();
+    };
+    const what = moved.length === 1 ? `"${nameOf(moved[0].from)}"` : `${moved.length} items`;
+    if (problems.length) sayError(`${moved.length ? `Moved ${what} to ${where}; n` : "N"}ot moved: ${problems.join("; ")}`);
+    else if (moved.length) say(`Moved ${what} to ${where}`, undo);
+  }
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");

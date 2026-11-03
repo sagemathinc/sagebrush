@@ -74,13 +74,14 @@ export function registerLatexTools() {
         type: "object",
         properties: {
           frames: { type: "array", items: { type: "number" }, description: `Frame (or page) numbers, from 1; default the first ${DEFAULT_SHOTS}` },
+          steps: { type: "boolean", description: "Each frame at each of its overlay steps (\\pause, <2->, \\only), as Present shows them; default false: all steps at once, as the preview shows them" },
         },
       },
-      async execute({ frames }: { frames?: number[] } = {}) {
+      async execute({ frames, steps }: { frames?: number[]; steps?: boolean } = {}) {
         const t = target;
         if (!t) return text(NONE);
         if (!(await settled(t))) return text("The preview hasn't caught up with the source yet: try again in a moment.");
-        try { return await (await load()).latexRender(t, frames); }
+        try { return await (await load()).latexRender(t, frames, steps); }
         catch (e) { return text("Couldn't draw the pictures: " + String((e as Error)?.message ?? e)); }
       },
     },
