@@ -145,6 +145,27 @@ try {
     check("images: a .tex outside the folder the command runs in has no images (not widened)", co2?.images?.[0]?.found === false && /outside the folder the command runs in/.test(co2.images[0].why), co2?.images ?? co);
   }
 
+  // ---- \input and \include (William's L4, Nov 2): read from the folder the command runs in as TeX finds them (with
+  // .tex added, ../, a leading /), never through a link out of it; macros from them apply; one not read is an error
+  // naming where it was looked for
+  {
+    const w = join(dir, "w"), ex = join(w, "ex");
+    const { mkdirSync, symlinkSync } = await import("node:fs");
+    mkdirSync(join(w, "shared"), { recursive: true });
+    writeFileSync(join(w, "shared", "macros.tex"), "\\newcommand{\\RR}{\\mathbb{R}}\n\\newcommand{\\hello}{Hello from macros}\n");
+    writeFileSync(join(ex, "part.tex"), "Included part with $\\RR$.\n");
+    writeFileSync(join(dir, "outside", "evil.tex"), "\\newcommand{\\hello}{OUTSIDE TEXT}\n");
+    symlinkSync(join(dir, "outside", "evil.tex"), join(ex, "evil.tex"));
+    writeFileSync(join(ex, "talk2.tex"), "\\documentclass{article}\n\\input{../shared/macros}\n\\input{evil}\n\\begin{document}\n\\hello: $\\RR$.\n\\include{part}\n\\input{/shared/macros.tex}\n\\input{missing}\n\\end{document}\n");
+    const ch = (await run(w, "check", "ex/talk2.tex", "--json")).json;
+    const ip = (n) => ch?.problems.find((x) => x.kind === "input" && x.name === n);
+    check("input: a missing file is an error at its line, naming where it was looked for", ip("missing")?.severity === "error" && ip("missing").line === 8 && /\\input\{missing\}: not found in this file's folder/.test(ip("missing").message), ch?.problems);
+    check("input: a link to outside the folder is refused", /a link to outside the folder the command runs in/.test(ip("evil")?.message ?? ""), ip("evil"));
+    const rr = await run(w, "render", "ex/talk2.tex", "-o", "t2.html");
+    const hh = existsSync(join(w, "t2.html")) ? readFileSync(join(w, "t2.html"), "utf8") : "";
+    check("input: the macros file's macros apply (../ and a leading /), \\include's text is there, nothing from outside", hh.includes("Hello from macros") && hh.includes("Included part with") && /mathbb/.test(hh) && !hh.includes("OUTSIDE TEXT"), { code: rr.code, err: rr.err, n: hh.length });
+  }
+
   // ---- render: one self-contained HTML file
   const r = await run(dir, "render", "talk.tex", "-o", "out.html", "--json");
   const html = existsSync(join(dir, "out.html")) ? readFileSync(join(dir, "out.html"), "utf8") : "";

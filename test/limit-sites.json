@@ -7292,6 +7292,14 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
+ "src/latex-cli.ts :: inputsNow :: else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: \"too large\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: an \\input/\\include file over web/latex/inputs.ts INPUT_BOUNDS.perFile (4 MiB, the editor's EDIT_MAX) is refused before it is read: the same bound the page applies to included files"
+ },
  "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",

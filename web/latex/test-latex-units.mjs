@@ -391,6 +391,45 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("gate-reply-other-revision", g.accept({ doc: t.doc, rev: t.rev }).patch && !g.accept({ doc: t.doc, rev: t.rev }).current && !g.accept({ doc: a.doc, rev: a.rev }).patch, null);
 }
 
+// ---- \input and \include (William's L4, Nov 2: silently ignored, which broke his shared macros file): found as TeX
+// finds them (inputs.ts, images.ts texCandidates), read from the host's snapshot; macros from them apply everywhere
+// after; a file not read is a visible note, in the body or (from the preamble) at the top; a cycle stops with a note
+{
+  const { engineInputs, admitInput, INPUT_BOUNDS } = await import("./inputs.ts");
+  const { texCandidates } = await import("./images.ts");
+  const tc = texCandidates("macros", "/ex/doc.tex"), tc2 = texCandidates("../shared/defs.tex", "/ex/doc.tex"), tc3 = texCandidates("/top", "/ex/doc.tex");
+  check("tex-candidates", tc.ok && tc.paths.join() === "/ex/macros.tex,/ex/macros" && tc2.ok && tc2.paths.join() === "/shared/defs.tex" && tc3.ok && tc3.paths[0] === "/top.tex" && !texCandidates("../../x", "/ex/doc.tex").ok, [tc, tc2, tc3]);
+  const enc = (t) => new TextEncoder().encode(t);
+  const known = new Map([
+    ["/shared/macros.tex", admitInput(enc("\\newcommand{\\RR}{\\mathbb{R}}\n\\input{../shared/more}\n"), 0, 0)],
+    ["/shared/more.tex", { text: "\\newcommand{\\NN}{\\mathbb{N}}\n" }],
+    ["/ex/body.tex", { text: "Included body text $\\NN$.\n" }],
+    ["/ex/loop.tex", { text: "x\\input{loop}" }],
+    ["/ex/nope.tex", { absent: true }], ["/ex/nope", { absent: true }],
+    ["/ex/gone.tex", { absent: true }], ["/ex/gone", { absent: true }],
+    ["/ex/big.tex", { why: "too large" }],
+  ]);
+  const ei = engineInputs("/ex/doc.tex", known);
+  const doc = "\\documentclass{article}\n\\input{../shared/macros}\n\\input{gone}\n\\begin{document}\nReals $\\RR$.\n\\include{body}\n\\input{nope}\n\\input{big}\n\\input{loop}\n\\end{document}\n";
+  const r = new Engine().update(doc, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const h = r.chunks.join("");
+  check("input-macros-apply", /\\mathbb ?\{R\}/.test(h) && h.includes("Included body text") && /\\mathbb ?\{N\}/.test(h), h.slice(0, 900));
+  check("input-missing-visible", h.includes("[input: nope: not found in &quot;ex/&quot;]") && h.includes("[input: big: too large]") && /Not read: \\input\{gone\}: not found in &quot;ex\/&quot;/.test(h), h.slice(0, 900));
+  check("input-cycle-stopped", h.includes("an \\input cycle: stopped 16 deep") && r.stats.outcome === "ok", { outcome: r.stats.outcome, h: h.slice(-600) });
+  check("input-problems", r.problems.some((p) => p.kind === "input" && p.name === "nope") && r.problems.some((p) => p.kind === "input" && p.name === "gone"), r.problems);
+  check("input-refs", ["../shared/macros", "../shared/more", "body", "nope", "gone"].every((n) => r.inputRefs.includes(n)), r.inputRefs);
+  // (what the host reads next: an unknown candidate, for each name, up to the first that might be it)
+  const e2 = engineInputs("/ex/doc.tex", new Map([["/ex/a.tex", { absent: true }]]));
+  check("input-wanted", JSON.stringify(e2.wanted(["a", "b", "../x/c.tex", "doc"])) === JSON.stringify(["/ex/a", "/ex/b.tex", "/x/c.tex"]) && e2.resolve("doc").key === "main.tex" && e2.resolve("b").why === "not read yet", e2.wanted(["a", "b", "../x/c.tex", "doc"]));
+  check("input-admit", "why" in admitInput(new Uint8Array([0, 1]), 0, 0) && admitInput(enc("x"), INPUT_BOUNDS.total, 0).why === "too large" && /too many/.test(admitInput(enc("x"), 0, INPUT_BOUNDS.files).why), null);
+  // (the same text, the inputs changed: expanded again from the start, with the new macro)
+  const k2 = new Map(known); k2.set("/shared/more.tex", { text: "\\newcommand{\\NN}{\\mathbb{Z}}\n" });
+  const ei2 = engineInputs("/ex/doc.tex", k2), eng = new Engine();
+  eng.update(doc, { inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const r2 = eng.update(doc, { inputs: { files: ei2.files, resolve: ei2.resolve, version: 2 } });
+  check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);

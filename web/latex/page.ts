@@ -10,6 +10,7 @@ import type { Workspace, Entry } from "../workspace/api";
 import { nameOf, parentOf } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
+import { engineInputs, admitInput, type Known } from "./inputs";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
@@ -338,10 +339,59 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       request();
     } catch {}
   };
+  // ---- \input and \include (William's L4, Nov 2; inputs.ts): the files the document asks for, found as TeX finds them
+  // (from this file's folder, ../, a leading "/" for the top), read by identity as images are, bounded, given to the
+  // engine; one reader at a time; a change to any of them (another tab, Python, an agent) reads it again
+  const inputs = { docPath: where.path, known: new Map<string, Known>(), version: 0 };
+  let inputBytes = 0, readingInputs = false;
+  const inputsWanted = new Set<string>();
+  const readInputs = async (refs: string[], tok: Token) => {
+    for (const p of engineInputs(where.path, inputs.known).wanted(refs)) inputsWanted.add(p);
+    if (readingInputs || !inputsWanted.size) return;
+    readingInputs = true;
+    let changed = false;
+    try {
+      for (const p of inputsWanted) {
+        inputsWanted.delete(p);
+        if (inputs.known.has(p) || inputs.known.size >= 1024) continue;
+        const e = await host.ws.stat(p).catch(() => undefined);
+        if (!alive(tok)) { inputsWanted.clear(); return; }
+        let k: Known;
+        if (!e || e.kind !== "file" || e.trashed) k = { absent: true };
+        else if (e.remote) k = { why: "it is in the cloud: open it on the device that made it" };
+        else {
+          let r: { entry: Entry; content: Uint8Array } | null = null;
+          try { r = await host.ws.readUpTo(p, EDIT_MAX + 1); } catch {}
+          const now = await host.ws.stat(p).catch(() => undefined);
+          if (!alive(tok)) { inputsWanted.clear(); return; }
+          if (!r) k = { why: "not readable" };
+          else if (!now || now.fid !== e.fid || r.entry.fid !== e.fid || now.updated !== e.updated) k = { why: "changed while it was read" };
+          else {
+            const count = [...inputs.known.values()].filter((x) => "text" in x).length;
+            k = admitInput(r.content, inputBytes, count);
+            if ("text" in k) inputBytes += r.content.length;
+          }
+        }
+        inputs.known.set(p, k); changed = true;
+      }
+    } finally { readingInputs = false; }
+    if (changed && alive(tok)) { inputs.version++; request(); }
+  };
+  // (a file the document read, or looked for, changed: forgotten, so the next render asks for it and it is read again)
+  const unwatchInputs = host.ws.watch((c) => {
+    let again = false;
+    for (const op of c.ops ?? []) for (const q of [op.path, op.to]) if (q && inputs.known.has(q)) {
+      const k = inputs.known.get(q)!; if ("text" in k) inputBytes -= new TextEncoder().encode(k.text).length;
+      inputs.known.delete(q); again = true;
+    }
+    if (again) { inputs.version++; request(); }
+  });
+  life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
     left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
+    inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
     onEdit: () => { showDirty(); if (!saving) say(""); },
   });

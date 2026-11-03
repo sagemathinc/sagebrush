@@ -19,6 +19,7 @@ import { setKatex } from "../web/latex/engine/render.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
+import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
 
 setKatex(katex.renderToString);
@@ -113,7 +114,6 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   //  the command runs in (its real path): its top is "/", so no name, relative, \graphicspath's or with a leading "/",
   //  reaches outside it, and a file that is a link (or in a linked folder) is read only if its real path is inside
   //  too (astra L2-BOUND-1, -2); a .tex outside that folder has no images)
-  const first = new Engine({}).update(text, { cold: true });
   const images: Record<string, string | { why: string }> = {};
   const imgReport: ImageReport[] = [];
   const root = realpathSync(process.cwd());
@@ -122,6 +122,30 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   try { docReal = realpathSync(resolve(file)); } catch {}
   const toWs = (p: string) => "/" + relative(root, p).split(sep).join("/"), toDisk = (w: string) => join(root, ...w.slice(1).split("/"));
   const doc = docReal && inRoot(docReal) ? toWs(docReal) : null, dirs = graphicsPathOf(text);
+  // (\input and \include, inputs.ts: the files the document asks for, read from the same folder by the same rules (inside
+  //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
+  const known = new Map<string, Known>();
+  let inputBytes = 0;
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), version: known.size } }; };
+  let first: any;
+  for (let round = 0; ; round++) {
+    const { ei, opt } = inputsNow();
+    first = new Engine({}).update(text, { cold: true, inputs: opt });
+    const want = doc && round < 64 ? ei.wanted(first.inputRefs as string[]) : [];
+    if (!want.length) break;
+    for (const w of want) {
+      const disk = toDisk(w);
+      let real = "";
+      try { real = realpathSync(disk); } catch {}
+      let k: Known;
+      if (!real) k = { absent: true };
+      else if (!inRoot(real)) k = { why: "a link to outside the folder the command runs in" };
+      else if (!statSync(real).isFile()) k = { absent: true };
+      else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: "too large" };
+      else { const b = readFileSync(real); k = admitInput(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), inputBytes, [...known.values()].filter((x) => "text" in x).length); if ("text" in k) inputBytes += b.length; }
+      known.set(w, k);
+    }
+  }
   let kept = 0;
   for (const name of first.imageRefs as string[]) {
     const c = doc ? imageCandidates(name, doc, dirs) : { ok: false as const, why: "the .tex is outside the folder the command runs in: run it from a folder that holds it" };
@@ -162,7 +186,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
   // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
-  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true });
+  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true, inputs: inputsNow().opt });
   const states = r.sageStates as State[];
   const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
     sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);

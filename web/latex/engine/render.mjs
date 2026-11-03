@@ -199,7 +199,7 @@ const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markb
 class Renderer {
   constructor(opts) {
     this.opts = opts || {};
-    this.images = this.opts.images || {}; this.imageRefs = new Set();
+    this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
     this.cls = "article"; this.book = false; this.clsOpt = "";
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
@@ -342,6 +342,13 @@ class Renderer {
         case "S": if (!this.inPreamble) this.sageShown.add(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
         case "err":
+          // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
+          if (n.code === "input") {
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
+            else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
+            break;
+          }
           // (a half-typed argument: what was read, then a note; LaTeX would say "Paragraph ended before \x was complete")
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
@@ -1154,5 +1161,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], inputMisses: R.inputMisses, frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }
