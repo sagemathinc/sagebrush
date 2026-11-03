@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=60
 // Download as HTML (web/board/export.ts): each board exported from the
 // site (its board script fetched as board-nosync.js, the frame's own, never
 // board.js or the frame page) opens from a file, offline (the network off), with its pages, math

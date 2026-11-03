@@ -1,3 +1,5 @@
+// ci: web-artifacts.1 order=10 runner=bun chrome
+// ci: web-artifacts.2 order=10 runner=bun chrome env=AGENTS_LATEX=1
 // Notebook and LaTeX artifacts in the agents chat (web/agents; the artifacts plan r2 + r2.1), end to end in headless
 // Chromium: the built page (dist/agents, SAGEBRUSH_AGENTS=1), served cross-origin isolated by web/serve.py on a
 // loopback port, paired as a person pairs it (a ?pair= link, Connect, the grant dialog) with a stand-in for

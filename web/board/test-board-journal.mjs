@@ -1,3 +1,4 @@
+// ci: web-runner order=280 runner=bun chrome
 // The board journal (web/board/journal.ts, Workspace.journalWrite) in headless Chromium,
 // with real IndexedDB and Web Locks: a board's T1 then T2, its load's recovery (an old row stamped), the row's
 // envelope all or none whatever writes it, markOnly's races, the record/document boundary, the kind's law and merge,

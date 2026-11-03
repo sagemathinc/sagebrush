@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=30
 // ipywidgets' widgets on their own, on the full page in headless Chromium: a
 // widget (or a VBox of them) that is a cell's value is drawn as controls;
 // moving one sets its .value, calls its observers and Button.on_click

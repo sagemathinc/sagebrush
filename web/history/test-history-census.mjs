@@ -1,3 +1,4 @@
+// ci: web-runner order=270 runner=bun
 // History's static census (web/history/census.mjs) and its control: the tree as it is passes, every site classified;
 // a fixture with one new readwrite transaction on "entries", outside the map, fails it, named.
 //   bun web/history/test-history-census.mjs

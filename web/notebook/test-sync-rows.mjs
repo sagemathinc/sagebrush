@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=140 runner=bun
 // web/notebook/sync-rows.js and stores.js's admission (plan-sync-slice2-client r4 §4, F1, F2, F8): sync's rows'
 // keys, their bounds, their order and their charge; the one predicate; document ids that would reach sync's
 // reserved range refused at every store opened and every import; sync rows owned by the workspace in both history

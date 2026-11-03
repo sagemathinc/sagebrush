@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=120
 // A board's tour across its pages (mount.ts, William's B4): → and ← go
 // through every page's intro and steps, and the caption, its arrows with
 // it, is shown on every page of a board of pages, a page without an intro
