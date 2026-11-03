@@ -8,8 +8,8 @@
 #   scripts/build-all.sh --no-engine # keep the committed wasm/sagebrush-engine.wasm (no Rust needed for it)
 #
 # The prerequisites and their versions are DEVELOPMENT.md's. This script checks them first and stops on a
-# missing one; a version that differs from CI's pin is a warning (budgets that record exact bytes or heap
-# would then differ).
+# missing one, and on a bun older than CI's pin (an older Bun.build gives the build no metafile); another
+# version that differs from CI's pin is a warning (budgets that record exact bytes or heap would then differ).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP=1 ENGINE=1
@@ -31,9 +31,21 @@ need uv "uv"
 need cargo "Rust via rustup (engine/rust-toolchain.toml pins the engine's toolchain)"
 need rustup "rustup"
 pin node "$(node --version)" v24.21.0
+# (at least CI's bun: an older one's Bun.build gives web/build.ts no metafile, issue #511; a newer one is a warning)
+if [ "$(printf '%s\n' 1.4.4 "$(bun --version)" | sort -V | head -1)" != 1.4.4 ]; then
+  echo "bun $(bun --version) is older than 1.4.4, CI's pin, which the build needs: bun upgrade (or curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4)"
+  exit 1
+fi
 pin bun "$(bun --version)" 1.4.4
 case "$(pnpm --version)" in 11.*) ;; *) echo "warning: pnpm is $(pnpm --version); CI uses pnpm 11" ;; esac
 if [ "$APP" = 1 ]; then need tauri "the Tauri 2 CLI: npm install -g @tauri-apps/cli@^2, or --no-app"; fi
+# (on Linux the app links against WebKitGTK; without its development files the Tauri build fails late, at the link)
+if [ "$APP" = 1 ] && [ "$(uname -s)" = Linux ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+  echo "missing: WebKitGTK 4.1's development files, which the desktop app needs on Linux:"
+  echo "  sudo apt-get install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf"
+  echo "(or build without the app: scripts/build-all.sh --no-app)"
+  exit 1
+fi
 
 summary=()
 step() {
@@ -53,7 +65,19 @@ if [ "$ENGINE" = 1 ]; then
 fi
 step "TypeScript (dist/)" pnpm run build
 step "the CLI (build/cli/pyjs.cjs)" node scripts/build-cli.mjs
-step "the notebook page (web/dist)" bun web/build.ts
+# (web/build.ts exits 3 when the bundles' npm packages changed and the notices are stale: write them, as
+# scripts/third-party-notices.mjs does, and build again; CI's own check stays strict)
+web_page() {
+  local rc=0
+  bun web/build.ts || rc=$?
+  if [ "$rc" = 3 ]; then
+    echo "build-all: writing the third-party notices (node scripts/third-party-notices.mjs; commit them with your change), then building the page again"
+    node scripts/third-party-notices.mjs && bun web/build.ts
+  else
+    return "$rc"
+  fi
+}
+step "the notebook page (web/dist)" web_page
 # (again, as CI does: the CLI embeds the page's assets)
 step "the CLI again, with the page" node scripts/build-cli.mjs
 step "the board package (packages/sagebrush-board)" bash -c 'cd packages/sagebrush-board && bun build.mjs'
