@@ -1012,6 +1012,31 @@ class Expression:
         # the assumptions: sqrt(x^2) is x under assume(x > 0))
         return _assume_simplify(self) if _ASSUMPTIONS else self
 
+    def minpoly(self, var="x", algorithm=None, bits=None, degree=None, epsilon=0):
+        """The minimal polynomial over QQ of an algebraic number given exactly
+        (through QQbar), as Sage's; an expression with variables, or a number
+        that isn't algebraic, is Sage's TypeError.
+
+        EXAMPLES::
+
+            sage: (sqrt(2) + sqrt(3)).minpoly()
+            x^4 - 10*x^2 + 1
+            sage: (1 + sqrt(5)).minpoly(var='t'), I.minpoly(), (sqrt(2) + 1/2).minpoly()
+            (t^2 - 2*t - 4, x^2 + 1, x^2 - x - 7/4)
+            sage: pi.minpoly()
+            Traceback (most recent call last):
+            ...
+            TypeError: Illegal initializer for algebraic number
+        """
+        if self.variables():
+            raise TypeError("cannot evaluate symbolic expression numerically")
+        import _sage_qqbar
+        try:
+            a = _sage_qqbar.QQbar(self)
+        except (TypeError, ValueError):
+            raise TypeError("Illegal initializer for algebraic number")
+        return a.minpoly(var)
+
     def simplify_full(self):
         """Full simplification (also full_simplify).
 

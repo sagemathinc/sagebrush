@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=160
 // web/notebook/anchor.js in headless Chromium: restoreAnchor keeps a cell in
 // its place while the page settles, and lets go when someone else scrolls.
 // The module's own source runs in a page of twelve 121 px cells in an 800 px

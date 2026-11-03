@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=40 runner=bun chrome
 // astra's probes on sync-outbox 8550de5e (CORR-855-1), with their cases in astra-855-cases.js:
 //   CHROME=google-chrome bun web/workspace/test-workspace-sync-outbox-855.mjs
 import { spawn } from "node:child_process";

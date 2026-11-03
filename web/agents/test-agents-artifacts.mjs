@@ -1,3 +1,5 @@
+// ci: web-artifacts.1 order=10 runner=bun chrome
+// ci: web-artifacts.2 order=10 runner=bun chrome env=AGENTS_LATEX=1
 // Notebook and LaTeX artifacts in the agents chat (web/agents; the artifacts plan r2 + r2.1), end to end in headless
 // Chromium: the built page (dist/agents, SAGEBRUSH_AGENTS=1), served cross-origin isolated by web/serve.py on a
 // loopback port, paired as a person pairs it (a ?pair= link, Connect, the grant dialog) with a stand-in for
@@ -10,13 +12,17 @@
 //   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
+import { runA14 } from "./a14-cases.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
-const LATEX = process.env.AGENTS_LATEX === "1";
+// (the build's own answer: the LaTeX editor is on by default (web/build.ts), so whether this web/dist has it, not the
+// variable alone, decides which LaTeX checks apply; AGENTS_LATEX=1 then insists that it has it)
+const LATEX = existsSync(join(here, "..", "dist", "sagebrush-latex.js"));
+if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 but this web/dist has no sagebrush-latex.js");
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 const want = (s) => !ONLY || ONLY.has(s);
 let failures = 0;
@@ -117,9 +123,9 @@ const stamps = [];
 const stamp = (what) => stamps.push(`${what} +${Date.now() - t0}ms`);
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
 // (--password-store=basic: no OS keyring, whose absence can stall Chrome's first load; c1's F1, the grader's hypothesis)
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
 stamp("spawned");
-const cdpPort = await devtoolsPort(profile);
+const cdpPort = await devtoolsPort(profile, undefined, { child: chrome });
 stamp("devtools port");
 let targets;
 for (let i = 0; i < 300; i++) {
@@ -144,8 +150,18 @@ const logs = []; // (the page's errors and warnings: shown when something fails)
 const urls = new Map(); // (request id -> URL, to name a failed request)
 const bad = []; // (the failed requests and non-2xx responses: shown when something fails)
 let loads = 0; // (the page's load events so far)
+// (logging only, A14 r2.8 per @sagebrush's ruling: each request's start, status and end, ms after the spawn, printed
+// once for the first pairing load, so a slow first load names the request that held it)
+const timing = new Map();
+let firstLoadLogged = false;
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  try { // (recorded for the first pairing load only; never throws)
+    if (firstLoadLogged) {}
+    else if (m.method === "Network.requestWillBeSent") timing.set(m.params.requestId, { url: m.params.request.url, start: Date.now() - t0 });
+    else if (m.method === "Network.responseReceived" && timing.has(m.params.requestId)) timing.get(m.params.requestId).status = m.params.response.status;
+    else if ((m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") && timing.has(m.params.requestId)) timing.get(m.params.requestId).end = Date.now() - t0;
+  } catch {}
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
@@ -278,13 +294,31 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 async function pair() {
   const before = loads;
   stamp("pair: navigate");
+  if (!firstLoadLogged) timing.clear();
   await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${daemon.port}` });
   // (the page loaded before its Connect is looked for: a load that never comes fails here, with the page's state)
   const t1 = Date.now();
   while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  if (!firstLoadLogged) {
+    // (to its own file beside the row's tmp files, never stdout: the logs the verdict reads are unchanged; a logging
+    // failure only writes "timing-unavailable" and never changes the result)
+    firstLoadLogged = true;
+    const file = join(process.env.TMPDIR || tmpdir(), "first-load-requests.txt");
+    try {
+      const lines = [...timing.values()].sort((a, b) => a.start - b.start).map((r) => {
+        let path = r.url;
+        try { const u = new URL(r.url); path = u.origin === site ? u.pathname : r.url; } catch {}
+        return `+${r.start}ms ${r.status ?? "-"} ${r.end == null ? "pending" : `+${r.end}ms`} ${path.slice(0, 160)}`;
+      });
+      appendFileSync(file, `== ${process.argv.slice(1).join(" ").slice(0, 120)} (navigate ${stamps.find((s) => s.startsWith("pair: navigate"))})\n${lines.join("\n")}\n`);
+    } catch (err) {
+      try { appendFileSync(file, `timing-unavailable: ${String(err).slice(0, 200)}\n`); } catch {}
+    }
+  }
   if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
-  await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
-  await ev(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
+  // (the Connect dialog's own button: the page's hint by Send (A14) can carry a "Connect" too)
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   const t = Date.now();
@@ -1667,10 +1701,19 @@ try {
 } finally {
   cdp.close();
   chrome.kill("SIGKILL");
-  server.kill();
   daemon.stop(true);
   await sleep(200);
   rmSync(profile, { recursive: true, force: true });
+  // ======================================================================== A14: reconnect after a reload
+  // (its own Chromes and stand-ins, one per case, on this site; in the plain build only: nothing of it is LaTeX's)
+  if (!LATEX) {
+    try {
+      await runA14({ site, ok, want });
+    } catch (e) {
+      ok(false, "A14: the cases ran to their end: " + (e?.stack ?? e));
+    }
+  }
+  server.kill();
 }
 console.log("timing: " + stamps.join(", "));
 console.log(failures ? `${failures} FAILED` : "all passed");

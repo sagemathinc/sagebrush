@@ -499,7 +499,7 @@ newBuiltinModule("sys", (m) => {
     const e = handled();
     return e === null ? tuple([null, null, null]) : tuple([typeOf(e), e, e.__traceback__ ?? null]);
   });
-  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
+  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);
 
@@ -1848,6 +1848,16 @@ newBuiltinModule("_fs", (m) => {
     }
   };
   fn(m, "exists", (path: string) => quiet(() => fs.existsSync(at(path))));
+  // (open()'s "a": whether an existing file may be written, before its first flush writes it; one not there yet is
+  // made at that flush, its error raised there)
+  fn(m, "may_append", (path: string) => {
+    try {
+      fs.accessSync(at(path), 2);
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") return oserr(e, path);
+    }
+    return null;
+  });
   fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
   // (CPython's path_converter, for os.path (lib/posixpath.py): a path argument
   // of stat ("stat", allowFd), lstat ("lstat"), or posix._path_normpath and

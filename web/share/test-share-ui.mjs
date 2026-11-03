@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=50 chrome
 // End to end in headless Chromium: share a notebook and a data file from the
 // notebook page (File > Share…), open the link, and run it, against the
 // share API in Miniflare (web/share/serve-dev.mjs) and web/dist.

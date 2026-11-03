@@ -1,6 +1,8 @@
+// ci: checks.3 order=40
 // llms.txt and the board format page (web/llms.txt, web/board-format.md), as
 // built into web/site/public by `bun web/build.ts`:
-// - every https://sagebrush.space/ link names a file the site serves, and a
+// - every link to the site (relative, /path; or https://sagebrush.space/path, only where marked absolute) names a
+//   file the site serves, and a
 //   #fragment on an HTML page names an element id on it;
 // - the board format page's example is a board that parses and renders.
 // Run after the build: node web/test-llms.mjs
@@ -21,6 +23,16 @@ const check = (ok, what) => {
   if (!ok) failed++;
 };
 
+// /version.json (web/build.ts): what the deploy is, for agents: the core commit, the build time and ids
+if (hasSite) {
+  let v = null;
+  try { v = JSON.parse(readFileSync(join(pub, "version.json"), "utf8")); } catch {}
+  check(!!v && /^[0-9a-f]{40}$/.test(v.core ?? "") && !Number.isNaN(Date.parse(v.built)) && /^[0-9a-f]{16}$/.test(v.engine ?? "") && /^[0-9a-f]+$/.test(v.build ?? "") && typeof v.latex === "boolean",
+    "version.json: the core commit, the build time, the engine's and library's ids, the LaTeX flag: " + JSON.stringify(v));
+  const h = readFileSync(join(pub, "_headers"), "utf8");
+  check(/^\/version\.json\n  Cache-Control: no-store\n  Access-Control-Allow-Origin: \*$/m.test(h), "version.json: never cached, readable from any origin (_headers)");
+}
+
 // a path on the site, as the files the site serves
 function served(path) {
   const p = decodeURIComponent(path.replace(/[?#].*$/, ""));
@@ -35,7 +47,14 @@ if (!hasSite) console.log("site absent: llms.txt and board-format.md are not che
 else for (const file of ["llms.txt", "board-format.md"]) {
   check(existsSync(join(pub, file)), `${file} is built into the site`);
   const text = readFileSync(join(here, file), "utf8");
-  const links = new Set([...text.matchAll(/https:\/\/sagebrush\.space(\/[^\s)`"'<>]*)?/g)].map((m) => m[1] ?? "/"));
+  // (links are relative to the site serving the file, so DEV's name DEV's files: @sagebrush, Nov 2. An absolute
+  // https://sagebrush.space link stays only where another site must use it, and says so: "absolute")
+  for (const line of text.split("\n")) if (/https:\/\/sagebrush\.space\//.test(line)) check(/absolute/.test(line), `${file}: an absolute sagebrush.space link says why it is absolute: ${line.slice(0, 100)}`);
+  const links = new Set([
+    ...[...text.matchAll(/https:\/\/sagebrush\.space(\/[^\s)`"'<>]*)?/g)].map((m) => m[1] ?? "/"),
+    // (not in an HTML comment: the generated sections' markers, <!-- /fields -->)
+    ...[...text.replace(/<!--[\s\S]*?-->/g, "").matchAll(/(?<=[\s(`])(\/(?!\/)[^\s)`"'<>]*)/g)].map((m) => m[1]),
+  ]);
   for (const raw of links) {
     const path = raw.replace(/[.,;:]+$/, "");
     let ok = served(path);
@@ -45,7 +64,7 @@ else for (const file of ["llms.txt", "board-format.md"]) {
       const f = join(pub, decodeURIComponent(frag[1]), frag[1].endsWith("/") || frag[1] === "" ? "index.html" : "");
       ok = existsSync(f) && new RegExp(`id=["']${frag[2]}["']`).test(readFileSync(f, "utf8"));
     }
-    check(ok, `${file}: https://sagebrush.space${path}`);
+    check(ok, `${file}: ${path}`);
   }
 }
 

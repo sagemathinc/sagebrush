@@ -1,3 +1,5 @@
+// ci: web-browser/terminal.2 order=10
+// ci: inline (ci.yml)
 // A long line's pages and the clipboard (the long-line design: pages; board's B-LL-4): with the panel's own CSS, a
 // line of 16 pages as web/shell/panel.ts paints it (the first 4 Ki inline, then inline-block page boxes, the line end
 // after the last box), between two short lines.  Selecting the output must give the long line as ONE line, every

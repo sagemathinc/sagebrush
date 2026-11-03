@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // Line 3's size controls (line-3 case §4c, D-3a..g): a source change in a worktree, the page built six ways (PROD and
 // DEV, shipped and measuring, each measuring flavour twice), line 3 run on it with the stated block, the change
 // undone and the worktree checked clean before the next. Each control's expected outcome is closed: the exact
@@ -42,9 +43,10 @@ const build = (vars) => {
   return readFileSync(join(W, "web/dist/index.html"));
 };
 const six = () => ({
-  prodShip: build({}), devShip: build({ SAGEBRUSH_LATEX_PREVIEW: "1" }),
-  prodMeas: build({ SAGEBRUSH_MEASURE_IDS: "keep" }), devMeas: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "1" }),
-  prodMeas2: build({ SAGEBRUSH_MEASURE_IDS: "keep" }), devMeas2: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "1" }),
+  // (the editor is on by default now (web/build.ts): "prod" here is a build without it, SAGEBRUSH_LATEX_PREVIEW=0)
+  prodShip: build({ SAGEBRUSH_LATEX_PREVIEW: "0" }), devShip: build({ SAGEBRUSH_LATEX_PREVIEW: "1" }),
+  prodMeas: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "0" }), devMeas: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "1" }),
+  prodMeas2: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "0" }), devMeas2: build({ SAGEBRUSH_MEASURE_IDS: "keep", SAGEBRUSH_LATEX_PREVIEW: "1" }),
 });
 const withEdit = (name, [file, from, to], fn) => {
   const p = join(W, file), s = readFileSync(p, "utf8");

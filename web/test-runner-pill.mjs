@@ -1,3 +1,4 @@
+// ci: web-runner order=40 chrome
 // Run after bun web/build.ts, through ptest. Localhost only; no browser packages.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';

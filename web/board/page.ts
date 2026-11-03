@@ -59,7 +59,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
-import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
+import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG;
@@ -81,6 +81,7 @@ import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "..
 declare const __SB_NO_SYNC__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
+import { latexOn } from "../latex/boot";
 // (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
 // board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
 // fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
@@ -683,6 +684,48 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 // view is kept: the board journal's load bridge)
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
+// A board's title is its file's name, as a notebook's is (William's B2, the notebook page's wsRenameSoon): a title
+// changed by an edit on this page (mount.ts titleEdited; never a change from elsewhere) renames its file in the workspace, after the saves before it, to a free name beside it (never over
+// another), only this board (its identity checked holding the lock). A rename in the file browser retitles the board
+// instead (renamed, below), which then matches its file and renames nothing.
+let boardRenameTimer: ReturnType<typeof setTimeout> | undefined, boardRenameGen = 0;
+function boardRenameSoon(id: string, title: unknown) {
+  clearTimeout(boardRenameTimer);
+  const gen = ++boardRenameGen, base = safeTitle(title);
+  boardRenameTimer = setTimeout(async () => {
+    const w = ws;
+    if (!w) return;
+    // (a conflict: the board written, moved or replaced since it was read; asked again from the start, at most three
+    // times, so a save of this page's own in between still renames, and another's newer title renames nothing)
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        await wsWriting;
+        if (gen !== boardRenameGen) return;
+        const from = await w.pathOf("board", id);
+        if (!from || splitExt(nameOf(from))[0] === base) return;
+        const e = await w.stat(from);
+        if (!e || e.kind !== "board" || e.ref !== id) return;
+        // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
+        // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence.  Its revision is
+        // the rename's too, checked holding the lock: anything written after this read stops it, astra's BOARD-RENAME-1)
+        const now = await w.read(from).catch(() => null);
+        if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
+        const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
+        const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
+        if (!to || to === from) return;
+        // (tests: a write between the read and the rename)
+        await (globalThis as any).__SB_BOARD_TEST__?.beforeRename?.(from);
+        await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created, rev: now.rev } });
+        return;
+      } catch (err: any) {
+        if (err?.code === "conflict") continue;
+        // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
+        if (err?.code !== "missing" && err?.code !== "exists") console.warn("workspace: a board's rename:", err);
+        return;
+      }
+    }
+  }, 800);
+}
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
   // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
   if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
@@ -933,6 +976,16 @@ const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
 // (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
+// (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
+// notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
+// open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+function openTex(e: Entry, tab: boolean): boolean {
+  if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
+  const url = "/?tex=" + e.fid;
+  if (tab) window.open(url, "_blank", "noopener");
+  else void leaveFor(url, nameOf(e.path));
+  return true;
+}
 function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
@@ -1352,6 +1405,9 @@ const host: BoardHost = {
     return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (a title changed by an edit on this page: its file renamed to follow; a change from elsewhere, an agent's write
+  // or another tab's, is never a rename: CI on #531)
+  titleEdited: (t) => { if (local && ws) boardRenameSoon(source.slice(6), t); },
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
@@ -1533,6 +1589,7 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
+      openFile: openTex,
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),

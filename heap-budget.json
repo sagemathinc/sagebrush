@@ -1,18 +1,18 @@
 {
- "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review",
+ "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review. The load heap is bimodal, run to run with the same build: about 72.45-73.15 MB, or about 73.4-73.55 MB, so a median of 7 is in either mode (Nov 3: 26 CI runs, 182 processes, 72450688..73542128; 20 fresh processes on master 85999b33, 72542432..73457568). The ceiling, 71 MiB, is 906768 B over the highest single run seen; at it _COLLECT_MAX is 25600 (collect_floor 20000).",
  "toolchain": {
   "node": "24.21.0"
  },
  "heap_mib": 96,
  "runs": 7,
- "ceiling": 73400320,
+ "ceiling": 74448896,
  "collect_floor": 20000,
  "measured": {
-  "median": 68767184,
-  "max": 69263592,
+  "median": 72938312,
+  "max": 73237896,
   "collect_max": [
-   29696,
-   30720
+   26624,
+   26624
   ]
  }
 }

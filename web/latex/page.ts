@@ -9,12 +9,15 @@
 import type { Workspace, Entry } from "../workspace/api";
 import { nameOf, parentOf } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
-import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images";
+import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
+import { engineInputs, admitInput, type Known } from "./inputs";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
+import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import { EXAMPLES, type Example } from "./examples";
+import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
@@ -31,6 +34,16 @@ const loadDocComments = (): Promise<typeof import("./comments-doc")> => import(d
 // (an agent on this computer, paired with the page: agent.ts, a chunk of its own, /sagebrush-latex-agent.js; mounted
 // once per page, as the editor switches files in place)
 const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
+// (the presenter, present.ts: a chunk of its own, /sagebrush-latex-present.js; a failed fetch is tried again by a URL of its own)
+const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
+let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
+const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
+// (Run's Sage session, run-core.mjs: the hosting page's kernel and runner classes (Host.sandbox), its interpreter in
+// the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
+// for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
+// current only while it is the last one asked for, on a page not disposed of)
+let sageSession: ReturnType<typeof sessionOf> | null = null;
+let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -39,12 +52,15 @@ const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `$
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 // the source's font size (px) and the preview's zoom (%): their ranges, defaults and keys in localStorage
+/** The largest results file read (`sagebrush latex run`'s, beside the .tex). */
+const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
-type Host = { ws: Workspace; fid: string; back(): void };
+// (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
+type Host = { ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
 // (a reply's piece: its group, its HTML and, from the worker, its UTF-8 size)
@@ -148,7 +164,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   noteShown();
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), dirty: () => false };
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
@@ -200,7 +216,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, status, tools);
+  // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
+  // step by step through their overlays; shown once the preview has slides
+  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Escape stops)"; presentBtn.hidden = true;
+  // Print / Save as PDF (William, Nov 2: "an easy PDF download, so a person can print out something or archive it"; a
+  // full LaTeX environment with direct PDF generation is out of scope): the browser prints the rendered preview only
+  // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
+  const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
+  printBtn.onclick = () => printPreview();
+  // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
+  const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; runBtn.hidden = true;
+  head.append(back, newBtn, title, dirty, save, toggle, runBtn, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -307,26 +333,161 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const images: Record<string, string | { why: string }> = {};
   const blobs = new Set<string>();
   let imageBytes = 0;
+  // (the code's results, paper.tex.results.json beside it: `sagebrush latex run`'s; read when the page opens, when
+  //  the window comes back into focus, and before an agent's tool call; bounded, and checked by the worker and renderer)
+  const results: { wrapper: string | null; saved: unknown[] } = { wrapper: null, saved: [] };
+  let resultsSeen: unknown = undefined;
+  const loadResults = async () => {
+    try {
+      const p = where.path + ".results.json", e = await host.ws.stat(p).catch(() => undefined);
+      if (!live()) return;
+      const seen = e && !e.trashed ? `${e.fid}:${e.updated}:${e.size}` : null;
+      if (seen === resultsSeen) return;
+      let next: typeof results = { wrapper: null, saved: [] };
+      if (e && !e.trashed && (e.size ?? 0) <= RESULTS_MAX) {
+        const j = JSON.parse(new TextDecoder().decode((await host.ws.readUpTo(p, RESULTS_MAX)).content));
+        if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) next = { wrapper: j.wrapper, saved: j.items };
+      }
+      if (!live()) return;
+      // (the file counted as seen only once it was read and parsed: one that failed or was malformed is read again
+      //  at the next chance, astra's #519 advisory; its old results stay meanwhile)
+      resultsSeen = seen;
+      results.wrapper = next.wrapper; results.saved = next.saved;
+      request();
+    } catch {}
+  };
+  // ---- \input and \include (William's L4, Nov 2; inputs.ts): the files the document asks for, found as TeX finds them
+  // (from this file's folder, ../, a leading "/" for the top), read by identity as images are, bounded, given to the
+  // engine; one reader at a time; a change to any of them (another tab, Python, an agent) reads it again
+  const inputs = { docPath: where.path, known: new Map<string, Known>(), version: 0 };
+  let inputBytes = 0, readingInputs = false;
+  const inputsWanted = new Set<string>();
+  const readInputs = async (refs: string[], tok: Token) => {
+    for (const p of engineInputs(where.path, inputs.known).wanted(refs)) inputsWanted.add(p);
+    if (readingInputs || !inputsWanted.size) return;
+    readingInputs = true;
+    let changed = false;
+    try {
+      for (const p of inputsWanted) {
+        inputsWanted.delete(p);
+        if (inputs.known.has(p) || inputs.known.size >= 1024) continue;
+        const e = await host.ws.stat(p).catch(() => undefined);
+        if (!alive(tok)) { inputsWanted.clear(); return; }
+        let k: Known;
+        if (!e || e.kind !== "file" || e.trashed) k = { absent: true };
+        else if (e.remote) k = { why: "it is in the cloud: open it on the device that made it" };
+        else {
+          let r: { entry: Entry; content: Uint8Array } | null = null;
+          try { r = await host.ws.readUpTo(p, EDIT_MAX + 1); } catch {}
+          const now = await host.ws.stat(p).catch(() => undefined);
+          if (!alive(tok)) { inputsWanted.clear(); return; }
+          if (!r) k = { why: "not readable" };
+          else if (!now || now.fid !== e.fid || r.entry.fid !== e.fid || now.updated !== e.updated) k = { why: "changed while it was read" };
+          else {
+            const count = [...inputs.known.values()].filter((x) => "text" in x).length;
+            k = admitInput(r.content, inputBytes, count);
+            if ("text" in k) inputBytes += r.content.length;
+          }
+        }
+        inputs.known.set(p, k); changed = true;
+      }
+    } finally { readingInputs = false; }
+    if (changed && alive(tok)) { inputs.version++; request(); }
+  };
+  // (a file the document read, or looked for, changed: forgotten, so the next render asks for it and it is read again)
+  const unwatchInputs = host.ws.watch((c) => {
+    let again = false;
+    for (const op of c.ops ?? []) for (const q of [op.path, op.to]) if (q && inputs.known.has(q)) {
+      const k = inputs.known.get(q)!; if ("text" in k) inputBytes -= new TextEncoder().encode(k.text).length;
+      inputs.known.delete(q); again = true;
+    }
+    if (again) { inputs.version++; request(); }
+  });
+  life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
+    inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
     onEdit: () => { showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
+  void loadResults();
+  window.addEventListener("focus", () => void loadResults(), on);
+  const slidesNow = () => Array.from(preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")) as HTMLElement[];
+  // (the slide to start at: the first one whose bottom is in the preview's view)
+  const frameInView = () => { const top = right.getBoundingClientRect().top; const k = slidesNow().findIndex((s) => s.getBoundingClientRect().bottom > top + 8); return k < 0 ? 1 : k + 1; };
+  let presenting: { stop(): void } | null = null;
+  presentBtn.onclick = () => void loadPresent().then((m) => {
+    if (!live() || presenting) return;
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+  }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
+  E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  life.signal.addEventListener("abort", () => presenting?.stop());
 
-  // ---- images (r5 §3): resolved inside the file's folder, read by identity, checked, shown from blob: URLs
+  // ---- Run (run-core.mjs): the SageTeX items of the text in the editor now (the preview's own list of them, so only
+  // once it has caught up), run in page order in this page's Sage session, on the person's click only (never on
+  // open); their states written as the results file beside the .tex, then read and shown as the CLI's are. A second
+  // click while it runs stops it.
+  let running = false;
+  E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
+  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
+  runBtn.onclick = async () => {
+    if (running) { sageSession?.kernel?.interrupt(); say("stopping…"); return; }
+    if (!host.sandbox) { say(NO_SANDBOX); return; }
+    const session = (sageSession ??= sessionOf(sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
+    const c = E.lastCheck();
+    if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
+    const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
+    if (!items.length) { say("No SageTeX code to run"); return; }
+    running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
+    const my = ++runGen, run = new AbortController(), stop = () => run.abort();
+    life.signal.addEventListener("abort", stop, { once: true });
+    const current = () => live() && my === runGen;
+    try {
+      const r = await runAndSave({
+        items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
+        session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
+        exec: runIn,
+      });
+      if (r.stale || !current()) return;
+      if (r.msg) { say(r.msg); return; }
+      await loadResults();
+      const bad = r.states.filter((x: any) => x.s !== "ok").length;
+      say(`Ran ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : ""));
+    } catch (err) {
+      if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
+  };
+  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
+  registerLatexTools(); setTarget(agentTarget);
+  life.signal.addEventListener("abort", () => clearTarget(agentTarget));
+
+  // ---- images (r5 §3): resolved as TeX does (images.ts), read by identity, checked, shown from blob: URLs
   // One resolver at a time (i1c01 A3-1): a reply's names join the queue, and only the running loop reads, counts and
   // keeps images, so no two resolutions are admitted against the same count or bytes, and a name is read once.
   const wanted = new Set<string>();
   let resolving = false;
   // (a read that completes after this page was disposed of keeps nothing: E.destroy leaves the gate's document current)
   const alive = (tok: Token) => !life.signal.aborted && gate.sameDoc(tok);
+  // (\graphicspath, from the source: when it changes, every name is resolved again)
+  let gpKey = "";
+  // (a name not found: the files of the same name elsewhere, from one listing of the workspace per resolution)
+  let everywhere: Promise<Entry[]> | null = null;
+  const elsewhere = async (name: string) => {
+    everywhere ??= host.ws.list("/", { recursive: true }).catch(() => [] as Entry[]);
+    const leaf = name.replace(/^.*\//, ""), want = /\.[A-Za-z0-9]+$/.test(leaf) ? [leaf] : IMAGE_EXTS.map((x) => leaf + x);
+    return (await everywhere).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && want.includes(e.path.replace(/^.*\//, ""))).map((e) => e.path).slice(0, 3);
+  };
   const resolveImages = async (refs: string[], tok: Token) => {
+    const dirs = graphicsPathOf(src.value), key = JSON.stringify(dirs);
+    if (key !== gpKey) { gpKey = key; for (const n of Object.keys(images)) delete images[n]; dropImages(); imageBytes = 0; }
     for (const name of refs) if (!Object.hasOwn(images, name)) wanted.add(name);
     if (resolving) return;
     resolving = true;
+    everywhere = null;
     let changed = false;
     try {
       // (a Set visits names added while it is iterated: those from replies that came during an await)
@@ -334,12 +495,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         wanted.delete(name);
         if (Object.hasOwn(images, name)) continue;
         if (Object.keys(images).length >= IMAGE_BOUNDS.perDocument) { images[name] = { why: "too many images" }; changed = true; continue; }
-        const c = imageCandidates(name, where.path);
+        const c = imageCandidates(name, where.path, dirs);
         if (!c.ok) { images[name] = { why: c.why }; changed = true; continue; }
         let found: Entry | undefined;
         for (const p of c.paths) { const e = await host.ws.stat(p).catch(() => undefined); if (e && e.kind === "file" && !e.trashed) { found = e; break; } }
         if (!alive(tok)) { wanted.clear(); return; }
-        if (!found) { images[name] = { why: "not found" }; changed = true; continue; }
+        if (!found) { const why = notFoundWhy(where.path, c.searched, await elsewhere(name), false, name); if (!alive(tok)) { wanted.clear(); return; } images[name] = { why }; changed = true; continue; }
         if ((found.size ?? 0) > IMAGE_BOUNDS.perImage || imageBytes + (found.size ?? 0) > IMAGE_BOUNDS.total) { images[name] = { why: "too large" }; changed = true; continue; }
         let r: { entry: Entry; content: Uint8Array };
         // (the test build only: the page test can hold an image read here; elsewhere this folds away)
@@ -363,6 +524,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (changed && alive(tok)) request();
   };
   const dropImages = () => { for (const u of blobs) URL.revokeObjectURL(u); blobs.clear(); };
+  // (back in this tab, an image not found is looked for again: the file may have been moved or added meanwhile)
+  window.addEventListener("focus", () => {
+    let again = false;
+    for (const [n, v] of Object.entries(images)) if (typeof v !== "string" && v.why.startsWith("not found")) { delete images[n]; again = true; }
+    if (again) request();
+  }, on);
 
   // ---- editing
   const isDirty = () => src.value !== savedText;
@@ -403,7 +570,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });
   void host.ws.stat(cmPath()).then((e) => { if (e && !e.trashed && live()) void comments(); }, () => {});
-  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); };
+  // (the agent's route to a PDF, documented in llms.txt: window.sagebrush.latex.print() opens the same dialog;
+  // printMode(true) puts the page in its print layout for a browser an agent drives, whose own print-to-PDF (CDP
+  // Page.printToPDF) then makes the file, and printMode(false) puts it back)
+  const sb = ((globalThis as any).sagebrush ??= {});
+  const handle = { print: () => printPreview(), printMode: (on: boolean) => document.documentElement.classList.toggle("tex-print", !!on), fid: host.fid };
+  sb.latex = handle;
+  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   current = { dispose: () => dispose(), dirty: isDirty };
 
   // ---- saving (r6b E5): the opened file only, last write wins
@@ -443,3 +616,32 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   void parentOf; void enc;
 }
+
+/** The preview printed alone (PRINT_CSS, while <html> has tex-print): the browser's dialog, with "Save as PDF". */
+export function printPreview() {
+  const html = document.documentElement;
+  html.classList.add("tex-print");
+  const done = () => html.classList.remove("tex-print");
+  window.addEventListener("afterprint", done, { once: true });
+  try { window.print(); } finally { setTimeout(() => { if (html.classList.contains("tex-print")) done(); }, 0); }
+}
+
+/** The print layout, only while <html> has tex-print: the rendered preview alone (no editor, header, banner, comments'
+ * margin or file browser), on the page's own margins, with breaks kept off headings, math, floats and tables. */
+export const PRINT_CSS = `
+@media print {
+  @page { margin: 18mm 16mm; }
+  html.tex-print body > :not(:has(.tex-page)) { display: none !important; }
+  html.tex-print body { background: #fff !important; }
+  html.tex-print .tex-page { position: static !important; display: block !important; inset: auto !important; left: 0 !important; background: #fff !important; z-index: auto; }
+  html.tex-print .tex-page > :not(.tex-main), html.tex-print .tex-left, html.tex-print .tex-right > :not(.tex-preview), html.tex-print .tex-newmenu { display: none !important; }
+  html.tex-print .tex-main, html.tex-print .tex-right { display: block !important; overflow: visible !important; background: none !important; padding: 0 !important; border: 0 !important; }
+  html.tex-print .tex-page .page { max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; zoom: 1 !important; }
+  html.tex-print .tex-preview .pc { content-visibility: visible !important; contain-intrinsic-size: none !important; }
+  html.tex-print .tex-preview .ch.sync-flash { outline: none !important; }
+  html.tex-print .tex-preview h1, html.tex-print .tex-preview h2, html.tex-print .tex-preview h3, html.tex-print .tex-preview h4 { break-after: avoid; page-break-after: avoid; }
+  html.tex-print .tex-preview .dmath, html.tex-print .tex-preview .float, html.tex-print .tex-preview table.tabular, html.tex-print .tex-preview img.graphic, html.tex-print .tex-preview .titleblock, html.tex-print .tex-preview .thmhead { break-inside: avoid; page-break-inside: avoid; }
+  html.tex-print .tex-preview .dmath { overflow: visible !important; }
+  html.tex-print .tex-preview h1.chapter, html.tex-print .tex-preview h1.part { break-before: page; }
+}
+`;
