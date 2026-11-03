@@ -237,8 +237,9 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
 for (const f of readdirSync(join(here, "dist"))) if (f.startsWith("sagebrush-latex")) rmSync(join(here, "dist", f));
 if (LATEX) {
   // (the comments, comments.ts: a chunk of their own, fetched only when someone comments or a document has comments;
-  // a document's live comments, comments-doc.ts with their core, another, so the frozen text's chunk stays small)
-  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"]]) {
+  // a document's live comments, comments-doc.ts with their core, another, so the frozen text's chunk stays small;
+  // the agent tools' work, tools.ts, a third, fetched on an agent's first latex_check or latex_render)
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"]]) {
     const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
@@ -251,6 +252,9 @@ if (LATEX) {
 // component, nothing else built here (plan-myst-notebooks r3 §8.1: its laziness is this, and the network test's)
 {
   const isMyst = (p: string) => /(^|\/)web\/myst\//.test(p.replace(/\\/g, "/"));
+  // (a bun whose Bun.build gives no metafile, as 1.2.21's doesn't, can't be checked here, nor list the bundles' npm
+  // packages below: CI's pin, DEVELOPMENT.md's bun, gives one)
+  if (mystResult.metafile === undefined) throw new Error(`bun ${Bun.version}'s Bun.build gives no metafile, which this build reads; use bun 1.4.4 (CI's pin): bun upgrade, or curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4`);
   if (!Object.keys(mystResult.metafile?.inputs ?? {}).some(isMyst)) throw new Error("sagebrush-myst.js doesn't contain web/myst");
   for (const [what, r] of builds) if (r !== mystResult && Object.keys(r.metafile?.inputs ?? {}).some(isMyst)) throw new Error(`${what} contains web/myst: MyST's renderer belongs only in sagebrush-myst.js`);
 }
@@ -460,7 +464,8 @@ function boardMystClosure(what: string, r: any) {
   const notices = readFileSync(join(here, "..", "packages", "sagebrush", "THIRD-PARTY-NOTICES.txt"), "utf8");
   if (!notices.includes(`web/js-dependencies.json ${hash}`)) {
     console.error("web/js-dependencies.json changed: run node scripts/third-party-notices.mjs, then this build again");
-    process.exit(1);
+    // (its own exit code, so scripts/build-all.sh can write the notices and build again; CI fails on any)
+    process.exit(3);
   }
   writeFileSync(join(here, "dist", "THIRD-PARTY-NOTICES.txt"), notices);
 }
@@ -598,11 +603,21 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
     latex: LATEX,
   }, null, 1) + "\n");
 }
-for (const f of ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm"])
+// The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
+// or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
+// the GitHub push were, until Nov 2).
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+/** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
+const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
+{
+  const left = readdirSync(join(here, "dist")).filter((f) => /^sagebrush-.*\.(js|wasm)$/.test(f) && !f.startsWith("sagebrush-latex") && !SITE_FILES.includes(f) && !NOT_ON_SITE.includes(f));
+  if (left.length) throw new Error(`web/build.ts: ${left.join(", ")} in web/dist but not in SITE_FILES (served on the site) or NOT_ON_SITE`);
+}
+for (const f of SITE_FILES)
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
-if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
