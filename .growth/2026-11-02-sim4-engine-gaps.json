@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Engine gaps from agent simulation run 4: ufunc.at (lib/numpy), matplotlib's semilogx/semilogy/loglog/get_xscale/get_yscale, a Sage polygon's ignored options warned as Sage does, GraphicsArray.show/save figsize, catalog entries, tests. Measured with bun 1.4.4 (size-record.sh) on master 5a2d1ce9 vs this PR's content head dc782d28: cli/lib.gen.js +2328, cli/pyjs.cjs +10656, engine/lib/sage.pre +10906, engine/lib/sage.src +3337, engine/lib/sci.pre +15555, engine/lib/sci.src +3359; no other row moves.",
+ "reason": "Engine gaps from agent simulation run 4: ufunc.at (lib/numpy), matplotlib's semilogx/semilogy/loglog/get_xscale/get_yscale, a Sage polygon's ignored options warned as Sage does, GraphicsArray.show/save figsize, catalog entries, tests. Re-measured with bun 1.4.4 (size-record.sh) on master c26ead62 vs head bb73d8ac: cli/lib.gen.js +2328, cli/pyjs.cjs +10656, engine/lib/sage.pre +10906, engine/lib/sage.src +3337, engine/lib/sci.pre +15555, engine/lib/sci.src +3359; no other row moves.",
  "bytes": {
   "cli/lib.gen.js": 2328,
   "cli/pyjs.cjs": 10656,
