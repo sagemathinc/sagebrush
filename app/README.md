@@ -33,11 +33,23 @@ npm install -g @tauri-apps/cli@^2               # as .github/workflows/app.yml d
 cargo install tauri-cli --version "^2" --locked  # or this: the `cargo tauri` subcommand
 ```
 
-Then, from the repository's root:
+On Linux, install WebKitGTK and the other libraries Tauri links against
+first (as `.github/workflows/app.yml` does), or the build fails at the link
+step on missing `glib-2.0`, `atk` and the like:
 
 ```sh
+sudo apt-get install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+```
+
+Then, from the repository's root, `scripts/build-all.sh` builds everything
+the app needs and then the app, checking the prerequisites first
+(DEVELOPMENT.md). By hand, the steps the app needs are:
+
+```sh
+pnpm install --frozen-lockfile
 pnpm run build && node scripts/build-cli.mjs   # the Python library
-bun web/build.ts                               # the notebook page (web/dist)
+bun web/build.ts                               # the notebook page (web/dist); bun 1.4.4
+# (if it stops with "web/js-dependencies.json changed": node scripts/third-party-notices.mjs, then bun web/build.ts again)
 node app/build-frontend.mjs                    # app/dist: the page's files for the app
 cd app/src-tauri && tauri build                # or `cargo tauri build`, or `npx @tauri-apps/cli@2 build`
 ```
@@ -46,8 +58,7 @@ The Tauri command must run in `app/src-tauri` (where `tauri.conf.json` is).
 Without the CLI installed, `cargo tauri build` fails with "no such command:
 tauri".
 
-On Linux, Tauri needs `libwebkit2gtk-4.1-dev librsvg2-dev patchelf` (see
-`.github/workflows/app.yml`). The bundles are in
+The bundles are in
 `app/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.deb`/`.AppImage`/`.rpm`,
 `.msi`/`.exe`). They are not signed or notarized yet.
 
