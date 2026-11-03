@@ -1,0 +1,14 @@
+S02 True
+S03 False
+S04 True
+S05 False
+S07 True
+S08 True
+S09 True
+S10 False
+S11 True
+S12 True
+S13 False
+S14 ERR TypeError: right must be a permutation group
+S15 True
+S16 False

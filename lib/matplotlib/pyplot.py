@@ -5,10 +5,11 @@
     plt.xlabel('n'); plt.legend(); plt.show()
 
 Supported: figure, subplots, subplot, plot (format strings), scatter, bar,
-barh, hist, fill_between, errorbar, step, axhline, axvline, text, annotate,
+barh, hist, fill_between, fill, errorbar, step, axhline, axvline, text, annotate,
 title, xlabel, ylabel, xlim, ylim, xscale/yscale ('log'), xticks, yticks,
 grid, legend, axis, suptitle, savefig (SVG), show, close, gcf, gca, clf;
-contourf and colorbar; GridSpec (matplotlib.gridspec) and add_axes; rc and
+contourf and colorbar; GridSpec (matplotlib.gridspec) and add_axes; the shapes
+of matplotlib.patches (Rectangle, Circle, Ellipse, Polygon) by add_patch; rc and
 rcParams font sizes; $...$ math in any text (matplotlib's mathtext subset).
 In the notebook, figures made in a cell are shown when it finishes (as in
 Jupyter); on the command line show() writes an SVG file and prints its path.
@@ -557,6 +558,63 @@ class Axes:
         p = Polygon([q[0] for q in pts], [q[1] for q in pts], color=col if alpha is None else _opaque(col),
                     alpha=alpha, label=label)
         return _Artist(self._add(p), "collections.PolyCollection")
+
+    def add_patch(self, p):
+        """Draw a matplotlib.patches shape (Rectangle, Circle, Ellipse,
+        Polygon) as a filled polygon, as matplotlib's defaults: C0 and no
+        visible edge, unless edgecolor is given or fill=False (a black edge).
+        Returns the patch.
+
+        EXAMPLES::
+
+            sage: import matplotlib.pyplot as plt
+            sage: from matplotlib.patches import Rectangle, Circle
+            sage: fig, ax = plt.subplots()
+            sage: print(ax.add_patch(Rectangle((0, 0), 2, 1, facecolor='orange', edgecolor='k')))
+            Rectangle(xy=(0, 0), width=2, height=1, angle=0)
+            sage: print(ax.add_patch(Circle((1, 1), 0.5, fill=False)))
+            Circle(xy=(1, 1), radius=0.5)
+        """
+        vs = p.get_verts()
+        face = to_color(p._face) if p._face is not None else self._cycle()[0]
+        edge = to_color(p._edge) if p._edge is not None else (to_color("black") if not p._fill else None)
+        opts = {"color": face, "fill": p._fill, "alpha": p._alpha, "label": p._label}
+        if edge is not None:
+            opts["edgecolor"] = edge
+            opts["thickness"] = float(p._lw) if p._lw is not None else 1.0
+        self._add(Polygon([v[0] for v in vs], [v[1] for v in vs], **opts))
+        p.axes = self
+        return p
+
+    def fill(self, *args, data=None, **kw):
+        """Filled polygons: fill(x, y), fill(x, y, 'r'), fill(x1, y1, x2, y2, ...);
+        each in the next color of the patch cycle unless given (color=, or a
+        format string's color letter). Returns the list of Polygon patches.
+
+        EXAMPLES::
+
+            sage: import matplotlib.pyplot as plt
+            sage: fig, ax = plt.subplots()
+            sage: [str(p) for p in ax.fill([0, 1, 1, 0], [0, 0, 1, 1], alpha=0.5)]
+            ['Polygon5((0, 0) ...)']
+        """
+        from matplotlib.patches import Polygon as _PatchPolygon
+        args = list(args)
+        out = []
+        while args:
+            if len(args) < 2:
+                raise ValueError("fill needs x and y")
+            x, y = _list(args.pop(0)), _list(args.pop(0))
+            fmt = args.pop(0) if args and isinstance(args[0], str) else None
+            col = kw.get("color", kw.get("facecolor", kw.get("fc")))
+            if col is None and fmt:
+                letters = [c for c in fmt if c in "bgrcmykw"]
+                col = letters[0] if letters else None
+            col = self._color(col, True)
+            o = {k: v for k, v in kw.items() if k not in ("color", "facecolor", "fc")}
+            p = _PatchPolygon(list(zip(x, y)), facecolor=col, **o)
+            out.append(self.add_patch(p))
+        return out
 
     def errorbar(self, x, y, yerr=None, xerr=None, fmt="", ecolor=None, elinewidth=None, capsize=None, color=None,
                  label=None, **kw):
@@ -1546,7 +1604,7 @@ def _forward(name):
     return f
 
 
-for _name in ("plot", "bar", "barh", "hist", "fill_between", "errorbar", "step", "stem",
+for _name in ("plot", "bar", "barh", "hist", "fill_between", "fill", "errorbar", "step", "stem",
               "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis"):
     globals()[_name] = _forward(_name)
 
