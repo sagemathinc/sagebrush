@@ -3681,7 +3681,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   const nbParam = new URLSearchParams(location.search).get("nb");
   if (nbParam && /^[\w-]{1,64}$/.test(nbParam)) { last = nbParam; history.replaceState(null, "", location.pathname + location.hash); }
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
-  // data it reads: fetched into the browser's files, then opened (&run runs it)
+  // data it reads: fetched into the browser's files, then opened (nothing runs until the person runs it: Run all)
   const qs = new URLSearchParams(location.search), remote = qs.get("open");
   let opened = false, resumed = null;
   // ?resume=notebook&at=version: TimeTravel's Resume from here
@@ -3790,7 +3790,6 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   kernelsMayStart = true;
   if (current.id) startKernel(kernelFor(current.id));
   if (resumed) await replayResumed(resumed);
-  if (qs.has("run")) { await kernel.started; nb.runAll(); }
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
     for (const b of document.querySelectorAll('[data-f="openfile"], [data-f="saveas"]')) b.hidden = false;
