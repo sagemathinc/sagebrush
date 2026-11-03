@@ -1302,6 +1302,40 @@ try {
     check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
   }
+  // ---- the name at the top (William's M0): it follows a rename elsewhere (the file panel's, the workspace's rename);
+  // a click on it renames the file (a true rename), its results file beside it moved along; Escape keeps the name; a
+  // name taken is said, nothing renamed
+  {
+    const T = `document.querySelector(".tex-head .tex-title")`;
+    await open(await mk("/m0/paper.tex", enc("\\documentclass{article}\n\\begin{document}\nM0 text.\n\\end{document}\n")));
+    await until(`${T}?.textContent === "paper.tex"`, 20000);
+    await ev(`${W}.rename("/m0/paper.tex", "/m0/moved.tex").then(() => 1)`);
+    const followed = await until(`${T}.textContent === "moved.tex" && document.title.startsWith("moved.tex")`, 5000);
+    check(followed, "M0: the name at the top follows a rename elsewhere (the file panel's)", await ev(`[${T}.textContent, document.title]`));
+    await mk("/m0/moved.tex.results.json", enc("{}"));
+    await mk("/m0/taken.tex", enc("x"));
+    const retitle = async (typed, key = "Enter") => {
+      await ev(`(${T}.click(), 1)`);
+      const opened = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
+      if (!opened) return false;
+      await ev(`(() => { const i = document.querySelector(".tex-head .tex-titlein"); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true })); return true; })()`);
+      return opened;
+    };
+    const stat = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
+    // (Escape: nothing renamed)
+    const escOpened = await retitle("other", "Escape");
+    await sleep(500);
+    check(escOpened && (await stat("/m0/moved.tex")) && !(await stat("/m0/other.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a click on the name edits it; Escape keeps it");
+    // (a name taken: said, nothing renamed)
+    await retitle("taken");
+    const saidTaken = await statusIs(/already a "taken\.tex" here/, 5000);
+    check(saidTaken && (await stat("/m0/moved.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a name already taken: said, nothing renamed", await ev(`document.querySelector(".tex-status")?.textContent`));
+    // (renamed: the .tex and its results file, the extension added when typed without it)
+    await retitle("final");
+    const renamed = await until(`${T}.textContent === "final.tex"`, 5000);
+    const files = { tex: await stat("/m0/final.tex"), old: await stat("/m0/moved.tex"), results: await stat("/m0/final.tex.results.json"), oldResults: await stat("/m0/moved.tex.results.json") };
+    check(renamed && files.tex && !files.old && files.results && !files.oldResults && (await ev(`document.title`)).startsWith("final.tex"), "M0: a name typed and Enter: the file renamed (.tex added), its results file moved along", files);
+  }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
   // preview toggle (and after File ▾, where the page has it); never on open; a Run made stale by opening another file

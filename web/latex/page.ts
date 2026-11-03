@@ -7,7 +7,7 @@
 // SECURITY: file names, paths and messages reach the page through textContent; preview HTML is the renderer's (its
 // own escaping, KaTeX trust:false); images only as <img> from blob: URLs made of bytes checked by images.ts.
 import type { Workspace, Entry } from "../workspace/api";
-import { nameOf, parentOf } from "../workspace/paths";
+import { nameOf, parentOf, join, safeName } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
 import { engineInputs, admitInput, type Known } from "./inputs";
@@ -305,7 +305,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (!live()) return;
   if (!where.ok) { gone(where.why === "trashed" ? "This file isn't here any more (it's in the Trash)." : "This file isn't here any more."); return; }
   const e0: Entry = where.entry;
-  title.textContent = nameOf(where.path); title.title = where.path;
+  title.textContent = nameOf(where.path); title.title = where.path + ": click to rename";
   document.title = nameOf(where.path) + " — Sagebrush";
   if ((e0.size ?? 0) > EDIT_MAX) {
     gone("This file is too large for the LaTeX editor (over 4 MiB): download it from the file's preview.");
@@ -413,6 +413,60 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // ---- the name at the top (William's M0, Nov 3): it follows this file renamed or moved elsewhere (the file panel,
+  // another tab), read again by its identity on any change; and a click on it renames the file there, as a notebook's
+  // title does: a true rename of the .tex, with its results and comments files beside it moved along
+  const showName = (p: string) => { title.textContent = nameOf(p); title.title = p + ": click to rename"; document.title = nameOf(p) + " — Sagebrush"; };
+  let renamingTitle = false, nameCheck: any = null;
+  const unwatchName = host.ws.watch(() => {
+    clearTimeout(nameCheck);
+    nameCheck = setTimeout(() => void host.ws.pathOfFile(host.fid).then((at) => { if (live() && at.ok && !renamingTitle) showName(at.path); }, () => {}), 50);
+  });
+  life.signal.addEventListener("abort", () => { unwatchName(); clearTimeout(nameCheck); });
+  title.tabIndex = 0; title.setAttribute("role", "button"); title.setAttribute("aria-label", "Rename this file");
+  const renameTitle = async () => {
+    if (renamingTitle || !saveable) return;
+    const at = await host.ws.pathOfFile(host.fid);
+    if (!live() || !at.ok) return;
+    renamingTitle = true;
+    const input = el("input", "tex-titlein"); input.value = nameOf(at.path); input.setAttribute("aria-label", "The file's new name");
+    title.replaceWith(input); input.focus(); input.setSelectionRange(0, input.value.replace(/\.tex$/i, "").length);
+    let done = false;
+    const finish = async (keep: boolean) => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      input.replaceWith(title); renamingTitle = false;
+      if (!keep || !v) return;
+      const name = safeName(/\.tex$/i.test(v) ? v : v + ".tex");
+      const now = await host.ws.pathOfFile(host.fid);
+      if (!live()) return;
+      if (!now.ok) { say("Not renamed: this file isn't here any more"); return; }
+      const to = join(parentOf(now.path), name);
+      if (to === now.path) return;
+      try {
+        const e = await host.ws.rename(now.path, to, { expect: { kind: now.entry.kind, ref: now.entry.ref, fid: now.entry.fid, created: now.entry.created } });
+        // (its results and comments files, if there and not already at the new name: moved along, each only if it is
+        //  still the one read; one that can't be is left where it was, said)
+        let left = 0;
+        for (const ext of [".results.json", ".comments.json"]) {
+          const se = await host.ws.stat(now.path + ext).catch(() => undefined);
+          if (!se || se.trashed) continue;
+          if (await host.ws.stat(e.path + ext).catch(() => undefined)) { left++; continue; }
+          try { await host.ws.rename(now.path + ext, e.path + ext, { expect: { kind: se.kind, ref: se.ref, fid: se.fid, created: se.created } }); } catch { left++; }
+        }
+        if (!live()) return;
+        where.path = e.path; inputs.docPath = e.path; inputs.version++;
+        showName(e.path); request();
+        say(left ? `Renamed; ${left} file${left === 1 ? "" : "s"} beside it kept ${left === 1 ? "its" : "their"} old name` : "Renamed");
+      } catch (err: any) {
+        say(err?.code === "exists" ? `Not renamed: there is already a "${name}" here` : err?.code === "conflict" ? "Not renamed: this file was moved or replaced meanwhile" : "Not renamed: " + String(err?.message ?? err).slice(0, 200));
+      }
+    };
+    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); void finish(true); } else if (ev.key === "Escape") { ev.preventDefault(); void finish(false); } });
+    input.addEventListener("blur", () => void finish(true));
+  };
+  title.addEventListener("click", () => void renameTitle());
+  title.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void renameTitle(); } });
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
   void loadResults();
   window.addEventListener("focus", () => void loadResults(), on);
@@ -600,7 +654,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       await host.ws.write(at.path, bytes, { fid: host.fid });
       savedText = text;
       void cm?.saved(snap);
-      if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
+      if (at.path !== where.path && !renamingTitle) showName(at.path);
       say("Saved");
     } catch (err) {
       // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
