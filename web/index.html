@@ -1627,7 +1627,12 @@ async function navLease() {
   if (trashTest.pause) await trashTest.pause("leased");
   return Object.assign(end, { after });
 }
-async function open(store, id, kind = "browser", guard = null) {
+// (the notebook a click is waiting for, still arriving from sync (awaitArrival): another attached here ends the wait;
+// one that fails to attach doesn't.  attachSeq counts the notebooks attached here: an automatic open (`intent`, its
+// count when it was asked for) attaches only if none was since, checked holding the navigation lease before anything
+// is detached, so a notebook the person opened meanwhile always wins: astra's B3-ARRIVAL-1)
+let arrivalWait = null, attachSeq = 0;
+async function open(store, id, kind = "browser", guard = null, intent = null) {
   const endSwitch = await navLease();
   try {
   for (const f of beforeSwitch) await f();
@@ -1639,6 +1644,7 @@ async function open(store, id, kind = "browser", guard = null) {
     if (trashTest.pause) await trashTest.pause("beforeDetach");
     if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   }
+  if (intent && intent.attach !== attachSeq) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   nb.detach();
   docGen++;
   ttShow(false);
@@ -1652,6 +1658,11 @@ async function open(store, id, kind = "browser", guard = null) {
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
+  attachSeq++;
+  if (arrivalWait && arrivalWait.id !== id) {
+    if (statusEl.textContent === arrivalWait.said) statusEl.textContent = "";
+    arrivalWait = null;
+  }
   showName(doc.name);
   showWriter(store, id);
   modeEl.value = nb.mode;
@@ -1727,7 +1738,8 @@ async function openDocument(doc, here = false, made = "elsewhere", guard = null)
 }
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
-async function openId(id, guard = null) {
+/** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
+async function openId(id, guard = null, intent = null) {
   const end = await navLease();
   try {
     // (it waited while what it asks for went to Trash: not opened, said, with Restore and open (board's (A), #447 r5c))
@@ -1742,8 +1754,12 @@ async function openId(id, guard = null) {
     // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
     if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
     const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-    if (!doc) return await openArrived(id);
-    await open(await storeFor(id), id, "browser", guard);
+    // (tests: the read done, the store not made yet)
+    await shareTest.afterRead?.(id);
+    if (!doc) return await openArrived(id, intent);
+    const st = await storeFor(id);
+    // (a switch refused before anything was detached (another opened meanwhile): its store let go, its lock with it)
+    try { await open(st, id, "browser", guard, intent); } catch (e) { if (e?.navWon && st.journaled) try { await st.release(); } catch {} throw e; }
     savedEl.textContent = "opened";
     return true;
   } finally {
@@ -1754,7 +1770,7 @@ async function openId(id, guard = null) {
 // only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
 // answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
 // and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
-async function openArrived(id) {
+async function openArrived(id, intent = null) {
   // (one navigation lease over all of it, its recovery included: #447 r5c, R5-NAV-2 (2))
   const end = await navLease();
   try {
@@ -1768,6 +1784,8 @@ async function openArrived(id) {
   // pull to ask (this page's notebook sync is off), that, as it won't arrive here either: journal.js's arrivingSay)
   const arriving = () => {
     const msg = mod.arrivingSay(id);
+    // (its download asked for: said as such, and opened once it is here, William's B3; nothing to wait for otherwise)
+    if (msg === mod.STILL_ARRIVING) { awaitArrival(id, splitExt(nameOf(at))[0], hdb, mod); return false; }
     statusEl.textContent = msg;
     wsBrowser?.say(msg);
     return false;
@@ -1782,7 +1800,7 @@ async function openArrived(id) {
   // so the window between the check above and the load's own read (a remove's dropped rows) is said here, never a fork)
   const prev = current;
   try {
-    await open(st, id);
+    await open(st, id, "browser", null, intent);
   } catch (e) {
     // (a refused load, still arriving or any other: the store never became the page's (nb.attach installs it only after
     // its load succeeds), so it is let go here, its writer lock with it; else a retry would queue read-only behind it and
@@ -1798,6 +1816,40 @@ async function openArrived(id) {
   } finally {
     end();
   }
+}
+// (a notebook another device made, clicked before its history is here: "Downloading…", its pull asked again every 10
+// s, and opened as soon as its history has arrived, unless another notebook was attached since the click (open ends
+// the wait, and refuses this one's switch: attachSeq); after a minute, said that it hasn't arrived, and the next click
+// waits again: William's B3)
+function awaitArrival(id, name, hdb, mod) {
+  const said = `Downloading ${name}…`;
+  statusEl.textContent = said;
+  wsBrowser?.say(said);
+  if (arrivalWait?.id === id) return;
+  const me = { id, said, attach: attachSeq };
+  arrivalWait = me;
+  let ticks = 0;
+  const tick = async () => {
+    if (arrivalWait !== me) return;
+    const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+    if (arrivalWait !== me) return;
+    if (s && s.start !== null && s.jOf?.size > 0) {
+      const ok = await openId(id, null, me).catch(() => false);
+      if (arrivalWait === me) arrivalWait = null;
+      if (ok) { wsTrackCurrent(); wsBrowser?.say(`${name} downloaded`); }
+      return;
+    }
+    if (++ticks >= 120) {
+      arrivalWait = null;
+      const late = `${name} hasn't arrived from sync yet (the device that made it sends it when it is online): click it again to keep waiting`;
+      statusEl.textContent = late;
+      wsBrowser?.say(late);
+      return;
+    }
+    if (ticks % 20 === 0) try { mod.DOC_SYNC.pull?.(id); } catch {}
+    setTimeout(tick, 500);
+  };
+  setTimeout(tick, 500);
 }
 const saveNow = () => nb.flush();
 // A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
@@ -3762,7 +3814,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await wsNow();
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws))) return;
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
