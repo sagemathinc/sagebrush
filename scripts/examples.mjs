@@ -95,6 +95,22 @@ function validate(root) {
   return problems;
 }
 
+/**
+ * CI's selection (EXAMPLES_IDS, from ci-paths), or why it isn't one. The jobs run only for a selection that isn't
+ * empty, so an empty or missing one is a wiring fault (an output the changes job didn't export reads as ''), and
+ * a census of it would pass with nothing run (grader B2)
+ */
+function selectedIds() {
+  const raw = process.env.EXAMPLES_IDS ?? "";
+  let ids;
+  try {
+    ids = JSON.parse(raw);
+  } catch {}
+  if (!Array.isArray(ids) || !ids.length || ids.some((x) => typeof x !== "string"))
+    return `EXAMPLES_IDS is ${JSON.stringify(raw)}, not the selection (a JSON list of ids, not empty): is it among the changes job's outputs?`;
+  return ids;
+}
+
 /** run a command with a deadline (SIGKILL) and a scrubbed environment: {code, out, err, killed} */
 function sh(cmd, args, { cwd, env, deadline }) {
   return new Promise((resolve) => {
@@ -358,7 +374,12 @@ async function main(argv) {
   if (cmd === "ci") {
     const k = Number(arg(argv, "--shard")),
       n = Number(arg(argv, "--of"));
-    const ids = shardIds(JSON.parse(process.env.EXAMPLES_IDS || "[]"), k, n);
+    const selected = selectedIds();
+    if (typeof selected === "string") {
+      console.error(selected);
+      return 1;
+    }
+    const ids = shardIds(selected, k, n);
     const p = validate(root);
     if (p.length) {
       for (const x of p) console.error(x);
@@ -378,7 +399,12 @@ async function main(argv) {
       .filter((f) => f.endsWith(".json"))
       .sort()
       .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
-    const p = census(JSON.parse(process.env.EXAMPLES_IDS || "[]"), lists);
+    const selected = selectedIds();
+    if (typeof selected === "string") {
+      console.error(selected);
+      return 1;
+    }
+    const p = census(selected, lists);
     for (const x of p) console.error(x);
     console.log(
       `census: ${lists.length} shards, ${lists.flat().length} runs: ${p.length ? "FAIL" : "ok"}`,

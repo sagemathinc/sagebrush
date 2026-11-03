@@ -370,4 +370,13 @@ test("ci shards and their census, end to end", () => {
   c = run(["census", "--ran-dir", out], env);
   assert.equal(c.status, 1);
   assert.match(c.stderr, /selected but never ran/);
+  // (an empty or missing selection is a wiring fault, never a vacuous pass: the jobs run only for a selection; B2)
+  for (const bad of ["", "[]", "{}", "[1]", "not json"]) {
+    c = run(["census", "--ran-dir", out], { EXAMPLES_IDS: bad });
+    assert.equal(c.status, 1, `census, EXAMPLES_IDS ${JSON.stringify(bad)}`);
+    assert.match(c.stderr, /EXAMPLES_IDS is .*not the selection/);
+  }
+  c = run(["ci", "--shard", "1", "--of", "1", "--ran", join(out, "x.json"), "--root", root], { EXAMPLES_IDS: "" });
+  assert.equal(c.status, 1);
+  assert.match(c.stderr, /EXAMPLES_IDS is "", not the selection/);
 });

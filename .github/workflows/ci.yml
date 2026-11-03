@@ -53,6 +53,8 @@ jobs:
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
+      examples_ids: ${{ steps.paths.outputs.examples_ids }}
+      examples_matrix: ${{ steps.paths.outputs.examples_matrix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
