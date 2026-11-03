@@ -9,11 +9,16 @@
 // (no import of the workspace here: the board library draws this menu in
 // exported files and frames too; the Open… dialog and Recent are fileopen.ts)
 
+/** New ▸'s items, in the file panel's + order (U0, William Nov 2: one order in every editor and in the file panel). */
+export const NEW_ITEMS: FileItem[] = ["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"];
+/** An item's words, the same everywhere it is offered. */
+export const fileLabel = (id: FileItem) => LABELS[id];
 /** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups. */
-export type FileItem = "newNotebook" | "newBoard" | "newFolder" | "fromExample" | "open" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+export type FileItem = "newNotebook" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "open" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
   newBoard: "Board",
+  newLatex: "LaTeX document",
   newFolder: "Folder",
   fromExample: "From an example…",
   open: "Open…",
@@ -49,6 +54,9 @@ export type FileMenuOptions = {
   recent?: () => Promise<{ label: string; title?: string; open: () => void }[]>;
   /** Called when an item is chosen (the page closes its menu). */
   chosen?: () => void;
+  /** Whether this page has the LaTeX editor (New ▸ LaTeX document): without it the item isn't drawn, as it means
+   * nothing in such a build (web/latex/boot.ts latexOn) */
+  latex?: boolean;
   /** Extra items the page keeps in the menu, at the end of a section (the desktop app's Open file…, Save as…). */
   extra?: { after: FileItem; key: string; label: string; title?: string; hidden?: boolean }[];
 };
@@ -115,7 +123,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   // (New's items and Download's are in the page from the start, though their
   // group is closed: the page's handlers and tests find them)
   const nw = group("New", "new", () => {});
-  for (const id of ["newNotebook", "newBoard", "newFolder", "fromExample"] as FileItem[]) item(id, nw);
+  for (const id of NEW_ITEMS) if (id !== "newLatex" || o.latex) item(id, nw);
   item("open", menu);
   group("Recent", "recent", async (box) => {
     box.replaceChildren();

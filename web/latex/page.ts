@@ -51,7 +51,11 @@ export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, 
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
-type Host = { ws: Workspace; fid: string; back(): void };
+type Host = {
+  ws: Workspace; fid: string; back(): void;
+  /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
+  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+};
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
 // (a reply's piece: its group, its HTML and, from the worker, its UTF-8 size)
@@ -113,13 +117,13 @@ export async function makeExample(ws: Workspace, ex: Example): Promise<Entry> {
   throw new Error("no free folder name");
 }
 
-/** The file browser's New, "LaTeX file" (boot.ts adds the item and loads this module on its click): /Untitled.tex, or
+/** New ▸ LaTeX document (boot.ts texNew, the pages' File ▸ New and file panel): <folder>/Untitled.tex, or
  * "Untitled (2).tex", ... (the first name not taken), made by the person here with a short document, then opened in
  * the editor by boot.ts's own hook (`open`). */
-export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promise<void> {
+export async function newTex(ws: Workspace, open: (e: Entry) => unknown, folder = "/"): Promise<void> {
   try {
     for (let i = 1; i <= 1000; i++) {
-      const p = "/Untitled" + (i > 1 ? " (" + i + ")" : "") + ".tex";
+      const p = (folder === "/" ? "" : folder) + "/Untitled" + (i > 1 ? " (" + i + ")" : "") + ".tex";
       if (await ws.stat(p)) continue;
       open(await ws.createByPerson(p, { content: new TextEncoder().encode("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n") }));
       return;
@@ -184,22 +188,20 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // cursor's place in the preview now); a double-click in the preview puts the cursor at that place in the source
   const followBtn = btn("Follow", "The preview follows the cursor"), showBtn = btn("Show", "Show the cursor's place in the preview");
   tools.append(el("span", "tex-tl", "Source"), fsDown, fsUp, el("span", "tex-tl", "Preview"), zOut, zShow, zIn, followBtn, showBtn);
-  // New (William's B1: from a LaTeX file, a new document or an example without going through a notebook)
-  const newBtn = el("button", "tex-new", "New ▾"); newBtn.setAttribute("aria-haspopup", "menu");
-  newBtn.onclick = (ev) => {
-    ev.stopPropagation();
-    const old = page.querySelector(".tex-newmenu"); if (old) { old.remove(); return; }
-    const m = el("div", "tex-newmenu"); m.setAttribute("role", "menu");
-    m.style.cssText = "position:absolute;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;display:grid;min-width:180px";
-    const item = (t: string, f: () => void) => { const b = el("button", "", t); b.setAttribute("role", "menuitem"); b.style.cssText = "text-align:left;padding:8px 10px;min-height:36px;border:0;background:none;cursor:pointer"; b.onclick = () => { m.remove(); f(); }; m.appendChild(b); };
-    const open = (e: Entry) => (globalThis as any).__sbTex(e);
-    item("LaTeX document", () => void newTex(host.ws, open));
-    item("LaTeX example", () => void texExamples(host.ws, open));
-    item("Notebooks", () => location.assign("/"));
-    const r = newBtn.getBoundingClientRect(); m.style.left = r.left + "px"; m.style.top = r.bottom + 2 + "px"; m.style.position = "fixed";
-    page.appendChild(m);
-    document.addEventListener("click", () => m.remove(), { once: true });
+  // File: the one File menu of every editor (New in the file panel's order, Open…, Recent, Print or save as PDF…: U0),
+  // drawn by the page that mounted this one (host.fileMenu), under its button
+  const fileBtn = el("button", "tex-filebtn", "File ▾"); fileBtn.setAttribute("aria-haspopup", "menu"); fileBtn.setAttribute("aria-expanded", "false");
+  const fileMenu = el("div", "tex-filemenu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
+  fileMenu.style.cssText = "position:fixed;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;min-width:200px;max-height:calc(100dvh - 60px);overflow:auto";
+  const showFile = (on: boolean) => {
+    fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
+    if (on) { const r = fileBtn.getBoundingClientRect(); fileMenu.style.left = Math.max(4, Math.min(r.left, innerWidth - 210)) + "px"; fileMenu.style.top = r.bottom + 2 + "px"; }
   };
+  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false) });
+  fileBtn.disabled = !host.fileMenu;
+  fileBtn.onclick = (ev) => { ev.stopPropagation(); showFile(fileMenu.hidden); };
+  document.addEventListener("click", (ev) => { if (!fileMenu.hidden && !fileMenu.contains(ev.target as Node)) showFile(false); }, on);
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !fileMenu.hidden) showFile(false); else fileKey?.(ev); }, on);
   // Comments (comments-doc.ts, in the comments' chunk: fetched when this file has a comments file, or on first use)
   const cmBtn = el("button", "tex-comments", "Comments");
   // Agent: an agent on this computer (Claude Code, Codex, … with sagebrush-mcp) connected to this page, to read and
@@ -210,12 +212,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
   // step by step through their overlays; shown once the preview has slides
   const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Escape stops)"; presentBtn.hidden = true;
-  // Print / Save as PDF (William, Nov 2: "an easy PDF download, so a person can print out something or archive it"; a
-  // full LaTeX environment with direct PDF generation is out of scope): the browser prints the rendered preview only
-  // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
-  const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
-  printBtn.onclick = () => printPreview();
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
+  // (Print / Save as PDF, William Nov 2: "an easy PDF download, so a person can print out something or archive it": File ▸
+  // Print or save as PDF…, as in the notebook and board; the browser prints the rendered preview only, PRINT_CSS)
+  head.append(back, fileBtn, title, dirty, save, toggle, cmBtn, agentBtn, presentBtn, status, tools);
+  page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -521,7 +521,7 @@ export const PRINT_CSS = `
   html.tex-print body > :not(:has(.tex-page)) { display: none !important; }
   html.tex-print body { background: #fff !important; }
   html.tex-print .tex-page { position: static !important; display: block !important; inset: auto !important; left: 0 !important; background: #fff !important; z-index: auto; }
-  html.tex-print .tex-page > :not(.tex-main), html.tex-print .tex-left, html.tex-print .tex-right > :not(.tex-preview), html.tex-print .tex-newmenu { display: none !important; }
+  html.tex-print .tex-page > :not(.tex-main), html.tex-print .tex-left, html.tex-print .tex-right > :not(.tex-preview), html.tex-print .tex-filemenu { display: none !important; }
   html.tex-print .tex-main, html.tex-print .tex-right { display: block !important; overflow: visible !important; background: none !important; padding: 0 !important; border: 0 !important; }
   html.tex-print .tex-page .page { max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; zoom: 1 !important; }
   html.tex-print .tex-preview .pc { content-visibility: visible !important; contain-intrinsic-size: none !important; }

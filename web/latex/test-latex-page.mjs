@@ -125,26 +125,27 @@ try {
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
     const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
     const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
-    check(fb.found && fb.inView && fb.top && items.indexOf("LaTeX document") >= 0 && items.indexOf("LaTeX document") === items.indexOf("newFolder") - 2 && items.indexOf("LaTeX example") === items.indexOf("newFolder") - 1 && mr.found && mr.inView && mr.top,
-      "phone: File > New offers LaTeX document and LaTeX example (before Folder), File and the item in view and not covered", { fb, items, mr });
+    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
+      "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // File > New > LaTeX example: the examples' list fits the phone (10 large buttons, the dialog within the width,
-    // each button reachable), and the figure example opens with its image (a folder of its own, plot.png beside it)
-    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    await ev(`(document.getElementById("filebtn").click(), true)`);
-    await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
-    await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
-    const exItem = await reach('.fmgroup[aria-label="New"] button', "LaTeX example");
-    await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX example").click(), true)`);
+    // the editor's File > New > From an example… (U0: "From an example…" replaces "LaTeX example", William Nov 2): the
+    // examples' list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
+    // figure example opens with its image (a folder of its own, plot.png beside it)
+    await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
+    await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
+    await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
+    const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "From an example…");
+    await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
     const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
       const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { menuHidden: document.getElementById("filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
+      return { menuHidden: document.querySelector(".tex-filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
     check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: File > New > LaTeX example: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
-    await mark(); await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
-    const figOk = await madeAs("/LaTeX examples/Figure with an image/figure.tex");
+      "phone: the editor's File > New > From an example…: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
+    // (in the editor, another .tex opens in place, its URL pushed: no new document)
+    await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
+    const figOk = await until(`${W}.stat("/LaTeX examples/Figure with an image/figure.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid && !!document.querySelector(".tex-page .tex-src"))`, 20000);
     const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
     check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
@@ -178,10 +179,11 @@ try {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await open(fa);
     await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
-    const nm = await ev(`(async () => { document.querySelector(".tex-new").click(); await new Promise((r) => setTimeout(r, 50)); const items = [...document.querySelectorAll(".tex-newmenu button")].map((b) => b.textContent);
-      [...document.querySelectorAll(".tex-newmenu button")].find((b) => b.textContent === "LaTeX example").click(); await new Promise((r) => setTimeout(r, 300));
-      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["LaTeX document", "LaTeX example", "Notebooks"]) && nm.n === 10, "B1: from a LaTeX file, New offers a LaTeX document, an example (the list opens) and the notebooks", nm);
+    const nm = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50)); document.querySelector('.tex-filemenu button[data-group="new"]').click();
+      const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
+      document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
+      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -1020,9 +1022,9 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
@@ -1206,12 +1208,13 @@ try {
     const fp = await mk("/t/print.tex", enc("\\documentclass{article}\n\\begin{document}\n\\section{Printed}\nA formula $$\\int_0^1 x^2\\,dx = \\frac13$$ in it.\n\\end{document}\n"));
     await open(fp);
     await until(`document.querySelector(".tex-preview")?.textContent.includes("Printed") && !!document.querySelector(".tex-preview .katex")`, 20000);
-    const b = await ev(`(() => { const b = document.querySelector(".tex-head .tex-printbtn"); if (!b) return null;
+    // (the File menu runs its item's action on the next microtask: the stub kept until it has)
+    const b = await ev(`(async () => { const b = document.querySelector('.tex-filemenu [data-item="print"]'); if (!b) return null;
       window.__printed = []; const real = window.print; window.print = () => window.__printed.push(document.documentElement.classList.contains("tex-print"));
-      b.click(); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
+      b.click(); await new Promise((r) => setTimeout(r, 50)); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
     await sleep(50);
     const after = await ev(`document.documentElement.classList.contains("tex-print")`);
-    check(b && b.label === "Print / Save as PDF" && JSON.stringify(b.printed) === "[true]" && !after, "Print / Save as PDF: the preview's button opens the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
+    check(b && b.label === "Print or save as PDF…" && JSON.stringify(b.printed) === "[true]" && !after, "File > Print or save as PDF… (the one File menu's, U0): the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
     check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
     await ev(`(window.sagebrush.latex.printMode(true), 1)`);
     await send("Emulation.setEmulatedMedia", { media: "print" });

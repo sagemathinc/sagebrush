@@ -200,20 +200,6 @@
   #exlist { max-height: 62vh; overflow: auto; }
   #exlist button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; }
   #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
-  /* the console, docked at the bottom */
-  #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
-  #console[hidden] { display: none; }
-  #console .grip { height: 9px; cursor: ns-resize; flex: none; display: flex; justify-content: center; align-items: center; }
-  #console .grip::after { content: ""; width: 40px; height: 3px; border-radius: 2px; background: var(--line); }
-  #console .grip:hover, #console .grip:focus-visible { background: var(--accent2); outline: none; }
-  #console .chead { display: flex; gap: 10px; align-items: center; padding: 0 12px 4px; font-size: 13px; color: var(--muted); flex: none; }
-  #console .chead b { color: var(--fg); }
-  #console .chead .sp { flex: 1; }
-  #console .chead button { padding: 1px 8px; font-size: 12px; }
-  #console .cbody { flex: 1; min-height: 0; display: flex; }
-  #term { flex: 1; min-width: 0; min-height: 0; padding: 0 0 4px 12px; }
-  #cplot { width: 45%; overflow: auto; border-left: 1px solid var(--line); background: var(--cell); }
-  #cplot[hidden] { display: none; }
   .about { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); margin-top: 30px; padding-top: 18px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
   .card { background: var(--cell); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
@@ -280,7 +266,6 @@
      as scripts/build-cli.mjs takes the notice out of the CLI's page by that name) */
   html.phone .menu { position: fixed !important; top: auto !important; left: 8px !important; right: 8px !important; bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px) + 8px) !important; max-height: 65vh !important; min-width: 0; z-index: 2147483001; }
   html.phone .menu button, html.phone .menu a { padding: 11px 12px; font-size: 16px; }
-  html.phone #console { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)); height: 45vh; }
   /* (an escaped id: as specific as the preview notice's own rule for it, which comes later) */
   html.phone #sb-alpha\-banner { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)) !important; }
   html.phone .sbnb { --gutter: 40px; }
@@ -301,7 +286,7 @@
     @page { margin: 14mm 12mm; }
     body { background: #fff; font-size: 13px; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    header, footer, .bar, #nbline, #files, .about, #console, .menu, #announce { display: none !important; }
+    header, footer, .bar, #nbline, #files, .about, .menu, #announce { display: none !important; }
     main { max-width: none; padding: 0; }
     #printhead { display: block; margin: 0 0 10px; border-bottom: 1px solid var(--line); }
     #printhead h1 { font-size: 20px; margin: 0; }
@@ -439,7 +424,6 @@
   <button role="menuitem" id="restart" title="A fresh interpreter; the outputs stay, marked stale">Restart interpreter</button>
   <hr>
   <button role="menuitem" id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
-  <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
@@ -491,11 +475,6 @@
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
   <ul id="nblist"></ul>
 </dialog>
-<section id="console" aria-label="Python console" hidden>
-  <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize console" tabindex="0"></div>
-  <div class="chead"><b>Console</b><span>a fresh, ephemeral session (not the notebook's)</span><span class="sp"></span><button id="closeconsole" aria-label="Close console">✕</button></div>
-  <div class="cbody"><div id="term"></div><aside id="cplot" aria-label="Console output pictures" hidden></aside></div>
-</section>
 <div id="announce" class="sr" aria-live="polite"></div>
 <script id="app">
 // The page: Sagebrush's notebook (web/notebook) with the in-browser kernel,
@@ -534,7 +513,7 @@ import { createShareDialog } from "./share-client/dialog.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot } from "./latex/boot.ts";
+import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -877,7 +856,7 @@ function kernelFor(id) {
   }
   return e;
 }
-const liveKernels = () => [...kernels.values()].map((e) => e.kernel).concat(consoleKernel ? [consoleKernel] : []);
+const liveKernels = () => [...kernels.values()].map((e) => e.kernel);
 let kernelsMayStart = false; // (the first starts once the page is drawn)
 function startKernel(e) {
   if (e.started || !kernelsMayStart) return;
@@ -1092,7 +1071,6 @@ window.sagebrush = {
   // (tests: how long a save waits for the workspace's lock, notebook/stores.js)
   lockWait: LOCK_WAIT,
   notebook: nb, kernels, get kernel() { return kernel; }, get history() { return nbHistory; },
-  get consoleKernel() { return consoleKernel; },
   // (tests: the reactive notebook's analyzer and its worker)
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
@@ -1317,77 +1295,14 @@ const presence = (() => {
   return { open(nid) { id = nid; ch?.postMessage({ kind: "hello", tab, id }); render(); } };
 })();
 
-// ------------------------------------------------------------ the console
-let consoleUi = null, consoleKernel = null, consoleNb = null;
-const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
-async function toggleConsole(show = consoleEl.hidden) {
-  consoleEl.hidden = !show;
-  consoleBtn.setAttribute("aria-pressed", String(show));
-  document.body.style.paddingBottom = show ? consoleEl.offsetHeight + "px" : "";
-  if (!show) return consoleBtn.focus();
-  if (consoleUi) return consoleUi.focus();
-  statusEl.textContent = "loading console…";
-  const { openConsole } = await import(new URL("sagebrush-console.js", location.href).href); // loaded on demand, never bundled
-  // a scratchpad: its own interpreter, apart from every notebook (and a
-  // notebook component, not shown, that draws its pictures and controls)
-  consoleKernel = makeKernel(null).kernel;
-  consoleNb = createNotebook(document.createElement("div"), { kernel: consoleKernel });
-  consoleKernel.start();
-  // (in the notebook's language; its pictures and controls drawn by consoleNb)
-  const kernel = consoleKernel, nb = { get mode() { return window.sagebrush.notebook.mode; }, get output() { return consoleNb.output; } };
-  consoleUi = openConsole($("#term"), {
-    // Pictures (and @interact controls) from the console go to the panel beside it.
-    run: (src, out) => new Promise((resolve) => kernel.execute(src, { mode: nb.mode, repl: true }, {
-      start() {}, out, done: () => resolve(),
-      display(b) { const box = consolePictures(); box.replaceChildren(); nb.output.display(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
-      interact(spec) { const box = consolePictures(); nb.output.forget(box); box.replaceChildren(); nb.output.interact(box, spec); out("[controls shown on the right]\n", false); },
-      clear() {},
-      stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
-      skipped() { resolve(); },
-    })),
-    more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
-    complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => kernel.interrupt(),
-    sage: isSage,
-    version: () => kernel.version,
-    announce,
-  });
-  if (!consoleKernel.ready) await new Promise((r) => { const off = consoleKernel.on("ready", () => { off(); r(); }); });
-  statusEl.textContent = `console ready (sagebrush ${consoleKernel.version}): a scratchpad with its own interpreter`;
-}
-function consolePictures() {
-  const box = $("#cplot");
-  box.hidden = false;
-  return box;
-}
-consoleBtn.onclick = () => toggleConsole();
-$("#closeconsole").onclick = () => toggleConsole(false);
-{
-  const grip = consoleEl.querySelector(".grip");
-  const setH = (h) => {
-    consoleEl.style.height = Math.max(120, Math.min(innerHeight - 60, h)) + "px";
-    document.body.style.paddingBottom = consoleEl.offsetHeight + "px";
-  };
-  grip.addEventListener("pointerdown", (e) => {
-    grip.setPointerCapture(e.pointerId);
-    grip.onpointermove = (m) => setH(innerHeight - m.clientY);
-    grip.onpointerup = () => (grip.onpointermove = null);
-  });
-  grip.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); setH(consoleEl.offsetHeight + (e.key === "ArrowUp" ? 30 : -30)); }
-  });
-}
-
 // ------------------------------------------------------------ theme, mode, toolbar
 function setTheme(t) {
   themeEl.value = t;
   if (t === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
   try { localStorage.setItem("sagebrush-theme", t); } catch {}
-  consoleUi?.setTheme();
 }
 themeEl.onchange = () => setTheme(themeEl.value);
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
 themeEl.value = document.documentElement.dataset.theme || "system";
 const setMode = (mode) => nb.setMode(mode);
 
@@ -2430,11 +2345,14 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
+const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexOn(location.hostname);
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
     attr: "data-f",
-    keys: { newNotebook: "new", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    latex: latexHere,
+    keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2590,6 +2508,7 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "rename": nbName.focus(); nbName.select(); break;
+    case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     case "examples":
       exDlg.showModal();
       exDlg.querySelector("#exlist button")?.focus();
@@ -3548,6 +3467,9 @@ function wsShowFiles(on) {
         else { saveNow(); location.assign(url); }
       },
       upload: (files, folder) => uploadHere(files, folder),
+      // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
+      ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
+      fromExample: () => { exDlg.showModal(); exDlg.querySelector("#exlist button")?.focus(); },
       openAs: (e, as) => openAs(e, as),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)

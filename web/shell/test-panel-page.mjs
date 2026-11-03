@@ -536,15 +536,14 @@ try {
     check(m?.open && m.pressable && m.bottom <= m.h, `B380-3: in a 420 px window, ${menu}'s last entry is clear of the foot's notices, pressable: ${JSON.stringify(m)}`);
   }
   await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
-  await evaluate(`document.querySelector("#consolebtn").click()`);
-  await until(`!document.querySelector("#console").hidden`, 5000);
+  // (the bottom dock: the Terminal's, the notebook page's only one since the Console went, U6)
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden; })()`, 5000);
   for (const [btn, menu] of MENUS) {
     const m = await lastEntry(btn, menu);
-    check(m?.open && m.pressable && !m.scrolls, `B380-1: at 800 px with the console open, ${menu} fits whole (the console is below it), its last entry pressable: ${JSON.stringify(m)}`);
+    check(m?.open && m.pressable && !m.scrolls, `B380-1: at 800 px with the terminal open, ${menu} fits whole (the dock is below it), its last entry pressable: ${JSON.stringify(m)}`);
   }
-  await evaluate(`document.querySelector("#consolebtn").click()`);
   await send("Emulation.clearDeviceMetricsOverride");
-  await evaluate(`document.querySelector("#termbtn").click()`);
   // ---- the board page's dock (TP-5, #326's deferral; plan E5.1: "the notebook page and the board page"): ⋯ ▸ Terminal
   // there too, placed as on the notebook page (above the bottom overlays, the board ending above it, hide and ✕, the
   // sheet under 700 px), with ps listing the board

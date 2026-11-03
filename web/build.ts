@@ -1,4 +1,4 @@
-// bun web/build.ts  ->  web/dist/{index.html, llms.txt, sagebrush-worker.js, sagebrush-console.js,
+// bun web/build.ts  ->  web/dist/{index.html, llms.txt, sagebrush-worker.js,
 //                                sagebrush-math.js, katex/, sagebrush-engine.wasm, sagebrush-raster.wasm}
 // The pyjs compiler and runtime for browsers: Node APIs are replaced by
 // web/shims, the Python library is fetched in chunks (lib/), and the
@@ -142,16 +142,6 @@ const result = await Bun.build(<any>{
     },
   ],
 });
-// The console (xterm.js), loaded only when it is opened.
-const consoleResult = await Bun.build(<any>{
-  metafile: true,
-  entrypoints: [join(here, "console.ts")],
-  outdir: join(here, "dist"),
-  naming: "sagebrush-console.js",
-  target: "browser",
-  format: "esm",
-  minify: true,
-});
 // Math in Markdown cells (KaTeX), loaded on first use.  (Markdown itself,
 // small and usually in the first cell, is part of the page script.)
 // (in a LaTeX build, the same module plus KaTeX's renderToString, for the LaTeX editor's worker: web/latex/math-dev.ts)
@@ -207,8 +197,8 @@ const gitShims = { name: "gitpush-shims", setup(b: any) {
   b.onResolve({ filter: /^(diff3|clean-git-ref|isomorphic-textencoder)$/ }, shim("unused.ts"));
 } };
 const gitpushWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "git-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-worker.js", target: "browser", format: "esm", minify: true, plugins: [gitShims] });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
-for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
+const builds: [string, any][] = [["the worker", result], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
+for (const r of [result, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -222,7 +212,8 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
   // (without the LaTeX editor, its entry's import line is taken out first: its one use is in a branch the build drops)
-  const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
+  // (with New ▸ LaTeX document's own two, latexOn and texNew: index.html uses them only behind __SB_LATEX__, U0)
+  const LATEX_IMPORT = 'import { latexBoot, latexOn, texNew } from "./latex/boot.ts";\n';
   if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   // (SAGEBRUSH_MEASURE_IDS=keep: the size gate's identifier-stable measuring variant, never shipped: identifiers kept,
@@ -506,7 +497,7 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // mode's, when it is first used; offline, a module whose sources were
 // never fetched can't be imported, and one whose compiled code wasn't is
 // compiled from its source: src/compile.ts)
-const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json", ...ICONS, ...KATEX];
 const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-myst.js", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 // What "Storage -> Offline" lists and "download all" fetches (plan-b8-offline §2-§3): LAZY as items, with each one's
 // file count, stored bytes (exact) and transfer bytes (brotli at quality 5 here, the build's estimate of the wire); the
@@ -522,7 +513,7 @@ const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.js
   console.log(`offline: ${inv.items.length} items, ${inv.totals.files} files, ${(inv.totals.stored / 1e6).toFixed(1)} MB stored, ~${(inv.totals.transfer / 1e6).toFixed(1)} MB to download, max entry ${(inv.totals.maxEntry / 1e6).toFixed(1)} MB`);
 }
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -636,7 +627,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {
@@ -662,4 +653,4 @@ if (hasSite) await import("./build-articles.ts");
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
 (await import("./csp.ts")).writeHeaders();
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;
-console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB, sagebrush-console.js ${(statSync(join(here, "dist", "sagebrush-console.js")).size / 1e3).toFixed(0)} kB`);
+console.log(`web/dist/sagebrush-worker.js ${(size / 1e6).toFixed(2)} MB`);

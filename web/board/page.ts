@@ -937,6 +937,15 @@ let chosen: string | null = null;
 // (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
 // notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
 // open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+// (the LaTeX editor's module, from the site's root: a variable, so the bundler leaves it to the browser)
+const TEX_PAGE = "/sagebrush-latex.js";
+// New ▸ LaTeX document in `folder` (the File menu's and the file panel's, where the editor is on: U0): made by the
+// editor's own newTex in this workspace, then opened there, this board left as New notebook leaves it
+const newLatexHere = ws && !file && latexOn(location.hostname) ? (folder = "/") => departFor("A new LaTeX document", async () => {
+  let url: string | undefined;
+  await (await import(TEX_PAGE)).newTex(ws!, (e: Entry) => { url = "/?tex=" + e.fid; }, folder);
+  return url;
+}) : undefined;
 function openTex(e: Entry, tab: boolean): boolean {
   if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
   const url = "/?tex=" + e.fid;
@@ -1383,6 +1392,7 @@ const host: BoardHost = {
       const e = await ws!.createByPerson(p, { mode, signal });
       return "/?nb=" + encodeURIComponent(e.ref!);
     }),
+    ...(newLatexHere ? { newLatex: newLatexHere } : {}),
     async newFolder() {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim()) return;
@@ -1545,6 +1555,9 @@ if (ws && local) {
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
       openFile: openTex,
+      ...(newLatexHere ? { newLatex: (folder: string) => void newLatexHere(folder) } : {}),
+      // (From an example…: the board's own, as its File menu has it)
+      fromExample: () => document.querySelector<HTMLElement>('[data-sbb="filemenu"] [data-sbb="examples"]:not([disabled])')?.click(),
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),

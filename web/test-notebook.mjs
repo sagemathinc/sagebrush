@@ -390,7 +390,7 @@ try {
   ok((await ev("document.querySelector('#mode').value")) === "matlab", "a MATLAB share link reopens in MATLAB mode");
   // the whiteboard (William): File > New whiteboard just under New notebook, ⋯ Whiteboard beside Console
   ok(await ev("(() => { const f = [...document.querySelectorAll('#filemenu [data-f]')].map((b) => b.dataset.f); return f.indexOf('whiteboard') === f.indexOf('new') + 1; })()"), "File: New whiteboard, just under New notebook");
-  ok(await ev("document.querySelector('#consolebtn').nextElementSibling?.id === 'boardbtn'"), "⋯: Whiteboard, beside Console");
+  ok(await ev("!document.querySelector('#consolebtn') && document.querySelector('#filesbtn').nextElementSibling?.id === 'boardbtn'"), "⋯: Whiteboard, beside Files; no Console (U6: Terminal stays)");
   // New whiteboard: a blank board in the notebook's language (MATLAB here), in Edit, at an address of its own
   await ev("document.querySelector('[data-f=whiteboard]').click(), 1");
   await until("location.pathname === '/board/' && /^\\?doc=local:[0-9a-f]{12}$/.test(location.search) && document.querySelector('[data-sbb=edit]')?.getAttribute('aria-pressed') === 'true'", 60000);

@@ -6,6 +6,9 @@
 // with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
 import { openPreview } from "../workspace/preview";
+import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
+import { openFilesDialog, recentLabel, recentOpened } from "../workspace/fileopen";
+import { freePath, safeName } from "../workspace/paths";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
@@ -14,10 +17,48 @@ export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOST
   return hosts.includes(host);
 }
 
+// (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
+const PAGE = "/sagebrush-latex.js";
+const g: any = globalThis;
+const isTex = (e: Entry) => /\.tex$/i.test(e.path);
+/** New ▸ LaTeX document in `folder`: "Untitled.tex" (or "Untitled (2).tex", ...) there, opened in the editor. */
+export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => x.newTex(ws, g.__sbTex, folder), (r) => alert(r));
+/** The LaTeX examples' list (the editor's "From an example…"; examples.ts). */
+export const texExamplesOpen = (ws: Workspace) => import(PAGE).then((x) => x.texExamples(ws, g.__sbTex), (r) => alert(r));
+/** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
+ * in the same order, U0) from this page's script, so the editor's chunk carries no copy of it: handed to the editor
+ * at mount (its host's `fileMenu`). `print`: the editor's own Print or save as PDF; `close`: the menu closed. */
+function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string }) {
+  const go = (e: Entry, how: "here" | "tab" = "here") => {
+    const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : e.kind === "notebook" ? "/?nb=" + encodeURIComponent(e.ref!) : isTex(e) && e.fid ? "/?tex=" + e.fid : null;
+    if (url) how === "tab" ? open(url, "_blank", "noopener") : location.assign(url);
+  };
+  const top = async (base: string, ext: string) => { const at = new Set((await ws.list("/")).map((e) => e.path)); const p = freePath("/", base, ext, (x) => at.has(x)); if (!p) throw new Error("no free name"); return p; };
+  const act: Record<string, () => unknown> = {
+    texnb: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "python" })),
+    texboard: () => location.assign("/board/?new=python"),
+    texnew: () => texNew(ws),
+    texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
+    texexamples: () => texExamplesOpen(ws),
+    texopen: () => openFilesDialog(ws, go),
+    texprint: () => o.print(),
+  };
+  renderFileMenu(menu, {
+    attr: "data-f", latex: true, downloads: [], chosen: o.close,
+    keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
+    recent: async () => (await recentOpened(ws)).filter((e) => e.fid !== o.fid).map((e) => ({ label: recentLabel(e), title: e.path, open: () => go(e) })),
+  });
+  menu.addEventListener("click", (ev) => {
+    const k = (ev.target as HTMLElement).closest("[data-f]")?.getAttribute("data-f");
+    if (k && act[k]) Promise.resolve().then(act[k]).catch((err) => alert(String((err as Error)?.message ?? err)));
+  });
+  return (e: KeyboardEvent) => { const it = fileMenuKey(e); if (it) { e.preventDefault(); menu.querySelector<HTMLElement>(`[data-item="${it}"]:not([disabled])`)?.click(); } };
+}
+
 /** Called once by the notebook page; true if the LaTeX page took the page over. */
 export async function latexBoot(ws: Workspace | null) {
   const p = new URLSearchParams(location.search), tex = p.get("tex");
-  const g: any = globalThis, el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; }, isTex = (e: Entry) => /\.tex$/i.test(e.path);
+  const el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; };
   if (!latexOn(location.hostname)) {
     if (tex === null) return false;
     // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
@@ -43,35 +84,11 @@ export async function latexBoot(ws: Workspace | null) {
     else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
-  // a new LaTeX document: an item in the file browser's New (+) menu, when it opens; in the File menu's New group; and on
-  // the empty file list (on a phone, where the file panel's buttons may be out of reach) (this module is in a LaTeX
-  // build only, so their own code is the same as without the editor); the work is the page module's newTex, loaded on
-  // the click: /Untitled.tex (or "Untitled (2).tex", ...) with a short document, opened in the editor
-  // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
-  const page = "/sagebrush-latex.js";
-  // (all three are redrawn as they change: checked after each change. The file browser's + menu is the .sbfmenu with a
-  //  "Folder" item: a folder's own menu has "New folder here")
-  // (fn: the page module's function: newTex, a blank document, or texExamples, the examples' list)
-  const qs = (s: string) => document.querySelector(s), t = "LaTeX document", e = "LaTeX example";
-  const add = (m: Element | null | undefined, t: string, at?: Element | null, close?: number, fn = "newTex") => {
-    if (!m || m.querySelector(`[data-tex="${fn}"]`)) return;
-    const b = el("button", t);
-    b.dataset.tex = fn; b.setAttribute("role", "menuitem");
-    b.onclick = (ev) => { ev.stopPropagation(); close ? m.remove() : m.closest("[role=menu]")?.setAttribute("hidden", ""); import(page).then((x) => x[fn](ws!, g.__sbTex), (r) => alert(r)); };
-    // (the click closes its menu: the + menu removed, the File menu hidden, so neither stays over the examples' list)
-    // (an undefined `at` is null to the DOM: the end)
-    m.insertBefore(b, at as Element | null);
-  };
-  if (ws) new MutationObserver(() => {
-    const m = qs(".sbfmenu"), f = qs(".fmgroup[aria-label=New]"), x = qs(".sbfiles .fempty"), at = f?.querySelector("[data-item=newFolder]");
-    const fo = [...(m?.querySelectorAll("button") ?? [])].find((b) => b.textContent == "Folder");
-    if (fo) add(m, t, fo, 1);
-    add(f, t, at); add(f, e, at, 0, "texExamples");
-    if (x?.textContent!.startsWith("Nothing")) { add(x, "New " + t); add(x, e, null, 0, "texExamples"); }
-}).observe(document.body, { childList: true, subtree: true });
+  // (a new LaTeX document and the LaTeX examples: texNew and texExamplesOpen above, which the page's File ▸ New, file
+  // panel and folder menus call (filemenu.ts NEW_ITEMS, browser.ts: U0); never a URL that makes a file)
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(page)).mount(root, { ws, fid: tex, back: () => location.assign("/") });
+  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }) });
   return true;
 }

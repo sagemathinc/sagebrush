@@ -64,13 +64,6 @@ try {
   ok((await ev(out(0))) === "42" && (await ev(stale(0))) && (await ev(stale(1))), "Restart keeps the outputs, marked stale");
   await setRun(0, "a = 41\nprint(a + 1)");
   ok(!(await ev(stale(0))) && !(await ev(stale(1))), "running a cell makes its output current again, and its dependent's (the reactive notebook reruns it)");
-  // the console: a scratchpad with its own interpreter
-  await ev("document.querySelector('#consolebtn').click(); true");
-  await until("/console ready/.test(document.querySelector('#status').textContent)", 20000);
-  await ev("new Promise((res) => sagebrush.consoleKernel.execute('scratch = 1\\nprint(\\'a\\' in globals())', { mode: 'python', repl: true }, { start() {}, out(t) { window.__c = (window.__c ?? '') + t; }, display() {}, interact() {}, clear() {}, done: res, stopped: res, skipped: res }))");
-  ok((await ev("window.__c.trim()")) === "False", "the console does not see the notebook's variables");
-  await setRun(1, "print('scratch' in globals())");
-  ok((await ev(out(1))) === "False", "the notebook does not see the console's variables");
   // a reload: outputs loaded from storage are stale
   await send("Page.reload");
   await until(ready);
