@@ -484,6 +484,18 @@ try {
     check(flagged && z.names.includes("files/Welcome (2).ipynb") && !omitted.includes("Welcome") && z.entries.some((e) => e.path === "/Welcome (2).ipynb" && e.kind === "notebook"), "B3 (3): a notebook from another device whose content is here (opened since) is exported, though its entry still says it was listed from the server");
     check(z.manifest?.totals?.files === z.entries.filter((e) => e.kind !== "folder").length, "…the manifest's totals count the workspace's files only, not the note: " + JSON.stringify(z.manifest?.totals));
     check((await ev(`${LAST}.then((l) => l?.partial === true)`)), "…and \"Last export prepared\" says it was partial");
+    // (the B3 hang, CI's web-export, Nov 3: Cancel at Ready held this tab's export until its records were removed, the
+    // Ready and its Save… still shown; an export begun meanwhile was refused, and the old Save… pressed did nothing.
+    // Now Cancel clears the panel and lets the page go at once: with that removal held, a new export starts and ends)
+    await hooks(`beforeCancelRemove: () => new Promise((r) => { window.__releaseRemove = r; })`);
+    const held = await exportOnce(join(out, "f1.zip"), { refuseAtReady: true });
+    const cleared = await until(`typeof window.__releaseRemove === "function" && ![...(${P}?.querySelectorAll("button") ?? [])].some((b) => /^Save…$/.test(b.textContent))`, 10000);
+    await hooks();
+    const f2 = await exportOnce(join(out, "f2.zip"));
+    check(await ev(`${LOCKS}`) === 1, "…while its records' removal is held, the cancelled export's lock is still held (1): " + (await ev(`${LOCKS}`)));
+    await ev(`(() => { window.__releaseRemove?.(); return 1; })()`);
+    check(!!held.readyText && cleared && !f2.stopped && /left out of the export/.test(f2.summary ?? ""), "B3: Cancel at Ready clears the panel at once (no Save… left), and an export begun while its records are still being removed starts and ends: " + (f2.stopped ?? "").slice(-200));
+    check(await until(`${LOCKS}.then((n) => n === 0)`, 10000), "…and once that removal ends, no export's lock is left");
     for (const p of ["/cloud.csv", "/scratch.board.json"]) await idb("sagebrush-workspace", "entries", `(s) => s.delete(${JSON.stringify(p)})`);
     for (const p of ["/gone.bin", "/Gone.board.json", "/Welcome (2).ipynb"]) { await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`); await idb("sagebrush-workspace", "entries", `(s) => s.delete(${JSON.stringify(p)})`); }
     // (a file whose bytes go after preflight: the export stops, so what is left out is always the whole list)
