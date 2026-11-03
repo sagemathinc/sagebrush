@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=30 runner=bun
 // The Share dialog's selection model (web/share-client/selection.ts,
 // share-ux-plan r2 §1, §4): stable order, touched boxes, shift ranges,
 // Select all/none, generations, the upload snapshot, the bounds.

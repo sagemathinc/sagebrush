@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=70
 // Which Sagebrush runs a board's code (page.ts, mount.ts; round 0's 17): the
 // ⋯ menu's foot says the site's version, build and engine from
 // /version.json (as `sagebrush --version` says them), and

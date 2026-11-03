@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=90
 // Board TimeTravel (web/board/history.ts) in headless Chromium: every change
 // kept is a version (a drag when it ends), recorded as patchflow patches in
 // this browser's IndexedDB, in a database of the board's own; moving an item

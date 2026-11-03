@@ -1,3 +1,4 @@
+// ci: web-runner order=260 runner=bun chrome
 // A confirmed large move's publication tokens (Stage A layer 1; design stage-a-l1 r2.2 addenda A1 + A1.1; the
 // grader's rows A1-T1..T13) in headless Chromium, with real IndexedDB: this build's workspace and its mutants, each made
 // here by exact patches of a copy of web/, each of which must FAIL the rows that guard against it:

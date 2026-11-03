@@ -1,3 +1,4 @@
+// ci: export-controls order=20 chrome
 // The export's controls (E1 r2, grader's G-1/G-2): each rule undone in a copy of the export's chunk (or worker), built as
 // web/build.ts builds them, with a fixed text substitution asserted to have happened; then test-export.mjs runs the
 // scenario that covers the rule against that copy (served in place of the built file), and its named check must FAIL,

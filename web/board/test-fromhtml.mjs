@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=30 runner=bun
 // A board downloaded as HTML, read back from its text alone (fromhtml.ts):
 // the JSON an export embeds, whose every "<" exportHtml writes as \u003c, so
 // that no "</script>" is in it and the first "</script>" after it is its end

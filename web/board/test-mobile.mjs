@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=90
 // Boards on a phone: an iPhone-sized screen with touch.  The top bar fits
 // on one line; Edit shows the toolbar (with Undo, there being no Ctrl+Z);
 // a double tap on a code item opens its editor as a sheet, whose buttons

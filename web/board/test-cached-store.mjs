@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=100 runner=bun
 // The store that opens from a copy first (cached.ts cachedStore) and its
 // merge, deterministically (daybreak's repros, 3d21f26): edits kept in the
 // order made, whatever order their hashes finish in, and the first sync

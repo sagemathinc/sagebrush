@@ -1,3 +1,4 @@
+// ci: web-runner order=100 runner=bun chrome
 // The frame's editing side in a real frame (web/board/edit-channel.ts, page.ts; web/board-host-protocol.md,
 // "Editing"): a parent page on another origin plays the host, with the host's own merge and checks
 // (editState, bundled for the page).  Without edit: true, no Edit.  Granted: an edit made in the frame reaches

@@ -1,3 +1,4 @@
+// ci: web-runner order=470 chrome
 // Both pages wired to the workspace (web/workspace/, design/workspace-files.md
 // step 1b), in headless Chromium against the built site:
 // - the board page: a board kept before in localStorage is brought in, under

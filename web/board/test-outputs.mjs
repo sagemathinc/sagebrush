@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=70
 // Outputs on boards (design/outputs.md), in headless Chrome.  Step 1: a
 // board's seed makes its random numbers the same at every load (and another
 // seed, others); each code item's output key changes exactly when its code or

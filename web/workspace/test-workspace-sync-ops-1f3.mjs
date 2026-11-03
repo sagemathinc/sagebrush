@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=130 runner=bun chrome
 // astra's probes on sync-ops 1f30ccaa (CORR-1F3-1: ownership checked before any re-adoption, so a replay after an
 // unmoved adoption committed makes no second entry; the cursor across a close and reopen), with their cases in
 // astra-1f3-cases.js:

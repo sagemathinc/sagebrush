@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci: inline (ci.yml)
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";

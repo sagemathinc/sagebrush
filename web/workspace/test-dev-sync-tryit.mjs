@@ -1,3 +1,4 @@
+// ci: inline (ci.yml)
 // The DEV try-it flow for notebook sync, end to end on the real notebook page: two browsers (two Chrome processes,
 // each its own profile: two devices of one account) open the built site as https://dev.sagebrush.space (the only
 // origin notebooks' contents sync on, web/workspace/doc-sync-switch.ts), which Chrome maps to a front here with a

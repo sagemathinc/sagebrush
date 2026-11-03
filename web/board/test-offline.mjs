@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=70
 // A board with code downloaded as HTML (export.ts, engine.ts): its code runs
 // in the file.  In offline mode the file carries the engine and runs
 // with the network off; without, it fetches the engine it was made with from

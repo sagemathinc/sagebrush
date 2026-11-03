@@ -1,3 +1,4 @@
+// ci: web-runner order=290 runner=bun chrome
 // A lost workspace detected in the real fault (design/workspace-durability.md
 // A.4): a workspace with files, its witnesses written; the browser killed
 // (SIGKILL, its whole process group), the tail of IndexedDB's LevelDB log

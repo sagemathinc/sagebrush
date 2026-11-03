@@ -1,3 +1,4 @@
+// ci: checks.3 order=130
 // The offline inventory's build-time controls (plan-b8-offline r3.4 §2-§3; cases K2, K3): every LAZY path in exactly
 // one item, no paths or hashes in the inventory, a library group no rule places refused, and a catalog over each cap
 // refused.  Run on a built web/dist (its sw.js LAZY and DIGESTS) and on synthetic lists.

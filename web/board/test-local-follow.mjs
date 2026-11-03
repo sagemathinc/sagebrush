@@ -1,3 +1,4 @@
+// ci: web-runner order=550 runner=bun
 // web/board/local-follow.ts, the way a board shown by `sagebrush board open` follows its file:
 //   bun web/board/test-local-follow.mjs
 // A fake server's events and reads, and fake timers: each revision read once and shown, the latest winning; a

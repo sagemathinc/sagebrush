@@ -1,3 +1,4 @@
+// ci: web-runner order=480 chrome
 // The file browser (web/workspace/browser.ts, design/workspace-files.md §4)
 // on both pages, in headless Chromium against the built site: the Files
 // button and the sidebar (remembered across pages); New board, folder,
@@ -1284,6 +1285,29 @@ try {
     // (one row, not selected, dragged alone)
     const d3 = await drag("/u4 two.txt", "/u4 dest");
     check(d3.accepted && (await until(`${W}.stat("/u4 dest/u4 two.txt").then((x) => !!x)`, 10000)), "U4: one row dragged alone moves alone: " + JSON.stringify(d3));
+  }
+  // U9 (William, Nov 2): rename knows a file's extension: the box preselects the base; a name typed without one keeps
+  // the old; another one is allowed, said beside the box as it is typed; a folder's name is all name
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    // (F2 on the tree's row: the box, its value and what is selected in it)
+    const f2 = (p) => ev(`(() => { const r = document.querySelector(${JSON.stringify(treeRow(p))}); if (!r) return null; r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); const i = r.querySelector("input"); return { value: i.value, sel: [i.selectionStart, i.selectionEnd] }; })()`);
+    // (typed: the input event the box listens to; then what the note beside it says; then Enter)
+    const typeName = (text) => ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); if (!i) return "(no box)"; i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event("input")); const n = i.parentElement.querySelector(".extnote")?.textContent ?? null; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return n; })()`);
+    const has = (p) => until(`${W}.stat(${JSON.stringify(p)}).then((x) => !!x)`, 10000);
+    await ev(`${W}.create("/u9 a.tex", { content: "x" }).then(() => ${W}.mkdir("/u9 dir")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 a.tex"))}) && !!document.querySelector(${JSON.stringify(treeRow("/u9 dir"))})`);
+    const b1 = await f2("/u9 a.tex");
+    check(b1 && b1.value === "u9 a.tex" && b1.sel[0] === 0 && b1.sel[1] === "u9 a".length, "U9: a file's rename box preselects only its base name: " + JSON.stringify(b1));
+    const n1 = await typeName("u9 b");
+    check((await has("/u9 b.tex")) && !(await ev(`${W}.stat("/u9 b").then((x) => !!x)`)) && !n1, "U9: a name typed without an extension keeps the old one (u9 b -> u9 b.tex), no note: " + JSON.stringify(n1));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 b.tex"))})`);
+    await f2("/u9 b.tex");
+    const n2 = await typeName("u9 c.md");
+    check(n2 === "changes the file type: .tex → .md" && (await has("/u9 c.md")), "U9: a different extension is allowed, said beside the box as typed: " + JSON.stringify(n2));
+    const b3 = await f2("/u9 dir");
+    const n3 = await typeName("u9 folder.v2");
+    check(b3 && b3.value === "u9 dir" && b3.sel[1] === "u9 dir".length && !n3 && (await has("/u9 folder.v2")), "U9: a folder's name is all name (all selected, no extension rule): " + JSON.stringify({ b3, n3 }));
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });

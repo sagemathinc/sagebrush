@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The LaTeX comments' agent loop end to end (plan latex-comments r4.2 §9, design COMMENTS-IMPL-DB3-5): the LaTeX
 // editor's page (web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, served by web/serve.py with the site's headers, its
 // CSP included) paired with the REAL pairing server (engine/py/python/sagebrush/pairing.py, as sagebrush-mcp runs it),

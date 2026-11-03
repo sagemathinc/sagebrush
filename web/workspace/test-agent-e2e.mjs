@@ -1,3 +1,4 @@
+// ci: web-runner order=180 runner=bun chrome
 // A paired agent end to end (design/workspace-agent-protocol.md §5): the REAL pairing server
 // (engine/py/python/sagebrush/pairing.py, the one sagebrush-mcp runs) and a page in headless Chromium with the real
 // workspace (IndexedDB), connected as a person would: a ?pair= link, Connect, the grant dialog, Allow, Revoke.

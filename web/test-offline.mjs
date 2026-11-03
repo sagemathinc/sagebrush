@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // Storage -> Offline's service-worker side (plan-b8-offline r3.4): the API's grammar, what is downloaded and checked,
 // "download all" (join, cancel, remove), repairing a bad kept copy, and the error a notebook shows offline.
 //

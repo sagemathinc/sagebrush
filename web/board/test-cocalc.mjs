@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=120
 // CoCalc whiteboards as Sagebrush boards (web/board/cocalc.ts), opened with
 // the ⋯ menu's Open… in headless Chromium: a current .board (pages, notes,
 // texts, code, frames within frames, edges, and what a board has nothing

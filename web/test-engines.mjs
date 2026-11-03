@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=10
 // The engines route (web/engines.ts) in Miniflare, with web/dist's engine in
 // a simulated R2 bucket: each file comes back byte for byte with its
 // manifest's headers, immutable and readable from anywhere; nothing else

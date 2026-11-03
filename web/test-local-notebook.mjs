@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // End-to-end test of `sagebrush notebook` (src/notebook.ts) in headless Chromium:
 //
 //   node web/test-local-notebook.mjs [bundle]     (default build/cli/pyjs.cjs; CHROME=... for the browser)

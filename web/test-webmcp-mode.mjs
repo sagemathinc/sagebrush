@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The page's WebMCP run_python and the notebook's language (sim run 2, APP-sage-switch), in headless Chromium
 // against the built site: in a notebook with no code, sage=true switches it to Sage; in a Python notebook WITH code,
 // the code runs in a new Sage notebook (opened, its result said), the Python one saved as it was, never switched.

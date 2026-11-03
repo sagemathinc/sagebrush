@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // Line 3's size controls (line-3 case §4c, D-3a..g): a source change in a worktree, the page built six ways (PROD and
 // DEV, shipped and measuring, each measuring flavour twice), line 3 run on it with the stated block, the change
 // undone and the worktree checked clean before the next. Each control's expected outcome is closed: the exact

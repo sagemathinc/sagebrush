@@ -1,3 +1,4 @@
+// ci: web-browser/terminal.4 order=20 runner=bun
 // The Terminal's bridge probe and its verdicts, without an app (plan-native-checks r2.2; the grader's AM-2 and
 // B): terminal-probe.js's probe() on fake scopes (a route there is attempted, recorded, and makes the worker's
 // verdict FAIL; an empty scope is "unavailable" everywhere), and selftest-terminal.js's policyVerdict

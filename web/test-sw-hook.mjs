@@ -1,3 +1,4 @@
+// ci: checks.3 order=120
 // The service worker's test hook stays out of what ships (web/sw-hook.mts; the grader's ruling on B8's cases):
 // one block cut out byte for byte, no marker left, the hook's seams assigned only at their declarations, the
 // counters only written, and no deployable directory carrying the test build.  Each check against its own mutant.

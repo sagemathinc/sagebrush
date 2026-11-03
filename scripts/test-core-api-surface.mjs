@@ -1,3 +1,4 @@
+// ci: checks.5 order=10
 // The Core API contract's signature rule (scripts/core-api-surface.mjs widenParams): a widening
 // is compatible exactly when every recorded call stays valid with the same binding.
 //   node scripts/test-core-api-surface.mjs

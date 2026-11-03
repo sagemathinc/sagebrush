@@ -1,3 +1,4 @@
+// ci: checks.3 order=70
 // .ipynb round trips keep what Sagebrush does not use (audit F8): notebook
 // and cell metadata (widgets, tags, provenance), raw cells, attachments, the
 // original kernelspec.  node web/test-ipynb.mjs

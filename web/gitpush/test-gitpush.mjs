@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // "Push project to GitHub" (Stage A MVP r1 §1; web/gitpush), end to end in headless Chromium against the built site
 // (bun web/build.ts first): the Storage panel's section, offered only with the flag; the token saved in the worker
 // and never in the page; a folder pushed through a stand-in for the push proxy (the same /github.com/<owner>/<repo>.git

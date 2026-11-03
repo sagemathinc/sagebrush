@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/board/test-board-journal-cutover.mjs, web/board/test-board-journal-page.mjs)
 // What test-board-journal-page.mjs, -cutover.mjs and -timing.mjs share: the site (built web/dist, or several builds
 // under prefixes) and a helper page (/__bj/, the workspace's module, to activate the journal and write as another
 // writer would) served from ONE origin, so they share this browser's IndexedDB, localStorage and locks; headless
