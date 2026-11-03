@@ -3500,21 +3500,32 @@ async function t14Figures() {
   const [widest, maxChars] = Object.entries(widths).sort((a, b) => b[1] - a[1])[0];
   check(nss.every((x) => x.length === 97) && maxChars === 216 && widths.refused === 216, "figures: the widest valid rows by construction (a refused one, a local supersession) are 216 JSON characters, ASCII only: " + J({ widths, widest }));
   const est = async () => (await navigator.storage.estimate()).usage ?? 0;
-  await sleep(500);
-  const u0 = await est();
   // (10,000 rows over the three namespaces, 3,334 / 3,333 / 3,333, in commits of at most 1,000; lseq distinct within a
   // namespace, every seq 16 digits)
   const N = 10_000, per = [3334, 3333, 3333];
   const rnd = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n;
-  const samples = [];
-  for (let k = 0; k < 3; k++)
-    for (let i0 = 0; i0 < per[k]; i0 += 1000)
-      await rawTx(w.ws, ["syncLedger"], (tx) => {
-        const st = tx.objectStore("syncLedger");
-        for (let i = i0; i < Math.min(i0 + 1000, per[k]); i++) st.put({ ns: nss[k], lseq: MAX - i * 2 ** 20 - rnd(2 ** 20), s: "refused", d: 1, dseq: MAX - rnd(2 ** 30) * 2 ** 10 - rnd(2 ** 10), code: coder(W.CODE.max) });
-      }).then(async () => samples.push((await est()) - u0));
-  await sleep(1500);
-  samples.push((await est()) - u0);
+  // (a measurement with no sample above its baseline is void: the browser compacted or freed earlier data meanwhile,
+  // so it says nothing about these rows (every sample negative on #467's CI, a peak of -55 B a row). It is done again,
+  // the rows cleared, after a settle, from a fresh baseline, at most 3 times; the allowance is held to the first that
+  // says something: @sagebrush, agents-ui)
+  let samples = [], tries = 0;
+  for (; tries < 3; tries++) {
+    if (tries) {
+      await rawTx(w.ws, ["syncLedger"], (tx) => { tx.objectStore("syncLedger").clear(); });
+      await sleep(2000);
+    } else await sleep(500);
+    const u0 = await est();
+    samples = [];
+    for (let k = 0; k < 3; k++)
+      for (let i0 = 0; i0 < per[k]; i0 += 1000)
+        await rawTx(w.ws, ["syncLedger"], (tx) => {
+          const st = tx.objectStore("syncLedger");
+          for (let i = i0; i < Math.min(i0 + 1000, per[k]); i++) st.put({ ns: nss[k], lseq: MAX - i * 2 ** 20 - rnd(2 ** 20), s: "refused", d: 1, dseq: MAX - rnd(2 ** 30) * 2 ** 10 - rnd(2 ** 10), code: coder(W.CODE.max) });
+        }).then(async () => samples.push((await est()) - u0));
+    await sleep(1500);
+    samples.push((await est()) - u0);
+    if (Math.max(...samples) > 0) break;
+  }
   const rows = await all(w.ws, "syncLedger");
   const dist = nss.map((x) => rows.filter((r) => r.ns === x).length);
   check(rows.length === N && J(dist) === J(per), `figures: exactly three namespaces, each constant within its rows: ${J(dist)} of ${rows.length}`);
@@ -3523,7 +3534,7 @@ async function t14Figures() {
   const skips = JSON.stringify(Array.from({ length: 16 }, () => [MAX, MAX, 2]));
   const meta = { ledgerCount: 50_000, ledgerFloor: MAX, ledgerFrom: MAX, ledgerRev: MAX, ledgerSeeded: true, ledgerSeedAt: MAX, ledgerWipe: true };
   const metaChars = Object.entries(meta).reduce((a, [k, v]) => a + `sync:${ns}:${k}`.length + JSON.stringify(v).length, 0) + `sync:${ns}:ledgerSkips`.length + skips.length;
-  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured a peak of ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ peakBytesPerRow: measured, samplesBytes: samples, namespaces: dist, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
+  check(skips.length <= 609 && measured > 0 && measured <= A, `figures (task #14): measured a peak of ${measured} B a stored row, ${measured > A ? "EXCEEDS" : "within"} the committed allowance A = ${A}: ` + J({ peakBytesPerRow: measured, tries: Math.min(tries + 1, 3), samplesBytes: samples, namespaces: dist, committedAllowanceBytesPerRow: A, perNamespacePlanMiB: +(A * 70_000 / 2 ** 20).toFixed(1), globalPlanMiB: +(A * 210_000 / 2 ** 20).toFixed(1), rowJsonCharsMax: maxChars, skipsJsonChars: skips.length, metaKeysAndValuesCharsPerNs: metaChars, obsoleteQueueCharsMax: JSON.stringify([ns, ns]).length }));
 }
 
 async function t14Review() {

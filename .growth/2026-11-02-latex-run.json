@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "sagebrush latex run: cli/pyjs.cjs gains the run command's help lines and the path of the script it runs (its Sage session's command line); the run code itself is in the lazily loaded sagebrush-latex.cjs. +95 in CI's size-gate on 94462275.",
+ "bytes": {
+  "cli/pyjs.cjs": 200
+ }
+}
