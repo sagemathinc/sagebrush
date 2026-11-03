@@ -7,6 +7,7 @@
 //   /examples/<kind>/<slug>/files.json and <slug>.zip
 // Plain HTML, readable without JavaScript and indexable; returns the pages' URLs for the sitemap (build-sitemap.ts).
 //
+// Each example's page names the sha256 of the main file its preview was built from (A6), in a <meta>.
 // The previews are static and inert (A4): no page has a script but its JSON-LD data block (checked here, for every
 // page written), and no example's bytes reach a page unescaped.
 //   - a notebook: its cells. Markdown through marked with KaTeX (trust: false) and the reviewed sanitizer for any HTML
@@ -223,7 +224,7 @@ details summary { cursor: pointer; color: var(--muted); }
 p.ai { color: var(--muted); font-size: 0.88rem; border-left: 3px solid var(--rule); padding: 0.2rem 0 0.2rem 0.8rem; }
 `;
 
-function page(o: { url: string; title: string; description: string; crumbs: [string, string][]; body: string; type: string }): string {
+function page(o: { url: string; title: string; description: string; crumbs: [string, string][]; body: string; type: string; main?: { path: string; sha256: string } }): string {
   const canonical = SITE + o.url;
   const ld = { "@context": "https://schema.org", "@type": o.type, name: o.title, description: o.description, url: canonical, license: "https://opensource.org/licenses/MIT", publisher: { "@type": "Organization", name: "SageMath, Inc.", url: "https://sagemath.com" } };
   return `<!doctype html>
@@ -233,7 +234,7 @@ function page(o: { url: string; title: string; description: string; crumbs: [str
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(o.title)} | Sagebrush examples</title>
 <meta name="description" content="${esc(o.description)}">
-<link rel="canonical" href="${canonical}">
+<link rel="canonical" href="${canonical}">${o.main ? `\n<meta name="sagebrush-example-main" content="${esc(o.main.path)} sha256:${o.main.sha256}">` : ""}
 <meta property="og:type" content="website">
 <meta property="og:title" content="${esc(o.title)}">
 <meta property="og:description" content="${esc(o.description)}">
@@ -259,12 +260,17 @@ ${o.body}
 
 // (the site's early-alpha notice, on every page of the site's own: web/test-alpha-banner.mjs)
 const ALPHA_BANNER = '<script src="/alpha-banner.js" defer></script>';
+/** Whether a tag in the page has an on* attribute: its attributes' names, not their values (an example's text reaches
+ * a page escaped, so its "<" is never a tag and its quotes never end a value). */
+export function handlerIn(html: string): boolean {
+  for (const m of html.matchAll(/<[a-z][^>]*>/gi)) if (/\son[a-z]+\s*=/i.test(m[0].replace(/"[^"]*"|'[^']*'/g, '""'))) return true;
+  return false;
+}
 // (no page has a script but its JSON-LD data block and the site's notice: the gallery's pages are inert, A4)
 function inert(file: string, html: string): string {
   for (const m of html.matchAll(/<script\b[^>]*>/gi))
     if (!/^<script type="application\/ld\+json">$/.test(m[0]) && !(m[0] + "</script>" === ALPHA_BANNER)) throw new Error(`build-examples: ${file} has a script`);
-  // (inside a tag only: an example's text reaches a page escaped, so its own "<" is never a tag)
-  if (/<[a-z][^>]*?\son[a-z]+\s*=/i.test(html.replace(/data:[^"]+/g, ""))) throw new Error(`build-examples: ${file} has an event handler attribute`);
+  if (handlerIn(html)) throw new Error(`build-examples: ${file} has an event handler attribute`);
   return html;
 }
 
@@ -349,7 +355,7 @@ ${preview}
 <h2>Files</h2>
 <ul>${fileList}</ul>
 <p class="meta">Open the ZIP's ${esc(KIND_ONE[e.kind])} in Sagebrush (File, Open) to run and change it.</p>`;
-    write(`${e.id}/index.html`, page({ url: `/examples/${e.id}/`, title: m.title, description: m.summary, crumbs: [["/examples/", "Examples"], [`/examples/${e.kind}/`, KIND_TITLE[e.kind]]], body, type: "CreativeWork" }));
+    write(`${e.id}/index.html`, page({ url: `/examples/${e.id}/`, title: m.title, description: m.summary, crumbs: [["/examples/", "Examples"], [`/examples/${e.kind}/`, KIND_TITLE[e.kind]]], body, type: "CreativeWork", main: { path: m.main, sha256: fj.files.find((x: any) => x.path === m.main)!.sha256 } }));
     urls.push({ url: `/examples/${e.id}/`, date });
   }
 

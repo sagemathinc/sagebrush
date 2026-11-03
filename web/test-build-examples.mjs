@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
-import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc } from "./build-examples.ts";
+import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn } from "./build-examples.ts";
 import { sitemapXml } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
@@ -96,13 +96,14 @@ const pages = files.filter((f) => f.endsWith(".html")).map((f) => [f, readFileSy
 for (const [f, h] of pages) {
   const scripts = [...h.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]);
   check(scripts.every((s) => s === '<script type="application/ld+json">' || s === '<script src="/alpha-banner.js" defer>'), `${f}: no script but its JSON-LD and the site's notice: ${scripts}`);
-  check(!/<[a-z][^>]*?\son[a-z]+\s*=/i.test(h.replace(/data:[^"]+/g, "")), `${f}: no event handler`);
+  check(!handlerIn(h), `${f}: no event handler`);
 }
 const lp = readFileSync(join(out, "examples", "latex", "article", "index.html"), "utf8");
 check(/<iframe class="latex" src="preview\.html" sandbox="" /.test(lp), "a LaTeX preview is framed with sandbox=\"\" (nothing allowed)");
 const nbp = readFileSync(join(out, "examples", "notebook", "hello-python", "index.html"), "utf8");
 check(/<img class="out-img" src="data:image\/svg\+xml;base64,/.test(nbp), "a notebook's SVG output is an <img> of a data: URL");
 
+check(handlerIn('<p><img src="x" onerror="a()"></p>') && handlerIn("<div\nonclick='a()'>") && !handlerIn('<meta content="x onerror=y">') && !handlerIn("<p>a onload=b</p>"), "the handler check reads attribute names, not values or text");
 // one output at a time: escaped, sanitized, images as data: URLs
 const evil = "<script>alert(1)</script><img src=x onerror=alert(2)>";
 check(outputHtml({ output_type: "stream", name: "stdout", text: evil }) === `<pre class="out">${esc(evil)}</pre>`, "a stream is text, escaped");
@@ -137,6 +138,27 @@ try {
   refused = String(e.message);
 }
 check(/marker names .* not examples\/shared\/katex-preview\.css/.test(refused ?? ""), "the build refuses a preview whose marker isn't the corpus's stylesheet: " + refused);
+
+// ---- A4: a title closing the JSON-LD's script, and markup in a summary, in the generated page; A6: main's sha256
+{
+  const c = join(tmp(), "examples");
+  cpSync(FIX, c, { recursive: true });
+  const mf = join(c, "notebook", "hello-python", "example.json");
+  const m = JSON.parse(readFileSync(mf, "utf8"));
+  m.title = 'T </script><script>alert(1)</script> & "q"';
+  m.summary = "<img src=x onerror=alert(2)> </ScRiPt >";
+  writeFileSync(mf, JSON.stringify(m));
+  const o = tmp();
+  await buildExamplesInto(o, c);
+  const h = readFileSync(join(o, "examples", "notebook", "hello-python", "index.html"), "utf8");
+  const ld = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(h)?.[1] ?? "";
+  check(!/[<>&]/.test(ld) && JSON.parse(ld).name === m.title, "the JSON-LD holds the title with <, > and & as \\u escapes, and parses back to it");
+  check(([...h.matchAll(/<\/script/gi)].length === 2) && !/<script>alert/i.test(h) && !h.includes("<img src=x"), "the title and summary are escaped everywhere else in the page");
+  const cat = readFileSync(join(o, "examples", "index.html"), "utf8");
+  check(!/<script>alert|<img src=x/i.test(cat), "and in the lists");
+  const sha = JSON.parse(readFileSync(join(o, "examples", "notebook", "hello-python", "files.json"), "utf8")).files.find((f) => f.path === m.main).sha256;
+  check(h.includes(`<meta name="sagebrush-example-main" content="${m.main} sha256:${sha}">`), "the page names the sha256 of the main its preview was built from (A6)");
+}
 
 // ---- the ZIP writer alone: empty, UTF-8 names, deterministic
 const z1 = zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.bin", bytes: Buffer.alloc(0) }]);
