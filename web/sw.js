@@ -843,7 +843,7 @@ self.addEventListener("message", (ev) => {
 let stopAt = null, resume = null;
 const instance = Math.random().toString(36).slice(2, 8), started = Date.now(), saw = [];
 for (const e of ["install", "activate"]) self.addEventListener(e, () => saw.push(e + "@" + Date.now()));
-const holds = [], grants = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
+const holds = [], grants = [], deletes = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
 reserve = (n, serve) => reserve0(n, serve).then((release) => (grants.push(serve ? "serve" : "bg"), release));
 caches.open = async (name) => { const c = await open(name); cacheNames.set(c, name); return c; };
 for (const op of ["put", "delete"]) {
@@ -854,6 +854,7 @@ for (const op of ["put", "delete"]) {
     const halt = () => ((stopAt = null), new BroadcastChannel("sb-offline-test").postMessage({ stopped: s, key: String(k?.url ?? k), instance }), new Promise((r) => (resume = r)));
     if (hit && s.when === "before") await halt();
     const r = await f.call(this, k, ...a);
+    if (op === "delete" && deletes.length < 200) deletes.push(String(k?.url ?? k));
     if (hit && s.when !== "before") await halt();
     return r;
   };
@@ -896,7 +897,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, deletes });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>

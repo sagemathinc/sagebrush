@@ -103,9 +103,12 @@ try {
     ok(await until(() => kept(v), 15000), `${v}: …and kept by the service worker`);
     await hook({ scale: 0.1, holdRead: url });
     await clearHttp();
-    const before = fromServer();
+    const before = fromServer(), h0 = await hook(), budget = h0?.budgetUsed;
     const r = await get(ms);
-    return { r, network: fromServer() - before, held: (await hook())?.heldReads };
+    const h1 = await hook();
+    // (the deletes of the chunk's entry while it was read)
+    const deleted = (h1?.deletes ?? []).slice(h0?.deletes?.length ?? 0).filter((k) => k.endsWith(url)).length;
+    return { r, network: fromServer() - before, held: h1?.heldReads, budget, deleted };
   }
 
   at = "a held read, with the bound";
@@ -114,6 +117,27 @@ try {
   ok(fixed.r.size === want.size && fixed.r.sha256 === want.sha256, "…and the request is answered, the right bytes: " + J(fixed.r));
   ok(fixed.network === 1, "…from the network: the server served it once more: " + fixed.network);
   ok(fixed.r.ms >= 900 && fixed.r.ms < 8000, `…after the bound (1 s at scale 0.1), not before and not much after: ${Math.round(fixed.r.ms)} ms`);
+  // (T565-RELEASE, grader: the stalled read's reservation released, so stalls can't drain the budget into reserve())
+  const after = await until(async () => (await hook())?.budgetUsed === fixed.budget, 3000);
+  ok(after, `…its reservation released: the budget back to ${fixed.budget} B (now ${(await hook())?.budgetUsed} B)`);
+  // (T565-KEPT, grader: a stalled read isn't a wrong copy: the entry stays)
+  ok(fixed.deleted === 0 && (await kept(A)), `…and the kept copy is left as it was: not deleted (${fixed.deleted} deletes), still there`);
+  // (T565-SERIAL, grader's advisory: two requests for the held URL at once: the second waits its turn behind the
+  // stalled check, then reads the copy; both answered, the chain of checks empty after)
+  at = "two requests at once, the first one's read held";
+  await hook({ holdRead: url });
+  await clearHttp();
+  const two = await ev(`Promise.all([0, 1].map(() => {
+    const t0 = performance.now();
+    return fetch(${J(url)}).then((r) => r.arrayBuffer()).then(async (b) => ({ size: b.byteLength, sha256: [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join(""), ms: performance.now() - t0 }));
+  }))`);
+  ok(two?.length === 2 && two.every((x) => x.size === want.size && x.sha256 === want.sha256), "both answered, the right bytes: " + J(two?.map((x) => [x.size, Math.round(x.ms)])));
+  // (one check of a key at a time: the second request's check waits for the first's, the held one, so neither is
+  // answered before the bound; and the later is answered within about two bounds)
+  ok(two?.length === 2 && Math.min(...two.map((x) => x.ms)) >= 900, "…one check at a time: the other request waited for the held one's (≥ 1 bound): " + J(two?.map((x) => Math.round(x.ms))));
+  ok(two?.length === 2 && Math.max(...two.map((x) => x.ms)) < 2 * 1000 + 3000, "…the later within about two bounds: " + J(two?.map((x) => Math.round(x.ms))));
+  let left;
+  ok(await until(async () => (left = (await hook())?.checking) === 0, 3000), "…and no check left waiting: " + left);
 
   // the control: the same build with the bound taken out, as a new deploy; the same held read is never answered
   at = "the control: the bound taken out";
