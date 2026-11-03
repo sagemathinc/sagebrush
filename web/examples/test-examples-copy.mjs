@@ -1,10 +1,11 @@
 // ci: web-runner order=195 runner=bun chrome
-// The copy path (web/examples/copy.ts; plan-examples-gallery A1-A3), in Chrome on a real workspace: the fixture
+// The copy path (web/examples/copy.ts; plan-examples-gallery A1-A3) and the Examples… panel (panel.ts), in Chrome on
+// a real workspace: the fixture
 // corpus's examples as web/build-examples.ts serves them, beside made-up ones (several folders deep, and each A1
 // refusal: a bad hash, a ZIP member renamed, .., an absolute or backslash path, a case collision, a path not in NFC,
 // main missing or of another kind, over 2 MiB, an .ipynb that isn't one, a redirect), and A2's races (an existing
-// root, two copies at once, the root or a nested folder replaced mid-copy, a file there already). Cases:
-// copy-cases.js.
+// root, two copies at once, the root or a nested folder replaced mid-copy, a file there already); the panel's
+// list, filters, sandboxed preview and copy, and a title with markup shown as text (A4). Cases: copy-cases.js.
 //   CHROME=google-chrome bun web/examples/test-examples-copy.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -17,7 +18,7 @@ import { buildExamplesInto, zip } from "../build-examples.ts";
 const here = new URL(".", import.meta.url).pathname;
 const FIX = join(here, "..", "..", "test", "fixtures", "examples");
 const site = mkdtempSync(join(tmpdir(), "sb-examples-copy-site-"));
-writeFileSync(join(site, "entry.ts"), `export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};\nexport * as C from ${JSON.stringify(join(here, "copy.ts"))};\n`);
+writeFileSync(join(site, "entry.ts"), `export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};\nexport * as C from ${JSON.stringify(join(here, "copy.ts"))};\nexport * as P from ${JSON.stringify(join(here, "panel.ts"))};\n`);
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "bundle.js", target: "browser", format: "esm" });
 if (!built.success) {
   console.error(built.logs.join("\n"));
@@ -67,6 +68,8 @@ example("notebook/main-kind", "Main kind", [["a.txt", t("a")]]);
 example("notebook/too-big", "Too big", [["main.ipynb", nb("13")], ["big.bin", Buffer.alloc(2 * 1024 * 1024 + 1)]]);
 example("notebook/not-ipynb", "Not ipynb", [["main.ipynb", t("{}")]]);
 example("notebook/redirect", "Redirect", [["main.ipynb", nb("14")]], { redirect: true });
+// (a title that would close a script or open a tag, for the panel: A4 in its actual embedding)
+catalog.examples.push({ id: "notebook/evil-title", kind: "notebook", title: '</script><img src=x onerror="window.pwned=1"><b>bold</b>', summary: "<script>window.pwned=2</script>", tags: ["<i>x</i>"], level: "intro", mode: "python", main: "main.ipynb", files: 1, bytes: 0, files_sha256: "0".repeat(64), url: "/examples/notebook/evil-title/" });
 routes.set("/examples/index.json", Buffer.from(JSON.stringify(catalog)));
 
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {

@@ -1,6 +1,6 @@
 // The copy path's cases (web/examples/copy.ts; plan-examples-gallery A1-A3), run in a page on a real workspace
 // (IndexedDB) against the examples test-examples-copy.mjs serves: window.run() -> [[ok, what], ...].
-import { W, C } from "./bundle.js";
+import { W, C, P } from "./bundle.js";
 
 const enc = new TextEncoder();
 const sha = async (b) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -134,6 +134,35 @@ export async function run() {
     check(err?.code === "stopped" && /notes\.txt is there already/.test(err.message), "a failure on the second file: stopped: " + err?.message);
     check(new TextDecoder().decode((await ws.readUpTo("/Examples/Pair (6)/notes.txt", 100)).content) === "theirs", "the file that was there is byte-identical");
     check(JSON.stringify(err?.copied?.made) === JSON.stringify(["/Examples/Pair (6)", "/Examples/Pair (6)/main.ipynb"]), "the error says what was copied: " + JSON.stringify(err?.copied));
+  }
+
+  // ---- the panel (A4 in its own embedding: every catalog string is text)
+  {
+    let opened = null;
+    const closed = P.openExamplesPanel({ ws, open: (e) => { opened = e; } }, { kind: "notebook" });
+    const dlg = document.querySelector("dialog.sb-examples");
+    for (let i = 0; i < 100 && !dlg.querySelector('button[data-id="notebook/hello-python"]'); i++) await new Promise((r) => setTimeout(r, 20));
+    check(dlg?.open, "the panel opens as a modal dialog");
+    const ids = () => [...dlg.querySelectorAll("li button")].map((b) => b.dataset.id);
+    check(ids().length > 3 && ids().every((id) => id.startsWith("notebook/")), "opened on notebooks: " + ids().length);
+    const evil = dlg.querySelector('button[data-id="notebook/evil-title"]');
+    check(evil && evil.querySelector(".t").textContent.startsWith("</script><img") && !dlg.querySelector("img") && !dlg.querySelector("li b") && !dlg.querySelector("li i") && window.pwned === undefined, "a title, summary and tag with markup are text in the panel: no element made, no script run");
+    const frame = dlg.querySelector("iframe");
+    check(frame.getAttribute("sandbox") === "" && /^\/examples\/notebook\/[a-z0-9-]+\/$/.test(frame.getAttribute("src") ?? ""), "the preview is the example's page, in an <iframe sandbox=\"\">: " + frame.getAttribute("sandbox") + " " + frame.getAttribute("src"));
+    dlg.querySelector('button[data-kind="board"]').click();
+    check(ids().length >= 1 && ids().every((id) => id.startsWith("board/")), "the Boards tab: boards only: " + ids());
+    dlg.querySelector('button[data-kind="all"]').click();
+    const search = dlg.querySelector("input[type=search]");
+    search.value = "pair";
+    search.dispatchEvent(new Event("input"));
+    check(JSON.stringify(ids()) === JSON.stringify(["notebook/pair"]), "a search narrows the list: " + ids());
+    search.value = "";
+    search.dispatchEvent(new Event("input"));
+    dlg.querySelector('button[data-id="board/hello"]').click();
+    check(frame.getAttribute("src") === "/examples/board/hello/" && dlg.querySelector(".acts a").getAttribute("href") === "/examples/board/hello/hello.zip", "choosing one shows its page and its ZIP");
+    dlg.querySelector(".acts button").click();
+    await closed;
+    check(opened?.kind === "board" && /^\/Examples\/Hello, board/.test(opened.path) && !document.querySelector("dialog.sb-examples"), "Open a copy: copied, the panel closed, the host told to open its main: " + opened?.path);
   }
   return out;
 }
