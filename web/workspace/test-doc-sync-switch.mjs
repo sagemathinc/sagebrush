@@ -59,7 +59,10 @@ const prodOff = await docSyncAllowed({ origin: PROD, fetch: async () => statuses
 check(prodOff === false, "PROD's origin when the server says not available (off the allowlist): off");
 check(docSyncOrigin(PROD) === true && docSyncOrigin(DEV) === true && docSyncOrigin("https://www.sagebrush.space") === false && docSyncOrigin("http://sagebrush.space") === false, "docSyncOrigin: DEV and PROD yes, www. and http: no");
 check((await docSyncAvailable(DEV, async () => statuses["200 available"]())) === true && (await docSyncAvailable(DEV, async () => statuses["404 (no sync route: a site without sync)"]())) === false, "docSyncAvailable: 200 available yes, 404 no");
-check(DOC_SYNC_NOTE.some((t) => /lasting for this browser/.test(t)) && DOC_SYNC_NOTE.some((t) => /dev\.sagebrush\.space and sagebrush\.space are separate sites/.test(t)) && !DOC_SYNC_NOTE.some((t) => /DEV only/.test(t)) && DOC_SYNC_NOTE.some((t) => /Boards don't sync yet/.test(t)), "the Sync panel's note says the activation lasts, that the two sites are separate, and that boards don't sync yet (and never 'DEV only')");
+// (William's M9: each sentence as the code does it: merged, not "the later change is kept"; history from the first sync,
+// on every device; no snapshot or cleared history as a cause; no "lasting" and no DEV/PROD line; boards said not to sync)
+const note = DOC_SYNC_NOTE.join("\n");
+check(/Not peer-to-peer/.test(note) && /Outputs never leave this browser/.test(note) && /the edits are merged/.test(note) && /since the notebook first synced, on every device/.test(note) && /Boards don't sync yet/.test(note) && /Clearing TimeTravel isn't available yet for a synced notebook/.test(note) && /If a notebook can't sync .*the Sync panel says so, and its changes stay in this browser/.test(note) && !/later change is kept|snapshot|cleared history|lasting|dev\.sagebrush\.space|separate sites|DEV only/.test(note), "the Sync panel's note says what sync is (your devices and Sagebrush's server), no outputs, edits merged, history from the first sync on every device, boards not synced; and none of the old claims (the later change kept, a snapshot or a cleared history as a cause, the activation lasting, the two sites, 'DEV only')");
 
 // ---- from the sources: no reachable override
 const files = [];
