@@ -110,6 +110,21 @@ test("reactive-session: the editor's Run: one budget for the whole Run, retries 
   } finally { await interp.close(); }
 });
 
+test("reactive-session: the editor's Run: a cancelled descendant spends none of the budget (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (bad raises; reader (3000 ms) is cancelled, never run; slow runs out of time; after (3000 ms) fits: only bad and
+    //  slow, 2 ms, were spent of 5000 ms)
+    const cells = [{ key: "root", code: "r = 1" }, { key: "bad", code: "b = r / 0" }, { key: "reader", code: "print('reader', b)" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["bad", 1], ["reader", 3000], ["slow", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.failed.has("bad"));
+    assert.equal(out.get("reader"), undefined);
+    assert.ok(r.timedOut.has("slow"));
+    assert.equal(out.get("after"), "after 1\n", "after fit: the cancelled reader spent nothing");
+  } finally { await interp.close(); }
+});
+
 test("reactive-session: a cell over its time is interrupted; what reads it isn't run; others are", async () => {
   const interp = await startInterpreter({ mode: "python", entry: CLI });
   try {
