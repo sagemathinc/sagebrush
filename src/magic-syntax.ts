@@ -176,8 +176,9 @@ export function magicSyntax(src: string): string {
 
 // the shell's forms, given the calling code's namespaces for their {expr} and
 // $name (lib/_pyjs_shell.py): IPython reads its caller's frame.  Reserved
-// spellings of globals() and locals() (src/emit.ts), so a notebook's own
-// globals or locals (a variable, a parameter) can't stand in for them.
+// spellings of globals() and locals() that src/emit.ts compiles to the
+// namespaces themselves, never through a name, so no binding of the code's
+// (globals, locals, or these names) can stand in for them.
 const SHELL_MAGICS = new Set(["system", "sx"]);
 const NS = ", __pyjs_globals__(), __pyjs_locals__()";
 

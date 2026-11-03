@@ -88,17 +88,17 @@ test("the shell forms reach the caller's namespaces even where globals or locals
   const s = await session();
   const cmd = (code: string) => `${code}\ntry:\n    CMD = None\n    !echo {y} $z\nexcept Exception as e:\n    CMD = (type(e).__name__, e.command)\nprint(CMD)`;
   // (at the top level, globals and locals rebound)
-  for (const name of ["globals", "locals"]) {
+  for (const name of ["globals", "locals", "__pyjs_globals__", "__pyjs_locals__"]) {
     const r = await s.run(cmd(`${name} = 1\ny = 2\nz = 1`));
     assert.equal(r.out, "('ShellUnavailableError', 'echo 2 1')\n", `${name} = 1: ${r.err}`);
   }
   // (in a function: parameters named globals and locals; y global, z local)
-  for (const name of ["globals", "locals"]) {
+  for (const name of ["globals", "locals", "__pyjs_globals__", "__pyjs_locals__"]) {
     const r = await s.run(`y = 2\ndef f(z, ${name}=5):\n    try:\n        !echo {y} $z\n    except Exception as e:\n        return (type(e).__name__, e.command)\nprint(f(1))`);
     assert.equal(r.out, "('ShellUnavailableError', 'echo 2 1')\n", `parameter ${name}: ${r.err}`);
   }
   // (the function's local wins over the global of the same name, as IPython's frame lookup)
   const r = await s.run(`y = 2\ndef g():\n    y = 'local'\n    try:\n        !echo {y}\n    except Exception as e:\n        return e.command\nprint(g())`);
   assert.equal(r.out, "echo local\n", r.err);
-  await s.run("del globals, locals");
+  await s.run("del globals, locals, __pyjs_globals__, __pyjs_locals__");
 });

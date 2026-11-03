@@ -485,6 +485,9 @@ export class Emitter {
     const f = e.func;
     if (this.isZeroArgSuper(e)) return this.zeroArgSuper(false);
     const intro = this.introspectionCall(e);
+    // (the shell forms' reserved spellings, src/magic-syntax.ts: the namespace
+    // itself, unconditionally, never through a name a notebook could bind)
+    if (intro !== null && f.k === "Name" && (f.id === "__pyjs_globals__" || f.id === "__pyjs_locals__")) return intro;
     if (intro !== null) {
       // (guarded on the name still being the builtin's own function: a
       // locals mapping, the globals or the builtins module can bind it
