@@ -371,18 +371,21 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
     const analyses = new Map<string, Analysis>();
     const reactive = new Reactive({
       cells: () => items.map((it) => ({ id: it.key, code: it.code })),
-      async analyze(code) {
-        if (!analyses.has(code)) {
+      async analyze(code, pageOrder) {
+        // (keyed by the code and its page-order map, if any: Magma's renames go beside the code)
+        const key = pageOrder ? `${code}\0${JSON.stringify(pageOrder)}` : code;
+        if (!analyses.has(key)) {
           let a: Analysis;
-          try { a = analyzeCell(code, "c", { mode }); } catch (e: any) { a = { error: { kind: e instanceof ImportStarError ? "import-star" : "syntax", message: String(e?.message ?? e) } }; }
-          analyses.set(code, a);
+          try { a = analyzeCell(code, "c", { mode, ...(pageOrder ? { pageOrder } : {}) }); } catch (e: any) { a = { error: { kind: e instanceof ImportStarError ? "import-star" : "syntax", message: String(e?.message ?? e) } }; }
+          analyses.set(key, a);
         }
-        return analyses.get(code)!;
+        return analyses.get(key)!;
       },
-      async execute(id, code, forget, scoped) {
+      pageOrderMaps: true,
+      async execute(id, code, forget, scoped, extra) {
         const list: any[] = [];
         outputs.set(id, list);
-        const r = await send({ cell: id, code, opts: { forget, mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => collect(list, m, kept), timeout * 1000);
+        const r = await send({ cell: id, code, opts: { forget, mangle: id.replace(/[^A-Za-z0-9]/g, ""), seed: seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}), ...(extra?.pageOrder ? { pageOrder: extra.pageOrder } : {}) } }, (m) => collect(list, m, kept), timeout * 1000);
         ran++;
         if (r.timedOut) timedOut.add(id);
         return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
@@ -390,8 +393,9 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       forget: (names) => send({ code: "", opts: { forget: names } }, () => {}).then(() => {}),
       rename: async (q) => {
         try {
-          const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), mode, SCOPE_SEP);
-          return r ? [...r] : null;
+          const po = new Map<string, { to: string; before?: string }>();
+          const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), mode, SCOPE_SEP, po);
+          return r ? [...r].map(([k, c]): [string, string, { to: string; before?: string }?] => (po.has(k) ? [k, c, po.get(k)!] : [k, c])) : null;
         } catch {
           return null;
         }

@@ -112,22 +112,25 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
   const mangle = (id: string) => id.replace(/[^A-Za-z0-9]/g, "");
   const reactive = new Reactive({
     cells: () => cells.map((c) => ({ id: c.key, code: c.code })),
-    async analyze(code) {
-      if (!analyses.has(code)) {
+    async analyze(code, pageOrder) {
+      // (keyed by the code and its page-order map, if any: Magma's renames go beside the code)
+      const key = pageOrder ? `${code}\0${JSON.stringify(pageOrder)}` : code;
+      if (!analyses.has(key)) {
         let a: Analysis;
-        try { a = analyzeCell(code, "c", { mode: o.mode }); } catch (e: any) { a = { error: { kind: e instanceof ImportStarError ? "import-star" : "syntax", message: String(e?.message ?? e) } }; }
-        analyses.set(code, a);
+        try { a = analyzeCell(code, "c", { mode: o.mode, ...(pageOrder ? { pageOrder } : {}) }); } catch (e: any) { a = { error: { kind: e instanceof ImportStarError ? "import-star" : "syntax", message: String(e?.message ?? e) } }; }
+        analyses.set(key, a);
       }
-      return analyses.get(code)!;
+      return analyses.get(key)!;
     },
-    async execute(id, code, forget, scoped) {
-      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
+    pageOrderMaps: true,
+    async execute(id, code, forget, scoped, extra) {
+      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}), ...(extra?.pageOrder ? { pageOrder: extra.pageOrder } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
       if (r.timedOut) timedOut.add(id);
       return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
     },
     forget: (names) => interp.send({ cell: "forget", code: "", opts: { forget: names } }, () => {}).then(() => {}),
     rename: async (q) => {
-      try { const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), o.mode, SCOPE_SEP); return r ? [...r] : null; } catch { return null; }
+      try { const po = new Map<string, { to: string; before?: string }>(); const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), o.mode, SCOPE_SEP, po); return r ? [...r].map(([k, c]) => (po.has(k) ? [k, c, po.get(k)!] : [k, c])) : null; } catch { return null; }
     },
     status: (id, st) => states.set(id, st),
   });

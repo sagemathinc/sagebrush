@@ -44,6 +44,7 @@
 //     and the graph stays exact; the page shows the code as written.
 import { NotebookGraph, MapView, analysisView, frozenError, type AnalysisView, type CellError, type GraphCell } from "./notebook-graph";
 import type { CellAnalysis } from "./dataflow";
+import type { PageOrder } from "./magma";
 import type { WaveDecision, WaveEntryPolicy, WavePolicy, WaveParent } from "./wave-policy";
 
 export type Analysis = CellAnalysis | { error: CellError };
@@ -70,14 +71,15 @@ export type CellState =
 export interface ReactiveHost {
   /** the code cells, in page order */
   cells(): CellInfo[];
-  /** a cell's code analyzed (the host may cache by code) */
-  analyze(code: string): Promise<Analysis>;
+  /** a cell's code analyzed (the host may cache by code, and page-order map if any: Magma, below) */
+  analyze(code: string, pageOrder?: PageOrder): Promise<Analysis>;
   /**
    * Run a cell's code after deleting the global names `forget`; `ok` false
    * if it raised, `stopped` if it was interrupted or the interpreter
-   * restarted.
+   * restarted.  `extra.pageOrder`: a Magma cell's page-order map, which
+   * its translation needs beside its code (only to a host with pageOrderMaps).
    */
-  execute(id: string, code: string, forget: string[], scoped?: Record<string, string>): Promise<ExecResult>;
+  execute(id: string, code: string, forget: string[], scoped?: Record<string, string>, extra?: { pageOrder: PageOrder }): Promise<ExecResult>;
   /** delete global names now (a cell deleted or broken); `cells`: the cells that defined them */
   forget(names: string[], cells?: string[]): Promise<void>;
   /** a cell's state changed */
@@ -86,8 +88,17 @@ export interface ReactiveHost {
    * Page-order scoping (optional): the new sources giving `name` one
    * defining cell, each later definition renamed (src/rename.ts
    * renameRedefinitions, with SCOPE_SEP), or null if it cannot be done.
+   * Magma: each with the cell's renames, which go beside its code, never in
+   * it (src/magma.ts PageOrder).
    */
-  rename?(request: { name: string; cells: { id: string; code: string; defines: boolean; reads: boolean }[]; taken: string[] }): Promise<[string, string][] | null>;
+  rename?(request: { name: string; cells: { id: string; code: string; defines: boolean; reads: boolean }[]; taken: string[] }): Promise<[string, string, { to: string; before?: string }?][] | null>;
+  /**
+   * The host takes a cell's page-order map to its translation (analyze,
+   * execute).  Without it a rename that needs one is not made: the name
+   * keeps its multiple-definition error, noted "remote" (the remote kernels
+   * can't carry the map yet).
+   */
+  pageOrderMaps?: boolean;
   /**
    * Remote approval (optional; web/notebook/remote-gate.js): a person's run
    * carries their consent (opaque here), checked before registration
@@ -146,6 +157,8 @@ export interface Registration {
   readonly source: string;
   /** the code that runs: the source with page-order scoping's renames */
   readonly code: string;
+  /** Magma: page-order scoping's renames, beside the code (src/magma.ts PageOrder) */
+  readonly pageOrder?: PageOrder;
   /** the text version it was registered from (remote approval) */
   readonly version?: object;
   /** its analysis: a private, read-only copy */
@@ -190,6 +203,15 @@ export const SCOPE_SEP = "\u02b9";
 /** A name as written (without page-order scoping's suffix). */
 export const written = (name: string) => name.replace(/\u02b9\d+$/, "");
 // How many spellings of `name` (x, xʹ2, xʹ3, ...) appear in code as whole
+// A registration's code to run, and its page-order map (Magma), the same as these?
+function sameCode(prev: Registration, code: string | undefined, pageOrder: PageOrder | undefined): boolean {
+  if (prev.code !== code) return false;
+  const a = prev.pageOrder, b = pageOrder;
+  if (!a || !b) return !a && !b;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && a[k].to === b[k].to && a[k].before === b[k].before);
+}
+
 // words (strings and attributes too: an overcount only keeps a rename).
 function spellings(code: string, name: string): number {
   const re = new RegExp(`(?<![\\p{L}\\p{N}_\u02b9])${name}(\u02b9\\d+)?(?![\\p{L}\\p{N}_\u02b9])`, "gu");
@@ -227,6 +249,10 @@ export class Reactive {
   private cancelledBy = new Map<string, { by: string; why: "exception" | "error" | "interrupted" }>();
   /** page-order scoping's names in the code that runs, and the names as written (xʹ2 -> x): replaced, never written */
   private scoped = new Map<string, string>();
+  // (Magma: each renamed cell's renames, beside its code; and the names whose
+  // renames need them but the host can't carry them)
+  private pageOrders = new Map<string, PageOrder>();
+  private pageOrderRefused = new Set<string>();
   /** the files each cell read and wrote in its last run */
   files = new Map<string, { reads: string[]; writes: string[] }>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
@@ -259,6 +285,13 @@ export class Reactive {
   }
   // (the only writer of the errors: a new map each time)
   private setErrors(m: Map<string, CellError[]>): void {
+    // (a name not renamed because the host can't carry Magma's map: its errors say so)
+    if (this.pageOrderRefused.size) {
+      const refused = this.pageOrderRefused;
+      m = new Map([...m].map(([id, es]) => [id, es.some((e) => e.kind === "multiple-definition" && refused.has(e.name))
+        ? Object.freeze(es.map((e) => (e.kind === "multiple-definition" && refused.has(e.name) ? Object.freeze({ ...e, note: "remote" as const }) : e))) as CellError[]
+        : es]));
+    }
     this.errorMap = m;
     this.errorsView = new MapView<string, CellError[]>([], m);
   }
@@ -545,16 +578,17 @@ export class Reactive {
   private async registerAll(sources: Map<string, string>, cells: CellInfo[], eff?: Map<string, string>, versions?: Map<string, object | undefined>): Promise<void> {
     eff ??= await this.effectiveCodes(sources);
     for (const [id, source] of sources) {
-      const code = eff.get(id) ?? source;
+      const code = eff.get(id) ?? source, pageOrder = this.pageOrders.get(id);
       const prev = this.registered.get(id);
       const version = versions?.has(id) ? versions.get(id) : prev?.version;
-      if (prev && prev.code === code && prev.error?.kind !== "analyzer") {
+      if (prev && sameCode(prev, code, pageOrder) && prev.error?.kind !== "analyzer") {
         // (the same code, not analyzed again: a new registration only if what it was registered from changed)
         if (prev.source !== source || prev.version !== version) this.registered.set(id, Object.freeze({ ...prev, source, version }));
         continue;
       }
-      const a = await this.host.analyze(code);
-      this.registered.set(id, Object.freeze("error" in a ? { source, code, version, error: frozenError(a.error) } : { source, code, version, analysis: analysisView(a) }));
+      const a = await (pageOrder ? this.host.analyze(code, pageOrder) : this.host.analyze(code));
+      const po = pageOrder ? { pageOrder } : {};
+      this.registered.set(id, Object.freeze("error" in a ? { source, code, ...po, version, error: frozenError(a.error) } : { source, code, ...po, version, analysis: analysisView(a) }));
     }
     this.graph.set(cells.filter((c) => this.registered.has(c.id)).map((c) => this.graphCell(c.id)));
     for (const id of [...this.outputs.keys()]) if (!this.registered.has(id)) this.outputs.delete(id);
@@ -566,6 +600,8 @@ export class Reactive {
   // keep their multiple-definition error.
   private async effectiveCodes(sources: Map<string, string>): Promise<Map<string, string>> {
     const eff = new Map(sources);
+    this.pageOrders = new Map();
+    this.pageOrderRefused = new Set();
     if (!this.host.rename || sources.size < 2) {
       this.scoped = testHooks?.scopedInPlace ? testHooks.scopedInPlace(this.scoped, new Map()) : new Map();
       return eff;
@@ -599,6 +635,7 @@ export class Reactive {
       return true;
     }).map(([n]) => n).sort();
     const scoped = new Map<string, string>();
+    const pageOrders = new Map<string, Record<string, { to: string; before?: string }>>(), refused = new Set<string>();
     for (const name of conflicts) {
       const cells = [...sources.keys()].map((id) => ({ id, code: eff.get(id)!, defines: !!an.get(id) && definesName(an.get(id)!, name), reads: !!an.get(id)?.refs.has(name) }));
       const r = await this.host.rename({ name, cells, taken: [...taken] });
@@ -606,8 +643,14 @@ export class Reactive {
       // (kept only if a renamed definition reads an earlier one: its code
       // has two of the name's spellings, x and xʹ2, or xʹ2 and xʹ3)
       if (unread.has(name) && !r.some(([, code]) => spellings(code, name) > 1)) continue;
-      for (const [id, code] of r) {
+      // (Magma: renames that go beside the code, to a host that takes them there)
+      if (r.some((e) => e[2]) && !this.host.pageOrderMaps) { refused.add(name); continue; }
+      for (const [id, code, e] of r) {
         eff.set(id, code);
+        if (e) {
+          const m = pageOrders.get(id) ?? pageOrders.set(id, Object.create(null)).get(id)!;
+          m[name] = Object.freeze(e.before === undefined ? { to: e.to } : { to: e.to, before: e.before });
+        }
       }
       // (the names it can have made: none is a name of the notebook's, `taken`)
       for (let k = 2; k <= cells.length + 1; k++) {
@@ -616,6 +659,8 @@ export class Reactive {
       }
     }
     this.scoped = testHooks?.scopedInPlace ? testHooks.scopedInPlace(this.scoped, scoped) : scoped;
+    for (const [id, m] of pageOrders) this.pageOrders.set(id, Object.freeze(m));
+    this.pageOrderRefused = refused;
     return eff;
   }
 
@@ -666,12 +711,12 @@ export class Reactive {
     // (cells whose code to run changed though they were not run: page-order scoping)
     const rescoped = new Set<string>();
     for (const [id, prev] of this.registered) {
-      if (!sources.has(id) || ids.includes(id) || prev.code === eff.get(id)) continue;
+      if (!sources.has(id) || ids.includes(id) || sameCode(prev, eff.get(id), this.pageOrders.get(id))) continue;
       rescoped.add(id);
     }
     for (const id of [...ids, ...rescoped]) {
       const prev = this.registered.get(id);
-      if (!prev || prev.code === eff.get(id)) continue;
+      if (!prev || sameCode(prev, eff.get(id), this.pageOrders.get(id))) continue;
       changed.add(id);
       for (const c of this.graph.children(id)) oldChildren.add(c);
       for (const n of [...(prev.analysis?.mutations ?? []), ...(prev.analysis?.deleted ?? []), ...(prev.analysis?.unbinds ?? [])]) oldMutations.add(n);
@@ -889,7 +934,8 @@ export class Reactive {
       }
       this.host.status(id, { state: "running" });
       const spec = this.runSpec(id)!;
-      const r = await this.host.execute(id, spec.code, spec.forget, spec.scoped);
+      // (Magma: the cell's page-order map beside its code; registered only with a host that takes it)
+      const r = await (reg.pageOrder ? this.host.execute(id, spec.code, spec.forget, spec.scoped, { pageOrder: reg.pageOrder }) : this.host.execute(id, spec.code, spec.forget, spec.scoped));
       // not sent at all (remote approval): stale, not run, not an error; what reads it waits too
       if (r.notRun) {
         stale.add(id);
@@ -988,6 +1034,8 @@ export class Reactive {
       if (desc.some((j) => j <= k)) return null; // (not in dependency order: cell by cell)
       const base = { cell: id, auto: !required.has(id), est: this.times.get(id) ?? 0, parents, desc, defs: this.defsOf(id) };
       const spec = this.registered.has(id) ? this.runSpec(id) : undefined;
+      // (a wave carries no page-order map: cell by cell)
+      if (this.registered.get(id)?.pageOrder) return null;
       if (!spec) entries.push({ ...base, place: "gone" });
       else if (notSent.has(id)) entries.push({ ...base, place: "approval", note: notSent.get(id) });
       else if (never) entries.push({ ...base, place: "never" });

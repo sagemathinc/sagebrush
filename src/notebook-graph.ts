@@ -39,8 +39,9 @@ export type CellError =
   // (the analyzer failed: not the code's fault; analyzed again on the next run)
   | { kind: "analyzer"; message: string }
   | { kind: "import-star"; message: string }
-  // (reading: the cell reads a name several cells define, under #1477's relaxation)
-  | { kind: "multiple-definition"; name: string; cells: string[]; reading?: true }
+  // (reading: the cell reads a name several cells define, under #1477's relaxation;
+  // note "remote": page-order scoping would rename it, but not for a remote kernel yet)
+  | { kind: "multiple-definition"; name: string; cells: string[]; reading?: true; note?: "remote" }
   | { kind: "cycle"; cells: string[] };
 
 interface Node {

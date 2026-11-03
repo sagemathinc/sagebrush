@@ -35,7 +35,7 @@ const NS = "5eed".repeat(16);
 // token or proof waits until released.
 // (`waves`: the page sends waves, as notebook.js does for a remote kernel: its host has executeWave)
 // (`gateway`: another gateway than the fake, e.g. the preview's, test-remote-preview-stop.mjs)
-export async function page(codes, { scoping = false, keepBodies = true, waves = false, net = null, timers = undefined, gateway = null } = {}) {
+export async function page(codes, { scoping = false, keepBodies = true, waves = false, net = null, timers = undefined, gateway = null, mode = "python" } = {}) {
   const fake = gateway ?? new FakeGateway();
   const fetches = [];
   const gates = { token: null, proof: null, analyze: null, seed: null, hash: null };
@@ -66,7 +66,7 @@ export async function page(codes, { scoping = false, keepBodies = true, waves = 
   await kernel.start();
   const shown = new Map(codes);
   const versions = new Map(codes.map(([id, t]) => [id, Object.freeze({ text: t })]));
-  let live = { mode: "python", seedNamespace: NS, reactive: true };
+  let live = { mode, seedNamespace: NS, reactive: true };
   let cfg = Object.freeze({ ...live });
   const seeding = { calls: 0, inFlight: 0, most: 0 };
   const hash = async (t) => { await wait("hash", t); return sha(t); };
@@ -104,10 +104,12 @@ export async function page(codes, { scoping = false, keepBodies = true, waves = 
   const base = {
     // (as notebook.js: a cell's code is its text version's text)
     cells: () => [...shown.keys()].map((id) => ({ id, code: versions.get(id).text, version: versions.get(id) })),
-    analyze: async (code) => {
+    analyze: async (code, pageOrder) => {
       await wait("analyze", code);
-      try { return analyzeCell(code); } catch (e) { return { error: { kind: "syntax", message: e.message } }; }
+      try { return live.mode === "python" ? analyzeCell(code) : analyzeCell(code, "c", { mode: live.mode, ...(pageOrder ? { pageOrder } : {}) }); } catch (e) { return { error: { kind: "syntax", message: e.message } }; }
     },
+    // (as notebook.js: Magma's page-order maps only to an interpreter here that takes them)
+    pageOrderMaps: kernel.pageOrderMaps === true && !kernel.remote,
     execute: async (id, code, forget, scoped, extra) => {
       const seed = await sha(`${live.seedNamespace}:${id}`); // (as execCell's cellSeed: the page's current seed)
       let opts = { mode: live.mode, cell: id, forget, mangle: live.reactive, seed, ...(scoped && Object.keys(scoped).length ? { scoped } : {}), ...(extra ?? {}) };
@@ -144,7 +146,7 @@ export async function page(codes, { scoping = false, keepBodies = true, waves = 
       },
     } : {}),
     status: (id, s) => states.set(id, s),
-    ...(scoping ? { rename: async (q) => { const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), "python", SCOPE_SEP); return r ? [...r] : null; } } : {}),
+    ...(scoping ? { rename: async (q) => { const po = new Map(); const r = renameRedefinitions(q.cells, q.name, new Set(q.taken), live.mode, SCOPE_SEP, po); return r ? [...r].map(([k, c]) => (po.has(k) ? [k, c, po.get(k)] : [k, c])) : null; } } : {}),
   };
   const host = gate.host(base);
   // (the action's budget, kept when it ends; and a probe at the scheduler's consent stages)
@@ -280,6 +282,17 @@ export async function runGateTests(check) {
     await p.gesture(["c0", "c1", "c2", "c3"]);
     const c3 = p.payloads().find((x) => x.cell === "c3");
     check(!!c3 && c3.code.includes(SCOPE_SEP) && !!c3.scoped, "a cell renamed by page-order scoping is approved through its spec's eid and sent, with its scoped names");
+  });
+
+  await control("page-order scoping: a Magma redefinition is refused, not run without its map", async () => {
+    // (Magma's renames go beside the code, which a remote kernel can't carry yet: #573's ruling)
+    const p = await page([["c0", "x := 1;"], ["c1", "print x;"], ["c2", "x := 2;"], ["c3", "print x;"]], { scoping: true, mode: "magma" });
+    await p.gesture(["c0", "c1", "c2", "c3"]);
+    const sent = p.payloads();
+    const errs = p.kernel.reactive.errors.get("c2") ?? [];
+    check(p.kernel.pageOrderMaps !== true && !sent.some((x) => x.cell === "c2" || x.cell === "c3") && !sent.some((x) => "pageOrder" in x || String(x.code).includes(SCOPE_SEP) || String(x.code).includes("page-order"))
+      && errs.some((e) => e.kind === "multiple-definition" && e.name === "x" && e.note === "remote"),
+      "a remote kernel: a Magma cell that page-order scoping would rename isn't sent (no map, no rename), and its error says remote runs don't support it yet");
   });
 
   await control("seeds from the captured namespace", async () => {

@@ -11,7 +11,7 @@
 // marimo is the oracle: test/dataflow.test.ts compares the two.
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
-import { magmaToPython } from "./magma";
+import { magmaToPython, type PageOrder } from "./magma";
 import { matlabToPython } from "./matlab";
 import { ipythonSyntax } from "./help-syntax";
 import { expandMagics, codeParser } from "./magic-syntax";
@@ -475,7 +475,7 @@ class Visitor {
  * Magma cells after translation to Python, as they run.  In Sage, a top-level
  * `var('x y')` (or `function('f')`) defines its names, as running it does.
  */
-export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" | "matlab"; strict?: boolean } = {}): CellAnalysis {
+export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" | "matlab"; strict?: boolean; pageOrder?: PageOrder } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
   // (IPython's obj? help lines and magics, as the notebook runs them: the
@@ -484,7 +484,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   if (ipython) source = ipythonSyntax(source);
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
-  else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");
+  else if (opts.mode === "magma") source = magmaToPython(source, "<cell>", opts.pageOrder ? { pageOrder: opts.pageOrder } : {}).replace(/^from _magma import \*\n/, "");
   // (MATLAB's translation, in cell mode: its two first lines are the runtime's,
   // and its own names (_m, _L, temporaries) start with _, the cell's own)
   else if (opts.mode === "matlab") source = matlabToPython(source, "<cell>", { cell: true }).replace(/^import _matlab as _m\n_m\.begin\([^\n]*\)\n/, "");

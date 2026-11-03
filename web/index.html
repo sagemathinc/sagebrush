@@ -971,8 +971,8 @@ const flagQuery = new URLSearchParams(location.search).has("reactive") ? "?react
 let analyzeWorker = null, analyzeId = 0;
 const analyzeWaiting = new Map();
 const analyzer = {
-  analyze(code, mode) {
-    return this.ask({ code, mode });
+  analyze(code, mode, pageOrder) {
+    return this.ask({ code, mode, ...(pageOrder ? { pageOrder } : {}) });
   },
   // the fix of a name defined by several cells (web/analyze-worker.ts): new sources, or null
   rename(request) {
