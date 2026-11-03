@@ -1,3 +1,4 @@
+// ci: none (new with U8, #551: a wiring candidate for the web-latex follow-up, runner=bun, no browser, about 1 s)
 // The LaTeX editor's autosave (autosave.ts; plan U8 r5, astra's DATA PLAN CLEAR 089b329b), without a browser: a fake
 // file (revisions, compare-and-swap, writes that can be held or made to fail), fake drafts (per fid and writer) and
 // manual timers. Each case is one of the plan's: snapshots, echoes, conflicts and their choices, two writers, recovery,
@@ -191,6 +192,41 @@ function editor(file, drafts, timers, init) {
   e.text = "the next file's text";
   release(); f.hold = null; const ok = await p;
   check("dispose-flushes-no-ui", ok && f.text === "closing" && !d.m.has("F|" + e.writerId) && e.states.length === n, { f: f.text, states: e.states.slice(n) });
+}
+
+// ---- 11. astra U8-RECOVERY-1: typing while recovery reads the drafts: the editor read-only meanwhile, and an edit
+// that got through anyway is never replaced by the old draft (that draft kept as a version instead)
+{
+  const f = fakeFile("base"), d = fakeDrafts(), t = fakeTimers();
+  d.put({ fid: "F", writerId: "a".repeat(32), gen: 7, path: "/a.tex", baseRev: f.rev, text: "OLD draft", t: 0 });
+  let release; const all0 = d.all.bind(d); d.all = async (fid) => { await new Promise((r) => (release = r)); return all0(fid); };
+  const e = editor(f, d, t);
+  const p = e.saver.recover(); await tick();
+  const roDuring = e.ro;
+  e.type("NEW typed");
+  release(); const r = await p; await settle();
+  check("recovery-1-readonly-while-pending", roDuring === true && e.ro === false, { roDuring, ro: e.ro });
+  check("recovery-1-new-text-kept", e.text === "NEW typed" && r.recovered === 0 && f.versions.includes("OLD draft") && d.m.get("F|" + e.writerId)?.text === "NEW typed" && !d.m.has("F|" + "a".repeat(32)), { text: e.text, r, v: f.versions, d: [...d.m.values()].map((x) => [x.writerId.slice(0, 4), x.text]) });
+}
+
+// ---- 12. astra U8-RECOVERY-2: a draft made on an older revision: no write can go out before the person chooses,
+// even with the file's read held and a flush (a timer, blur) meanwhile
+{
+  const f = fakeFile("base"), d = fakeDrafts(), t = fakeTimers();
+  f.rev = 2;
+  d.put({ fid: "F", writerId: "b".repeat(32), gen: 1, path: "/a.tex", baseRev: 1, text: "stale draft", t: 0 });
+  const io = f.io(); let release; const cur0 = io.current;
+  const e = { text: "base", ro: false, states: [], set: [] };
+  const held = { ...io, current: async () => { await new Promise((r) => (release = r)); return cur0(); } };
+  e.saver = new AutoSaver(held, d, { fid: "F", writerId: "c".repeat(32), path: () => "/a.tex" }, { text: "base", rev: 2 }, {
+    text: () => e.text, setText: (x) => { e.text = x; }, readOnly: (on) => { e.ro = on; }, state: (st) => e.states.push(st) }, t, () => 0);
+  const p = e.saver.recover(); await tick(); await tick();
+  t.fire(); await e.saver.flush(); await tick();
+  const writesWhileHeld = f.writes;
+  release(); await p; await settle();
+  check("recovery-2-no-write-before-choice", writesWhileHeld === 0 && f.writes === 0 && f.text === "base" && e.text === "stale draft" && e.saver.conflict?.text === "base" && e.saver.state.k === "conflict", { writesWhileHeld, writes: f.writes, st: e.saver.state });
+  const ok = await e.saver.keepMine();
+  check("recovery-2-keep-mine-then", ok && f.text === "stale draft" && f.versions.includes("base"), { f: f.text });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

@@ -219,30 +219,41 @@ export class AutoSaver {
   }
 
   /** On open: the drafts of this file that edits never reached it (any writer: another tab, a closed one). One: put
-   * in the editor and written (compare-and-swap; changed since, a conflict). Several: each kept as a version first,
-   * none chosen; their count returned. Drafts equal to the file are dropped. */
+   * in the editor and written (compare-and-swap; made on an older revision: a conflict, nothing written). Several: each
+   * kept as a version first, none chosen; their count returned. Drafts equal to the file are dropped. The editor is
+   * read-only until this is resolved (astra U8-RECOVERY-1), and a draft never replaces text edited meanwhile. */
   async recover(): Promise<{ recovered: number; kept: number }> {
-    const all = await this.drafts.all(this.id.fid).catch(() => [] as Draft[]);
-    // (per writer, its highest gen)
-    const best = new Map<string, Draft>();
-    for (const d of all) if (d.writerId !== this.id.writerId && (!best.has(d.writerId) || best.get(d.writerId)!.gen < d.gen)) best.set(d.writerId, d);
-    const live = [...best.values()].filter((d) => d.text !== this.savedText);
-    for (const d of best.values()) if (d.text === this.savedText) await this.drafts.drop(d.fid, d.writerId, d.gen).catch(() => {});
-    if (this.disposed || !live.length) return { recovered: 0, kept: 0 };
-    if (live.length === 1) {
-      const d = live[0];
-      this.ui.setText(d.text);
-      this.edited();
-      // (the draft is now this writer's too; the other writer's goes once this one's is durable and written)
-      if (d.baseRev !== this.rev) { await this.openConflict(); return { recovered: 1, kept: 0 }; }
-      if (await this.flush()) await this.drafts.drop(d.fid, d.writerId, d.gen).catch(() => {});
-      return { recovered: 1, kept: 0 };
-    }
-    let kept = 0;
-    for (const d of live) {
-      try { await this.io.keepVersion(d.text); await this.drafts.drop(d.fid, d.writerId, d.gen); kept++; } catch {}
-    }
-    return { recovered: 0, kept };
+    const gen0 = this.gen;
+    this.ui.readOnly(true);
+    try {
+      const all = await this.drafts.all(this.id.fid).catch(() => [] as Draft[]);
+      // (per writer, its highest gen)
+      const best = new Map<string, Draft>();
+      for (const d of all) if (d.writerId !== this.id.writerId && (!best.has(d.writerId) || best.get(d.writerId)!.gen < d.gen)) best.set(d.writerId, d);
+      const live = [...best.values()].filter((d) => d.text !== this.savedText);
+      for (const d of best.values()) if (d.text === this.savedText) await this.drafts.drop(d.fid, d.writerId, d.gen).catch(() => {});
+      if (this.disposed || !live.length) return { recovered: 0, kept: 0 };
+      // (one draft, and nothing edited meanwhile: it becomes this editor's text)
+      if (live.length === 1 && this.gen === gen0) {
+        const d = live[0];
+        // (made on an older revision: a conflict at once, before anything waits, so no write can go out before the
+        //  person chooses (astra U8-RECOVERY-2); the other text is filled in when it is read)
+        const stale = d.baseRev !== this.rev;
+        if (stale) this.conflict = { text: this.savedText, rev: this.rev };
+        this.ui.setText(d.text);
+        const g = ++this.gen;
+        this.draft(g, d.text);
+        if (stale) { await this.openConflict(); return { recovered: 1, kept: 0 }; }
+        if (await this.flush()) await this.drafts.drop(d.fid, d.writerId, d.gen).catch(() => {});
+        return { recovered: 1, kept: 0 };
+      }
+      // (several, or an edit made meanwhile: each kept as a version, none chosen)
+      let kept = 0;
+      for (const d of live) {
+        try { await this.io.keepVersion(d.text); await this.drafts.drop(d.fid, d.writerId, d.gen); kept++; } catch {}
+      }
+      return { recovered: 0, kept };
+    } finally { if (!this.disposed) this.ui.readOnly(false); }
   }
 
   /** The editor is closing: what is pending is written (the drafts keep it if that fails); no UI change after. */

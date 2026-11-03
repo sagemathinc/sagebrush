@@ -137,6 +137,9 @@ let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean } | 
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
+// (every editor closed goes through this one barrier, in order: a mount waits for all those closed before it, its
+//  number taken before it waits, and only the newest mount goes on (astra U8-SWITCH-1))
+let closing: Promise<unknown> = Promise.resolve();
 // the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
 // and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
 // page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it
@@ -152,9 +155,11 @@ const LEAVE = "Your last changes couldn't be saved. Leave this file anyway? They
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
   // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
-  const prev = current; current = null;
-  await prev?.close();
   const my = ++mounts;
+  const prev = current; current = null;
+  closing = closing.then(() => prev?.close()).catch(() => {});
+  await closing;
+  if (my !== mounts) return;
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
   const st = history.state && typeof history.state === "object" ? history.state : {};

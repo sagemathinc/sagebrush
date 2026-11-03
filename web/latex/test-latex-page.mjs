@@ -179,6 +179,7 @@ try {
   {
     const fa = await mk("/sw/a.tex", enc("\\documentclass{article}\n\\begin{document}\nFile A here.\n\\end{document}\n"));
     const fb = await mk("/sw/b.tex", enc("\\documentclass{article}\n\\begin{document}\nFile B here.\n\\end{document}\n"));
+    const fc = await mk("/sw/c.tex", enc("\\documentclass{article}\n\\begin{document}\nFile C here.\n\\end{document}\n"));
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await open(fa);
     await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
@@ -310,6 +311,24 @@ try {
       return out; })()`);
     check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
     await savedNow();
+    // ---- (astra U8-SWITCH-1) quick switches A -> B -> C while A's write is held: only the newest, C, is shown, now
+    // and after A's write lands (B, which waited for A's close, never replaces it); A's edit written
+    const sw1 = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      let release; window.__sbTexSaveWrite = () => new Promise((r) => { release = r; });
+      const t = document.querySelector(".tex-src"); t.value += "% A before the switches\\n"; t.dispatchEvent(new Event("input"));
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+      await wait(50);
+      window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
+      for (let i = 0; i < 50 && !release; i++) await wait(100);
+      const held = !!release;
+      delete window.__sbTexSaveWrite; release?.();
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File C here."); i++) await wait(100);
+      await wait(2500);
+      return { held, title: document.querySelector(".tex-title")?.textContent, c: !!document.querySelector(".tex-preview")?.textContent.includes("File C here."), b: !!document.querySelector(".tex-preview")?.textContent.includes("File B here."), pages: document.querySelectorAll(".tex-page").length };
+    })()`);
+    const aBytes = new TextDecoder().decode(new Uint8Array(await bytesOf("/sw/a.tex")));
+    check(sw1.held && sw1.title === "c.tex" && sw1.c && !sw1.b && sw1.pages === 1 && aBytes.includes("% A before the switches"), "U8-SWITCH-1: A -> B -> C quickly while A's write is held: C shown, then and after A's write lands; A's edit written", { ...sw1, a: aBytes.slice(-60) });
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); delete window.__sbTexSaveWrite; delete window.__failWrites; true`);
   }
   // ---- comments on a document, end to end (plan latex-comments r4.2 §5): a person comments in the preview and the
