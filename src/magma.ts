@@ -152,7 +152,11 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
 export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield " +
   "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
-const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
+const magmaName = (py0: string) => {
+  // (a for loop's private name, iʹloop<n>: its variable's)
+  const py = py0.replace(/\u02b9loop\d+$/, "");
+  return py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py;
+};
 
 interface Fn {
   name: string; // the Python function's name ($$)
@@ -314,7 +318,7 @@ class Parser {
     }
     const t = this.next();
     this.expect(";");
-    const v = pyName(t.v);
+    const v = this.nm(t.v);
     let j = this.loops.length - 1;
     while (j >= 0 && this.loops[j].v !== v) j--;
     if (j < 0) {
@@ -669,7 +673,7 @@ class Parser {
           this.next();
           do {
             const t = this.peek();
-            const n = pyName(this.ident());
+            const n = this.nm(this.ident());
             const cell = this.fresh("_mfw");
             this.emit(`${cell} = ${n} = _m._Cell(${JSON.stringify(n)})`);
             this.declareGlobal(cell, t);
@@ -686,7 +690,7 @@ class Parser {
           if (!this.fns.length || !this.localsOpen) throw new MagmaSyntaxError("'local' only at the start of a function", lt.line, lt.col);
           do {
             const t = this.peek();
-            const n = pyName(this.ident());
+            const n = this.nm(this.ident());
             if (this.capturing) this.uses.push({ name: n, bound: false, kind: "l", tok: t });
           } while (this.eat(","));
           this.expect(";");
@@ -800,11 +804,11 @@ class Parser {
         gens.push(this.next().v);
         if (!this.eat(",")) break;
       }
-      if (this.eat(">") && this.at(":=")) return { kind: "gens", py: pyName(name), gens: gens.map(pyName), names: gens, read: pyName(name) };
+      if (this.eat(">") && this.at(":=")) return { kind: "gens", py: this.nm(name), gens: gens.map(pyName), names: gens, read: this.nm(name) };
       this.i = save;
       return null;
     }
-    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : pyName(name), read: pyName(name), name, tok: t };
+    let target: Target = { kind: "name", py: name === "_" ? "_m_discard" : this.nm(name), read: this.nm(name), name, tok: t };
     const path: PathEl[] = [];
     while (this.at("[") || this.at("`")) {
       if (this.at("`")) {
@@ -905,22 +909,62 @@ class Parser {
     this.expect(";");
   }
 
+  // A for loop's variable is the loop's own, as in Magma: an outer i is
+  // untouched by `for i in ...`, a new one stays unassigned after the loop,
+  // and in the loop's own range i is that unassigned variable ("Variable 'i'
+  // has not been initialized", checked against Magma 2.18).  In the loop's
+  // range and body the name is a private Python name, iʹloop<n> (a spelling
+  // typed Magma can't have), deleted when the loop is left, however it is.
+  // Everything there that names i (reads, assignments, parameters, nested
+  // functions' captures) goes through nm(), so it stays one variable.
+  private loopAliases: { name: string; py: string; inRange: boolean }[] = [];
+  private loopVarCount = 0;
+  nm(name: string): string {
+    const p = pyName(name);
+    for (let k = this.loopAliases.length - 1; k >= 0; k--) if (this.loopAliases[k].name === p) return this.loopAliases[k].py;
+    return p;
+  }
+  /** Whether name, read here, is a for loop's variable in that loop's own range. */
+  private inOwnRange(name: string): boolean {
+    const p = pyName(name);
+    for (let k = this.loopAliases.length - 1; k >= 0; k--) if (this.loopAliases[k].name === p) return this.loopAliases[k].inRange;
+    return false;
+  }
+
   forStmt() {
     this.expect("for");
-    const v = pyName(this.ident());
-    this.declareGlobal(v);
-    if (this.eat(":=")) {
-      const a = this.expr();
-      this.expect("to");
-      const b = this.expr();
-      const by = this.eat("by") ? this.expr() : "1";
+    const t = this.peek();
+    const alias = { name: pyName(this.ident()), py: "", inRange: true };
+    alias.py = `${alias.name}\u02b9loop${++this.loopVarCount}`;
+    this.loopAliases.push(alias);
+    try {
+      const v = alias.py;
+      this.declareGlobal(v, t);
+      let head: string;
+      if (this.eat(":=")) {
+        const a = this.expr();
+        this.expect("to");
+        const b = this.expr();
+        const by = this.eat("by") ? this.expr() : "1";
+        head = `for ${v} in _m._to(${a}, ${b}, ${by}):`;
+      } else {
+        this.expect("in");
+        head = `for ${v} in _m._iter(${this.expr()}):`;
+      }
       this.expect("do");
-      this.loop(v, () => this.emit(`for ${v} in _m._to(${a}, ${b}, ${by}):`), () => this.block(() => this.statements(["end"])));
-    } else {
-      this.expect("in");
-      const s = this.expr();
-      this.expect("do");
-      this.loop(v, () => this.emit(`for ${v} in _m._iter(${s}):`), () => this.block(() => this.statements(["end"])));
+      alias.inRange = false;
+      // (the private name is unbound again on every way out: an outer i was never touched)
+      this.emit("try:");
+      this.block(() => this.loop(v, () => this.emit(head), () => this.block(() => this.statements(["end"]))));
+      this.emit("finally:");
+      this.block(() => {
+        this.emit("try:");
+        this.block(() => this.emit(`del ${v}`));
+        this.emit("except NameError:");
+        this.block(() => this.emit("pass"));
+      });
+    } finally {
+      this.loopAliases.pop();
     }
     this.expect("end");
     this.expect("for");
@@ -1048,7 +1092,7 @@ class Parser {
     if (!this.at(close) && !this.at(":")) {
       do {
         const ref = this.eat("~");
-        const name = pyName(this.ident());
+        const name = this.nm(this.ident());
         // typed parameters: x :: RngIntElt
         if (this.at(":") && this.at(":", 1)) { this.next(); this.next(); this.ident(); }
         py.push(name);
@@ -1154,7 +1198,7 @@ class Parser {
   namedFunction() {
     const kind = this.next().v as "function" | "procedure";
     const t = this.peek();
-    const name = pyName(this.ident());
+    const name = this.nm(this.ident());
     // a def name of its own, so that a later function of the same name
     // doesn't change what this one calls recursively
     const def = this.fresh("_mf");
@@ -1352,8 +1396,8 @@ class Parser {
     // its name or through a variable or parameter that may hold one:
     // _m._call tells the runtime which call it is, nested or repeated; in a
     // function body the read is a placeholder, resolved later)
-    const located = head.t === "id" && (e === head.v || e === pyName(head.v) || /^\u0000[rs]\d+\u0000$/.test(e)) &&
-      (CALL_POS.has(head.v) || this.boundVar(pyName(head.v)));
+    const located = head.t === "id" && (e === head.v || e === this.nm(head.v) || /^\u0000[rs]\d+\u0000$/.test(e)) &&
+      (CALL_POS.has(head.v) || this.boundVar(this.nm(head.v)));
     let chainAt = ""; // the first "[" of consecutive indexes
     let links = 0;
     while (true) {
@@ -1427,7 +1471,9 @@ class Parser {
     if (t.t === "id" && this.at("<", 1)) return this.ctorExpr();
     if (t.t === "id") {
       this.next();
-      const n = pyName(t.v);
+      // (a for loop's variable in its own range: unassigned, as in Magma)
+      if (this.inOwnRange(t.v)) return `_m._uninit(${JSON.stringify(t.v)}, (${t.line}, ${t.col}))`;
+      const n = this.nm(t.v);
       const r = this.capturing ? this.useVar(n, "r", t) : n;
       // (a witness exists(t){ } may have unassigned: Magma's error, not its old value)
       return this.witnesses.has(t.v) ? `_m._wread(${r}, ${JSON.stringify(n)}, (${t.line}, ${t.col}), ${this.fns.length ? "True" : "False"})` : r;
@@ -1606,7 +1652,7 @@ class Parser {
     this.expect("|");
     if (this.peek().t === "id" && this.at(":->", 1)) {
       const rule = (): string => {
-        const v = pyName(this.ident());
+        const v = this.nm(this.ident());
         this.expect(":->");
         // Magma's rule takes the values its free variables have when the
         // map is made (a later a := 10 doesn't change it): they are bound
@@ -1650,7 +1696,7 @@ class Parser {
     // assigned r`f: the record r is read before anything in the path (a
     // computed field r``e), in the order free names are taken (classify)
     const id = this.peek();
-    const baseUse = this.capturing && id.t === "id" && (this.at("`", 1) || this.at("[", 1)) ? this.useVar(pyName(id.v), "r", id) : null;
+    const baseUse = this.capturing && id.t === "id" && (this.at("`", 1) || this.at("[", 1)) ? this.useVar(this.nm(id.v), "r", id) : null;
     const t = this.tryLhs();
     if (!t || t.kind === "gens") this.fail("expected a variable after 'assigned'");
     if (t.kind === "name") return this.capturing ? this.useVar(t.py, "a", kw) : `_m._assigned_name(lambda: ${t.read})`;
@@ -1682,8 +1728,8 @@ class Parser {
     const bound: string[] = [];
     const sets: { vars: string[]; from: number; to: number }[] = [];
     do {
-      const vars = [pyName(this.ident())];
-      while (this.eat(",")) vars.push(pyName(this.ident()));
+      const vars = [this.nm(this.ident())];
+      while (this.eat(",")) vars.push(this.nm(this.ident()));
       bound.push(...vars);
       this.expect("in");
       const from = this.uses.length;
@@ -1747,7 +1793,7 @@ class Parser {
     // with := in the expression, only when there is one
     const t = this.fresh();
     const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
-    const names = wit.map((w) => pyName(w.v));
+    const names = wit.map((w) => this.nm(w.v));
     names.forEach((n, k) => this.declareGlobal(n, wit[k]));
     if (this.fns.length === 0) this.topWitnesses.push(...names);
     const assign = names.map((n, k) => `(${n} := ${names.length === 1 ? `${t}[0]` : `_m._index(${t}[0], ${k + 1})`})`).join(", ");

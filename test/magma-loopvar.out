@@ -1,0 +1,49 @@
+L1 an outer variable is untouched
+1
+2
+99
+L2 a new one stays unassigned
+1
+2
+false
+L3 the := to form
+1
+3
+false
+L4 its own range: unassigned there
+
+>> for i in [1..i] do print i; end for;
+                ^
+Runtime error: Variable 'i' has not been initialized
+
+3
+L5 another name in the range
+1
+2
+3
+3
+L6 nested: the inner range reads the outer loop's
+1 1
+2 1
+2 2
+false false
+L7 nested, same name: the inner loop's own
+
+>> for c in [1..2] do for c in [c..3] do print c; end for; end for;
+                                ^
+Runtime error: Variable 'c' has not been initialized
+
+L8 in a function
+6 false
+L9 a func made in the loop takes its value
+20 false
+L10 break and continue with the loop's name
+1 1
+2 1
+L11 an error in the loop: still unassigned after
+Runtime error: stop at 2
+false
+L12 assigned in the range
+1
+2
+done

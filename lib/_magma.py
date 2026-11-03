@@ -139,16 +139,29 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+def _mname(name):
+    """A Python name as the Magma name it stands for: a for loop's private
+    name, iʹloop<n>, is its variable i (src/magma.ts forStmt)."""
+    return _re.sub("\u02b9loop[0-9]+$", "", name)
+
+
+def _uninit(name, pos=None):
+    """A for loop's variable read in its own range: unassigned there, as in Magma."""
+    e = MagmaError("Variable '%s' has not been initialized" % name)
+    e.pos = pos
+    raise e
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
     if isinstance(e, SystemExit):
         raise e
-    m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
+    m = _re.match("name '([A-Za-z_][A-Za-z0-9_\u02b9]*)' is not defined", str(e)) if isinstance(e, NameError) else None
     if m:
         # Magma rejects a statement that uses an undeclared identifier
         # (before running it) and goes on, in a file too
-        name = m.group(1)
+        name = _mname(m.group(1))
         name = name[:-1] if name.endswith("_") else name
         line, col = getattr(e, "_mpos", None) or _undeclared(name, line, col)
         if name in ("SetSeed", "GetSeed"):
@@ -171,10 +184,10 @@ def _report(e, line, col):
     if isinstance(e, _UserError):
         _sys.stdout.write("%s\n" % _wrap("Runtime error: %s" % e, 0, 0))
     else:
-        um = _re.search(r"local variable '([A-Za-z_][A-Za-z0-9_]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
+        um = _re.search("local variable '([A-Za-z_][A-Za-z0-9_\u02b9]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
         if um:
             # a function's local read before it is assigned: Magma's words
-            v = um.group(1)
+            v = _mname(um.group(1))
             msg = "Variable '%s' has not been initialized" % (v[:-1] if v.endswith("_") and v[:-1] in _PYKW else v)
         else:
             msg = str(e) if isinstance(e, MagmaError) else _unsupported_call(e) or "%s: %s" % (type(e).__name__, e)
@@ -2364,6 +2377,7 @@ def _val(v, name, pos=None):
     """A captured variable read in a map rule: an error (as Magma's) only
     if it was not assigned when the map was made."""
     if v is _UNSET:
+        name = _mname(name)
         raise MagmaError("Variable '%s' has not been initialized" % (name[:-1] if name.endswith("_") and name[:-1] in _PYKW else name))
     if v is _UNDECLARED:
         _missing(name, pos)
