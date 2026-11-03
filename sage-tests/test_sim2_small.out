@@ -1,0 +1,21 @@
+S01 x^4 - 10*x^2 + 1
+S03 Univariate Polynomial Ring in x over Rational Field
+S04 x^2 - 2
+S05 x^3 - 2
+S06 t^2 - 2*t - 4
+S07 ERR TypeError: cannot evaluate symbolic expression numerically
+S08 ERR TypeError: Illegal initializer for algebraic number
+S10 x - 3/2
+S11 ERR NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt
+S12 ERR NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt
+S13 ERR NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt
+S14 ERR NameError: name 'simplify_full' is not defined
+S15 False
+S16 1
+S17 Univariate Polynomial Ring in t over Rational Field
+S18 t^2 + 1
+S19 ERR NameError: name 'full_simplify' is not defined
+S20 x^2 - 6
+S21 x^2 - x - 7/4
+S22 x^2 + 1
+S23 x^2 + 3
