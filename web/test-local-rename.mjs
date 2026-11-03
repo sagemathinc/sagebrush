@@ -1,10 +1,11 @@
 // Renaming a notebook of `sagebrush notebook DIR` (src/notebook.ts; William's B2), in headless Chromium: its title is
 // its file's name, so editing the title renames the FILE, to a free name beside it (" (2)" when the name is taken:
 // never over another file), and then the page's address and its "saved to" say the new name; later saves go there,
-// and the file opens again at its new address. And the server's api/rename refuses what it must.
+// and the file opens again at its new address; a rename held back serializes with the saves (LOCAL-RENAME-2); a symbolic
+// link out of DIR is refused (LOCAL-RENAME-1). And the server's api/rename refuses what it must (fs-move.ts: test/fs-move.test.ts).
 //   node web/test-local-rename.mjs [bundle]     (default build/cli/pyjs.cjs; CHROME=... for the browser)
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
@@ -36,7 +37,8 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
-ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+const paused = [];
+ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
 const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
@@ -69,6 +71,30 @@ try {
   // a free name: the file takes it exactly
   await rename("fresh");
   ok(await until(`location.pathname === "/nb/fresh.ipynb/"`, 15000) && read("stats (2).ipynb") === null && (read("fresh.ipynb") ?? "").includes("mine, edited"), "a free name: stats (2).ipynb renamed to fresh.ipynb");
+
+  // (astra's LOCAL-RENAME-2) the rename's answer held back while the notebook is edited: the edit's save waits for the
+  // rename and goes to the new name; the old name is never written again, the new file has the newest edit
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*api/rename*", requestStage: "Request" }] });
+  await rename("held");
+  for (let i = 0; i < 100 && !paused.length; i++) await sleep(100);
+  ok(paused.length === 1, "(the rename's request is held)");
+  await setCode("x = 'edited during the rename'");
+  await sleep(2500);
+  ok((read("fresh.ipynb") ?? "").includes("mine, edited") && !(read("fresh.ipynb") ?? "").includes("during the rename") && read("held.ipynb") === null, "while the rename is held, the edit isn't written to the old name (its save waits)");
+  await send("Fetch.continueRequest", { requestId: paused.shift() });
+  await send("Fetch.disable");
+  ok(await until(`location.pathname === "/nb/held.ipynb/"`, 15000), "the rename lands: /nb/held.ipynb/");
+  ok(await (async () => { for (let i = 0; i < 100; i++) { if ((read("held.ipynb") ?? "").includes("during the rename")) return true; await sleep(100); } return false; })() && read("fresh.ipynb") === null, "…the edit made during it is saved to held.ipynb, and fresh.ipynb isn't made again");
+
+  // (astra's LOCAL-RENAME-1) a folder that is a symbolic link out of DIR, or a notebook that is one: refused, nothing moved
+  const outside = mkdtempSync(join(tmpdir(), "sb-local-rename-outside-"));
+  writeFileSync(join(outside, "a.ipynb"), "OUTSIDE");
+  symlinkSync(outside, join(dir, "jump"));
+  symlinkSync(join(outside, "a.ipynb"), join(dir, "link.ipynb"));
+  const post = (q) => fetch(`${base}/api/rename?${q}`, { method: "POST", headers: { Cookie: cookie } }).then((r) => r.status);
+  ok((await post("path=jump/a.ipynb&to=jump/b.ipynb")) === 400 && readFileSync(join(outside, "a.ipynb"), "utf8") === "OUTSIDE" && !existsSync(join(outside, "b.ipynb")), "api/rename: in a folder that is a symbolic link out of DIR: 400, the file outside untouched");
+  ok((await post("path=link.ipynb&to=link2.ipynb")) === 400 && existsSync(join(dir, "link.ipynb")) && !existsSync(join(dir, "link2.ipynb")), "…a notebook that is a symbolic link: 400, left as it is");
+  rmSync(outside, { recursive: true, force: true });
 
   // the server's api/rename: what it refuses
   const api = (q, method = "POST") => fetch(`${base}/api/rename?${q}`, { method, headers: { Cookie: cookie } }).then((r) => r.status);

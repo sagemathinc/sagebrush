@@ -1492,18 +1492,21 @@ nbName.addEventListener("input", () => { document.title = `${nbName.value} — S
 // `sagebrush notebook DIR`'s file (LOCAL): its title is its file's name, so a rename renames the file (William's B2):
 // to a free name beside it (" (2)", " (3)"... if taken: never over another file, the server refuses that), after the
 // saves before it, and then the page's address and its "saved to" say the new name. A notebook not saved yet only
-// takes the name.
-let localStore = null, localRenameTimer = null, localRenaming = Promise.resolve();
+// takes the name. The rename is a task of the store's own write queue (astra's LOCAL-RENAME-2): every save before it
+// is written first, every save after it waits for it and goes to the new name; none in between.
+let localStore = null, localRenameTimer = null;
 function localRenameSoon() {
   if (!LOCAL || !localStore) return;
   clearTimeout(localRenameTimer);
-  localRenameTimer = setTimeout(() => { localRenaming = localRenaming.then(localRename, localRename); }, 800);
+  localRenameTimer = setTimeout(() => {
+    const p = (localStore.queue ?? Promise.resolve()).then(localRename, localRename);
+    localStore.queue = p.catch(() => {});
+  }, 800);
 }
 async function localRename() {
   const at = LOCAL.path, i = at.lastIndexOf("/"), folder = i < 0 ? "" : at.slice(0, i + 1);
   const base = safeName(docName());
   if (folder + base + ".ipynb" === at) return;
-  await (localStore.queue ?? Promise.resolve());
   for (let k = 1; k <= 50; k++) {
     const to = folder + base + (k > 1 ? ` (${k})` : "") + ".ipynb";
     if (to === at) return;

@@ -9,7 +9,8 @@
 // (in the URL it prints and opens; then a cookie); it answers only requests
 // for its own host name (no DNS rebinding) and serves files under DIR only.
 import * as http from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, linkSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, realpathSync } from "fs";
+import { moveNoReplace, MoveError, isLink } from "./fs-move";
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
 import { requestCtrlC } from "./runtime/interrupt";
@@ -204,19 +205,29 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
         return;
       }
       // a notebook renamed, as its page's title is edited (William's B2): POST api/rename?path=OLD&to=NEW, both .ipynb
-      // in the same folder. Never over another file: a taken name is 409, and the move is a hard link then the old
-      // name's removal (the link fails on a name that exists, even one made meanwhile). A notebook not saved yet has
-      // nothing to move: the new name is only checked free. Answers {path} (relative to DIR) and whether it moved.
+      // in the same folder, that folder really inside DIR (its real path: no symbolic link out, astra's LOCAL-RENAME-1),
+      // the notebook itself no symbolic link. Never over another file and never losing one: fs-move.ts (a taken name is
+      // 409, also one made meanwhile; a save of OLD by another program during the move is left as it is). A notebook not
+      // saved yet has nothing to move: the new name is only checked free. Answers {path} (relative to DIR) and whether
+      // it moved.
       if (/^\/(?:nb\/.+?\.ipynb\/)?api\/rename$/is.test(path)) {
         if (method !== "POST") { res.writeHead(405, { Allow: "POST" }).end(); return; }
         const from = inside(url.searchParams.get("path")), to = inside(url.searchParams.get("to"));
         if (!from || !to || !/\.ipynb$/i.test(from) || !/\.ipynb$/i.test(to) || dirname(from) !== dirname(to) || basename(to).length > 255) { res.writeHead(400).end("bad path"); return; }
+        const real = (p: string) => { try { return realpathSync(p); } catch { return null; } };
+        const rdir = real(dir), rfolder = real(dirname(from));
+        if (!rdir || !rfolder || !(rfolder === rdir || rfolder.startsWith(rdir.endsWith(sep) ? rdir : rdir + sep))) { res.writeHead(400).end("bad path: its folder isn't inside the directory"); return; }
+        if (isLink(from)) { res.writeHead(400).end("bad path: a symbolic link isn't renamed here"); return; }
         const answer = (moved: boolean) => res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ path: relative(dir, to), moved }));
         if (from === to) return void answer(false);
-        if (existsSync(to)) { res.writeHead(409).end("a file of that name is there"); return; }
+        if (existsSync(to) || isLink(to)) { res.writeHead(409).end("a file of that name is there"); return; }
         if (!existsSync(from)) return void answer(false);
-        try { linkSync(from, to); } catch (e: any) { res.writeHead(e?.code === "EEXIST" ? 409 : 500).end(e?.code === "EEXIST" ? "a file of that name is there" : String(e?.message ?? e)); return; }
-        unlinkSync(from);
+        try { moveNoReplace(from, to); } catch (e: any) {
+          const code = e instanceof MoveError ? e.code : "failed";
+          if (code === "missing") return void answer(false);
+          res.writeHead(code === "failed" ? 500 : 409).end(String(e?.message ?? e));
+          return;
+        }
         return void answer(true);
       }
       const m = /^\/(?:nb\/.*\/)?api\/session\/([\w-]+)\/(events|send|interrupt|stop)$/s.exec(path);
