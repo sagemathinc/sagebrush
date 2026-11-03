@@ -1505,15 +1505,18 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await hooks();
       for (const p of ["/P2", "/P", "/away.txt"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
     }
-    // (sync-docs: a folder named like the archive's own top-level members keeps the files/... names, so nothing collides)
-    {
-      await ev(`${W}.mkdir("/manifest.json").then(() => ${W}.create("/manifest.json/x.txt", { content: "x" })).then(() => 1)`);
+    // (sync-docs: a folder named like the archive's own top-level members keeps the files/... names, so nothing collides;
+    // in any case, as the zip may be unpacked case-insensitively: astra's U3-TOP-1)
+    for (const [i, top] of ["manifest.json", "MANIFEST.JSON", "Not-Included.txt"].entries()) {
+      await ev(`${W}.mkdir("/${top}").then(() => ${W}.create("/${top}/x.txt", { content: "x" })).then(() => 1)`);
       await hooks();
-      const tm = await exportOnce(join(out, "u3-m.zip"), { start: startFor("/manifest.json") });
+      const tm = await exportOnce(join(out, `u3-m${i}.zip`), { start: startFor(`/${top}`) });
       await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
-      const zm = tm.stopped ? { names: [] } : inspect(join(out, "u3-m.zip"));
-      check(!tm.stopped && zm.unzip === 0 && zm.names.includes("files/manifest.json/x.txt") && zm.names.filter((n) => n === "manifest.json").length === 1, "U3: a folder named manifest.json downloads with files/... names, beside the archive's own manifest.json: " + JSON.stringify(tm.stopped ?? zm.names));
-      await ev(`${W}.remove("/manifest.json").then(() => 1, () => 0)`);
+      const zm = tm.stopped ? { names: [] } : inspect(join(out, `u3-m${i}.zip`));
+      const tops = zm.names.filter((n) => !n.includes("/") || ["manifest.json", "not-included.txt"].includes(n.slice(0, n.indexOf("/")).toLowerCase()));
+      check(!tm.stopped && zm.unzip === 0 && zm.names.includes(`files/${top}/x.txt`) && tops.every((n) => n === "manifest.json" || n === "not-included.txt") && zm.names.filter((n) => n === "manifest.json").length === 1,
+        `U3: a folder named ${top} downloads with files/... names, nothing beside the archive's own top-level files under a name differing only in case: ` + JSON.stringify(tm.stopped ?? zm.names));
+      await ev(`${W}.remove("/${top}").then(() => 1, () => 0)`);
     }
     // (afterwards an export of everything names its members files/... again)
     await hooks();

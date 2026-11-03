@@ -42,10 +42,11 @@ export function rowLen(e: Entry, captured: number): number {
 // folder itself ("folder/a.txt" for /Some/folder/a.txt). Set by openExport for its run (one export per page) and back)
 let nameHead = frag("files/"), nameText = "files/", nameSkip = 1;
 // (a folder named like the archive's own top-level members, manifest.json or not-included.txt (run.ts NOTE_NAME), would
-// put a folder beside the file of the same name: its members keep the files/... form instead (sync-docs' review))
+// put a folder beside the file of the same name: its members keep the files/... form instead (sync-docs' review); compared
+// ignoring case, since MANIFEST.JSON collides too where the zip is unpacked case-insensitively (astra's U3-TOP-1))
 const TOP = ["manifest.json", "not-included.txt"];
 export function setNaming(root?: string) {
-  const scoped = !!root && !TOP.includes(root.slice(root.lastIndexOf("/") + 1));
+  const scoped = !!root && !TOP.includes(root.slice(root.lastIndexOf("/") + 1).toLowerCase());
   nameText = scoped ? "" : "files/";
   nameHead = frag(nameText);
   nameSkip = scoped ? root!.lastIndexOf("/") + 1 : 1;
