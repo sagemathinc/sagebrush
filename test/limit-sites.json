@@ -7277,7 +7277,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
- "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, relative, delimiter, sep } from \"path\"; #0": {
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from \"path\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"

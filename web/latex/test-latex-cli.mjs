@@ -97,7 +97,7 @@ try {
     && j.frames[1].line === lineOf(TALK, "\\begin{frame}{Overlays}") && j.frames[0].line === lineOf(TALK, "\\frame{\\titlepage}"), j.frames);
   const p = (kind, name) => j.problems.find((x) => x.kind === kind && (name === undefined || x.name === name));
   check("check-missing-image-error-with-line", p("image", "missing.png")?.severity === "error" && p("image", "missing.png").line === lineOf(TALK, "{missing.png}"), j.problems);
-  check("check-parent-image-looked-for", p("image", "../outside.png")?.severity === "error" && /: not found in "\.\.\/"$/.test(p("image", "../outside.png").message), j.problems);
+  check("check-parent-image-looked-for", p("image", "../outside.png")?.severity === "error" && /: above the workspace's top folder$/.test(p("image", "../outside.png").message), j.problems);
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
@@ -112,19 +112,37 @@ try {
   const ca = await run(dir, "check", "article.tex", "--json");
   check("check-article-has-no-frames", ca.code === 0 && ca.json.class === "other" && ca.json.frames.length === 0 && ca.json.problems.some((x) => x.kind === "environment" && x.name === "frame"), ca.json);
 
-  // ---- images as TeX finds them (William's L2, Nov 2): the file's folder, a parent (../), \graphicspath; when not
-  // found, the folders searched and the name to write
+  // ---- images as TeX finds them (William's L2, Nov 2): the file's folder, a parent (../), \graphicspath, a leading /
+  // (the folder the command runs in); when not found, the folders searched and the name to write. Never outside the
+  // folder the command runs in (astra L2-BOUND-1: relative, \graphicspath's and the not-found probe too; a .tex outside
+  // it has no images) nor through a link out of it (L2-BOUND-2: a linked folder, a linked file; a link inside is read)
   {
-    const { mkdirSync } = await import("node:fs");
-    mkdirSync(join(dir, "ex", "figs"), { recursive: true });
-    writeFileSync(join(dir, "top.svg"), SVG); writeFileSync(join(dir, "ex", "here.svg"), SVG); writeFileSync(join(dir, "ex", "figs", "deep.svg"), SVG);
-    writeFileSync(join(dir, "ex", "cv.tex"), "\\documentclass{article}\n\\graphicspath{{figs/}}\n\\begin{document}\n\\includegraphics{here.svg}\n\\includegraphics{../top.svg}\n\\includegraphics{deep}\n\\includegraphics{top.svg}\n\\includegraphics{nowhere.png}\n\\includegraphics{/here.svg}\n\\includegraphics{/../top.svg}\n\\end{document}\n");
-    const ci = (await run(join(dir, "ex"), "check", "cv.tex", "--json")).json;
+    const { mkdirSync, symlinkSync } = await import("node:fs");
+    const w = join(dir, "w"), ex = join(w, "ex"), out = join(dir, "outside");
+    mkdirSync(join(ex, "figs"), { recursive: true }); mkdirSync(out, { recursive: true });
+    const SECRET = SVG.replace("#c00", "#0c0");
+    writeFileSync(join(w, "top.svg"), SVG); writeFileSync(join(ex, "here.svg"), SVG); writeFileSync(join(ex, "figs", "deep.svg"), SVG);
+    writeFileSync(join(out, "secret.svg"), SECRET); writeFileSync(join(out, "top2.svg"), SECRET);
+    symlinkSync(out, join(ex, "jump")); symlinkSync(join(out, "secret.svg"), join(ex, "leaf.svg")); symlinkSync(join(w, "top.svg"), join(ex, "inlink.svg"));
+    const refs = ["here.svg", "../top.svg", "deep", "top.svg", "nowhere.png", "/ex/here.svg", "/../top.svg", "../../outside/secret.svg", "secret.svg", "jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg", "inlink.svg", "top2.svg"];
+    writeFileSync(join(ex, "cv.tex"), "\\documentclass{article}\n\\graphicspath{{figs/}{../../outside/}}\n\\begin{document}\n" + refs.map((r) => "\\includegraphics{" + r + "}\n").join("") + "\\end{document}\n");
+    const ci = (await run(w, "check", "ex/cv.tex", "--json")).json;
     const im = (n) => ci?.images.find((x) => x.name === n);
-    check("images: same folder, parent (../) and \\graphicspath found", im("here.svg")?.found && im("../top.svg")?.found && im("../top.svg").path === "../top.svg" && im("deep")?.found && im("deep").path === "figs/deep.svg", ci?.images);
+    check("images: same folder, parent (../), \\graphicspath and a link inside the folder: found", im("here.svg")?.found && im("../top.svg")?.found && im("../top.svg").path === "../top.svg" && im("deep")?.found && im("deep").path === "figs/deep.svg" && im("inlink.svg")?.found, ci?.images);
     check("images: a file in a parent folder named without ../: where it is, and what to write", im("top.svg")?.found === false && im("top.svg").why === 'not found in this file\'s folder, "figs/"; it is in "../": write {../top.svg}, or move the file into this file\'s folder', im("top.svg"));
-    check("images: a leading / is the folder the command runs in, never the computer's top, never above it", im("/here.svg")?.found && im("/here.svg").path === "here.svg" && im("/../top.svg")?.found === false && /above the workspace's top folder/.test(im("/../top.svg").why), [im("/here.svg"), im("/../top.svg")]);
+    check("images: a leading / is the folder the command runs in, never the computer's top, never above it", im("/ex/here.svg")?.found && im("/ex/here.svg").path === "here.svg" && im("/../top.svg")?.found === false && /above the workspace's top folder/.test(im("/../top.svg").why), [im("/ex/here.svg"), im("/../top.svg")]);
     check("images: missing everywhere: the folders searched, no suggestion", im("nowhere.png")?.found === false && im("nowhere.png").why === 'not found in this file\'s folder, "figs/"', im("nowhere.png"));
+    check("images: ../ and \\graphicspath never reach outside the folder the command runs in (L2-BOUND-1), nor does the not-found probe",
+      im("../../outside/secret.svg")?.found === false && im("secret.svg")?.found === false && !/outside/.test(im("secret.svg").why)
+      && im("top2.svg")?.found === false && !/it is in/.test(im("top2.svg").why), [im("../../outside/secret.svg"), im("secret.svg"), im("top2.svg")]);
+    check("images: a linked folder or a linked file pointing outside is refused (L2-BOUND-2)", ["jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg"].every((n) => im(n)?.found === false && im(n).why === "a link to outside the folder the command runs in"), ["jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg"].map(im));
+    const rh = await run(w, "render", "ex/cv.tex", "-o", "cv.html");
+    const page = existsSync(join(w, "cv.html")) ? readFileSync(join(w, "cv.html"), "utf8") : "";
+    check("images: the outside SVG's bytes are nowhere in the page", page.length > 1000 && !page.includes(Buffer.from(SECRET).toString("base64")) && page.includes(Buffer.from(SVG).toString("base64")), { code: rh.code, n: page.length });
+    const co = (await run(ex, "check", "../top-doc.tex", "--json"));
+    writeFileSync(join(w, "top-doc.tex"), "\\documentclass{article}\n\\begin{document}\n\\includegraphics{top.svg}\n\\end{document}\n");
+    const co2 = (await run(ex, "check", "../top-doc.tex", "--json")).json;
+    check("images: a .tex outside the folder the command runs in has no images (not widened)", co2?.images?.[0]?.found === false && /outside the folder the command runs in/.test(co2.images[0].why), co2?.images ?? co);
   }
 
   // ---- render: one self-contained HTML file

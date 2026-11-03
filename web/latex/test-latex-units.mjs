@@ -75,6 +75,7 @@ check("img-dot-and-sibling", ok("./x.png")[0] === "/papers/a/x.png" && ok("a//b.
   const w = notFoundWhy("/LaTeX examples/cv.tex", ["/LaTeX examples"], ["/images.png"]);
   check("img-not-found-why", w === 'not found in "LaTeX examples/"; it is in the top folder: write {../images.png}, or move the file into "LaTeX examples/"' && notFoundWhy("/cv.tex", ["/"]) === "not found in the top folder"
     && notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true) === 'not found in this file\'s folder, "figs/"; it is in "../": write {../x.png}, or move the file into this file\'s folder', [w, notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true)]);
+  check("not-found-top-relative", notFoundWhy("/ex/cv.tex", ["/ex"], ["/top.svg"], true) === 'not found in this file\'s folder; it is in "../": write {../top.svg}, or move the file into this file\'s folder', notFoundWhy("/ex/cv.tex", ["/ex"], ["/top.svg"], true));
   check("relative-path", relativePath("/a/b", "/a/c/x.png") === "../c/x.png" && relativePath("/", "/x.png") === "x.png" && relativePath("/a", "/a/x.png") === "x.png", null);
 }
 const png = u8([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13], "IHDR", [0, 0, 0x10, 0, 0, 0, 0x10, 0, 8, 6, 0, 0, 0]);

@@ -77,7 +77,7 @@ export function relativePath(from: string, to: string): string {
  * paths), how to name it from the opened file's folder. */
 export function notFoundWhy(docPath: string, searched: string[], elsewhere: string[] = [], relativeToFile = false, name = ""): string {
   // (the folders by their workspace paths; or, for the command line, from the file's folder)
-  const shown = (f: string) => relativeToFile ? (f === parentOf(docPath) ? "this file's folder" : "\"" + relativePath(parentOf(docPath), f + "/x").slice(0, -1) + "\"")
+  const shown = (f: string) => relativeToFile ? (f === parentOf(docPath) ? "this file's folder" : "\"" + relativePath(parentOf(docPath), (f === "/" ? "" : f) + "/x").slice(0, -1) + "\"")
     : f === "/" ? "the top folder" : "\"" + f.slice(1) + "/\"";
   let why = "not found in " + searched.slice(0, 4).map(shown).join(", ");
   if (name.startsWith("/")) why += relativeToFile ? " (a leading / is the folder the command runs in, not the computer's top folder)" : " (a leading / is the workspace's top folder)";
