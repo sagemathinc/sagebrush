@@ -926,6 +926,8 @@ class ufunc:
             raise TypeError("first operand must be array")
         if self.nin == 1 and b is not None:
             raise ValueError("second operand provided when ufunc is unary")
+        if self.nin == 2 and b is None:
+            raise ValueError("second operand needed for ufunc")
         # (the flat positions that a[indices] selects, in its order and shape;
         # an empty list selects none)
         if isinstance(indices, list) and not indices:
@@ -936,7 +938,9 @@ class ufunc:
                 b = broadcast_to(asarray(b), pos.shape)
             except ValueError:
                 raise ValueError("array is not broadcastable to correct shape") from None
-            bs = b.ravel()
+            # (a copy: b may be a view of a, and NumPy takes its values
+            # before a changes)
+            bs = b.ravel().copy()
         shape = a.shape
         for k, p in enumerate(pos.ravel().tolist()):
             # (the flat position's index in a, C order)
