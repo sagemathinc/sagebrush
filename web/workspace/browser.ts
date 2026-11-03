@@ -124,6 +124,7 @@ const STYLE = `
 .sbfiles .frow .more { visibility: hidden; }
 .sbfiles .frow:hover .more, .sbfiles .frow:focus-within .more, .sbfiles .frow.cur .more { visibility: visible; }
 .sbfiles .frow input { flex: 1; font: inherit; padding: 1px 4px; border: 1px solid #4a6b49; border-radius: 4px; min-width: 0; }
+.sbfiles .frow .extnote { flex: none; font-size: 11.5px; color: #8a5a00; }
 /* (B2: a row's checkbox, at its left: shown on the row pointed at or focused, and on every row while any is selected) */
 /* (a span with role=checkbox, not an <input>: a row's one input stays its name typed in place) */
 .sbfiles .frow .sel { flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid #8a8f8b; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: #fff; cursor: pointer; visibility: hidden; }
@@ -705,19 +706,34 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const full = nameOf(e.path);
     // (a document keeps its extension: only its name is edited)
     const [base, ext] = e.kind === "notebook" || e.kind === "board" ? splitExt(full) : [full, ""];
+    // (U9, William Nov 2: a file's box holds its whole name with only the base selected; a name typed without an
+    // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
+    // Enter (or leaving the box) renames. A folder's name is all name)
+    const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
+    const note = h("span", { className: "extnote" });
+    note.setAttribute("role", "status");
+    const sayExt = () => {
+      const typed = splitExt(input.value.trim())[1];
+      note.textContent = file && typed && typed.toLowerCase() !== fileExt.toLowerCase() ? `changes the file type: ${fileExt || "(none)"} → ${typed}` : "";
+    };
+    input.addEventListener("input", sayExt);
     nameEl.replaceWith(input);
+    input.after(note);
     renamingNow = true;
     input.focus();
-    input.select();
+    if (file && fileExt) input.setSelectionRange(0, full.length - fileExt.length);
+    else input.select();
     let done = false;
     const finish = async (keep: boolean) => {
       if (done) return;
       done = true;
       renamingNow = false;
+      note.remove();
       const v = input.value.trim();
-      if (keep && v && v !== base) {
+      if (keep && v && finalName(v) !== full) {
         host.renaming?.(e);
         try {
           // (a document renamed since the row was drawn, as by its typed
@@ -726,7 +742,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           // path meanwhile, CORR-4B2-1)
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
           if (!from) say(`"${full}" was moved or deleted meanwhile: not renamed`);
-          else host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
+          else host.renamed?.(await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
         } catch (err) {
           if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
           else fail(err);

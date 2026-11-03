@@ -1,3 +1,4 @@
+// ci: web-sync.3 order=10 chrome
 // The Share dialog in headless Chromium (share-ux-plan r2 §1, §3-§5,
 // web/share-client/dialog.ts), against the share API in Miniflare
 // (web/share/serve-dev.mjs) and web/dist:

@@ -1,3 +1,4 @@
+// ci: web-export order=10 chrome
 // "Export all current files (.zip)" (export plan E1 r2d, web/workspace/export) in headless Chromium against the
 // built site.  The archive is checked outside the browser by Python's zipfile and by unzip -t: every member's bytes,
 // the manifest's sizes and SHA-256 (and the data files' bytes against the workspace's own), the manifest the last
@@ -1170,9 +1171,8 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       for (let k = 1; k <= 200; k++) P8.push(folder("/g/" + String(k).padStart(6, "0") + "z".repeat(20), k));
       const bytes = (s) => Buffer.byteLength(s);
       const cap13 = 1761900000000;
-      // (manifest.json's own central record, counted once in the central directory's bound: U3's finding)
-      const MANIFEST_CD = 46 + 12 + 13;
-      const need = MANIFEST_CD + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
+      // (manifest.json's own central record, 46 + 12 + 13, in the index's bound since #545)
+      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
       await putAll([...saved.filter(keep), ...P8]);
       await reload();
       await only(P8);
@@ -1180,7 +1180,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await hooks(`onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`);
       const pre = await exportOnce(join(out, "p8pre.zip"));
       const parts = await ev(`window.__plan`);
-      const mine = [MANIFEST_CD + P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
+      const mine = [46 + 12 + 13 + P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
       check(!pre.stopped && JSON.stringify([...parts, pre.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
       for (const [label, cap, ok] of [["at the threshold", need - 1, false], ["one byte below it", need, true]]) {
         await hooks(`noOpfs: true, caps: { spoolBlob: ${cap} }`);
@@ -1725,6 +1725,25 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     // (the large workspace taken away again)
     await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/bulk", "/bulk/\\uffff"))`);
     await ev(`${W}.remove("/zzz/late.csv").then(() => ${W}.remove("/zzz")).then(() => 1, () => 0)`);
+  });
+
+  // ---- a near-empty workspace (agents-ui's finding on #545): the index's spool holds manifest.json's central record,
+  // and not-included.txt's, however few the entries (last: everything else is put in Trash, which isn't exported)
+  await scenario("tiny", async () => {
+    const top = await ev(`${W}.list("/").then((l) => l.map((e) => ({ path: e.path, kind: e.kind })))`);
+    const keep = top.find((e) => e.kind === "notebook")?.path;
+    for (const e of top) if (e.path !== keep && e.path !== "/Trash") await ev(`${W}.remove(${JSON.stringify(e.path)}).then(() => 1, () => 0)`);
+    const left = await ev(`${W}.list("/").then((l) => l.filter((e) => e.path !== "/Trash").map((e) => e.path))`);
+    await hooks();
+    const one = await exportOnce(join(out, "tiny1.zip"));
+    const z1 = one.stopped ? { names: [] } : inspect(join(out, "tiny1.zip"));
+    check(!!keep && JSON.stringify(left) === JSON.stringify([keep]) && !one.stopped && z1.bad === null && JSON.stringify(z1.names) === JSON.stringify(["files" + keep, "manifest.json"]), `tiny: one notebook alone exports (${JSON.stringify({ left, stopped: one.stopped?.slice(-160), names: z1.names })})`);
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/tiny-cloud.csv", kind: "file", ref: "/tiny-cloud.csv", size: 10, created: t, updated: t, fid: "tcfid", ident: "tcfid", sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
+    await hooks();
+    const two = await exportOnce(join(out, "tiny2.zip"));
+    const z2 = two.stopped ? { names: [] } : inspect(join(out, "tiny2.zip"));
+    check(!two.stopped && z2.bad === null && JSON.stringify(z2.names) === JSON.stringify(["files" + keep, "not-included.txt", "manifest.json"]), `tiny: …and with a file in the cloud only, left out and listed (${JSON.stringify({ stopped: two.stopped?.slice(-160), names: z2.names })})`);
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/tiny-cloud.csv")`);
   });
 
   check(errors.length === 0, "no page errors: " + errors.slice(0, 3).join(" | "));

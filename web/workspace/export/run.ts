@@ -357,7 +357,10 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
   resetCounts();
   rowStats.rowBytes = 0;
   const s0 = await w.lastSeq();
-  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 0, manSpool: 0, capSpool: 0, unavailable: [], ...(root ? { root } : {}) };
+  // (cdSpool from manifest.json's own central record, "manifest.json" 13 bytes: uncounted before, so an export of a few
+  // entries stopped at "the export's index grew past …"; counted from the start, so the no-OPFS check below sees it:
+  // agents-ui's finding on #545)
+  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 46 + 12 + 13, manSpool: 0, capSpool: 0, unavailable: [], ...(root ? { root } : {}) };
   sizesNow();
   const pace = paceOf(signal);
   await rows.open();
@@ -422,17 +425,14 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
     plan.omitted = JSON.stringify(plan.unavailable);
     plan.bytes += plan.note.length;
     plan.bound += deflateBound(plan.note.length) + 30 + 46 + 16 + 12 + 2 * NOTE_NAME.length;
-    // (its central record, in the central directory's spool too: a small export has no slack for it, U3's finding)
+    // (its central record too: the index's spool is capped at cdSpool, agents-ui's finding on #545)
     plan.cdSpool += 46 + 12 + NOTE_NAME.length;
+    if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
   }
   const manifest = plan.manSpool + MANIFEST_ENDS + (plan.omitted ? utf8Len(plan.omitted) : 0);
   if (manifest > cap("manifest")) throw new ExportStopped(`the export's index (manifest.json) would be over ${cap("manifest") / 2 ** 20} MiB: too many files with long names`);
   plan.bytes += manifest;
   plan.bound += deflateBound(manifest) + 30 + 46 + 16 + 12 + 2 * 13;
-  // (manifest.json's central record, likewise: counted, never left to the entries' slack)
-  plan.cdSpool += 46 + 12 + 13;
-  // (and the spools held in memory checked again with those records in: the bound is what will be written)
-  if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
   if (plan.bytes > cap("total")) throw new ExportStopped(`the files come to more than ${cap("total") / 2 ** 30} GiB, more than an import takes`);
   plan.preflightMs = performance.now() - t0;
   return plan;

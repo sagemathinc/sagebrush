@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// ci: inline (ci.yml)
 // scripts/check-action-pins.mjs on fixed workflows (scripts/action-pins-fixtures):
 // each must pass or fail as listed, with the failure naming the right rule, so
 // a guard that lets everything through (or nothing) can't pass.

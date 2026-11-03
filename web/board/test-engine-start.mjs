@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=60
 // An interpreter whose worker never starts (code.ts): seen on busy CI
 // machines, where a page's workers were made but their scripts never
 // loaded, and the board waited for good (test-export's live.json, 90 s).

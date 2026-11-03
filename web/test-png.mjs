@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=130
 // PNG files in the notebook page (headless Chrome): the PNG module
 // (sagebrush-raster.wasm) is fetched only when Python first writes or reads
 // a PNG, savefig and imread work in the worker, and a copy of the module

@@ -1,3 +1,4 @@
+// ci: inline (ci.yml)
 // The DEV try-it flow for notebook sync, end to end on the real notebook page: two browsers (two Chrome processes,
 // each its own profile: two devices of one account) open the built site as https://dev.sagebrush.space (the only
 // origin notebooks' contents sync on, web/workspace/doc-sync-switch.ts), which Chrome maps to a front here with a
@@ -372,7 +373,23 @@ try {
   const click7 = () => B2.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path7)})?.click()`);
   await click7();
   check(await B2.until(`/Downloading .*…/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10_000), "B2, with none of its history: \"Downloading…\" said (and clicked again while it waits, below: one wait)");
+  // (astra's B3-ARRIVAL-1, refused attach: an open of another notebook that fails to attach doesn't end the wait)
+  const other = await B2.ev(`(async () => { const keys = await new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").getAllKeys(); g.onsuccess = () => { ok(g.result); r.result.close(); }; g.onerror = () => ok([]); }; r.onerror = () => ok([]); }); const l = await window.sagebrush.workspace.list("/", { recursive: true }); const cur = localStorage.getItem("sagebrush-current"); return l.find((e) => e.kind === "notebook" && e.ref !== ${J(ref7)} && e.ref !== cur && keys.includes(e.ref))?.ref ?? null; })()`);
+  await B2.ev(`(() => { let once = true; window.sagebrush.shareTest.beforeAttach = async () => { if (once) { once = false; throw new Error("refused (a test)"); } }; return 1; })()`);
+  const failed = other ? await B2.ev(`window.sagebrush.open(${J(other)}).then(() => "attached", (e) => "refused: " + e.message)`) : "no other notebook";
+  check(/^refused: refused \(a test\)/.test(failed), `B2: another notebook's open, refused at its attach (a test): ${failed}`);
+  // (astra's B3-ARRIVAL-1, held read: the automatic open, held after its read, while the person opens another; once let
+  // go it attaches nothing, and the other stays)
+  await B2.ev(`(() => { window.__heldRead = null; window.sagebrush.shareTest.afterRead = (id) => (id === ${J(ref7)} && !window.__heldRead ? new Promise((r) => { window.__heldRead = r; }) : undefined); return 1; })()`);
   holdChanged.delete(B.session);
+  check(await B2.until(`!!window.__heldRead`, 30_000), "B2: …the wait outlived it: its automatic open reached its read once the history arrived (held there)");
+  const okOther = other ? await B2.ev(`window.sagebrush.open(${J(other)}).then((x) => x === true, () => false)`) : false;
+  const otherName = await B2.ev(`document.querySelector("#nbname")?.value`);
+  await B2.ev(`(() => { window.__heldRead(); return 1; })()`);
+  await sleep(3000);
+  const after = { current: await B2.ev(`localStorage.getItem("sagebrush-current")`), name: await B2.ev(`document.querySelector("#nbname")?.value`), w7: await B2.ev(B2.has("w = 7")) };
+  check(okOther && after.current === other && after.name === otherName && !after.w7, `B2: the notebook opened meanwhile stays, and the held automatic open attached nothing (${J({ okOther, otherName, ...after })})`);
+  await B2.ev(`(() => { delete window.sagebrush.shareTest.afterRead; delete window.sagebrush.shareTest.beforeAttach; return 1; })()`);
   let opened7 = false;
   for (let i = 0; i < 15 && !opened7; i++) { await click7(); opened7 = await B2.until(B2.has("w = 7"), 2000); }
   check(opened7, `B2 opens it with A's cell, nothing more from A (within 30 s; ${J(await B2.codes())})`);

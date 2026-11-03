@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=150
 // The notebook page's phone layout (?phone=1, web/index.html's html.phone) at a
 // phone's size, 390x844 with touch, in headless Chromium:
 // - nothing a person can press is covered by something else, and no two

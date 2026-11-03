@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs)
 // Waves (the waves design r3): one reactive action, one request.
 //   - the policy (src/wave-policy.ts): its vectors, the scheduler loop's decisions in order;
 //   - the in-memory gateway (remote-fake.js): validation before any effect, the three forgets at their points, at

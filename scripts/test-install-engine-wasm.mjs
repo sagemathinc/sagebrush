@@ -1,3 +1,4 @@
+// ci: checks.6 order=20
 // scripts/install-engine-wasm.mjs: a fresh engine module with identical bytes
 // leaves `git diff --quiet wasm/` clean, whatever the build output's mode.
 //   node scripts/test-install-engine-wasm.mjs
