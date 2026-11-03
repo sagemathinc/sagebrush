@@ -4,6 +4,16 @@
 
 Links here are relative to the site serving this file (sagebrush.space, or dev.sagebrush.space for the development site).
 
+## How code runs (read this first)
+
+Sagebrush notebooks are **reactive, but they are not marimo**: **a name may be defined again in a later cell**, as in a Jupyter notebook read from the top.
+
+- **Order is the page order.** Each cell reads the nearest definition **above** it. A later redefinition is a new value from that cell down; the cells above it keep the earlier one.
+- **Editing a cell reruns the cells that depend on it**: the cells below that read what it defines, up to the next redefinition.
+- Example (Sage mode, where `^` is a power; in Python mode write `**`), four cells: `x = 1`; `print(x^2)` prints 1; `x = 17`; `print(x^3)` prints 4913. Change the first cell to `x = 2`: only `print(x^2)` reruns (prints 4); `print(x^3)` still reads `x = 17` and prints 4913.
+- A **board** runs its code items the same way, in its reading order (top to bottom, then left to right; a group's items together). A **.tex** runs its SageTeX blocks in document order.
+- **For agents:** don't rename variables (`x2`, `x_new`) to avoid a redefinition, and don't refuse one or call it an error ("x is defined in more than one cell" is marimo's rule, not Sagebrush's): redefining a name is normal here.
+
 ## Using the page
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
