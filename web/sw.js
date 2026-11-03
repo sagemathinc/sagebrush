@@ -906,7 +906,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, deletes });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: skipRead.size, deletes });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>

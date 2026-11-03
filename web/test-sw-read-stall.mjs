@@ -159,14 +159,23 @@ try {
   // copy is skipped, so the request gets the network's refusal; after it, the kept copy is served again)
   at = "the mark runs out, the network refusing";
   await until(() => kept(A), 15000);
+  // (the phase before leaves its mark until its network copy is put, in the background: it starts from none, so its
+  // own stall is the one that marks the key; CI's run 41619463054 started while the mark was still there)
+  let skipping;
+  ok(await until(async () => (skipping = (await hook())?.skipping) === 0, 15000), "(no key marked before the phase: " + skipping + ")");
   overrides[url] = { status: 503 };
   saveOverrides();
+  const held0 = (await hook())?.heldReads;
   await hook({ holdRead: url });
   await clearHttp();
   const stalledRead = await get(15000);
   const markedAt = Date.now();
+  const after1 = await hook(), heldNow2 = after1?.heldReads - held0;
   await clearHttp();
   const within = await get(5000);
+  // (the held read is the request's own check, or the keep it set off reading the same entry first: either way one read
+  // stalls, the request waits its turn behind it, and the key is marked)
+  ok(heldNow2 === 1 && after1?.skipping === 1 && stalledRead.ms >= 900, `one read of the kept copy stalls, by the phase's first request, and marks the key (${heldNow2} held, ${after1?.skipping} marked, ${Math.round(stalledRead.ms)} ms)`);
   ok(stalledRead.size !== want.size && within.size !== want.size && Date.now() - markedAt < 6000, "after a stall, within STALL_SKIP_MS the kept copy is skipped: the network's refusal both times: " + J([stalledRead.size, within.size]));
   await sleep(Math.max(0, markedAt + 6500 - Date.now()));
   await clearHttp();
