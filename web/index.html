@@ -1545,7 +1545,61 @@ function showName(name) {
   nbName.value = name || "Untitled";
   document.title = `${nbName.value} — Sagebrush`;
 }
-nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); });
+nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); localRenameSoon(); });
+// `sagebrush notebook DIR`'s file (LOCAL): its title is its file's name, so a rename renames the file (William's B2):
+// to a free name beside it (" (2)", " (3)"... if taken: never over another file, the server refuses that), after the
+// saves before it, and then the page's address and its "saved to" say the new name. A notebook not saved yet only
+// takes the name. The rename is a task of the store's own write queue (astra's LOCAL-RENAME-2): every save before it
+// is written first, every save after it waits for it and goes to the new name; none in between.
+let localStore = null, localRenameTimer = null;
+function localRenameSoon() {
+  if (!LOCAL || !localStore || localStore.failed) return;
+  clearTimeout(localRenameTimer);
+  localRenameTimer = setTimeout(() => {
+    const p = (localStore.queue ?? Promise.resolve()).then(localRename, localRename);
+    localStore.queue = p.catch(() => {});
+  }, 800);
+}
+async function localRename() {
+  // (after a failure (store.failed: a rename "kept", a file not read), nothing more is renamed, nor saved, from this
+  // page until the notebook is opened again: checked here, when the queued task runs, so one queued before the failure
+  // stops too: astra on #531)
+  if (localStore.failed) return;
+  const at = LOCAL.path, i = at.lastIndexOf("/"), folder = i < 0 ? "" : at.slice(0, i + 1);
+  const base = safeName(docName());
+  if (folder + base + ".ipynb" === at) return;
+  for (let k = 1; k <= 50; k++) {
+    const to = folder + base + (k > 1 ? ` (${k})` : "") + ".ipynb";
+    if (to === at) return;
+    let r;
+    try { r = await fetch(`api/rename?path=${encodeURIComponent(at)}&to=${encodeURIComponent(to)}`, { method: "POST" }); } catch (e) { statusEl.textContent = `not renamed: ${e?.message ?? e}`; return; }
+    if (!r.ok) {
+      const why = await r.json().catch(() => ({ code: "failed", message: `${r.status}` }));
+      // (a taken name: the next one; anything else ends here)
+      if (why.code === "exists") continue;
+      if (why.code === "kept") {
+        // (another program made both names meanwhile: the notebook as it was is at its staging name; this page saves
+        // nothing more over either name until it is opened again: astra's LOCAL-RENAME-3 recovery)
+        localStore.failed = `this notebook wasn't renamed: another program changed ${at} and ${to} meanwhile, so the file as it was is kept as ${why.stage}. Nothing more is saved from this page: open the notebook you want again`;
+        statusEl.textContent = localStore.failed;
+        savedEl.textContent = "not saved: see the status";
+        return;
+      }
+      statusEl.textContent = `not renamed: ${why.message ?? why.code}`;
+      return;
+    }
+    const { path } = await r.json();
+    LOCAL.path = path;
+    LOCAL.name = path.slice(path.lastIndexOf("/") + 1);
+    localStore.name = localStore.label = LOCAL.name;
+    history.replaceState(history.state, "", "/nb/" + encodeURIComponent(path).replace(/%2F/g, "/") + "/" + location.search + location.hash);
+    document.title = LOCAL.name + " · Sagebrush";
+    savedEl.textContent = "saved to " + LOCAL.name;
+    saveNow();
+    return;
+  }
+  statusEl.textContent = `not renamed: ${base}.ipynb and 49 more names are taken`;
+}
 
 // A store for a file saved as .ipynb text: the local server's file, or the app's.
 // read() gives null for a file that does not exist yet (a new notebook); a file
@@ -3894,11 +3948,13 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     } catch (err) { statusEl.textContent = `could not open ${remote}: ${err.message ?? err}`; }
   }
   if (LOCAL) {
-    const url = `api/file?path=${encodeURIComponent(LOCAL.path)}`;
+    // (the file's path follows a rename, localRenameSoon: every read and write after it goes to the new name)
+    const url = () => `api/file?path=${encodeURIComponent(LOCAL.path)}`;
     const store = new TextFileStore(LOCAL.name,
-      async () => { const r = await fetch(url); if (r.status === 204 || r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
-      async (text) => { const r = await fetch(url, { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
+      async () => { const r = await fetch(url()); if (r.status === 204 || r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
+      async (text) => { const r = await fetch(url(), { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
       LOCAL.name);
+    localStore = store;
     await open(store, "local:" + LOCAL.path, "local");
     document.title = LOCAL.name + " · Sagebrush";
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
