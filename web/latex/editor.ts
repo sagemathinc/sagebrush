@@ -211,10 +211,14 @@ export function createEditor(o: EditorOpts) {
   //  "}" for X's arguments. The browser's own insertion, a second undo step after the "}" (one undo takes back only the
   //  close); its nested input event is folded into the person's, so one edit, one render. Never for a paste, an IME
   //  composition, a selection or setText)
-  let closing = false;
+  let closing = false, typedOver = false;
+  // (whether the "}" replaces a selection: known only before the browser applies it, so read in beforeinput, for the
+  //  input event that follows it)
+  src.addEventListener("beforeinput", () => { typedOver = src.selectionStart !== src.selectionEnd; });
   src.addEventListener("input", (ev) => {
-    const e = ev as InputEvent;
-    if (closing || src.readOnly || e.isComposing || e.inputType !== "insertText" || e.data !== "}" || src.selectionStart !== src.selectionEnd) return;
+    const e = ev as InputEvent, over = typedOver;
+    typedOver = false;
+    if (closing || over || src.readOnly || e.isComposing || e.inputType !== "insertText" || e.data !== "}" || src.selectionStart !== src.selectionEnd) return;
     const at = src.selectionStart, ins = autoClose(src.value, at);
     if (!ins) return;
     closing = true;

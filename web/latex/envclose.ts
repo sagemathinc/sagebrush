@@ -10,6 +10,28 @@ const LITERAL = new Set(["verbatim", "verbatim*", "Verbatim", "Verbatim*", "BVer
   "filecontents", "filecontents*", "sageblock", "sagesilent", "sageverbatim", "sagecommandline", "sageexample",
   "pycode", "pyblock", "pyverbatim", "pyconsole", "pysub", "matlabcode", "matlabblock", "matlabsilent"]);
 
+// (an environment's name as LaTeX takes it: any characters but braces, backslashes, % and white space, an optional
+//  star included)
+const NAME = "[^{}\\\\%\\s]+";
+const MARK = new RegExp("(\\\\+)(begin|end)\\{(" + NAME + ")\\}", "g");
+
+/** Whether `head` (whole lines) leaves a verbatim-like environment open. */
+function literalOpen(head: string): boolean {
+  let open: string | null = null;
+  for (const line of head.split("\n")) {
+    // (a line's text up to its first unescaped %, unless inside a literal environment, where % is text)
+    let text = line;
+    if (open === null) { const c = /(?:^|[^\\\\])(?:\\\\\\\\)*%/.exec(line); if (c) text = line.slice(0, c.index + c[0].length - 1); }
+    MARK.lastIndex = 0;
+    for (let r = MARK.exec(text); r; r = MARK.exec(text)) {
+      if (r[1].length % 2 === 0) continue;   // (\\begin: a line break, then text)
+      if (open === null) { if (r[2] === "begin" && LITERAL.has(r[3])) open = r[3]; }
+      else if (r[2] === "end" && r[3] === open) open = null;
+    }
+  }
+  return open !== null;
+}
+
 /** What to insert at `at`, just after a "}" the person typed (text[at - 1]), to close the environment it opened; or null. */
 export function autoClose(text: string, at: number): string | null {
   if (text[at - 1] !== "}") return null;
@@ -19,19 +41,14 @@ export function autoClose(text: string, at: number): string | null {
   if (text.slice(at, lineEnd < 0 ? text.length : lineEnd).trim() !== "") return null;
   const before = text.slice(lineStart, at - 1);
   // (an unescaped \begin{X just before the "}": an odd run of backslashes, so \\begin, a line break, is not one)
-  const m = /(?:^|[^\\])((?:\\\\)*)\\begin\{([A-Za-z@]+\*?)$/.exec(before);
+  const m = new RegExp("(?:^|[^\\\\])((?:\\\\\\\\)*)\\\\begin\\{(" + NAME + ")$").exec(before);
   if (!m) return null;
   const name = m[2];
   // (a comment: an unescaped % earlier on the line)
   if (/(?:^|[^\\])(?:\\\\)*%/.test(before.slice(0, m.index + 1 + m[1].length))) return null;
-  // (in an open verbatim-like environment: one begun before this line and not ended)
-  const re = /\\(begin|end)\{([A-Za-z@]+\*?)\}/g, head = text.slice(0, lineStart);
-  const open: string[] = [];
-  for (let r = re.exec(head); r; r = re.exec(head)) {
-    if (!LITERAL.has(r[2])) continue;
-    if (r[1] === "begin") open.push(r[2]); else if (open[open.length - 1] === r[2]) open.pop();
-  }
-  if (open.length) return null;
+  // (in an open verbatim-like environment: one begun before this line and not ended; a \begin or \end in a comment or
+  //  after an escaped backslash (\\begin) is text, never one)
+  if (literalOpen(text.slice(0, lineStart))) return null;
   // (a matching close already next: nothing more)
   if (text.slice(lineEnd < 0 ? text.length : lineEnd).trimStart().startsWith("\\end{" + name + "}")) return null;
   return "\n" + /^[ \t]*/.exec(before)![0] + "\\end{" + name + "}";

@@ -488,6 +488,10 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("envclose-not-in-verbatim", ac("\\begin{verbatim}\n\\begin{x}|\n\\end{verbatim}") === null && ac("\\begin{sageblock}\n\\begin{x}|") === null, null);
   check("envclose-after-a-closed-verbatim", ac("\\begin{verbatim}\nv\n\\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
   check("envclose-existing-close-kept", ac("\\begin{x}|\n\n  \\end{x}") === null && ac("\\begin{x}|\n\\end{y}") === "\n\\end{x}", null);
+  check("envclose-names-as-latex", ac("\\begin{foo2}|") === "\n\\end{foo2}" && ac("\\begin{foo-bar}|") === "\n\\end{foo-bar}" && ac("\\begin{foo:bar*}|") === "\n\\end{foo:bar*}" && ac("\\begin{a b}|") === null, [ac("\\begin{foo2}|"), ac("\\begin{foo-bar}|")]);
+  check("envclose-commented-literal-is-text", ac("% \\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("a % b \\begin{lstlisting}\n\\begin{x}|") === "\n\\end{x}", ac("% \\begin{verbatim}\n\\begin{x}|"));
+  check("envclose-escaped-literal-is-text", ac("\\\\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("\\\\\\begin{verbatim}\n\\begin{x}|") === null, [ac("\\\\begin{verbatim}\n\\begin{x}|"), ac("\\\\\\begin{verbatim}\n\\begin{x}|")]);
+  check("envclose-percent-inside-verbatim-is-text", ac("\\begin{verbatim}\n% \\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
   check("envclose-only-on-brace", autoClose("\\begin{x", 8) === null && ac("\\begin{x}{cc}|") === null && ac("\\end{x}|") === null, null);
 }
 

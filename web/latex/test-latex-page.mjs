@@ -1345,6 +1345,24 @@ try {
     const HAS = D0.slice(0, at0) + "\n\\end{itemize}" + D0.slice(at0);
     await none(HAS, at0, "\\begin{itemize", "when its \\end{itemize} is already next");
     await none(D0, at0, "a\\\\begin{itemize", "after \\\\ (a line break, not \\begin)");
+    // (daybreak3 DB3-P1A-1: a "}" typed over a selection, completing \begin{itemize}: replaced as typed, no close)
+    {
+      const SEL = D0.slice(0, at0) + "\\begin{itemizeQ" + D0.slice(at0), q = at0 + "\\begin{itemize".length;
+      await setAt(SEL, q); await ev(`(() => { document.querySelector(".tex-src").setSelectionRange(${q}, ${q + 1}); return true; })()`);
+      const b = await st(); await keyChar("}"); const a = await st();
+      check(a.v === D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0) && a.edits === b.edits + 1, "P1a: no close for a } typed over a selection", { before: b.v, after: a.v });
+    }
+    // (DB3-P1A-3: names as LaTeX takes them: digits and punctuation)
+    for (const nm of ["foo2", "foo-bar", "foo:bar"]) {
+      await setAt(D0, at0); await typed("\\begin{" + nm); await keyChar("}");
+      check((await st()).v === D0.slice(0, at0) + "\\begin{" + nm + "}\n\\end{" + nm + "}" + D0.slice(at0), "P1a: \\begin{" + nm + "} closed too");
+    }
+    // (DB3-P1A-2: a commented or escaped \begin{verbatim} earlier is text: a later environment still closes)
+    for (const [what, pre] of [["commented", "% \\begin{verbatim}\n"], ["escaped", "\\\\begin{verbatim}\n"]]) {
+      const T = D0.slice(0, at0) + pre + D0.slice(at0), o = at0 + pre.length;
+      await setAt(T, o); await typed("\\begin{x"); await keyChar("}");
+      check((await st()).v === T.slice(0, o) + "\\begin{x}\n\\end{x}" + T.slice(o), "P1a: after a " + what + " \\begin{verbatim}, \\begin{x} still closes");
+    }
     // (the host's setText, a paste-like programmatic value: nothing added)
     const PROG = D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0);
     await setAt(PROG, at0 + "\\begin{itemize}".length);
