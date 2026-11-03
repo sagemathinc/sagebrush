@@ -865,9 +865,33 @@ offlineSerial = (f) => {
 const holds = [], grants = [], deletes = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
 reserve = (n, serve) => reserve0(n, serve).then((release) => (grants.push(serve ? "serve" : "bg"), release));
 caches.open = async (name) => { const c = await open(name); cacheNames.set(c, name); return c; };
+// (a gated body, the put-under-chain follow-up's reproducer (sync-docs; the read-during-put seen on VM1 Nov 3): a body
+// that gives its first chunk, then nothing until the test opens its gate, then the rest of the real body.  holdPut: the
+// next put whose URL includes it stores such a body, so the put is in flight for as long as the test likes; gateRead:
+// the next cache hit whose URL includes it reads its real body so, so a read can be left part-way while a put of the
+// same key finishes.  A read's gated body is a byte stream, as a cache hit's is (readExact reads it BYOB))
+const gates = { put: { url: null, n: 0, held: false }, read: { url: null, n: 0, held: false } };
+const arm = (g, url) => ((g.url = url), (g.gate = new Promise((r) => (g.open = r))));
+function gatedBody(res, g, bytes) {
+  const src = res.body.getReader();
+  let first = true;
+  const body = new ReadableStream({
+    ...(bytes ? { type: "bytes" } : {}),
+    async pull(c) {
+      if (!first) (g.held = true), await g.gate, (g.held = false);
+      first = false;
+      const { value, done } = await src.read();
+      done ? (c.close(), c.byobRequest?.respond(0)) : c.enqueue(value.slice());
+    },
+    cancel: (why) => src.cancel(why),
+  });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+const gateMatch = (g, k) => g.url && String(k?.url ?? k).includes(g.url) && ((g.url = null), ++g.n);
 for (const op of ["put", "delete"]) {
   const f = Cache.prototype[op];
   Cache.prototype[op] = async function (k, ...a) {
+    if (op === "put" && a[0]?.body && gateMatch(gates.put, k)) a[0] = gatedBody(a[0], gates.put, false);
     // (a stop with "walk" matches only the carry-over's own move: the key its intent record names)
     const s = stopAt, hit = s?.op === op && String(k?.url ?? k).includes(s.url) && (!s.cache || s.cache === cacheNames.get(this)) && (!s.walk || (await recGet("moving"))?.key === String(k?.url ?? k));
     const halt = () => ((stopAt = null), new BroadcastChannel("sb-offline-test").postMessage({ stopped: s, key: String(k?.url ?? k), instance }), new Promise((r) => (resume = r)));
@@ -885,6 +909,7 @@ let holdRead = null, holdKeep = false, heldReads = 0;
 const match0 = Cache.prototype.match;
 Cache.prototype.match = async function (k, ...a) {
   const r = await match0.call(this, k, ...a), h = holdRead;
+  if (r?.body && gateMatch(gates.read, k)) return gatedBody(r, gates.read, true);
   if (!r || !h || !String(k?.url ?? k).includes(h)) return r;
   if (!holdKeep) holdRead = null;
   heldReads++;
@@ -898,6 +923,8 @@ const set = (t) => {
   if (t.probe === false) probed = Promise.resolve(false);
   if ("stop" in t) stopAt = t.stop;
   if ("holdRead" in t) (holdRead = t.holdRead), (holdKeep = !!t.holdKeep);
+  if ("holdPut" in t) arm(gates.put, t.holdPut);
+  if ("gateRead" in t) arm(gates.read, t.gateRead);
 };
 const boot = new Promise((done) => {
   const o = indexedDB.open("sb-offline-test", 1);
@@ -915,10 +942,22 @@ self.addEventListener("message", (ev) => {
   if (!t || !port || ev.origin !== scope.origin) return;
   set(t);
   if (t.resume) resume?.();
+  if (t.releasePut) gates.put.open?.();
+  if (t.releaseRead) gates.read.open?.();
+  // (this build's own code run for a URL of this build, the reply when it ends: keep, fetchAndKeep as a page's request
+  // runs it (the network's copy put, then read back, in the background); check, the read-back alone (entryVerified))
+  if (t.keep || t.check) {
+    const u = new URL(t.keep ?? t.check, scope), req = new Request(u), t0 = Date.now();
+    const job = t.keep
+      ? fetchAndKeep(req, req, u.pathname, ev).then((r) => (r.body?.cancel().catch(() => {}), { status: r.status }))
+      : caches.open(CACHE).then((c) => entryVerified(c, req, u.pathname)).then((verified) => ({ verified }));
+    ev.waitUntil(job.then((r) => port.postMessage({ ...r, ms: Date.now() - t0 }), (e) => port.postMessage({ error: String(e), ms: Date.now() - t0 })));
+    return;
+  }
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes, heldPuts: gates.put.n, putHeld: gates.put.held, gatedReads: gates.read.n, readHeld: gates.read.held });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>
