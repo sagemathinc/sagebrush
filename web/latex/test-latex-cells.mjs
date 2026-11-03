@@ -4,7 +4,7 @@
 // corresponds to a new one when one of its characters is in it; an id is kept only through a unique one-to-one
 // correspondence of the same kind); reopen matching by (kind, code hash, ordinal); the results file's validation.
 //   bun web/latex/test-latex-cells.mjs
-import { scanItems, carryIds, reopenIds, idSource, savedIdentities, signatures } from "./cells.ts";
+import { scanItems, carryIds, reopenIds, idSource, savedIdentities, signatures, ID_MAX } from "./cells.ts";
 import { applyChanges } from "./posmap.ts";
 import { createHash } from "node:crypto";
 
@@ -116,6 +116,18 @@ function refRule(oldCells, oldItems, newCells, newItems) {
   const good = { id: "i1", kind: "sage", codeHash: "a".repeat(64), ordinal: 0 };
   check("saved-v2", savedIdentities({ format: "sagebrush-latex-results", version: 2, items: [good, { ...good, id: "x" }, { ...good, kind: "shell" }, { ...good, ordinal: -1 }, null] }).length === 1, null);
   check("saved-malformed-file", savedIdentities({ format: "sagebrush-latex-results", version: 1, items: [good] }).length === 0 && savedIdentities(null).length === 0 && savedIdentities({ format: "sagebrush-latex-results", version: 2, items: Array(1001).fill(good) }).length === 0, null);
+}
+
+// ---- 6. fresh ids at the schema's edge (daybreak3's #555 HOLD): with i999999 used, the next ids are distinct, unused,
+// valid in the results file, and read back from it
+{
+  const next = idSource(["i999999", "i1", "i2"]);
+  const fresh = Array.from({ length: 5 }, () => next());
+  const file = { format: "sagebrush-latex-results", version: 2, items: fresh.map((id, k) => ({ id, kind: "sage", codeHash: "b".repeat(64), ordinal: k })) };
+  const back = savedIdentities(file).map((s) => s.id);
+  check("fresh-ids-at-the-edge", ID_MAX === 999999 && new Set(fresh).size === 5 && !fresh.some((id) => ["i999999", "i1", "i2"].includes(id)) && fresh.every((id) => /^i[0-9]{1,6}$/.test(id) && Number(id.slice(1)) <= ID_MAX) && JSON.stringify(back) === JSON.stringify(fresh), { fresh, back });
+  const n2 = idSource(["i5"]);
+  check("fresh-ids-ordinary", n2() === "i6" && n2() === "i7", null);
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

@@ -146,11 +146,23 @@ export function reopenIds(items: Item[], saved: Saved[], hash: (code: string) =>
   });
 }
 
-/** A fresh-id source: i1, i2, ... past every id already used. */
+/** The largest id number the results file accepts (i1 ... i999999: savedIdentities). */
+export const ID_MAX = 999999;
+/** A fresh-id source: i1, i2, ... past every id already used, never past ID_MAX (then the smallest number no used id
+ * has), so every id it gives is one the results file reads back (daybreak3's #555 HOLD), and never one in use. */
 export function idSource(used: Iterable<string>): () => string {
+  const taken = new Set<number>();
+  for (const id of used) { const m = /^i(\d{1,6})$/.exec(id); if (m) taken.add(Number(m[1])); }
   let n = 0;
-  for (const id of used) { const m = /^i(\d{1,6})$/.exec(id); if (m) n = Math.max(n, Number(m[1])); }
-  return () => "i" + ++n;
+  for (const k of taken) if (k > n) n = k;
+  let low = 1;
+  return () => {
+    if (n < ID_MAX) { n++; taken.add(n); return "i" + n; }
+    while (taken.has(low)) low++;
+    if (low > ID_MAX) throw new Error("no fresh id left");
+    taken.add(low);
+    return "i" + low;
+  };
 }
 
 const KINDS = new Set(Object.keys(LANG));
