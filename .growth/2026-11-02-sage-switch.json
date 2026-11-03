@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "WebMCP run_python (sim run 2, APP-sage-switch): in a notebook with code, code in another language runs in a new notebook of it, opened, the result saying so, instead of a refusal; its description says it. In the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +356).",
+ "bytes": {
+  "cli/pyjs.cjs": 400
+ }
+}
