@@ -300,6 +300,18 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "untitled.tex"), TITLED.replace("\\maketitle\n", ""));
   const ut = await run(dir, "check", "untitled.tex", "--json");
   check("check: a \\title item with no \\maketitle is still hidden (refused, an error at its line)", ut.code === 1 && ut.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 3 && /can't be run/.test(x.message)), ut.json?.problems);
+  // (grader E6: \institute on a beamer \titlepage; E7: a \sage in the preamble outside every title field, with
+  //  \maketitle there, is still hidden: refused at its line, S1E01-A3)
+  const INST = "\\documentclass{beamer}\n\\usepackage{sagetex}\n\\title{T}\n\\institute{Inst $\\sage{3*3}$}\n\\begin{document}\n\\frame{\\titlepage}\n\\end{document}\n";
+  writeFileSync(join(dir, "inst.tex"), INST);
+  const ir = await run(dir, "run", "inst.tex", "--json");
+  await run(dir, "render", "inst.tex", "-o", "inst.html");
+  const ih = existsSync(join(dir, "inst.html")) ? readFileSync(join(dir, "inst.html"), "utf8") : "";
+  check("run: an item in \\institute runs and is shown on the \\titlepage", ir.code === 0 && ir.json?.items?.length === 1 && ir.json.items[0].state === "ok" && /<div class="institute">Inst [\s\S]*<mn>9<\/mn>/.test(ih), { code: ir.code, items: ir.json?.items });
+  const PRE = "\\documentclass{article}\n\\usepackage{sagetex}\n\\title{T}\nPreamble text $\\sage{5}$\n\\begin{document}\n\\maketitle\nBody $\\sage{1+1}$.\n\\end{document}\n";
+  writeFileSync(join(dir, "pre.tex"), PRE);
+  const pc = await run(dir, "check", "pre.tex", "--json");
+  check("check: a \\sage in the preamble outside the title fields is still refused at its line (\\maketitle there)", pc.code === 1 && pc.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 4 && /can't be run/.test(x.message)), pc.json?.problems);
   const none = await run(dir, "run", "clean.tex");
   check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
 
