@@ -112,6 +112,36 @@ try {
   check("check-clean-exit-0", cc.code === 0 && cc.out.startsWith("clean.tex: beamer, 1 frame; no problems"), cc);
   const ca = await run(dir, "check", "article.tex", "--json");
   check("check-article-has-no-frames", ca.code === 0 && ca.json.class === "other" && ca.json.frames.length === 0 && ca.json.problems.some((x) => x.kind === "environment" && x.name === "frame"), ca.json);
+  // (a frame the editor's preview shows as a placeholder, over 128 KiB of markup: a warning at its line, exit 0; a
+  //  frame with an image over 128 KiB, inlined as a data: URL, none: the preview shows it, sim run 8)
+  const BIGSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` + `<circle cx="5" cy="5" r="4"/>`.repeat(6000) + "</svg>";
+  const LARGE = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{Picture}
+\includegraphics{big.svg}
+\end{frame}
+\begin{frame}{Long}
+${"many words ".repeat(14000)}
+\end{frame}
+\end{document}
+`;
+  writeFileSync(join(dir, "large.tex"), LARGE); writeFileSync(join(dir, "big.svg"), BIGSVG);
+  const cl = await run(dir, "check", "large.tex", "--json");
+  const tl = (cl.json?.problems ?? []).filter((x) => x.kind === "toolarge");
+  check("check-frame-too-large-warning-with-line", cl.code === 0 && BIGSVG.length > 128 * 1024 && cl.json.frames.length === 2 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === lineOf(LARGE, "\\begin{frame}{Long}")
+    && /^this slide is too large \(\d+ KiB, over 128 KiB\): the preview and Present show a placeholder instead/.test(tl[0].message), { code: cl.code, problems: cl.json?.problems });
+  // (render shows what check says: that frame's placeholder, inside its own slide, the picture's frame whole; and a
+  //  frame over CHUNK_MAX, 2 MiB, still a slide too: the deck's frames all kept)
+  const HUGE = LARGE.replace("\\end{document}", "\\begin{frame}{Huge}\n" + "more words ".repeat(200000) + "\n\\end{frame}\n\\end{document}");
+  writeFileSync(join(dir, "huge.tex"), HUGE);
+  const rl = await run(dir, "render", "huge.tex", "-o", "huge.html", "--json");
+  const hh = existsSync(join(dir, "huge.html")) ? readFileSync(join(dir, "huge.html"), "utf8") : "";
+  const frameOf = (k) => { const i = hh.indexOf(`<section class="slide" data-frame="${k}"`); return i < 0 ? "" : hh.slice(i, hh.indexOf("</section>", i) + 10); };
+  const ch = await run(dir, "check", "huge.tex", "--json");
+  check("render-too-large-frames-placeholders-in-their-slides", rl.code === 0 && (hh.match(/<section class="slide"/g) || []).length === 3 && frameOf(1).includes('src="data:image/svg+xml;base64,')
+    && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(2)) && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(3))
+    && !hh.includes("many words many words") && !hh.includes("more words more words"), { code: rl.code, slides: (hh.match(/<section class="slide"/g) || []).length, f2: frameOf(2).slice(0, 300), f3: frameOf(3).slice(0, 300) });
+  check("check-frame-over-2MiB-warning", ch.json?.frames?.length === 3 && (ch.json?.problems ?? []).some((x) => x.kind === "toolarge" && x.line === lineOf(HUGE, "\\begin{frame}{Huge}") && /over 2048 KiB/.test(x.message)), ch.json?.problems);
 
   // ---- images as TeX finds them (William's L2, Nov 2): the file's folder, a parent (../), \graphicspath, a leading /
   // (the folder the command runs in); when not found, the folders searched and the name to write. Never outside the

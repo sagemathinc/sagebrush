@@ -35,6 +35,7 @@ const MESSAGES: Record<string, (name: string) => string> = {
   math: (n) => `KaTeX can't typeset this math: ${n}`,
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
+  toolarge: (n) => `${n}: the preview and Present show a placeholder instead (make it smaller, or split it)`,
 };
 const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion", "input"]);
 
