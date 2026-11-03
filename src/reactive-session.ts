@@ -137,6 +137,11 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
   const note = (r: RunReport) => { for (const id of r.failed) failed.add(id); for (const id of r.cancelled) cancelled.add(id); };
   if (cells.length) {
     await reactive.load({ stale: true });
+    // (a fresh session: every cell starts stale, nothing is up to date before this Run. The editor's rule below (a
+    //  descendant sent only if every cell it reads ran ok in this Run) is valid only so: a persistent session needs the
+    //  fresh-parent rule, daybreak3's DB3-RS-4 (L1b step 3, @sagebrush's ruling). Checked, never assumed.)
+    const upToDate = cells.filter((c) => !reactive.stale.has(c.key) && !reactive.errors.has(c.key)).map((c) => c.key);
+    if (upToDate.length) throw new Error("runCells: a fresh session must start with every cell stale (" + upToDate.slice(0, 3).join(", ") + " aren't): a persistent session needs the fresh-parent rule (DB3-RS-4)");
     // (each cell's predicted time, as the budget counts it: its last measured time before this run)
     const predicted = new Map(reactive.times);
     note(o.only ? await reactive.run(o.only, { budget: 0 }) : await reactive.runAll());
@@ -151,7 +156,8 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
       note(await reactive.run(left, o.only ? { budget: 0 } : { budget: Infinity }));
       if (reactive.outcome.size === before) break;
     }
-    // (the editor's Run: then the descendants, one at a time, in the graph's order (ties in page order), by one rule
+    // (valid only for a fresh session: every cell starts stale; persistent sessions need the fresh-parent rule (L1b
+    //  step 3). The editor's Run: then the descendants, one at a time, in the graph's order (ties in page order), by one rule
     //  (@sagebrush, after daybreak3's DB3-RS-3): remaining = the budget minus the predicted times of the cells sent in
     //  this Run; a descendant is sent iff every cell it reads ran ok in this Run and its predicted time is at most what
     //  remains. No reservations: a cell not sent spends nothing; one that fails or runs out of time leaves its readers

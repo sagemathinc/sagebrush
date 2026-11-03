@@ -194,6 +194,15 @@ function fakeInterpreter(script: Map<string, Outcome>, log: string[]): Interpret
     dead: () => null, err: [], close: async () => {},
   };
 }
+test("reactive-session: a fresh session: every cell starts stale, so no parent is up to date before the Run (the guard of the editor's rule; persistent sessions: DB3-RS-4, L1b step 3)", async () => {
+  const log: string[] = [];
+  const interp = fakeInterpreter(new Map(), log);
+  const r = await runCells(interp, [{ key: "x", code: "x = 1" }, { key: "y", code: "y = 2" }, { key: "z", code: "print(x + y)" }], { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["y"], descendantsWithinMs: 5000, onMessage: () => {} });
+  // (x was never run in this session: z reads it, so z isn't sent; x isn't either: nothing up to date was assumed)
+  assert.deepEqual(log, ["y"]);
+  assert.ok(r.reactive.stale.has("x") && r.reactive.stale.has("z"));
+});
+
 test("reactive-session: the editor's Run matches the reference model on 1000 random graphs and outcomes", async () => {
   let seed = 20261103;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
