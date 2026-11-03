@@ -21,7 +21,10 @@ export const CHROME_STDERR_TAIL = 2048, PROFILE_LIST_MAX = 12;
  * one a Chrome slow to say its port (the Chrome-start reds of Nov 3).  Given its
  * process, { child } (spawned with stderr piped), a Chrome that exits or can't
  * start fails at once instead of after `ms`, and either failure carries the last
- * CHROME_STDERR_TAIL bytes of its stderr. */
+ * CHROME_STDERR_TAIL bytes of its stderr.
+ * @param {string} profile
+ * @param {number} [ms]
+ * @param {{ child?: import("node:child_process").ChildProcess }} [options] */
 export async function devtoolsPort(profile, ms = 60_000, { child } = {}) {
   const watch = child ? watchChrome(child) : null;
   const t = Date.now();
@@ -43,34 +46,41 @@ export async function devtoolsPort(profile, ms = 60_000, { child } = {}) {
 
 // (one watcher a process, kept for its life: its stderr is drained into the tail, so a chatty Chrome never blocks on
 // a full pipe, and a spawn error is held rather than thrown unhandled)
+/** @typedef {{ tail: Buffer, error: (NodeJS.ErrnoException | null), closed: Promise<unknown> }} ChromeWatch */
+/** @type {WeakMap<import("node:child_process").ChildProcess, ChromeWatch>} */
 const watched = new WeakMap();
+/** @param {import("node:child_process").ChildProcess} child
+ * @returns {ChromeWatch} */
 function watchChrome(child) {
-  let w = watched.get(child);
+  const w = watched.get(child);
   if (w) return w;
-  w = { tail: Buffer.alloc(0), error: null, closed: Promise.resolve() };
-  const keep = w;
-  if (child.stderr) w.closed = new Promise((r) => child.stderr.once("close", r));
-  child.stderr?.on("data", (d) => {
+  /** @type {ChromeWatch} */
+  const keep = { tail: Buffer.alloc(0), error: null, closed: Promise.resolve() };
+  const stderr = child.stderr;
+  if (stderr) keep.closed = new Promise((r) => stderr.once("close", r));
+  stderr?.on("data", (d) => {
     const all = Buffer.concat([keep.tail, Buffer.isBuffer(d) ? d : Buffer.from(String(d))]);
     keep.tail = all.subarray(Math.max(0, all.length - CHROME_STDERR_TAIL));
   });
   child.on("error", (e) => { keep.error = e; });
-  watched.set(child, w);
-  return w;
+  watched.set(child, keep);
+  return keep;
 }
 
+/** @param {ChromeWatch | null} watch */
 function stderrText(watch) {
   if (!watch) return "";
   const text = watch.tail.toString("utf8").trim();
   return text ? `; its stderr ends: ${text}` : "; its stderr is empty";
 }
 
+/** @param {string} profile */
 function listProfile(profile) {
   let names;
   try {
     names = readdirSync(profile).sort();
   } catch (e) {
-    return `no profile directory (${/** @type {any} */ (e).code ?? e})`;
+    return `no profile directory (${/** @type {NodeJS.ErrnoException} */ (e).code ?? e})`;
   }
   if (names.length === 0) return "the profile is empty";
   const shown = names.slice(0, PROFILE_LIST_MAX).join(", ");
