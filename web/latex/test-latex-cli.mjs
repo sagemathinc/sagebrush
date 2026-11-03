@@ -287,6 +287,19 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
   check("run --timeout: stopped, earlier results kept", slow.code === 1 && slow.json.items.map((x) => x.state).join(",") === "ok,error,blocked" && /timeout/.test(slow.json.items[1].message), slow.json?.items ?? slow.err);
+  // (William's L1, Nov 3: \title{$\sage{factor(2026)}$} "doesn't work": an item in a title field is shown where
+  //  \maketitle prints it, so it runs and its result is in the title block; with no \maketitle it is still hidden)
+  const TITLED = "\\documentclass{article}\n\\usepackage{sagetex}\n\\title{$\\sage{factor(2026)}$}\n\\author{A $\\sage{2+3}$\\thanks{t $\\sage{6*7}$}}\n\\date{$\\sage{2025+1}$}\n\\begin{document}\n\\maketitle\nBody $\\sage{1+1}$.\n\\end{document}\n";
+  writeFileSync(join(dir, "titled.tex"), TITLED);
+  const tr = await run(dir, "run", "titled.tex", "--json");
+  await run(dir, "render", "titled.tex", "-o", "titled.html");
+  const th = existsSync(join(dir, "titled.html")) ? readFileSync(join(dir, "titled.html"), "utf8") : "";
+  const tblock = th.slice(th.indexOf('<div class="titleblock">'), th.indexOf('<div class="titleblock">') + 20000);
+  check("run: items in \\title, \\author, \\thanks and \\date run and are shown in the title block", tr.code === 0 && tr.json?.items?.length === 5 && tr.json.items.every((x) => x.state === "ok")
+    && /<div class="title">[\s\S]*1013/.test(tblock) && /<div class="author">[\s\S]*<mn>5<\/mn>/.test(tblock) && /<div class="date">[\s\S]*2026/.test(tblock) && /<div class="thanks">[\s\S]*42/.test(tblock), { code: tr.code, items: tr.json?.items, block: tblock.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 300) });
+  writeFileSync(join(dir, "untitled.tex"), TITLED.replace("\\maketitle\n", ""));
+  const ut = await run(dir, "check", "untitled.tex", "--json");
+  check("check: a \\title item with no \\maketitle is still hidden (refused, an error at its line)", ut.code === 1 && ut.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 3 && /can't be run/.test(x.message)), ut.json?.problems);
   const none = await run(dir, "run", "clean.tex");
   check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
 
