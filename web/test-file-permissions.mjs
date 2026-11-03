@@ -13,6 +13,7 @@
 //     (a new file, a write over one, a remove), as it refuses one from an interpreter since restarted (a late message
 //     from the old worker included), and the old
 //     store's write where there is no workspace (astra's NM-ADMIT-1); with each a control that does write;
+//   - a notebook of the person's reopened while the page runs (?runner=0) starts a plain interpreter, never a refusing one;
 //   - "don't allow" holds in the page when storage can't keep it, and says so; no number of other choices evicts a
 //     "don't allow" back into the own-notebook default (NM-DENY-2: the record's own module, in node).
 //   bun web/build.ts, then node web/test-file-permissions.mjs
@@ -277,6 +278,37 @@ try {
   check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000) && !(await stat("/unkept.txt")), "…the next write is refused, nothing written");
   await ev("(Storage.prototype.setItem = window.__setItem, 1)");
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
+
+  // ---- a notebook of the person's reopened while the page runs, with no sandbox (?runner=0, as in the app): its
+  // provenance is known before its interpreter starts, so that interpreter is a plain one from the start, never one
+  // that can't change files (whose ready has no version) restarted once the provenance arrives
+  const newOwn = async () => {
+    await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
+    await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
+    await sleep(800);
+    return ev("localStorage.getItem('sagebrush-current')");
+  };
+  await go(base + "?runner=0");
+  const idA = await newOwn(), idB = await newOwn();
+  check(idA && idB && idA !== idB, "(two notebooks of the person's: A, then B)");
+  const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
+  await go(base + "?runner=0");
+  check((await ev("localStorage.getItem('sagebrush-current')")) === idB && (await until("!!sagebrush.kernel?.context", 30000)), "(reloaded into B, its interpreter running; A has none in this page)");
+  await ev("(window.__statuses.length = 0, 1)");
+  await ev(`sagebrush.open(${JSON.stringify(idA)}).then(() => 1)`);
+  await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA)} && !!sagebrush.kernel?.context`, 30000);
+  const reopened = await ev("window.__statuses");
+  check(!reopened.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "A reopened while the page runs: its interpreter a plain one from the start (no refusing interpreter's ready), files allowed: " + JSON.stringify(reopened.filter((t) => /ready/.test(t))));
+  // (and one of Sagebrush's own examples, opened from the Examples dialog while the page runs: host-made before it opens)
+  await ev("(window.__statuses.length = 0, 1)");
+  await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="examples"]').click(); return 1; })()`);
+  await until("!!document.querySelector('#exlist button')", 10000);
+  const exBefore = await ev("localStorage.getItem('sagebrush-current')");
+  await ev("(document.querySelector('#exlist button').click(), 1)");
+  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)} && !!sagebrush.kernel?.context`, 30000);
+  const exStatuses = await ev("window.__statuses");
+  check(!exStatuses.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "an example opened from the Examples dialog while the page runs: a plain interpreter from the start, files allowed: " + JSON.stringify(exStatuses.filter((t) => /ready/.test(t))));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: statusLog });
 
   // ---- no workspace (it can't be opened): the old store's write asks the same authority, in its own transaction
   const { identifier: noWs } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `{ const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (name, ...a) { if (name === "sagebrush-workspace") throw new DOMException("blocked for the test", "UnknownError"); return o.call(this, name, ...a); }; }` });
