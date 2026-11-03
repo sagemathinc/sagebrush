@@ -21,6 +21,7 @@ import { loadRemotePicture, safeHtml } from "../safe-html.ts";
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
+import { cycleText } from "../../src/notebook-graph.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 export const GRAPH = "application/vnd.sagebrush.graph+json";
@@ -1013,7 +1014,10 @@ export function createNotebook(root, opts = {}) {
             analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
               // (the analyzer failed, not the code: not kept, so that the next run asks again)
               if (a.error?.kind === "analyzer") analyses.delete(key);
-              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
+              return a.error ? a : {
+                defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []),
+                late: new Set(a.late ?? []), lateBy: new Map((a.lateBy ?? []).map(([k, ns]) => [k, new Set(ns)])),
+              };
             }));
           }
           return analyses.get(key);
@@ -1081,7 +1085,7 @@ export function createNotebook(root, opts = {}) {
           ? `${e.name} is defined by ${labels(e.cells)}, so this cell cannot tell which one it reads. Rename it in all but one of them.`
           : `${e.name} is also defined by ${labels(e.cells)}. A name read by other cells can be defined by only one cell: rename it in one of them, or start it with _ to keep it private to its cell.`;
       case "cycle":
-        return `${labels(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
+        return cycleText(e, label, (n) => (kernel?.reactive ? kernel.reactive.written(n) : n));
       case "import-star":
         return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
       default:

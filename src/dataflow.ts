@@ -41,6 +41,10 @@ class Block {
   // (ours) names defined here only by a `:=` in a generator's body, which may
   // never run: a later read is still a read of the previous value
   lazyDefs = new Set<string>();
+  // (ours) a lambda's block: at a cell's top level, one is mostly called at
+  // once or given to a call (sorted(xs, key=lambda k: w[k])), so its body's
+  // reads are not late
+  lambda = false;
   constructor(public scope: Scope = Scope.Module) {}
 }
 
@@ -50,6 +54,11 @@ interface RefData {
   parents: Block[];
   // (a `global x` statement's, which reads nothing itself)
   global?: boolean;
+  // (ours) read in a def's body: when it is called, not when the cell runs
+  late: boolean;
+  // (ours) the top-level def or class it is read in (null: elsewhere, as a
+  // top-level lambda's body)
+  owner: string | null;
 }
 
 /** marimo's is_local: `_x` (not `__x`), and `__` itself. */
@@ -79,6 +88,20 @@ export interface CellAnalysis {
    */
   imports?: Map<string, string>;
   /**
+   * (ours) the refs read only inside defs' bodies (methods' too), so only
+   * when they are called, not when the cell runs (and not by the cell's own
+   * top-level code, which would call them; a top-level lambda's body counts
+   * as run now): they don't order cells (src/notebook-graph.ts). Absent when
+   * strict.
+   */
+  late?: Set<string>;
+  /**
+   * (ours) the late refs of each top-level def and class the cell defines
+   * ("*": of a def elsewhere, as in a top-level `if`), which a cell using
+   * that def at its top level may read by calling it
+   */
+  lateBy?: Map<string, Set<string>>;
+  /**
    * global names it leaves deleted without defining them: `except E as x`
    * at its top level binds x and deletes it at the handler's end, wiping
    * out another cell's x (ours: marimo counts x as local to the handler)
@@ -93,6 +116,10 @@ class Visitor {
   blocks: Block[] = [new Block()];
   obscured: (string | null)[] = [];
   refs = new Map<string, RefData[]>();
+  // (ours) the top-level def or class being visited, and the cell's own
+  // top-level names its top-level code reads (it may call them)
+  owner: string | null = null;
+  eagerOwn = new Set<string>();
   constructor(public id: string, public strict = false) {}
 
   mangle(name: string, ignoreScope = false): string {
@@ -127,12 +154,22 @@ class Visitor {
     if (!list) this.refs.set(name, (list = []));
     // (ours: what is evaluated outside a block, as a default, is a read of
     // the block around it)
-    let i = this.blocks.length - 1;
-    while (!this.strict && i > 0 && this.blocks[i].outside) i--;
+    const i = this.effective();
     const block = this.blocks[i];
     const found = list.find((r) => r.block === block);
     if (found && deleted) found.deleted = true;
-    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, i), ...(global ? { global } : {}) });
+    else if (!found) list.push({ deleted, block, parents: this.blocks.slice(0, i), ...(global ? { global } : {}), late: this.late(i), owner: this.owner });
+  }
+  // (the block what is visited now is evaluated in: a default, a decorator
+  // or a base is the block around its function's or class's)
+  effective(): number {
+    let i = this.blocks.length - 1;
+    while (!this.strict && i > 0 && this.blocks[i].outside) i--;
+    return i;
+  }
+  // (ours) whether block i is evaluated only when a def is called
+  late(i: number): boolean {
+    return this.blocks.slice(1, i + 1).some((b) => b.scope === Scope.Function && !b.lambda);
   }
   removeRef(name: string, block: Block): void {
     // (ours: only the reads that run later, from a function's body; a class
@@ -189,6 +226,7 @@ class Visitor {
     // (the same order as marimo's: what differs is only what isDefined sees)
     if (t === "ClassDef" || t === "Lambda") {
       const b = new Block(t === "ClassDef" ? Scope.Class : Scope.Function);
+      b.lambda = t === "Lambda";
       this.blocks.push(b);
       for (const p of node.type_params ?? []) this.visit(p);
       b.typeParams = new Set(b.defs);
@@ -251,13 +289,20 @@ class Visitor {
   }
   visit_ClassDef(node: Node): void {
     node.name = this.mangle(node.name);
-    this.visitDefinition(node);
+    this.owned(node.name, () => this.visitDefinition(node));
     this.define(node.name, "class");
   }
   visit_FunctionDef(node: Node): void {
     node.name = this.mangle(node.name);
-    this.visitDefinition(node);
+    this.owned(node.name, () => this.visitDefinition(node));
     this.define(node.name, this.blocks[this.blocks.length - 1].scope === Scope.Class ? "method" : "function");
+  }
+  // (ours) a top-level def's or class's reads are its own
+  owned(name: string, f: () => void): void {
+    const was = this.owner;
+    if (this.blocks.length === 1) this.owner = name;
+    f();
+    this.owner = was;
   }
   visit_AsyncFunctionDef(node: Node): void {
     this.visit_FunctionDef(node);
@@ -348,6 +393,12 @@ class Visitor {
   visit_Name(node: Node): void {
     if (this.obscured.includes(node.id)) return;
     const ctx = node.ctx?._type;
+    // (ours: the cell's top-level code reads one of its own top-level names:
+    // if a def or class, it may call it now, reading its late refs)
+    if (ctx === "Load" && !this.strict) {
+      const i = this.effective();
+      if (!this.late(i) && this.blocks[0].defs.has(node.id) && !this.blocks.slice(1, i + 1).some((b) => b.defs.has(node.id))) this.eagerOwn.add(node.id);
+    }
     // (ours: a `:=` in what is evaluated outside a block, a default or a
     // base, binds in the scope around it)
     let at = this.blocks.length - 1;
@@ -484,6 +535,30 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     if (!isLocal(n)) defs.add(n);
   }
   const refs = new Set([...v.refs.keys()].filter((n) => !injected.includes(n)));
+  // (ours) the refs read only in defs' bodies, by owner;
+  // those of the defs its own top-level code reads (and so may call) are
+  // read when it runs
+  let late: Set<string> | undefined, lateBy: Map<string, Set<string>> | undefined;
+  if (!opts.strict) {
+    lateBy = new Map();
+    for (const n of refs) {
+      const rs = v.refs.get(n)!;
+      if (!rs.every((r) => r.late)) continue;
+      for (const r of rs) {
+        const k = r.owner ?? "*";
+        (lateBy.get(k) ?? lateBy.set(k, new Set()).get(k)!).add(n);
+      }
+    }
+    const called = new Set([...v.eagerOwn].filter((n) => lateBy!.has(n)));
+    if (v.eagerOwn.size && lateBy.has("*")) called.add("*");
+    const eager = new Set<string>();
+    for (const k of called) for (const n of lateBy.get(k)!) eager.add(n);
+    late = new Set([...lateBy.values()].flatMap((ns) => [...ns]).filter((n) => !eager.has(n)));
+    for (const [k, ns] of lateBy) {
+      for (const n of [...ns]) if (eager.has(n)) ns.delete(n);
+      if (!ns.size || (!defs.has(k) && k !== "*")) lateBy.delete(k);
+    }
+  }
   if (opts.mode === "matlab") {
     // (MATLAB's ans is every bare expression's value: no cell's to share; and
     // the translation's own machinery reads globals(), locals(), BaseException)
@@ -497,6 +572,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
     imports: new Map([...v.imported].filter((e): e is [string, string] => e[1] !== null && defs.has(e[0]))),
     unbinds: new Set([...handlers].filter((n) => !defs.has(n) && !isLocal(n))),
+    ...(late ? { late, lateBy } : {}),
   };
 }
 

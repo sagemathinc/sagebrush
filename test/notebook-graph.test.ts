@@ -78,7 +78,11 @@ test("#1477: several cells may define a name no cell reads", () => {
 
 test("cycles, import *, syntax errors", () => {
   const g = build(["a = b", "b = c", "c = a", "d = a", "from m import *", "x = ("], false);
-  assert.deepEqual(g.errors.get("c0"), [{ kind: "cycle", cells: ["c0", "c1", "c2"] }]);
+  assert.deepEqual(g.errors.get("c0"), [{ kind: "cycle", cells: ["c0", "c1", "c2"], path: [
+    { from: "c0", to: "c2", kind: "uses", name: "a", def: "a = b", defKind: "value" },
+    { from: "c2", to: "c1", kind: "uses", name: "c", def: "c = a", defKind: "value" },
+    { from: "c1", to: "c0", kind: "uses", name: "b", def: "b = c", defKind: "value" },
+  ] }]);
   assert.equal(g.errors.has("c3"), false);
   assert.equal(g.errors.get("c4")![0].kind, "import-star");
   assert.equal(g.errors.get("c5")![0].kind, "syntax");

@@ -35,7 +35,7 @@ import { boardFromText } from "../web/board/mermaid";
 import { canonical, cleanDoc, codeOrder, formatError, isBoard, pageCount, pageView, type BoardDoc, type DocNode, type DocNote } from "../web/board/doc";
 import { PREVIEW_MS, imageSize, makePreview, overCap, type Preview, type Raster } from "../web/board/preview";
 import { Reactive, SCOPE_SEP, type Analysis, type CellState, type RunReport } from "./notebook-reactive";
-import type { CellError } from "./notebook-graph";
+import { cycleText, type CellError } from "./notebook-graph";
 import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
 import { oneLine, textLines } from "./terminal-text";
@@ -628,7 +628,7 @@ function errorText(e: CellError, label: (id: string) => string, written: (n: str
         ? `${written(e.name)} is defined by ${list(e.cells)}, so this item cannot tell which one it reads. Rename it in all but one of them.`
         : `${written(e.name)} is also defined by ${list(e.cells)}. A name read by other items can be defined by only one item: rename it in one of them, or start it with _ to keep it private to its item.`;
     case "cycle":
-      return `${list(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
+      return cycleText(e, label, written, "item");
     case "import-star":
       return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
     case "analyzer":
