@@ -1570,6 +1570,8 @@ async function navLease() {
   if (trashTest.pause) await trashTest.pause("leased");
   return Object.assign(end, { after });
 }
+// (the notebook a click is waiting for, still arriving from sync (awaitArrival): another opened here ends the wait)
+let arrivalWait = null;
 async function open(store, id, kind = "browser", guard = null) {
   const endSwitch = await navLease();
   try {
@@ -1586,6 +1588,7 @@ async function open(store, id, kind = "browser", guard = null) {
   docGen++;
   ttShow(false);
   current = { id, kind };
+  if (arrivalWait && arrivalWait.id !== id) arrivalWait = null;
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
   const doc = await nb.attach(store);
@@ -1662,6 +1665,8 @@ async function openArrived(id) {
   // pull to ask (this page's notebook sync is off), that, as it won't arrive here either: journal.js's arrivingSay)
   const arriving = () => {
     const msg = mod.arrivingSay(id);
+    // (its download asked for: said as such, and opened once it is here, William's B3; nothing to wait for otherwise)
+    if (msg === mod.STILL_ARRIVING) { awaitArrival(id, splitExt(nameOf(at))[0], hdb, mod); return false; }
     statusEl.textContent = msg;
     wsBrowser?.say(msg);
     return false;
@@ -1692,6 +1697,39 @@ async function openArrived(id) {
   } finally {
     end();
   }
+}
+// (a notebook another device made, clicked before its history is here: "Downloading…", its pull asked again every 10
+// s, and opened as soon as its history has arrived, unless another notebook was opened meanwhile (open ends the
+// wait; an open that fails doesn't); after a minute, said that it hasn't arrived, and the next click waits again:
+// William's B3)
+function awaitArrival(id, name, hdb, mod) {
+  const said = `Downloading ${name}…`;
+  statusEl.textContent = said;
+  wsBrowser?.say(said);
+  if (arrivalWait?.id === id) return;
+  const me = { id };
+  arrivalWait = me;
+  let ticks = 0;
+  const tick = async () => {
+    if (arrivalWait !== me) return;
+    const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+    if (arrivalWait !== me) return;
+    if (s && s.start !== null && s.jOf?.size > 0) {
+      arrivalWait = null;
+      if (await openId(id).catch(() => false)) { wsTrackCurrent(); wsBrowser?.say(`${name} downloaded`); }
+      return;
+    }
+    if (++ticks >= 120) {
+      arrivalWait = null;
+      const late = `${name} hasn't arrived from sync yet (the device that made it sends it when it is online): click it again to keep waiting`;
+      statusEl.textContent = late;
+      wsBrowser?.say(late);
+      return;
+    }
+    if (ticks % 20 === 0) try { mod.DOC_SYNC.pull?.(id); } catch {}
+    setTimeout(tick, 500);
+  };
+  setTimeout(tick, 500);
 }
 const saveNow = () => nb.flush();
 // A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
