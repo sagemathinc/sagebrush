@@ -16,6 +16,8 @@ import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import { EXAMPLES, type Example } from "./examples";
+import { siteEngine } from "../board/code";
+import { driver, runnable, parseOutput, statesOf, resultsText } from "./run-core.mjs";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
@@ -36,6 +38,35 @@ const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
 const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
 let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
 const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
+// (Run's Sage session: the board's engine, siteEngine, the files beside this module: the notebook module, fetched on
+// the first Run, and its interpreter in the opaque-origin runner; one per page, kept warm for the next Run and for the
+// next file opened in place; started again on a Run after it failed to start)
+let sageKernel: any = null, sageStart: Promise<any> | null = null;
+const SAGE_START_MS = 120_000;
+const sageSession = () => (sageStart ??= (async () => {
+  const eng = siteEngine(new URL(".", import.meta.url));
+  const mod = await eng.module();
+  const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod) });
+  k.start();
+  const ok = await new Promise<boolean>((res) => {
+    if (k.ready) return res(true);
+    const t = setTimeout(() => { off(); res(false); }, SAGE_START_MS);
+    const off = k.on("ready", () => { clearTimeout(t); off(); res(true); });
+  });
+  if (!ok) { k.worker?.terminate(); throw new Error(`Sage didn't start in ${SAGE_START_MS / 1000} s`); }
+  return (sageKernel = k);
+})().catch((e) => { sageStart = null; throw e; }));
+/** The session's script run; what it printed (bounded: the results file's own limit) and why it ended early, if it did. */
+const runIn = (k: any, code: string) => new Promise<{ out: string; stopped: string }>((resolve) => {
+  let out = "";
+  k.execute(code, { mode: "sage" }, {
+    start() {}, display() {}, interact() {}, clear() {}, input(_p: string, reply: (t: string | null) => void) { reply(null); },
+    out(t: string, isErr: boolean) { if (!isErr && out.length < RESULTS_MAX) out += t; },
+    done(_ms: number, o: any) { resolve({ out, stopped: o?.interrupted ? "the run was stopped" : out.length >= RESULTS_MAX ? "the results are over 32 MiB" : o?.error ? "the session stopped with an error" : "" }); },
+    stopped(m: string) { resolve({ out, stopped: String(m || "the session stopped").trim().slice(0, 300) }); },
+    skipped() { resolve({ out, stopped: "the session didn't run it" }); },
+  });
+});
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -215,7 +246,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
   const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
   printBtn.onclick = () => printPreview();
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
+  // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
+  const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; runBtn.hidden = true;
+  head.append(back, newBtn, title, dirty, save, toggle, runBtn, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -366,6 +399,47 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   life.signal.addEventListener("abort", () => presenting?.stop());
+
+  // ---- Run (run-core.mjs): the SageTeX items of the text in the editor now (the preview's own list of them, so only
+  // once it has caught up), run in page order in this page's Sage session, on the person's click only (never on
+  // open); their states written as the results file beside the .tex, then read and shown as the CLI's are. A second
+  // click while it runs stops it.
+  let running = false;
+  E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
+  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
+  runBtn.onclick = async () => {
+    if (running) { sageKernel?.interrupt(); say("stopping…"); return; }
+    const c = E.lastCheck();
+    if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
+    const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
+    if (!items.length) { say("No SageTeX code to run"); return; }
+    running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
+    try {
+      const k = await sageSession();
+      if (!live()) return;
+      runBtn.textContent = "Running…";
+      const t0 = performance.now();
+      const { out, stopped } = await runIn(k, driver(runnable(items)));
+      const states = statesOf(items, parseOutput(out), stopped);
+      const bytes = enc.encode(resultsText(states));
+      if (bytes.length > RESULTS_MAX) { if (live()) say("Not run: the results are over 32 MiB"); return; }
+      // (the file where it is now, by its id, as Save finds it)
+      const at = await host.ws.pathOfFile(host.fid);
+      if (!at.ok) { if (live()) say("Not run: this file isn't here any more"); return; }
+      const rp = at.path + ".results.json", e = await host.ws.stat(rp).catch(() => undefined);
+      if (e && !e.trashed) await host.ws.write(rp, bytes);
+      else {
+        try { await host.ws.createByPerson(rp, { content: bytes }); }
+        catch (err: any) { if (err?.code === "exists") await host.ws.write(rp, bytes); else throw err; }
+      }
+      if (!live()) return;
+      await loadResults();
+      const bad = states.filter((x) => x.s !== "ok").length;
+      say(`Ran ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${((performance.now() - t0) / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : ""));
+    } catch (err) {
+      if (live()) say("Couldn't run the code: " + String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { if (live()) runIdle(); else running = false; }
+  };
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
