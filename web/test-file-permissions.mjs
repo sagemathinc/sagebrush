@@ -47,7 +47,7 @@ const PROBE = [
   "t('remove', lambda: os.remove('keep.txt'))",
   "t('rename', lambda: os.rename('keep.txt', 'keep2.txt'))",
   "t('move', lambda: os.replace('keep.txt', 'moved.txt'))",
-  "t('tmp', lambda: open('/tmp/nm-t.txt', 'w').write('x'))",
+  "t('tmp', lambda: (os.makedirs('/tmp', exist_ok=True), open('/tmp/nm-t.txt', 'w').write('x')))",
   "print('NM:' + ','.join(r))",
 ].join("\n");
 const ipynb = JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [{ cell_type: "code", source: PROBE, metadata: {}, outputs: [], execution_count: null }] });
