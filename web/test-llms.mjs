@@ -1,3 +1,4 @@
+// ci: checks.3 order=40
 // llms.txt and the board format page (web/llms.txt, web/board-format.md), as
 // built into web/site/public by `bun web/build.ts`:
 // - every link to the site (relative, /path; or https://sagebrush.space/path, only where marked absolute) names a

@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=10 runner=bun
 // A board's file, foo.board.json (doc.ts canonical()): format and version
 // first, the document's keys in a fixed order whatever order they came in,
 // two spaces of indent, arrays of numbers or strings on one line, a final

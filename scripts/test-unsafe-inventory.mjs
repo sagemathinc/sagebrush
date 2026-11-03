@@ -1,3 +1,4 @@
+// ci: census order=10
 // scripts/unsafe-inventory.mjs: every way of overriding or widening the unsafe_code lint is refused, a
 // changed or new allowed item fails until reviewed, and the tokenizer isn't fooled by strings or comments.
 //   node scripts/test-unsafe-inventory.mjs

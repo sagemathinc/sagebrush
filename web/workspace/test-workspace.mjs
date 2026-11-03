@@ -1,3 +1,4 @@
+// ci: web-runner order=150 runner=bun chrome
 // The workspace (web/workspace/: design/workspace-files.md §2, §8.2) in
 // headless Chromium, with real IndexedDB, localStorage, Web Locks and
 // BroadcastChannel: paths; making, reading and writing notebooks, boards and

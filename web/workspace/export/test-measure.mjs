@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=150 runner=bun
 // E1 r2e item 4, route (b): preflight's length-only measure (stream.ts notebookBytes / boardBytes, a counting Out)
 // against the real writer (notebookSlices / boardSlices, each slice encoded by TextEncoder), byte for byte, over whole
 // members (the JSON's framing, indentation, the data: URL's prefix and padding included), at several slice and piece

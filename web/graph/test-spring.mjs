@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=70 runner=bun
 // web/graph/spring.ts: a spring layout of boxes that no two overlap, fixed
 // boxes stay put, the same input and seed give the same positions (here, under
 // Node and Deno too), linked boxes end nearer than others, and past its caps

@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=110 runner=bun
 // The board page under the board journal (page.ts's wiring) in headless
 // Chromium, the built site (web/dist, or SB_DIST) and a helper page served from one origin
 // (test-board-journal-lib.mjs): the versions from before the journal kept read-only (test 15), a save's T1/T2 with no

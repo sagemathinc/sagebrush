@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=20 runner=bun
 // A board as Mermaid (mermaid.ts toMermaid): a flowchart read as a board,
 // written back, and read again is the same board, for every flowchart in
 // examples/mermaid.md and a set covering the syntax; the example boards'

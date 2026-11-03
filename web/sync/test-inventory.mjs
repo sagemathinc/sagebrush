@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=40 runner=bun
 // The daily inventory's bounds (web/sync/server.ts syncScheduled, LIMIT-268-1 and
 // LIMIT-SYNC-CRON-1), against a counted stand-in for D1, R2 and the account objects:
 // the call budget with the production constants, and the whole run's deadline.

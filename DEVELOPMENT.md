@@ -11,6 +11,22 @@ Both are short scripts you can read. `test-all.sh` doesn't keep its own list of 
 (scripts/ci-local.py), so it follows CI, and it refuses a workflow construct it doesn't model rather than guess. The timings below were measured on a 16-core x86_64 Ubuntu 24.04 VM from a fresh
 clone (October 28, 2026).
 
+## Adding a test
+
+A TypeScript test (`test/*.test.ts`) needs nothing: CI runs every compiled `dist/test/*.test.js`. A suite
+script (`web/**/test-*.mjs`, `scripts/test-*.mjs`) says where CI runs it in a header near its top, one line per
+run, and no workflow lists it:
+
+```js
+// ci: web-runner order=125 runner=bun chrome
+// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.json
+// ci: none (needs a signed-in DEV account)
+```
+
+The target is an existing `node scripts/web-tests.mjs run TARGET` line in a workflow. `node scripts/web-tests.mjs
+plan TARGET` shows a target's commands in order, and `node scripts/web-tests.mjs check` (run by CI's `changes`
+job) fails on a suite without a header; the script's own comment lists every option.
+
 ## Prerequisites (Linux; Ubuntu 24.04 shown)
 
 CI's versions, which some checks need exactly:

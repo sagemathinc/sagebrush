@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=50
 // Code items in several languages on one board (codes.ts, doc.ts; William's
 // item 16, option A): an item's own `mode`, else the board's; each language
 // its own interpreter, made when its first item runs; names shared, and

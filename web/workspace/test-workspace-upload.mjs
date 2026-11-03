@@ -1,3 +1,4 @@
+// ci: web-runner order=510 chrome
 // Upload's rule (design/workspace-files.md §3, web/workspace/upload.ts) on
 // both pages, in headless Chromium against the built site: Upload never
 // converts behind the person's back.  .ipynb, .board.json and .sbreplay

@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=100
 // Editing an item where it is (web/board/inplace.ts), with the mouse and
 // keyboard in headless Chromium: a double-click in Edit makes the item's
 // parts fields at its place and size, the caret where it was clicked; a
