@@ -1,0 +1,92 @@
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=red
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=red
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=red
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+b'\x89PNG'
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=(0, 1, 0)
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'foo'=3
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=(0, 1, 0)
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'foo'=3
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'facecolor'=(0, 1, 0)
+verbose 0 (162: primitive.py, options) WARNING: Ignoring option 'foo'=3
+verbose 0 (162: primitive.py, options) 
+The allowed options for Polygon defined by 3 points are:
+    alpha          How transparent the figure is.                              
+    edgecolor      The color for the border of filled polygons.                
+    fill           Whether or not to fill the polygon.                         
+    hue            The color given as a hue.                                   
+    legend_color   The color of the legend text.                               
+    legend_label   The label for this item in the legend.                      
+    linestyle      The style of the enclosing line.                            
+    rgbcolor       The color as an RGB tuple.                                  
+    thickness      How thick the border line is.                               
+    zorder         The layer level in which to draw                            
+
+1 1 1
+b'\x89PNG'
+b'\x89PNG'
+Graphics Array of size 2 x 2 ['a.png', 'a.svg', 'b.png', 'h.png', 'p.png', 'q.svg', 'r.svg']
