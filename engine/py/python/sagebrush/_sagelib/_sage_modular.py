@@ -2098,16 +2098,11 @@ class EllipticCurve_rational_field:
         """
         import _sage_ec as _ec
         out = [EllipticCurvePoint(self, None)]
-        T = self.torsion_order()
-        if T > 1:
-            seen = set()
-            H = 2.0
-            while len(out) < T and H < 60:
-                for P in _ec.point_search(self._a, H):
-                    if P not in seen and _ec.point_order(self._a, P):
-                        seen.add(P)
-                        out.append(EllipticCurvePoint(self, P))
-                H += 2
+        # (all of them, exactly, by Nagell-Lutz on the short model: a search on
+        # this model's own coordinates missed those of a translated model,
+        # ECTORS-ENG-1)
+        if self.torsion_order() > 1:
+            out += [EllipticCurvePoint(self, P) for P in _ec.torsion_points(tuple(self._a))]
         return sorted(out, key=lambda Q: (Q._P is not None, Q._P or ()))
 
     def torsion_subgroup(self):
@@ -2607,7 +2602,10 @@ class EllipticCurve_rational_field:
         """
         if getattr(self, "_tors", None) is None:
             import _sage_ec as _ec
-            self._tors = _ec.torsion_order(self._a, _ap.aplist(self._a, 200))
+            # (the bound from the minimal model's a_p, which every model of the
+            # curve shares: a translated model's coefficients can exceed the
+            # engine's 64-bit integers, ECTORS-ENG-1)
+            self._tors = _ec.torsion_order(self._a, _ap.aplist(_ec.minimal_model(tuple(self._a)), 200))
         return self._tors
 
     def _ap_bad(self, p):
@@ -3374,6 +3372,11 @@ class EllipticCurvePoint:
     def __hash__(self):
         return hash(("pt", self._E._a, self._P))
 
+    def _same_curve(self, other, op):
+        # (points on different curves are not ordered, as in Sage: ECTORS-ENG-2)
+        if tuple(self._E._a) != tuple(other._E._a):
+            raise TypeError("unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'" % (op, self._E, other._E))
+
     def _key(self):
         # (Sage orders points by their projective coordinates [x, y, z])
         from fractions import Fraction
@@ -3389,21 +3392,25 @@ class EllipticCurvePoint:
         """
         if not isinstance(other, EllipticCurvePoint):
             return NotImplemented
+        self._same_curve(other, "<")
         return self._key() < other._key()
 
     def __le__(self, other):
         if not isinstance(other, EllipticCurvePoint):
             return NotImplemented
+        self._same_curve(other, "<=")
         return self._key() <= other._key()
 
     def __gt__(self, other):
         if not isinstance(other, EllipticCurvePoint):
             return NotImplemented
+        self._same_curve(other, ">")
         return self._key() > other._key()
 
     def __ge__(self, other):
         if not isinstance(other, EllipticCurvePoint):
             return NotImplemented
+        self._same_curve(other, ">=")
         return self._key() >= other._key()
 
     def is_zero(self):

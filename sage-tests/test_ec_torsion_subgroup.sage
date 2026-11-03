@@ -47,3 +47,18 @@ show(35, lambda: EllipticCurve('15a1').torsion_subgroup().gens())
 # the generators and points for 3 curves of each torsion structure of conductor < 1000
 for i, lab in enumerate(['11a1', '11a3', '38b1', '14a1', '14a2', '14a4', '14a3', '14a5', '15a5', '15a1', '15a3', '21a1', '15a2', '17a2', '21a2', '15a4', '21a3', '42a1', '15a7', '15a8', '17a1', '19a1', '19a3', '26a1', '26b1', '174b1', '258f1', '30a2', '90c6', '210a2', '54b3', '714i1', '66c1', '66c2', '150a3', '90c3', '210b5', '210e2']):
     show(40 + i, lambda: (lab, EllipticCurve(lab).torsion_subgroup().invariants(), EllipticCurve(lab).torsion_subgroup().gens(), EllipticCurve(lab).torsion_subgroup().points()))
+# translated models (x -> x + r) of 11a1 and of a Z/2 x Z/8 curve: torsion far beyond any height search (ECTORS-ENG-1)
+for i, r in enumerate([10, 1000, 10**30]):
+    show(80 + i, lambda: (EllipticCurve([0, 3*r - 1, 1, 3*r**2 - 2*r - 10, r**3 - r**2 - 10*r - 20]).torsion_subgroup().invariants(), EllipticCurve([0, 3*r - 1, 1, 3*r**2 - 2*r - 10, r**3 - r**2 - 10*r - 20]).torsion_subgroup().gens(), EllipticCurve([0, 3*r - 1, 1, 3*r**2 - 2*r - 10, r**3 - r**2 - 10*r - 20]).torsion_points()))
+# (210e2 = [1, 0, 0, -1070, 7812], x -> x + r: [a1, a2 + 3r, a3 + r a1, a4 + 2 r a2 + 3 r^2, a6 + r a4 + r^2 a2 + r^3])
+for i, r in enumerate([7, 10**25]):
+    show(83 + i, lambda: (lambda F: (F.torsion_subgroup().invariants(), F.torsion_subgroup().gens(), len(F.torsion_points())))(EllipticCurve([1, 3*r, r, -1070 + 3*r**2, 7812 - 1070*r + r**3])))
+# a scaled (non-minimal) model
+show(85, lambda: (lambda F: (F, F.torsion_subgroup().invariants(), F.torsion_subgroup().gens(), F.torsion_points()))(EllipticCurve([0, 0, 0, -432*16, 0])))
+# points on different curves are not ordered (ECTORS-ENG-2)
+P8 = EllipticCurve([0, 0, 0, -1, 0])(0, 0); Q8 = EllipticCurve([0, 0, 0, -4, 0])(0, 0)
+show(86, lambda: P8 < Q8)
+show(87, lambda: P8 <= Q8)
+show(88, lambda: P8 > Q8)
+show(89, lambda: P8 >= Q8)
+show(90, lambda: (P8 == Q8, P8 != Q8))
