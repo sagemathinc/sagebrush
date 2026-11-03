@@ -8,22 +8,73 @@
 // says (port 0: the system's choice), or on port 0 itself; web/serve.py, on
 // port 0, says the port it took once it is listening, and startServe() waits
 // for that (no port chosen here that something else can take first).
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
+/** How much of a Chrome's stderr devtoolsPort keeps (its last bytes), and how many profile entries a timeout names. */
+export const CHROME_STDERR_TAIL = 2048, PROFILE_LIST_MAX = 12;
+
 /** The DevTools port of a Chrome started with --remote-debugging-port=0 and
- * --user-data-dir=profile, once it is listening (within `ms`). */
-export async function devtoolsPort(profile, ms = 60_000) {
+ * --user-data-dir=profile, once it is listening (within `ms`).  A timeout lists
+ * the profile: none or an empty one is a Chrome that never started, a populated
+ * one a Chrome slow to say its port (the Chrome-start reds of Nov 3).  Given its
+ * process, { child } (spawned with stderr piped), a Chrome that exits or can't
+ * start fails at once instead of after `ms`, and either failure carries the last
+ * CHROME_STDERR_TAIL bytes of its stderr. */
+export async function devtoolsPort(profile, ms = 60_000, { child } = {}) {
+  const watch = child ? watchChrome(child) : null;
   const t = Date.now();
   for (;;) {
     try {
       const port = Number(readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]);
       if (port > 0) return port;
     } catch {}
-    if (Date.now() - t > ms) throw new Error(`Chrome did not say its DevTools port within ${ms / 1000} s (${profile})`);
+    if (watch?.error) throw new Error(`Chrome couldn't start (${watch.error.code ?? watch.error.message}) (${profile})${stderrText(watch)}`);
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      // (its last stderr can arrive after the exit: wait for the pipe to close, a second at most)
+      await Promise.race([watch.closed, new Promise((r) => setTimeout(r, 1000))]);
+      throw new Error(`Chrome exited (${child.exitCode ?? child.signalCode}) before saying its DevTools port (${profile})${stderrText(watch)}`);
+    }
+    if (Date.now() - t > ms) throw new Error(`Chrome did not say its DevTools port within ${ms / 1000} s (${profile}: ${listProfile(profile)})${stderrText(watch)}`);
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+// (one watcher a process, kept for its life: its stderr is drained into the tail, so a chatty Chrome never blocks on
+// a full pipe, and a spawn error is held rather than thrown unhandled)
+const watched = new WeakMap();
+function watchChrome(child) {
+  let w = watched.get(child);
+  if (w) return w;
+  w = { tail: Buffer.alloc(0), error: null, closed: Promise.resolve() };
+  const keep = w;
+  if (child.stderr) w.closed = new Promise((r) => child.stderr.once("close", r));
+  child.stderr?.on("data", (d) => {
+    const all = Buffer.concat([keep.tail, Buffer.isBuffer(d) ? d : Buffer.from(String(d))]);
+    keep.tail = all.subarray(Math.max(0, all.length - CHROME_STDERR_TAIL));
+  });
+  child.on("error", (e) => { keep.error = e; });
+  watched.set(child, w);
+  return w;
+}
+
+function stderrText(watch) {
+  if (!watch) return "";
+  const text = watch.tail.toString("utf8").trim();
+  return text ? `; its stderr ends: ${text}` : "; its stderr is empty";
+}
+
+function listProfile(profile) {
+  let names;
+  try {
+    names = readdirSync(profile).sort();
+  } catch (e) {
+    return `no profile directory (${/** @type {any} */ (e).code ?? e})`;
+  }
+  if (names.length === 0) return "the profile is empty";
+  const shown = names.slice(0, PROFILE_LIST_MAX).join(", ");
+  return `${names.length} profile entries: ${shown}${names.length > PROFILE_LIST_MAX ? ", ..." : ""}`;
 }
 
 /** A port free now (the system's choice), for a server that must be told one. */
