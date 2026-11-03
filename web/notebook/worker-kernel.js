@@ -124,7 +124,8 @@ export class WorkerKernel {
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
    * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing but its limits ({init}) is sent to the worker until it is done
-   * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
+   * @param {(message: any, worker: Worker) => boolean | void} [o.onMessage] sees each message first, with the worker that
+   * sent it (an earlier one's, after a restart, may still arrive); returning true consumes it (e.g. fsChanged)
    * @param {string | null} [o.limits] the engine's limits, a JSON text (src/limits.ts): the deployment's
    *   or the course's, never a document's; omitted or null for the defaults.  Every worker this kernel
    *   starts, restarts too, is given the same value first ({init}), and runs nothing before it is valid;
@@ -225,7 +226,7 @@ export class WorkerKernel {
     });
     w.onmessage = (ev) => {
       const m = ev.data;
-      if (this.onMessage?.(m)) return;
+      if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
         this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
         return;

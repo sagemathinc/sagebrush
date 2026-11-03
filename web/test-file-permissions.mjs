@@ -10,7 +10,8 @@
 //   - a change queued before "don't allow" isn't kept; a change the page didn't ask for (a forged fsChanged) isn't kept;
 //   - a notebook that can't change files never runs in a plain worker (?runner=0): it says why; one that can, runs;
 //   - a change past the queue's own check, held there, then "don't allow": the workspace's locked admission refuses it
-//     (a new file, a write over one, a remove), as it refuses one from an interpreter since restarted, and the old
+//     (a new file, a write over one, a remove), as it refuses one from an interpreter since restarted (a late message
+//     from the old worker included), and the old
 //     store's write where there is no workspace (astra's NM-ADMIT-1); with each a control that does write;
 //   - "don't allow" holds in the page when storage can't keep it, and says so; no number of other choices evicts a
 //     "don't allow" back into the own-notebook default (NM-DENY-2: the record's own module, in node).
@@ -243,6 +244,16 @@ try {
   await ev("(window.__go(), 1)");
   await until("!sagebrush.files.queue().draining", 20000); await sleep(800);
   check((await files()) === true && !(await stat("/late-gen.txt")), "a change from an interpreter restarted before it was kept isn't kept, file changes still allowed");
+  // (a message from the worker before a restart, arriving after it: judged by its sender, not by when it arrives)
+  await ev("(window.__oldMsg = sagebrush.kernel.worker.onmessage, 1)");
+  await ev("(sagebrush.notebook.restart?.() ?? document.querySelector('#restart').click(), 1)");
+  await setCode("print('fresh2')"); await runAll();
+  await until("/fresh2/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
+  await ev(`(window.__oldMsg({ data: { fsChanged: "/stale.txt", data: new Uint8Array([7]) } }), 1)`);
+  await sleep(1500);
+  check((await files()) === true && !(await stat("/stale.txt")) && (await ev("sagebrush.files.queue().paths")) === 0, "a change from the worker before a restart, arriving after it: not queued, not kept, file changes still allowed");
+  await ev(`(sagebrush.kernel.worker.onmessage({ data: { fsChanged: "/cur-ctl.txt", data: new Uint8Array([7]) } }), 1)`);
+  check(await until(`${W}.stat("/cur-ctl.txt").then((e) => !!e)`, 15000), "control: the same change from the current worker is kept");
 
   // ---- "don't allow" when storage can't keep it: in effect, and said
   await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-permissions") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);

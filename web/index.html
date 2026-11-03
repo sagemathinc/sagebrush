@@ -837,8 +837,11 @@ function makeKernel(owner) {
   let j = null;
   // (each worker this kernel starts, its generation: a change is this document's to keep only while the worker that
   // made it is still the document's interpreter and the document may change files, asked again where it is kept)
+  // (its generation is the worker's own, given at its start: a message is judged by the worker that sent it, not by
+  // when it arrives, so an earlier worker's late message is never the current one's, astra's NM-ADMIT-1 r2)
   let gen = 0;
-  const authority = () => { const g = gen; return () => owner === null || (perms.may(owner, "files") && kernels.get(owner)?.kernel === k && gen === g); };
+  const gens = new WeakMap(); // worker -> its generation
+  const authority = (w) => { const g = gens.get(w); return () => owner === null || (g !== undefined && perms.may(owner, "files") && kernels.get(owner)?.kernel === k && k.worker === w && gen === g); };
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
@@ -849,7 +852,7 @@ function makeKernel(owner) {
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
-      gen++;
+      gens.set(w, ++gen);
       // (first: whether this document may change files, before its files or any run)
       // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
       // separate question, not this page's to answer)
@@ -866,11 +869,13 @@ function makeKernel(owner) {
       const sent = LOCAL ? [] : await sendFiles(w);
       await j?.filesSent([...diskFiles, ...(sent ?? [])]);
     },
-    onMessage: (m) => {
+    onMessage: (m, sender) => {
       // (a change the interpreter refused: the bar, for the document shown)
       if (m.fsRefused !== undefined) { if (owner !== null && owner === current.id) filesBar(true); return true; }
       if (m.fsChanged === undefined) return false;
       if (replaying && k === kernel) return true; // a replay rewrites old files: not into the browser's
+      // (from a worker this kernel no longer runs: kept nowhere, given to no interpreter)
+      if (sender !== k.worker) return true;
       // (the host's own check, which decides: a change from a document that may not change files is kept nowhere, nor
       // given to the other interpreters; nor one from an interpreter no longer this document's)
       if (owner !== null && (!perms.may(owner, "files") || kernels.get(owner)?.kernel !== k)) {
@@ -878,7 +883,7 @@ function makeKernel(owner) {
         return true;
       }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
-      const may = authority();
+      const may = authority(sender);
       if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data, may);
       fileChanged(m.fsChanged, m.data, owner, may);
       // (the other interpreters see the browser's files as they are)
