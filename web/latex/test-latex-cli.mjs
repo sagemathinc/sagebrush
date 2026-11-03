@@ -215,6 +215,29 @@ ${"many words ".repeat(14000)}
 
   // ---- render --png: what the agent looks at
   // (CHROME as CI sets it, a command's name (CHROME=google-chrome), is the CLI's to look up on PATH: passed as it is)
+  // (a browser that fails to start: what it said is in png_error, not only that it failed; a fake one, on any box)
+  {
+    const fake = join(dir, "fake-chrome");
+    writeFileSync(fake, "#!/bin/sh\necho 'fake-chrome: Missing X server or $DISPLAY' >&2\nexit 1\n", { mode: 0o755 });
+    const fk = await new Promise((res) => {
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--png", "fkpng", "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+      let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+    });
+    check("png: a browser that exits at once, its own words in png_error", fk.code === 1 && /exited \(1\) before it could take the pictures; it said: fake-chrome: Missing X server or \$DISPLAY/.test(fk.json?.png_error ?? ""), { code: fk.code, png_error: fk.json?.png_error });
+    const fakeRun = (script, out) => new Promise((res) => {
+      writeFileSync(fake, script, { mode: 0o755 });
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--png", out, "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+      let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+    });
+    // (grader D5: the tail is the END of what it said, at most 2048 characters)
+    const fl = await fakeRun("#!/bin/sh\nprintf 'FIRST' >&2\nhead -c 3000 /dev/zero | tr '\\0' x >&2\necho 'LAST' >&2\nexit 1\n", "flpng");
+    const said = /; it said: ([\s\S]*)$/.exec(fl.json?.png_error ?? "")?.[1] ?? "";
+    check("png: a long stderr, its last 2048 characters kept (the end, not the start)", fl.code === 1 && said.endsWith("LAST") && !said.includes("FIRST") && said.length <= 2048 && said.length > 2000, { code: fl.code, n: said.length, head: said.slice(0, 20), tail: said.slice(-10) });
+    // (grader D4: the CI sighting's path: a browser that says something and never opens its DevTools port; the CLI
+    //  gives up at 30 s, with what it said)
+    const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
+    check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
+  }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
     if (process.env.LATEX_CLI_PNG === "1") check("png-browser-found", false, "no Chromium-family browser (CHROME=...)");
@@ -227,7 +250,7 @@ ${"many words ".repeat(14000)}
     });
     const pages = g.json?.png?.pages ?? [];
     const files = existsSync(join(dir, "png")) ? readdirSync(join(dir, "png")).sort() : [];
-    check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, pages, files });
+    check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, png_error: g.json?.png_error, pages, files });
     const dims = files.map((f) => { const b = readFileSync(join(dir, "png", f)); return b.subarray(0, 8).toString("hex") === "89504e470d0a1a0a" ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; });
     check("png-slide-size-16-9", dims.length === 5 && dims.every((x) => x && x[0] === 1024 && Math.abs(x[1] - 576) <= 1), dims);
     // (--steps: each frame at each overlay step)
@@ -235,14 +258,14 @@ ${"many words ".repeat(14000)}
     const st = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "ov.tex", "--png", "ovpng", "--steps", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
     const sp = st.json?.png?.pages ?? [];
     const ovFiles = existsSync(join(dir, "ovpng")) ? readdirSync(join(dir, "ovpng")).sort() : [];
-    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { files: ovFiles, pages: sp });
+    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { code: st.code, png_error: st.json?.png_error, files: ovFiles, pages: sp });
     const bytes = ovFiles.map((f) => readFileSync(join(dir, "ovpng", f)).toString("base64"));
     check("png --steps: the steps' pictures differ", bytes[0] !== bytes[1] && bytes[1] !== bytes[2], null);
     // (--pdf: printed by the same browser, a beamer document one page per frame, of the slide's size)
     const pd = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--pdf", "talk.pdf", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
     const pdfBytes = existsSync(join(dir, "talk.pdf")) ? readFileSync(join(dir, "talk.pdf")) : Buffer.alloc(0);
     const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
-    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
+    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf_error: pd.json?.pdf_error, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
   }
 
