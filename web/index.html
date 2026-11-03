@@ -846,7 +846,9 @@ function makeKernel(owner) {
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
       // (first: whether this document may change files, before its files or any run)
-      w.postMessage({ fsWritable: owner === null || perms.may(owner, "files") });
+      // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
+      // separate question, not this page's to answer)
+      if (!LOCAL) w.postMessage({ fsWritable: owner === null || perms.may(owner, "files") });
       // the notebook's optional package set, pinned, before any code (plan-modular-packages-r4 §4.4;
       // the kernel holds every run until this is done); a replayed session's is the one it recorded
       const replayed = j?.replayPkgset();
