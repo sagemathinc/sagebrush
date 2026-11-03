@@ -255,14 +255,16 @@ export function buildFiles(rootDir) {
   // The examples gallery (plan-examples-gallery §5, daybreak2's ruling): the corpus (every file under examples/),
   // what the site serves of it (every file web/build.ts writes under web/site/public/examples: the pages, the
   // LaTeX previews, files.json, the ZIPs, the catalog) and the catalog on its own. Read after the build, never
-  // built here: a tree that isn't there fails the measurement.
+  // built here. A tree that isn't there isn't measured: a base from before the gallery has none (the reset that
+  // added these rows measures it under this file too), and a merge whose measured bundles aren't exactly
+  // budgets.json's fails the gate (r5 §1.2, "the measured bundles differ").
   const walk = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
   const site = join(rootDir, "web", "site", "public", "examples");
-  for (const [key, path] of [["examples/corpus", join(rootDir, "examples")], ["site/examples", site], ["examples/index.json", join(site, "index.json")]])
-    if (!existsSync(path)) throw new Error(`${key}: ${path} isn't there (the examples are measured after bun web/build.ts, with web/site)`);
-  files["examples/corpus"] = walk(join(rootDir, "examples"));
-  files["site/examples"] = walk(site);
-  files["examples/index.json"] = [join(site, "index.json")];
+  if (existsSync(join(rootDir, "examples"))) files["examples/corpus"] = walk(join(rootDir, "examples"));
+  if (existsSync(join(site, "index.json"))) {
+    files["site/examples"] = walk(site);
+    files["examples/index.json"] = [join(site, "index.json")];
+  }
   const reg = JSON.parse(readFileSync(join(rootDir, "packages", "registry.json"), "utf8"));
   return { files, extra: { "registry/packages": Object.keys(reg.packages).length } };
 }
