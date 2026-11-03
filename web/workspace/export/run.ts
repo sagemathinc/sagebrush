@@ -13,7 +13,7 @@ import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
 import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
 import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
-import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, NAME, PATH, putRow, R, readRow, TIME } from "./rows";
+import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, memberLen, memberName, NAME, PATH, putRow, R, readRow, setNaming, TIME } from "./rows";
 import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
 // (the serializers: Download's own functions, from the module Download calls (file-bytes.ts), built into this chunk
 // rather than handed over by the page, so that a page carries them only if it uses them itself before any click
@@ -201,6 +201,8 @@ export type Plan = {
   omitted?: string;
   /** preflight's elapsed time, ms (r2c's evidence) */
   preflightMs?: number;
+  /** (U3) one folder's export: its path; the members are it and everything under it, named from its parent */
+  root?: string;
 };
 export type Progress = { phase: "preflight" | "writing" | "finishing"; files: number; of: number; bytes: number; total: number };
 
@@ -218,7 +220,6 @@ async function* entries(w: Workspace): AsyncGenerator<Entry[]> {
   }
 }
 
-const zipName = (e: Pick<Entry, "path" | "kind">) => "files/" + e.path.slice(1) + (e.kind === "folder" ? "/" : "");
 // (a data file another device has, its bytes not fetched: flagged on its entry.  A document's `remote` says only that
 // it was listed from the server, and stays once its content has arrived (it is opened, or synced): whether its content
 // is here is its capture's to find, as the Files list's isElsewhere asks it (William's B3 (3): one notebook shown as
@@ -351,7 +352,7 @@ export const NO_OPFS_WHY = "This workspace is too large to export in this browse
  * owns (created, and removed on every exit, by openExport: astra's obligations), opened here.  `opfs`: false when the
  * spools are Blob parts, which then count, the records included, toward CAPS.spoolBlob.
  */
-export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean): Promise<Plan> {
+export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean, root?: string): Promise<Plan> {
   const t0 = performance.now();
   resetCounts();
   rowStats.rowBytes = 0;
@@ -359,7 +360,7 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
   // (cdSpool from manifest.json's own central record, "manifest.json" 13 bytes: uncounted before, so an export of a few
   // entries stopped at "the export's index grew past …"; counted from the start, so the no-OPFS check below sees it:
   // agents-ui's finding on #545)
-  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 46 + 12 + 13, manSpool: 0, capSpool: 0, unavailable: [] };
+  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 46 + 12 + 13, manSpool: 0, capSpool: 0, unavailable: [], ...(root ? { root } : {}) };
   sizesNow();
   const pace = paceOf(signal);
   await rows.open();
@@ -370,7 +371,9 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
     for (const e of page) {
       stopIf(signal);
       { const y = breathe(); if (y) await y; }
-      const name = utf8Len(e.path) + 6 + (e.kind === "folder" ? 1 : 0);
+      // (U3: one folder's export takes the folder and what is under it, nothing else, left out or not)
+      if (root && e.path !== root && !e.path.startsWith(root + "/")) continue;
+      const name = memberLen(e) + 1;
       const flagged = unavailableWhy(e);
       if (flagged) { plan.unavailable.push({ path: e.path, kind: e.kind, why: flagged }); continue; }
       // (the spools: each member's central record, at most 46 + name + a Zip64 extra; its manifest entry and comma)
@@ -479,6 +482,8 @@ export class CaptureLog {
 /** A line's length in the capture log, at its widest (preflight's bound). */
 const captureLineLen = (e: Entry) => jsonLen(e.path) + jsonLen(e.kind) + (e.ident === undefined ? 4 : jsonLen(e.ident)) + 5;
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+/** Whether path `p` is `folder` or inside it. */
+const under = (p: string, folder: string) => p === folder || p.startsWith(folder + "/");
 
 /** Ops after S0, against the allow-list (E1 r2c §2 rule 1; astra's E1-A1 and E1-R2-A1): a content `write` that kept,
  * exactly as the export captured them, its entry's identity and kind, its folder (by the folder's identity, itself
@@ -486,7 +491,7 @@ const parentOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
  * the export, naming its path; server-applied ops alike.  Two passes: the ops (any other kind stops at once; the writes
  * kept), then the capture log, read once for just the paths the writes need.  The log's floor is read before and
  * after: ops after S0 pruned meanwhile stop it. */
-export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, signal: AbortSignal): Promise<void> {
+export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, signal: AbortSignal, root?: string): Promise<void> {
   const trimmed = "the workspace's change log was trimmed while exporting, so the export can't show nothing moved";
   if ((await w.opsFloor()) > s0) throw new ExportStopped(trimmed);
   const stop = (op: Op): never => { throw new ExportStopped(`${op.path}${op.to ? ` (to ${op.to})` : ""}: "${op.op}" while exporting`); };
@@ -499,6 +504,9 @@ export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, s
     for (const op of ops) {
       { const y = breathe(); if (y) await y; }
       if (op.op === "dropVersions" || op.op === "emptyTrash") continue;
+      // (U3, sync-docs' U3-TREE-1: one folder's export minds only what touches it: an op in it, a move into or out of
+      // it, or a change to it or an ancestor of it (which changes what `root` names); work elsewhere goes on)
+      if (root && !(under(op.path, root) || (op.to && under(op.to, root)) || under(root, op.path))) continue;
       const a = op.after;
       if (op.op !== "write" || !a || a.trashed || a.name !== nameOf(op.path) || a.kind !== op.kind) stop(op);
       writes.push(op);
@@ -521,6 +529,8 @@ export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, s
   }
 }
 
+/** The archive's suggested name: the folder's name for one folder's export (U3), else sagebrush-<date>.zip. */
+export const exportFileName = (root?: string) => (root ? `${root.slice(root.lastIndexOf("/") + 1)}.zip` : `sagebrush-${localDate()}.zip`);
 export type Result = { name: string; members: number; bytes: number; stampFailed?: string; omitted: Unavailable[] };
 
 /** The sink, chosen on the plan's bound (§5): the picker (opened by the caller, on a click), else OPFS when it has
@@ -665,11 +675,11 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     }
     { const st = T().stats; if (st) { st.records = records; st.clockReads = clockReads; } }
     // (rule 1: nothing in the tree moved since S0)
-    await treeUnchanged(w, plan.s0, log, opts.signal);
+    await treeUnchanged(w, plan.s0, log, opts.signal, plan.root);
     tick("finishing", true);
     // (§5a: created right before the manifest is serialized; the manifest is the last member)
     const created = new Date().toISOString();
-    const head = enc.encode(JSON.stringify({ format: "sagebrush-workspace-bundle", version: 1, mode: "files", created, site: opts.site, app: opts.app }).slice(0, -1) + ',"entries":[');
+    const head = enc.encode(JSON.stringify({ format: "sagebrush-workspace-bundle", version: 1, mode: "files", ...(plan.root ? { root: plan.root } : {}), created, site: opts.site, app: opts.app }).slice(0, -1) + ',"entries":[');
     const tail = enc.encode(`],"omitted":${plan.omitted ?? "[]"},"totals":${JSON.stringify({ files, folders: plan.folders, bytes: total })}}`);
     // (the note on what is left out: before the manifest, which is always the last member; not in the totals, which
     // are the workspace's files)
@@ -679,14 +689,15 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     await zip.member("manifest.json", manifest(), true, Date.now(), Math.min(cap("manifest"), left), `the export's index (manifest.json) passed ${cap("manifest") / 2 ** 20} MiB, or the export passed ${cap("total") / 2 ** 30} GiB, while it was written`);
     await zip.finish();
     stopIf(opts.signal);
-    const name = `sagebrush-${localDate()}.zip`;
+    const name = exportFileName(plan.root);
     // (from here the archive is the person's: committed, a Cancel no longer undoes it, and a failure after this is
     // reported as such, never as "nothing was saved" (astra's E1-A6))
     const closed = await sink.close(name);
     committed = true;
     opts.after(closed?.later ?? Promise.resolve());
     const r: Result = { name, members: zip.members, bytes: zip.offset, omitted: plan.unavailable };
-    try {
+    // (a folder's export is not the workspace's backup: no "Last export prepared")
+    if (!plan.root) try {
       if (T().failStamp) throw new Error("this device's storage refused the write (a test)");
       await w.setLastExport({ at: Date.now(), partial: plan.unavailable.length > 0, members: r.members, bytes: r.bytes });
     } catch (e) { r.stampFailed = String((e as Error)?.message ?? e); }
@@ -724,7 +735,12 @@ export { ExportStopped, ExportWorker, SLICE, Spool };
  * browser: each string as JSON and as UTF-8, each number as JSON, and each entry's record (written, counted, read
  * back) and its capture and manifest lines, a folder's copied from its record, against manifestEntry and the
  * capture line JSON.stringify makes.  The mismatches, as [what, mine, theirs]. */
-export async function writerCheck(strings: string[], numbers: number[], entries: Entry[]): Promise<[string, string, string][]> {
+export async function writerCheck(strings: string[], numbers: number[], entries: Entry[], root?: string): Promise<[string, string, string][]> {
+  // (the names as one folder's export (`root`) writes them, or as an export of everything; set back after)
+  setNaming(root);
+  try { return await checkWriter(strings, numbers, entries); } finally { setNaming(); }
+}
+async function checkWriter(strings: string[], numbers: number[], entries: Entry[]): Promise<[string, string, string][]> {
   const bad: [string, string, string][] = [];
   const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
   const buf = new Uint8Array(1 << 16);
@@ -754,7 +770,7 @@ export async function writerCheck(strings: string[], numbers: number[], entries:
       for await (const seg of rows.read()) {
         const end = readRow(seg, 0, seg.length);
         if (end !== seg.length) { bad.push(["record " + e.path, String(end), String(seg.length)]); continue; }
-        const name = new TextDecoder().decode(seg.subarray(R[NAME], R[NAME + 1])), wantName = "files/" + e.path.slice(1) + (e.kind === "folder" ? "/" : "");
+        const name = new TextDecoder().decode(seg.subarray(R[NAME], R[NAME + 1])), wantName = memberName(e);
         if (hex(seg.subarray(R[NAME], R[NAME + 1])) !== hex(enc.encode(wantName))) bad.push(["name " + e.path, name, wantName]);
         if (e.kind === "folder") {
           const q = captureFolder(log, seg); if (q) await q;

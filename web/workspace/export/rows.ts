@@ -29,7 +29,7 @@ const get32 = (b: Uint8Array, at: number) => (b[at] | (b[at + 1] << 8) | (b[at +
  * (r2c §1 says "its worst case"; counting it exactly is the same rule with fuller segments, and it is what lets a
  * record end exactly at the slice's end, grader's 0–5 byte remainder fixtures; writeRow checks the count.) */
 export function rowLen(e: Entry, captured: number): number {
-  let n = HEAD + 4 + 6 + utf8Len(e.path) - 1 + (e.kind === "folder" ? 1 : 0) + 4 + jsonLen(e.path);
+  let n = HEAD + 4 + memberLen(e) + 4 + jsonLen(e.path);
   if (e.ident != null) n += 4 + valueLen(e.ident);
   if (e.fid !== undefined) n += 4 + valueLen(e.fid);
   if (e.ref != null) n += 4 + valueLen(e.ref);
@@ -37,7 +37,23 @@ export function rowLen(e: Entry, captured: number): number {
   return n + 4 + (e.created === undefined ? 0 : valueLen(e.created)) + 4 + (e.updated === undefined ? 0 : valueLen(e.updated)) + 4 + (e.kind === "folder" ? numLen(captured) : 0);
 }
 
-const NAME_HEAD = frag("files/");
+// (the member names (U3, William Nov 2: a folder downloads as a zip): an export of everything names each member
+// "files/" + its path; an export of one folder (`root`) names them from the folder's parent, so the zip unpacks to the
+// folder itself ("folder/a.txt" for /Some/folder/a.txt). Set by openExport for its run (one export per page) and back)
+let nameHead = frag("files/"), nameText = "files/", nameSkip = 1;
+// (a folder named like the archive's own top-level members, manifest.json or not-included.txt (run.ts NOTE_NAME), would
+// put a folder beside the file of the same name: its members keep the files/... form instead (sync-docs' review); compared
+// ignoring case, since MANIFEST.JSON collides too where the zip is unpacked case-insensitively (astra's U3-TOP-1))
+const TOP = ["manifest.json", "not-included.txt"];
+export function setNaming(root?: string) {
+  const scoped = !!root && !TOP.includes(root.slice(root.lastIndexOf("/") + 1).toLowerCase());
+  nameText = scoped ? "" : "files/";
+  nameHead = frag(nameText);
+  nameSkip = scoped ? root!.lastIndexOf("/") + 1 : 1;
+}
+/** A member's name in the zip, and its length in UTF-8 bytes. */
+export const memberName = (e: Pick<Entry, "path" | "kind">) => nameText + e.path.slice(nameSkip) + (e.kind === "folder" ? "/" : "");
+export const memberLen = (e: Pick<Entry, "path" | "kind">) => nameHead.length + utf8Len(e.path.slice(nameSkip)) + (e.kind === "folder" ? 1 : 0);
 /** The record of `e` written into the rows spool; `captured`: a folder's, sampled now (P-9).  Undefined, or a promise
  * when a flush was due (r2c §4).  Every byte the record has is counted in `stats.rowBytes`. */
 export function putRow(rows: Spool, e: Entry, captured: number, stats: { rowBytes: number }): Promise<void> | undefined {
@@ -57,10 +73,10 @@ function writeRow(rows: Spool, e: Entry, captured: number, stats: { rowBytes: nu
   let at = start + HEAD;
   // (the name)
   let f = at;
-  at = putBytes(b, f + 4, NAME_HEAD, 0, NAME_HEAD.length);
-  at = putUtf8(b, at, e.path, 1);
+  at = putBytes(b, f + 4, nameHead, 0, nameHead.length);
+  at = putUtf8(b, at, e.path, nameSkip);
   if (folder) b[at++] = 0x2f;
-  if (at - f - 4 > NAME_MAX) throw new ExportStopped(`a name is too long to export: ${("files/" + e.path.slice(1)).slice(0, 80)}…`);
+  if (at - f - 4 > NAME_MAX) throw new ExportStopped(`a name is too long to export: ${memberName(e).slice(0, 80)}…`);
   put32(b, f, at - f - 4);
   // (the JSON fields)
   f = at; at = putJson(b, f + 4, e.path); put32(b, f, at - f - 4);

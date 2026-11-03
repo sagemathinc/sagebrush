@@ -119,8 +119,8 @@ const startFlow = async () => {
   await panelButton(/^Export all current files/);
 };
 /** One export to its end; the archive's bytes saved to `file`.  { stopped: text } if it stopped or was refused. */
-async function exportOnce(file, { refuseAtReady = false, picked = false, keep = false } = {}) {
-  await startFlow();
+async function exportOnce(file, { refuseAtReady = false, picked = false, keep = false, start = startFlow } = {}) {
+  await start();
   const readyOrStop = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => /^(Save…|Export again)$/.test(b.textContent))`, 180000);
   if (!readyOrStop) {
     const locks = await ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name), pending: q.pending.map((l) => l.name) }))`).catch((e) => String(e));
@@ -156,11 +156,15 @@ async function exportOnce(file, { refuseAtReady = false, picked = false, keep = 
 
 /** The archive, checked outside the browser: Python's zipfile and unzip -t; `want`: data files' bytes (base64) as
  * the workspace has them, by path, compared with their members. */
-function inspect(file, want = {}) {
+function inspect(file, want = {}, root = "") {
   const py = String.raw`
 import base64, json, sys, zipfile, hashlib, struct
 f = sys.argv[1]
 want = json.load(open(sys.argv[2]))
+root = sys.argv[3] if len(sys.argv) > 3 else ""
+# (a member's name: "files/" + its path, or for one folder's export (U3) its path from the folder's parent)
+skip = root.rfind("/") + 1 if root else 1
+head = "" if root else "files/"
 z = zipfile.ZipFile(f)
 bad = z.testzip()
 infos = z.infolist()
@@ -178,14 +182,14 @@ while True:
 mismatch = []
 folders_hashless = True
 for e in m["entries"]:
-    n = "files/" + e["path"][1:] + ("/" if e["kind"] == "folder" else "")
+    n = head + e["path"][skip:] + ("/" if e["kind"] == "folder" else "")
     if n not in names: mismatch.append("missing member " + n); continue
     if e["kind"] == "folder":
         if "sha256" in e or "size" in e: folders_hashless = False
         continue
     b = z.read(n)
     if hashlib.sha256(b).hexdigest() != e["sha256"] or len(b) != e["size"]: mismatch.append("hash/size " + n)
-workspace = {p: z.read("files/" + p[1:]) == base64.b64decode(b) for p, b in want.items()}
+workspace = {p: z.read(head + p[skip:]) == base64.b64decode(b) for p, b in want.items()}
 print(json.dumps({"bad": bad, "names": names, "last_local": locs[-1] if locs else None, "last_central": names[-1], "count": len(names),
   "manifest": {k: m[k] for k in m if k != "entries"}, "entries": m["entries"], "mismatch": mismatch, "folders_hashless": folders_hashless,
   "workspace": workspace, "methods": {i.filename: i.compress_type for i in infos}}))
@@ -193,7 +197,7 @@ print(json.dumps({"bad": bad, "names": names, "last_local": locs[-1] if locs els
   // (the workspace's bytes through a file: one argument is at most 128 KiB)
   const wantFile = file + ".want.json";
   writeFileSync(wantFile, JSON.stringify(want));
-  const r = spawnSync("python3", ["-I", "-c", py, file, wantFile], { encoding: "utf8", maxBuffer: 1 << 28 });
+  const r = spawnSync("python3", ["-I", "-c", py, file, wantFile, root], { encoding: "utf8", maxBuffer: 1 << 28 });
   if (r.status !== 0) return { error: String(r.stderr ?? r.error).slice(0, 600) };
   const u = spawnSync("unzip", ["-tq", file], { encoding: "utf8" });
   return { ...JSON.parse(r.stdout), unzip: u.status, unzipOut: (u.stdout + u.stderr).slice(0, 300) };
@@ -1408,6 +1412,121 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
   });
 
   // ---- 13. the spool: the Blob-part spool refused over its cap before writing; an OPFS scratch failure midway
+  // ---- U3 (William, Nov 2): one folder downloaded as a zip from the file panel (the folder selected, Download): the
+  // export's own flow scoped to it: only it and what is under it, named from its parent (unzipped: the folder),
+  // manifest.json's "root", "<folder>.zip", nothing stamped; what isn't on this device under it skipped and listed,
+  // what isn't outside it not mentioned
+  await scenario("scoped", async () => {
+    await ev(`${W}.mkdir("/U3").then(() => ${W}.mkdir("/U3/sub")).then(() => ${W}.create("/U3/a.txt", { content: "aa" })).then(() => ${W}.create("/U3/sub/b.txt", { content: "bbb" })).then(() => ${W}.create("/U3/n.ipynb", { content: ${nb("u3")} })).then(() => ${W}.create("/U3x.txt", { content: "a sibling whose name starts with the folder's" })).then(() => 1)`);
+    for (const p of ["/U3/cloud.csv", "/far.csv"]) await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: ${JSON.stringify(p)}, kind: "file", ref: ${JSON.stringify(p)}, size: 10, created: t, updated: t, fid: ${JSON.stringify("fid" + p.length)}, ident: ${JSON.stringify("id" + p)}, sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
+    const before = await lastAt();
+    // (one folder's export from the file panel: the folder's checkbox, then the bar's Download)
+    const startFor = (folder) => async () => {
+      const row = `#wssidebar .frow[data-sel][data-path=${JSON.stringify(folder)}]`;
+      await closeFlow();
+      await ev(`(() => { document.querySelector(".sbfprev button.x")?.click(); window.__exp = null; return 1; })()`);
+      await until(`!${P}`, 5000);
+      await until(`!!document.querySelector(${JSON.stringify(row)})`, 15000);
+      await ev(`(() => { document.querySelector(${JSON.stringify(row + " .sel")}).click(); [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Download").click(); return 1; })()`);
+      await until(`!!${P}`, 10000);
+    };
+    const start = startFor("/U3");
+    await hooks();
+    const f = await exportOnce(join(out, "u3.zip"), { start });
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+    check(!f.stopped && f.name === "U3.zip", "U3: a folder selected in the file panel, Download: its export, named after it: " + JSON.stringify(f.stopped ?? f.name));
+    const z = f.stopped ? { names: [], entries: [], manifest: {} } : inspect(join(out, "u3.zip"), { "/U3/a.txt": await wsBytes("/U3/a.txt"), "/U3/sub/b.txt": await wsBytes("/U3/sub/b.txt") }, "/U3");
+    const names = [...(z.names ?? [])].sort();
+    check(z.bad === null && z.unzip === 0 && z.mismatch?.length === 0 && z.last_central === "manifest.json" && Object.values(z.workspace ?? {}).every(Boolean) && Object.keys(z.workspace ?? {}).length === 2,
+      "U3: a sound archive, the manifest last, its files' bytes the workspace's: " + JSON.stringify({ error: z.error, bad: z.bad, unzip: z.unzip, mismatch: z.mismatch, ws: z.workspace }).slice(0, 300));
+    check(JSON.stringify(names) === JSON.stringify(["U3/", "U3/a.txt", "U3/n.ipynb", "U3/sub/", "U3/sub/b.txt", "manifest.json", "not-included.txt"]),
+      "U3: only the folder and what is under it, named from its parent (no files/, nothing outside, not /U3x.txt): " + JSON.stringify(names));
+    check(z.manifest?.root === "/U3" && JSON.stringify(z.manifest?.omitted) === JSON.stringify([{ path: "/U3/cloud.csv", kind: "file", why: "remote" }]),
+      "U3: manifest.json says its root; what isn't on this device under it is skipped and listed, nothing outside it: " + JSON.stringify({ root: z.manifest?.root, omitted: z.manifest?.omitted }));
+    const note = f.stopped ? "" : member(join(out, "u3.zip"), "not-included.txt").toString("utf8");
+    check(/^1 file isn't on this device/.test(note) && note.includes("/U3/cloud.csv") && !note.includes("/far.csv"), "U3: not-included.txt lists the one under the folder: " + JSON.stringify(note.slice(0, 200)));
+    check((await lastAt()) === before, "U3: a folder's download is not a backup: \"Last export prepared\" unchanged");
+    // (astra's U3-NAMING-1: a folder export that stops, then Export again on its panel while the stopped one's call is
+    // still settling: the new archive's names are still the folder's, never files/...)
+    {
+      await hooks("cutRows: true");
+      await start();
+      // (cutRows stops it at writing: Ready first, then Save…, then the stopped panel)
+      if (await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 120000)) await panelButton(/^Save…$/);
+      const stoppedShown = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Export again")`, 120000);
+      const stopText = (await panelText()).slice(-300);
+      await hooks();
+      await ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "Export again")?.click(); return 1; })()`);
+      const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 120000);
+      if (ready) await panelButton(/^Save…$/);
+      const got = ready && (await until(`!!window.__exp`, 120000));
+      let names = [], zname = null;
+      if (got) {
+        const b64 = await ev(`(async () => { const b = new Uint8Array(await window.__exp.blob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); })()`);
+        writeFileSync(join(out, "u3-again.zip"), Buffer.from(b64, "base64"));
+        zname = await ev(`window.__exp.name`);
+        await handed();
+        names = [...(inspect(join(out, "u3-again.zip"), {}, "/U3").names ?? [])].sort();
+      }
+      await closeFlow();
+      await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      check(stoppedShown && got && zname === "U3.zip" && names.length > 0 && names.every((n) => n.startsWith("U3/") || n === "manifest.json" || n === "not-included.txt"),
+        "U3 (astra's U3-NAMING-1): a folder export stopped, then Export again from its panel: the new archive is still named from the folder: " + JSON.stringify({ stoppedShown, stopText, zname, names }));
+    }
+    // (sync-docs' U3-TREE-1: a folder's export minds only what touches it. Held at its first member's capture:
+    // (a) a write to a file outside the folder: the zip is made; (b) a rename of the folder's parent: it stops;
+    // (c) a move of a file from outside into the folder: it stops)
+    {
+      const clear = () => ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      const during = (code) => hooks(`beforeCapture: async (p) => { if (!window.__did && p.startsWith("/P/U3t/")) { window.__did = 1; ${code} } }`);
+      await ev(`${W}.mkdir("/P").then(() => ${W}.mkdir("/P/U3t")).then(() => ${W}.create("/P/U3t/z.txt", { content: "zz" })).then(() => ${W}.create("/away.txt", { content: "1" })).then(() => { window.__did = 0; return 1; })`);
+      await until(`!!document.querySelector('#wssidebar .frow[data-path="/P"]')`, 15000);
+      // (the parent opened in the file panel, so the folder's own row is there to select)
+      await ev(`(() => { const r = document.querySelector('#wssidebar .frow[data-sel][data-path="/P"]'); if (r && r.getAttribute("aria-expanded") !== "true") r.click(); return 1; })()`);
+      await during(`await window.sagebrush.workspace.write("/away.txt", "2");`);
+      const ta = await exportOnce(join(out, "u3-a.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      const na = ta.stopped ? [] : (inspect(join(out, "u3-a.zip"), {}, "/P/U3t").names ?? []);
+      check(!ta.stopped && ta.name === "U3t.zip" && na.includes("U3t/z.txt"), "U3-TREE-1 (a): a write outside the folder during its export: the zip is still made: " + JSON.stringify(ta.stopped ?? na));
+      await ev(`(() => { window.__did = 0; return 1; })()`);
+      await during(`await window.sagebrush.workspace.create("/inbound.txt", { content: "in" }); await window.sagebrush.workspace.rename("/inbound.txt", "/P/U3t/inbound.txt");`);
+      const tc = await exportOnce(join(out, "u3-c.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      check(!!tc.stopped && /while exporting/.test(tc.stopped), "U3-TREE-1 (c): a file moved into the folder during its export stops it: " + String(tc.stopped ?? "not stopped").slice(-160));
+      await ev(`(() => { window.__did = 0; return 1; })()`);
+      // ((b): the parent renamed away and straight back during a capture: every capture still finds its path, so only the
+      // tree check's ancestor rule can stop it; (c)'s file taken out first)
+      await ev(`${W}.remove("/P/U3t/inbound.txt").then(() => 1, () => 0)`);
+      await until(`!document.querySelector('#wssidebar .frow[data-path="/P/U3t/inbound.txt"]')`, 10000);
+      await during(`await window.sagebrush.workspace.rename("/P", "/P2"); await window.sagebrush.workspace.rename("/P2", "/P");`);
+      const tb = await exportOnce(join(out, "u3-b.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      check(!!tb.stopped && /\/P \(to \/P2\): "rename" while exporting/.test(tb.stopped), "U3-TREE-1 (b): the folder's parent renamed during its export stops it (the tree check's ancestor rule): " + String(tb.stopped ?? "not stopped").slice(-160));
+      await hooks();
+      for (const p of ["/P2", "/P", "/away.txt"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
+    }
+    // (sync-docs: a folder named like the archive's own top-level members keeps the files/... names, so nothing collides;
+    // in any case, as the zip may be unpacked case-insensitively: astra's U3-TOP-1)
+    for (const [i, top] of ["manifest.json", "MANIFEST.JSON", "Not-Included.txt"].entries()) {
+      await ev(`${W}.mkdir("/${top}").then(() => ${W}.create("/${top}/x.txt", { content: "x" })).then(() => 1)`);
+      await hooks();
+      const tm = await exportOnce(join(out, `u3-m${i}.zip`), { start: startFor(`/${top}`) });
+      await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      const zm = tm.stopped ? { names: [] } : inspect(join(out, `u3-m${i}.zip`));
+      const tops = zm.names.filter((n) => !n.includes("/") || ["manifest.json", "not-included.txt"].includes(n.slice(0, n.indexOf("/")).toLowerCase()));
+      check(!tm.stopped && zm.unzip === 0 && zm.names.includes(`files/${top}/x.txt`) && tops.every((n) => n === "manifest.json" || n === "not-included.txt") && zm.names.filter((n) => n === "manifest.json").length === 1,
+        `U3: a folder named ${top} downloads with files/... names, nothing beside the archive's own top-level files under a name differing only in case: ` + JSON.stringify(tm.stopped ?? zm.names));
+      await ev(`${W}.remove("/${top}").then(() => 1, () => 0)`);
+    }
+    // (afterwards an export of everything names its members files/... again)
+    await hooks();
+    const g = await exportOnce(join(out, "u3-all.zip"));
+    const gz = g.stopped ? { names: [] } : inspect(join(out, "u3-all.zip"));
+    check(!g.stopped && gz.names.includes("files/U3/a.txt") && gz.names.includes("files/far.csv") === false && gz.manifest?.root === undefined, "U3: the next export of everything is named files/... again, with no root: " + JSON.stringify((gz.names ?? []).filter((n) => /U3/.test(n))));
+    for (const p of ["/U3/cloud.csv", "/far.csv"]) await idb("sagebrush-workspace", "entries", `(s) => s.delete(${JSON.stringify(p)})`);
+    for (const p of ["/U3", "/U3x.txt"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
+  });
+
   await scenario("spool", async () => {
     const before = await lastAt();
     await hooks("noOpfs: true, caps: { spoolBlob: 64 }");

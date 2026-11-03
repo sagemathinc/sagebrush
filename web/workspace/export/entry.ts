@@ -4,7 +4,8 @@
 //   not-included.txt and manifest.json `omitted`) → written (progress, Cancel) → a summary, or one plain reason with
 //   Export again.  Save… is its own click: the browser's save picker needs one.
 import type { Workspace } from "../api";
-import { ExportStopped, LOCK_PREFIX, localDate, NOTE_NAME, preflight, setKit, Spool, startWorker, unavailableWhyText, whyWords, write, type Kit, type Plan, type Progress, type Result, type Unavailable } from "./run";
+import { setNaming } from "./rows";
+import { exportFileName, ExportStopped, LOCK_PREFIX, NOTE_NAME, preflight, setKit, Spool, startWorker, unavailableWhyText, whyWords, write, type Kit, type Plan, type Progress, type Result, type Unavailable } from "./run";
 // (the caps in effect: the test page checks a page without its hooks has the real ones, grader's N-3)
 export { capsInEffect } from "./run";
 // (tests only: the direct writer against JSON.stringify, in the page, E1 r2c)
@@ -42,15 +43,22 @@ const btn = (text: string, onclick: () => void, cls = "") => { const b = el("but
 /** Runs one export in `box` (the Storage panel's export section); resolves when it ends, however it ends.  The export
  * holds the Web Lock LOCK_PREFIX + its id from before its worker starts until its last scratch file is gone, which
  * may be a minute after this resolves (an OPFS handoff): another tab's export never removes its files meanwhile. */
-export async function openExport(w: Workspace, host: ExportHost, box: HTMLElement): Promise<void> {
+// (U3, William Nov 2: a folder downloads as a zip. `root`: one folder's export, the same flow: the folder and what is
+// under it, the members named from its parent, manifest.json's "root", "<folder>.zip", and no "Last export prepared")
+export async function openExport(w: Workspace, host: ExportHost, box: HTMLElement, opts: { root?: string } = {}): Promise<void> {
   if (owner) { host.say("An export is already running in this tab. Finish or cancel it first."); return; }
   const me = {};
   owner = me;
-  const free = () => { if (owner === me) owner = null; };
-  try { await flow(w, host, box, free); } finally { free(); }
+  // (the member names are this export's while it owns the page's export state: set back in the release itself, and
+  // only by the owner releasing, so an export ending after a newer one began (its stopped panel's Export again) never
+  // resets the newer one's names: astra's U3-NAMING-1)
+  const free = () => { if (owner === me) { owner = null; setNaming(); } };
+  setNaming(opts.root);
+  try { await flow(w, host, box, free, opts); } finally { free(); }
 }
 
-async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () => void): Promise<void> {
+async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () => void, opts: { root?: string } = {}): Promise<void> {
+  const folder = opts.root ? `“${opts.root.slice(opts.root.lastIndexOf("/") + 1)}”: ` : "";
   // (the panel closed: this export cancelled, while it is still this page's; never after, when another may be.
   // Listened for from the first step, before anything asynchronous; a panel already closed cancels it at once)
   const ac = new AbortController();
@@ -77,11 +85,11 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
   const line = el("p", { className: "note" }), cancel = btn("Cancel", () => ac.abort());
   const show = (...kids: (Node | string)[]) => box.replaceChildren(...kids);
   const progress = (p: Progress) => {
-    line.textContent = p.phase === "preflight" ? `Checking… ${p.files.toLocaleString()} files · ${fmt(p.bytes)}`
+    line.textContent = folder + (p.phase === "preflight" ? `Checking… ${p.files.toLocaleString()} files · ${fmt(p.bytes)}`
       : p.phase === "writing" ? `${p.files.toLocaleString()} of ${p.of.toLocaleString()} files and folders · ${fmt(p.bytes)} written`
-      : `Finishing the archive's index… ${fmt(p.bytes)} written`;
+      : `Finishing the archive's index… ${fmt(p.bytes)} written`);
   };
-  const again = (done: () => void) => [btn("Export again", () => { done(); void openExport(w, host, box); }), " ", btn("Close", () => { box.replaceChildren(); done(); })];
+  const again = (done: () => void) => [btn("Export again", () => { done(); void openExport(w, host, box, opts); }), " ", btn("Close", () => { box.replaceChildren(); done(); })];
   // (what the panel shows at the end, shown once this export no longer owns the page's state: its Export again then
   // starts a new one)
   let end: (() => Promise<void> | void) | null = null;
@@ -100,7 +108,7 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
     show(line, " ", cancel);
     // (tests only: the r2d heap baselines are taken here, the worker started and preflight not begun)
     await (globalThis as any).__SB_EXPORT_TEST__?.beforePreflight?.();
-    const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs);
+    const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs, opts.root);
     await (globalThis as any).__SB_EXPORT_TEST__?.onPlan?.(plan);
     for (;;) {
       if ((await ready(plan)) === "cancel") { await rows.remove(); box.replaceChildren(); break work; }
@@ -110,7 +118,7 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
       const T = (globalThis as any).__SB_EXPORT_TEST__;
       if (typeof (globalThis as any).showSaveFilePicker === "function" && !T?.noPicker) {
         try {
-          const h = await (globalThis as any).showSaveFilePicker({ suggestedName: `sagebrush-${localDate()}.zip`, types: [{ description: "Zip archive", accept: { "application/zip": [".zip"] } }] });
+          const h = await (globalThis as any).showSaveFilePicker({ suggestedName: exportFileName(opts.root), types: [{ description: "Zip archive", accept: { "application/zip": [".zip"] } }] });
           picked = await h.createWritable();
         } catch (e: any) {
           if (e?.name === "AbortError") continue; // (the picker closed: back to ready)
@@ -119,7 +127,7 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
       }
       show(line, " ", cancel);
       const r = await write(w, plan, { worker, opfs, id, picked, signal: ac.signal, progress, site: host.site, app: host.app, after: (p) => { after = p; }, rows });
-      if (!r.stampFailed) host.stamped();
+      if (!r.stampFailed && !opts.root) host.stamped();
       end = () => summary(r);
       break work;
     }

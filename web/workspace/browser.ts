@@ -486,6 +486,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   selClear.onclick = () => { clearSel(); focusList(); };
   selDownload.onclick = async () => {
     const files = entries.filter((e) => selected.has(e.path) && e.kind === "file");
+    // (U3, William Nov 2: a folder downloads as a zip, through the export (the Storage panel's flow, scoped to it): one
+    // folder selected alone; with other rows, said)
+    const folders = entries.filter((e) => selected.has(e.path) && e.kind === "folder");
+    if (folders.length === 1 && selected.size === 1 && host.exportUrl) { void storage(folders[0].path); return; }
+    if (folders.length && !files.length) { say(host.exportUrl ? "A folder downloads as a zip on its own: select just the one folder" : "Folders don't download here"); return; }
     const skipped = selected.size - files.length;
     if (!files.length) { say("Only files download: no file is selected"); return; }
     // (one after another: a browser asks once before a page downloads several files)
@@ -579,7 +584,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
+  const storage = (exportRoot?: string) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, ...(exportRoot ? { exportRoot } : {}) }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   async function rowMenu(at: HTMLElement, e: Entry) {
@@ -606,6 +611,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
+    // (U3: a folder, as a zip of it and what is under it)
+    if (e.kind === "folder" && host.exportUrl) items.push(["Download as .zip", () => void storage(e.path)]);
     items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
