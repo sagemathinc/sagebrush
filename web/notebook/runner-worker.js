@@ -27,6 +27,7 @@
 export const NOT_RUN = "This code wasn't run: the sandboxed runner didn't start, and code doesn't run outside it by itself. Run it again to run it in this page's own interpreter.\n";
 
 import { FILES_RUNNER } from "./files-runner.js";
+import { fetchMoving } from "../stall-fetch.js";
 
 // the files the runner may have the page fetch for its worker, exactly (G-10): the engine and the PNG module
 // with their ?h=, the Python library's chunks (web/lib-lazy.ts) and the pinned zone data's index, as the build
@@ -221,8 +222,10 @@ export class RunnerWorker {
       const raw = String(url);
       const isIndex = !!this.tzIndex && raw === this.tzIndex.url;
       if (this.base && raw === new URL(raw).href && (this.allowed.has(raw) || isIndex || this.zones.has(raw) || this.mounted.has(raw))) {
-        const r = await fetch(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" });
-        if (r.ok) bytes = await r.arrayBuffer();
+        // (bounded between pieces of data, as the plain worker's own fetches: web/stall-fetch.js)
+        const u = await fetchMoving(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" });
+        // (its own buffer when the bytes fill it, as one piece does: no copy of a 13.6 MB chunk)
+        bytes = u.byteOffset === 0 && u.byteLength === u.buffer.byteLength ? u.buffer : u.slice().buffer;
         if (bytes && isIndex) {
           // (the index: its bytes must be the build's, then its grammar; its zones are admitted all at once, before
           // the index is answered, so the interpreter's next request, a zone, finds them)
