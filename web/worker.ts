@@ -48,6 +48,7 @@ declare const __SB_RASTER_HASH__: string;
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
+import { fetchMoving } from "./stall-fetch.js";
 import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
@@ -157,9 +158,8 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer | Uint8Array> => {
     await brokered;
     return fetchSync(url).slice();
   }
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.arrayBuffer();
+  // (bounded between pieces of data: a request that stops never holds a run, web/stall-fetch.js)
+  return fetchMoving(url);
 };
 const libLoading = (what: string | null) => postMessage({ libLoading: what });
 onChunkInstalled((file) => postMessage({ libChunk: file }));
@@ -229,7 +229,18 @@ self.onmessage = async (ev: MessageEvent) => {
     const p = prefetchMode(mode, fetchBytes, libLoading);
     // (a run, and the questions that load the language first: Tab, check, a
     // warm-up, X1; the session's admission comes after this await)
-    if (m.code !== undefined || m.complete !== undefined || m.check !== undefined || m.warm !== undefined) await p;
+    if (m.code !== undefined || m.complete !== undefined || m.check !== undefined || m.warm !== undefined) {
+      try {
+        await p;
+      } catch (e: any) {
+        // (its library didn't load, a chunk's fetch having stalled: a run says so and ends, a question is answered
+        // as not asked; nothing waits for good)
+        if (m.id === undefined) return;
+        if (m.code === undefined) return postMessage({ id: m.id, skipped: true });
+        postMessage({ id: m.id, stream: "stderr", target: null, text: `${String(e?.message ?? e)}\n` });
+        return postMessage({ id: m.id, done: true, ms: 0, error: true });
+      }
+    } else p.catch(() => {});
   }
   if (m.code !== undefined) {
     await pkgsetReady;

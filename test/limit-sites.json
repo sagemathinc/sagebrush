@@ -9442,6 +9442,22 @@
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
  },
+ "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/stall-fetch.js :: fetchMoving :: export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",
   "owner": "sync client"
