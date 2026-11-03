@@ -1,0 +1,120 @@
+{
+ "about": "U13a: Magma cells that redefine names, run in page order. Each case's cells, run top to bottom as one Magma 2.18 session (magma -b < the cells joined, made by scripts/magma-page-order-oracle.py), give `out`; the reactive notebook's page-order renames (src/rename.ts, src/magma.ts PAGE_ORDER) must give the same, each cell its own translation (test/magma-page-order.test.ts).",
+ "cases": [
+  {
+   "name": "the shared fixture",
+   "cells": [
+    "x := 1;",
+    "print x^2;",
+    "x := 17;",
+    "print x^3;"
+   ],
+   "out": "1\n4913\n"
+  },
+  {
+   "name": "an op-assignment reads the earlier value",
+   "cells": [
+    "x := 1;",
+    "x +:= 1;",
+    "print x;"
+   ],
+   "out": "2\n"
+  },
+  {
+   "name": "Append(~L, v) reads and redefines",
+   "cells": [
+    "L := [1, 2, 3];",
+    "Append(~L, 4);",
+    "print L;"
+   ],
+   "out": "[ 1, 2, 3, 4 ]\n"
+  },
+  {
+   "name": "a func takes x when it is made",
+   "cells": [
+    "x := 2;",
+    "f := func<y | x*y>;",
+    "x := 10;",
+    "print f(3), x;"
+   ],
+   "out": "6 10\n"
+  },
+  {
+   "name": "a procedure's reference argument",
+   "cells": [
+    "x := 1;",
+    "procedure P(~a) a +:= 5; end procedure; P(~x);",
+    "print x;"
+   ],
+   "out": "6\n"
+  },
+  {
+   "name": "a function reads a global defined later, at its call",
+   "cells": [
+    "c := 1;",
+    "g := function(y) return c + y; end function;",
+    "c := 100;",
+    "print g(0), c;"
+   ],
+   "out": "1 100\n"
+  },
+  {
+   "name": "a definition in a block keeps the earlier value when it doesn't run",
+   "cells": [
+    "x := 1;",
+    "if false then x := 5; end if; print x;",
+    "print x;"
+   ],
+   "out": "1\n1\n"
+  },
+  {
+   "name": "an element assignment",
+   "cells": [
+    "s := [1, 2, 3];",
+    "s[2] := 20;",
+    "print s;"
+   ],
+   "out": "[ 1, 20, 3 ]\n"
+  },
+  {
+   "name": "a name Python mangles",
+   "cells": [
+    "len := 3;",
+    "print len;",
+    "len := 4;",
+    "print len;"
+   ],
+   "out": "3\n4\n"
+  },
+  {
+   "name": "three definitions",
+   "cells": [
+    "a := 1;",
+    "b := a + 1;",
+    "a := b * 10;",
+    "b := a + 1;",
+    "print a, b;"
+   ],
+   "out": "20 21\n"
+  },
+  {
+   "name": "a loop's variable is no definition",
+   "cells": [
+    "i := 5;",
+    "for i in [1..2] do j := i; end for;",
+    "print i;"
+   ],
+   "out": "5\n"
+  },
+  {
+   "name": "generator names redefined",
+   "cells": [
+    "R<t> := PolynomialRing(Rationals());",
+    "print t^2;",
+    "R<t> := PolynomialRing(GF(5));",
+    "print t^5 + 1;"
+   ],
+   "out": "t^2\nt^5 + 1\n"
+  }
+ ]
+}

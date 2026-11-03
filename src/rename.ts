@@ -1183,7 +1183,8 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
-  if (opts.mode === "magma" || opts.mode === "matlab") return null;
+  if (opts.mode === "magma") return magmaRename(source, name, to, opts);
+  if (opts.mode === "matlab") return null;
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
   try {
@@ -1582,3 +1583,16 @@ def _sb_lowering():
 _b.__sb_push__, _b.__sb_pop__ = _sb_lowering()
 del _b, _sb_lowering
 `;
+
+// Magma (U13a): the cell as written, with a directive the translation applies
+// in its own scoping (src/magma.ts magmaToPython, PAGE_ORDER): every name of
+// the cell's that is `name` is `to` (loop variables and parameters aside); a
+// redefining cell whose code needs the earlier value starts `to` as a copy of
+// `before`.  A comment, at the end, so the cell's line numbers don't move.
+// Refused: code that names variables at run time (eval) or defines intrinsics.
+function magmaRename(source: string, name: string, to: string, opts: { from?: "all" | "definition"; before?: string }): string | null {
+  if (/\b(eval|declare|intrinsic)\b/.test(source)) return null;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || /\s/.test(to)) return null;
+  const mode = opts.from === "definition" ? `definition ${opts.before ?? name}` : "all";
+  return `${source.replace(/\s*$/, "")}\n// sagebrush page-order: ${name} ${to} ${mode}`;
+}

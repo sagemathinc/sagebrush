@@ -24,7 +24,9 @@ test("renaming a global, with Python's scoping", () => {
 test("Sage cells are renamed through the preparser", () => {
   assert.equal(renameInCell("x = 2^3\nprint(x/2)", "x", "x_2", { mode: "sage" }), "x_2 = 2^3\nprint(x_2/2)");
   assert.equal(renameInCell("x = x^2 + 1", "x", "x_2", { mode: "sage", from: "definition" }), "x_2 = x^2 + 1");
-  assert.equal(renameInCell("x := 1;", "x", "y", { mode: "magma" }), null);
+  // (Magma: the cell as written plus a page-order directive, src/magma.ts PAGE_ORDER; test/magma-page-order.test.ts)
+  assert.equal(renameInCell("x := 1;", "x", "y", { mode: "magma" }), "x := 1;\n// sagebrush page-order: x y all");
+  assert.equal(renameInCell('x := eval "1";', "x", "y", { mode: "magma" }), null);
 });
 
 test("a notebook in Jupyter's order: each later definition gets a new name", () => {

@@ -147,8 +147,9 @@ _LOOPSEP = chr(0x2B9)
 
 def _mname(name):
     """A Python name as the Magma name it stands for: a for loop's private
-    name, i + U+02B9 + loop<n>, is its variable i (src/magma.ts forStmt)."""
-    return _re.sub(_LOOPSEP + "loop[0-9]+$", "", name)
+    name, i + U+02B9 + loop<n>, is its variable i (src/magma.ts forStmt), and so
+    is a page-order rename's, i + U+02B9 + k (src/rename.ts)."""
+    return _re.sub(_LOOPSEP + "[0-9]+$", "", _re.sub(_LOOPSEP + "loop[0-9]+$", "", name))
 
 
 def _uninit(name, pos=None):
