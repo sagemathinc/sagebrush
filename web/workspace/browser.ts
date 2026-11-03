@@ -108,6 +108,8 @@ const STYLE = `
 .sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
+.sbfiles .fgrp .fback { font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; margin-right: 8px; padding: 2px 8px; border: 1px solid #c9cfc9; border-radius: 4px; background: #fff; color: #1d5fa8; cursor: pointer; }
+.sbfiles .fgrp .fback:hover { background: #eef3fb; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
 .sbfiles .frow:hover { background: #ecebe4; }
 .sbfiles .frow:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
@@ -200,7 +202,7 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
   (menu.querySelector("button") as HTMLElement | null)?.focus();
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
-  const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
+  const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { ev.preventDefault(); close(); at.focus(); } };
   setTimeout(() => { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); });
   return menu;
 }
@@ -517,7 +519,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     tree.replaceChildren();
     const q = query.toLowerCase();
     if (trashView) {
-      tree.append(h("div", { className: "fgrp", textContent: "Trash" }));
+      // (U10, William Nov 2: the way back where Trash is shown, not only at the foot; Escape too)
+      const back = h("button", { className: "fback", textContent: "← All files", title: "Back to all files (Esc)" });
+      back.onclick = leaveTrash;
+      tree.append(h("div", { className: "fgrp" }, back, h("span", { textContent: "Trash" })));
       const top = children(TRASH);
       if (!top.length) tree.append(h("div", { className: "fempty", textContent: "Trash is empty." }));
       for (const e of top) if (!q || nameOf(e.path).toLowerCase().includes(q)) tree.append(row(e, 0));
@@ -549,7 +554,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     foot.replaceChildren();
     const trashLink = h("button", { className: "ib", textContent: trashView ? "← All files" : "Trash", style: "font-size:12px" });
-    trashLink.onclick = () => { trashView = !trashView; refresh(); };
+    trashLink.onclick = () => (trashView ? leaveTrash() : void ((trashView = true), refresh()));
     foot.append(trashLink, syncEl, h("span", { className: "sp" }));
     paintIcons();
     if (trashView && children(TRASH).length) {
@@ -578,6 +583,18 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const est = await estimate();
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
+  // (out of Trash to every file, the focus on the first of them)
+  function leaveTrash() {
+    trashView = false;
+    void refresh().then(() => tree.querySelector<HTMLElement>(".frow")?.focus());
+  }
+  root.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !trashView || ev.defaultPrevented) return;
+    // (a search with something typed: Escape clears that first)
+    if (ev.target === search && search.value) return;
+    ev.preventDefault();
+    leaveTrash();
+  });
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
   const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
@@ -594,7 +611,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       ]);
       return;
     }
-    const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
+    // (U12, William Nov 2: the row whose ⋯ (or right-click) opened the menu, not the first row of that path: a file in
+    // Recent is drawn twice)
+    const r = at.closest<HTMLElement>(".frow") ?? tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
     if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
     // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
@@ -717,6 +736,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     input.after(note);
     renamingNow = true;
     input.focus();
+    input.scrollIntoView({ block: "nearest" });
     if (file && fileExt) input.setSelectionRange(0, full.length - fileExt.length);
     else input.select();
     let done = false;
@@ -874,7 +894,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()]]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => (trashView ? leaveTrash() : void ((trashView = true), refresh()))], ["Storage…", () => storage()]]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
