@@ -13,6 +13,7 @@
 // they do not correspond); Magma cells are not renamed.
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
+import { MATLAB_DYNAMIC_NAMES } from "./page-order";
 
 type Mode = "python" | "sage" | "magma" | "matlab";
 
@@ -1179,12 +1180,14 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * every occurrence (a cell reading the renamed definition); "definition"
  * keeps the occurrences before the cell first binds the name, and the reads
  * in the statement that binds it (`x = x + 1` -> `x_2 = x + 1`).  Returns the
- * new source, or null if it cannot be done reliably (Magma, MATLAB; a Sage cell
- * whose occurrences do not correspond after preparsing; a syntax error).
+ * new source, or null if it cannot be done reliably (a Sage cell whose
+ * occurrences do not correspond after preparsing; a syntax error).  Magma and
+ * MATLAB: the source with an inert comment, the renames going beside it
+ * (magmaRename, matlabRename), or null.
  */
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
   if (opts.mode === "magma") return magmaRename(source, name, to, opts);
-  if (opts.mode === "matlab") return null;
+  if (opts.mode === "matlab") return matlabRename(source, name, to, opts);
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
   try {
@@ -1438,7 +1441,7 @@ export function renameRedefinitions(
       if (mode === "sage") code = srVar(code, name);
       out.set(c.id, code);
       // (Magma: the renames beside the code, the translator's; src/magma.ts PageOrder)
-      if (mode === "magma") pageOrder?.set(c.id, { to, before: current });
+      if (mode === "magma" || mode === "matlab") pageOrder?.set(c.id, { to, before: current });
       current = to;
     } else if (c.defines) {
       seen = true;
@@ -1446,7 +1449,7 @@ export function renameRedefinitions(
       const code = renameInCell(c.code, name, current, { mode });
       if (code === null) return null;
       out.set(c.id, code);
-      if (mode === "magma") pageOrder?.set(c.id, { to: current });
+      if (mode === "magma" || mode === "matlab") pageOrder?.set(c.id, { to: current });
     }
   }
   return out;
@@ -1605,4 +1608,16 @@ function magmaRename(source: string, name: string, to: string, opts: { from?: "a
   if (!MAGMA_NAME.test(name) || !magmaScoped(to, name) || (opts.from === "definition" && before !== name && !magmaScoped(before, name))) return null;
   const mode = opts.from === "definition" ? `definition ${before}` : "all";
   return `${source.replace(/\s*$/, "")}\n// sagebrush page-order: ${name} ${to} ${mode}`;
+}
+
+// MATLAB: as Magma, an inert comment at the end and the renames beside the
+// code (src/matlab.ts applies them at the top level).  Refused: code that
+// names variables at run time (clear, eval, exist, who, load, assignin, global,
+// ...: src/matlab.ts MATLAB_DYNAMIC_NAMES), and ans, which every expression sets.
+function matlabRename(source: string, name: string, to: string, opts: { from?: "all" | "definition"; before?: string }): string | null {
+  if (MATLAB_DYNAMIC_NAMES.test(source) || name === "ans") return null;
+  const before = opts.before ?? name;
+  if (!MAGMA_NAME.test(name) || !magmaScoped(to, name) || (opts.from === "definition" && before !== name && !magmaScoped(before, name))) return null;
+  const mode = opts.from === "definition" ? `definition ${before}` : "all";
+  return `${source.replace(/\s*$/, "")}\n% sagebrush page-order: ${name} ${to} ${mode}`;
 }

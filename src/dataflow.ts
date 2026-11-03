@@ -487,7 +487,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>", opts.pageOrder ? { pageOrder: opts.pageOrder } : {}).replace(/^from _magma import \*\n/, "");
   // (MATLAB's translation, in cell mode: its two first lines are the runtime's,
   // and its own names (_m, _L, temporaries) start with _, the cell's own)
-  else if (opts.mode === "matlab") source = matlabToPython(source, "<cell>", { cell: true }).replace(/^import _matlab as _m\n_m\.begin\([^\n]*\)\n/, "");
+  else if (opts.mode === "matlab") source = matlabToPython(source, "<cell>", { cell: true, ...(opts.pageOrder ? { pageOrder: opts.pageOrder } : {}) }).replace(/^import _matlab as _m\n_m\.begin\([^\n]*\)\n/, "");
   const tree = parse(source, "exec") as Node;
   if (ipython) expandMagics(tree, codeParser(opts.mode === "sage"));
   const handlers = exceptNames(tree);

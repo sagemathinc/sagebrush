@@ -545,12 +545,14 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // MATLAB: translated to Python (src/matlab.ts) in cell mode: variables and
         // functions stay for the next cells; MATLAB prints its own values, and an
         // error is MATLAB's message on stderr (lib/_matlab.py report_cell)
+        // (page-order scoping's renames, beside the code: checked by the translator, src/page-order.ts)
         let py: string | null = null;
         try {
-          py = matlabToPython(m.code, m.repl ? "<stdin>" : "<cell>", { cell: true });
+          py = matlabToPython(m.code, m.repl ? "<stdin>" : "<cell>", { cell: true, ...(m.pageOrder !== undefined && !m.repl ? { pageOrder: m.pageOrder } : {}) });
         } catch (e) {
-          if (!(e instanceof MatlabSyntaxError)) throw e;
-          R.stderr.write(matlabSyntaxMessage(e, m.code, "<cell>"));
+          if (e instanceof PageOrderError) R.stderr.write(`\nNot run: ${e.message}.\n`);
+          else if (!(e instanceof MatlabSyntaxError)) throw e;
+          else R.stderr.write(matlabSyntaxMessage(e, m.code, "<cell>"));
         }
         if (py !== null) {
           ok = run(py, main, "exec", "<cell>");
