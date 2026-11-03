@@ -937,10 +937,18 @@ try {
   const cjk = "\\documentclass{article}\n\\begin{document}\n" + "中文字体 ".repeat(150000) + "\n\\end{document}\n";
   const fc = await mk("/t/cjk.tex", enc(cjk));
   await open(fc);
-  const cjkOk = await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
-  const cj = await ev(`(() => { const d = document.querySelector(".tex-preview").dataset; const pcs = [...document.querySelectorAll(".tex-preview .pc")]; const enc = new TextEncoder(); return { pcs: pcs.length, utf8: pcs.reduce((a, p) => a + enc.encode(p.innerHTML).length, 0), units: pcs.reduce((a, p) => a + p.innerHTML.length, 0), stepBytesMax: +d.stepBytesMax, stops: JSON.parse(d.stops) }; })()`);
-  console.log("non-ASCII patch (UTF-8 bytes, UTF-16 units, the most bytes in one step, the stops):", JSON.stringify(cj));
-  check(cjkOk && cj.utf8 > 3 * 512 * 1024 && cj.utf8 > 2 * cj.units && cj.stepBytesMax > 0 && cj.stepBytesMax <= 512 * 1024 && cj.stops.bytes > 0, "non-ASCII: no patch step over 512 KiB of UTF-8, the byte stop ending steps", cj);
+  // (the case is the patch, so its bound is the patch's: the wait for it starts once the worker's reply is in, the
+  // editor's tex-parse-done mark. Before that the page lays out the 1.95 MB one-line source, one native main-thread
+  // task of about 9 s on a build box (measured, Nov 3: "(program)" in a CPU profile, one long task), which grows with
+  // the host's load: 21-24 s at 2x CPU throttling, 52-57 s at 4x, against the patch itself in 0.2-0.5 s with no step
+  // over 9 ms. Whatever the case sees is returned, and the check fails with it, never a throw on a missing field)
+  const parsedIn = await (async () => { const t = Date.now(); return (await until(`performance.getEntriesByType("mark").some((m) => m.name === "tex-parse-done")`, 180000)) ? Date.now() - t : null; })();
+  const cjkOk = parsedIn !== null && await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
+  const cj = await ev(`(() => { const p = document.querySelector(".tex-preview"), d = p?.dataset ?? {}; const pcs = p ? [...p.querySelectorAll(".pc")] : []; const enc = new TextEncoder(); let stops = null; try { stops = JSON.parse(d.stops); } catch {}
+    return { pcs: pcs.length, utf8: pcs.reduce((a, p) => a + enc.encode(p.innerHTML).length, 0), units: pcs.reduce((a, p) => a + p.innerHTML.length, 0), stepBytesMax: +(d.stepBytesMax ?? 0), stops, patchMaxMs: d.patchMaxMs ?? null,
+      status: document.querySelector(".tex-status")?.textContent ?? "", marks: performance.getEntriesByType("mark").filter((m) => /^tex-/.test(m.name)).map((m) => m.name + "@" + Math.round(m.startTime)).slice(-8) }; })()`);
+  console.log("non-ASCII patch (reply after, UTF-8 bytes, UTF-16 units, the most bytes in one step, the stops):", JSON.stringify({ parsedIn, ...cj, marks: undefined }));
+  check(cjkOk && cj.utf8 > 3 * 512 * 1024 && cj.utf8 > 2 * cj.units && cj.stepBytesMax > 0 && cj.stepBytesMax <= 512 * 1024 && cj.stops?.bytes > 0, "non-ASCII: no patch step over 512 KiB of UTF-8, the byte stop ending steps", { parsedIn, ...cj });
 
   // ---- a large paragraph and list: pieces of at most 128 KiB, never two versions at once
   const para = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(200000) + "\n\n\\begin{itemize}\n" + "\\item list item text\n".repeat(22000) + "\\end{itemize}\n\\end{document}\n";
