@@ -27,10 +27,10 @@ let server;
 const port = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const origin = `http://127.0.0.1:${port}`;
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-layout-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
 let code = 1;
 try {
-  const cdpPort = await devtoolsPort(profile);
+  const cdpPort = await devtoolsPort(profile, undefined, { child: chrome });
   let targets;
   for (let i = 0; i < 300 && !targets; i++) targets = await fetch(`http://127.0.0.1:${cdpPort}/json`).then((r) => r.json(), () => sleep(100).then(() => undefined));
   const cdp = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
