@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=90 runner=bun chrome
 // astra's probes on sync-ops 12e5d39b (CORR-12E-1: an adopt moves the bytes it hashed, in the transaction that
 // makes its entry and op, whatever an older tab writes at the old key meanwhile; a refusal and a claim
 // re-checked), with their cases in astra-12e-cases.js:

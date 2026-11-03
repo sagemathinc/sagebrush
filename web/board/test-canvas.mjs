@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=60 runner=bun
 // JSON Canvas (canvas.ts): a canvas read as a board, and boards written as
 // canvases.  A canvas's cards become notes where they were (laid out, each
 // at its x and y), in the groups holding them, groups in groups; a heading

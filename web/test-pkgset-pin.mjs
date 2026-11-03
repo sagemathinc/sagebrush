@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=180
 // The notebook's package set pin is durable before any start uses it
 // (web/index.html notebookPkgset; astra's CORR-PR68-3 on c6580f48): a pin
 // already in memory, e.g. on a restart while the first start's save is held,

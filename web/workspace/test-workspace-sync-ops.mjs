@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=20 runner=bun chrome
 // Sync client step 2a (design/sync-client.md §3, §3a) in headless Chromium: every op of the workspace's log
 // carries its identity, and the version 4 upgrade adds sync's stores and indexes without changing what a
 // version 3 workspace holds (the migrator then gives older entries their identity key and older data files

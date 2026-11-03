@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=90
 // Drawing on a board (Edit: the Draw and Erase tools, pen.ts's row,
 // board.ts): the toolbar's Draw shows the pen row; a drag draws, shown as
 // it goes, kept when let go, in the row's color and width; a mouse's

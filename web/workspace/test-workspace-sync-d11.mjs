@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=80 runner=bun chrome
 // D11 (design/sync-client.md; plan-pr65-d11-chunked-moves r7 and its r8 notes) in headless Chromium: large moves applied
 // in chunks, on small trees, each compared with the same change made in one transaction.  The cases are in sync-d11-cases.js.
 //   CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs

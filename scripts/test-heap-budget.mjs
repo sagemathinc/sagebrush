@@ -1,3 +1,4 @@
+// ci: checks.6 order=60 test
 // scripts/heap-budget.mjs's arithmetic and verdicts, without measuring
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

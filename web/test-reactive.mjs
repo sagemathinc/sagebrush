@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=80
 // The reactive notebook (design/reactive-notebook.md) on the full page in
 // headless Chromium, with ?reactive: running a cell reruns what depends on
 // it, in graph order; definitions below their use; a removed definition

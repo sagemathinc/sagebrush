@@ -1,3 +1,4 @@
+// ci: web-runner-sync order=10 runner=bun chrome
 // Sync 2c-3 (notebooks' contents on the wire) in headless Chromium: two devices of one account, each its own browser
 // context (its own IndexedDB and Web Locks), against core's reference server (web/sync-protocol/reference-server.ts)
 // behind a small front here.  The front serves the page, carries each device's account socket to the server with

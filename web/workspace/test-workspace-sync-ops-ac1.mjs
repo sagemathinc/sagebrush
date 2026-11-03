@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=110 runner=bun chrome
 // astra's probes on sync-ops ac1c27eb (CORR-AC1-1: old copies' marks reached past any that keep failing; CORR-AC1-2: an older tab's write too large to move, kept, never deleted), with their cases in astra-ac1-cases.js:
 //   CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1.mjs
 import { spawn } from "node:child_process";

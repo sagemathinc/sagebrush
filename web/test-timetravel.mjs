@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=20
 // TimeTravel (web/notebook/history.js) on the full page, in headless Chromium:
 // edits are recorded as patchflow patches on CoCalc-style records in
 // IndexedDB; the panel shows past versions read-only, reverts (as a new

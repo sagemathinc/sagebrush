@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=80 runner=bun
 // The frame's answer channel (channel.ts) against a host that never
 // answers (HARD-B21-1): a submission sent again and again is one promise,
 // one id waiting; ids for changed answers past SUBMITS_MAX give up the

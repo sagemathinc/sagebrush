@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=50 runner=bun
 // A large board's layout (doc.ts layout(), without the page: estimated
 // sizes) is quick: 1000 notes, 5000 pen strokes and 500 edges laid out in
 // well under a second, the edges' routes deferred; laid out again (as after

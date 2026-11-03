@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=10
 // Tests for the share API and the files Worker (web/share/), in Miniflare
 // with a real D1 and R2 simulation, and a fake CoCalc for sign-in and limits.
 //

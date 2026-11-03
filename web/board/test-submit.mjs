@@ -1,3 +1,4 @@
+// ci: web-runner order=80 runner=bun chrome
 // The frame's Submit bar and "Get feedback on my words"
 // (web/board-host-protocol.md): a parent page on another origin plays the
 // host.  Given a nonce, the frame says it in its first ready, takes it out

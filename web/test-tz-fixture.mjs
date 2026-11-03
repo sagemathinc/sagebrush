@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-runner-fetch.mjs, web/test-runner-broker.mjs)
 // G-10's tampered zone index (plan r2.3 R-2), one fixture for both the unit G11u (web/notebook/test-runner-fetch.mjs)
 // and the browser's G11 (web/test-runner-broker.mjs): the index's own bytes with ONE byte changed, the first hex digit
 // of ANOTHER zone's value, so it stays valid JSON and passes the grammar, and still lists the zone the cases ask

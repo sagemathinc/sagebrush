@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=10
 // TimeTravel's Resume from here (design/timetravel-replay.md), on the full
 // page in headless Chromium: runs are journaled in the history; resuming a
 // version in a new tab replays them and recreates the session exactly

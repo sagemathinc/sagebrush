@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=40 runner=bun
 // The runner's fallback (web/notebook/runner-worker.js) never runs by itself
 // what was waiting for the runner (astra's CORR-CAP-4): a run or a question
 // sent before the sandboxed runner was given up (it didn't answer in time,

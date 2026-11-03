@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // End-to-end checks of the atlas in headless Chromium: server-rendered pages,
 // JSON, search, recomputing a stored space in the browser and comparing it,
 // computing a space that is not stored, Sato-Tate from a_p computed in the

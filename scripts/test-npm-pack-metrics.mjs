@@ -1,3 +1,4 @@
+// ci: checks.6 order=40
 // scripts/npm-pack-metrics.mjs (plan-npm-pack-metrics-r3 §3): npm's output
 // parsed strictly, the wrapper's error paths with a fake npm first on PATH, the
 // real bundled npm once (a smoke test: a fake can't catch npm's own config
@@ -7,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bindFetched, isolationProblem, literalEntryProblem, makeRecord, md, packDir, parsePack, readRecord, recordProblems, report, runNpm, ARGS, CAPS, FORMAT } from "./npm-pack-metrics.mjs";
+import { targetsOf } from "./web-tests.mjs";
 
 let passed = 0, failures = 0;
 function check(name, ok, detail = "") {
@@ -260,7 +262,9 @@ esac
     const iRep = sg.findIndex((s) => s.includes("npm-pack-metrics.mjs --report"));
     check("contract: the report runs after the gate, with if: always()", iGate >= 0 && iRep > iGate && /\n {8}if: always\(\)\n/.test(sg[iRep]), sg[iRep]);
     for (const [where, s] of [["checks", ck[iRec]], ["size-base", sb[iPack]], ["size-gate", sg[iRep]]]) check(`contract: the ${where} npm-pack step is continue-on-error`, /\n {8}continue-on-error: true\n/.test(s ?? ""), s);
-    check("contract: the tests run in checks", ck.some((s) => s.includes("node scripts/test-npm-pack-metrics.mjs")));
+    // (by their test-discovery target: scripts/web-tests.mjs)
+    const mine = targetsOf("scripts/test-npm-pack-metrics.mjs");
+    check("contract: the tests run in checks", ck.some((s) => mine.some((t) => s.includes(`node scripts/web-tests.mjs run ${t}\n`))));
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });

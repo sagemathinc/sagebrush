@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // A data file's versions on the sync server in its preview (version-history note r1, PR 1's page side:
 // web/workspace/server-versions.ts), in headless Chromium against the built site, the server's two routes stood in by
 // web/serve.py's overrides: GET /api/sync/v1/versions?fid= and GET /api/sync/v1/blob/<sha256>.  Listed below the

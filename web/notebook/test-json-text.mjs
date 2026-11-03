@@ -1,3 +1,4 @@
+// ci: web-runner order=370 runner=bun
 // The history store's own JSON writer (stores.js jsonText, jsonTextSize: inertJson's copy written by writeJson)
 // against JSON.stringify, the oracle: on astra's 5,000 generated inputs (from her size-property.mjs on 89685b0c:
 // strings with escapes, lone surrogates and control characters, -0 and extreme numbers, null-prototype objects,

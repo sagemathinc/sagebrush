@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs)
 // The loss recovery (plan r8): an unknown outcome no longer refuses every queued Run.
 //   F1 continuity, attested by the gateway: a fence keeps the page's lineage (lc.own) only on `continuity.sole`
 //      from the epoch it held, the same binding and incarnation, no restart or delete applied, nothing in flight;
