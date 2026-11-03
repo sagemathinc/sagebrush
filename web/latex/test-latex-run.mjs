@@ -175,6 +175,20 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     const r = await old.p;
     check("RUN-1 generation: a superseded Run writes nothing", now.ok && r.stale === true && shown(ws) === "NEW", { r, shown: shown(ws) });
   }
+  // (grader's T561-ADMIT) disposed while the write waits for the lock, nothing written meanwhile: only the admit
+  // inside the lock refuses it
+  {
+    const ws = fakeWs();
+    ws.put(RP, resultsText([]));
+    const before = ws.files.get(RP).text;
+    const h = ws.hold("write");
+    const old = startRun(ws, "OLD");
+    await h.reached;
+    old.dispose();
+    h.open();
+    const r = await old.p;
+    check("RUN-1 locked admit alone: disposed in the write lock, nothing written", r.stale === true && ws.files.get(RP).text === before && ws.files.get(RP).rev === 0, { r, rev: ws.files.get(RP).rev });
+  }
   // still current, but the file was written meanwhile (another tab's Run): pinned by its revision, not replaced
   {
     const ws = fakeWs();
