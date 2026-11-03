@@ -200,6 +200,12 @@ export interface ExecResult {
 
 /** The separator of page-order scoping's names: `xʹ2` (U+02B9, a letter Python allows in names). */
 export const SCOPE_SEP = "\u02b9";
+/**
+ * Whether a page's host may take Magma's page-order maps to this kernel
+ * (ReactiveHost.pageOrderMaps): only one that says it carries them, and never
+ * a remote one (remote approval's specs don't bind a map yet), whatever it says.
+ */
+export const pageOrderMapsFor = (kernel: { pageOrderMaps?: unknown; remote?: unknown } | null | undefined): boolean => !!kernel && kernel.pageOrderMaps === true && !kernel.remote;
 /** A name as written (without page-order scoping's suffix). */
 export const written = (name: string) => name.replace(/\u02b9\d+$/, "");
 // How many spellings of `name` (x, xʹ2, xʹ3, ...) appear in code as whole
