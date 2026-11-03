@@ -1,9 +1,10 @@
 """A small part of SciPy for Sagebrush in the browser: scipy.io's MATLAB
-files (loadmat, savemat) and scipy.integrate (odeint, solve_ivp, quad,
-simpson, ...) and scipy.special.  (Under CPython, use SciPy itself.)"""
+files (loadmat, savemat), scipy.integrate (odeint, solve_ivp, quad,
+simpson, ...), scipy.special and scipy.stats' distributions.  (Under
+CPython, use SciPy itself.)"""
 __version__ = "0.0.sagebrush"
 
-_SUBMODULES = ("integrate", "io", "special")
+_SUBMODULES = ("integrate", "io", "special", "stats")
 
 
 def __getattr__(name):
