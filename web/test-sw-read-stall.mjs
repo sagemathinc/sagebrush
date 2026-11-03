@@ -45,6 +45,9 @@ if (!SW.includes(BOUND_LINE)) throw new Error("sw.test.js has no READ_STALL_MS l
 // (a small library chunk, served cache-first)
 const chunk = Object.keys(DIGESTS).find((p) => /^lib\/core\.src\.[0-9a-f]{16}\.json$/.test(p));
 const want = DIGESTS[chunk], url = "/" + chunk;
+// (another cache-first chunk, the smallest other: kept, then read while the first key's mark has run out)
+const others = Object.keys(DIGESTS).filter((p) => p !== chunk && /^lib\/[\w.-]+\.[0-9a-f]{16}\.json$/.test(p)).sort((a, b) => DIGESTS[a].size - DIGESTS[b].size);
+const url3 = "/" + others[0];
 
 const overridesFile = join(tmp, "overrides.json"), logFile = join(tmp, "requests.log");
 const overrides = { "/sw.js": { file: testSw } };
@@ -96,9 +99,9 @@ try {
   };
   const quiesce = () => calmUntil(false), settle = () => calmUntil(true);
   // (the chunk fetched by the page, through its service worker, within `ms`: its size and SHA-256, or a timeout)
-  const get = (ms) => ev(`new Promise((resolve) => {
-    const t0 = performance.now(), t = setTimeout(() => resolve({ timeout: true, ms: performance.now() - t0 }), ${ms});
-    fetch(${J(url)}).then((r) => r.arrayBuffer()).then(async (b) => {
+  const get = (ms, u = url) => ev(`new Promise((resolve) => {
+    const t0 = performance.now(), ac = new AbortController(), t = setTimeout(() => (ac.abort(), resolve({ timeout: true, ms: performance.now() - t0 })), ${ms});
+    fetch(${J(u)}, { signal: ac.signal }).then((r) => r.arrayBuffer()).then(async (b) => {
       const h = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
       clearTimeout(t); resolve({ size: b.byteLength, sha256: h, ms: performance.now() - t0 });
     }, (e) => (clearTimeout(t), resolve({ error: String(e), ms: performance.now() - t0 })));
@@ -111,6 +114,8 @@ try {
   let controlled = await until(async () => (await ev("!!navigator.serviceWorker?.controller")) === true, 15000);
   if (!controlled) { await send("Page.reload"); controlled = await until(async () => (await ev("!!navigator.serviceWorker?.controller")) === true, 30000); }
   ok(controlled && (await hook())?.version === A, "the page is controlled by the test build's service worker");
+  const third = await get(30000, url3);
+  ok(third.size === DIGESTS[others[0]].size && (await until(() => ev(`caches.open(${J("sagebrush-" + A)}).then((c) => c.match(${J(url3)})).then((r) => !!r)`), 15000)), "(another chunk fetched once, and kept: " + url3 + ")");
 
   // (each build: the chunk fetched once so a copy is kept, then that copy's read held)
   async function heldRead(v, ms) {
@@ -200,6 +205,12 @@ try {
   ok(heldNow2 === 1 && after1?.skipping === 1 && stalledRead.ms >= 900, `one read of the kept copy stalls, by the phase's first request, and marks the key (${heldNow2} held, ${after1?.skipping} marked, ${Math.round(stalledRead.ms)} ms)`);
   ok(stalledRead.size !== want.size && within.size !== want.size && Date.now() - markedAt < 6000, "after a stall, within STALL_SKIP_MS the kept copy is skipped: the network's refusal both times: " + J([stalledRead.size, within.size]));
   await sleep(Math.max(0, markedAt + 6500 - Date.now()));
+  // (an expired mark goes when any key is checked, not only its own: a read of another kept chunk drops it)
+  const stale = (await hook())?.marks;
+  await clearHttp();
+  const other = await get(15000, url3);
+  const pruned = (await hook())?.marks;
+  ok(stale === 1 && other.size === DIGESTS[others[0]].size && pruned === 0, `the run-out mark is dropped by a read of another key, its own key not read again (marks ${stale} -> ${pruned})`);
   await clearHttp();
   const expired = await get(15000);
   delete overrides[url];
