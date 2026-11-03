@@ -129,6 +129,7 @@ try {
   check("render-default-path", d.code === 0 && existsSync(join(dir, "clean.html")) && d.out.startsWith("wrote clean.html"), d);
 
   // ---- render --png: what the agent looks at
+  // (CHROME as CI sets it, a command's name (CHROME=google-chrome), is the CLI's to look up on PATH: passed as it is)
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
     if (process.env.LATEX_CLI_PNG === "1") check("png-browser-found", false, "no Chromium-family browser (CHROME=...)");
