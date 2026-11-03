@@ -1347,6 +1347,55 @@ try {
     const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
     check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
       "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
+    // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
+    // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present
+    {
+      const BEAMER_RUN = String.raw`\documentclass{beamer}
+\usepackage{sagetex}
+\title{2026 = $\sage{factor(2026)}$}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{Computed}
+\begin{sagesilent}
+f(x) = x^3 - 2*x
+\end{sagesilent}
+$f'(x) = \sage{diff(f(x), x)}$
+
+\sageplot[width=0.5\textwidth]{plot(f(x), (x, -2, 2))}
+\end{frame}
+\begin{frame}{Curve}
+\begin{sageblock}
+E = EllipticCurve('389a')
+g = E.gens()
+\end{sageblock}
+$P = \sage{g[0]}$
+\end{frame}
+\end{document}
+`;
+      const fbr = await mk("/t/run-beamer.tex", enc(BEAMER_RUN));
+      await open(fbr);
+      await until(`document.querySelectorAll(".tex-preview section.slide").length === 3 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranB = await statusIs(/Ran 6 SageTeX items in [0-9.]+ s$/, 120000);
+      const S = `[...document.querySelectorAll(".tex-preview section.slide")]`;
+      const shownB = await until(`(() => { const s = ${S}; return s.length === 3 && s[0].textContent.includes("1013") && !!s[1].querySelector("img.sageplot") && /\\(0\\s*:\\s*[-\\u2212]1\\s*:\\s*1\\)/.test(s[2].textContent) && !document.querySelector(".tex-preview .sagechip"); })()`, 20000);
+      const bj = JSON.parse((await resultsOf("/t/run-beamer.tex")) ?? "null");
+      check(ranB && shownB && bj?.items?.length === 6 && bj.items.every((x) => x.s === "ok"),
+        "Run, beamer (William's L0/L1): every item ok, the \\title item on the title page, the plot and the point in the slides",
+        { ranB, shownB, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), items: bj?.items?.map((x) => x.s), slides: await ev(`${S}.map((s) => s.textContent.replace(/\\s+/g, " ").slice(0, 80))`) });
+      const P = `document.querySelector(".tex-present")`;
+      const pkey = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      const p1 = await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.querySelector(".tp-stage").textContent.includes("1013") && ${P}.textContent.includes("1 / 3")`, 15000);
+      await pkey("ArrowRight", "ArrowRight", 39);
+      const p2 = await until(`${P}.dataset.frame === "2" && !!${P}.querySelector(".tp-stage img.sageplot")`, 5000);
+      await pkey("ArrowRight", "ArrowRight", 39);
+      const p3 = await until(`${P}.dataset.frame === "3" && /\\(0\\s*:\\s*[-\\u2212]1\\s*:\\s*1\\)/.test(${P}.querySelector(".tp-stage").textContent)`, 5000);
+      await pkey("Escape", "Escape", 27);
+      await until(`!${P}`, 5000);
+      check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+    }
     // (a Run made stale: another file opened in place while it runs; it writes nothing)
     const fs = await mk("/t/run-stale.tex", enc(RUN_DOC.replace("x = 2^10", "x = 2^10\n_s = sum(i for i in range(2*10^6))")));
     const fo = await mk("/t/run-other.tex", enc(DOC));
@@ -1376,6 +1425,29 @@ try {
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
   check(await ev(`document.querySelector(".tex-page")?.textContent.includes("This file isn't here any more.")`), "an unknown fid: Gone");
+  // (grader R5 on #546) the worker replaced by its watchdog (a reply held past its 15 s): the new worker is sent the
+  // \input files again, so a macro from the macros file still renders in its reply
+  {
+    const rHook = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__holdReplies = false; window.__replyHolds = [];
+      window.__sbTexReplyHold = () => { if (window.__holdReplies) return new Promise((r) => window.__replyHolds.push(r)); };
+    })()` });
+    await mk("/shared2/macros.tex", enc("\\newcommand{\\greet}{Hello again from the macros file}\n"));
+    const MAIN = "\\documentclass{article}\n\\input{../shared2/macros}\n\\begin{document}\n\\greet.\n\\end{document}\n";
+    await open(await mk("/paper2/main.tex", enc(MAIN)));
+    const first = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Hello again from the macros file")`, 20000);
+    await ev(`window.__holdReplies = true`);
+    await typeInto(MAIN.replace("\\greet.", "\\greet. After the restart."));
+    const held = await until(`window.__replyHolds.length === 1`, 20000);
+    // (only that reply held: the replaced worker's reply, after the watchdog's 15 s, is installed)
+    await ev(`window.__holdReplies = false`);
+    const shown = await until(`(() => { const t = document.querySelector(".tex-preview")?.textContent ?? ""; return t.includes("After the restart") && t.includes("Hello again from the macros file"); })()`, 40000);
+    check(first && held && shown, "\\input: after the worker is replaced (its watchdog), the macros file's macro still renders",
+      { first, held, shown, text: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });
+    await ev(`(() => { for (const r of window.__replyHolds.splice(0)) r(); return true; })()`);
+    await sleep(500);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
+  }
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
