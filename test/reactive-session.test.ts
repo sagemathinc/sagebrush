@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { startInterpreter, runCells, type Interpreter } from "../src/reactive-session";
+import { startInterpreter, runCells, type Interpreter, type Sent } from "../src/reactive-session";
 
 // src/reactive-session.ts (plan L1b r4b, step 2a): a document's code run as the reactive notebook runs it, in one
 // interpreter. Until `sagebrush board run` adopts it (step 2c), the shared semantics fixtures run through BOTH hosts,
@@ -125,6 +125,21 @@ test("reactive-session: the editor's Run: a cancelled descendant spends none of 
   } finally { await interp.close(); }
 });
 
+test("reactive-session: the editor's Run: a retry's reservation for a cell it then cancels isn't charged (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (slow0 times out; the retry admits bad, reader (3000 ms) and slow1: bad raises, reader is cancelled, slow1 times
+    //  out; the next retry has after (3000 ms): only 3 ms were run of 5000 ms, so it runs)
+    const loop = "import time\nwhile True:\n    time.sleep(0.05)\n";
+    const cells = [{ key: "root", code: "r = 1" }, { key: "slow0", code: loop + "s0 = r" }, { key: "bad", code: "b = r / 0" }, { key: "reader", code: "print('reader', b)" }, { key: "slow1", code: loop + "s1 = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["slow0", 1], ["bad", 1], ["reader", 3000], ["slow1", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.timedOut.has("slow0") && r.timedOut.has("slow1"));
+    assert.equal(out.get("reader"), undefined);
+    assert.equal(out.get("after"), "after 1\n", "after ran: the cancelled reader's reservation wasn't kept");
+  } finally { await interp.close(); }
+});
+
 test("reactive-session: a cell over its time is interrupted; what reads it isn't run; others are", async () => {
   const interp = await startInterpreter({ mode: "python", entry: CLI });
   try {
@@ -144,4 +159,57 @@ test("reactive-session: a cycle is the notebook's error, in the document's word 
     const r = await runCells(interp, [{ key: "p", code: "a = b + 1" }, { key: "q", code: "b = a + 1" }], { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 5000, noun: "block", label: (k) => "block " + k, onMessage: () => {} });
     assert.match(r.errors.get("p") ?? "", /block p and block q depend on each other in a cycle/);
   } finally { await interp.close(); }
+});
+
+// ---- the editor's Run against a reference model (@sagebrush, after daybreak3's DB3-RS-3): a plain loop over a scripted
+// outcome for each cell (ok, fail, timeout). A budget of 0: nothing after the root. Else remaining = budget - the
+// predicted times of the cells sent (a cell never timed predicts 0); in page order
+// (here the graph's order: every edge goes from an earlier cell to a later one), a descendant of the root is sent iff
+// every cell it reads ran ok in this Run and its predicted time fits what remains. A fake interpreter plays the
+// script; 1000 seeds of random graphs, times and outcomes; the cells sent compared, in order.
+type Outcome = "ok" | "fail" | "timeout";
+function model(parents: number[][], root: number, pred: number[], script: Outcome[], budget: number): number[] {
+  const sent: number[] = [], ok = new Set<number>();
+  // (no budget: only the root, nothing after it, `latex run --item N`)
+  if (script[root] !== "ok" || budget <= 0) return sent;
+  ok.add(root);
+  const desc = new Set<number>([root]);
+  for (let i = root + 1; i < parents.length; i++) if (parents[i].some((p) => desc.has(p))) desc.add(i);
+  let remaining = budget;
+  for (let i = root + 1; i < parents.length; i++) {
+    if (!desc.has(i) || !parents[i].every((p) => ok.has(p)) || pred[i] > remaining) continue;
+    remaining -= pred[i]; sent.push(i);
+    if (script[i] === "ok") ok.add(i);
+  }
+  return sent;
+}
+function fakeInterpreter(script: Map<string, Outcome>, log: string[]): Interpreter {
+  return {
+    async send(msg): Promise<Sent> {
+      if (msg.cell === "forget" || msg.cell === "warm-up") return { ms: 0, error: false, timedOut: false, dead: false };
+      log.push(msg.cell);
+      const o = script.get(msg.cell) ?? "ok";
+      return { ms: 1, error: o !== "ok", timedOut: o === "timeout", dead: false };
+    },
+    dead: () => null, err: [], close: async () => {},
+  };
+}
+test("reactive-session: the editor's Run matches the reference model on 1000 random graphs and outcomes", async () => {
+  let seed = 20261103;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const int = (n: number) => Math.floor(rnd() * n);
+  for (let run = 0; run < 1000; run++) {
+    const n = 2 + int(9), root = 0, budget = [0, 1, 3000, 5000, 10000][int(5)];
+    // (the root reads nothing; cell i reads some earlier cells, the root often)
+    const parents: number[][] = [[]];
+    for (let i = 1; i < n; i++) { const ps = new Set<number>(); for (let j = 0; j < i; j++) if (rnd() < (j === 0 ? 0.6 : 0.25)) ps.add(j); parents.push([...ps]); }
+    const pred = Array.from({ length: n }, () => [0, 1, 1000, 3000][int(4)]);
+    const script: Outcome[] = Array.from({ length: n }, (_, i) => (i === 0 ? (rnd() < 0.9 ? "ok" : "fail") : (["ok", "ok", "ok", "fail", "timeout"] as Outcome[])[int(5)]));
+    const cells = parents.map((ps, i) => ({ key: "k" + i, code: `v${i} = 0` + ps.map((p) => ` + v${p}`).join("") }));
+    const log: string[] = [];
+    const interp = fakeInterpreter(new Map(script.map((o, i) => ["k" + i, o])), log);
+    await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["k0"], descendantsWithinMs: budget, lastMs: new Map(pred.map((t, i) => ["k" + i, t])), onMessage: () => {} });
+    const got = log.filter((k) => k !== "k0").map((k) => Number(k.slice(1))), want = model(parents, root, pred, script, budget);
+    assert.deepEqual(got, want, JSON.stringify({ run, parents, pred, script, budget, log }));
+  }
 });
