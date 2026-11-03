@@ -1,0 +1,224 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { startInterpreter, runCells, type Interpreter, type Sent } from "../src/reactive-session";
+
+// src/reactive-session.ts (plan L1b r4b, step 2a): a document's code run as the reactive notebook runs it, in one
+// interpreter. Until `sagebrush board run` adopts it (step 2c), the shared semantics fixtures run through BOTH hosts,
+// this one and board run's, and must give the same output in every cell (@sagebrush's condition): redefinition in
+// page order, the frozen constructs (daybreak3's #3 case, decorators, defaults, class bodies, comprehensions, a stored
+// nested function, an immediately called lambda), and a failure cancelling only what reads it.
+const CLI = __dirname + "/../src/cli.js";
+const FIXTURES: { name: string; cells: string[]; want?: string[] }[] = [
+  { name: "redefinition, each reader the nearest earlier", cells: ["x = 1", "print(x)", "x = 2", "print(x)"], want: ["", "1\n", "", "2\n"] },
+  // (notebook semantics, not linear: f reads the x defined above it, page-order scoping; a linear run would print 2)
+  { name: "daybreak3's #3: a function reading a name redefined later", cells: ["x = 1", "def f():\n    return x", "x = 2", "print(f())"], want: ["", "", "", "1\n"] },
+  { name: "a decorator", cells: ["def deco(g):\n    return lambda: g() + 1", "@deco\ndef h():\n    return 1", "print(h())"], want: ["", "", "2\n"] },
+  { name: "a default argument, redefined after", cells: ["k = 3", "def g(a=k):\n    return a", "k = 4", "print(g())"] },
+  { name: "a class body", cells: ["n = 5", "class C:\n    v = n", "print(C.v)"], want: ["", "", "5\n"] },
+  { name: "a comprehension", cells: ["m = 2", "print([m * i for i in range(3)])"], want: ["", "[0, 2, 4]\n"] },
+  { name: "a stored nested function, its name redefined after", cells: ["y = 1", "def outer():\n    def inner():\n        return y\n    return inner", "keep = outer()", "y = 9", "print(keep())"] },
+  { name: "an immediately called lambda", cells: ["z = 7", "print((lambda: z)())"], want: ["", "7\n"] },
+  { name: "a failure: what reads it isn't run, the rest is", cells: ["a = 1 / 0", "print(a)", "print('independent')"], want: ["", "", "independent\n"] },
+];
+
+// (through board run: one board, its items in one column, in order)
+function viaBoard(cells: string[]): string[] {
+  const doc = { format: "sagebrush-board", version: 1, title: "T", nodes: cells.map((code, i) => ({ id: "c" + i, x: 0, y: i * 300, w: 300, text: "", code })) };
+  const r = spawnSync(process.execPath, [CLI, "board", "run", "-", "--json", "--timeout", "20"], { encoding: "utf8", input: JSON.stringify(doc), timeout: 180_000 });
+  const rep = JSON.parse(r.stdout);
+  return cells.map((_, i) => rep.items.find((it: any) => it.id === "c" + i)?.stdout ?? "");
+}
+
+// (through this module)
+async function viaSession(interp: Interpreter, cells: string[]): Promise<{ out: string[]; failed: string[]; cancelled: string[] }> {
+  const out = new Map<string, string>();
+  const keys = cells.map((_, i) => "c" + i);
+  // (each fixture in its own names: the interpreter is shared, the cells' keys are not)
+  const tag = "f" + Math.random().toString(36).slice(2, 8);
+  const r = await runCells(interp, cells.map((code, i) => ({ key: tag + keys[i], code })), {
+    mode: "python", seedOf: (k) => "0".repeat(64) + k, timeoutMs: 20_000,
+    onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + String(m.text ?? "")); },
+  });
+  return { out: keys.map((k) => out.get(tag + k) ?? ""), failed: [...r.failed], cancelled: [...r.cancelled] };
+}
+
+test("reactive-session: the shared semantics fixtures give the same output through board run and this module", async () => {
+  // (a fresh interpreter for each fixture, as board run has: names don't carry from one fixture to the next)
+  for (const f of FIXTURES) {
+    const interp = await startInterpreter({ mode: "python", entry: CLI });
+    try {
+      assert.equal(interp.dead(), null, "the interpreter started: " + interp.err.join(""));
+      const mine = await viaSession(interp, f.cells), theirs = viaBoard(f.cells);
+      assert.deepEqual(mine.out, theirs, `${f.name}: the same output in each cell as board run's`);
+      if (f.want) assert.deepEqual(mine.out, f.want, `${f.name}: the expected output`);
+    } finally { await interp.close(); }
+  }
+});
+
+test("reactive-session: only a cell asked for runs, with its stale ancestors; not unrelated cells, not its descendants", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "a", code: "base = 40" }, { key: "b", code: "print('unrelated')" }, { key: "c", code: "total = base + 2\nprint(total)" }, { key: "d", code: "print('descendant', total)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 20_000, only: ["c"], onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.equal(out.get("c"), "42\n");
+    assert.equal(out.get("b"), undefined, "the unrelated cell wasn't run");
+    assert.equal(r.reactive.outcome.get("a"), "ok", "its ancestor ran first");
+    assert.equal(out.get("d"), undefined, "its descendant wasn't run (the default budget is 0)");
+    assert.equal(r.reactive.outcome.has("d"), false);
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: N, its ancestors, then its descendants within the budget; a slower one left stale", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "a", code: "base = 40" }, { key: "c", code: "total = base + 2" }, { key: "fast", code: "print('fast', total)" }, { key: "slow", code: "print('slow', total)" }];
+    // (their last measured times: fast 10 ms, slow 5 s, over a 2 s budget)
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 20_000, only: ["c"], descendantsWithinMs: 2000, lastMs: new Map([["fast", 10], ["slow", 5000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.equal(r.reactive.outcome.get("a"), "ok", "its ancestor ran");
+    assert.equal(out.get("fast"), "fast 42\n", "a descendant within the budget ran");
+    assert.equal(out.get("slow"), undefined, "a descendant over the budget didn't run");
+    assert.equal(r.states.get("slow")?.state, "stale", "…and is stale");
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: an optional descendant out of time stays stale; independent ones after it still run (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "root", code: "r = 1" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "afterslow", code: "print('reads slow', s)" }, { key: "fast", code: "print('fast', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["slow", 1], ["afterslow", 1], ["fast", 1]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.timedOut.has("slow"), "the slow descendant ran out of time");
+    assert.equal(out.get("fast"), "fast 1\n", "the independent descendant after it still ran");
+    assert.equal(out.get("afterslow"), undefined, "what reads the slow one didn't");
+    assert.equal(interp.dead(), null);
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: one budget for the whole Run, retries included (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (before 3000 ms and after 3000 ms can't both fit 5000 ms: before runs, slow (1 ms) runs out of time, after is left)
+    const cells = [{ key: "root", code: "r = 1" }, { key: "before", code: "print('before', r)" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["before", 3000], ["slow", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.equal(out.get("before"), "before 1\n");
+    assert.ok(r.timedOut.has("slow"));
+    assert.equal(out.get("after"), undefined, "after didn't run: the budget was spent");
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: a cancelled descendant spends none of the budget (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (bad raises; reader (3000 ms) is cancelled, never run; slow runs out of time; after (3000 ms) fits: only bad and
+    //  slow, 2 ms, were spent of 5000 ms)
+    const cells = [{ key: "root", code: "r = 1" }, { key: "bad", code: "b = r / 0" }, { key: "reader", code: "print('reader', b)" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["bad", 1], ["reader", 3000], ["slow", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.failed.has("bad"));
+    assert.equal(out.get("reader"), undefined);
+    assert.ok(r.timedOut.has("slow"));
+    assert.equal(out.get("after"), "after 1\n", "after fit: the cancelled reader spent nothing");
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: a retry's reservation for a cell it then cancels isn't charged (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (slow0 times out; the retry admits bad, reader (3000 ms) and slow1: bad raises, reader is cancelled, slow1 times
+    //  out; the next retry has after (3000 ms): only 3 ms were run of 5000 ms, so it runs)
+    const loop = "import time\nwhile True:\n    time.sleep(0.05)\n";
+    const cells = [{ key: "root", code: "r = 1" }, { key: "slow0", code: loop + "s0 = r" }, { key: "bad", code: "b = r / 0" }, { key: "reader", code: "print('reader', b)" }, { key: "slow1", code: loop + "s1 = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["slow0", 1], ["bad", 1], ["reader", 3000], ["slow1", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.timedOut.has("slow0") && r.timedOut.has("slow1"));
+    assert.equal(out.get("reader"), undefined);
+    assert.equal(out.get("after"), "after 1\n", "after ran: the cancelled reader's reservation wasn't kept");
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: a cell over its time is interrupted; what reads it isn't run; others are", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\nv = 1" }, { key: "reads", code: "print(v)" }, { key: "other", code: "print('ran')" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.ok(r.timedOut.has("slow"));
+    assert.equal(out.get("reads"), undefined);
+    assert.equal(out.get("other"), "ran\n");
+    assert.equal(interp.dead(), null, "interrupted, not killed");
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: a cycle is the notebook's error, in the document's word for its cells", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const r = await runCells(interp, [{ key: "p", code: "a = b + 1" }, { key: "q", code: "b = a + 1" }], { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 5000, noun: "block", label: (k) => "block " + k, onMessage: () => {} });
+    assert.match(r.errors.get("p") ?? "", /block p and block q depend on each other in a cycle/);
+  } finally { await interp.close(); }
+});
+
+// ---- the editor's Run against a reference model (@sagebrush, after daybreak3's DB3-RS-3): a plain loop over a scripted
+// outcome for each cell (ok, fail, timeout). A budget of 0: nothing after the root. Else remaining = budget - the
+// predicted times of the cells sent (a cell never timed predicts 0); in page order
+// (here the graph's order: every edge goes from an earlier cell to a later one), a descendant of the root is sent iff
+// every cell it reads ran ok in this Run and its predicted time fits what remains. A fake interpreter plays the
+// script; 1000 seeds of random graphs, times and outcomes; the cells sent compared, in order.
+type Outcome = "ok" | "fail" | "timeout";
+function model(parents: number[][], root: number, pred: number[], script: Outcome[], budget: number): number[] {
+  const sent: number[] = [], ok = new Set<number>();
+  // (no budget: only the root, nothing after it, `latex run --item N`)
+  if (script[root] !== "ok" || budget <= 0) return sent;
+  ok.add(root);
+  const desc = new Set<number>([root]);
+  for (let i = root + 1; i < parents.length; i++) if (parents[i].some((p) => desc.has(p))) desc.add(i);
+  let remaining = budget;
+  for (let i = root + 1; i < parents.length; i++) {
+    if (!desc.has(i) || !parents[i].every((p) => ok.has(p)) || pred[i] > remaining) continue;
+    remaining -= pred[i]; sent.push(i);
+    if (script[i] === "ok") ok.add(i);
+  }
+  return sent;
+}
+function fakeInterpreter(script: Map<string, Outcome>, log: string[]): Interpreter {
+  return {
+    async send(msg): Promise<Sent> {
+      if (msg.cell === "forget" || msg.cell === "warm-up") return { ms: 0, error: false, timedOut: false, dead: false };
+      log.push(msg.cell);
+      const o = script.get(msg.cell) ?? "ok";
+      return { ms: 1, error: o !== "ok", timedOut: o === "timeout", dead: false };
+    },
+    dead: () => null, err: [], close: async () => {},
+  };
+}
+test("reactive-session: a fresh session: every cell starts stale, so no parent is up to date before the Run (the guard of the editor's rule; persistent sessions: DB3-RS-4, L1b step 3)", async () => {
+  const log: string[] = [];
+  const interp = fakeInterpreter(new Map(), log);
+  const r = await runCells(interp, [{ key: "x", code: "x = 1" }, { key: "y", code: "y = 2" }, { key: "z", code: "print(x + y)" }], { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["y"], descendantsWithinMs: 5000, onMessage: () => {} });
+  // (x was never run in this session: z reads it, so z isn't sent; x isn't either: nothing up to date was assumed)
+  assert.deepEqual(log, ["y"]);
+  assert.ok(r.reactive.stale.has("x") && r.reactive.stale.has("z"));
+});
+
+test("reactive-session: the editor's Run matches the reference model on 1000 random graphs and outcomes", async () => {
+  let seed = 20261103;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const int = (n: number) => Math.floor(rnd() * n);
+  for (let run = 0; run < 1000; run++) {
+    const n = 2 + int(9), root = 0, budget = [0, 1, 3000, 5000, 10000][int(5)];
+    // (the root reads nothing; cell i reads some earlier cells, the root often)
+    const parents: number[][] = [[]];
+    for (let i = 1; i < n; i++) { const ps = new Set<number>(); for (let j = 0; j < i; j++) if (rnd() < (j === 0 ? 0.6 : 0.25)) ps.add(j); parents.push([...ps]); }
+    const pred = Array.from({ length: n }, () => [0, 1, 1000, 3000][int(4)]);
+    const script: Outcome[] = Array.from({ length: n }, (_, i) => (i === 0 ? (rnd() < 0.9 ? "ok" : "fail") : (["ok", "ok", "ok", "fail", "timeout"] as Outcome[])[int(5)]));
+    const cells = parents.map((ps, i) => ({ key: "k" + i, code: `v${i} = 0` + ps.map((p) => ` + v${p}`).join("") }));
+    const log: string[] = [];
+    const interp = fakeInterpreter(new Map(script.map((o, i) => ["k" + i, o])), log);
+    await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["k0"], descendantsWithinMs: budget, lastMs: new Map(pred.map((t, i) => ["k" + i, t])), onMessage: () => {} });
+    const got = log.filter((k) => k !== "k0").map((k) => Number(k.slice(1))), want = model(parents, root, pred, script, budget);
+    assert.deepEqual(got, want, JSON.stringify({ run, parents, pred, script, budget, log }));
+  }
+});
