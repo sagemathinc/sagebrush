@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "U13a part 1: a Magma for loop's variable is the loop's own (a private name in the translation, src/magma.ts forStmt; lib/_magma.py _uninit/_mname; src/dataflow.ts). Re-measured with bun 1.4.4 (size-record.sh) on master c039c5bd vs head 65582531: cli/lib.gen.js +468, cli/pyjs.cjs +2800, engine/lib/magma.pre +2832, engine/lib/magma.src +810, engine/sagebrush-analyze.js +954, engine/sagebrush-worker.js +809; no other row moves. Markers: exact, except cli/pyjs.cjs 2832 (+2800 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 468,
+  "cli/pyjs.cjs": 2832,
+  "engine/lib/magma.pre": 2832,
+  "engine/lib/magma.src": 810,
+  "engine/sagebrush-analyze.js": 954,
+  "engine/sagebrush-worker.js": 809
+ }
+}
