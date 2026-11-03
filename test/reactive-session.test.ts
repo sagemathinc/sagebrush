@@ -97,6 +97,19 @@ test("reactive-session: the editor's Run: an optional descendant out of time sta
   } finally { await interp.close(); }
 });
 
+test("reactive-session: the editor's Run: one budget for the whole Run, retries included (daybreak3's DB3-RS-3)", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    // (before 3000 ms and after 3000 ms can't both fit 5000 ms: before runs, slow (1 ms) runs out of time, after is left)
+    const cells = [{ key: "root", code: "r = 1" }, { key: "before", code: "print('before', r)" }, { key: "slow", code: "import time\nwhile True:\n    time.sleep(0.05)\ns = r" }, { key: "after", code: "print('after', r)" }];
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 1000, only: ["root"], descendantsWithinMs: 5000, lastMs: new Map([["before", 3000], ["slow", 1], ["after", 3000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.equal(out.get("before"), "before 1\n");
+    assert.ok(r.timedOut.has("slow"));
+    assert.equal(out.get("after"), undefined, "after didn't run: the budget was spent");
+  } finally { await interp.close(); }
+});
+
 test("reactive-session: a cell over its time is interrupted; what reads it isn't run; others are", async () => {
   const interp = await startInterpreter({ mode: "python", entry: CLI });
   try {
