@@ -1,3 +1,4 @@
+// ci: none (new with posmap.ts, #554: a wiring candidate for the web-latex follow-up, runner=bun, no browser, about 1 s)
 // posmap.ts (plan L1b r4b §5 step 0): positions mapped through change sets, checked against a reference that knows
 // nothing of offsets arithmetic: the text as a list of characters, each with an identity; a change set applied to it
 // keeps or deletes characters and makes new ones; a gap maps by its neighbours' identities (the rule in posmap.ts's
