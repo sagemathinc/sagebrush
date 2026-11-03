@@ -694,23 +694,34 @@ function boardRenameSoon(id: string, title: unknown) {
   boardRenameTimer = setTimeout(async () => {
     const w = ws;
     if (!w) return;
-    try {
-      await wsWriting;
-      if (gen !== boardRenameGen) return;
-      const from = await w.pathOf("board", id);
-      if (!from || splitExt(nameOf(from))[0] === base) return;
-      const e = await w.stat(from);
-      if (!e || e.kind !== "board" || e.ref !== id) return;
-      // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
-      // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence)
-      const now = await w.read(from).catch(() => null);
-      if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
-      const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
-      const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
-      if (to && to !== from) await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created } });
-    } catch (err: any) {
-      // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
-      if (err?.code !== "missing" && err?.code !== "exists" && err?.code !== "conflict") console.warn("workspace: a board's rename:", err);
+    // (a conflict: the board written, moved or replaced since it was read; asked again from the start, at most three
+    // times, so a save of this page's own in between still renames, and another's newer title renames nothing)
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        await wsWriting;
+        if (gen !== boardRenameGen) return;
+        const from = await w.pathOf("board", id);
+        if (!from || splitExt(nameOf(from))[0] === base) return;
+        const e = await w.stat(from);
+        if (!e || e.kind !== "board" || e.ref !== id) return;
+        // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
+        // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence.  Its revision is
+        // the rename's too, checked holding the lock: anything written after this read stops it, astra's BOARD-RENAME-1)
+        const now = await w.read(from).catch(() => null);
+        if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
+        const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
+        const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
+        if (!to || to === from) return;
+        // (tests: a write between the read and the rename)
+        await (globalThis as any).__SB_BOARD_TEST__?.beforeRename?.(from);
+        await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created, rev: now.rev } });
+        return;
+      } catch (err: any) {
+        if (err?.code === "conflict") continue;
+        // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
+        if (err?.code !== "missing" && err?.code !== "exists") console.warn("workspace: a board's rename:", err);
+        return;
+      }
     }
   }, 800);
 }

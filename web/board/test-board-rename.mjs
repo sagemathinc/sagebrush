@@ -59,6 +59,34 @@ try {
   check(await until(`window.sagebrush.workspace.read("/Slides for Friday.board.json").then((r) => r.content?.nodes?.some((x) => x.text === "kept"))`), "…and a later edit is saved there");
   const all = await boards();
   check(JSON.stringify(all.filter((p) => /Talk|Slides/.test(p))) === JSON.stringify(["/Slides for Friday.board.json", "/Talk.board.json"]), `the files: ${JSON.stringify(all)}`);
+  // astra's BOARD-RENAME-1: another writer's newer title, written after the page read the board and before the rename
+  // is admitted: nothing moves, the newer title and contents stay at the old path
+  await send("Page.navigate", { url: "about:blank" });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?new=python` });
+  await until("!!window.sagebrush?.workspace && !!window.sagebrush?.board?.snapshot().doc");
+  await title("Before");
+  check(await until(`window.sagebrush.workspace.list("/").then((l) => l.some((e) => e.path === "/Before.board.json"))`), "a third board, \"Before\": /Before.board.json");
+  await sleep(1500);
+  await ev(`(() => { const W = window.sagebrush.workspace; let once = true; window.__SB_BOARD_TEST__ = { beforeRename: async (from) => { if (!once) return; once = false; const r = await W.read(from); await W.write(from, { ...r.content, title: "Other writer", nodes: [{ id: "k", text: "KEEP ME", x: 0, y: 0 }] }, { base: r.rev }); window.__wroteBetween = from; } }; return 1; })()`);
+  await title("Edited");
+  check(await until(`window.__wroteBetween === "/Before.board.json"`), "…another's write landed between the page's read and its rename");
+  await sleep(2500);
+  const left = await boards();
+  check(left.includes("/Before.board.json") && !left.includes("/Edited.board.json"), `…and nothing moved: the board is still /Before.board.json, no /Edited.board.json (${JSON.stringify(left)})`);
+  const kept = await ev(`window.sagebrush.workspace.read("/Before.board.json").then((r) => r.content)`);
+  check(kept?.title === "Other writer" && kept.nodes?.some((x) => x.text === "KEEP ME"), `…its newer title and contents as the other wrote them (${JSON.stringify(kept?.title)})`);
+  // the control: a save of this page's own in the same window still renames (its title is still the one edited)
+  await send("Page.navigate", { url: "about:blank" });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?new=python` });
+  await until("!!window.sagebrush?.workspace && !!window.sagebrush?.board?.snapshot().doc");
+  await title("Mine");
+  check(await until(`window.sagebrush.workspace.list("/").then((l) => l.some((e) => e.path === "/Mine.board.json"))`), "a fourth board, \"Mine\": /Mine.board.json");
+  await sleep(1500);
+  await ev(`(() => { let once = true; window.__SB_BOARD_TEST__ = { beforeRename: async () => { if (!once) return; once = false; await window.sagebrush.board.edit((d) => { d.nodes = [{ id: "o", text: "own edit", x: 0, y: 0 }]; }); await new Promise((r) => setTimeout(r, 1200)); window.__ownBetween = 1; } }; return 1; })()`);
+  await title("Mine renamed");
+  check(await until(`window.__ownBetween === 1`), "…the page's own save landed between its read and its rename");
+  check(await until(`window.sagebrush.workspace.list("/").then((l) => l.some((e) => e.path === "/Mine renamed.board.json") && !l.some((e) => e.path === "/Mine.board.json"))`), `…and it is still renamed, after asking again (${JSON.stringify(await boards())})`);
+  check(await until(`window.sagebrush.workspace.read("/Mine renamed.board.json").then((r) => r.content?.nodes?.some((x) => x.text === "own edit"))`), "…its own edit kept there");
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));
