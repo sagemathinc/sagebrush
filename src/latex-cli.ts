@@ -20,6 +20,7 @@ import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagete
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
+import { applyStep } from "../web/latex/overlay";
 
 setKatex(katex.renderToString);
 
@@ -27,6 +28,8 @@ setKatex(katex.renderToString);
 const TEX_MAX = 4 * 2 ** 20;
 /** The most PNG pages written for a document that isn't beamer's. */
 const PAGES_MAX = 60;
+/** The most PNGs one render writes (--steps: every step of every frame). */
+const SHOTS_MOST = 400;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
@@ -43,11 +46,13 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       environments, math KaTeX can't typeset, missing images, code not run, expansion stopped. Exits 1 if
       there is an error (a warning alone exits 0).
 
-  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR] [--json]
+  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--json]
       The preview as one self-contained HTML file (default: FILE.html beside FILE.tex). With --png DIR, one
       PNG per beamer frame (frame-01.png, ...) or per page of another document, and a report of each frame
       whose content overflows its slide. PNGs need Chrome, Chromium, Edge or Brave on this computer (or
-      CHROME=/path/to/browser); nothing is installed.
+      CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
+      (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
+      --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
 
 Look at the PNGs after every change: they are what the reader sees.
 `;
@@ -58,12 +63,14 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") { process.stdout.write(HELP); return cmd === undefined ? 2 : 0; }
   if (cmd !== "check" && cmd !== "render" && cmd !== "run") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check, run or render)\n\n${HELP}`); return 2; }
   const args = argv.slice(1);
-  let file: string | null = null, out: string | null = null, png: string | null = null, json = false, timeout = 120;
+  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") json = true;
     else if ((a === "-o" || a === "--out") && cmd === "render") { out = args[++i] ?? null; if (out === null) return usage(`${a} needs a file name`); }
     else if (a === "--timeout" && cmd === "run") { timeout = Number(args[++i]); if (!(timeout > 0 && timeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
+    else if (a === "--steps" && cmd === "render") steps = true;
+    else if (a === "--pdf" && cmd === "render") { pdf = args[++i] ?? null; if (pdf === null) return usage("--pdf needs a file name"); }
     else if (a === "--png" && cmd === "render") { png = args[++i] ?? null; if (png === null) return usage("--png needs a folder"); }
     else if (a.startsWith("-")) return usage(`unknown option ${a}`);
     else if (file === null) file = a;
@@ -88,15 +95,17 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   writeFileSync(htmlPath, html);
   const report: any = { html: htmlPath, check: result };
   let code = 0;
-  if (png !== null) {
-    try { report.png = await screenshots(htmlPath, png, result); }
-    catch (e: any) { report.png_error = String(e?.message ?? e); code = 1; }
+  if (png !== null || pdf !== null) {
+    try { const b = await screenshots(htmlPath, png, result, steps, pdf); if (png !== null) report.png = b; if (pdf !== null) report.pdf = b.pdf; }
+    catch (e: any) { report[png !== null ? "png_error" : "pdf_error"] = String(e?.message ?? e); code = 1; }
   }
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
   else {
     process.stdout.write(`wrote ${htmlPath}\n`);
     if (report.png) for (const p of report.png.pages) process.stdout.write(`wrote ${p.file}${p.title ? `  (frame ${p.frame}: ${p.title})` : ""}${p.overflow_px ? `  OVERFLOWS its slide by ${p.overflow_px}px` : ""}\n`);
+    if (report.pdf) process.stdout.write(`wrote ${report.pdf.file} (${report.pdf.pages} page${report.pdf.pages === 1 ? "" : "s"})\n`);
     if (report.png_error) process.stderr.write(`sagebrush latex: no PNGs: ${report.png_error}\n`);
+    if (report.pdf_error) process.stderr.write(`sagebrush latex: no PDF: ${report.pdf_error}\n`);
     const n = result.problems.length;
     if (n) process.stdout.write(`${n} problem${n === 1 ? "" : "s"} (sagebrush latex check ${file} lists them)\n`);
   }
@@ -302,6 +311,12 @@ body { margin: 0; background: #eef0f2; }
 .tex-page.sb-standalone { position: static; display: block; min-height: 100vh; }
 .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
+@media print {
+  body { background: #fff; }
+  .sb-standalone .page.beamer { padding: 0; }
+  .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
+  .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
+}
 `;
 
 function pageHtml(name: string, body: string, beamer: boolean): string {
@@ -319,7 +334,14 @@ function pageHtml(name: string, body: string, beamer: boolean): string {
 
 /** The browser to use: $CHROME (or $SAGEBRUSH_CHROME), else the usual places, else null. */
 export function findBrowser(env = process.env, platform = process.platform): string | null {
-  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) return existsSync(env[k]!) ? env[k]! : null;
+  // (CHROME=/path/to/it, or a command's name looked up on PATH as a shell would: CI sets CHROME=google-chrome)
+  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) {
+    const v = env[k]!;
+    if (/[\\/]/.test(v)) return existsSync(v) ? v : null;
+    const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);
+    const names = platform === "win32" && !/\.exe$/i.test(v) ? [v + ".exe", v] : [v];
+    return dirs.flatMap((d) => names.map((n) => join(d, n))).find((p) => existsSync(p) && statSync(p).isFile()) ?? null;
+  }
   const cands: string[] = [];
   if (platform === "darwin") {
     for (const app of ["Google Chrome", "Chromium", "Microsoft Edge", "Brave Browser", "Google Chrome Canary"]) {
@@ -369,11 +391,11 @@ class Cdp {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function screenshots(htmlPath: string, dir: string, check: CheckResult) {
+async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null) {
   const browser = findBrowser();
   if (!browser) throw new Error("no Chrome, Chromium, Edge or Brave found (set CHROME=/path/to/it); the HTML is written: open it in a browser");
   if (typeof (globalThis as any).WebSocket !== "function") throw new Error(`this JavaScript runtime has no WebSocket (Node 22 or newer has it)`);
-  mkdirSync(dir, { recursive: true });
+  if (dir !== null) mkdirSync(dir, { recursive: true });
   let proc: ChildProcess | null = null, ws: WebSocket | null = null, profile = "";
   try {
     // (where the browser's own sandbox can't start, as in many containers, once more without it: the page it draws
@@ -407,16 +429,33 @@ async function screenshots(htmlPath: string, dir: string, check: CheckResult) {
       : `(() => { const r = document.querySelector(".page").getBoundingClientRect(), H = Math.round(r.width * 1.294), out = [];
           for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 });
           return out; })()`);
-    const pages: { file: string; frame?: number; title?: string; overflow_px?: number }[] = [];
-    for (let k = 0; k < boxes.length; k++) {
-      const b = boxes[k];
-      const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 } });
-      const f = join(dir, `${beamer ? "frame" : "page"}-${String(k + 1).padStart(2, "0")}.png`);
-      writeFileSync(f, Buffer.from(shot.data, "base64"));
-      const fr = beamer ? check.frames[k] : undefined;
-      pages.push({ file: f, ...(fr ? { frame: fr.n, title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
+    // (--pdf: the page printed by the browser, a beamer document one page per frame of the slide's size, others on
+    //  Letter paper; the print rules are STANDALONE_CSS's)
+    let pdfOut: { file: string; pages: number } | undefined;
+    if (pdf !== null) {
+      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: 8.5, paperHeight: 11, marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 };
+      const r = await cdp.send("Page.printToPDF", { printBackground: true, ...sz });
+      const bytes = Buffer.from(r.data, "base64");
+      writeFileSync(pdf, bytes);
+      pdfOut = { file: pdf, pages: (bytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length };
     }
-    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages };
+    const pages: { file: string; frame?: number; step?: number; title?: string; overflow_px?: number }[] = [];
+    // (--steps: each frame at each overlay step, as the presenter shows them: overlay.ts's applyStep, its source sent to
+    //  the page; the frame measured again at each step)
+    const stepFn = applyStep.toString();
+    for (let k = 0; k < (dir === null ? 0 : boxes.length); k++) {
+      const fr = beamer ? check.frames[k] : undefined, n = steps && fr ? fr.steps : 1;
+      for (let s = 1; s <= n && pages.length < SHOTS_MOST; s++) {
+        let b = boxes[k];
+        if (steps && fr) b = await cdp.eval(`(() => { const sl = document.querySelectorAll("section.slide")[${k}]; (${stepFn})(sl, ${s}); const r = sl.getBoundingClientRect(), bd = sl.querySelector(".slide-body");
+          return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height, over: bd ? Math.max(0, Math.ceil(bd.scrollHeight - bd.clientHeight), Math.ceil(bd.scrollWidth - bd.clientWidth)) : 0 }; })()`);
+        const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 } });
+        const f = join(dir!, `${beamer ? "frame" : "page"}-${String(k + 1).padStart(2, "0")}${steps && fr ? "-" + s : ""}.png`);
+        writeFileSync(f, Buffer.from(shot.data, "base64"));
+        pages.push({ file: f, ...(fr ? { frame: fr.n, ...(steps ? { step: s } : {}), title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
+      }
+    }
+    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}) };
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }

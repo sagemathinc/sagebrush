@@ -30,6 +30,10 @@ export type BrowserHost = {
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
+  /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
+   * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
+   * is web/latex/boot.ts's.) */
+  openFile?(e: Entry, tab: boolean): boolean;
   /** A data file of a kind the page recognises opened as a document: a converted copy beside it (upload.ts, design §3); none: not offered. */
   openAs?(e: Entry, as: DocKind): void | Promise<void | string>;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
@@ -95,7 +99,13 @@ const STYLE = `
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
-.sbfiles .fsearch { margin: 0 10px 6px; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
+/* (U2, William: "Selecting a checkbox MUST NOT move the checkbox or row". The search box and the selection bar share
+   one slot, stacked in a grid cell, both always laid out (the bar hidden by visibility, not display): its height never
+   changes, so nothing under it moves; while rows are selected the bar covers the search box) */
+.sbfiles .ftop { display: grid; margin: 0 10px 6px; }
+.sbfiles .ftop > * { grid-area: 1 / 1; min-width: 0; }
+.sbfiles.selecting .fsearch { visibility: hidden; }
+.sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
@@ -114,14 +124,15 @@ const STYLE = `
 .sbfiles .frow .more { visibility: hidden; }
 .sbfiles .frow:hover .more, .sbfiles .frow:focus-within .more, .sbfiles .frow.cur .more { visibility: visible; }
 .sbfiles .frow input { flex: 1; font: inherit; padding: 1px 4px; border: 1px solid #4a6b49; border-radius: 4px; min-width: 0; }
+.sbfiles .frow .extnote { flex: none; font-size: 11.5px; color: #8a5a00; }
 /* (B2: a row's checkbox, at its left: shown on the row pointed at or focused, and on every row while any is selected) */
 /* (a span with role=checkbox, not an <input>: a row's one input stays its name typed in place) */
 .sbfiles .frow .sel { flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid #8a8f8b; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: #fff; cursor: pointer; visibility: hidden; }
 .sbfiles .frow .sel[aria-checked=true] { background: #4a6b49; border-color: #4a6b49; }
 .sbfiles .frow:hover .sel, .sbfiles .frow:focus-within .sel, .sbfiles.selecting .frow .sel { visibility: visible; }
 .sbfiles .frow.picked { background: #e6eedf; }
-.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0 10px 6px; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; }
-.sbfiles .fsel[hidden] { display: none; }
+.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; background: var(--sbf-bg, #f6f5f0); }
+.sbfiles .fsel[hidden] { display: flex; visibility: hidden; }
 .sbfiles .fsel input { margin: 0; cursor: pointer; }
 .sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
@@ -233,6 +244,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // closed, a search) leaves the selection, so an action never reaches a row out of sight)
   const selected = new Set<string>();
   let anchor: string | null = null;
+  // (U4: the rows being dragged within the list, by path; their drag data's type, which a drop from outside never has)
+  let dragging: string[] | null = null;
+  const MOVE_TYPE = "application/x-sagebrush-paths";
   const selAll = h("input", { type: "checkbox" });
   selAll.setAttribute("aria-label", "Select all shown");
   const selCount = h("span");
@@ -241,7 +255,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
   selBar.setAttribute("role", "toolbar");
   selBar.setAttribute("aria-label", "Selected files");
-  root.append(head, search, selBar, tree, toastEl, foot, picker);
+  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
   container.append(root);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
@@ -378,6 +392,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       r.dataset.sel = "1";
       if (selected.has(e.path)) r.classList.add("picked");
       r.append(cb);
+      // (U4: a row dragged onto a folder moves there; a selected row carries the whole selection)
+      r.draggable = true;
+      r.addEventListener("dragstart", (ev) => {
+        if (renamingNow || !ev.dataTransfer) return void ev.preventDefault();
+        dragging = selected.has(e.path) ? [...selected] : [e.path];
+        ev.dataTransfer.setData(MOVE_TYPE, JSON.stringify(dragging));
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
     }
     r.append(chev, ic, name, si, meta, more);
     if (!trashView) drawnRows.push({ e, si });
@@ -389,12 +412,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
+      // (U1: a page with an editor of its own for the file, the board page's .tex)
+      if (e.kind === "file" && host.openFile?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
     r.onauxclick = (ev) => {
       // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
+      if (ev.button === 1 && e.kind === "file") { if (!trashView) host.openFile?.(e, true); return; }
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };
     r.onkeydown = (ev) => {
@@ -673,19 +699,34 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const full = nameOf(e.path);
     // (a document keeps its extension: only its name is edited)
     const [base, ext] = e.kind === "notebook" || e.kind === "board" ? splitExt(full) : [full, ""];
+    // (U9, William Nov 2: a file's box holds its whole name with only the base selected; a name typed without an
+    // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
+    // Enter (or leaving the box) renames. A folder's name is all name)
+    const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
+    const note = h("span", { className: "extnote" });
+    note.setAttribute("role", "status");
+    const sayExt = () => {
+      const typed = splitExt(input.value.trim())[1];
+      note.textContent = file && typed && typed.toLowerCase() !== fileExt.toLowerCase() ? `changes the file type: ${fileExt || "(none)"} → ${typed}` : "";
+    };
+    input.addEventListener("input", sayExt);
     nameEl.replaceWith(input);
+    input.after(note);
     renamingNow = true;
     input.focus();
-    input.select();
+    if (file && fileExt) input.setSelectionRange(0, full.length - fileExt.length);
+    else input.select();
     let done = false;
     const finish = async (keep: boolean) => {
       if (done) return;
       done = true;
       renamingNow = false;
+      note.remove();
       const v = input.value.trim();
-      if (keep && v && v !== base) {
+      if (keep && v && finalName(v) !== full) {
         host.renaming?.(e);
         try {
           // (a document renamed since the row was drawn, as by its typed
@@ -694,7 +735,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           // path meanwhile, CORR-4B2-1)
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
           if (!from) say(`"${full}" was moved or deleted meanwhile: not renamed`);
-          else host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
+          else host.renamed?.(await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
         } catch (err) {
           if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
           else fail(err);
@@ -749,24 +790,87 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const pick = (folder: string) => { pickFolder = folder; picker.click(); };
   picker.onchange = () => { const fs = [...(picker.files ?? [])]; picker.value = ""; if (fs.length) upload(fs, pickFolder); };
 
-  function dropTarget(el: HTMLElement, folder: string) {
+  // (U4: of the rows being dragged, those that can move into `folder`: not one already there, not a folder into itself
+  // or below itself, and not one inside another being moved (it goes with its folder))
+  const movable = (folder: string) => {
+    const d = dragging ?? [];
+    return d.filter((p) => parentOf(p) !== folder && !within(folder, p) && !d.some((q) => q !== p && within(p, q)));
+  };
+  // (files dropped from outside: uploaded into the folder; rows of this list dropped: moved into it. `folder` is the
+  // folder's path, or for the list itself where the drop lands: a file row's own folder, else the top folder)
+  function dropTarget(el: HTMLElement, folder: string | ((ev: DragEvent) => string)) {
+    const at = (ev: DragEvent) => (typeof folder === "string" ? folder : folder(ev));
     el.addEventListener("dragover", (ev) => {
-      if (!ev.dataTransfer?.types.includes("Files")) return;
+      const types = ev.dataTransfer?.types ?? [];
+      const rows = types.includes(MOVE_TYPE);
+      if (!types.includes("Files") && !rows) return;
       ev.preventDefault();
       ev.stopPropagation();
       tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop"));
+      if (rows && !movable(at(ev)).length) { ev.dataTransfer!.dropEffect = "none"; return; }
+      if (rows) ev.dataTransfer!.dropEffect = "move";
       el.classList.add("drop");
     });
     el.addEventListener("dragleave", () => el.classList.remove("drop"));
     el.addEventListener("drop", (ev) => {
+      if (ev.dataTransfer?.types.includes(MOVE_TYPE)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        el.classList.remove("drop");
+        const to = at(ev), paths = movable(to);
+        dragging = null;
+        if (paths.length) void moveInto(to, paths);
+        return;
+      }
       if (!ev.dataTransfer?.files.length) return;
       ev.preventDefault();
       ev.stopPropagation();
       el.classList.remove("drop");
-      upload([...ev.dataTransfer.files], folder);
+      upload([...ev.dataTransfer.files], at(ev));
     });
   }
-  dropTarget(tree, "/");
+  dropTarget(tree, (ev) => {
+    const r = (ev.target as Element | null)?.closest?.<HTMLElement>(".frow[data-path]");
+    return r ? parentOf(r.dataset.path!) : "/";
+  });
+  // (U4: rows moved into a folder, one at a time, each the way Rename moves one: a document found by its id wherever it
+  // is now, checked holding the lock, the page told so it retitles what it has open. A name already taken there, or a
+  // move that fails, is said and the rest still move; Undo moves back what moved)
+  async function moveInto(folder: string, paths: string[]) {
+    const where = folder === "/" ? "the top folder" : `"${nameOf(folder)}"`;
+    const moved: { from: string; to: string; e: Entry }[] = [], problems: string[] = [];
+    const expect = (e: Entry) => ({ kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+    for (const p of paths) {
+      const e = entries.find((x) => x.path === p);
+      if (!e) { problems.push(`"${nameOf(p)}" is gone`); continue; }
+      try {
+        const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
+        if (!from) { problems.push(`"${nameOf(p)}" was moved or deleted meanwhile`); continue; }
+        const to = join(folder, nameOf(from));
+        if (await w.stat(to)) { problems.push(`${where} already has a "${nameOf(from)}"`); continue; }
+        host.renaming?.(e);
+        const got = await w.rename(from, to, { retitle: !host.retitles?.(e), expect: expect(e) });
+        host.renamed?.(got, from);
+        moved.push({ from, to: got.path, e: got });
+      } catch (err) {
+        problems.push(`"${nameOf(p)}": ${err instanceof WorkspaceError && err.code === "conflict" ? "moved or replaced meanwhile" : String((err as Error)?.message ?? err)}`);
+      }
+    }
+    if (folder !== "/" && moved.length) { open.add(folder); saveOpen(); }
+    for (const m of moved) selected.delete(m.from);
+    await refresh();
+    paintSel();
+    const undo = async () => {
+      for (const m of [...moved].reverse()) {
+        try { host.renaming?.(m.e); host.renamed?.(await w.rename(m.to, m.from, { retitle: !host.retitles?.(m.e), expect: expect(m.e) }), m.to); }
+        catch (err) { fail(err); break; }
+      }
+      await refresh();
+    };
+    const what = moved.length === 1 ? `"${nameOf(moved[0].from)}"` : `${moved.length} items`;
+    if (problems.length) sayError(`${moved.length ? `Moved ${what} to ${where}; n` : "N"}ot moved: ${problems.join("; ")}`);
+    else if (moved.length) say(`Moved ${what} to ${where}`, undo);
+  }
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
