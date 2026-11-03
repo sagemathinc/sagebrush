@@ -1,4 +1,4 @@
-// ci: web-runner order=200 runner=bun chrome
+// ci: web-runner order=210 runner=bun chrome
 // The version 4 upgrade and the migrator's filling in of sync's identities (design/sync-client.md §3, §3a)
 // survive the browser being killed: a workspace as version 3 left it (120 data files of 2 MB beside the
 // index, written since capabilities 1a, so without their SHA-256 or identity key; its migration done), opened

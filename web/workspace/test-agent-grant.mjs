@@ -1,4 +1,4 @@
-// ci: web-runner order=150 runner=bun
+// ci: web-runner order=160 runner=bun
 // A paired agent's checks (agent-schema.ts, agent-grant.ts), without a page: every verb against its schema, and
 // the grant's scoping, which is the only guard on what an agent may touch (the server treats a grant as opaque).
 //   bun web/workspace/test-agent-grant.mjs

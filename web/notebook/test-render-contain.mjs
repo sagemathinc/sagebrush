@@ -1,4 +1,4 @@
-// ci: web-runner order=120 chrome
+// ci: web-runner order=130 chrome
 // A notebook's saved outputs stay in their place on the page (web/notebook/notebook.js, notebook.css,
 // web/safe-html.ts), in headless Chromium against the built page:
 //   (cd web/dist && python3 ../serve.py 8765) &   node web/notebook/test-render-contain.mjs

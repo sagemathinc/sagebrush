@@ -22,10 +22,10 @@
 //                                             and every workflow target has a suite; inline suites are
 //                                             named in a workflow, and a workflow names no other suite
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HEAD_LINES = 40;
 const TARGET = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)?(\.[0-9]+)?$/;
@@ -244,6 +244,7 @@ function main(argv) {
       console.error(`web-tests: no suite names target ${rest[0]}`);
       return 1;
     }
+    let ran = 0;
     for (const r of runs) {
       console.log(`START ${r.target}: ${command(r)}`);
       const env = {
@@ -271,8 +272,11 @@ function main(argv) {
         // (as the shell reports a signal: 128 + its number)
         return res.status ?? 128 + (constants.signals[res.signal] ?? 0);
       }
+      ran++;
     }
-    return 0;
+    // (the run's own count, so a run that ran nothing, or less than its plan, can never pass silently)
+    console.log(`web-tests: ran ${ran} of ${runs.length} (${rest[0]})`);
+    return ran > 0 && ran === runs.length ? 0 : 1;
   }
   console.error(
     "usage: node scripts/web-tests.mjs run TARGET | plan [TARGET] [--json] | check",
@@ -280,5 +284,15 @@ function main(argv) {
   return 2;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`)
-  process.exitCode = main(process.argv.slice(2));
+// (run as a script, by any path to it, a symlink or a relative one included: a guard that compared the
+// raw argv[1] did nothing, and exited 0, through a symlink)
+const isMain = () => {
+  try {
+    return (
+      import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+    );
+  } catch {
+    return false;
+  }
+};
+if (isMain()) process.exitCode = main(process.argv.slice(2));
