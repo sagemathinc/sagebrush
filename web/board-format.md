@@ -3,8 +3,8 @@
 A board is a JSON file (`*.board.json`): notes with Markdown and math, live
 code, groups laid out for you, edges between items, pages or slides, and a
 guided tour. You describe structure; the board does the layout. Open a board at
-https://sagebrush.space/board/ (its ⋯ menu > Open…, or drop the file on the
-page). A page that embeds a board uses https://sagebrush.space/frame/board/.
+/board/ (its ⋯ menu > Open…, or drop the file on the
+page). A page that embeds a board uses https://sagebrush.space/frame/board/ (an absolute address: it is on another site).
 
 This page is for people and agents writing boards. Its fields are those of the
 format's definition, `web/board/doc.ts` in the repository, which is
@@ -49,7 +49,7 @@ authoritative.
   **languages share no values**: a name defined in a Python item is
   undefined in a Sage item. To use data from one language in another, copy
   it in as a literal. Run order and reruns work within each language. See
-  "Languages" in https://sagebrush.space/llms.txt.
+  "Languages" in /llms.txt.
 - **Code is reactive.** A note with `code` is a code item. Its output is shown
   under it, and items that use a name it defines rerun when it changes, as in
   a reactive notebook. Code runs in the reader's browser, in a sandbox with no
@@ -141,7 +141,7 @@ reader sees the overview and zooms or scrolls to read. For more, use
 holds everything.
 
 **Check it before you hand it over.** Open it at
-https://sagebrush.space/board/ and look at it as it first opens, fitted to
+/board/ and look at it as it first opens, fitted to
 the window, before zooming in.
 
 ## Asking the reader
@@ -243,7 +243,7 @@ A question can also say what the reader's own words may show: its
 `confuses-transitive-with-two-transitive`), an optional `about` (Markdown
 that makes the name clearer) and an optional `next`. A host that shows the
 board can ask a model which of them the reader's words show, and the board
-sends the reader to that one's `next` (https://sagebrush.space/board-host-protocol.md,
+sends the reader to that one's `next` (/board-host-protocol.md,
 "Deciding"). The name carries the meaning, so write it for a reader who
 sees nothing else.
 
@@ -324,7 +324,7 @@ empty one, `next` naming no item of the page). `sagebrush board try FILE
 `sagebrush board answers FILE` lists the questions and the answers kept in
 the board, with each one's note; with `--json`, for a program. A host that shows the board
 passes the reader's answers back as a submission
-(https://sagebrush.space/board-host-protocol.md), and
+(/board-host-protocol.md), and
 `sagebrush board answers FILE --apply SUBMISSION.json` writes them into
 the file. A reader that doesn't know questions yet shows each as a note,
 with its title and text.
@@ -590,7 +590,7 @@ A picture a note shows, by its name in the document's `images`.
    is supported. `npx sagebrush@0.6.4 board check FILE` checks the whole board
    (the format, ids, edges, pictures, questions) and runs its code items.
 2. Search before you guess: `npx sagebrush@0.6.4 --search "elliptic curve rank"`.
-3. Open the board at https://sagebrush.space/board/ to see the layout, or, on
+3. Open the board at /board/ to see the layout, or, on
    your own computer, `npx sagebrush@0.6.4 board open FILE`: the board in
    your browser, shown again each time you rewrite FILE.
 
