@@ -135,3 +135,34 @@ test("MATLAB page order: the translator checks the map (src/page-order.ts) and r
   const py = matlabToPython("function y = f(x)\n  y = x + 1;\nend\nx = f(2);", "<cell>", { cell: true, pageOrder: ok });
   assert.ok(py.includes(`x, = _m.inargs(_a, ["x"]`) && py.includes("y = _m.plus(x, 1.0)") && py.includes(`x${S}2 = _m.paren(f, [2.0], 1)`), py);
 });
+
+// MATPO-SEM-1: page order renames variables only.  A cell defining a function
+// of the name isn't renamed (the name keeps its multiple-definition error), and
+// a map naming one of the cell's functions is refused by the translator.
+test("MATLAB page order: a function defined again in a later cell is not renamed", () => {
+  const cells = ["function r = f()\n  r = 1;\nend", "fprintf('%d\\n', f())", "function r = f()\n  r = 2;\nend", "fprintf('%d\\n', f())"];
+  const an = cells.map((c) => analyzeCell(c, "c", { mode: "matlab" }));
+  assert.deepEqual(an.map((a) => a.defs.has("f")), [true, false, true, false]);
+  const r = renameRedefinitions(cells.map((code, k) => ({ id: `c${k}`, code, defines: an[k].defs.has("f"), reads: an[k].refs.has("f") })), "f", new Set(["f", "r"]), "matlab", SCOPE_SEP);
+  assert.equal(r, null);
+  // (the forms of a function line)
+  for (const def of ["function f", "function f()", "function y = f(x)", "function [a, b] = f(x)", "  function y=f(x) % f"]) {
+    assert.equal(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code: `${def}\nend`, defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP), null, def);
+  }
+  // (a function whose name only starts so, or a variable f in a cell with another function: renamed)
+  assert.ok(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code: "f = 2;\nfunction y = fg(x)\n  y = x;\nend", defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP));
+  assert.throws(() => matlabToPython(cells[2], "<cell>", { cell: true, pageOrder: { f: { to: `f${S}2`, before: "f" } } }), PageOrderError);
+});
+
+// MATPO-SEM-2: a script-level return may end the cell before a plain
+// definition, which is then not sure: the earlier value stays.
+test("MATLAB page order: a return before the definition keeps the earlier value", async () => {
+  const eff = effective(["x = 1;", "if true\n  return\nend\nx = 2;", "fprintf('%d\\n', x)", "return\nx = 3;", "fprintf('%d\\n', x)"]);
+  assert.ok(eff[1].pageOrder && eff[3].pageOrder, JSON.stringify(eff));
+  const run = await session();
+  let out = "", err = "";
+  for (const e of eff) { const r = await run(e); out += r.out; err += r.err; }
+  assert.equal(err, "");
+  assert.equal(out, "1\n1\n");
+  assert.match(matlabToPython(eff[3].code, "<cell>", { cell: true, pageOrder: eff[3].pageOrder }), new RegExp(`if "x${S}2" in globals\\(\\): x${S}3 = _m\\.cp\\(x${S}2\\)`));
+});

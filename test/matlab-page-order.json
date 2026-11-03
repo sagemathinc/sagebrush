@@ -129,6 +129,16 @@
     "fprintf('%d %d\\n', a, b)"
    ],
    "out": "3 30\n"
+  },
+  {
+   "name": "a variable after a function of the same name",
+   "cells": [
+    "function r = f(x)\n  r = x + 1;\nend",
+    "fprintf('%d\\n', f(1))",
+    "f = [10 20];",
+    "fprintf('%d\\n', f(1))"
+   ],
+   "out": "2\n10\n"
   }
  ]
 }

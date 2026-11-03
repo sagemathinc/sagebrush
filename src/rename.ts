@@ -1613,9 +1613,12 @@ function magmaRename(source: string, name: string, to: string, opts: { from?: "a
 // MATLAB: as Magma, an inert comment at the end and the renames beside the
 // code (src/matlab.ts applies them at the top level).  Refused: code that
 // names variables at run time (clear, eval, exist, who, load, assignin, global,
-// ...: src/matlab.ts MATLAB_DYNAMIC_NAMES), and ans, which every expression sets.
+// ...: src/page-order.ts MATLAB_DYNAMIC_NAMES), ans, which every expression
+// sets, and a cell defining a function of that name (page order renames
+// variables only: MATPO-SEM-1).
 function matlabRename(source: string, name: string, to: string, opts: { from?: "all" | "definition"; before?: string }): string | null {
   if (MATLAB_DYNAMIC_NAMES.test(source) || name === "ans") return null;
+  if (MAGMA_NAME.test(name) && new RegExp(`^[ \\t]*function\\b[^\\n%]*?(?:=\\s*|\\s)${name}\\s*(?:\\(|$|[;,%\\n])`, "m").test(source)) return null;
   const before = opts.before ?? name;
   if (!MAGMA_NAME.test(name) || !magmaScoped(to, name) || (opts.from === "definition" && before !== name && !magmaScoped(before, name))) return null;
   const mode = opts.from === "definition" ? `definition ${before}` : "all";

@@ -977,6 +977,8 @@ class Emitter {
   // before it surely sets it starts TO as a copy of BEFORE (needsInit)
   pageOrder = new Map<string, { to: string; mode: "definition" | "all"; before: string; seenDef: boolean; needsInit: boolean }>();
   private depth = 0;
+  // (a script-level return seen: what follows it may not run, so no later definition is sure, MATPO-SEM-2)
+  private mayReturn = false;
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
@@ -1000,7 +1002,7 @@ class Emitter {
     if (scope.fn || scope.anon) return;
     const r = this.pageOrder.get(name);
     if (!r || r.mode !== "definition" || r.seenDef) return;
-    if (plain && this.depth === 1) r.seenDef = true;
+    if (plain && this.depth === 1 && !this.mayReturn) r.seenDef = true;
     else r.needsInit = true;
   }
   indent(f: () => void) {
@@ -1242,7 +1244,10 @@ class Emitter {
       case "continue": this.emit("continue"); return;
       case "return":
         if (scope.fn) this.emit(`return ${this.retExpr(scope.fn)}`);
-        else this.emit("raise _m.ScriptReturn()");
+        else {
+          this.mayReturn = true;
+          this.emit("raise _m.ScriptReturn()");
+        }
         return;
       case "global":
         for (const n of s.names) {
@@ -1811,6 +1816,8 @@ export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?
   if (po.size && MATLAB_DYNAMIC_NAMES.test(src)) throw new PageOrderError("the cell names variables at run time");
   const p = new Parser(lex(src));
   const stmts = p.program();
+  // (a function the cell defines is bound by its own name: page order renames variables only, MATPO-SEM-1)
+  if (p.functions.some((f) => po.has(f.name))) throw new PageOrderError("the cell defines a function of that name");
   const em = new Emitter(p.functions, filename, !!opts.cell);
   for (const [name, d] of po) em.pageOrder.set(name, { ...d, seenDef: false, needsInit: false });
   return em.program(stmts, src);
