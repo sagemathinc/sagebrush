@@ -16,6 +16,7 @@ import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex } from "../web/latex/engine/render.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
@@ -29,7 +30,13 @@ const PAGES_MAX = 60;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
-const HELP = `sagebrush latex: check and see a .tex file as Sagebrush's LaTeX editor shows it
+const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaTeX editor shows it
+
+  sagebrush latex run FILE.tex [--timeout SECONDS] [--json]
+      Run the document's SageTeX code (sagesilent, sageblock, \\sage{}, \\sageplot{}) in order, in one Sage
+      session here, and keep the results beside it in FILE.tex.results.json: check and render show them
+      (a result counts while its item and every item before it are unchanged). The code runs in the file's
+      folder, so it can read and write files there. An item that fails stops the rest. Exits 1 if one failed.
 
   sagebrush latex check FILE.tex [--json]
       What the preview can't show or found wrong, each with its line number: unsupported commands and
@@ -46,16 +53,17 @@ Look at the PNGs after every change: they are what the reader sees.
 `;
 
 /** `sagebrush latex ...`: the exit code. */
-export async function latexCommand(argv: string[]): Promise<number> {
+export async function latexCommand(argv: string[], opts: { cli?: string } = {}): Promise<number> {
   const cmd = argv[0];
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") { process.stdout.write(HELP); return cmd === undefined ? 2 : 0; }
-  if (cmd !== "check" && cmd !== "render") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check or render)\n\n${HELP}`); return 2; }
+  if (cmd !== "check" && cmd !== "render" && cmd !== "run") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check, run or render)\n\n${HELP}`); return 2; }
   const args = argv.slice(1);
-  let file: string | null = null, out: string | null = null, png: string | null = null, json = false;
+  let file: string | null = null, out: string | null = null, png: string | null = null, json = false, timeout = 120;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") json = true;
     else if ((a === "-o" || a === "--out") && cmd === "render") { out = args[++i] ?? null; if (out === null) return usage(`${a} needs a file name`); }
+    else if (a === "--timeout" && cmd === "run") { timeout = Number(args[++i]); if (!(timeout > 0 && timeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
     else if (a === "--png" && cmd === "render") { png = args[++i] ?? null; if (png === null) return usage("--png needs a folder"); }
     else if (a.startsWith("-")) return usage(`unknown option ${a}`);
     else if (file === null) file = a;
@@ -69,6 +77,7 @@ export async function latexCommand(argv: string[]): Promise<number> {
     if (st.size > TEX_MAX) return fail(`${file}: ${st.size} bytes, over the ${TEX_MAX} this reads`);
     text = readFileSync(file, "utf8");
   } catch (e: any) { return fail(`${file}: ${e?.code === "ENOENT" ? "no such file" : e?.message ?? e}`); }
+  if (cmd === "run") return runCommand(file, text, timeout, json, opts.cli);
   const { result, html } = renderTex(file, text);
   if (cmd === "check") {
     if (json) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -125,10 +134,147 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
     if ("url" in got) { images[name] = got.url; imgReport.push({ name, found: true, path: got.path }); }
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
-  const r = new Engine({ images }).update(text, { cold: true });
+  // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
+  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true });
+  const states = r.sageStates as State[];
   const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
-    sage: (r.sageItems as any[]).map((it) => ({ mode: String(it.mode), err: it.err ?? null })) }, imgReport);
+    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
   return { result, html: pageHtml(basename(file), r.chunks.join("\n"), !!r.beamer) };
+}
+
+// ---- running the code: `sagebrush latex run`
+
+/** The results file of a .tex: beside it, FILE.tex.results.json. */
+export const resultsPath = (file: string) => join(dirname(file), basename(file) + ".results.json");
+export const RESULTS_FORMAT = "sagebrush-latex-results";
+const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000;
+type State = { key: string; s: "ok" | "error" | "blocked"; latex?: string; src?: string; msg?: string };
+
+/** The results file's states, or [] if there is none or it isn't one (never trusted beyond its shape). */
+function readResults(file: string): State[] {
+  const p = resultsPath(file);
+  try {
+    if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return [];
+    const j = JSON.parse(readFileSync(p, "utf8"));
+    if (j?.format !== RESULTS_FORMAT || j.version !== 1 || j.wrapper !== WRAPPER_VERSION || !Array.isArray(j.items)) return [];
+    return j.items.filter((x: any) => x && typeof x.key === "string" && ["ok", "error", "blocked"].includes(x.s)).map((x: any) => ({
+      key: x.key, s: x.s, ...(typeof x.latex === "string" ? { latex: x.latex } : {}), ...(typeof x.src === "string" ? { src: x.src } : {}), ...(typeof x.msg === "string" ? { msg: x.msg.slice(0, MSG_MAX) } : {}),
+    }));
+  } catch { return []; }
+}
+
+// the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
+// latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
+// session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
+const DRIVER = `import json, io, sys, traceback
+from sagebrush.preparse import preparse as _sbtx_pp
+_sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
+with open(_sbtx_in) as _sbtx_f:
+    _sbtx_items = json.load(_sbtx_f)
+_sbtx_g = dict(globals())
+_sbtx_out = []
+_sbtx_failed = False
+for _sbtx_it in _sbtx_items:
+    if _sbtx_failed:
+        _sbtx_out.append({"s": "blocked"})
+        continue
+    _sbtx_buf = io.StringIO()
+    _sbtx_old = sys.stdout
+    sys.stdout = _sbtx_buf
+    try:
+        _sbtx_code = _sbtx_pp(_sbtx_it["code"])
+        if _sbtx_it["mode"] == "sage":
+            _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
+        elif _sbtx_it["mode"] == "plot":
+            _sbtx_v = eval(_sbtx_code, _sbtx_g)
+            if not hasattr(_sbtx_v, "_repr_svg_"):
+                raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
+            _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+        else:
+            exec(_sbtx_code, _sbtx_g)
+            _sbtx_r = {"s": "ok"}
+    except BaseException:
+        _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
+        _sbtx_failed = True
+    finally:
+        sys.stdout = _sbtx_old
+    _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX}:]
+    _sbtx_out.append(_sbtx_r)
+    with open(_sbtx_outp, "w") as _sbtx_f:
+        json.dump(_sbtx_out, _sbtx_f)
+`;
+
+/** The session's own last words: its stderr's last lines, without the runtime's version line. */
+const sessionError = (err: string) => err.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() && !/^(Node\.js|Bun) v[0-9.]+/.test(l.trim())).slice(-4).join("\n");
+/** The command line of this sagebrush in Sage mode, to run the session in (the bundle that loaded this file). */
+function sageCommand(cli: string | undefined): string[] | null {
+  if (!cli || !existsSync(cli)) return null;
+  return [process.execPath, cli, "--sage"];
+}
+
+async function runCommand(file: string, text: string, timeout: number, json: boolean, cli: string | undefined): Promise<number> {
+  const items = new Engine({}).update(text, { cold: true }).sageItems as any[];
+  const report = (o: any, code: number) => { if (json) process.stdout.write(JSON.stringify(o, null, 2) + "\n"); return code; };
+  if (!items.length) {
+    if (!json) process.stdout.write(`${file}: no SageTeX code to run\n`);
+    return report({ file, items: [], results: null }, 0);
+  }
+  const cmd = sageCommand(cli);
+  if (!cmd) return fail("can't find this sagebrush's own bundle to run the code in");
+  const tmp = mkdtempSync(join(tmpdir(), "sb-latex-run-"));
+  const runnable = items.map((it) => (it.err ? null : { mode: it.mode, code: it.code }));
+  // (only the items up to the first refused one are run: a refused item fails, and stops the rest, as in the page)
+  const firstBad = runnable.findIndex((x) => x === null);
+  const toRun = (firstBad < 0 ? runnable : runnable.slice(0, firstBad)) as { mode: string; code: string }[];
+  writeFileSync(join(tmp, "items.json"), JSON.stringify(toRun));
+  writeFileSync(join(tmp, "driver.sage"), DRIVER);
+  const outp = join(tmp, "out.json");
+  const t0 = Date.now();
+  const done = await new Promise<{ code: number | null; timedOut: boolean; err: string }>((res) => {
+    const p = spawn(cmd[0], [...cmd.slice(1), join(tmp, "driver.sage"), join(tmp, "items.json"), outp], { cwd: dirname(resolve(file)), stdio: ["ignore", "ignore", "pipe"] });
+    let err = "", timedOut = false;
+    p.stderr!.on("data", (d) => { if (err.length < 16384) err += d; });
+    const t = setTimeout(() => { timedOut = true; p.kill("SIGKILL"); }, timeout * 1000);
+    p.on("close", (code) => { clearTimeout(t); res({ code, timedOut, err }); });
+    p.on("error", (e) => { clearTimeout(t); res({ code: -1, timedOut, err: e.message }); });
+  });
+  let got: any[] = [];
+  try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
+  rmSync(tmp, { recursive: true, force: true });
+  const states: State[] = [];
+  let failed = false;
+  // (a traceback without the session script's own frames: the item's code is the "<string>" one)
+  const msgOf = (x: any) => {
+    const lines = String(x?.msg ?? "").split("\n"), out: string[] = [];
+    for (let i = 0; i < lines.length; i++) { if (/^\s*File ".*driver\.sage", line \d+/.test(lines[i])) { if (/^\s{4,}\S/.test(lines[i + 1] ?? "") && !/^\s*File /.test(lines[i + 1])) i++; continue; } out.push(lines[i]); }
+    return out.join("\n").slice(-MSG_MAX);
+  };
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k], key = itemKey(it), g = got[k];
+    if (failed) { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); continue; }
+    if (it.err) { states.push({ key, s: "error", msg: "this item can't be run (" + it.err + ")" }); failed = true; continue; }
+    if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
+    if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
+    if (g.s === "blocked") { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); failed = true; continue; }
+    if (it.mode === "sage") {
+      const l = String(g.latex ?? "");
+      if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; }
+      states.push({ key, s: "ok", latex: l });
+    } else if (it.mode === "plot") {
+      const svg = String(g.svg ?? "");
+      if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : "the plot isn't an SVG" }); failed = true; continue; }
+      states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64") });
+    } else states.push({ key, s: "ok" });
+  }
+  const rp = resultsPath(file);
+  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states }) + "\n");
+  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
+  const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
+  if (!json) {
+    process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
+    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: SageTeX item ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item failed"}\n`);
+  }
+  return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
 }
 
 // ---- the page
