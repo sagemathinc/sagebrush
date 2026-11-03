@@ -3,7 +3,9 @@
 // notebook, MATLAB's built-ins in a MATLAB one, and says there is no search in
 // a Python one); a function's examples are inserted only into a notebook of
 // its language, never switching it; choosing another language for a notebook
-// with code asks first, and cancelling keeps the language.
+// with code asks first, and cancelling keeps the language. The agents'
+// search_docs tool (WebMCP) finds every language's functions, whatever the
+// notebook's, marking those of another language.
 //   bun web/build.ts && python3 web/serve.py 8765 &   node web/test-doclang.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
@@ -64,6 +66,8 @@ const mode = () => ev("window.sagebrush.notebook.mode");
 try {
   await send("Runtime.enable");
   await send("Page.enable");
+  // (the page's WebMCP tools, kept as it registers them: a stand-in for the browser's navigator.modelContext)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "Object.defineProperty(navigator, 'modelContext', { value: { registerTool(t) { (window.__sbTools ??= {})[t.name] = t; } } });" });
   await send("Page.navigate", { url });
   await until("!!window.sagebrush?.notebook");
   await sleep(500);
@@ -144,6 +148,24 @@ try {
   const out = await ev(`[...document.querySelectorAll(".cell .out")].map((o) => o.textContent).join(" | ")`);
   check(/array\(\[0\.\s+, 0\.25, 0\.5 , 0\.75, 1\.\s+\]\)/.test(out) && !/Error/.test(out), "and it runs there: " + JSON.stringify(out.slice(0, 120)));
   await ev(`(() => { const i = document.querySelector("#docsearch"); i.value = ""; return 1; })()`);
+
+  // the agents' search_docs: every language's functions, whatever the notebook's (agent simulation run 2)
+  const tool = (args) => ev(`window.__sbTools.search_docs.execute(${JSON.stringify(args)}).then((r) => ({ err: !!r.isError, text: r.content.map((c) => c.text).join("\\n") }))`);
+  check(await mode() === "python", "(a Python notebook for the tool's checks)");
+  let r = await tool({ query: "prime_range" });
+  check(/^prime_range\(.*\)  \[Sage\]/m.test(r.text) && /This notebook is Python/.test(r.text) && /sage=true \(Sage\)/.test(r.text), "in a Python notebook, search_docs finds a Sage function, marked [Sage]: " + JSON.stringify(r.text.slice(0, 160)));
+  r = await tool({ query: "minimal polynomial" });
+  check(/minimal_polynomial/.test(r.text), "and Sage's minimal_polynomial: " + JSON.stringify(r.text.slice(0, 120)));
+  r = await tool({ query: "linspace" });
+  check(/^numpy\.linspace\(/m.test(r.text.split("\n")[0]) && !/^numpy\.linspace\(.*\[Python\]/m.test(r.text), "the notebook's own language's results are first and unmarked: " + JSON.stringify(r.text.slice(0, 120)));
+  r = await tool({ query: "prime_range", language: "python" });
+  check(!/prime_range/.test(r.text) && !r.err, "language narrows the search to one index: " + JSON.stringify(r.text.slice(0, 80)));
+  r = await tool({ query: "prime_range", language: "fortran" });
+  check(r.err && /No documentation search for "fortran"/.test(r.text), "an unknown language is an error naming the choices: " + JSON.stringify(r.text.slice(0, 120)));
+  answer = true;
+  await choose("sage");
+  r = await tool({ query: "linspace" });
+  check(/numpy\.linspace\(.*\)  \[Python\]/.test(r.text) && /sage=false \(Python\)/.test(r.text), "in a Sage notebook, it finds NumPy's, marked [Python]: " + JSON.stringify(r.text.slice(0, 160)));
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill();
