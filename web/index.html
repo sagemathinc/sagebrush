@@ -440,7 +440,6 @@
   <hr>
   <button role="menuitem" id="addmd" title="Add a Markdown (text) cell at the end">+ Text cell<kbd>M</kbd></button>
   <button role="menuitem" id="restart" title="A fresh interpreter; the outputs stay, marked stale">Restart interpreter</button>
-  <button role="menuitem" id="filesperm" title="Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)">Don't allow file changes</button>
   <hr>
   <button role="menuitem" id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
@@ -771,7 +770,10 @@ const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
 const perms = createPermissions();
 // (a document whose code can't change files never runs in a plain worker, which has this page's network: its interpreter
 // is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
-const NEEDS_RUNNER = "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (⋯) to run it in this page's own interpreter.\n";
+const NEEDS_RUNNER = window.__TAURI__
+  // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
+  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
+  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
 class RefusingWorker {
   constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
   postMessage(m) {
@@ -1250,6 +1252,10 @@ async function resumeFrom(srcId, at) {
   h.close();
   // the history up to the next version (with the journal of that time)
   const id = newId();
+  // (a copy of the person's own session: its source's permission to change files, as Save a copy's (a source that
+  // can't change files, by its provenance or the person's don't-allow, gives a copy that can't either))
+  perms.provenance(srcId, await provenanceOf(srcId, "browser"));
+  madeAs.set(id, perms.may(srcId, "files") ? "person" : "elsewhere");
   const rows = (await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([srcId, ""], [srcId, "\uffff"])))) ?? [];
   await idb(hdb, "history", "readwrite", (st) => {
     let r = null;
@@ -1673,6 +1679,9 @@ const madeAs = new Map();
 // (a notebook's provenance as the host keeps it: its workspace entry's `made` (absent: unknown, elsewhere); the local
 // server's, a disk file's, a remote one's: elsewhere)
 async function provenanceOf(id, kind) {
+  // (the app: a notebook file the person opened from their own disk, by the open dialog or a file association, is
+  // their own, as in Jupyter on one's own computer (@sagebrush's ruling on #563, Nov 3); a remote one stays elsewhere)
+  if (kind === "file" && window.__TAURI__ && /^file:/.test(id)) return "person";
   if (kind !== "browser") return "elsewhere";
   try {
     const w = await wsNow(), p = w && (await w.pathOf("notebook", id)), e = p && (await w.stat(p));
@@ -1681,11 +1690,12 @@ async function provenanceOf(id, kind) {
 }
 // The files permission of the notebook shown (permissions.js): the bar, shown at a refused change, and ⋯'s item; both
 // set the one record, and only from the person's own (isTrusted) click
-const filesBarEl = $("#filesbar"), filesPermEl = $("#filesperm");
+const filesBarEl = $("#filesbar");
 function filesBar(on) { filesBarEl.hidden = !on || !current.id || perms.may(current.id, "files"); }
 function filesShown() {
   const on = !!current.id && perms.may(current.id, "files");
-  filesPermEl.textContent = on ? "Don't allow file changes" : "Allow file changes";
+  const fp = document.getElementById("filesperm"); // (the File menu's, drawn again with it)
+  if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
   if (on) filesBarEl.hidden = true;
 }
 // (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
@@ -1696,7 +1706,6 @@ const setFiles = (e, on) => {
   return false;
 };
 $("#filesallow").onclick = (e) => { if (setFiles(e, true)) statusEl.textContent = "Changes allowed for this notebook: run the cell again"; };
-filesPermEl.onclick = (e) => setFiles(e, !(current.id && perms.may(current.id, "files")));
 // (a change of it reaches that document's interpreter at once: its next write; one that may no longer change files
 // never keeps a plain worker (a fresh interpreter, in the sandbox, or none); one allowed whose interpreter was the
 // refusing one, a fresh one)
@@ -1830,7 +1839,7 @@ async function openDiskFile(path) {
     const { dir, sep, name } = splitPath(path);
     nb.flush();
     if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
-    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode)); }
+    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode), false, "person"); }
     // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
     diskFiles = [];
     let total = 0;
@@ -2491,12 +2500,16 @@ function drawFileMenu() {
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
+      { after: "share", key: "filesperm", label: "Don't allow file changes", title: "Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
+  fileMenu.querySelector('[data-f="filesperm"]').id = "filesperm";
+  filesShown();
 }
 // (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
 function openEntry(e, how = "here") {
@@ -2627,6 +2640,8 @@ fileMenu.addEventListener("click", async (e) => {
   if (!b || b.dataset.group || b.disabled || !b.dataset.f) return;
   toggleFileMenu(false);
   switch (b.dataset.f) {
+    // (the person's own click only: setFiles checks isTrusted)
+    case "filesperm": setFiles(e, !(current.id && perms.may(current.id, "files"))); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;

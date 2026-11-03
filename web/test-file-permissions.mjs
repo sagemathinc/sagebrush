@@ -5,7 +5,7 @@
 //     write, mkdir, remove, rename and replace each raise PermissionError, /tmp's writes don't; the workspace is unchanged
 //     and the page shows "This notebook wants to change files";
 //   - a synthetic click on Allow changes nothing; the person's own (trusted) click does, and the cell run again writes;
-//   - the person's own notebook writes; ⋯ "Don't allow file changes" (trusted) makes its writes refused, a run in
+//   - the person's own notebook writes; File "Don't allow file changes" (trusted) makes its writes refused, a run in
 //     flight at its next write; "Allow file changes" makes them work again; an explicit "don't allow" survives a reopen;
 //   - a change queued before "don't allow" isn't kept; a change the page didn't ask for (a forged fsChanged) isn't kept;
 //   - a notebook that can't change files never runs in a plain worker (?runner=0): it says why; one that can, runs;
@@ -160,8 +160,8 @@ try {
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
   await runAll();
   check(await until(`${W}.stat("/own-1.txt").then((e) => !!e)`, 30000), "…it writes: /own-1.txt");
-  await trusted("#morebtn");
-  check(/Don't allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "⋯ offers Don't allow file changes");
+  await trusted("#filebtn");
+  check(/Don't allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File offers Don't allow file changes");
   await trusted("#filesperm");
   check((await files()) === false, "…the person's own click: it can't change files now");
   await setCode("try:\n    open('own-2.txt', 'w').write('x'); print('W2')\nexcept PermissionError as e:\n    print('REFUSED', e)");
@@ -172,8 +172,8 @@ try {
   await go(base + "?nb=" + encodeURIComponent(ownId));
   await sleep(800);
   check((await files()) === false, "…the person's choice survives a reopen (an explicit don't-allow beats the own-notebook default)");
-  await trusted("#morebtn");
-  check(/^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "⋯ now offers Allow file changes");
+  await trusted("#filebtn");
+  check(/^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File now offers Allow file changes");
   await trusted("#filesperm");
   check((await files()) === true, "…which allows them again");
   await setCode("open('own-3.txt', 'w').write('x'); print('W3')");
@@ -183,10 +183,10 @@ try {
   await setCode("import time\nh = open('flight.txt', 'w')\nfor i in range(40):\n    try:\n        h.write('x'); h.flush(); print('w', i, flush=True)\n    except PermissionError:\n        print('refused at', i); break\n    time.sleep(0.25)");
   await ev("(sagebrush.notebook.runAll(), 1)");
   await until("/w 3/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
-  await trusted("#morebtn");
+  await trusted("#filebtn");
   await trusted("#filesperm");
   check(await until("/refused at \\d+/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 20000), "a run in flight is refused at its next write once file changes aren't allowed, through a file it opened before: " + (await out()).trim().split("\n").slice(-1)[0]);
-  await trusted("#morebtn");
+  await trusted("#filebtn");
   await trusted("#filesperm");
   check((await files()) === true, "(allowed again)");
   // (a change still queued when file changes stop being allowed: not kept)
@@ -195,7 +195,7 @@ try {
   await runAll();
   await until("/Q/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
   await until("sagebrush.files.queue().paths > 0", 10000);
-  await trusted("#morebtn");
+  await trusted("#filebtn");
   await trusted("#filesperm");
   await ev("(window.__release(), 1)");
   await sleep(1500);
@@ -203,7 +203,7 @@ try {
 
   // ---- past the queue's own check (held there): "don't allow" before it is kept; the workspace's admission refuses
   const VS = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then(async (e) => e ? [e.fid, e.size ?? null, (await ${W}.history(${JSON.stringify(p)}).catch(() => [])).length].join(":") : "none", () => "err")`);
-  const allowOwn = async () => { if (!(await files())) { await trusted("#morebtn"); await trusted("#filesperm"); } };
+  const allowOwn = async () => { if (!(await files())) { await trusted("#filebtn"); await trusted("#filesperm"); } };
   const taken = () => until("sagebrush.files.queue().draining && sagebrush.files.queue().paths === 0", 20000);
   const lateCase = async (code, revoke) => {
     await allowOwn();
@@ -212,7 +212,7 @@ try {
     await runAll();
     await until("/L/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
     await taken(); await sleep(500);
-    if (revoke) { await trusted("#morebtn"); await trusted("#filesperm"); }
+    if (revoke) { await trusted("#filebtn"); await trusted("#filesperm"); }
     await ev("(window.__go(), 1)");
     await until("!sagebrush.files.queue().draining", 20000); await sleep(800);
   };
@@ -257,7 +257,7 @@ try {
 
   // ---- "don't allow" when storage can't keep it: in effect, and said
   await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-permissions") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);
-  await trusted("#morebtn");
+  await trusted("#filebtn");
   await trusted("#filesperm");
   check((await files()) === false && /couldn't keep the choice/.test(await ev("document.querySelector('#status').textContent")), "\"don't allow\" with storage refusing it: in effect anyway, and the page says it couldn't keep it: " + (await ev("document.querySelector('#status').textContent")).slice(0, 140));
   await setCode("try:\n    open('unkept.txt', 'w').write('x'); print('W')\nexcept PermissionError:\n    print('REFUSED')");
@@ -282,7 +282,7 @@ try {
     await runAll();
     await until("/F/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
     await taken(); await sleep(500);
-    if (revoke) { await trusted("#morebtn"); await trusted("#filesperm"); }
+    if (revoke) { await trusted("#filebtn"); await trusted("#filesperm"); }
     await ev("(window.__go(), 1)");
     await until("!sagebrush.files.queue().draining", 20000); await sleep(800);
   };

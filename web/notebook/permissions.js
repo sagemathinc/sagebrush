@@ -5,7 +5,7 @@
 //            entry's `made: "person"`, which the host keeps and never reads from the document, a file or a URL) and for
 //            one the page made from its own bundled examples ("host"); off for any other (a remote URL, a share link,
 //            an upload, a copy of one, provenance unknown, the local server's, a disk file's). The person changes it
-//            with a trusted click (the bar's "Allow changes for this notebook", ⋯ "Allow / Don't allow file changes"),
+//            with a trusted click (the bar's "Allow changes for this notebook", File "Allow / Don't allow file changes"),
 //            kept per document here, and an explicit setting beats the default, a reopen included.
 //   network  may reach the network: off for every document; nothing reads it yet (there is no network path today).
 // Checked where a change is made: the interpreter's file layer (web/shims/fs.ts), the page as it keeps a change
