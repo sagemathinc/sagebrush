@@ -118,9 +118,32 @@ async function fetchBounded(url: string, max: number, o: { fetch: typeof fetch; 
   return out;
 }
 
+/** What the decompressor gave for the last member inflated: bytes read from it, before the read stopped (the tests'
+ * check that a member claiming a small size is never inflated past it: astra's A1-ZIP-1). */
+export const inflated = { bytes: 0 };
+
+/** A deflated member, inflated a chunk at a time: the reading stops, and the decompressor is cancelled, as soon as it
+ * gives more than `size` bytes (the size its header says, already counted against the whole ZIP's bound). */
 async function inflateRaw(data: Uint8Array, size: number): Promise<Uint8Array> {
-  const out = new Uint8Array(await new Response(new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
-  if (out.length !== size) throw invalid("a ZIP member's size isn't what its header says");
+  const reader = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const out = new Uint8Array(size);
+  let n = 0;
+  inflated.bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      inflated.bytes += value.length;
+      if (n + value.length > size) throw invalid("a ZIP member inflates past the size its header says");
+      out.set(value, n);
+      n += value.length;
+    }
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    if (e instanceof ExampleError) throw e;
+    throw invalid(`a ZIP member doesn't inflate: ${(e as Error)?.message ?? e}`);
+  }
+  if (n !== size) throw invalid("a ZIP member's size isn't what its header says");
   return out;
 }
 
@@ -185,6 +208,7 @@ class Taken extends Error {}
  * and every file created in it, each creation checking, holding the lock, that the folders it goes into are the ones
  * this copy made. Returns the folder, every entry made and main's (open it only now: the last file is written).
  */
+// (`progress`: called, and awaited, between creations, never holding the workspace's lock)
 export async function copyExample(ws: Workspace, id: string, o: { catalog: Catalog; base?: string; fetch?: typeof fetch; signal?: AbortSignal; folder?: string; progress?(made: number, of: number): void | Promise<void> }): Promise<{ root: string; made: Entry[]; main: Entry }> {
   const { entry, files } = await fetchExample(id, o);
   // (each file's contents as create() takes them, converted as upload converts: before anything is made)
@@ -229,6 +253,7 @@ export async function copyExample(ws: Workspace, id: string, o: { catalog: Catal
       if (f.path === entry.main) main = e;
       await o.progress?.(i + 1, files.length);
     }
+    // (main is set: filesProblems checked it is one of the files, and every file was created)
     return { root, made, main: main! };
   } catch (e) {
     if (e instanceof ExampleError) throw e;

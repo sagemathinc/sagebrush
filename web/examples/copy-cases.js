@@ -70,6 +70,40 @@ export async function run() {
   const esc = await C.copyExample(ws, "notebook/escape-title", { catalog });
   check(/^\/Examples\/[^/]+$/.test(esc.root) && !esc.root.split("/").includes("..") && esc.made.every((e) => e.path.startsWith(esc.root)), "a title with slashes and dots: one folder under /Examples, everything inside it: " + esc.root);
 
+  // ---- A1-ZIP-1 (astra): a member claiming 1 byte that inflates to 8 MiB is refused after at most one chunk past 1 byte
+  {
+    const raw = new Uint8Array(8 * 1024 * 1024);
+    const def = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+    const name = enc.encode("bomb.txt");
+    const h = new Uint8Array(30 + name.length), v = new DataView(h.buffer);
+    v.setUint32(0, 0x04034b50, true); v.setUint16(4, 20, true); v.setUint16(8, 8, true);
+    v.setUint32(18, def.length, true); v.setUint32(22, 1, true); v.setUint16(26, name.length, true);
+    h.set(name, 30);
+    const z = new Uint8Array(h.length + def.length);
+    z.set(h);
+    z.set(def, h.length);
+    let err = null;
+    try {
+      await C.unzip(z, 2 * 1024 * 1024);
+    } catch (e) {
+      err = e;
+    }
+    check(err?.code === "invalid" && /inflates past the size its header says/.test(err.message), `a ${def.length}-byte member claiming 1 byte that inflates to 8 MiB is refused: ${err?.message}`);
+    check(C.inflated.bytes > 0 && C.inflated.bytes <= 256 * 1024, `and the decompressor was read for at most one chunk (${C.inflated.bytes} bytes), never the 8 MiB`);
+    // (and a member that inflates to less than it says)
+    new DataView(z.buffer).setUint32(22, 9 * 1024 * 1024, true);
+    err = null;
+    try {
+      await C.unzip(z, 16 * 1024 * 1024);
+    } catch (e) {
+      err = e;
+    }
+    check(err?.code === "invalid" && /size isn't what its header says/.test(err.message), "a member that inflates to less than its header says is refused: " + err?.message);
+    // (a valid deflated member still comes back whole)
+    const ok = await C.unzip(z.slice(), 0).catch((e) => e);
+    check(ok instanceof C.ExampleError && /unpacks to more than 0/.test(ok.message), "the whole ZIP's bound is applied before any inflating: " + ok?.message);
+  }
+
   // ---- A2: create-only into a reserved root
   // (an existing root: never reused, its files byte-identical)
   await ws.mkdir("/Examples/Pair");
