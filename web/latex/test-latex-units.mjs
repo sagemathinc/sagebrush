@@ -344,7 +344,7 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
     const res = { id: ex.id, outcome: r.stats.outcome, unknown: r.stats.unknownCommands, notFinished: (h.match(/not finished/g) || []).length, sage: r.sageItems.length, images: r.imageRefs, missing };
     record.push(res);
     let ok = res.outcome === "ok" && res.unknown === 0 && res.notFinished === 0 && missing.length === 0;
-    if (ex.id === "sagetex") ok &&= res.sage === 6;
+    if (ex.id === "sagetex") ok &&= res.sage === 8;
     if (ex.id === "figure") {
       const png = ex.files.find(([n]) => n === "plot.png");
       const sn = png && sniffImage(Uint8Array.from(atob(png[1]), (c) => c.charCodeAt(0)));
