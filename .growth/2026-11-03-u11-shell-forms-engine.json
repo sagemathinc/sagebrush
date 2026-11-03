@@ -1,13 +1,13 @@
 {
  "v": 1,
- "reason": "U11 engine PR: x = !cmd, !!cmd, %sx, %system lowered (src/magic-syntax.ts); lib/_pyjs_shell.py (var_expand, SList, ShellError family; sagebrush.shell re-exports it); lib/_pyjs_magic.py routes to it. Re-measured with bun 1.4.4 (size-record.sh) on master 6a27119a vs head f3ab854e: cli/lib.gen.js +3400, cli/pyjs.cjs +5825, engine/lib/mod-pyjs-magic.src +960, engine/lib/sage-more.src +478, engine/sagebrush-analyze.js +900, engine/sagebrush-notebook.js +47, engine/sagebrush-worker.js +1200; no other row moves. Markers: exact, except cli/pyjs.cjs 5857 (+5825 measured, plus 32 B of margin, as it moves with master). New bundle engine/lib/mod-pyjs-shell.src (lib/_pyjs_shell.py), authorized by its budgets.json row (epoch 6893, ceiling 7582 = epoch + floor(epoch/10)). Ceilings raised to head + 64: mod-pyjs-magic.src 24994 -> 25237, sage-more.src 375956 -> 376434 (lib/sagebrush/shell.py).",
+ "reason": "U11 engine PR: x = !cmd, !!cmd, %sx, %system lowered (src/magic-syntax.ts); lib/_pyjs_shell.py (var_expand, SList, ShellError family; sagebrush.shell re-exports it); lib/_pyjs_magic.py routes to it. Re-measured with bun 1.4.4 (size-record.sh) on master a71886ae vs head 52ec14de: cli/lib.gen.js +3440, cli/pyjs.cjs +6908, engine/lib/mod-pyjs-magic.src +960, engine/lib/sage-more.src +478, engine/sagebrush-analyze.js +1023, engine/sagebrush-notebook.js +47, engine/sagebrush-worker.js +1784; no other row moves. Markers: exact, except cli/pyjs.cjs 6940 (+6908 measured, plus 32 B of margin, as it moves with master). New bundle engine/lib/mod-pyjs-shell.src (lib/_pyjs_shell.py), authorized by its budgets.json row (epoch 6953, ceiling 7648 = epoch + floor(epoch/10)). Ceilings raised to head + 64: mod-pyjs-magic.src 24994 -> 25237, sage-more.src 375956 -> 376434 (lib/sagebrush/shell.py).",
  "bytes": {
-  "cli/lib.gen.js": 3400,
-  "cli/pyjs.cjs": 5857,
+  "cli/lib.gen.js": 3440,
+  "cli/pyjs.cjs": 6940,
   "engine/lib/mod-pyjs-magic.src": 960,
   "engine/lib/sage-more.src": 478,
-  "engine/sagebrush-analyze.js": 900,
+  "engine/sagebrush-analyze.js": 1023,
   "engine/sagebrush-notebook.js": 47,
-  "engine/sagebrush-worker.js": 1200
+  "engine/sagebrush-worker.js": 1784
  }
 }
