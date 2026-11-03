@@ -17,8 +17,10 @@ import {
   census,
   committedOutputs,
   committedPreview,
-  FONTS_MARK,
+  fontsMark,
   leaks,
+  notebookFormProblem,
+  previewMarkProblem,
   listExamples,
   manifestProblems,
   normalizeOutputs,
@@ -229,12 +231,18 @@ test("committed outputs (r4.1): an image keeps its text/plain, not its interacti
   assert.deepEqual(committedOutputs(undefined), []);
 });
 
-test("committed previews (r4.1): KaTeX's shared stylesheet as a marker, exactly one; the rest the render's bytes", () => {
+test("committed previews (r4.1): KaTeX's shared stylesheet as a marker naming its sha256; the marker checked", () => {
   const css = "@font-face{font-display:block;font-family:KaTeX_AMS;src:url(data:font/woff2;base64,AAAA)}.katex{x:1}";
   const page = `<!doctype html><style>${css}</style>\n<style>.tex-page{}</style><p>$x$</p>`;
-  assert.deepEqual(committedPreview(page), { html: `<!doctype html>${FONTS_MARK}\n<style>.tex-page{}</style><p>$x$</p>`, fonts: css });
+  const h = sha256(css);
+  assert.deepEqual(committedPreview(page), { html: `<!doctype html>${fontsMark(h)}\n<style>.tex-page{}</style><p>$x$</p>`, fonts: css });
   assert.equal(committedPreview("<p>none</p>").fonts, null);
   assert.equal(committedPreview(`<style>${css}</style><style>${css}</style>`).fonts, null, "two: neither is taken for the shared one");
+  const committed = committedPreview(page).html;
+  assert.equal(previewMarkProblem(committed, h), null);
+  assert.match(previewMarkProblem(committed, sha256(css + " ")), /names a stylesheet .* that isn't examples\/shared\/katex-preview\.css/);
+  assert.match(previewMarkProblem(committed, null), /katex-preview\.css is missing/);
+  assert.match(previewMarkProblem(committed + fontsMark(h), h), /2 shared-stylesheet markers, not 1/);
 });
 
 test("sizes (section 5, r4.1): a notebook's sources without its outputs; its outputs at most 1 MB", () => {
@@ -250,6 +258,17 @@ test("sizes (section 5, r4.1): a notebook's sources without its outputs; its out
   assert.deepEqual(sizeProblems(dir, m), [], "600 KB of outputs: within the outputs' limit, not counted as sources");
   writeFileSync(join(dir, "main.ipynb"), JSON.stringify(nb(1100 * 1024), null, 1) + "\n");
   assert.match(sizeProblems(dir, m).join(), /its outputs: \d+ bytes, more than 1048576/);
+  // (minified, the same outputs measure the same: the canonical form, not the file's formatting; daybreak3 r4.1-1)
+  writeFileSync(join(dir, "main.ipynb"), JSON.stringify(nb(1100 * 1024)));
+  assert.match(sizeProblems(dir, m).join(), /its outputs: \d+ bytes, more than 1048576/, "minified");
+  // (the case a file-size difference missed: 1.05 MB of outputs beside a source whose pretty form has ~120 KB more
+  // whitespace than its minified one, read minified: file size minus the pretty source came to under 1 MB)
+  const nested = nb(1050 * 1024);
+  nested.metadata = { a: new Array(30000).fill(0) };
+  writeFileSync(join(dir, "main.ipynb"), JSON.stringify(nested));
+  assert.match(sizeProblems(dir, m).join(), /its outputs: \d+ bytes, more than 1048576/, "minified, with a nested source");
+  assert.match(notebookFormProblem(JSON.stringify(nb(1))), /not in the runner's form/);
+  assert.equal(notebookFormProblem(JSON.stringify(nb(1), null, 1) + "\n"), null);
   const big = nb(0);
   big.cells[0].source = "#".repeat(210 * 1024);
   writeFileSync(join(dir, "main.ipynb"), JSON.stringify(big, null, 1) + "\n");
@@ -385,6 +404,17 @@ test("the runner fails a changed output, an error, a hang (killed at the deadlin
   r = run(["validate", "--root", root]);
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /board\/hello: main: a \.board\.json needs "format": "sagebrush-board"/);
+  // (a stylesheet that isn't the corpus's one copy: validate refuses the markers, the run the render; daybreak3 r4.1-2)
+  const shared = join(root, "shared", "katex-preview.css");
+  const css = readFileSync(shared, "utf8");
+  writeFileSync(shared, css.replace("font-display:block", "font-display:swap"));
+  r = run(["validate", "--root", root]);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout + r.stderr, /latex\/article: preview\.html's marker names a stylesheet .* that isn't examples\/shared\/katex-preview\.css/);
+  r = run(["run", "latex/article", "--root", root]);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /the render's KaTeX stylesheet .* isn't examples\/shared\/katex-preview\.css/);
+  writeFileSync(shared, css);
   writeFileSync(join(root, "latex", "article", "preview.html"), "<p>stale</p>");
   r = run(["run", "latex/article", "--root", root]);
   assert.equal(r.status, 1);

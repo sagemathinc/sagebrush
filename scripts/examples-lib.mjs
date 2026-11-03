@@ -88,7 +88,8 @@ const ENGINE = [
   /^pnpm-lock\.yaml$/,
 ];
 const BOARD = [/^web\/board\//, /^packages\/sagebrush-board\//];
-const LATEX = [/^web\/latex\//, /^src\/latex-cli\.ts$/];
+// (examples/shared/: the LaTeX previews' shared stylesheet)
+const LATEX = [/^web\/latex\//, /^src\/latex-cli\.ts$/, /^examples\/shared\//];
 export const EXAMPLE_PATH =
   /^examples\/(notebook|board|latex)\/([a-z0-9]+(?:-[a-z0-9]+)*)\//;
 
@@ -332,8 +333,10 @@ export function filesJson(dir, m) {
 }
 
 /**
- * An example's size problems (plan section 5). A notebook's committed outputs are its preview, not its sources:
- * the source limits count the notebook as it is without them, and its outputs have their own limit (r4.1).
+ * An example's size problems (plan section 5). A notebook's committed outputs are its preview, not its sources
+ * (r4.1): both are measured on their canonical (minified JSON) form, not on the file's formatting. The sources are
+ * the notebook without its outputs, under the file and total limits; the outputs, every code cell's, have their own.
+ * (validate also requires the file in the runner's own form: notebookFormProblem)
  */
 export function sizeProblems(dir, m) {
   const p = [];
@@ -345,13 +348,9 @@ export function sizeProblems(dir, m) {
     if (/\.ipynb$/.test(f)) {
       try {
         const nb = JSON.parse(readFileSync(join(dir, f), "utf8"));
-        const bare = {
-          ...nb,
-          cells: (nb.cells ?? []).map((c) => (c.cell_type === "code" ? { ...c, outputs: [] } : c)),
-        };
-        const k = Buffer.byteLength(JSON.stringify(bare, null, 1) + "\n");
-        outputs += Math.max(0, n - k);
-        n = k;
+        const cells = nb.cells ?? [];
+        for (const c of cells) if (c.cell_type === "code") outputs += Buffer.byteLength(JSON.stringify(c.outputs ?? []));
+        n = Buffer.byteLength(JSON.stringify({ ...nb, cells: cells.map((c) => (c.cell_type === "code" ? { ...c, outputs: [] } : c)) }));
       } catch {}
     }
     total += n;
@@ -364,17 +363,42 @@ export function sizeProblems(dir, m) {
   return p;
 }
 
+/** Why a committed notebook's text isn't the runner's own form (JSON.stringify(nb, null, 1) and a newline), or null. */
+export function notebookFormProblem(text) {
+  let nb;
+  try {
+    nb = JSON.parse(text);
+  } catch (err) {
+    return `not JSON: ${err.message}`;
+  }
+  return text === JSON.stringify(nb, null, 1) + "\n"
+    ? null
+    : "not in the runner's form (node scripts/examples.mjs run ID --update writes it)";
+}
+
 /**
  * The committed form of a LaTeX preview (r4.1): `latex render` inlines KaTeX's stylesheet with its fonts, the same
- * 369 KB in every preview; the committed preview.html holds an empty marker in its place, and the site puts the one
- * shared copy back (`fonts`, from the same render). Everything else is the render's bytes.
+ * 369 KB in every preview. The corpus keeps one copy, examples/shared/katex-preview.css (SHARED_CSS), and each
+ * committed preview.html holds a marker naming that copy's sha256 in its place; everything else is the render's
+ * bytes. The runner checks each render's stylesheet against the copy, validate each marker, and the site puts the
+ * copy back where its marker is (PR 3).
  */
-export const FONTS_MARK = '<style data-sagebrush-shared="katex"></style>';
+export const SHARED_CSS = "shared/katex-preview.css";
+export const fontsMark = (sha) => `<style data-sagebrush-shared="katex" data-sha256="${sha}"></style>`;
+export const FONTS_MARK_RE = /<style data-sagebrush-shared="katex" data-sha256="([0-9a-f]{64})"><\/style>/g;
 const KATEX_STYLE = /<style>(@font-face\{font-display:block;font-family:KaTeX_[^<]*)<\/style>/g;
 export function committedPreview(html) {
   const found = [...html.matchAll(KATEX_STYLE)];
   if (found.length !== 1) return { html, fonts: null };
-  return { html: html.replace(found[0][0], FONTS_MARK), fonts: found[0][1] };
+  const fonts = found[0][1];
+  return { html: html.replace(found[0][0], () => fontsMark(sha256(fonts))), fonts };
+}
+/** Why a committed preview's markers don't name the corpus's shared stylesheet (exactly one, its sha256), or null. */
+export function previewMarkProblem(html, sharedSha) {
+  const marks = [...html.matchAll(FONTS_MARK_RE)];
+  if (marks.length !== 1) return `preview.html has ${marks.length} shared-stylesheet markers, not 1`;
+  if (sharedSha === null) return `examples/${SHARED_CSS} is missing (node scripts/examples.mjs run ID --update writes it)`;
+  return marks[0][1] === sharedSha ? null : `preview.html's marker names a stylesheet (${marks[0][1].slice(0, 12)}) that isn't examples/${SHARED_CSS} (${sharedSha.slice(0, 12)})`;
 }
 
 /**

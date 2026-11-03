@@ -23,6 +23,7 @@ import { spawn } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -40,6 +41,9 @@ import {
   committedOutputs,
   committedPreview,
   folderFiles,
+  notebookFormProblem,
+  previewMarkProblem,
+  SHARED_CSS,
   leaks,
   listExamples,
   manifestProblems,
@@ -67,6 +71,7 @@ const arg = (argv, name, dflt) => {
 function validate(root) {
   const tags = JSON.parse(readFileSync(join(root, "tags.json"), "utf8"));
   const problems = [];
+  const sharedSha = existsSync(join(root, SHARED_CSS)) ? sha256(readFileSync(join(root, SHARED_CSS))) : null;
   for (const e of listExamples(root)) {
     if (!ID.test(e.id) || e.slug.length > SLUG_MAX)
       problems.push(
@@ -85,6 +90,16 @@ function validate(root) {
       problems.push(`${e.id}: ${p}`);
     for (const p of sizeProblems(e.dir, e.manifest))
       problems.push(`${e.id}: ${p}`);
+    // (a notebook in the runner's own form, so its sizes are what they are; a preview whose marker names the
+    // corpus's one shared stylesheet: r4.1)
+    if (e.kind === "notebook" && /\.ipynb$/.test(e.manifest.main ?? "") && existsSync(join(e.dir, e.manifest.main))) {
+      const why = notebookFormProblem(readFileSync(join(e.dir, e.manifest.main), "utf8"));
+      if (why) problems.push(`${e.id}: ${e.manifest.main}: ${why}`);
+    }
+    if (e.kind === "latex" && existsSync(join(e.dir, "preview.html"))) {
+      const why = previewMarkProblem(readFileSync(join(e.dir, "preview.html"), "utf8"), sharedSha);
+      if (why) problems.push(`${e.id}: ${why}`);
+    }
     // (a .board.json is the current format, which `board check` checks; without its header the runner
     // would take it for an older board)
     if (e.kind === "board" && /\.board\.json$/.test(e.manifest.main ?? "")) {
@@ -316,7 +331,20 @@ export async function runExample(root, id, { update = false } = {}) {
           problems.push(`latex render: ${r.killed ? "killed" : tail(r.err)}`);
         else {
           const { html: page, fonts } = committedPreview(readFileSync(html, "utf8"));
+          // (the corpus's one copy of the stylesheet: each render's must be it, byte for byte; --update writes it)
+          const sharedFile = join(root, SHARED_CSS);
           if (!fonts) problems.push("latex render: not one KaTeX stylesheet to share (scripts/examples-lib.mjs committedPreview)");
+          else if (update && !problems.length) {
+            if (!existsSync(sharedFile) || readFileSync(sharedFile, "utf8") !== fonts) {
+              mkdirSync(dirname(sharedFile), { recursive: true });
+              writeFileSync(sharedFile, fonts);
+            }
+          } else if (!existsSync(sharedFile))
+            problems.push(`examples/${SHARED_CSS} is missing (node scripts/examples.mjs run ${id} --update writes it)`);
+          else if (readFileSync(sharedFile, "utf8") !== fonts)
+            problems.push(
+              `the render's KaTeX stylesheet (${sha256(fonts).slice(0, 12)}) isn't examples/${SHARED_CSS} (${sha256(readFileSync(sharedFile)).slice(0, 12)}): --update rewrites it, and then every LaTeX preview`,
+            );
           const got = Buffer.from(page);
           if (update && !problems.length)
             writeFileSync(join(e.dir, "preview.html"), got);
