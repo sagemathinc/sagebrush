@@ -522,16 +522,21 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
 /** The browser started headless with its DevTools on a port of its choosing, or why it didn't start. */
 async function launch(browser: string, profile: string, extra: string[]): Promise<{ proc: ChildProcess; port: number } | { why: string }> {
   const proc = spawn(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: "ignore" });
+    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  // (the browser's own last words, its stderr's last 2 KB, kept for every "why" below: a start that fails in CI
+  //  then says what the browser said, not only that it failed; read for its whole life, so it never blocks on a full pipe)
+  let said = "";
+  proc.stderr?.on("data", (d) => { said = (said + d).slice(-2048); });
+  const tail = () => (said.trim() ? `; it said: ${said.trim().slice(-2048)}` : "");
   let exited: string | null = null;
   proc.on("exit", (c, s) => { exited = `the browser (${browser}) exited (${s ?? c}) before it could take the pictures`; });
   proc.on("error", (e) => { exited = `the browser (${browser}) didn't start: ${e.message}`; });
   const portFile = join(profile, "DevToolsActivePort");
   for (let i = 0; i < 300; i++) {
-    if (exited) return { why: exited };
+    if (exited) { await sleep(100); return { why: exited + tail() }; }
     if (existsSync(portFile)) { const port = parseInt(readFileSync(portFile, "utf8").split("\n")[0], 10) || 0; if (port) return { proc, port }; }
     await sleep(100);
   }
   proc.kill();
-  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` };
+  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` + tail() };
 }
