@@ -105,7 +105,9 @@ ok(out.includes("274177 * 67280421310721"), "offline, Python and the engines run
 out = await runCode("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))");
 ok(out.includes("[1, 2]"), "offline, a library module imported online (its chunk fetched lazily then) imports: " + JSON.stringify(out));
 out = await runCode("import _matlab_sparse");
-ok(/could not load the Python library's matlab modules/.test(out), "offline, a module of a part never fetched is an error saying so: " + JSON.stringify(out.slice(0, 300)));
+// (the server is down but the browser isn't told it is offline: the error says the fetch failed, not "offline", plan-b8-offline
+// §10; the offline wording, with navigator.onLine false, is web/test-offline.mjs's)
+ok(/Could not fetch the Python library's matlab modules/.test(out) && !/offline/.test(out), "offline (the server down), a module of a part never fetched is an error saying so: " + JSON.stringify(out.slice(0, 300)));
 ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok, () => false)`), "offline, the documentation index used online is served");
 ok(await ev(`fetch("docs-index-magma.json").then(() => "served", () => "refused")`) === "refused", "offline, a documentation index never used is not there (a fetch error, as for any file offline)");
 // offline, a rewritten worker is not served (it would run without the server to correct it)
@@ -159,9 +161,31 @@ await send("Network.enable");
 {
   const sw = readFileSync(join(here, "dist", "sw.js"), "utf8"), m = /const DIGESTS = (\{.*?\});\n/s.exec(sw), sh = /const SHELL = (\[.*?\]);\n/s.exec(sw);
   const paths = m ? Object.keys(JSON.parse(m[1])) : [], shell = sh ? JSON.parse(sh[1]).length : Infinity;
-  const got = await ev(`Promise.all(${JSON.stringify(paths)}.map((p) => fetch(p).then((r) => [p, r.status, r.headers.get("x-content-type-options")], () => [p, 0, null])))`);
-  const served = got.filter(([, st]) => st === 200), lacking = served.filter(([, , n]) => n !== "nosniff").map(([p]) => p);
-  ok(paths.length > 0 && served.some(([p]) => p === "./") && served.length >= shell && lacking.length === 0, `offline, every kept file the service worker serves says nosniff (G-3b): ${served.length} of ${paths.length} served (the shell: ${shell}), ${lacking.length} without it` + (lacking.length ? ": " + JSON.stringify(lacking.slice(0, 5)) : ""));
+  // (at most 32 at a time, each body read to its end and checked against its digest before the next starts: the
+  // service worker holds a served body's bytes until it is read, and admits at most 64 waiters, plan-b8-offline §14 S3)
+  const digests = m ? JSON.parse(m[1]) : {};
+  const got = await ev(`(async () => {
+    const paths = ${JSON.stringify(paths)}, want = ${JSON.stringify(Object.fromEntries(Object.entries(digests).map(([p, d]) => [p, d.sha256])))}, out = [];
+    let next = 0;
+    const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+    await Promise.all(Array.from({ length: 32 }, async () => {
+      while (next < paths.length) {
+        const p = paths[next++];
+        let r = null;
+        try {
+          r = await fetch(p);
+          const body = await r.arrayBuffer();
+          out.push([p, r.status, r.headers.get("x-content-type-options"), r.status !== 200 || hex(await crypto.subtle.digest("SHA-256", body)) === want[p]]);
+        } catch {
+          try { await r?.body?.cancel(); } catch {}
+          out.push([p, 0, null, true]);
+        }
+      }
+    }));
+    return out;
+  })()`);
+  const served = got.filter(([, st]) => st === 200), lacking = served.filter(([, , n]) => n !== "nosniff").map(([p]) => p), wrong = served.filter(([, , , good]) => !good).map(([p]) => p);
+  ok(paths.length > 0 && served.some(([p]) => p === "./") && served.length >= shell && lacking.length === 0 && wrong.length === 0, `wrong bytes: ${JSON.stringify(wrong)}; offline, every kept file the service worker serves says nosniff (G-3b): ${served.length} of ${paths.length} served (the shell: ${shell}), ${lacking.length} without it` + (lacking.length ? ": " + JSON.stringify(lacking.slice(0, 5)) : ""));
 }
 // (the same answer to a fetch from this page: the service worker's offline
 // fallback, deterministic: refused, or the build's own response)
@@ -178,13 +202,15 @@ for (const [what, init] of [["without its security headers", { headers: { "Conte
 }
 ok(await putPage({ headers: { "Content-Type": "text/html" } }), "(the page's kept copy: its bytes, without its security headers)");
 let seen = await openTab("/");
-ok(!(seen.loaded && !seen.isolated) && (await pageDropped()), "offline, the page is never served without its headers (cross-origin isolation, policy), and the entry is dropped: " + JSON.stringify(seen));
+// (plan-b8-offline §14 S1, astra's ruling: the right bytes under the page's key are kept and served with the build's
+// status and headers only; a kept copy's own headers are never served)
+ok(!(seen.loaded && !seen.isolated), "offline, the page is never served without its headers (cross-origin isolation, policy): " + JSON.stringify(seen));
 ok(await putPage({ status: 302, headers: { Location: "/redirect-proof" } }), "(the page's kept copy: its bytes, as a redirect)");
 seen = await openTab("/");
 ok(!/redirect-proof/.test(seen.went ?? "") && !/redirect-proof/.test(seen.href ?? "") && (await pageDropped()), "offline, a kept redirect is not followed, and the entry is dropped: " + JSON.stringify(seen));
 ok(await putPage({ headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }), "(the page's kept copy: its bytes, with a Refresh)");
 seen = await openTab("/");
-ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (await pageDropped()), "offline, a kept Refresh is not followed, and the entry is dropped: " + JSON.stringify(seen));
+ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (!seen.loaded || seen.isolated), "offline, a kept Refresh is not followed (the page served with the build's headers only): " + JSON.stringify(seen));
 ws.close(); cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);

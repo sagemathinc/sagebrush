@@ -19,6 +19,8 @@ export interface ToolTarget {
   images: Record<string, string | { why: string }>;
   /** The page's own styles (style.ts PAGE_CSS), for the pictures. */
   css: string;
+  /** Read the code's saved results again (a `sagebrush latex run` may have written them since). */
+  refresh?: () => Promise<void>;
 }
 
 const DEFAULT_SHOTS = 12;
@@ -40,6 +42,7 @@ const NONE = "No LaTeX document is open in this page: open a .tex file first.";
 
 /** The preview of the source as it is now: waits for the reply (and its patch) to an edit made just before. */
 async function settled(t: ToolTarget, ms = 15000): Promise<boolean> {
+  await t.refresh?.();
   const t0 = performance.now();
   while (performance.now() - t0 < ms) {
     if (t.current() && t.lastCheck()) return true;
