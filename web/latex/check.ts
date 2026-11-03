@@ -9,14 +9,15 @@ export interface CheckResult {
   frames: { n: number; title: string; line: number | null }[];
   problems: Problem[];
   images: ImageReport[];
-  code: { n: number; mode: string; state: string }[];
+  code: { n: number; mode: string; line: number | null; state: string }[];
 }
 /** The engine's result, as render.mjs gives it (and the worker passes on). */
 export interface EngineCheck {
   outcome: string; beamer: boolean;
   problems: { kind: string; name: string; at: number }[];
   frames: { n: number; title: string; at: number }[];
-  sage: { mode: string; err?: string | null }[];
+  /** The code items in order: refused (err), and their state if they were run (s: ok, error, blocked; msg). */
+  sage: { mode: string; err?: string | null; at?: number; s?: string; msg?: string }[];
 }
 
 /** The line (1-based) of a source offset, or null for none. */
@@ -52,8 +53,18 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
     problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
   }
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
-  const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), state: it.err ? `refused: ${it.err}` : "not run" }));
-  if (code.length) problems.push({ severity: "warning", kind: "code", name: String(code.length), line: null, message: `${code.length} SageTeX item${code.length === 1 ? " is" : "s are"} shown but not run by the preview` });
+  // (the code items: one refused or failed is an error at its line; one blocked by an earlier failure, a warning;
+  //  those not run yet, one warning saying how to run them)
+  const last = (m?: string) => String(m ?? "").split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
+  const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
+    state: it.err ? `refused: ${it.err}` : it.s === "ok" ? "ok" : it.s === "error" ? `error: ${last(it.msg)}` : it.s === "blocked" ? "blocked" : "not run" }));
+  let notRun = 0;
+  for (const c of code) {
+    if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
+    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) wasn't run: an earlier item failed` });
+    else if (c.state === "not run") notRun++;
+  }
+  if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} SageTeX item${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
   problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),
