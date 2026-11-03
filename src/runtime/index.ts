@@ -764,7 +764,9 @@ B.builtins.__pyjs_locals__ = Obj.builtin(() => raise(T.RuntimeError, "__pyjs_loc
 // which a call's guard compares with, not the builtins' names, which code
 // can rebind (CORR-FBF-3)
 const originalBuiltins: any = Object.create(null);
-for (const n of ["globals", "locals", "__pyjs_globals__", "__pyjs_locals__", "vars", "dir", "eval", "exec", "tuple", "list", "set", "frozenset", "sum", "any", "all", "sorted", "min", "max", "range"]) originalBuiltins[n] = B.builtins[n];
+for (const n of ["globals", "locals", "vars", "dir", "eval", "exec", "tuple", "list", "set", "frozenset", "sum", "any", "all", "sorted", "min", "max", "range"]) originalBuiltins[n] = B.builtins[n];
+// (and the shell forms' spellings of globals() and locals(): src/magic-syntax.ts)
+for (const n of ["__pyjs_globals__", "__pyjs_locals__"]) originalBuiltins[n] = B.builtins[n];
 Object.freeze(originalBuiltins);
 
 // ------------------------------------------------------------------ classes
