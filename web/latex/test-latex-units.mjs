@@ -375,6 +375,28 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("gate-reply-other-revision", g.accept({ doc: t.doc, rev: t.rev }).patch && !g.accept({ doc: t.doc, rev: t.rev }).current && !g.accept({ doc: a.doc, rev: a.rev }).patch, null);
 }
 
+// ---- our stylesheets never style KaTeX's own classes (William, Nov 2: $n \neq 0$ with its slash below the "="; the
+// preview's .rlap rule, for LaTeX's \rlap, also matched the .rlap KaTeX builds \not from): the classes the real KaTeX
+// emits for math touching its boxes, against every class the preview's, the print and the standalone CSS select
+{
+  const { default: katex } = await import("katex");
+  const { PAGE_CSS } = await import("./style.ts");
+  const { readFileSync } = await import("node:fs");
+  const literal = (file, name) => readFileSync(new URL(file, import.meta.url), "utf8").match(new RegExp("const " + name + " = `([^`]*)`"))?.[1] ?? "";
+  const css = [PAGE_CSS, literal("./page.ts", "PRINT_CSS"), literal("../../src/latex-cli.ts", "STANDALONE_CSS")];
+  const math = String.raw`a \neq b \not\in \notin \not= \not\subset \nleq \ne \boxed{x} \fbox{y} \cancel{x} \sout{x} \xrightarrow{a} \overbrace{ab}^c \sqrt[3]{x} \frac12 \binom{a}{b} \left(\frac ab\right) \widehat{xy} \vec v \overline{x} \colorbox{red}{x} \fcolorbox{red}{blue}{x} \mathbb{R} \text{hi} \operatorname{sp} \sum_{i=1}^n \int_0^1 \rlap{x} \llap{y} \mathrlap{z} \clap{z} \phantom{x} \smash{y} \raisebox{2pt}{x} \rule{1em}{1pt} \tag{1} \begin{matrix}a&b\\c&d\end{matrix} \begin{array}{|c|}a\\\hline b\end{array} \begin{cases}a\\b\end{cases} \begin{aligned}a&=b\\&=c\end{aligned} \stackrel{a}{=} \hspace{1em} \quad`;
+  const emitted = new Set();
+  for (const displayMode of [false, true]) for (const m of katex.renderToString(math, { displayMode, throwOnError: false, strict: false }).matchAll(/class="([^"]*)"/g)) for (const c of m[1].split(/\s+/)) if (c) emitted.add(c);
+  const selected = new Set(css.flatMap((s) => [...s.replace(/\{[^}]*\}/g, "{}").matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1])));
+  // (the wrappers on purpose: .katex's size and color, .katex-display's margins, .katex-error's color)
+  const allowed = new Set(["katex", "katex-display", "katex-error"]);
+  const clash = [...emitted].filter((c) => selected.has(c) && !allowed.has(c));
+  check("css-not-katex-classes", emitted.has("rlap") && emitted.has("fbox") && selected.has("tex-rlap") && clash.length === 0, { clash, emitted: emitted.size });
+  // (and the renderer's own boxes use the prefixed classes)
+  const h = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\rlap{a}\\llap{b}\\fbox{c}\\framebox[2cm]{d}\n\\end{document}\n").chunks.join("");
+  check("tex-boxes-prefixed", /class="tex-rlap"/.test(h) && /class="tex-llap"/.test(h) && /class="tex-fbox"/.test(h) && !/class="(fbox|rlap|llap)[ "]/.test(h), h.slice(0, 600));
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);
