@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "import * message in Sagebrush's words, with the module's name and the way forward (src/dataflow.ts importStarMessage; board-run.ts and notebook.js show it as it is), William's report of 'marimo' in it. Measured with bun 1.4.4 (size-record.sh) on master d2324372 vs this PR's content head 5ad01126: cli/pyjs.cjs +1533, engine/sagebrush-analyze.js +689, engine/sagebrush-worker.js +689 (engine/sagebrush-notebook.js shrinks 77 B); no other row moves.",
+ "reason": "import * message in Sagebrush's words, with the module's name and the way forward (src/dataflow.ts importStarMessage; board-run.ts and notebook.js show it as it is), William's report of 'marimo' in it. Re-measured with bun 1.4.4 (size-record.sh) on master 6764c4d2 vs head 6e9ff00e: cli/pyjs.cjs +1541, engine/sagebrush-analyze.js +689, engine/sagebrush-worker.js +689; no other row moves. (pyjs marker 1573: measured +1541 and 32 B of margin, as pyjs moves with master; notebook.js shrinks 77 B, no marker.)",
  "bytes": {
-  "cli/pyjs.cjs": 1533,
+  "cli/pyjs.cjs": 1573,
   "engine/sagebrush-analyze.js": 689,
   "engine/sagebrush-worker.js": 689
  }
