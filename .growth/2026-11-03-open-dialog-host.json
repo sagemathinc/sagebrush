@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "File ▸ Open…'s file browser gets the page's host, as the sidebar's has (run 7, X05: its Storage panel had no export, and a folder named there kept \"New folder\"), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge on master b4b44579d (pyjs +88).",
+ "reason": "File ▸ Open…'s file browser gets the page's host, as the sidebar's has (run 7, X05: its Storage panel had no export, and a folder named there kept \"New folder\"), and the Storage panel's text on clearing (William, Nov 3), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge on master f3c531fc4 (pyjs +336).",
  "bytes": {
-  "cli/pyjs.cjs": 100
+  "cli/pyjs.cjs": 400
  }
 }
