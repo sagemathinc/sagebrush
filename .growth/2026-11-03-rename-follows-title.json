@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Rename follows the title (William's B2): the notebook page's rename of a `sagebrush notebook DIR` file (api/rename in src/notebook.ts, the free-name loop, the address and caption), and the board page's rename of a board's file on a title edit, in the pages and server the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +2645).",
+ "bytes": {
+  "cli/pyjs.cjs": 2700
+ }
+}
