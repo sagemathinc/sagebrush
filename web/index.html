@@ -2546,7 +2546,7 @@ fileMenu.addEventListener("click", async (e) => {
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
-    case "open": if (ws) openFilesDialog(ws, (e, how) => openEntry(e, how), () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined)); else await showOpen(); break;
+    case "open": if (ws) openFilesDialog(ws, (e, how) => openEntry(e, how), () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined), wsBrowserHost()); else await showOpen(); break;
     case "duplicate": {
       saveNow();
       const name = prompt("Save a copy of this notebook as", docName() + " (copy)");
@@ -3472,6 +3472,108 @@ const wsSidebar = $("#wssidebar"), wsFilesBtn = $("#wsfilesbtn");
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
+// (what a file browser needs from this page: the sidebar's and File ▸ Open…'s alike, so both offer the same (the Storage
+// panel's export, upload, Open as, and the fences of a rename or a Move to Trash of what is open here); each adds its
+// own open and close.  Run 7 (X05): Open…'s file browser had none of it, so its Storage panel had no export)
+function wsBrowserHost() {
+  return {
+    ws,
+    current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
+    upload: (files, folder) => uploadHere(files, folder),
+    openAs: (e, as) => openAs(e, as),
+    // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
+    exportUrl: (f) => new URL(f, location.href).href,
+    saveOpen: async () => { saveNow(); await nb.saved(); },
+    // (the open notebook renamed here: a typed title's rename not yet made
+    // is dropped, and its name follows, as if typed)
+    renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
+    // (a Move to Trash of what is open here has settled: its own hold released, if it took one; a navigation that
+    // waited is told what went (#447 r5c))
+    trashDone(gate, moved) { gate?.release?.(moved); },
+    // (the open notebook, or a folder it is in, going to Trash from the file browser (B1). Fenced until it is closed
+    // (astra's R2 on #447): read-only here meanwhile, and every edit counted; saved until a save ends with no edit
+    // after it, the same notebook still the one open here and still this page's to change (else refused, nothing
+    // moved); then another opened in its place, the most recent one not going with it, else a new Untitled; then
+    // whatever is open must not be inside what goes; and the saves of any edit that slipped in before the switch,
+    // awaited: if one fails, this notebook is opened again and nothing moves. Open for editing in another tab of
+    // this browser: refused, said)
+    async trashing(e) {
+      if (current.kind !== "browser") return;
+      const id = current.id, inside = (p) => p === e.path || p.startsWith(e.path.replace(/\/$/, "") + "/");
+      const same = () => current.kind === "browser" && current.id === id;
+      const crossTab = "this notebook is open for editing in another tab of this browser: close it there, then try again.";
+      if (!pageMay().trash) return crossTab;
+      // (one at a time: another Move to Trash of what is open here still settling (#447 r5c, R5-OWNER-3))
+      if (hold) return "another move to Trash is under way here.";
+      let edits = 0;
+      const offs = [nb.on("dirty", () => edits++), nb.on("change", () => edits++)];
+      nb.setReadOnly(true);
+      try {
+        let others = [];
+        for (let round = 0; ; round++) {
+          const seen = edits;
+          try {
+            saveNow();
+            await nb.saved();
+            if (trashTest.pause) await trashTest.pause("saved");
+            await nb.mayLeave();
+            others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id && !inside(x.path));
+          } catch (err) { return `its changes couldn't be saved (${err?.message ?? err}).`; }
+          if (!same()) return "another notebook was opened here meanwhile, so nothing was moved.";
+          if (!pageMay().trash) return crossTab;
+          if (edits === seen) break;
+          if (round >= 3) return "it kept changing while it was being saved (is a cell running?), so nothing was moved.";
+        }
+        try { if (others.length) await openId(others[0].ref, { expect: id }); else await openNew("Untitled", nb.mode, [""], true, { expect: id }); }
+        catch (err) { return err?.navWon ? "another notebook was opened here meanwhile, so nothing was moved." : `another notebook couldn't be opened in its place (${err?.message ?? err}).`; }
+        wsTrackCurrent();
+        if (trashTest.pause) await trashTest.pause("switched");
+        if (same()) return "it is still open.";
+        const now = current.kind === "browser" ? await ws.pathOf("notebook", current.id).catch(() => undefined) : undefined;
+        if (now && inside(now)) return `"${nameOf(now)}" is open here and inside it, so nothing was moved.`;
+        if (trashTest.pause) await trashTest.pause("checked");
+        try { await nb.saved(); }
+        catch (err) { await openId(id).catch(() => {}); return `its last changes couldn't be saved (${err?.message ?? err}), so it was opened again.`; }
+        // (and checked again by the workspace itself, holding its lock (no other tab's change can follow until the
+        // move is published): no navigation under way and no other hold, then this page's navigation held, then the
+        // notebook open here looked up NOW, which must not be what goes or inside it; and asked again right before
+        // the move publishes.  The hold is released by trashDone, once the move has settled (#447 r5c))
+        let tok = null, pinned = null;
+        const holding = () => !!tok && hold === tok && switches === 0 && current.kind === "browser" && current.id === pinned;
+        return {
+          still: async () => {
+            if (switches > 0 || hold || current.kind !== "browser") return false;
+            pinned = current.id;
+            const mine = (tok = holdNav());
+            if (trashTest.pause) await trashTest.pause("lookup");
+            const now = await ws.pathOf("notebook", pinned).catch(() => undefined);
+            const ok = holding() && !(now && inside(now));
+            if (!ok) mine.release();
+            return ok;
+          },
+          recheck: holding,
+          ...(trashTest.pause ? { pause: async (stage) => { await trashTest.pause?.(stage); } } : {}),
+          release: (moved) => tok?.release(moved),
+        };
+      } finally {
+        for (const off of offs) off();
+        // (as showWriter leaves it; another notebook opened meanwhile has had its own set by open())
+        if (same()) nb.setReadOnly(!!pageMay().readOnly || !!ws?.quarantined || docSyncNeedsReload);
+      }
+    },
+    // (and saved by the notebook, after what it has yet to save: CORR-0B0-2)
+    retitles: (e) => e.kind === "notebook" && e.ref === current.id && current.kind === "browser",
+    renamed(e) {
+      if (e.kind === "notebook" && e.ref === current.id) {
+        const base = splitExt(nameOf(e.path))[0];
+        nbName.value = base;
+        nb.setMeta({ name: base });
+        document.title = `${base} — Sagebrush`;
+      }
+      wsTrackCurrent();
+    },
+  };
+}
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
@@ -3479,8 +3581,7 @@ function wsShowFiles(on) {
   try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
-      ws,
-      current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
+      ...wsBrowserHost(),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
         if (how === "tab") return void window.open(url, "_blank", "noopener");
@@ -3495,100 +3596,7 @@ function wsShowFiles(on) {
         }
         else { saveNow(); location.assign(url); }
       },
-      upload: (files, folder) => uploadHere(files, folder),
-      openAs: (e, as) => openAs(e, as),
       close: () => wsShowFiles(false),
-      // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
-      exportUrl: (f) => new URL(f, location.href).href,
-      saveOpen: async () => { saveNow(); await nb.saved(); },
-      // (the open notebook renamed here: a typed title's rename not yet made
-      // is dropped, and its name follows, as if typed)
-      renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
-      // (a Move to Trash of what is open here has settled: its own hold released, if it took one; a navigation that
-      // waited is told what went (#447 r5c))
-      trashDone(gate, moved) { gate?.release?.(moved); },
-      // (the open notebook, or a folder it is in, going to Trash from the file browser (B1). Fenced until it is closed
-      // (astra's R2 on #447): read-only here meanwhile, and every edit counted; saved until a save ends with no edit
-      // after it, the same notebook still the one open here and still this page's to change (else refused, nothing
-      // moved); then another opened in its place, the most recent one not going with it, else a new Untitled; then
-      // whatever is open must not be inside what goes; and the saves of any edit that slipped in before the switch,
-      // awaited: if one fails, this notebook is opened again and nothing moves. Open for editing in another tab of
-      // this browser: refused, said)
-      async trashing(e) {
-        if (current.kind !== "browser") return;
-        const id = current.id, inside = (p) => p === e.path || p.startsWith(e.path.replace(/\/$/, "") + "/");
-        const same = () => current.kind === "browser" && current.id === id;
-        const crossTab = "this notebook is open for editing in another tab of this browser: close it there, then try again.";
-        if (!pageMay().trash) return crossTab;
-        // (one at a time: another Move to Trash of what is open here still settling (#447 r5c, R5-OWNER-3))
-        if (hold) return "another move to Trash is under way here.";
-        let edits = 0;
-        const offs = [nb.on("dirty", () => edits++), nb.on("change", () => edits++)];
-        nb.setReadOnly(true);
-        try {
-          let others = [];
-          for (let round = 0; ; round++) {
-            const seen = edits;
-            try {
-              saveNow();
-              await nb.saved();
-              if (trashTest.pause) await trashTest.pause("saved");
-              await nb.mayLeave();
-              others = (await recentOpened(ws, { kind: "notebook", ref: id })).filter((x) => x.kind === "notebook" && x.ref !== id && !inside(x.path));
-            } catch (err) { return `its changes couldn't be saved (${err?.message ?? err}).`; }
-            if (!same()) return "another notebook was opened here meanwhile, so nothing was moved.";
-            if (!pageMay().trash) return crossTab;
-            if (edits === seen) break;
-            if (round >= 3) return "it kept changing while it was being saved (is a cell running?), so nothing was moved.";
-          }
-          try { if (others.length) await openId(others[0].ref, { expect: id }); else await openNew("Untitled", nb.mode, [""], true, { expect: id }); }
-          catch (err) { return err?.navWon ? "another notebook was opened here meanwhile, so nothing was moved." : `another notebook couldn't be opened in its place (${err?.message ?? err}).`; }
-          wsTrackCurrent();
-          if (trashTest.pause) await trashTest.pause("switched");
-          if (same()) return "it is still open.";
-          const now = current.kind === "browser" ? await ws.pathOf("notebook", current.id).catch(() => undefined) : undefined;
-          if (now && inside(now)) return `"${nameOf(now)}" is open here and inside it, so nothing was moved.`;
-          if (trashTest.pause) await trashTest.pause("checked");
-          try { await nb.saved(); }
-          catch (err) { await openId(id).catch(() => {}); return `its last changes couldn't be saved (${err?.message ?? err}), so it was opened again.`; }
-          // (and checked again by the workspace itself, holding its lock (no other tab's change can follow until the
-          // move is published): no navigation under way and no other hold, then this page's navigation held, then the
-          // notebook open here looked up NOW, which must not be what goes or inside it; and asked again right before
-          // the move publishes.  The hold is released by trashDone, once the move has settled (#447 r5c))
-          let tok = null, pinned = null;
-          const holding = () => !!tok && hold === tok && switches === 0 && current.kind === "browser" && current.id === pinned;
-          return {
-            still: async () => {
-              if (switches > 0 || hold || current.kind !== "browser") return false;
-              pinned = current.id;
-              const mine = (tok = holdNav());
-              if (trashTest.pause) await trashTest.pause("lookup");
-              const now = await ws.pathOf("notebook", pinned).catch(() => undefined);
-              const ok = holding() && !(now && inside(now));
-              if (!ok) mine.release();
-              return ok;
-            },
-            recheck: holding,
-            ...(trashTest.pause ? { pause: async (stage) => { await trashTest.pause?.(stage); } } : {}),
-            release: (moved) => tok?.release(moved),
-          };
-        } finally {
-          for (const off of offs) off();
-          // (as showWriter leaves it; another notebook opened meanwhile has had its own set by open())
-          if (same()) nb.setReadOnly(!!pageMay().readOnly || !!ws?.quarantined || docSyncNeedsReload);
-        }
-      },
-      // (and saved by the notebook, after what it has yet to save: CORR-0B0-2)
-      retitles: (e) => e.kind === "notebook" && e.ref === current.id && current.kind === "browser",
-      renamed(e) {
-        if (e.kind === "notebook" && e.ref === current.id) {
-          const base = splitExt(nameOf(e.path))[0];
-          nbName.value = base;
-          nb.setMeta({ name: base });
-          document.title = `${base} — Sagebrush`;
-        }
-        wsTrackCurrent();
-      },
     });
   }
 }

@@ -106,6 +106,29 @@ try {
   await until(`!!document.querySelector(".sbfopen")`);
   await ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
   check(await until(`!document.querySelector(".sbfopen")`), "…Esc closes it");
+  // (run 7, X05: Open…'s file browser has the page's host, as the sidebar has: a folder made and named there keeps its
+  // name, and its Storage panel has the export)
+  const inOpen = async (page) => {
+    await until(`!!document.querySelector(".sbfopen .sbfiles .fh button[aria-label=New]")`);
+    await ev(`(() => { document.querySelector(".sbfopen .fh button[aria-label=New]").click(); return 1; })()`);
+    await until(`[...document.querySelectorAll(".sbfmenu button")].some((x) => x.textContent === "Folder")`);
+    await ev(`(() => { [...document.querySelectorAll(".sbfmenu button")].find((x) => x.textContent === "Folder").click(); return 1; })()`);
+    await until(`!!document.querySelector(".sbfopen .frow input")`);
+    const name = "Named in Open " + page;
+    await ev(`(() => { const i = document.querySelector(".sbfopen .frow input"); i.value = ${JSON.stringify(name)}; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return 1; })()`);
+    const named = await until(`${W}.stat(${JSON.stringify("/" + name)}).then((e) => e?.kind === "folder")`);
+    await sleep(3000);
+    const kept = await ev(`Promise.all([${W}.stat(${JSON.stringify("/" + name)}), ${W}.list("/")]).then(([e, l]) => e?.kind === "folder" && !l.some((x) => x.path.startsWith("/New folder")))`);
+    check(named && kept, `${page}: Open…'s New ▸ Folder, named in place, keeps its name (still, 3 s later): ` + JSON.stringify(await ev(`${W}.list("/").then((l) => l.filter((x) => x.kind === "folder").map((x) => x.path))`)));
+    await ev(`(() => { document.querySelector(".sbfopen .fmeter").click(); return 1; })()`);
+    check(await until(`[...(document.querySelector(".sbfprev")?.querySelectorAll("button") ?? [])].some((b) => /^Export all current files/.test(b.textContent))`), `${page}: Open…'s Storage panel has "Export all current files (.zip)", as the sidebar's has`);
+    await ev(`(() => { [...document.querySelectorAll(".sbfprev button")].filter((b) => /Close|✕/.test(b.textContent) || b.getAttribute("aria-label") === "Close").forEach((b) => b.click()); return 1; })()`);
+    await until(`!document.querySelector(".sbfprev")`, 5000);
+    await ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    await until(`!document.querySelector(".sbfopen")`, 5000);
+  };
+  await key("o");
+  await inOpen("the notebook page");
   // Delete: to Trash, after asking; another notebook opened
   const doomed = await nbRef();
   await pick(NB, "delete");
@@ -132,6 +155,8 @@ try {
   check(await ev(`document.querySelector("[data-sbb=filemenu] [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0 && document.querySelector("[data-sbb=filemenu] [data-item=newBoard]").getBoundingClientRect().top > document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]").getBoundingClientRect().bottom - 1`), "the board page: a group not opened shows nothing; an open group's items one per line");
   await shot("board-file-menu");
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); return 1; })()`);
+  await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-item=open]").click(); return 1; })()`);
+  await inOpen("the board page");
   // Recent ▸ on the board page has the notebooks too
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=recent]").click(); return 1; })()`);
   check(await until(`[...document.querySelectorAll("[data-sbb=filemenu] [data-recent]")].some((b) => b.dataset.recent.endsWith(".ipynb"))`), "the board page's Recent ▸ lists notebooks too");

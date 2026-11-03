@@ -2,7 +2,7 @@
 // itself is filemenu.ts): the documents opened lately, both kinds, both
 // pages; and the file browser as a dialog.
 import type { Workspace, Entry } from "./api";
-import { mountBrowser } from "./browser";
+import { mountBrowser, type BrowserHost } from "./browser";
 import { nameOf } from "./paths";
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}): HTMLElementTagNameMap[K] => Object.assign(document.createElement(tag), props);
@@ -42,7 +42,10 @@ export const recentLabel = (e: Entry) => nameOf(e.path);
 
 // ----------------------------------------------------------- Open… dialog
 /** The file browser as a dialog (File ▸ Open…): choosing a document opens it (the page's `open`), and closes the dialog. */
-export function openFilesDialog(ws: Workspace, open: (e: Entry, how: "here" | "tab") => void, current?: () => { kind: "notebook" | "board"; ref: string } | undefined) {
+/** `host`: what the page gives its own file browser (the sidebar's: upload, the Storage panel's export, Open as, the
+ * fences of a rename or a Move to Trash of what is open), so Open…'s offers the same; its open and close are this
+ * dialog's. */
+export function openFilesDialog(ws: Workspace, open: (e: Entry, how: "here" | "tab") => void, current?: () => { kind: "notebook" | "board"; ref: string } | undefined, host: Partial<BrowserHost> = {}) {
   document.querySelectorAll(".sbfopen").forEach((d) => (d as any).sbClose?.());
   const root = el("div");
   root.className = "sbfopen";
@@ -60,7 +63,7 @@ export function openFilesDialog(ws: Workspace, open: (e: Entry, how: "here" | "t
   root.onpointerdown = (ev) => { if (ev.target === root) close(); };
   addEventListener("keydown", esc, true);
   document.body.append(root);
-  b = mountBrowser(box, { ws, current, open: (e, how) => { close(); open(e, how); }, close });
+  b = mountBrowser(box, { ...host, ws, current, open: (e, how) => { close(); open(e, how); }, close });
   b.el.style.flex = "1";
   (b.el.querySelector(".fsearch") as HTMLInputElement | null)?.focus();
   return { close };

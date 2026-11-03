@@ -69,7 +69,7 @@ onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
-import { mountBrowser } from "../workspace/browser";
+import { mountBrowser, type BrowserHost } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { pairLink } from "../workspace/pair-link";
 import { SyncOwner } from "../workspace/sync-owner";
@@ -1388,7 +1388,7 @@ const host: BoardHost = {
       if (!name?.trim()) return;
       await ws!.mkdir("/" + safeName(name.trim()));
     },
-    open: () => openFilesDialog(ws!, openEntry, () => (local ? { kind: "board", ref: source.slice(6) } : undefined)),
+    open: () => openFilesDialog(ws!, openEntry, () => (local ? { kind: "board", ref: source.slice(6) } : undefined), fileBrowserHost?.() ?? {}),
     recent: async () => (await recentOpened(ws!, local ? { kind: "board", ref: source.slice(6) } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e, "here") })),
     upload: (files: File[], mode: string) => uploadToWorkspace(ws!, files, mode),
     // (this board, by its identity, to Trash; then the latest other board, or a new one)
@@ -1514,6 +1514,8 @@ export { mountBoard, host, mounted };
 // (for a host whose documents are kept elsewhere: a copy in this browser first; the tests' fake remote)
 export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 
+// (the page's host for any file browser: set below once the workspace and a local board are here)
+let fileBrowserHost: (() => Partial<BrowserHost>) | null = null;
 // The file browser (design §4): a sidebar on the left, over the board's
 // left edge (which moves aside), shown and hidden by Files in the top bar,
 // remembered with the notebook page's
@@ -1531,6 +1533,40 @@ if (ws && local) {
   document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
+  // (what a file browser needs from this page: the sidebar's and File ▸ Open…'s alike, so both offer the same (the
+  // Storage panel's export, upload, Open as, a rename's fence); each adds its own open and close (run 7, X05: Open…'s
+  // had none of it, so its Storage panel had no export)
+  const pageHost = (): Partial<BrowserHost> => ({
+    openFile: openTex,
+    upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
+    openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
+    // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
+    exportUrl: (f) => new URL("/" + f, location.href).href,
+    // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
+    // what is being written kept, every save made, a refused save said, never a second writer (astra's E1-A5))
+    saveOpen: async () => {
+      for (let i = 0; ; i++) {
+        await mounted.keepWriting();
+        let late: ReturnType<typeof setTimeout> | undefined;
+        const saved = await Promise.race([wsFlush().then(() => true), new Promise<boolean>((r) => (late = setTimeout(() => r(false), DEPART_MS)))]);
+        clearTimeout(late);
+        if (!saved) throw new Error("this board's last changes are still being saved (your files are busy); try again in a moment");
+        if (local && ws && wsRefused) throw new Error(`this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it isn't exported as it is now`);
+        if (!mounted.writing()) return;
+        if (i >= 9) throw new Error("this board is still being written; try again in a moment");
+      }
+    },
+    // (this board renamed here: its title follows, saved by this page as
+    // its other changes are, never written beside them: CORR-0B0-2)
+    retitles: (e) => e.kind === "board" && e.ref === source.slice(6),
+    renamed(e, was) {
+      if (e.kind === "board" && e.ref === source.slice(6)) {
+        const base = (p: string) => splitExt(nameOf(p))[0];
+        void mounted.retitle(base(e.path), base(was));
+      }
+    },
+  });
+  fileBrowserHost = pageHost;
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const show = (on: boolean) => {
     side.hidden = !on;
@@ -1541,38 +1577,11 @@ if (ws && local) {
     try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
     dispatchEvent(new Event("resize"));
     if (on && !browser) browser = mountBrowser(side, {
+      ...pageHost(),
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
-      openFile: openTex,
-      upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
-      openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
-      // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
-      exportUrl: (f) => new URL("/" + f, location.href).href,
-      // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
-      // what is being written kept, every save made, a refused save said, never a second writer (astra's E1-A5))
-      saveOpen: async () => {
-        for (let i = 0; ; i++) {
-          await mounted.keepWriting();
-          let late: ReturnType<typeof setTimeout> | undefined;
-          const saved = await Promise.race([wsFlush().then(() => true), new Promise<boolean>((r) => (late = setTimeout(() => r(false), DEPART_MS)))]);
-          clearTimeout(late);
-          if (!saved) throw new Error("this board's last changes are still being saved (your files are busy); try again in a moment");
-          if (local && ws && wsRefused) throw new Error(`this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it isn't exported as it is now`);
-          if (!mounted.writing()) return;
-          if (i >= 9) throw new Error("this board is still being written; try again in a moment");
-        }
-      },
-      // (this board renamed here: its title follows, saved by this page as
-      // its other changes are, never written beside them: CORR-0B0-2)
-      retitles: (e) => e.kind === "board" && e.ref === source.slice(6),
-      renamed(e, was) {
-        if (e.kind === "board" && e.ref === source.slice(6)) {
-          const base = (p: string) => splitExt(nameOf(p))[0];
-          void mounted.retitle(base(e.path), base(was));
-        }
-      },
     });
   };
   btn.onclick = () => show(side.hidden !== false);
