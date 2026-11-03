@@ -1287,6 +1287,20 @@ try {
   {
     const RUN_DOC = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nvar('t')\nx = 2^10\n\\end{sagesilent}\nWe have $x = \\sage{x}$ and $\\int_0^1 t^2\\,dt = \\sage{integrate(t^2, t, 0, 1)}$.\n\\begin{sagesilent}\nx = 7\n\\end{sagesilent}\nNow $x = \\sage{x}$.\n\\end{document}\n";
     const resultsOf = (p) => ev(`${W}.stat(${JSON.stringify(p + ".results.json")}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p + ".results.json")}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    // (sim run 8, RD03: a new document with no SageTeX code, the code then typed into it: Run must appear once the
+    // preview shows the items, without a save or a reopen. It didn't: the reply's own render ran before the editor
+    // kept that reply's check, so Run's listener read the check of the text before the edit)
+    {
+      const fb = await mk("/t/run-typed.tex", enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n"));
+      await open(fb);
+      await until(`document.querySelector(".tex-preview")?.textContent !== undefined && !!document.querySelector(".tex-head .tex-run")`, 20000);
+      await sleep(1000);
+      const hiddenBefore = await ev(`document.querySelector(".tex-head .tex-run").hidden`);
+      await typeInto("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nTwo is $\\sage{1+1}$.\n\\end{document}\n");
+      const shownItem = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Two is")`, 20000);
+      const visible = await until(`document.querySelector(".tex-head .tex-run")?.hidden === false`, 10000);
+      check(hiddenBefore === true && shownItem && visible, "Run: a new document's SageTeX code typed in: Run appears once the preview shows it (no save, no reopen)", { hiddenBefore, shownItem, visible });
+    }
     const fr = await mk("/t/run.tex", enc(RUN_DOC));
     const n0 = requests.length;
     await open(fr);

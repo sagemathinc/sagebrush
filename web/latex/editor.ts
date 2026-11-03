@@ -110,9 +110,12 @@ export function createEditor(o: EditorOpts) {
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
+    // (this reply's check kept before its patch: a small patch is done within schedulePatch, and the host's onRendered
+    //  listeners, Run's among them, read lastCheck() then; set after, they saw the check of the text before this edit)
+    if (ok.current) lastCheck = { text: src.value, rev: r.rev as number, check: r.check };
     schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], { doc: r.doc as number, rev: r.rev as number });
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
-    if (ok.current) { lastCheck = { text: src.value, rev: r.rev as number, check: r.check }; o.onImageRefs?.(r.imageRefs as string[], gate.token()); }
+    if (ok.current) o.onImageRefs?.(r.imageRefs as string[], gate.token());
   };
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
