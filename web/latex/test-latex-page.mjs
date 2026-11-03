@@ -1335,6 +1335,23 @@ try {
     const renamed = await until(`${T}.textContent === "final.tex"`, 5000);
     const files = { tex: await stat("/m0/final.tex"), old: await stat("/m0/moved.tex"), results: await stat("/m0/final.tex.results.json"), oldResults: await stat("/m0/moved.tex.results.json") };
     check(renamed && files.tex && !files.old && files.results && !files.oldResults && (await ev(`document.title`)).startsWith("final.tex"), "M0: a name typed and Enter: the file renamed (.tex added), its results file moved along", files);
+    // (astra LATEX-RENAME-1: the old name, freed by the rename, reused at once by another document that makes its own
+    //  comments or results file there: never taken along; only the files found before the rename move)
+    const reuse = (made) => ev(`(window.__reuse = 0, window.__sbTexRenamed = async (from) => { window.__reuse++; await ${W}.create(from, { content: new TextEncoder().encode("other") });
+      for (const x of ${JSON.stringify(made)}) await ${W}.create(from + x, { content: new TextEncoder().encode("OTHER") }); }, 1)`);
+    const read = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    await reuse([".comments.json"]);
+    await retitle("again");
+    await until(`${T}.textContent === "again.tex"`, 5000);
+    const r1 = { hook: await ev(`window.__reuse`), ourResults: await read("/m0/again.tex.results.json"), otherComments: await read("/m0/final.tex.comments.json"), takenComments: await read("/m0/again.tex.comments.json") };
+    check(r1.hook === 1 && r1.ourResults === "{}" && r1.otherComments === "OTHER" && r1.takenComments === null, "M0: another document's comments file made at the freed name stays; only this file's results move", r1);
+    await ev(`${W}.remove("/m0/again.tex.results.json").then(() => 1)`);
+    await reuse([".results.json"]);
+    await retitle("last");
+    await until(`${T}.textContent === "last.tex"`, 5000);
+    const r2 = { hook: await ev(`window.__reuse`), otherResults: await read("/m0/again.tex.results.json"), takenResults: await read("/m0/last.tex.results.json") };
+    check(r2.hook === 1 && r2.otherResults === "OTHER" && r2.takenResults === null, "M0: another document's results file made at the freed name stays where it is", r2);
+    await ev(`(window.__sbTexRenamed = undefined, 1)`);
   }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the

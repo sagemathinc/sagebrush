@@ -444,15 +444,22 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       const to = join(parentOf(now.path), name);
       if (to === now.path) return;
       try {
-        const e = await host.ws.rename(now.path, to, { expect: { kind: now.entry.kind, ref: now.entry.ref, fid: now.entry.fid, created: now.entry.created } });
-        // (its results and comments files, if there and not already at the new name: moved along, each only if it is
-        //  still the one read; one that can't be is left where it was, said)
-        let left = 0;
+        // (its results and comments files, as they are BEFORE the rename (astra LATEX-RENAME-1): once the .tex has moved,
+        //  its old name is free, and another document's files made there meanwhile must never be taken along)
+        const companions: { ext: string; e: Entry }[] = [];
         for (const ext of [".results.json", ".comments.json"]) {
           const se = await host.ws.stat(now.path + ext).catch(() => undefined);
-          if (!se || se.trashed) continue;
+          if (se && !se.trashed && se.kind === "file") companions.push({ ext, e: se });
+        }
+        const e = await host.ws.rename(now.path, to, { expect: { kind: now.entry.kind, ref: now.entry.ref, fid: now.entry.fid, created: now.entry.created } });
+        // (the test build only: the page test can make files at the freed name here; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexRenamed?.(now.path, e.path);
+        // (each moved along only if it is still the very entry found before (its identity checked holding the lock) and
+        //  the new name is free; one that can't be is left where it was, said)
+        let left = 0;
+        for (const { ext, e: se } of companions) {
           if (await host.ws.stat(e.path + ext).catch(() => undefined)) { left++; continue; }
-          try { await host.ws.rename(now.path + ext, e.path + ext, { expect: { kind: se.kind, ref: se.ref, fid: se.fid, created: se.created } }); } catch { left++; }
+          try { await host.ws.rename(se.path, e.path + ext, { expect: { kind: se.kind, ref: se.ref, fid: se.fid, created: se.created } }); } catch { left++; }
         }
         if (!live()) return;
         where.path = e.path; inputs.docPath = e.path; inputs.version++;
