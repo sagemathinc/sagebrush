@@ -4897,6 +4897,16 @@
   "owner": "number fields",
   "row": "inv-28"
  },
+ "lib/_sage_nf.py :: NumberField :: NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt(2) + sqrt(3)).minpoly() #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
+ "lib/_sage_nf.py :: NumberField :: raise NotImplementedError(\"relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; \" #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
  "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
   "owner": "number fields"
@@ -6845,6 +6855,58 @@
   "class": "1",
   "owner": "notebook/kernel",
   "row": "src-17"
+ },
+ "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts ::  :: const PAGES_MAX = 60; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts ::  :: const TEX_MAX = 4 * 2 ** 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, delimiter } from \"path\"; #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: findBrowser :: for (const dir of (env.PATH ?? \"\").split(delimiter)) if (dir) for (const b of [\"google-chrome\", \"google-chrome-stable\", \"chromium\", \"chromium-browser\", \"microsoft-edge\", \"microsoft-edge-stable\", \"brave-browser\"]) cands.push(join(dir, b)); #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: latexCommand :: if (st.size > TEX_MAX) return fail(`${file}: ${st.size} bytes, over the ${TEX_MAX} this reads`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts :: screenshots :: for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",
