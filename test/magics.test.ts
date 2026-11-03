@@ -40,14 +40,14 @@ test("magic syntax: %line, %%cell and !shell lines at a statement's start become
   assert.equal(magicSyntax("%reload_ext autoreload\n%autoreload 2\nx = 1"),
     '__pyjs_magic__("reload_ext", "autoreload")\n__pyjs_magic__("autoreload", "2")\nx = 1');
   assert.equal(magicSyntax("for i in range(3):\n    %time f(i)"), 'for i in range(3):\n    __pyjs_magic__("time", "f(i)")');
-  assert.equal(magicSyntax("!pip install numpy"), '__pyjs_magic__("system", "pip install numpy", globals(), locals())');
+  assert.equal(magicSyntax("!pip install numpy"), '__pyjs_magic__("system", "pip install numpy", __pyjs_globals__(), __pyjs_locals__())');
   // %%time and %%timeit: the body stays code, on its lines; other cell magics' bodies are text
   assert.equal(magicSyntax("%%time\nx = 1\ny = 2"), '__pyjs_cell_magic__("time", "")\nx = 1\ny = 2');
   assert.equal(magicSyntax("\n%%timeit -n 3 a = 1\na + 1"), '\n__pyjs_cell_magic__("timeit", "-n 3 a = 1")\na + 1');
   assert.equal(magicSyntax("%%time --bad\nx = 1"), '__pyjs_cell_magic__("time", "--bad", "x = 1")');
   assert.equal(magicSyntax("%%capture\nprint(1)"), '__pyjs_cell_magic__("capture", "", "print(1)")');
   // a magic's line is opaque: an unbalanced quote in it does not hide the next line
-  assert.equal(magicSyntax("!echo it's\n%time 1"), '__pyjs_magic__("system", "echo it\'s", globals(), locals())\n__pyjs_magic__("time", "1")');
+  assert.equal(magicSyntax("!echo it's\n%time 1"), '__pyjs_magic__("system", "echo it\'s", __pyjs_globals__(), __pyjs_locals__())\n__pyjs_magic__("time", "1")');
   // not at a statement's start: modulo, strings, brackets, backslashes, comments
   for (const src of ["x = 5 %3", "s = '''\n%time x\n'''", "f(1,\n  %2)", "y = 1 + \\\n%2", "a != b", "x = 1  # %time", "s = '%d' % 3"]) assert.equal(magicSyntax(src), src);
   assert.equal(magicSyntax("s = '%d' % 3\n%time s"), "s = '%d' % 3\n__pyjs_magic__(\"time\", \"s\")");

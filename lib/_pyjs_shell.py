@@ -172,8 +172,10 @@ def _namespace(g, l):
 def _run(cmd):
     if cmd.rstrip().endswith("&"):
         raise OSError("Background processes not supported.")
-    raise ShellUnavailableError("shell commands aren't available in Sagebrush yet: the shell isn't connected to "
-                                "Python (it comes in a later update)")
+    e = ShellUnavailableError("shell commands aren't available in Sagebrush yet: the shell isn't connected to "
+                              "Python (it comes in a later update)")
+    e.command = cmd   # (the command as expanded)
+    raise e
 
 
 def system(cmd, g=None, l=None):

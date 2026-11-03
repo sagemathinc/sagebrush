@@ -516,7 +516,7 @@ export class Emitter {
     const c = e.func.value;
     if (c.k !== "Call" || c.args.length !== 2 || c.keywords.length !== 0 || c.args.some((a) => a.k === "Starred")) return null;
     // (the calls the compiler gives its caller's namespaces stay as they are)
-    if (c.func.k === "Name" && ["globals", "locals", "vars", "dir", "eval", "exec", "super"].includes(c.func.id)) return null;
+    if (c.func.k === "Name" && ["globals", "locals", "vars", "dir", "eval", "exec", "super", "__pyjs_globals__", "__pyjs_locals__"].includes(c.func.id)) return null;
     if (suspends(e.args[0])) return null;
     return { o: c.func, f: c.args[0], m: c.args[1], s: e.args[0] };
   }
@@ -602,12 +602,15 @@ export class Emitter {
     const f = e.func;
     if (f.k !== "Name" || e.keywords.length !== 0 || e.args.some((a) => a.k === "Starred")) return null;
     const names = ["globals", "locals", "vars", "dir", "eval", "exec"];
+    // (the shell forms' spellings, src/magic-syntax.ts: the caller's namespaces
+    // whatever the code binds to the names globals and locals)
+    const reserved = f.id === "__pyjs_globals__" || f.id === "__pyjs_locals__";
     const r = resolve(this.fn.scope, f.id);
     const isGlobal = r.kind === "global" || (r.kind === "class" && r.outer.kind === "global" && !this.fn.scope.bound.has(f.id));
-    if (!names.includes(f.id) || !isGlobal || this.moduleBinds(f.id)) return null;
+    if (!reserved && (!names.includes(f.id) || !isGlobal || this.moduleBinds(f.id))) return null;
     const n = e.args.length;
-    if ((f.id === "vars" || f.id === "dir") && n !== 0) return null;
-    if (f.id === "globals" && n === 0) return "R.globalsDict($g)";
+    if (((f.id === "vars" || f.id === "dir") || reserved) && n !== 0) return null;
+    if ((f.id === "globals" || f.id === "__pyjs_globals__") && n === 0) return "R.globalsDict($g)";
     const scope = this.fn.scope;
     const localsExpr = (): string => {
       if (scope.kind === "module") return "R.moduleLocals($g)";
@@ -623,7 +626,7 @@ export class Emitter {
       }
       return `R.localsDict(${JSON.stringify(ls)}, [${vs.join(", ")}])`;
     };
-    if (f.id === "locals" || f.id === "vars") return n === 0 ? localsExpr() : null;
+    if (f.id === "locals" || f.id === "vars" || f.id === "__pyjs_locals__") return n === 0 ? localsExpr() : null;
     if (f.id === "dir") return `sortedKeys(${localsExpr()})`;
     if (n < 1 || n > 3) return null;
     const args = e.args.map((a) => this.ex(a));

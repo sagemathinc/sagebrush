@@ -4,6 +4,11 @@
 #    namespace user_ns + the caller's locals (on any error: unchanged).
 # 3. SList: l, s, n, grep, fields, sort.
 # Prints one JSON document on stdout.
+#
+# Provenance of test/shell_forms_oracle.json (Nov 3 2026): run on VM2 (sagebrush-2)
+# with the Sage 10.9 conda environment's Python and IPython 9.17.1:
+#   ~/sage-conda/env/bin/python3 scripts/shell-forms-oracle.py > test/shell_forms_oracle.json
+# sha256 of that JSON: 4e472d2375dac7fe3a0029891bc01293f45ed05a34c8727c90dac9fa66a4dee3
 import json
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.utils.text import SList
