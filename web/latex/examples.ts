@@ -72,9 +72,9 @@ const beamer = String.raw`\documentclass{beamer}
 \end{frame}
 
 \begin{frame}{In this preview}
-  The preview shows each frame as a section of the page, with its content. It doesn't draw the theme or
-  page through overlays: every \texttt{\textbackslash pause} and \texttt{<2->} step is shown at once. A
-  full LaTeX run makes the PDF slides.
+  The preview shows each frame as a slide, with its title. It doesn't draw the theme or page through
+  overlays: every \texttt{\textbackslash pause} and \texttt{<2->} step is shown at once. A full LaTeX
+  run makes the PDF slides.
 \end{frame}
 
 \begin{frame}{Overlays}

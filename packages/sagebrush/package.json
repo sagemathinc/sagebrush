@@ -9,6 +9,7 @@
   "files": [
     "bin/sagebrush.cjs",
     "dist/sagebrush.cjs",
+    "dist/sagebrush-latex.cjs",
     "README.md",
     "NOTICE.md",
     "LICENSE-CPython.txt",

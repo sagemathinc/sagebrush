@@ -157,6 +157,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-csv.src": {
+   "exact": false,
+   "ceiling": 50266,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-ctypes.src": {
    "exact": false,
    "ceiling": 9101,
@@ -236,7 +243,7 @@
   },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 14870,
+   "ceiling": 14972,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -430,6 +437,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-scipy-stats-py.src": {
+   "exact": false,
+   "ceiling": 25411,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-string.src": {
    "exact": false,
    "ceiling": 21100,
@@ -614,7 +628,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 235422,
+   "ceiling": 235521,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -668,6 +682,7 @@
    "engine/lib/mod-contextlib.src": 29725,
    "engine/lib/mod-copy.src": 9103,
    "engine/lib/mod-copyreg.src": 8446,
+   "engine/lib/mod-csv.src": 45697,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
    "engine/lib/mod-encodings.src": 18178,
@@ -707,6 +722,7 @@
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
+   "engine/lib/mod-scipy-stats-py.src": 23101,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
