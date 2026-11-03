@@ -490,11 +490,15 @@ export function normalizeNotebook(nb, loose = []) {
   });
 }
 
-/** Text an output must never hold (A5): the run's temporary folder, today's date, the host's name. */
-export function leaks(nbNorm, { tmp, date, host }) {
+/** Text an output must never hold (A5): the run's temporary folder, the checkout's path, today's date, the host's name. */
+export function leaks(nbNorm, { tmp, date, host, checkout }) {
   const s = JSON.stringify(nbNorm);
   return [
     tmp && s.includes(tmp) ? `the run's temporary folder (${tmp})` : null,
+    // (the checkout's own path, as a help page's "File:" line printed it: another machine's differs)
+    checkout && checkout.length > 1 && s.includes(JSON.stringify(checkout).slice(1, -1))
+      ? `the checkout's path (${checkout})`
+      : null,
     date && s.includes(date) ? `today's date (${date})` : null,
     host && host.length > 3 && s.includes(host)
       ? `the host name (${host})`

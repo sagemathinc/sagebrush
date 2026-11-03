@@ -331,6 +331,12 @@ test("normalization (A5): streams joined, HTML exact, images hashed, errors and 
       "today's date (2026-11-03)",
     ],
   );
+  // (the checkout's own path, as help's "File:" line printed it on one machine and not another)
+  assert.deepEqual(
+    leaks([[{ stream: "stdout", text: "Type: method\nFile:      /scratch/sb/lib/_sage_modular.py\n" }]], { checkout: "/scratch/sb" }),
+    ["the checkout's path (/scratch/sb)"],
+  );
+  assert.deepEqual(leaks([[{ stream: "stdout", text: "File: lib/_sage_modular.py" }]], { checkout: "/scratch/sb" }), []);
 });
 
 // ---- the runner, on the fixture corpus (needs dist/)

@@ -208,7 +208,7 @@ export async function runExample(root, id, { update = false } = {}) {
         const fn = normalizeNotebook(freshNb, m.loose ?? []);
         for (const [i, c] of fn.entries())
           if (c.error) problems.push(`cell ${i + 1} raised ${c.error}`);
-        for (const l of leaks(fn, { tmp, date, host: hostname() }))
+        for (const l of leaks(fn, { tmp, date, host: hostname(), checkout: realpathSync(repo) }))
           problems.push(`an output holds ${l}`);
         for (const [cell, want] of Object.entries(m.expect ?? {})) {
           const got = JSON.stringify(fn[Number(cell)] ?? []);
