@@ -492,6 +492,7 @@ try {
     const cleared = await until(`typeof window.__releaseRemove === "function" && ![...(${P}?.querySelectorAll("button") ?? [])].some((b) => /^Save…$/.test(b.textContent))`, 10000);
     await hooks();
     const f2 = await exportOnce(join(out, "f2.zip"));
+    check(await ev(`${LOCKS}`) === 1, "…while its records' removal is held, the cancelled export's lock is still held (1): " + (await ev(`${LOCKS}`)));
     await ev(`(() => { window.__releaseRemove?.(); return 1; })()`);
     check(!!held.readyText && cleared && !f2.stopped && /left out of the export/.test(f2.summary ?? ""), "B3: Cancel at Ready clears the panel at once (no Save… left), and an export begun while its records are still being removed starts and ends: " + (f2.stopped ?? "").slice(-200));
     check(await until(`${LOCKS}.then((n) => n === 0)`, 10000), "…and once that removal ends, no export's lock is left");
