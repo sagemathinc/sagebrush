@@ -924,6 +924,19 @@ class Parser {
     for (let k = this.loopAliases.length - 1; k >= 0; k--) if (this.loopAliases[k].name === p) return this.loopAliases[k].py;
     return p;
   }
+  /** f with names (Python names: a function's parameters, optional ones
+   * too) shadowing an enclosing loop's variable of the same name: in the
+   * body they are the parameters, as in Magma (an optional parameter keeps
+   * its name, the call's keyword). */
+  private withShadows<T>(names: string[], f: () => T): T {
+    const n = this.loopAliases.length;
+    for (const v of names) this.loopAliases.push({ name: v, py: v, inRange: false });
+    try {
+      return f();
+    } finally {
+      this.loopAliases.length = n;
+    }
+  }
   /** Whether name, read here, is a for loop's variable in that loop's own range. */
   private inOwnRange(name: string): boolean {
     const p = pyName(name);
@@ -1092,7 +1105,7 @@ class Parser {
     if (!this.at(close) && !this.at(":")) {
       do {
         const ref = this.eat("~");
-        const name = this.nm(this.ident());
+        const name = pyName(this.ident());
         // typed parameters: x :: RngIntElt
         if (this.at(":") && this.at(":", 1)) { this.next(); this.next(); this.ident(); }
         py.push(name);
@@ -1142,12 +1155,12 @@ class Parser {
     const saveForwards = new Map(this.forwards), saveLocals = this.localsOpen;
     this.localsOpen = true;
     try {
-      this.block(() => {
+      this.withShadows([...p.py, ...p.optNames], () => this.block(() => {
         // value semantics: arguments are the callee's own copies
         for (const v of p.py) if (!p.refs.includes(v)) this.emit(`${v} = _m._own(${v})`);
         this.statements(["end"]);
         if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
-      });
+      }));
     } finally {
       this.capturing--;
       this.fns.pop();
@@ -1531,7 +1544,7 @@ class Parser {
         const b0 = this.uses.length;
         let body: string;
         try {
-          body = this.expr();
+          body = this.withShadows([...p.py, ...p.optNames], () => this.expr());
         } finally {
           this.capturing--;
           this.bindings.pop();

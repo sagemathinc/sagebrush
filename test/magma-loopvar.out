@@ -46,4 +46,8 @@ false
 L12 assigned in the range
 1
 2
+L13 parameters shadow the loop's variable (an optional one keeps its name)
+7 9
+50
+42
 done
