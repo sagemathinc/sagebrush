@@ -49,6 +49,10 @@ const FALLBACK = /the runner did not start/;
 const FALLBACK_TEXT = "sagebrush: the runner did not start; Python runs in a plain worker";
 let phase = "main";
 const stuckLog = []; // the stuck case's console: {at, session, text}
+// the stuck case's library requests (lib/...), by session and request id: when sent, answered, finished or failed, and
+// whether a service worker answered; every session's (the page's, its workers', the service worker's), to name the
+// request a hung run waits for and the hop that holds it (grader's investigation, step 1)
+const stuckNet = new Map();
 let mainFrameId, stuckCtx, lastRunnerFrameId;
 // (the library chunks the page fetches, web/lib-chunks.mts: lib/<group>.src.<hash>.json)
 const libFetched = [];
@@ -70,6 +74,7 @@ ws.onmessage = (e) => {
     if (m.params.targetInfo.type === "iframe") frames.push(sid);
     const ti = m.params.targetInfo;
     attached.set(sid, { sessionId: sid, targetId: ti.targetId, type: ti.type, url: ti.url, title: ti.title, parentFrameId: ti.parentFrameId, parentSession: m.sessionId, order: ++attachOrder, detached: false, phase });
+    if (phase === "stuck") ws.send(JSON.stringify({ id: ++n, method: "Network.enable", params: {}, sessionId: sid }));
     for (const [method, params] of [["Runtime.enable", {}], ["Log.enable", {}], ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId: sid }));
   }
   if (m.method === "Log.entryAdded" && /Content Security Policy/.test(m.params.entry.text)) violations.push(m.params.entry.text);
@@ -88,6 +93,18 @@ ws.onmessage = (e) => {
   // (the stuck case's console, every session's (the page's, the plain worker's), for its failure report)
   if (phase === "stuck" && (m.method === "Runtime.consoleAPICalled" || m.method === "Runtime.exceptionThrown" || m.method === "Log.entryAdded") && stuckLog.length < 400)
     stuckLog.push({ at: m.params.timestamp ?? m.params.entry?.timestamp ?? Date.now(), session: m.sessionId ? m.sessionId.slice(0, 6) : "page", text: m.method === "Runtime.exceptionThrown" ? "exception: " + (m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text) : m.method === "Log.entryAdded" ? `log ${m.params.entry.level}: ${m.params.entry.text}` : `${m.params.type}: ${(m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" ")}` });
+  if (phase === "stuck" && m.method?.startsWith("Network.")) {
+    const p = m.params, key = (m.sessionId ?? "page").slice(0, 6) + ":" + p.requestId;
+    if (m.method === "Network.requestWillBeSent" && /\/lib\/[^/]+\.json(\?|$)/.test(p.request.url) && stuckNet.size < 200)
+      stuckNet.set(key, { session: (m.sessionId ?? "page").slice(0, 6), url: p.request.url.replace(/^.*\/lib\//, "lib/"), sent: Date.now() });
+    const r = stuckNet.get(key);
+    if (r && m.method === "Network.responseReceived") Object.assign(r, { answered: Date.now(), status: p.response.status, sw: !!p.response.fromServiceWorker, len: p.response.headers?.["content-length"] ?? p.response.headers?.["Content-Length"] });
+    if (r && m.method === "Network.dataReceived") r.bytes = (r.bytes ?? 0) + (p.dataLength ?? 0);
+    if (r && m.method === "Network.loadingFinished") r.finished = Date.now();
+    if (r && m.method === "Network.loadingFailed") Object.assign(r, { failed: Date.now(), error: p.errorText });
+  }
+  // (a service worker, in the stuck case: attached so its own requests are seen too)
+  if (phase === "stuck" && m.method === "Target.targetCreated" && m.params.targetInfo.type === "service_worker") ws.send(JSON.stringify({ id: ++n, method: "Target.attachToTarget", params: { targetId: m.params.targetInfo.targetId, flatten: true } }));
   if (process.env.RUNNER_DEBUG && (m.method === "Log.entryAdded" || m.method === "Runtime.exceptionThrown" || m.method === "Runtime.consoleAPICalled")) console.log("  [" + (m.sessionId ?? "page").slice(0, 6) + "]", JSON.stringify(m.params).slice(0, 600));
 };
 const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
@@ -238,6 +255,10 @@ async function reportStuck({ navAt, runAt }) {
   // (sync-docs: the run still pending in the kernel, its start barrier, the runner's own state)
   console.log("  stuck kernel: " + JSON.stringify(v.kernel).slice(0, 800));
   console.log("  stuck cells: " + JSON.stringify(v.cells).slice(0, 1500));
+  // (each library request: ms after the page opened; one never finished nor failed is what a hung run waits for)
+  for (const r of stuckNet.values())
+    console.log(`  stuck net [${r.session}] ${r.url.slice(0, 70)} sent ${at(r.sent)} answered ${at(r.answered) ?? "-"} (${r.status ?? "-"}${r.sw ? ", service worker" : ""}, ${r.bytes ?? 0}/${r.len ?? "?"} B) ${r.finished ? "finished " + at(r.finished) : r.failed ? "FAILED " + at(r.failed) + " " + r.error : "NEVER FINISHED"}`);
+  if (!stuckNet.size) console.log("  stuck net: no library requests seen");
   for (const l of stuckLog.slice(-60)) console.log(`  stuck console [${l.session} ${at(Math.round(l.at))}] ${String(l.text).slice(0, 300)}`);
 }
 
@@ -538,6 +559,12 @@ try {
     if (process.env.STUCK_DIAG !== "0") {
       await send("Page.enable");
       diag = await send("Page.addScriptToEvaluateOnNewDocument", { source: STUCK_DIAG });
+    }
+    if (process.env.STUCK_DIAG !== "0") {
+      await send("Target.setDiscoverTargets", { discover: true });
+      // (a service worker already running: attached now)
+      const sws = ((await send("Target.getTargets"))?.targetInfos ?? []).filter((t) => t.type === "service_worker" && !t.attached);
+      for (const t of sws) await sendWithin(3000, "attach the service worker", "Target.attachToTarget", { targetId: t.targetId, flatten: true });
     }
     const ctxBefore = contexts.length;
     const navAt = Date.now();
