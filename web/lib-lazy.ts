@@ -216,6 +216,7 @@ export function prefetchMode(mode: string, fetchBytes: (url: string) => Promise<
                 // code that stalled twice is done without (its modules compile from their sources), sources aren't)
                 if (!e?.stalled) return;
                 if (attempt === 1 && kind === "src") stalled.push(`${ref.file}: ${e.message}`);
+                else if (attempt === 1) console.warn(`sagebrush: ${ref.file} didn't load (${e.message}); its modules compile from their sources`);
               }
             }
           }),

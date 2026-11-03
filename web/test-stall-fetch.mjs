@@ -1,7 +1,8 @@
 // ci: web-runner order=590 runner=bun
 // fetchMoving (web/stall-fetch.js), the bound on the library chunks' fetches: a response that stops ends within the
 // bound, saying so (stalled), whether nothing came at all or the body stopped part way; a slow response that keeps
-// moving finishes however long it takes in all; an answer that isn't ok is HTTP <status>; and no timer is left behind.
+// moving finishes however long it takes in all; an answer that isn't ok is HTTP <status>; a caller's own abort is
+// its own; and no timer is left behind.
 // Against a local server, with the bound made short for the test (its third argument).
 //   bun web/test-stall-fetch.mjs
 import assert from "node:assert/strict";
@@ -79,6 +80,15 @@ try {
   assert.equal(missing.error?.message, "HTTP 404");
   assert.equal(missing.error.status, 404);
   assert.notEqual(missing.error.stalled, true);
+  checks++;
+
+  // (a caller's own signal: its abort is the caller's error, not a stall, and before the bound)
+  const own = new AbortController();
+  setTimeout(() => own.abort(new Error("the caller's")), 100);
+  const mine = await timed(() => fetchMoving(base + "/silent", { signal: own.signal }, BOUND));
+  assert.notEqual(mine.error?.stalled, true, "a caller's abort isn't a stall: " + mine.error);
+  assert.equal(mine.error?.message, "the caller's");
+  assert.ok(mine.ms < BOUND, `…and ends then: ${mine.ms.toFixed(0)} ms`);
   checks++;
 
   const ok = await fetchMoving(base + "/ok", {}, BOUND);

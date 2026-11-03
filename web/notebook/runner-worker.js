@@ -223,7 +223,9 @@ export class RunnerWorker {
       const isIndex = !!this.tzIndex && raw === this.tzIndex.url;
       if (this.base && raw === new URL(raw).href && (this.allowed.has(raw) || isIndex || this.zones.has(raw) || this.mounted.has(raw))) {
         // (bounded between pieces of data, as the plain worker's own fetches: web/stall-fetch.js)
-        bytes = (await fetchMoving(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" })).slice().buffer;
+        const u = await fetchMoving(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" });
+        // (its own buffer when the bytes fill it, as one piece does: no copy of a 13.6 MB chunk)
+        bytes = u.byteOffset === 0 && u.byteLength === u.buffer.byteLength ? u.buffer : u.slice().buffer;
         if (bytes && isIndex) {
           // (the index: its bytes must be the build's, then its grammar; its zones are admitted all at once, before
           // the index is answered, so the interpreter's next request, a zone, finds them)

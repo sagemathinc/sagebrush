@@ -24,13 +24,18 @@ export function stalledError(ms) {
  */
 export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) {
   const ac = new AbortController();
-  let timer;
+  // (a caller's own signal aborts it too, as its own error, never as a stall)
+  const own = init.signal;
+  if (own?.aborted) throw own.reason;
+  const relay = () => ac.abort(own.reason);
+  own?.addEventListener("abort", relay, { once: true });
+  let stalled = false, timer;
   const arm = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => ac.abort(), stallMs);
+    timer = setTimeout(() => ((stalled = true), ac.abort()), stallMs);
   };
-  // (an error after the abort is the stall's, whatever the browser calls it)
-  const why = (e) => (ac.signal.aborted ? stalledError(stallMs) : e);
+  // (an error after the stall's abort is the stall's, whatever the browser calls it)
+  const why = (e) => (stalled ? stalledError(stallMs) : e);
   arm();
   try {
     let r;
@@ -72,5 +77,6 @@ export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) {
     return out;
   } finally {
     clearTimeout(timer);
+    own?.removeEventListener("abort", relay);
   }
 }
