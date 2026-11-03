@@ -31,6 +31,8 @@ const LATEX_SITE_HOSTS = ["sagebrush.space", "dev.sagebrush.space"];
 const LATEX_DEFINE = LATEX
   ? { __SB_LATEX__: "true", __SB_LATEX_TEST__: String(LATEX_MODE === "test"), __SB_LATEX_HOSTS__: JSON.stringify(LATEX_MODE === "test" ? [...LATEX_SITE_HOSTS, "127.0.0.1", "localhost"] : [...LATEX_SITE_HOSTS, ...(LATEX_PREVIEW_HOST ? [LATEX_PREVIEW_HOST] : [])]) }
   : { __SB_LATEX__: "false" };
+// (the board page: the hosts where a .tex file in its file panel opens the LaTeX editor (U1); none in a build without it)
+const BOARD_TEX_HOSTS = LATEX ? (LATEX_DEFINE as Record<string, string>).__SB_LATEX_HOSTS__ : "[]";
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");
 const shims: Record<string, string> = {
@@ -108,6 +110,12 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
     if (r.success) checkRunnerDefine(String(o.entrypoints?.[0] ?? "a bundle"), Object.keys(r.metafile?.inputs ?? {}), await Promise.all(r.outputs.map((x: any) => x.text())));
     return r;
   };
+}
+// (each group's offline item, so an import that fails offline can name what to download: web/offline-inventory.mts,
+// plan-b8-offline §2; a group no rule places fails the build here)
+{
+  const { itemOfGroup } = await import("./offline-inventory.mts");
+  (libManifest as any).items = Object.fromEntries(Object.keys(libManifest.chunks).sort().map((g) => [g, itemOfGroup(g)]));
 }
 // (the manifest, in the worker: web/lib-lazy.ts)
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
@@ -366,7 +374,7 @@ function boardMystClosure(what: string, r: any) {
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: join(here, "dist", "board"), naming: "board.js", target: "browser", format: "esm", minify: true,
     // (the engine it was built with, by its files' SHA-256s: an exported board pins it, design/engines.md)
-    define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
+    define: { __SB_LATEX__: "false", __SB_LATEX_HOSTS__: BOARD_TEX_HOSTS, __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "false" } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -404,7 +412,7 @@ function boardMystClosure(what: string, r: any) {
   // __SB_NO_SYNC__, never reached, and the stub keeps the modules themselves, and the client behind them, out of
   // this copy)
   const noSync = { name: "no-sync", setup(b: any) { b.onResolve({ filter: /(^|\/)sync-(owner|panel|rows)(\.ts)?$/ }, () => ({ path: join(here, "board", "no-sync-stub.ts") })); } };
-  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
+  const ns = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "board", "page.ts")], outdir: nosyncDir, naming: "board.js", target: "browser", format: "esm", minify: true, plugins: [noSync], define: { __SB_LATEX__: "false", __SB_LATEX_HOSTS__: BOARD_TEX_HOSTS, __SB_ENGINE__: JSON.stringify(ENGINE), __SB_NO_SYNC__: "true" } });
   if (!ns.success) { for (const l of ns.logs) console.error(l); process.exit(1); }
   boardMystClosure("the board without sync (the frame, exports)", ns);
   // (its packages are the board build's: a subset, already listed in js-dependencies.json)
@@ -498,10 +506,23 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // mode's, when it is first used; offline, a module whose sources were
 // never fetched can't be imported, and one whose compiled code wasn't is
 // compiled from its source: src/compile.ts)
-const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", ...ICONS, ...KATEX];
+const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json", ...ICONS, ...KATEX];
 const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-myst.js", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
+// What "Storage -> Offline" lists and "download all" fetches (plan-b8-offline §2-§3): LAZY as items, with each one's
+// file count, stored bytes (exact) and transfer bytes (brotli at quality 5 here, the build's estimate of the wire); the
+// build refuses a catalog over its caps (web/offline-inventory.mts), and the inventory over its own size caps.
+{
+  const { offlineInventory, inventoryBytes } = await import("./offline-inventory.mts");
+  const { brotliCompressSync, gzipSync, constants: zc } = await import("node:zlib");
+  const fileOf = (p: string) => p.split("?")[0];
+  const stored = new Map(LAZY.map((p) => [p, statSync(join(here, "dist", fileOf(p))).size]));
+  const transfer = new Map(LAZY.map((p) => [p, brotliCompressSync(readFileSync(join(here, "dist", fileOf(p))), { params: { [zc.BROTLI_PARAM_QUALITY]: 5 } }).length]));
+  const inv = offlineInventory(LAZY, stored, transfer);
+  writeFileSync(join(here, "dist", "offline-inventory.json"), inventoryBytes(inv, (b) => gzipSync(b, { level: 9 })));
+  console.log(`offline: ${inv.items.length} items, ${inv.totals.files} files, ${(inv.totals.stored / 1e6).toFixed(1)} MB stored, ~${(inv.totals.transfer / 1e6).toFixed(1)} MB to download, max entry ${(inv.totals.maxEntry / 1e6).toFixed(1)} MB`);
+}
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -516,9 +537,17 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   // (as web/_headers and web/csp.ts give it: every file cross-origin isolated, a page its policy)
   const headers: Record<string, string> = { "Content-Type": mime, "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
   if (file.endsWith(".html")) Object.assign(headers, { "Content-Security-Policy": pagePolicy(scriptHashes(bytes.toString("utf8"))), "X-Frame-Options": frameOptions(pagePolicy())! });
-  return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), headers }];
+  return [p.split("?")[0], { sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length, headers }];
 }));
-writeFileSync(join(here, "dist", "sw.js"), readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS)));
+{
+  // (the shipped service worker is web/sw.js minus its test-only hook block, byte for byte, asserted in
+  // web/sw-hook.mts; a test build, SAGEBRUSH_OFFLINE_TEST=1, also writes the file with the block as dist/sw.test.js)
+  const { stripHook } = await import("./sw-hook.mts");
+  const full = readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS));
+  writeFileSync(join(here, "dist", "sw.js"), stripHook(full));
+  rmSync(join(here, "dist-test"), { recursive: true, force: true });
+  if (process.env.SAGEBRUSH_OFFLINE_TEST === "1") (mkdirSync(join(here, "dist-test")), writeFileSync(join(here, "dist-test", "sw.test.js"), full));
+}
 if (hasSite) mkdirSync(join(siteDir, "public", "icons"), { recursive: true });
 // the shell worker's bootstrap (web/shell/worker-boot.js; plan-bash-shell r3
 // §6), served with its own policy (web/csp.ts); the shell's module comes from a
@@ -607,7 +636,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {
@@ -624,6 +653,12 @@ if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: tr
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
 // the articles (articles/ in the repository) as static pages, sitemap.xml
 if (hasSite) await import("./build-articles.ts");
+// (the service worker's test hook is in no deployable directory: web/sw-hook.mts)
+{
+  const { assertNoHookIn } = await import("./sw-hook.mts");
+  await assertNoHookIn(join(here, "dist"));
+  if (hasSite) await assertNoHookIn(join(siteDir, "public"));
+}
 // every page's Content-Security-Policy, in _headers (web/csp.ts)
 (await import("./csp.ts")).writeHeaders();
 const size = statSync(join(here, "dist", "sagebrush-worker.js")).size;

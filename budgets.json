@@ -157,6 +157,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-csv.src": {
+   "exact": false,
+   "ceiling": 50266,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-ctypes.src": {
    "exact": false,
    "ceiling": 9101,
@@ -236,7 +243,7 @@
   },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 14870,
+   "ceiling": 14972,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -278,7 +285,7 @@
   },
   "engine/lib/mod-matplotlib.src": {
    "exact": false,
-   "ceiling": 26439,
+   "ceiling": 30378,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -544,7 +551,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 371026,
+   "ceiling": 375956,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -621,7 +628,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 235521,
+   "ceiling": 235870,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -675,6 +682,7 @@
    "engine/lib/mod-contextlib.src": 29725,
    "engine/lib/mod-copy.src": 9103,
    "engine/lib/mod-copyreg.src": 8446,
+   "engine/lib/mod-csv.src": 45697,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
    "engine/lib/mod-encodings.src": 18178,
