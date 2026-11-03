@@ -162,7 +162,12 @@ export function preparseNumbers(code: string): string {
 const GENS = /^(\s*)([\p{L}_][\p{L}\p{N}_]*)\.<\s*([\p{L}_][\p{L}\p{N}_\s,]*)>\s*=\s*(.+?)\s*$/u;
 function generators(line: string): string {
   const m = GENS.exec(line);
-  if (!m) return line;
+  if (!m) {
+    // (a declaration after other statements on the line, as Sage allows:
+    // z = 1; R.<t> = PolynomialRing(QQ))
+    const cut = line.includes(".<") ? topLevelSemicolon(line) : -1;
+    return cut < 0 ? line : line.slice(0, cut + 1) + " " + generators(line.slice(cut + 1).trimStart());
+  }
   const [, indent, name, gens, all] = m;
   const names = gens.split(",").map((g) => g.trim()).filter(Boolean);
   // (the generators' printed names are as written: the reactive notebook's

@@ -4,9 +4,9 @@
 
 ## Pages (HTML; append .json, or send Accept: application/json)
 
-- https://sagebrush.space/atlas/mf/389.2.a : the newspace N.k.a (trivial character "a"): dimensions, orbits, characteristic polynomials of T, old-space decomposition, provenance.
-- https://sagebrush.space/atlas/mf/389.2.a.e : one Galois orbit N.k.a.x: q-expansion or trace form, coefficient field, Atkin-Lehner signs, sign of the functional equation, CM, elliptic curve, traces.
-- https://sagebrush.space/atlas/mf/?weight=2&level=1-100&dim=1&cm=no&sign=-1&rank=1&format=json : search the stored orbits (ranges "a-b"; start, limit <= 1000). q=<text> jumps to a label (389.2.a.e, 389.2.a, 389, 11a1, 11.a).
+- /atlas/mf/389.2.a : the newspace N.k.a (trivial character "a"): dimensions, orbits, characteristic polynomials of T, old-space decomposition, provenance.
+- /atlas/mf/389.2.a.e : one Galois orbit N.k.a.x: q-expansion or trace form, coefficient field, Atkin-Lehner signs, sign of the functional equation, CM, elliptic curve, traces.
+- /atlas/mf/?weight=2&level=1-100&dim=1&cm=no&sign=-1&rank=1&format=json : search the stored orbits (ranges "a-b"; start, limit <= 1000). q=<text> jumps to a label (389.2.a.e, 389.2.a, 389, 11a1, 11.a).
 - A label that is not stored (e.g. 1.24.a, or 1009.2.a) opens a page that computes it in the browser; its .json is a 404 with {"stored": false}.
 
 ## Bulk data (static files)
@@ -28,7 +28,7 @@
 
 ## Recompute
 
-- Sage mode (https://sagebrush.space notebook, or `npx sagebrush --sage`): newform_orbits(N, k) lists the orbits (label, dimension, trace form, .charpoly(), .traces(n)); Newforms(N, k) prints q-expansions as Sage does when all are rational.
-- Before computing: the engine predicts time and peak memory (WebAssembly, one thread) with estimate_newforms: in Sage mode `from sagebrush import mf; mf.estimate(N, k, bound)`, in a page the WebMCP tool atlas_estimate; https://sagebrush.space/atlas/about#cost shows its accuracy.
+- Sage mode (the notebook at /, or `npx sagebrush --sage`): newform_orbits(N, k) lists the orbits (label, dimension, trace form, .charpoly(), .traces(n)); Newforms(N, k) prints q-expansions as Sage does when all are rational.
+- Before computing: the engine predicts time and peak memory (WebAssembly, one thread) with estimate_newforms: in Sage mode `from sagebrush import mf; mf.estimate(N, k, bound)`, in a page the WebMCP tool atlas_estimate; /atlas/about#cost shows its accuracy.
 - Rust: in engine/ of https://github.com/sagemathinc/sagebrush, `cargo run --release -p sagebrush-web --example atlas -- N:k 1000` prints the newspace as one JSON line (the atlas's input).
 - In a browser with WebMCP, atlas pages offer tools atlas_lookup(label), atlas_search(filters), atlas_estimate(level, weight, bound) and atlas_compute(level, weight).

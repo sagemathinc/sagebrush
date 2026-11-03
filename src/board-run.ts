@@ -630,7 +630,7 @@ function errorText(e: CellError, label: (id: string) => string, written: (n: str
     case "cycle":
       return `${list(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
     case "import-star":
-      return `${e.message} Import the names you use (from m import a, b), or the module (import m).`;
+      return e.message;
     case "analyzer":
       return `This item could not be analyzed (${e.message}).`;
     default:

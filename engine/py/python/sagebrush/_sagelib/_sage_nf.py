@@ -1819,7 +1819,16 @@ def NumberField(polynomial, name=None, names=None, **kwds):
         (2, a^2 + 2*a + 1)
         sage: NumberField(x^2 + 5, 'b')
         Number Field in b with defining polynomial x^2 + 5
+        sage: NumberField([x^2 - 2, x^2 - 3], 'a')  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt(2) + sqrt(3)).minpoly()
     """
+    if isinstance(polynomial, (list, tuple)):
+        # (Sage builds a relative field, a tower; Sagebrush has absolute fields only)
+        raise NotImplementedError("relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; "
+                                  "the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, "
+                                  "e.g. (sqrt(2) + sqrt(3)).minpoly()")
     if names is not None:
         name = names[0] if isinstance(names, (list, tuple)) else names
     if name is None:
