@@ -299,7 +299,15 @@ const cards = (list: Example[]) => `<ul class="cards">\n${list.map(card).join("\
 /** The catalog: one entry per example, the fields a list or a search needs, and its files.json's hash. */
 export type CatalogEntry = { id: string; kind: string; title: string; summary: string; tags: string[]; level: string; mode?: string; modes?: string[]; features?: string[]; main: string; files: number; bytes: number; files_sha256: string; url: string };
 
-export async function buildExamplesInto(out: string, corpus = join(root, "examples")): Promise<{ url: string; date: string }[]> {
+/**
+ * The site's examples within plan section 5's caps (daybreak2's ruling: budgets.json's site/examples row binds only
+ * the total, 180 MiB; these parts are bound here): each example's generated preview (its page, and a LaTeX
+ * document's preview.html) at most 1 MiB, all of them at most 120 MiB, the ZIPs at most 60 MiB, the catalog at most
+ * 200 KiB (also its own row). Exported for the tests, which pass smaller caps.
+ */
+export const SITE_CAPS = { preview: 1024 * 1024, previews: 120 * 1024 * 1024, zips: 60 * 1024 * 1024, catalog: 200 * 1024 };
+
+export async function buildExamplesInto(out: string, corpus = join(root, "examples"), caps = SITE_CAPS): Promise<{ url: string; date: string }[]> {
   const dest = join(out, "examples");
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
@@ -310,11 +318,14 @@ export async function buildExamplesInto(out: string, corpus = join(root, "exampl
   const urls: { url: string; date: string }[] = [];
   const today = new Date().toISOString().slice(0, 10);
   const catalog: CatalogEntry[] = [];
+  const sizes = new Map<string, number>();
   const write = (rel: string, data: string | Uint8Array) => {
     const f = join(dest, rel);
     mkdirSync(dirname(f), { recursive: true });
     writeFileSync(f, typeof data === "string" && rel.endsWith(".html") ? inert(rel, data) : data);
+    sizes.set(rel, typeof data === "string" ? Buffer.byteLength(data) : data.length);
   };
+  const over: string[] = [];
 
   for (const e of examples) {
     const m = e.manifest;
@@ -357,6 +368,8 @@ ${preview}
 <p class="meta">Open the ZIP's ${esc(KIND_ONE[e.kind])} in Sagebrush (File, Open) to run and change it.</p>`;
     write(`${e.id}/index.html`, page({ url: `/examples/${e.id}/`, title: m.title, description: m.summary, crumbs: [["/examples/", "Examples"], [`/examples/${e.kind}/`, KIND_TITLE[e.kind]]], body, type: "CreativeWork", main: { path: m.main, sha256: fj.files.find((x: any) => x.path === m.main)!.sha256 } }));
     urls.push({ url: `/examples/${e.id}/`, date });
+    const shown = (sizes.get(`${e.id}/index.html`) ?? 0) + (sizes.get(`${e.id}/preview.html`) ?? 0);
+    if (shown > caps.preview) over.push(`${e.id}: its preview is ${shown} bytes, more than ${caps.preview}`);
   }
 
   // the kinds, the tags, the index
@@ -383,6 +396,12 @@ ${preview}
   }));
   urls.unshift({ url: "/examples/", date: today });
   write("index.json", JSON.stringify({ format: "sagebrush-examples", v: 1, examples: catalog }, null, 1) + "\n");
+  const sum = (test: (rel: string) => boolean) => [...sizes].filter(([rel]) => test(rel)).reduce((n, [, b]) => n + b, 0);
+  const previews = sum((rel) => rel.endsWith(".html")), zips = sum((rel) => rel.endsWith(".zip")), cat = sizes.get("index.json") ?? 0;
+  if (previews > caps.previews) over.push(`the previews (every page) are ${previews} bytes, more than ${caps.previews}`);
+  if (zips > caps.zips) over.push(`the ZIPs are ${zips} bytes, more than ${caps.zips}`);
+  if (cat > caps.catalog) over.push(`index.json is ${cat} bytes, more than ${caps.catalog}`);
+  if (over.length) throw new Error(`build-examples: over plan section 5's caps:\n  ${over.join("\n  ")}`);
   console.log(`examples: ${examples.length} examples, ${urls.length} pages`);
   return urls;
 }

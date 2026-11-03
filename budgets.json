@@ -657,6 +657,27 @@
   "registry/packages": {
    "exact": true,
    "max": 3
+  },
+  "examples/corpus": {
+   "exact": false,
+   "ceiling": 62914560,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "examples/index.json": {
+   "exact": false,
+   "ceiling": 204800,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "site/examples": {
+   "exact": false,
+   "ceiling": 188743680,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
   }
  },
  "epoch": {

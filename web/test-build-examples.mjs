@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
-import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn } from "./build-examples.ts";
+import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn, SITE_CAPS } from "./build-examples.ts";
 import { sitemapXml } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
@@ -158,6 +158,23 @@ check(/marker names .* not examples\/shared\/katex-preview\.css/.test(refused ??
   check(!/<script>alert|<img src=x/i.test(cat), "and in the lists");
   const sha = JSON.parse(readFileSync(join(o, "examples", "notebook", "hello-python", "files.json"), "utf8")).files.find((f) => f.path === m.main).sha256;
   check(h.includes(`<meta name="sagebrush-example-main" content="${m.main} sha256:${sha}">`), "the page names the sha256 of the main its preview was built from (A6)");
+}
+
+// ---- plan section 5's caps on what the site serves (the parts budgets.json's site/examples row doesn't bind alone)
+check(SITE_CAPS.preview === 1048576 && SITE_CAPS.previews === 125829120 && SITE_CAPS.zips === 62914560 && SITE_CAPS.catalog === 204800, "the caps are the plan's: 1 MiB a preview, 120 MiB of previews, 60 MiB of ZIPs, 200 KiB of catalog");
+for (const [cap, re] of [
+  [{ ...SITE_CAPS, preview: 10000 }, /latex\/article: its preview is \d+ bytes, more than 10000/],
+  [{ ...SITE_CAPS, previews: 20000 }, /the previews \(every page\) are \d+ bytes, more than 20000/],
+  [{ ...SITE_CAPS, zips: 1000 }, /the ZIPs are \d+ bytes, more than 1000/],
+  [{ ...SITE_CAPS, catalog: 100 }, /index\.json is \d+ bytes, more than 100/],
+]) {
+  let why = null;
+  try {
+    await buildExamplesInto(tmp(), FIX, cap);
+  } catch (e) {
+    why = String(e.message);
+  }
+  check(re.test(why ?? ""), "the build refuses a site over a cap: " + why);
 }
 
 // ---- the ZIP writer alone: empty, UTF-8 names, deterministic
