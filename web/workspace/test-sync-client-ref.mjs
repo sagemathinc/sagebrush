@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=30 runner=bun env=SYNC_REQUIRE_CLAIM=1 chrome
 // The sync client's cases (sync-client-cases.js: design/sync-client.md §3, C1, L2, L3, L4) in headless Chromium against
 // core's reference server (web/sync-protocol/reference-server.ts), in this process: the sender lock, the account
 // socket, hello/welcome/index/pull_index, ops and acks, lost acks, refusals (the rebuild asked for, never done here),

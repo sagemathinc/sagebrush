@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=60 runner=bun
 // The core build without web/site/ (PR #59, astra's CORR-PR59-1;
 // plan-cloud-split-r1 §2): `SAGEBRUSH_NO_SITE=1 bun web/build.ts` must
 // succeed, produce web/dist/, and write nothing into web/site/, as when

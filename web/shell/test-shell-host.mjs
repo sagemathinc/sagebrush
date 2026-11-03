@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=210 runner=bun
 // ShellHost, the page's mediator (plan-bash-shell r3 §2–§3, addendum D8 r3), in headless Chromium: the real
 // shell module, built by the publisher into a set of its own and run in its CSP'd worker
 // (web/shell/worker-boot.js), against a real Workspace (IndexedDB, Web Locks).  The cases are

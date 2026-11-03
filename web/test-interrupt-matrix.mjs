@@ -1,3 +1,4 @@
+// ci: interrupt-matrix order=10 env=SB_URL=http://127.0.0.1:8765/ chrome -- --ci --budget-ms 900000 --out interrupt-out/interrupt-matrix.json
 // The interrupt matrix (item B): start each expensive operation, interrupt it partway, and
 // check that the interrupt is recognized (and how long it took), that the session survives
 // (the same process, `keep` still defined), that the next call on the same route works,

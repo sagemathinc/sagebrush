@@ -1,3 +1,4 @@
+// ci: web-runner order=70 chrome
 // The frame other sites show a board in (/frame/board/; design/frame.md):
 // a page of another origin embeds it, without a sandbox attribute, and posts
 // it a board.  The frame's own policy sandboxes it: an opaque origin, no

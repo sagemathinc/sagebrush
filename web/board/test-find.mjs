@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=20
 // Find in a board (web/board/find.ts, mount.ts), with the keyboard in
 // headless Chromium: Ctrl/Cmd+F opens a small bar; what is typed is looked
 // for in what the items say as written (titles, text, code, details), never

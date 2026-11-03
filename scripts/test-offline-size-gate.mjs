@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci: checks.3 order=110
 // The offline size gate's controls (scripts/offline-size-gate.mjs): a synthetic dist exactly at every ceiling passes,
 // and each of the eight rows one unit over its ceiling, alone, is refused (the gate exits 1 naming that row).
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";

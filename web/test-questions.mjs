@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The questions preview (web/questions), in headless Chromium: six questions (two with Sage plots)
 // render with typeset math; each student gets their own numbers; a right numeric
 // answer, a right symbolic answer (checked by Sage in the page's worker) and a

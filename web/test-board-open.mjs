@@ -1,3 +1,4 @@
+// ci: web-runner order=110 chrome
 // End-to-end test of `sagebrush board open FILE` (src/board-open.ts) in headless Chromium:
 //
 //   node web/test-board-open.mjs [bundle]     (default build/cli/pyjs.cjs; CHROME=... for the browser)
