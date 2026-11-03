@@ -1,4 +1,4 @@
-// ci: web-runner order=350 runner=bun chrome
+// ci: web-runner order=360 runner=bun chrome
 // astra's controls on 529dc616 (CORR-529-1: a board edit while its history is reopened; a stale init, clear's
 // generation, a journal with no tail), from /scratch/sagebrush-reviews/evidence/durability-detect-529-astra/, with
 // its cases in astra-529-cases.js, verbatim:  CHROME=google-chrome bun web/workspace/test-workspace-529.mjs

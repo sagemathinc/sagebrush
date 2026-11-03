@@ -1,4 +1,4 @@
-// ci: web-runner order=400 runner=bun
+// ci: web-runner order=410 runner=bun
 // The notebooks' merges outside the patch graph (plan-exact-only r1, P2c's), as units: the store's (history.js exactRecords3, through
 // journal.js notebookKind.apply) and the editor's (history.js mergeText, mergeTextAt with the selection mapped).
 //   bun web/notebook/test-p2c-merge.mjs

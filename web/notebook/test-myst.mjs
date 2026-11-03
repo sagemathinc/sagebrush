@@ -1,4 +1,4 @@
-// ci: web-runner order=130 runner=bun chrome
+// ci: web-runner order=140 runner=bun chrome
 // Jupytext MyST notebooks in headless Chromium (plan-myst-notebooks r3):
 //   CHROME=google-chrome bun web/notebook/test-myst.mjs      (after bun web/build.ts)
 // A. "Open as a notebook" in a workspace of its own (real IndexedDB): a MyST .md is offered as a notebook by its

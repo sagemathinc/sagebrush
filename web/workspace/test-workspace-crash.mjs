@@ -1,4 +1,4 @@
-// ci: web-runner order=190 runner=bun chrome
+// ci: web-runner order=200 runner=bun chrome
 // The migration of data files' bytes beside the index (design/capabilities.md
 // §2b) survives the browser being killed: a workspace as version 1 made it
 // (120 data files of 2 MB kept the old way, 5 in Trash), opened by this

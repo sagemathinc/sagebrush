@@ -1,4 +1,4 @@
-// ci: web-runner order=480 chrome
+// ci: web-runner order=490 chrome
 // A data file's preview, its versions, and the Storage panel
 // (web/workspace/preview.ts, design/workspace-files.md §4, §2.5, §6.3), in
 // headless Chromium against the built site: a table's first rows, a

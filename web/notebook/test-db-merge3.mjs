@@ -1,4 +1,4 @@
-// ci: web-runner order=380 runner=bun
+// ci: web-runner order=390 runner=bun
 // web/notebook/db-merge3.ts (P1 of the merge-alignment plan, Oct 30 2026: cocalc-ai's merge3.ts, copied) against the
 // oracle db-merge3-vectors.json: 406 merges made by cocalc-ai's own built mergeDbStrings at the commit the copy is of
 // (gen-db-merge3-vectors.mjs; 6 pinned cases like its jupyter-core-merge's, 400 seeded random notebook edits).

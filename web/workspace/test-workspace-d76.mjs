@@ -1,4 +1,4 @@
-// ci: web-runner order=320 runner=bun chrome
+// ci: web-runner order=330 runner=bun chrome
 // astra's root controls on d761fdec (/scratch/astra-detect-d76/web/workspace/astra-d76-probes.mjs, its cases
 // astra-d76-cases.js), verbatim but for one change (marked: the live checks wait for the rebuild, @sagebrush's
 // decision on be486fe2):  CHROME=google-chrome bun web/workspace/test-workspace-d76.mjs

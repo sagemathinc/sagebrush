@@ -1,4 +1,4 @@
-// ci: web-runner order=300 runner=bun chrome
+// ci: web-runner order=310 runner=bun chrome
 // astra's probes on c05ffd53 (CORR-C05-1/2): the 9d7 runner (test-workspace-9d7.mjs) with its cases in
 // astra-c05-cases.js:  CHROME=google-chrome bun web/workspace/test-workspace-c05.mjs
 // The workspace (web/workspace/: design/workspace-files.md §2, §8.2) in

@@ -1,4 +1,4 @@
-// ci: web-runner order=220 runner=bun chrome
+// ci: web-runner order=230 runner=bun chrome
 // The notebook journal's core (web/notebook/journal.js; plan-sync-slice2-client r4 §2.1, r9 §3.1a) in headless
 // Chromium, with real IndexedDB and Web Locks: T1 then T2 on every save, the journal's rows and their charges, the
 // pending value while TimeTravel is paused (F4), and recovery on load, each row of its table hit by a case.

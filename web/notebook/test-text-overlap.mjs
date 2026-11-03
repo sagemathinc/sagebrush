@@ -1,4 +1,4 @@
-// ci: web-runner order=370 runner=bun
+// ci: web-runner order=380 runner=bun
 // web/notebook/text-overlap.ts: whether two edits of a text overlap, and their line merge when they don't, against
 // the shared vectors (merge3-vectors.json's textOverlap) and a few properties: symmetric in the two sides; the
 // work charged is exact (one unit less is "exhausted", nothing guessed); one diff past TEXT_DIFF_PRODUCT_LIMIT is

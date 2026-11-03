@@ -603,6 +603,7 @@ jobs:
           sleep 1
           kill -0 "$server_pid"
           # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
+          # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
           # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
           # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
           # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
