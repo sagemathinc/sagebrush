@@ -13,6 +13,7 @@ import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./im
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
+import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import { EXAMPLES, type Example } from "./examples";
 export { EXAMPLES };
@@ -315,6 +316,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
+  const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS };
+  registerLatexTools(); setTarget(agentTarget);
+  life.signal.addEventListener("abort", () => clearTarget(agentTarget));
 
   // ---- images (r5 §3): resolved inside the file's folder, read by identity, checked, shown from blob: URLs
   // One resolver at a time (i1c01 A3-1): a reply's names join the queue, and only the running loop reads, counts and

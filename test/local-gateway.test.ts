@@ -1750,6 +1750,18 @@ const tsapi = require("typescript-api");
 const BUNDLED_PACKAGES: Record<string, { version: string; importers: string[] }> = {
   "marked": { version: "18.0.14", importers: ["web/board/svg.ts"] },
   "mathjax-full": { version: "3.2.2", importers: ["src/board-math.ts"] },
+  // (`sagebrush latex`'s math: src/latex-cli.ts, in its own lazily loaded file, LAZY_REVIEWED below)
+  "katex": { version: "0.19.0", importers: ["src/latex-cli.ts"] },
+};
+/** The closure's reviewed lazily loaded modules: file -> {fn, target, sha256}. `sagebrush latex`'s module,
+ * src/latex-cli.ts, is built as its own file beside the bundle (scripts/build-cli.mjs) and loaded by path only by
+ * src/cli.ts's loadLatex, through createRequire. That one createRequire is accepted only inside that function, once,
+ * and only while the function's whole source (whitespace runs as one space: fnPin) is the reviewed one, its sha256 here:
+ * what the returned require loads (its fixed candidates, all sagebrush-latex.cjs) is part of what is pinned, so any
+ * change to the loader fails until it is reviewed and the pin renewed (astra's L41-LAZY-1). The census then follows it
+ * into the target, whose closure is checked like the rest; any other createRequire fails. */
+const LAZY_REVIEWED: Record<string, { fn: string; target: string; sha256: string }> = {
+  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "b6f9186bfcea6fd8ee8108644176672fa7058ddd06dc22a46aef3b7c5b69c71d" },
 };
 /** The lockfile's package entries, parsed exactly (the `packages:` section's `name@version:` keys). */
 function lockEntries(root: string) {
@@ -1768,16 +1780,23 @@ const CANON_ENTRY = "require.main?.filename ?? process.argv[1]";
 /** The closure's reviewed dynamic-code sites: the compiler's generated accessors and numpy's kernels, each a
  * `new Function` over its own parameters with no module in reach; their count per file, exactly (any other fails). */
 const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "src/runtime/numpy.ts": 3, "src/runtime/object.ts": 4 };
+/** The function declaration a node is in, or null. */
+function enclosingFn(n: any): any {
+  for (let p = n.parent; p; p = p.parent) if (tsapi.isFunctionDeclaration(p)) return p;
+  return null;
+}
+/** A function declaration's pin: the sha256 of its source, each run of whitespace one space. */
+const fnPin = (f: any, sf: any) => createHash("sha256").update(f.getText(sf).replace(/\s+/g, " ")).digest("hex");
 /** The runtime module closure of `entry` under root's tsconfig: every import / export-from, import-equals, require()
  * and import() edge (type-only imports are not runtime), resolved with ts.resolveModuleName; it fails closed (a
  * problem) on a non-literal require or import(), eval, createRequire, X.require(), a Worker whose entry isn't the
  * CLI's own, an unreviewed `new Function`, an unresolved relative specifier, and a bare specifier that is neither a
  * node builtin nor a package.json dependency. */
-function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}) {
+function runtimeClosure(root: string, entry: string, reviewed: Record<string, number> = {}, lazy: Record<string, { fn: string; target: string; sha256: string }> = {}) {
   const cfg = tsapi.readConfigFile(join(root, "tsconfig.json"), tsapi.sys.readFile);
   const options = { ...tsapi.parseJsonConfigFileContent(cfg.config ?? {}, tsapi.sys, root).options, allowJs: true };
   const locks = lockEntries(root);
-  const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {}, resolved: string[] = [];
+  const files = new Set<string>(), problems: string[] = [], dyn: Record<string, number> = {}, resolved: string[] = [], lazySeen: Record<string, number> = {};
   const rel = (f: string) => relative(root, f).split(sep).join("/");
   const queue = [join(root, entry)];
   const canonDecl = new RegExp(`\\bentry(: string)? = ${CANON_ENTRY.replace(/[.?*+^$()[\]{}|\\]/g, "\\$&")}`);
@@ -1829,6 +1848,10 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
           const a = n.arguments[0];
           if (n.arguments.length === 1 && tsapi.isStringLiteralLike(a)) spec(n, a.text);
           else problems.push(`${at(n)}: a non-literal ${isReq ? "require" : "import()"}`);
+        } else if (tsapi.isIdentifier(c) && c.text === "createRequire" && lazy[r] && enclosingFn(n)?.name?.text === lazy[r].fn) {
+          const pin = fnPin(enclosingFn(n), sf);
+          if (pin !== lazy[r].sha256) problems.push(`${at(n)}: createRequire in ${lazy[r].fn}, whose source isn't the reviewed one (its pin is ${pin})`);
+          else { lazySeen[r] = (lazySeen[r] ?? 0) + 1; queue.push(join(root, lazy[r].target)); }
         } else if (tsapi.isIdentifier(c) && (c.text === "eval" || c.text === "createRequire")) problems.push(`${at(n)}: ${c.text}`);
         else if (tsapi.isPropertyAccessExpression(c) && c.name.text === "require") problems.push(`${at(n)}: ${c.getText(sf)}`);
       } else if (tsapi.isNewExpression(n) && tsapi.isIdentifier(n.expression)) {
@@ -1844,14 +1867,16 @@ function runtimeClosure(root: string, entry: string, reviewed: Record<string, nu
     visit(sf);
   }
   for (const [f, n] of Object.entries(dyn)) if (reviewed[f] !== n) problems.push(`${f}: ${n} new Function site(s), ${reviewed[f] ?? 0} reviewed`);
+  for (const [f, l] of Object.entries(lazy)) if (files.has(f) && lazySeen[f] !== 1) problems.push(`${f}: ${lazySeen[f] ?? 0} reviewed lazy load(s) in ${l.fn}, 1 reviewed`);
   for (const f of Object.keys(reviewed)) if (!(f in dyn)) problems.push(`${f}: its reviewed new Function sites are gone`);
   return { files, problems, resolved };
 }
 const verdict = (c: { files: Set<string>; problems: string[] }) => (c.problems.length === 0 && !c.files.has(FAKE) ? "pass" : "fail");
 
 test("L41 the production CLI's runtime closure: remote-fake.js not in it, nothing in it unaccounted for", () => {
-  const c = runtimeClosure(REPO, "src/cli.ts", DYNAMIC_REVIEWED);
+  const c = runtimeClosure(REPO, "src/cli.ts", DYNAMIC_REVIEWED, LAZY_REVIEWED);
   assert.deepEqual(c.problems, [], "the census fails closed on nothing");
+  assert.ok(c.files.has("src/latex-cli.ts") && c.files.has("web/latex/engine/render.mjs"), "the lazily loaded latex module and its closure are in it");
   assert.ok(c.files.has("src/local-gateway.ts") && c.files.has("src/notebook-pair.ts"), "the gateway is in it (the positive witness)");
   assert.equal(c.files.has(FAKE), false, "remote-fake.js is not in the closure");
   assert.equal(verdict(c), "pass");
@@ -1880,6 +1905,25 @@ const fxCases: [string, Record<string, string>, "pass" | "fail"][] = [
 for (const [name, files, want] of fxCases) {
   test(name, () => {
     const c = runtimeClosure(fixtureTree(files), "src/cli.ts");
+    assert.equal(verdict(c), want, `${JSON.stringify([...c.files])} ${JSON.stringify(c.problems)}`);
+  });
+}
+// (the reviewed lazy load, LAZY_REVIEWED: followed into its target, whose closure is checked like the rest; the same
+// createRequire anywhere else fails)
+const LOADER_FN = 'export function loadLatex() { return createRequire(__filename)("./lazy-built.cjs"); }';
+const LOADER = 'import { createRequire } from "node:module";\n' + LOADER_FN + "\n";
+const LAZY_FX = { "src/cli.ts": { fn: "loadLatex", target: "src/lazy.ts", sha256: createHash("sha256").update(LOADER_FN.replace(/\s+/g, " ")).digest("hex") } };
+for (const [name, files, want] of [
+  ["L41-lazy1 the reviewed lazy load, its target clean: pass", { "src/cli.ts": LOADER, "src/lazy.ts": "export const x = 1;\n" }, "pass"],
+  ["L41-lazy2 the reviewed lazy load is followed: its target reaching remote-fake.js fails", { "src/cli.ts": LOADER, "src/lazy.ts": 'export * from "../web/notebook/remote-fake.js";\n' }, "fail"],
+  ["L41-lazy3 createRequire in another function of the reviewed file fails", { "src/cli.ts": LOADER + "export function other() { return createRequire(__filename)(process.argv[1]); }\n", "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy4 the reviewed lazy load twice in its function fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { createRequire(__filename); return createRequire(__filename)(process.argv[1]); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy5 the reviewed loader's function loading another target (remote-fake.js) fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { return createRequire(__filename)("../web/notebook/remote-fake.js"); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy6 the reviewed loader's returned handle kept and used again fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { const r = createRequire(__filename); r("../web/notebook/remote-fake.js"); return r("./lazy-built.cjs"); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+  ["L41-lazy7 the reviewed loader with a changed argument (process.argv[1]) fails", { "src/cli.ts": 'import { createRequire } from "node:module";\nexport function loadLatex() { return createRequire(__filename)(process.argv[1]); }\n', "src/lazy.ts": "export const x = 1;\n" }, "fail"],
+] as [string, Record<string, string>, string][]) {
+  test(name, () => {
+    const c = runtimeClosure(fixtureTree(files), "src/cli.ts", {}, LAZY_FX);
     assert.equal(verdict(c), want, `${JSON.stringify([...c.files])} ${JSON.stringify(c.problems)}`);
   });
 }
@@ -1920,8 +1964,8 @@ function stubbedTree(files: Record<string, string>, stubs: Stub[], lock: string[
 }
 const MARKED: Stub = { name: "marked", dirVersion: "18.0.14", pj: { name: "marked", version: "18.0.14" }, files: {} };
 const MATHJAX: Stub = { name: "mathjax-full", dirVersion: "3.2.2", pj: { name: "mathjax-full", version: "3.2.2" }, files: { "js/mathjax.js": "exports.mathjax = {};\n", ...typed({ "js/mathjax.d.ts": "export {};\n" }) } };
-const KATEX: Stub = { name: "katex", dirVersion: "0.19.0", pj: { name: "katex", version: "0.19.0" }, files: {} };
-const LOCK = ["marked@18.0.14", "mathjax-full@3.2.2", "katex@0.19.0"];
+const CHALK: Stub = { name: "chalk", dirVersion: "5.3.0", pj: { name: "chalk", version: "5.3.0" }, files: {} };
+const LOCK = ["marked@18.0.14", "mathjax-full@3.2.2", "chalk@5.3.0"];
 const REVIEWED_IMPORTERS = {
   "src/cli.ts": 'import "./board-math";\nimport "../web/board/svg";\nexport const y = 1;\n',
   "src/board-math.ts": '// @ts-ignore\nimport { mathjax } from "mathjax-full/js/mathjax.js";\nexport const m = mathjax;\n',
@@ -1930,12 +1974,12 @@ const REVIEWED_IMPORTERS = {
 const boundaryCases: [string, Record<string, string>, Stub[], string[], RegExp | null][] = [
   // [name, files, stubs, lockfile entries, the expected refusal (null: passes)]
   ["L41-fx11 the reviewed packages, from their reviewed importers, at their versions, in the lockfile: pass", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK, null],
-  ["L41-fx7 membership only: katex, otherwise valid (its stub, its version, the lockfile), is not a reviewed package", { "src/cli.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [KATEX], LOCK, /src\/cli\.ts:\d+: not a reviewed bundled package: katex$/],
+  ["L41-fx7 membership only: chalk, otherwise valid (its stub, its version, the lockfile), is not a reviewed package", { "src/cli.ts": '// @ts-ignore\nimport chalk from "chalk";\nexport const k = chalk;\n' }, [CHALK], LOCK, /src\/cli\.ts:\d+: not a reviewed bundled package: chalk$/],
   ["L41-fx8 importer only: marked from src/cli.ts, not its reviewed importer", { "src/cli.ts": '// @ts-ignore\nimport { Lexer } from "marked";\nexport const l = Lexer;\n' }, [MARKED], LOCK, /src\/cli\.ts:\d+: marked from an unreviewed importer$/],
   ["L41-fx12 identity only: marked's reviewed root holds a package named evil", REVIEWED_IMPORTERS, [{ ...MARKED, pj: { name: "evil", version: "18.0.14" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
   ["L41-fx9 version only: marked 18.0.13 at its root", REVIEWED_IMPORTERS, [{ ...MARKED, dirVersion: "18.0.13", pj: { name: "marked", version: "18.0.13" } }, MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked version 18\.0\.13, reviewed 18\.0\.14$/],
   ["L41-fx10 lockfile only: marked@18.0.14 missing from the lockfile", REVIEWED_IMPORTERS, [MARKED, MATHJAX], LOCK.filter((e) => e !== "marked@18.0.14"), /web\/board\/svg\.ts:\d+: marked@18\.0\.14 not in the lockfile$/],
-  ["L41-fx13 no masking: a listed package absent from the closure doesn't admit an unlisted one (katex from src/x.ts)", { "src/cli.ts": 'import "./x";\nexport const y = 1;\n', "src/x.ts": '// @ts-ignore\nimport katex from "katex";\nexport const k = katex;\n' }, [MARKED, MATHJAX, KATEX], LOCK, /src\/x\.ts:\d+: not a reviewed bundled package: katex$/],
+  ["L41-fx13 no masking: a listed package absent from the closure doesn't admit an unlisted one (chalk from src/x.ts)", { "src/cli.ts": 'import "./x";\nexport const y = 1;\n', "src/x.ts": '// @ts-ignore\nimport chalk from "chalk";\nexport const k = chalk;\n' }, [MARKED, MATHJAX, CHALK], LOCK, /src\/x\.ts:\d+: not a reviewed bundled package: chalk$/],
   ["L41-fx14 root only: node_modules/marked a real directory holding a valid marked 18.0.14, outside .pnpm", { ...REVIEWED_IMPORTERS, "node_modules/marked/package.json": JSON.stringify({ name: "marked", version: "18.0.14", main: "index.js", ...(STUB_TYPES ? { types: "index.d.ts" } : {}) }), "node_modules/marked/index.js": "module.exports = {};\n", ...typed({ "node_modules/marked/index.d.ts": "export {};\n" }) }, [MATHJAX], LOCK, /web\/board\/svg\.ts:\d+: marked resolves outside its reviewed root or is not that package$/],
 ];
 // (r3.2: how many bare imports each case resolves before its verdict: the reviewed pair in the positive and in the
