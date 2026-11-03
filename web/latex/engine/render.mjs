@@ -24,6 +24,7 @@ const Alph = (n) => alph(n).toUpperCase();
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
 // a beamer slide's box (style.ts .slide): the class's aspectratio (beamer's paper sizes, in mm) and its type size as a share
 // of the slide's width (--sfs, in cqw: the slide is a size container); 11pt and 4:3 (128 x 96 mm) unless given
+const OV_STEPS_MAX = 100;   // (a frame's steps, at most)
 const ASPECTS = { "1610": [160, 100], "169": [160, 90], "149": [140, 90], "141": [148.5, 105], "54": [125, 100], "43": [128, 96], "32": [135, 90] };
 function slideStyle(opt) {
   const m = /aspectratio\s*=\s*(\d+)/.exec(opt || ""), [w, h] = ASPECTS[m && Object.hasOwn(ASPECTS, m[1]) ? m[1] : "43"];
@@ -182,7 +183,7 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "makeindex", "makeglossary", "maketitle@", "frontmatter", "mainmatter", "backmatter", "normalsize", "selectfont", "onecolumn", "twocolumn",
   "flushbottom", "raggedbottom", "strut", "unskip", "hss", "hfilneg", "break", "filbreak", "goodbreak", "noindent@", "centerline@", "displaystyle", "textstyle", "boldmath", "unboldmath",
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
-  "pause"]);   // (beamer's \pause: every step of a slide is shown at once)
+  ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
@@ -203,7 +204,7 @@ class Renderer {
     this.cls = "article"; this.book = false; this.clsOpt = "";
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
-    this.frameList = []; this.problems = []; this.lastPos = -1;
+    this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
@@ -600,13 +601,51 @@ class Renderer {
     const va = /(^|,)\s*t\s*(,|$)/.test(fopts) ? " va-t" : /(^|,)\s*b\s*(,|$)/.test(fopts) ? " va-b" : "";
     const b = flow.open("section", ' class="slide' + va + '" data-frame="' + n + '" id="frame-' + n + '" style="' + slideStyle(this.clsOpt) + '"', head);
     const inner = flow.open("div", ' class="slide-body"');
+    // (the frame's overlays: its specs' and pauses' highest step, and beamer's beamerpauses counter less one (plus), which
+    //  + advances and uses and \pause advances: what follows a \pause is shown from plus + 1 on)
+    const saved = this.ov; this.ov = { max: 1, plus: 0 };
     this.walk(body, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow);
+    const steps = Math.min(OV_STEPS_MAX, Math.max(1, this.ov.max));
+    this.ov = saved;
+    b.attrs += ' data-steps="' + steps + '"';
+    this.frameList[n - 1].steps = steps;
     flow.close(inner); flow.close(b);
   }
+  // a beamer overlay specification <..> right after i: [its last index, its text normalized (step numbers, "+" and "." resolved
+  // with the frame's counter: "2-", "1,3-4", "-3"), or null]; outside a frame, the text as written
+  ovSpec(nodes, i) {
+    const k = this.spec(nodes, i);
+    if (k === i) return [i, null];
+    let j = i + 1; while (j < nodes.length && this.isSp(nodes[j])) j++;
+    let t = ""; for (let q = j + 1; q < k; q++) if (nodes[q].t === "x" && !isCs(nodes[q].v)) t += String.fromCodePoint(codeOf(nodes[q].v));
+    return [k, this.ovNorm(t)];
+  }
+  ovNorm(t) {
+    const ov = this.ov; if (!ov) return null;
+    const parts = [];
+    for (let p of String(t).replace(/\s+/g, "").replace(/^[a-z]+@/i, "").split(",")) {
+      // (+ and . : the frame's counter, + advancing it first; +(d) and .(d) offset it)
+      p = p.replace(/([+.])(?:\((-?\d+)\))?/g, (_, c, d) => { if (c === "+") ov.plus++; return String(Math.max(1, Math.max(1, ov.plus) + (d ? +d : 0))); });
+      const m = /^(\d*)(-?)(\d*)$/.exec(p);
+      if (!m || (!m[1] && !m[3])) continue;
+      const a = m[1] ? Math.min(+m[1], OV_STEPS_MAX) : 1, z = m[2] ? (m[3] ? Math.min(+m[3], OV_STEPS_MAX) : null) : a;
+      ov.max = Math.max(ov.max, a, z || 0);
+      parts.push(m[2] ? a + "-" + (z ?? "") : String(a));
+    }
+    return parts.length ? parts.join(",") : null;
+  }
+  // a frame's content shown on some steps only: mode only (no room otherwise), uncover (its room kept), invisible (hidden
+  // on those steps), onlynot (shown on the others); a block's content in a div, an inline one in a span
+  ovWrap(a, spec, mode, ctx, flow) {
+    if (!spec) { if (mode === "invisible") flow.html('<span class="invisible">' + this.inline(a, ctx) + "</span>", ctx.st); else if (mode !== "onlynot") this.walk(a, ctx, flow); return; }
+    const attrs = ' class="ov" data-ov="' + esc(spec) + '" data-ovm="' + mode + '"';
+    if (a.some((x) => x.t === "e" || this.csName(x) === "par" || x.t === "V")) { const b = flow.open("div", attrs); this.walk(a, ctx, flow); flow.close(b); }
+    else flow.html("<span" + attrs + ">" + this.inline(a, ctx) + "</span>", ctx.st);
+  }
   // an overlay command's argument (after its <spec>): shown, as every step is; \invisible's takes its room, unseen
-  overlayArg(nodes, i, ctx, flow, hidden) {
-    const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0);
-    if (hidden) flow.html('<span class="invisible">' + this.inline(a, ctx) + "</span>", ctx.st); else this.walk(a, ctx, flow);
+  overlayArg(nodes, i, ctx, flow, mode) {
+    const [j0, spec] = this.ovSpec(nodes, i); const [a, j] = this.arg(nodes, j0);
+    this.ovWrap(a, spec, mode, ctx, flow);
     return j;
   }
   // beamer's block, alertblock and exampleblock: {title}, then the body
@@ -666,11 +705,16 @@ class Renderer {
     // anything before the first \item renders as plain content
     const walkUntilItem = (from) => { let j = from; for (; j < kids.length; j++) if (this.csName(kids[j]) === "item") break; return j; };
     const first = walkUntilItem(0);
-    this.walk(kids.slice(0, first), ctx, flow);
+    // (beamer: itemize[<+->] gives every item that spec, an item's own <..> instead)
+    let lead = kids.slice(0, first), dflt = null;
+    if (this.ov) { const [o, oj] = this.opt(lead, -1); if (o && this.isChar(o[0], 60)) { dflt = this.str(o).trim().replace(/^<|>$/g, ""); lead = lead.slice(oj + 1); } }
+    this.walk(lead, ctx, flow);
     i = first;
     while (i < kids.length) {
       // \item[label] (and beamer's \item<2->[label])
-      const [o, j] = this.opt(kids, this.spec(kids, i));
+      const [si, ispec] = this.ovSpec(kids, i);
+      const spec = ispec ?? (dflt !== null ? this.ovNorm(dflt) : null);
+      const [o, j] = this.opt(kids, si);
       if (L.li) flow.close(L.li);
       let lbl;
       if (o) lbl = this.inline(o, ctx);
@@ -685,7 +729,7 @@ class Renderer {
       } else if (kind === "item") lbl = ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
       else lbl = "";
       const id = this.nid("it"); if (kind === "enum" && !o) this.target.id = id;
-      L.li = flow.open("li", ' id="' + id + '"', kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
+      L.li = flow.open("li", ' id="' + id + '"' + (spec ? ' class="ov" data-ov="' + esc(spec) + '" data-ovm="uncover"' : ""), kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
       const next = walkUntilItem(j + 1);
       this.walk(kids.slice(j + 1, next), ctx, flow);
       i = next;
@@ -900,12 +944,18 @@ const CMDS = {
   maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
   titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
   // (beamer's overlays: every step is shown, so \only, \uncover, \visible and \onslide show their content; \alt its first)
-  only: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  uncover: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  visible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  invisible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, true); },
+  only: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, "only"); },
+  uncover: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, "uncover"); },
+  visible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, "uncover"); },
+  invisible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, "invisible"); },
+  // (\pause: what follows in the frame is shown from the next step on: a marker the presenter hides after, overlay.ts)
+  pause: function (nodes, i, ctx, flow) {
+    if (!this.ov) return i;
+    const k = Math.min(OV_STEPS_MAX - 1, ++this.ov.plus); this.ov.max = Math.max(this.ov.max, k + 1);
+    flow.html('<span class="ovpause" data-pause="' + k + '"></span>', ctx.st); return this.opt(nodes, i)[1];
+  },
   onslide: function (nodes, i) { return this.spec(nodes, i); },
-  alt: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
+  alt: function (nodes, i, ctx, flow) { const [j0, spec] = this.ovSpec(nodes, i); const [a, j] = this.arg(nodes, j0); const [b, j2] = this.arg(nodes, j); if (spec) { this.ovWrap(a, spec, "only", ctx, flow); this.ovWrap(b, spec, "onlynot", ctx, flow); } else this.walk(a, ctx, flow); return j2; },
   alert: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="alert">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   structure: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="structure">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   note: function (nodes, i) { const j0 = this.spec(nodes, i); const [, j1] = this.opt(nodes, j0); const [, j] = this.arg(nodes, j1); return j; },
@@ -918,13 +968,13 @@ const CMDS = {
   hyperref: function (nodes, i, ctx, flow) { const [, j] = this.opt(nodes, i); const [b, j2] = this.arg(nodes, j); flow.html(this.inline(b, ctx), ctx.st); return j2; },
   texorpdfstring: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
   ensuremath: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html(this.math(this.mathStr(a), false), ctx.st); return j; },
-  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   frame: function (nodes, i, ctx, flow) {
-    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
@@ -945,8 +995,8 @@ const CMDS = {
   hphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom hph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   vphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom vph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   smash: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="smash">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
-  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
   marginpar: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   todo: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar todo">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   hspace: function (nodes, i, ctx, flow) { const [, j0] = this.star(nodes, i); const [a, j] = this.arg(nodes, j0); const w = cssDim(this.str(a)); flow.html('<span class="hsp" style="width:' + (w || "0") + '"></span>', ctx.st); return j; },
@@ -1016,7 +1066,7 @@ Renderer.prototype.makebox = function (nodes, i, ctx, flow, framed) {
   if (o) { const [p, j2] = this.opt(nodes, j); if (p) { pos = this.str(p).trim()[0] || "c"; j = j2; } }
   const [a, j3] = this.arg(nodes, j);
   const al = pos === "l" ? "left" : pos === "r" ? "right" : pos === "s" ? "justify" : "center";
-  flow.html('<span class="' + (framed ? "fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
+  flow.html('<span class="' + (framed ? "tex-fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
   return j3;
 };
 Renderer.prototype.dimen = function (nodes, i) {   // a TeX <dimen> written as characters: "1.5em plus 1pt minus .5pt"

@@ -33,6 +33,10 @@ const loadDocComments = (): Promise<typeof import("./comments-doc")> => import(d
 // (an agent on this computer, paired with the page: agent.ts, a chunk of its own, /sagebrush-latex-agent.js; mounted
 // once per page, as the editor switches files in place)
 const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
+// (the presenter, present.ts: a chunk of its own, /sagebrush-latex-present.js; a failed fetch is tried again by a URL of its own)
+const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
+let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
+const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -204,12 +208,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
+  // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
+  // step by step through their overlays; shown once the preview has slides
+  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Escape stops)"; presentBtn.hidden = true;
   // Print / Save as PDF (William, Nov 2: "an easy PDF download, so a person can print out something or archive it"; a
   // full LaTeX environment with direct PDF generation is out of scope): the browser prints the rendered preview only
   // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
   const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
   printBtn.onclick = () => printPreview();
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, status, tools);
+  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -399,6 +406,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
   void loadResults();
   window.addEventListener("focus", () => void loadResults(), on);
+  const slidesNow = () => Array.from(preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")) as HTMLElement[];
+  // (the slide to start at: the first one whose bottom is in the preview's view)
+  const frameInView = () => { const top = right.getBoundingClientRect().top; const k = slidesNow().findIndex((s) => s.getBoundingClientRect().bottom > top + 8); return k < 0 ? 1 : k + 1; };
+  let presenting: { stop(): void } | null = null;
+  presentBtn.onclick = () => void loadPresent().then((m) => {
+    if (!live() || presenting) return;
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+  }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
+  E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  life.signal.addEventListener("abort", () => presenting?.stop());
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
