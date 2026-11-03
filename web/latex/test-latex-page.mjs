@@ -1190,6 +1190,38 @@ try {
     await ev(`(window.sagebrush.latex.printMode(false), 1)`);
     check(!(await ev(`document.documentElement.classList.contains("tex-print")`)) && (await ev(`getComputedStyle(document.querySelector(".tex-head")).display`)) !== "none", "…printMode(false): the page as it was");
   }
+  // ---- \neq and the other \not relations (William, Nov 2: the slash below and left of the "="; the preview's .rlap rule,
+  // for LaTeX's \rlap, also styled the .rlap KaTeX builds \not from): each slash across its relation, in an article and
+  // a slide; and LaTeX's own \rlap and \llap on their line, starting (ending) where they are
+  for (const [name, cls] of [["neq-article", "article"], ["neq-beamer", "beamer"]]) {
+    const body = "For every $n \\neq 0$, $a \\not\\in B$, $x \\notin S$, $A \\not\\subset B$, $a \\not= b$.\n\nAAA\\rlap{XY}lap and ri\\llap{ZW}ght.\n";
+    const src = cls === "beamer" ? "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{Not}\n" + body + "\\end{frame}\n\\end{document}\n" : "\\documentclass{article}\n\\begin{document}\n" + body + "\\end{document}\n";
+    const fn = await mk("/t/" + name + ".tex", enc(src));
+    await open(fn);
+    await until(`document.querySelectorAll(".tex-preview .katex").length >= 5 && !!document.querySelector(".tex-preview .tex-llap")`, 20000);
+    const g = await ev(`(() => {
+      const r = (e) => e.getBoundingClientRect(), cy = (b) => (b.top + b.bottom) / 2, cx = (b) => (b.left + b.right) / 2;
+      // (KaTeX's \\not: the slash in an .rlap before its relation; \\notin: a "/" in an .llap after the \\in; the relation is
+      // the nearest glyph on that side in the same .katex-base)
+      const slashes = [...document.querySelectorAll(".tex-preview .katex :is(.rlap, .llap) > .katex-inner")].map((inner) => {
+        const right = inner.parentElement.classList.contains("rlap"), vbox = inner.closest(".katex-vbox");
+        const rels = [...vbox.closest(".katex-base").querySelectorAll(".mrel")].filter((m) => !m.firstElementChild && m.textContent.trim() && !vbox.contains(m));
+        const rel = right ? rels.find((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING) : rels.findLast((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_PRECEDING);
+        if (!rel) return { rel: null };
+        const s = r(inner.firstElementChild ?? inner), e = r(rel);
+        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1) };
+      });
+      // (a lap's text against the paragraph text beside it: the same line box, by the bottom of their glyph boxes)
+      const textBeside = (o, after) => { const n = after ? o.nextSibling : o.previousSibling, g = document.createRange(); g.setStart(n, after ? 0 : n.length - 2); g.setEnd(n, after ? 2 : n.length); return g.getBoundingClientRect(); };
+      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o.firstElementChild, a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
+        return { start: +(b.left - a.left).toFixed(1), end: +(b.right - a.left).toFixed(1), dBottom: +(gb.bottom - t.bottom).toFixed(1), w: +(b.right - b.left).toFixed(1) }; };
+      return { slashes, rlap: lap("tex-rlap"), llap: lap("tex-llap") };
+    })()`);
+    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
+      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it`, g.slashes);
+    check(Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
+      `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
+  }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);
