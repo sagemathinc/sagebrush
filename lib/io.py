@@ -346,9 +346,21 @@ class BytesIO(BufferedIOBase):
 
 
 class StringIO(TextIOBase):
+    _readnl = "\n"
+
     def __init__(self, initial_value="", newline="\n"):
         if initial_value is not None and not isinstance(initial_value, str):
             raise TypeError(f"initial_value must be str or None, not {type(initial_value).__name__}")
+        # (newline as CPython's: None translates "\r\n" and "\r" to "\n" as
+        # written, "\r" and "\r\n" are what "\n" is written as, and a line
+        # ends at newline, or for "" at any of the three)
+        if newline is not None and not isinstance(newline, str):
+            raise TypeError(f"newline must be str or None, not {type(newline).__name__}")
+        if newline not in (None, "", "\n", "\r", "\r\n"):
+            raise ValueError(f"illegal newline value: {newline!r}")
+        self._readnl = newline
+        if initial_value:
+            initial_value = self._translate(initial_value)
         self._parts = [initial_value] if initial_value else []
         # (the value's length, kept so a write at the end needn't join the parts)
         self._len = len(initial_value) if initial_value else 0
@@ -369,6 +381,8 @@ class StringIO(TextIOBase):
         if not isinstance(s, str):
             raise TypeError(f"string argument expected, got '{type(s).__name__}'")
         self._check()
+        n = len(s)
+        s = self._translate(s)
         if self._pos == self._len:
             self._parts.append(s)
             self._len += len(s)
@@ -377,7 +391,15 @@ class StringIO(TextIOBase):
             self._parts = [v[: self._pos] + s + v[self._pos + len(s) :]]
             self._len = len(self._parts[0])
         self._pos += len(s)
-        return len(s)
+        return n
+
+    def _translate(self, s):
+        nl = self._readnl
+        if nl is None:
+            return s.replace("\r\n", "\n").replace("\r", "\n") if "\r" in s else s
+        if (nl == "\r" or nl == "\r\n") and "\n" in s:
+            return s.replace("\n", nl)
+        return s
 
     def writelines(self, lines):
         self._checkClosed()
@@ -399,8 +421,17 @@ class StringIO(TextIOBase):
     def readline(self, size=-1):
         self._check()
         v = self._value()
-        i = v.find("\n", self._pos)
-        end = len(v) if i < 0 else i + 1
+        nl = self._readnl
+        if nl == "":
+            i = v.find("\n", self._pos)
+            j = v.find("\r", self._pos, None if i < 0 else i)
+            if j >= 0:
+                i = j + 1 if v.startswith("\n", j + 1) else j
+            end = len(v) if i < 0 else i + 1
+        else:
+            nl = nl or "\n"
+            i = v.find(nl, self._pos)
+            end = len(v) if i < 0 else i + len(nl)
         if size is not None and size >= 0:
             end = min(end, self._pos + size)
         s = v[self._pos : end]
