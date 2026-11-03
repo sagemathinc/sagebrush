@@ -380,6 +380,42 @@
         ],
         "additionalProperties": false
       }
+    },
+    "support.draft": {
+      "description": "Draft a support request for the person: it is shown on their page as a card, and they review it and send it with one click; you can't send it yourself. Use it when you're blocked, or Sagebrush is missing a feature or package. The answer is only {drafted: true, shown: \"card\"}; a new draft replaces the one shown.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "bug",
+              "pkg",
+              "feat",
+              "book",
+              "other"
+            ],
+            "description": "bug, pkg (a missing package), feat, book or other (the default)"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 180,
+            "description": "The title"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 19000,
+            "description": "What you tried and what happened, in plain text: no attachments, so the relevant text or a link to a shared Sagebrush document"
+          }
+        },
+        "required": [
+          "subject",
+          "body"
+        ],
+        "additionalProperties": false
+      }
     }
   }
 }

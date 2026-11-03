@@ -641,6 +641,8 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
+          # (an agent drafts a support request, the person sends it: the WebMCP tool, its card, no network before a trusted click)
+          CHROME=google-chrome node web/test-support-draft.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
           CHROME=google-chrome bun web/notebook/test-myst.mjs

@@ -360,6 +360,8 @@ def test_tools_come_from_the_schema():
     schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
     tools = {t["name"]: t for t in WS.tools()}
     for method, v in schema["verbs"].items():
+        if not method.startswith("workspace."):
+            continue  # (support.draft: not a workspace tool)
         params = {k: x for k, x in v["params"].items() if k != "$schema"}
         assert tools["workspace_" + method.split(".", 1)[1]]["inputSchema"] == params, method
     source = os.path.join(HERE, "..", "..", "web", "workspace", "schema.json")

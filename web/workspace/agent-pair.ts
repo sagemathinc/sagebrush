@@ -15,6 +15,7 @@
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, type Grant, type TrashEntry } from "./agent-grant";
+import { checkDraft, type Draft } from "./support-draft";
 
 /** What the hello's result says (the agent's own claims, shown as such). */
 export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[] };
@@ -150,7 +151,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; supportDraft?: (d: Draft) => unknown; supportMode?: string },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -321,6 +322,7 @@ export class AgentPairing {
     if (this.tokens < 1) return this.fail(id, "limit", `more than ${AGENT_LIMITS.perSecond} calls a second`, { retryAfterMs: Math.ceil(((1 - this.tokens) * 1000) / AGENT_LIMITS.perSecond) });
     this.tokens -= 1;
     if (method === "notebook.edit") return void this.edit(id, params);
+    if (method === "support.draft") return this.draft(id, params);
     const bad = checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
@@ -355,6 +357,18 @@ export class AgentPairing {
     } finally {
       this.inFlight--;
     }
+  }
+
+  /** A support request drafted for the person (support-draft.ts): shown as a card, sent only by the person. No
+   * grant is needed, since it only shows them something; the answer is only {drafted: true, shown: "card"}. */
+  private draft(id: string, params: unknown) {
+    if (this.state !== "paired" && this.state !== "granted") return this.fail(id, "invalid", "not paired");
+    if (!this.opts.supportDraft) return this.fail(id, "invalid", "this page doesn't show support requests");
+    const bad = checkCall("support.draft", params);
+    if (bad) return this.fail(id, "invalid", bad);
+    const d = checkDraft(params, { mode: this.opts.supportMode ?? "page", via: "pairing" });
+    if (typeof d === "string") return this.fail(id, "invalid", d);
+    this.reply(id, this.opts.supportDraft(d));
   }
 
   /** Whether this pairing edits notebooks by cell: the page offers it and the agent said it uses it (its hello). */
