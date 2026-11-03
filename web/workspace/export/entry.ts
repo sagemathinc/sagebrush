@@ -1,11 +1,10 @@
 // The lazy chunk's entry (sagebrush-export.js): the export's flow inside the Storage panel (export plan E1 r2d §0).
 //   Export all current files → this tab's open document saved → preflight (progress, Cancel) → ready (Save… / Cancel),
-//   or, when files aren't on this device, a plain refusal naming them (nothing is ever left out of an export: the r2
-//   simplification of "Export the rest" and "Fetch them first", @sagebrush's rule of Oct 31) → written (progress,
-//   Cancel) → a summary, or one plain reason with Export again.  Save… is its own click: the browser's save picker
-//   needs one.
+//   naming what isn't on this device, which is left out (William's B3: listed here, in the summary, and in the archive's
+//   not-included.txt and manifest.json `omitted`) → written (progress, Cancel) → a summary, or one plain reason with
+//   Export again.  Save… is its own click: the browser's save picker needs one.
 import type { Workspace } from "../api";
-import { ExportStopped, LOCK_PREFIX, localDate, preflight, setKit, Spool, startWorker, unavailableWhyText, write, type Kit, type Plan, type Progress, type Result } from "./run";
+import { ExportStopped, LOCK_PREFIX, localDate, NOTE_NAME, preflight, setKit, Spool, startWorker, unavailableWhyText, whyWords, write, type Kit, type Plan, type Progress, type Result, type Unavailable } from "./run";
 // (the caps in effect: the test page checks a page without its hooks has the real ones, grader's N-3)
 export { capsInEffect } from "./run";
 // (tests only: the direct writer against JSON.stringify, in the page, E1 r2c)
@@ -102,7 +101,6 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
     // (tests only: the r2d heap baselines are taken here, the worker started and preflight not begun)
     await (globalThis as any).__SB_EXPORT_TEST__?.beforePreflight?.();
     const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs);
-    if (plan.unavailable.length) { await rows.remove(); end = () => refused(plan); break work; }
     await (globalThis as any).__SB_EXPORT_TEST__?.onPlan?.(plan);
     for (;;) {
       if ((await ready(plan)) === "cancel") { await rows.remove(); box.replaceChildren(); break work; }
@@ -138,24 +136,25 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
   // (the panel closed meanwhile: nothing to show, and no one to answer it)
   if (end && !host.closed?.aborted) await end();
 
+  // (what is left out: the first 20 named, then how many more; all of them in the archive's note)
+  function leftOut(u: Unavailable[]): Node[] {
+    if (!u.length) return [];
+    const list = el("ul");
+    for (const x of u.slice(0, 20)) list.append(el("li", { textContent: `${x.path} (${whyWords(x.why)})` }));
+    if (u.length > 20) list.append(el("li", { textContent: `and ${(u.length - 20).toLocaleString()} more` }));
+    return [el("p", { className: "warn", textContent: unavailableWhyText(u) + ":" }), list];
+  }
+
   function summary(r: Result) {
     show(
-      el("p", { textContent: `Exported ${r.name}: ${(r.members - 1).toLocaleString()} files and folders, ${fmt(r.bytes)}.` }),
+      el("p", { textContent: `Exported ${r.name}: ${(r.members - 1 - (r.omitted.length ? 1 : 0)).toLocaleString()} files and folders, ${fmt(r.bytes)}.` }),
+      ...leftOut(r.omitted),
+      ...(r.omitted.length ? [el("p", { className: "note", textContent: `The archive's ${NOTE_NAME} lists them too.` })] : []),
       el("p", { className: "note", textContent: "Each file is in the export as it was saved when it was read. Anything saved after that isn't included." }),
       // (the archive is saved; only the "Last export prepared" line couldn't be updated: said as it is (astra's E1-A6))
       ...(r.stampFailed ? [el("p", { className: "warn", textContent: `The archive was saved, but this device couldn't record when (${r.stampFailed}), so "Last export prepared" wasn't updated.` })] : []),
       btn("Close", () => box.replaceChildren()),
     );
-  }
-
-  function refused(plan: Plan): Promise<void> {
-    return new Promise((done) => {
-      host.closed?.addEventListener("abort", () => done(), { once: true });
-      const n = plan.unavailable.length, list = el("ul");
-      for (const u of plan.unavailable.slice(0, 20)) list.append(el("li", { textContent: `${u.path} (${u.why === "remote" ? "in the cloud only" : "missing"})` }));
-      if (n > 20) list.append(el("li", { textContent: `and ${(n - 20).toLocaleString()} more` }));
-      show(el("p", { className: "warn", textContent: unavailableWhyText(plan.unavailable) + ":" }), list, ...again(done));
-    });
   }
 
   function ready(plan: Plan): Promise<"save" | "cancel"> {
@@ -166,6 +165,7 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
       ac.signal.addEventListener("abort", () => done("cancel"), { once: true });
       show(
         el("p", { textContent: `Ready: ${plan.files.toLocaleString()} files and ${plan.folders.toLocaleString()} folders, ${fmt(plan.bytes)} before compression.` }),
+        ...leftOut(plan.unavailable),
         btn("Save…", () => done("save")), " ", btn("Cancel", () => done("cancel")),
       );
     });

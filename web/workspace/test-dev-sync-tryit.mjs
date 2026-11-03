@@ -8,8 +8,9 @@
 //   2. Files sidebar, Storage…, "Turn on sync…" (the confirm accepted), then a reload: the sidebar says "Synced";
 //   3. the Files sidebar's New makes a notebook with the journal on (it was refused); a notebook made with File, New
 //      and typed in one browser is listed in the other, which, clicking it in Files before any of its history has
-//      arrived (the front holds that browser's `changed`), says it is still arriving, writes nothing and asks for
-//      its pull; with nothing more from the first browser, a click again opens it with its cell; an edit there comes back;
+//      arrived (the front holds that browser's `changed`), says "Downloading SyncTest…", writes nothing and asks for
+//      its pull; with nothing more from the first browser, it opens by itself, with its cell, once its history is
+//      there (no second click: William's B3); an edit there comes back;
 //   4. different cells edited in both at once: both kept, the two the same; the same cell in both: the two the same;
 //   5. a data file made, renamed and moved to Trash in one appears, follows and goes in the other;
 //   6. one browser offline (its network emulated off, and cut at the front): it says "Offline: …"; an edit made
@@ -283,27 +284,28 @@ try {
   const path3 = (await notebooks()).find((x) => x.ref === ref3)?.path;
   obs("A's new notebook", { named, path: path3 });
   check(await B.until(row(path3), 20_000), `B's Files list ${path3} within 20 s`);
-  // (B opens it as a person does: its row in Files, clicked.  First with none of its history: still arriving, said,
+  // (B opens it as a person does: its row in Files, clicked.  First with none of its history: "Downloading…", said,
   // nothing written, B's own notebook left as it was)
   const hasRecord = (b) => b.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { try { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${J(ref3)}); g.onsuccess = () => { ok(g.result ? { cells: (g.result.cells ?? []).length, j: g.result.j ?? null } : null); r.result.close(); }; g.onerror = () => ok("error"); } catch (e) { ok(String(e)); } }; r.onerror = () => ok("no db"); })`);
   const clickRow = (b) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path3)})?.click()`);
   const nameB = await B.ev(`document.querySelector("#nbname")?.value`);
   await clickRow(B);
-  const said = await B.until(`/still arriving/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10_000);
-  check(said && (await B.ev(`document.querySelector("#nbname")?.value`)) === nameB && (await hasRecord(B)) === null, `B, with none of its history yet: "still arriving" said, nothing opened or written (${J({ toast: await B.ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? null`), record: await hasRecord(B) })})`);
+  const name3 = path3.slice(path3.lastIndexOf("/") + 1).replace(/\.ipynb$/, "");
+  const said = await B.until(`(document.querySelector("#wssidebar .ftoast")?.textContent ?? "").includes(${J(`Downloading ${name3}…`)})`, 10_000);
+  check(said && (await B.ev(`document.querySelector("#nbname")?.value`)) === nameB && (await hasRecord(B)) === null, `B, with none of its history yet: "Downloading ${name3}…" said, nothing opened or written (${J({ toast: await B.ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? null`), record: await hasRecord(B) })})`);
   check((await B.ev(`window.sagebrush.open(crypto.randomUUID())`)) === false, "B: a notebook not listed: open() false, as before");
   // (its `changed` let through, but none sent again: A doesn't edit, as when B was closed while A made it.  B's click
-  // asks for the pull itself (DOC_SYNC.pull); B clicks again, as a person would, until it opens)
+  // asked for the pull itself (DOC_SYNC.pull), and asks again while it waits; B opens it once its history is here,
+  // with no second click: William's B3)
   holdChanged.delete(B.session);
-  let opened = false;
-  for (let i = 0; i < 15 && !opened; i++) { await clickRow(B); opened = await B.until(`document.querySelector("#nbname")?.value === "SyncTest"`, 2000); }
+  const opened = await B.until(`document.querySelector("#nbname")?.value === "SyncTest"`, 30_000);
   // (where the notebook's history is: the server's documents, and each browser's history rows that name it)
   const histKeys = (b) => b.ev(`(async () => { const out = {}; for (const { name } of await indexedDB.databases()) { const db = await new Promise((ok) => { const r = indexedDB.open(name); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); }); if (!db) continue; for (const s of db.objectStoreNames) { if (!/history/.test(s)) continue; const keys = await new Promise((ok) => { const g = db.transaction(s).objectStore(s).getAllKeys(); g.onsuccess = () => ok(g.result); g.onerror = () => ok([]); }); const mine = keys.filter((k) => JSON.stringify(k).includes(${J(ref3)})); if (mine.length) out[name + "/" + s] = { n: mine.length, first: mine.slice(0, 3).map((k) => JSON.stringify(k).slice(0, 80)) }; } db.close(); } return out; })()`);
   obs("the server's documents", [...(ref.accounts?.get(ACCOUNT)?.docs ?? new Map()).entries()].map(([k, d]) => ({ doc: String(k).slice(0, 60), head: d.head, batches: d.batches?.length })));
   obs("A's history rows naming SyncTest", await histKeys(A).catch((e) => String(e)));
   obs("B's history rows naming SyncTest", await histKeys(B).catch((e) => String(e)));
   obs("B after clicking SyncTest in Files", { opened, name: await B.ev(`document.querySelector("#nbname")?.value`), saved: await B.ev(`document.querySelector("#saved")?.textContent`), toast: await B.ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? null`), record: await hasRecord(B), syncA: await A.syncLine(), syncB: await B.syncLine() });
-  check(opened, "B opens SyncTest from its Files once its history is here (within 30 s)");
+  check(opened && (await B.until(`(document.querySelector("#wssidebar .ftoast")?.textContent ?? "").includes(${J(`${name3} downloaded`)})`, 5000)), "B opens SyncTest by itself once its history is here, from the one click (within 30 s), and says it downloaded");
   if (!opened) throw new Error("B couldn't open the notebook A made: the rest of the flow needs it");
   check(await B.until(B.has("x = 1"), 20_000), `B shows A's cell within 20 s (${J(await B.codes())})`);
   check((await B.type(1, "y = 2")) === "typed", "B types y = 2 in a second cell");
@@ -370,8 +372,24 @@ try {
   check(await B2.until(row(path7), 20_000), `B2's Files list ${path7}`);
   const click7 = () => B2.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path7)})?.click()`);
   await click7();
-  check(await B2.until(`/still arriving/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10_000), "B2, with none of its history: \"still arriving\" said");
+  check(await B2.until(`/Downloading .*…/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10_000), "B2, with none of its history: \"Downloading…\" said (and clicked again while it waits, below: one wait)");
+  // (astra's B3-ARRIVAL-1, refused attach: an open of another notebook that fails to attach doesn't end the wait)
+  const other = await B2.ev(`(async () => { const keys = await new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").getAllKeys(); g.onsuccess = () => { ok(g.result); r.result.close(); }; g.onerror = () => ok([]); }; r.onerror = () => ok([]); }); const l = await window.sagebrush.workspace.list("/", { recursive: true }); const cur = localStorage.getItem("sagebrush-current"); return l.find((e) => e.kind === "notebook" && e.ref !== ${J(ref7)} && e.ref !== cur && keys.includes(e.ref))?.ref ?? null; })()`);
+  await B2.ev(`(() => { let once = true; window.sagebrush.shareTest.beforeAttach = async () => { if (once) { once = false; throw new Error("refused (a test)"); } }; return 1; })()`);
+  const failed = other ? await B2.ev(`window.sagebrush.open(${J(other)}).then(() => "attached", (e) => "refused: " + e.message)`) : "no other notebook";
+  check(/^refused: refused \(a test\)/.test(failed), `B2: another notebook's open, refused at its attach (a test): ${failed}`);
+  // (astra's B3-ARRIVAL-1, held read: the automatic open, held after its read, while the person opens another; once let
+  // go it attaches nothing, and the other stays)
+  await B2.ev(`(() => { window.__heldRead = null; window.sagebrush.shareTest.afterRead = (id) => (id === ${J(ref7)} && !window.__heldRead ? new Promise((r) => { window.__heldRead = r; }) : undefined); return 1; })()`);
   holdChanged.delete(B.session);
+  check(await B2.until(`!!window.__heldRead`, 30_000), "B2: …the wait outlived it: its automatic open reached its read once the history arrived (held there)");
+  const okOther = other ? await B2.ev(`window.sagebrush.open(${J(other)}).then((x) => x === true, () => false)`) : false;
+  const otherName = await B2.ev(`document.querySelector("#nbname")?.value`);
+  await B2.ev(`(() => { window.__heldRead(); return 1; })()`);
+  await sleep(3000);
+  const after = { current: await B2.ev(`localStorage.getItem("sagebrush-current")`), name: await B2.ev(`document.querySelector("#nbname")?.value`), w7: await B2.ev(B2.has("w = 7")) };
+  check(okOther && after.current === other && after.name === otherName && !after.w7, `B2: the notebook opened meanwhile stays, and the held automatic open attached nothing (${J({ okOther, otherName, ...after })})`);
+  await B2.ev(`(() => { delete window.sagebrush.shareTest.afterRead; delete window.sagebrush.shareTest.beforeAttach; return 1; })()`);
   let opened7 = false;
   for (let i = 0; i < 15 && !opened7; i++) { await click7(); opened7 = await B2.until(B2.has("w = 7"), 2000); }
   check(opened7, `B2 opens it with A's cell, nothing more from A (within 30 s; ${J(await B2.codes())})`);
