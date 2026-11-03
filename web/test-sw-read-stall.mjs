@@ -138,12 +138,29 @@ try {
   ok(two?.length === 2 && Math.max(...two.map((x) => x.ms)) < 2 * 1000 + 3000, "…the later within about two bounds: " + J(two?.map((x) => Math.round(x.ms))));
   let left;
   ok(await until(async () => (left = (await hook())?.checking) === 0, 3000), "…and no check left waiting: " + left);
+  // (APP-565-1, sync-docs: an entry that stays stuck: every read of it held. Three requests at once must each end
+  // under the clients' bound (2 bounds here): the first stalls once, the others skip the stuck copy for the network,
+  // never each stalling in turn behind the one before)
+  at = "three requests at once, every read held";
+  await until(() => kept(A), 15000);
+  await hook({ holdRead: url, holdKeep: true });
+  await clearHttp();
+  const h3 = (await hook())?.heldReads;
+  const three = await ev(`Promise.all([0, 1, 2].map(() => {
+    const t0 = performance.now();
+    return fetch(${J(url)}).then((r) => r.arrayBuffer()).then((b) => ({ size: b.byteLength, ms: performance.now() - t0 }));
+  }))`);
+  const heldNow = (await hook())?.heldReads - h3;
+  await hook({ holdRead: null });
+  ok(three?.length === 3 && three.every((x) => x.size === want.size), "the stuck entry: all three answered: " + J(three?.map((x) => [x.size, Math.round(x.ms)])));
+  ok(three?.length === 3 && Math.max(...three.map((x) => x.ms)) < 1800, "…each under the clients' bound (2 bounds), none stalling again in turn: " + J(three?.map((x) => Math.round(x.ms))) + `, ${heldNow} read(s) held`);
 
   // the control: the same build with the bound taken out, as a new deploy; the same held read is never answered
   at = "the control: the bound taken out";
   const B = "c0" + A.slice(2);
   const mutant = join(tmp, "sw-control.js");
-  writeFileSync(mutant, SW.replace(BOUND_LINE, "const READ_STALL_MS = 1e12;").replace(`const VERSION = "${A}";`, `const VERSION = "${B}";`));
+  // (2 ** 30 ms: in setTimeout's range, as a larger delay fires at once)
+  writeFileSync(mutant, SW.replace(BOUND_LINE, "const READ_STALL_MS = 2 ** 30;").replace(`const VERSION = "${A}";`, `const VERSION = "${B}";`));
   overrides["/sw.js"] = { file: mutant };
   saveOverrides();
   await clearHttp();

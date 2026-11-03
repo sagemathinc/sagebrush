@@ -121,11 +121,15 @@ function stored(p, body, onBytes) {
 
 // the bytes of the cache's entry under `key` if it is this build's file `p`, with the budget's release (kept while
 // they are served, §14 S3); a wrong entry (length, bytes, a redirect) is deleted; a read that stalled (READ_STALL_MS
-// without data) is not an answer: null, the entry left, so the request goes to the network.  One check of a key at a
-// time: a page's request and the keep it then asks for (offlineKeep's entryVerified) read the same entry, and a
-// stalled read was seen with that overlap (VM1, Nov 3)
+// without data) is not an answer: null, the entry left, so the request goes to the network, and that key's kept copy
+// isn't read again until a new copy is put (fetchAndKeep) or STALL_SKIP_MS pass, so requests waiting their turn
+// behind a stalled read don't each stall on the same entry (sync-docs' APP-565-1).  The digest after the read is CPU
+// work and isn't bounded.  One check of a key at a time: a page's request and the keep it then asks for
+// (offlineKeep's entryVerified) read the same entry, and a stalled read was seen with that overlap (VM1, Nov 3)
 let stallSaid = false;
 const checking = new Map();
+const STALL_SKIP_MS = 6 * READ_STALL_MS;
+const skipRead = new Map(); // key -> until when its kept copy isn't read (a read of it stalled)
 function check(cache, key, p, serve, opts) {
   const k = String(key?.url ?? key), prev = checking.get(k) ?? Promise.resolve();
   const run = prev.then(() => checkNow(cache, key, p, serve, opts));
@@ -135,6 +139,9 @@ function check(cache, key, p, serve, opts) {
   return run;
 }
 async function checkNow(cache, key, p, serve, opts) {
+  const k = String(key?.url ?? key), skip = skipRead.get(k);
+  if (skip !== undefined && Date.now() < skip) return null;
+  skipRead.delete(k);
   const w = wanted.get(p), hit = w && (await cache.match(key, opts));
   if (!hit) return null;
   let release = null, bytes = null, stalled = false;
@@ -148,6 +155,7 @@ async function checkNow(cache, key, p, serve, opts) {
   if (bytes) return { bytes, release };
   release?.();
   if (stalled) {
+    skipRead.set(k, Date.now() + STALL_SKIP_MS * timeScale);
     if (!stallSaid) (stallSaid = true), console.warn(`sagebrush: a kept copy of ${p} gave no data for ${READ_STALL_MS / 1000} s; fetched from the network instead`);
     return null;
   }
@@ -254,7 +262,7 @@ async function fetchAndKeep(req, key, p, ev) {
   if (copy) {
     ev.waitUntil((async () => {
       const cache = await caches.open(CACHE), release = await reserve(INGEST, false);
-      try { await cache.put(key, copy); } finally { release(); }
+      try { await cache.put(key, copy); skipRead.delete(String(key?.url ?? key)); } finally { release(); }
       await offlineSerial(async () => (await entryVerified(cache, key, p)) && offlineVerified.add(p));
     })().catch(() => {}));
   }
@@ -861,12 +869,13 @@ for (const op of ["put", "delete"]) {
 }
 // (a held read: the next cache hit whose URL includes `holdRead` gets a body that never gives data, once: the stall
 // a kept copy's read was seen in, VM1 Nov 3)
-let holdRead = null, heldReads = 0;
+let holdRead = null, holdKeep = false, heldReads = 0;
 const match0 = Cache.prototype.match;
 Cache.prototype.match = async function (k, ...a) {
   const r = await match0.call(this, k, ...a), h = holdRead;
   if (!r || !h || !String(k?.url ?? k).includes(h)) return r;
-  (holdRead = null), heldReads++;
+  if (!holdKeep) holdRead = null;
+  heldReads++;
   return new Response(new ReadableStream({ type: "bytes", pull: () => new Promise(() => {}) }), { status: 200, headers: r.headers });
 };
 // (a deploy's settings, one shot, set by the test page for this build before it installs: read before install ends)
@@ -876,7 +885,7 @@ const set = (t) => {
   else if (t.quota) estimateFn = async () => ({ quota: t.quota.quota, usage: t.quota.usage });
   if (t.probe === false) probed = Promise.resolve(false);
   if ("stop" in t) stopAt = t.stop;
-  if ("holdRead" in t) holdRead = t.holdRead;
+  if ("holdRead" in t) (holdRead = t.holdRead), (holdKeep = !!t.holdKeep);
 };
 const boot = new Promise((done) => {
   const o = indexedDB.open("sb-offline-test", 1);
