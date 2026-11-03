@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,12 +10,12 @@ import { join } from "node:path";
 const script = join(__dirname, "..", "..", "scripts", "ci-paths.mjs");
 const dir = mkdtempSync(join(tmpdir(), "ci-paths-"));
 
-function classify(files: string[], labels = ""): Record<string, string> {
+function classify(files: string[], labels = "", env: Record<string, string> = {}): Record<string, string> {
   const list = join(dir, "files.txt");
   writeFileSync(list, files.join("\n") + "\n");
   const r = spawnSync(process.execPath, [script], {
     encoding: "utf8",
-    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels },
+    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels, ...env },
   });
   assert.equal(r.status, 0, r.stderr);
   return Object.fromEntries(r.stdout.trim().split("\n").map((l) => l.split("=") as [string, string]));
@@ -325,3 +325,44 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   assert.deepEqual(pick(["README.md"]), { groups: [], runner: "false", export: "false", lookalike: "false" });
 });
 
+
+test("a changed suite runs on its own pull request: its `// ci:` job, and the full tier for a full-tier-only job (#565)", () => {
+  // #565's pair: the service worker and a new web-sync.2 suite (the suite is not on master: a checkout of its own)
+  const root = mkdtempSync(join(dir, "root-"));
+  mkdirSync(join(root, "web", "shell"), { recursive: true });
+  writeFileSync(join(root, "web", "test-sw-read-stall.mjs"), "// ci: web-sync.2 order=70 chrome\n// (the stalled read)\n");
+  writeFileSync(join(root, "web", "shell", "test-cross.mjs"), "// ci: web-browser/notebook order=10 chrome\n");
+  const at = { CI_PATHS_ROOT: root };
+  for (const files of [["web/sw.js", "web/test-sw-read-stall.mjs"], ["web/test-sw-read-stall.mjs"], ["web/sw.js"]]) {
+    const o = classify(files, "", at);
+    assert.deepEqual([o.full, o.web], ["true", "true"], files.join(" "));
+  }
+  // each full-tier-only job, by a suite of it from this checkout
+  for (const f of ["web/test-pwa.mjs", "web/workspace/test-workspace-sync-ops.mjs", "web/workspace/test-doc-sync.mjs", "web/agents/test-agents-layout.mjs"]) {
+    assert.equal(classify([f]).full, "true", f);
+  }
+  // a fast-tier suite stays fast and selects its own group, beside its area's (a terminal-area file in notebook's group)
+  const o = classify(["web/shell/test-cross.mjs"], "", at);
+  assert.equal(o.full, "false");
+  assert.deepEqual(JSON.parse(o.web_groups), ["notebook", "terminal"]);
+  assert.equal(classify(["web/board/test-ink.mjs"]).full, "false");
+  // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
+  assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
+  assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
+  // a deleted suite (not in the checkout) runs nowhere
+  assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
+});
+
+test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on the full tier", () => {
+  const source = readFileSync(script, "utf8");
+  const listed = JSON.parse(/const fullOnlyJobs = (\[[^\]]*\]);/.exec(source)![1]);
+  const workflow = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const gated: string[] = [];
+  let job = "";
+  for (const line of workflow.split("\n")) {
+    const m = /^  ([a-z0-9-]+):$/.exec(line);
+    if (m) job = m[1];
+    else if (/^    if:.*needs\.changes\.outputs\.full == 'true'/.test(line)) gated.push(job);
+  }
+  assert.deepEqual([...listed].sort(), gated.sort());
+});
