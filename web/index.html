@@ -1518,7 +1518,7 @@ const exDlg = $("#exdlg");
       b.onclick = () => {
         exDlg.close();
         // (Sagebrush's own example: it may change files, as the person's own notebooks may: permissions.js)
-        openNew(k, g.toLowerCase(), EXAMPLES[k]).then(() => { if (current.id) { hostMade(current.id); perms.provenance(current.id, "host"); } });
+        openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
         history.replaceState(null, "", location.pathname + flagQuery);
       };
       $("#exlist").append(b);
@@ -1638,6 +1638,10 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   for (const f of beforeSwitch) await f();
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
+  // (its permissions' provenance, from the host's own metadata only (this page's madeAs, the workspace entry's made),
+  // never the document's, a file's or a URL's: known before its interpreter starts, so one of the person's own never
+  // starts as one that can't change files and is restarted (permissions.js; the app on Windows, #563))
+  const how = kind === "browser" && madeAs.has(id) ? madeAs.get(id) : await provenanceOf(id, kind);
   // (Move to Trash's own switch (B1): it leaves only the notebook it was asked to; another opened here meanwhile wins,
   // and this switch is dropped before it detaches anything (astra's R2 on #447))
   if (guard) {
@@ -1649,10 +1653,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   docGen++;
   ttShow(false);
   current = { id, kind };
-  // (its permissions' provenance, from the host's own metadata only (this page's madeAs, the workspace entry's made),
-  // never the document's, a file's or a URL's; until known, elsewhere: permissions.js)
-  if (kind === "browser" && madeAs.has(id)) perms.provenance(id, madeAs.get(id));
-  else void provenanceOf(id, kind).then((m) => perms.provenance(id, m));
+  perms.provenance(id, how);
   filesBar(false);
   filesShown();
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
@@ -1732,12 +1733,17 @@ perms.onChange((doc) => {
 });
 async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
   const id = newId();
+  // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
+  // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
+  if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
   return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+// (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
+const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
 async function openId(id, guard = null, intent = null) {
   const end = await navLease();
@@ -3900,9 +3906,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
   else if (!(last && (await openId(last)))) {
-    await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
     // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
-    if (current.id) { hostMade(current.id); perms.provenance(current.id, "host"); }
+    await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
