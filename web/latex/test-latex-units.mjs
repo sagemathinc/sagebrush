@@ -5,7 +5,7 @@
 //   bun web/latex/test-latex-units.mjs
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
-import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes } from "./split.ts";
+import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
@@ -112,6 +112,26 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   const whole = splitChunk(slide(4000)), big = splitChunk(slide(40000));
   check("split-slide-kept-whole", whole.length === 1 && whole[0] === slide(4000) && bytes(slide(4000)) > 32 * 1024, bytes(slide(4000)));
   check("split-slide-over-max-placeholder", big.length === 1 && /this slide is too large/.test(big[0]) && bytes(slide(40000)) > PIECE_MAX, bytes(slide(40000)));
+  // (the placeholder is still that slide, its own open tag: Present and the tools count every frame; and the warning
+  //  latex check gives, at the chunk's place, with the size and the limit)
+  const open = slide(0).slice(0, slide(0).indexOf("<div"));
+  const told = []; const big2 = splitChunk(slide(40000), (why, size) => told.push(tooLargeProblem(why, size, 61)));
+  check("split-slide-placeholder-is-the-slide", big2.length === 1 && big2[0].startsWith(open) && big2[0].endsWith("</section>") && /class="placeholder toolarge"/.test(big2[0]), big2[0].slice(0, 300));
+  check("split-too-large-told", told.length === 1 && told[0].kind === "toolarge" && told[0].at === 61 && /^this slide is too large \(\d+ KiB, over 128 KiB\)$/.test(told[0].name), told);
+  // (a \sageplot's data: URL over PIECE_MAX: not counted, the slide kept whole, nothing told; the same in a paragraph)
+  const plot = '<img class="sageplot" alt="a plot" src="data:image/svg+xml;base64,' + "A".repeat(PIECE_MAX * 2) + '" style="width:50%">';
+  const ps2 = slide(0).replace('<div class="slide-body">', '<div class="slide-body">' + plot), told2 = [];
+  const kept = splitChunk(ps2, () => told2.push(1));
+  check("split-slide-data-url-not-counted", bytes(ps2) > 2 * PIECE_MAX && kept.length === 1 && kept[0] === ps2 && told2.length === 0, { n: bytes(ps2), pieces: kept.length, told: told2.length });
+  const pp = '<div class="p">a ' + plot + " b</div>";
+  check("split-paragraph-data-url-not-counted", (() => { const t = splitChunk(pp); return t.length === 1 && t[0] === pp; })(), null);
+  // (but the markup still counts: the same plot with a slide too large otherwise, a placeholder; and CHUNK_MAX counts it all)
+  check("split-slide-data-url-markup-still-counted", /this slide is too large/.test(splitChunk(slide(40000).replace('<div class="slide-body">', '<div class="slide-body">' + plot))[0]), null);
+  check("split-data-url-over-chunk-max-placeholder", (() => { const t = splitChunk('<div class="p"><img src="data:image/png;base64,' + "B".repeat(CHUNK_MAX) + '"></div>'); return t.length === 1 && /too large/.test(t[0]); })(), null);
+  const over = slide(0).replace('<div class="slide-body">', '<div class="slide-body"><div class="p">' + "q ".repeat(CHUNK_MAX / 2 + 10) + "</div>"), told3 = [];
+  const ov = splitChunk(over, (why, size) => told3.push(tooLargeProblem(why, size, 5)));
+  check("split-slide-over-chunk-max-still-the-slide", bytes(over) > CHUNK_MAX && ov.length === 1 && ov[0].startsWith(open) && ov[0].endsWith("</section>") && /this slide is too large/.test(ov[0]) && /over 2048 KiB/.test(told3[0]?.name ?? ""), { head: ov[0].slice(0, 200), told3 });
+  check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
 

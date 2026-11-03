@@ -9,7 +9,7 @@
 import "./engine/shim.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { setKatex } from "./engine/render.mjs";
-import { splitChunk, bytes } from "./split";
+import { splitChunk, bytes, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
 import { engineInputs, type Known } from "./inputs";
 
@@ -36,9 +36,11 @@ self.onmessage = async (e: MessageEvent) => {
     // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts)
     const items: { g: number; h: string; b: number }[] = [];
     let total = 0, stopped = false;
+    // (a chunk shown as a placeholder: latex_check's warning at its place, check.ts)
+    const tooLarge: { kind: string; name: string; at: number }[] = [];
     if (r.chunks.length > RENDER_BOUNDS.chunks) stopped = true;
     for (let g = 0; g < r.chunks.length && !stopped; g++) {
-      for (const h of splitChunk(r.chunks[g])) {
+      for (const h of splitChunk(r.chunks[g], (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g])))) {
         const b = bytes(h);
         total += b;
         if (total > RENDER_BOUNDS.html) { stopped = true; break; }
@@ -48,7 +50,7 @@ self.onmessage = async (e: MessageEvent) => {
     if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE, b: bytes(TOO_LARGE) }); }
     (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, pos: stopped ? [-1] : r.chunkPos, imageRefs: r.imageRefs || [], inputRefs: r.inputRefs || [], stats: r.stats, tooLarge: stopped,
       // (what latex_check reports, check.ts: small, the problems bounded by the renderer)
-      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems || [], frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}),
+      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: (r.problems || []).concat(tooLarge), frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}),
         // (and what the editor's Run needs, run-core.mjs: the item's key, its code, a refused one's name; the code
         //  is the document's own, so all of it is at most the text sent)
         key: itemKey(it), ...(typeof it.code === "string" && !it.err ? { code: it.code } : {}), ...(it.name ? { name: String(it.name) } : {}) })) } }));
