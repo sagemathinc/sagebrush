@@ -3110,7 +3110,7 @@ const tools = [
   },
   {
     name: "edit_notebook",
-    description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a name defined by two cells, a cycle). Cell ids come from notebook_graph or read_notebook.",
+    description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a redefinition the engine could not safely page-scope, or a cycle; an ordinary Python or Sage name defined again in a later cell is not an error: each cell reads the nearest earlier definition, or the first definition if all are later). Cell ids come from notebook_graph or read_notebook.",
     inputSchema: {
       type: "object",
       properties: {
