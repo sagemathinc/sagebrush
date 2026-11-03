@@ -11,7 +11,8 @@ import { startInterpreter, runCells, type Interpreter } from "../src/reactive-se
 const CLI = __dirname + "/../src/cli.js";
 const FIXTURES: { name: string; cells: string[]; want?: string[] }[] = [
   { name: "redefinition, each reader the nearest earlier", cells: ["x = 1", "print(x)", "x = 2", "print(x)"], want: ["", "1\n", "", "2\n"] },
-  { name: "daybreak3's #3: a function reading a name redefined later", cells: ["x = 1", "def f():\n    return x", "x = 2", "print(f())"] },
+  // (notebook semantics, not linear: f reads the x defined above it, page-order scoping; a linear run would print 2)
+  { name: "daybreak3's #3: a function reading a name redefined later", cells: ["x = 1", "def f():\n    return x", "x = 2", "print(f())"], want: ["", "", "", "1\n"] },
   { name: "a decorator", cells: ["def deco(g):\n    return lambda: g() + 1", "@deco\ndef h():\n    return 1", "print(h())"], want: ["", "", "2\n"] },
   { name: "a default argument, redefined after", cells: ["k = 3", "def g(a=k):\n    return a", "k = 4", "print(g())"] },
   { name: "a class body", cells: ["n = 5", "class C:\n    v = n", "print(C.v)"], want: ["", "", "5\n"] },
@@ -55,15 +56,31 @@ test("reactive-session: the shared semantics fixtures give the same output throu
   }
 });
 
-test("reactive-session: only a cell asked for runs, with its stale ancestors, not unrelated cells", async () => {
+test("reactive-session: only a cell asked for runs, with its stale ancestors; not unrelated cells, not its descendants", async () => {
   const interp = await startInterpreter({ mode: "python", entry: CLI });
   try {
     const out = new Map<string, string>();
-    const cells = [{ key: "a", code: "base = 40" }, { key: "b", code: "print('unrelated')" }, { key: "c", code: "print(base + 2)" }];
+    const cells = [{ key: "a", code: "base = 40" }, { key: "b", code: "print('unrelated')" }, { key: "c", code: "total = base + 2\nprint(total)" }, { key: "d", code: "print('descendant', total)" }];
     const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 20_000, only: ["c"], onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
     assert.equal(out.get("c"), "42\n");
     assert.equal(out.get("b"), undefined, "the unrelated cell wasn't run");
     assert.equal(r.reactive.outcome.get("a"), "ok", "its ancestor ran first");
+    assert.equal(out.get("d"), undefined, "its descendant wasn't run (the default budget is 0)");
+    assert.equal(r.reactive.outcome.has("d"), false);
+  } finally { await interp.close(); }
+});
+
+test("reactive-session: the editor's Run: N, its ancestors, then its descendants within the budget; a slower one left stale", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const out = new Map<string, string>();
+    const cells = [{ key: "a", code: "base = 40" }, { key: "c", code: "total = base + 2" }, { key: "fast", code: "print('fast', total)" }, { key: "slow", code: "print('slow', total)" }];
+    // (their last measured times: fast 10 ms, slow 5 s, over a 2 s budget)
+    const r = await runCells(interp, cells, { mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 20_000, only: ["c"], descendantsWithinMs: 2000, lastMs: new Map([["fast", 10], ["slow", 5000]]), onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); } });
+    assert.equal(r.reactive.outcome.get("a"), "ok", "its ancestor ran");
+    assert.equal(out.get("fast"), "fast 42\n", "a descendant within the budget ran");
+    assert.equal(out.get("slow"), undefined, "a descendant over the budget didn't run");
+    assert.equal(r.states.get("slow")?.state, "stale", "…and is stale");
   } finally { await interp.close(); }
 });
 

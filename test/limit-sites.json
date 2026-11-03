@@ -8249,15 +8249,29 @@
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
- "src/reactive-session.ts :: note :: note(await reactive.run(left, { budget: Infinity })); #0": {
-  "class": "none",
+ "src/reactive-session.ts :: note :: const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "the reactive session (@sagebrush-latex)",
-  "reason": "an unbounded autorun budget for the cells asked for (the scheduler's, not a cap): board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+  "reason": "the descendants' autorun budget (the editor's Run passes the plan's 2 s; latex run --item N and the default: 0, only N and its stale ancestors; run all: every cell), by each cell's last measured time, a slower one left stale (@sagebrush's ruling on #557)"
  },
- "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget: Infinity }) : await reactive.runAll()); #0": {
-  "class": "none",
+ "src/reactive-session.ts :: note :: note(await reactive.run(left, { budget })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "the reactive session (@sagebrush-latex)",
-  "reason": "an unbounded autorun budget for the cells asked for (the scheduler's, not a cap): board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+  "reason": "the descendants' autorun budget (the editor's Run passes the plan's 2 s; latex run --item N and the default: 0, only N and its stale ancestors; run all: every cell), by each cell's last measured time, a slower one left stale (@sagebrush's ruling on #557)"
+ },
+ "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget }) : await reactive.runAll()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the descendants' autorun budget (the editor's Run passes the plan's 2 s; latex run --item N and the default: 0, only N and its stale ancestors; run all: every cell), by each cell's last measured time, a slower one left stale (@sagebrush's ruling on #557)"
  },
  "src/reactive-session.ts :: over :: if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS); #0": {
   "class": "1",
