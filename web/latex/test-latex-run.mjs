@@ -1,4 +1,5 @@
-// ci: none (new with the editor's Run: a wiring candidate for the web-latex follow-up, runner=node after build-cli, about 10 s)
+// ci: checks.3 order=105
+// (checks.3: after the job's final build-cli, as this runs the session's script in build/cli/pyjs.cjs --sage; about 3 s)
 // The editor's Run (run-core.mjs), without a browser: the session's script run in the CLI's own Sage (the same
 // engine's Python and preparser as the page's runner), its printed results parsed and turned into the results file's
 // states; then those states shown by the renderer's own rule (sagetex.mjs savedStates/stateOf). William's case: a
