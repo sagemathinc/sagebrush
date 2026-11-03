@@ -7,6 +7,10 @@ __pyjs_help__(obj, 1, "obj")).
 """
 
 _LIB = "/$pyjs/lib/"
+# (and this file's own directory: run from a checkout or an install, the
+# library is read from disk there, and its path is the computer's, not the
+# library's)
+_HERE = __file__.rsplit("/", 1)[0] + "/"
 
 
 def _cleandoc(doc):
@@ -98,8 +102,9 @@ def _file(obj):
 
 
 def _show_file(fn):
-    if fn and fn.startswith(_LIB):
-        return "lib/" + fn[len(_LIB):]
+    for root in (_LIB, _HERE):
+        if fn and fn.startswith(root):
+            return "lib/" + fn[len(root):]
     return fn
 
 
