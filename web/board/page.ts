@@ -701,6 +701,10 @@ function boardRenameSoon(id: string, title: unknown) {
       if (!from || splitExt(nameOf(from))[0] === base) return;
       const e = await w.stat(from);
       if (!e || e.kind !== "board" || e.ref !== id) return;
+      // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
+      // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence)
+      const now = await w.read(from).catch(() => null);
+      if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
       const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
       const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
       if (to && to !== from) await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created } });
