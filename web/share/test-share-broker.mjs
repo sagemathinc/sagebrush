@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=60 chrome
 // G-10 (plan r2..r2.3.1; astra's placement ruling 0f2a9a14): the runner's fetch broker on the share client, the one
 // page that mounts files (share-client/view.ts: `onStart: w => w.postMessage({ mount })`), against the share API in
 // Miniflare (web/share/serve-dev.mjs) and web/dist. The harness is web/test-broker-lib.mjs's: requests forged from

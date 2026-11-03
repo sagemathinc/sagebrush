@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=50
 // The canvas view of Graph.plot's picture (web/graph/view.ts), in the full
 // page in headless Chromium: it replaces the SVG (kept, hidden); dragging a
 // vertex moves it; Reset gives back the first picture, pixel for pixel;

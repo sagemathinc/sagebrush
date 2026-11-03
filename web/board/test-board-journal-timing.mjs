@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The board journal's cost on the input path (test 17): a large board (2,000
 // notes), edited in a typing run (200 edits, one every 30 ms) and a 10 s run of moves (one edit a frame), with the
 // journal on against off, each in a profile of its own, the same build, the same machine.  The bound, stated in the

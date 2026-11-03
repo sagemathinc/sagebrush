@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=10 runner=bun
 // A board's file, edited without losing anything (web/board/lossless.ts; plan-board-open-edit r7 §3.1, §3.4):
 // the repository's example boards and astra's probes come back as they were through the records an edit merges
 // (tools, extension fields, an edge's own id, pages without edges); stable page ids, unique even against an id

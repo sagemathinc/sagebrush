@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=60
 // Links to places on a board (doc.ts boardLink(), mount.ts, board.ts; round
 // 0's 15): a note's ref `#page-id` shows "→ " and the page's title, and a
 // click goes to that page; `#page-id/item-id` to an item on it, in view;

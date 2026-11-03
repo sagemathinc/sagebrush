@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=20
 // Tests for the sync service (web/sync/, design/sync-server.md), in
 // Miniflare with real Durable Objects (SQLite), D1 and R2.
 //

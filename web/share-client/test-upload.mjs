@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=50 runner=bun
 // uploadCollection (web/share-client/upload.ts): the batch is sent before the next file is read
 // whenever that file would take it over the limit, or its size isn't known, so at most
 // max(batchBytes, the largest file) is held (#172 r2's review: daybreak3's LIMIT-SHAREB-1, astra3's

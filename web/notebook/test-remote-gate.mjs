@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs, web/notebook/test-remote-loss.mjs)
 // Remote approval end to end:
 // the real scheduler (src/notebook-reactive.ts), approvals
 // (src/remote-approval.ts), gate (remote-gate.js), kernel (remote-kernel.js)

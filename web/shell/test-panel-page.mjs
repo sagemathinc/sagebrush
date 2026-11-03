@@ -1,3 +1,4 @@
+// ci: web-browser/terminal.3 order=10 runner=bun
 // The terminal panel on the notebook page (plan-bash-shell r8c E5; step 6's preview): a smoke test in headless
 // Chromium against web/dist built with SAGEBRUSH_TERMINAL=1 (the bash set in dist, as a hosted preview has it).
 // ⋯ ▸ Terminal opens the dock; commands run through the page's ShellHost with the person principal: text, SGR

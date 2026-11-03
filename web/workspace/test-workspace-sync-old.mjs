@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=60 runner=bun chrome
 // EXACT-ONLY's old-sync detector (sync-old.ts; plan-exact-only §5A r2, OLD1-OLD10) in headless Chromium, in a profile
 // of its own (the history databases are the origin's, shared by every workspace a page opens).  The cases are in
 // sync-old-cases.js; ONLY=name,name runs those alone.
