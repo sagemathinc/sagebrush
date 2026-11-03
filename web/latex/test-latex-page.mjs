@@ -1,4 +1,4 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -753,10 +753,22 @@ try {
     check(rows && mid && mid.opened.length === 1 && mid.opened[0].includes("?tex=" + midFid) && mid.board.startsWith("/board") && txt && txt.preview && txt.board.startsWith("/board") && left && editor,
       "U1: with a board open, a .tex file in the file panel opens the LaTeX editor (a click here, a middle-click in a new tab); another file still previews, the board kept", { rows, mid, txt, left, editor });
   }
-  // on, by the URL: no LaTeX file fetched before a .tex is opened
-  requests.length = 0;
+  // on, by the URL: no LaTeX file fetched before a .tex is opened. Counted from a blank page (T568-EAGER-FETCH-RACE): the
+  // case before leaves the editor open, and its worker's script could still be asked for after the list was cleared and
+  // before the next navigation, counted against the new page; at about:blank the editor's document and worker are gone
+  const fromBlank = async () => { await send("Page.navigate", { url: "about:blank" }); await until(`location.href === "about:blank"`, 10000); await sleep(200); requests.length = 0; };
+  await fromBlank();
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
+  // (its control: the same page with an eager fetch of a LaTeX file added fails that check)
+  {
+    await fromBlank();
+    const eager = await send("Page.addScriptToEvaluateOnNewDocument", { source: `if (location.protocol.startsWith("http")) fetch("/sagebrush-latex-worker.js").catch(() => {});` });
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
+    const seen = latexFetches();
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: eager.identifier });
+    check(seen.length > 0, "…its control: a page that fetches a LaTeX file eagerly is caught by the same count", seen);
+  }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
   // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
   // the new document, whose timeOrigin is after the mark, and only after the delay)

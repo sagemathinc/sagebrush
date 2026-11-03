@@ -225,6 +225,8 @@ const allWeb = full || workflowOrBuild || fallback || webCore;
 const webRuntime = allWeb || runtime;
 const webGroups = [
   ["notebook", webRuntime],
+  // (the LaTeX editor's page and agent tools, on a build with the editor on loopback hosts: web/latex/ is the core)
+  ["latex", webRuntime],
   ["board-a", webRuntime || inArea("board")],
   ["board-b", webRuntime || inArea("board")],
   ["board-c", webRuntime || inArea("board")],
