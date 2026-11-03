@@ -2,8 +2,10 @@
 QRPM book corpus uses (norm, t, f, chi2, cauchy, levy and binom), as SciPy
 1.18's: frozen or not, loc and scale, NumPy's broadcasting, SciPy's values at
 the support's ends and nan for an invalid parameter.  The statistics
-functions (skew, kurtosis, pearsonr, ...) come in a later part.  (Under
-CPython, use SciPy itself.)
+functions (skew, kurtosis, pearsonr, spearmanr, rankdata, ttest_ind, levene,
+jarque_bera, describe, zscore) are lib/_scipy_stats_py.py's, a chunk of its
+own, imported at the first call of one of them.  (Under CPython, use SciPy
+itself.)
 
 The values come from scipy.special (lib/_special.py and
 lib/_special_ibeta.py), each tail computed directly rather than as 1 minus
@@ -18,7 +20,9 @@ import numpy as np
 import scipy.special as _sc
 
 __all__ = ["norm", "t", "f", "chi2", "cauchy", "levy", "binom",
-           "rv_continuous", "rv_discrete", "rv_frozen", "levy_stable", "genextreme", "genpareto"]
+           "rv_continuous", "rv_discrete", "rv_frozen", "levy_stable", "genextreme", "genpareto",
+           "skew", "kurtosis", "pearsonr", "spearmanr", "rankdata", "ttest_ind", "levene", "jarque_bera",
+           "describe", "zscore"]
 
 _NAN = float("nan")
 _INF = float("inf")
@@ -919,3 +923,28 @@ class _NotYet:
 levy_stable = _NotYet("levy_stable")
 genextreme = _NotYet("genextreme")
 genpareto = _NotYet("genpareto")
+
+
+# ------------------------------------------------------------------ the statistics functions
+
+def _py(name):
+    # (lib/_scipy_stats_py.py's function, imported at its first call: its own library chunk in the browser,
+    # mod-scipy-stats-py, so the distributions' users don't fetch it)
+    def f(*args, **kwds):
+        import _scipy_stats_py
+        return getattr(_scipy_stats_py, name)(*args, **kwds)
+    f.__name__ = f.__qualname__ = name
+    return f
+
+
+skew = _py("skew")
+kurtosis = _py("kurtosis")
+pearsonr = _py("pearsonr")
+spearmanr = _py("spearmanr")
+rankdata = _py("rankdata")
+ttest_ind = _py("ttest_ind")
+levene = _py("levene")
+jarque_bera = _py("jarque_bera")
+describe = _py("describe")
+zscore = _py("zscore")
+

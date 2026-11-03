@@ -430,6 +430,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-scipy-stats-py.src": {
+   "exact": false,
+   "ceiling": 25411,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-string.src": {
    "exact": false,
    "ceiling": 21100,
@@ -614,7 +621,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 235422,
+   "ceiling": 235521,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -707,6 +714,7 @@
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
+   "engine/lib/mod-scipy-stats-py.src": 23101,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
