@@ -25,6 +25,12 @@ const SHELL = __SHELL__;
 const LAZY = __LAZY__;
 const DIGESTS = __DIGESTS__;
 const CACHE = "sagebrush-" + VERSION;
+// (web/stall-fetch.js's bound, given by the build: a client's chunk fetch is given up after this long without data)
+const STALL_LIMIT_MS = __STALL_LIMIT_MS__;
+// A kept copy's read is given up after half that without data, so the copy's request falls through to the network
+// well before its client gives up: a cache-hit body that never settled held a Sage run for good (the grader's
+// plain-worker investigation; VM1, Nov 3: the reservation taken, the read never answered, nobody waiting)
+const READ_STALL_MS = STALL_LIMIT_MS / 2;
 
 self.addEventListener("install", (ev) => {
   ev.waitUntil((async () => {
@@ -64,7 +70,9 @@ function reserve(n, serve) {
 }
 
 // exactly `size` bytes of a body in one buffer, or null (shorter or longer); with this script's own buffer (BYOB),
-// or, for serving only, chunk by chunk up to the first byte too many (§16)
+// or, for serving only, chunk by chunk up to the first byte too many (§16); STALLED thrown when a read gives no data
+// for READ_STALL_MS (the reader then cancelled)
+const STALLED = new Error("stalled");
 async function readExact(body, size, serving) {
   let r = null, ab = new ArrayBuffer(size), off = 0;
   if (!body) return size ? null : ab;
@@ -72,7 +80,9 @@ async function readExact(body, size, serving) {
   const d = r ?? body.getReader();
   try {
     for (;;) {
-      const { value, done } = await (r ? d.read(new Uint8Array(off < size ? ab : new ArrayBuffer(1), off < size ? off : 0, off < size ? Math.min(size - off, MiB) : 1)) : d.read());
+      let timer;
+      const stalled = new Promise((_, no) => (timer = setTimeout(() => no(STALLED), READ_STALL_MS * timeScale)));
+      const { value, done } = await Promise.race([r ? d.read(new Uint8Array(off < size ? ab : new ArrayBuffer(1), off < size ? off : 0, off < size ? Math.min(size - off, MiB) : 1)) : d.read(), stalled]).finally(() => clearTimeout(timer));
       if (done) return off === size ? ab : null;
       if (off + value.byteLength > size) return null;
       if (r) ab = value.buffer;
@@ -110,20 +120,37 @@ function stored(p, body, onBytes) {
 }
 
 // the bytes of the cache's entry under `key` if it is this build's file `p`, with the budget's release (kept while
-// they are served, §14 S3); a wrong entry (length, bytes, a redirect) is deleted
-async function check(cache, key, p, serve, opts) {
+// they are served, §14 S3); a wrong entry (length, bytes, a redirect) is deleted; a read that stalled (READ_STALL_MS
+// without data) is not an answer: null, the entry left, so the request goes to the network.  One check of a key at a
+// time: a page's request and the keep it then asks for (offlineKeep's entryVerified) read the same entry, and a
+// stalled read was seen with that overlap (VM1, Nov 3)
+let stallSaid = false;
+const checking = new Map();
+function check(cache, key, p, serve, opts) {
+  const k = String(key?.url ?? key), prev = checking.get(k) ?? Promise.resolve();
+  const run = prev.then(() => checkNow(cache, key, p, serve, opts));
+  const tail = run.catch(() => {});
+  checking.set(k, tail);
+  tail.then(() => checking.get(k) === tail && checking.delete(k));
+  return run;
+}
+async function checkNow(cache, key, p, serve, opts) {
   const w = wanted.get(p), hit = w && (await cache.match(key, opts));
   if (!hit) return null;
-  let release = null, bytes = null;
+  let release = null, bytes = null, stalled = false;
   if (hit.status === 200 && !hit.redirected) {
     try { release = await reserve(2 * w.size, serve); } catch { return null; }
     try {
       bytes = await readExact(hit.body, w.size, serve);
       if (bytes && hex(await crypto.subtle.digest("SHA-256", bytes)) !== w.sha256) bytes = null;
-    } catch { bytes = null; }
+    } catch (e) { (stalled = e === STALLED), (bytes = null); }
   }
   if (bytes) return { bytes, release };
   release?.();
+  if (stalled) {
+    if (!stallSaid) (stallSaid = true), console.warn(`sagebrush: a kept copy of ${p} gave no data for ${READ_STALL_MS / 1000} s; fetched from the network instead`);
+    return null;
+  }
   await cache.delete(key, opts);
   return null;
 }
@@ -831,6 +858,16 @@ for (const op of ["put", "delete"]) {
     return r;
   };
 }
+// (a held read: the next cache hit whose URL includes `holdRead` gets a body that never gives data, once: the stall
+// a kept copy's read was seen in, VM1 Nov 3)
+let holdRead = null, heldReads = 0;
+const match0 = Cache.prototype.match;
+Cache.prototype.match = async function (k, ...a) {
+  const r = await match0.call(this, k, ...a), h = holdRead;
+  if (!r || !h || !String(k?.url ?? k).includes(h)) return r;
+  (holdRead = null), heldReads++;
+  return new Response(new ReadableStream({ type: "bytes", pull: () => new Promise(() => {}) }), { status: 200, headers: r.headers });
+};
 // (a deploy's settings, one shot, set by the test page for this build before it installs: read before install ends)
 const set = (t) => {
   if (typeof t.scale === "number" && t.scale > 0) timeScale = t.scale;
@@ -838,6 +875,7 @@ const set = (t) => {
   else if (t.quota) estimateFn = async () => ({ quota: t.quota.quota, usage: t.quota.usage });
   if (t.probe === false) probed = Promise.resolve(false);
   if ("stop" in t) stopAt = t.stop;
+  if ("holdRead" in t) holdRead = t.holdRead;
 };
 const boot = new Promise((done) => {
   const o = indexedDB.open("sb-offline-test", 1);
@@ -858,7 +896,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>

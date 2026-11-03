@@ -543,7 +543,9 @@ const DIGESTS = Object.fromEntries([...SHELL, ...LAZY].map((p) => {
   // (the shipped service worker is web/sw.js minus its test-only hook block, byte for byte, asserted in
   // web/sw-hook.mts; a test build, SAGEBRUSH_OFFLINE_TEST=1, also writes the file with the block as dist/sw.test.js)
   const { stripHook } = await import("./sw-hook.mts");
-  const full = readFileSync(join(here, "sw.js"), "utf8").replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS));
+  // (the stall bound the page's and the worker's chunk fetches use, web/stall-fetch.js: one constant, given to sw.js)
+  const { STALL_LIMIT_MS } = await import("./stall-fetch.js");
+  const full = readFileSync(join(here, "sw.js"), "utf8").replace("__STALL_LIMIT_MS__", String(STALL_LIMIT_MS)).replace("__VERSION__", shellHash.digest("hex").slice(0, 16)).replace("__SHELL__", JSON.stringify(SHELL)).replace("__LAZY__", JSON.stringify(LAZY)).replace("__DIGESTS__", JSON.stringify(DIGESTS));
   writeFileSync(join(here, "dist", "sw.js"), stripHook(full));
   rmSync(join(here, "dist-test"), { recursive: true, force: true });
   if (process.env.SAGEBRUSH_OFFLINE_TEST === "1") (mkdirSync(join(here, "dist-test")), writeFileSync(join(here, "dist-test", "sw.test.js"), full));
