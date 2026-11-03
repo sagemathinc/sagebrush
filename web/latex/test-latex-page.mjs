@@ -1245,17 +1245,19 @@ try {
         const rel = right ? rels.find((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING) : rels.findLast((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_PRECEDING);
         if (!rel) return { rel: null };
         const s = r(inner.firstElementChild ?? inner), e = r(rel);
-        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1) };
+        // (the share of the slash's height inside the relation's: at least half, William's DEV report, Nov 3)
+        const over = Math.max(0, Math.min(s.bottom, e.bottom) - Math.max(s.top, e.top)) / Math.max(1e-6, s.bottom - s.top);
+        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1), over: +over.toFixed(2) };
       });
       // (a lap's text against the paragraph text beside it: the same line box, by the bottom of their glyph boxes)
       const textBeside = (o, after) => { const n = after ? o.nextSibling : o.previousSibling, g = document.createRange(); g.setStart(n, after ? 0 : n.length - 2); g.setEnd(n, after ? 2 : n.length); return g.getBoundingClientRect(); };
-      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o.firstElementChild, a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
+      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o?.firstElementChild; if (!o || !i) return null; const a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
         return { start: +(b.left - a.left).toFixed(1), end: +(b.right - a.left).toFixed(1), dBottom: +(gb.bottom - t.bottom).toFixed(1), w: +(b.right - b.left).toFixed(1) }; };
       return { slashes, rlap: lap("tex-rlap"), llap: lap("tex-llap") };
     })()`);
-    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
-      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it`, g.slashes);
-    check(Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
+    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && s.over >= 0.5 && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
+      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it: at least half its height inside the relation's`, g.slashes);
+    check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
   }
   // ---- a file in Trash, opened by its fid

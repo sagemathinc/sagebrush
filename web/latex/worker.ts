@@ -9,7 +9,7 @@ import "./engine/shim.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { setKatex } from "./engine/render.mjs";
 import { splitChunk, bytes } from "./split";
-import { WRAPPER_VERSION } from "./engine/sagetex.mjs";
+import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
 
 export const RENDER_BOUNDS = { chunks: 20000, html: 16 * 2 ** 20 };
 const TOO_LARGE = '<div class="bounderr">This document is too large for the prototype\'s preview.</div>';
@@ -42,7 +42,10 @@ self.onmessage = async (e: MessageEvent) => {
     if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE, b: bytes(TOO_LARGE) }); }
     (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, pos: stopped ? [-1] : r.chunkPos, imageRefs: r.imageRefs || [], stats: r.stats, tooLarge: stopped,
       // (what latex_check reports, check.ts: small, the problems bounded by the renderer)
-      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems || [], frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}) })) } }));
+      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems || [], frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}),
+        // (and what the editor's Run needs, run-core.mjs: the item's key, its code, a refused one's name; the code
+        //  is the document's own, so all of it is at most the text sent)
+        key: itemKey(it), ...(typeof it.code === "string" && !it.err ? { code: it.code } : {}), ...(it.name ? { name: String(it.name) } : {}) })) } }));
   } catch (err: any) {
     eng = null;
     (self as any).postMessage(Object.assign(echo, { ok: false, error: String((err && err.message) || err).slice(0, 300) }));
