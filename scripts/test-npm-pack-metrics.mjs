@@ -1,4 +1,4 @@
-// ci: checks.5 order=40
+// ci: checks.6 order=40
 // scripts/npm-pack-metrics.mjs (plan-npm-pack-metrics-r3 §3): npm's output
 // parsed strictly, the wrapper's error paths with a fake npm first on PATH, the
 // real bundled npm once (a smoke test: a fake can't catch npm's own config

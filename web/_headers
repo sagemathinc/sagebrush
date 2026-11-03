@@ -8,6 +8,10 @@
 # the service worker and the page: always revalidated (a deploy shows up at once)
 /sw.js
   Cache-Control: no-cache
+# what this deploy is (web/build.ts): never cached, and readable from any origin (an agent's own page or tool)
+/version.json
+  Cache-Control: no-store
+  Access-Control-Allow-Origin: *
 # the interpreter's files, which the runner (an opaque origin: web/runner/)
 # fetches with CORS
 /sagebrush-worker.js

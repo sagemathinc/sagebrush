@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ci: checks.6 order=10 -- --built
+// ci: checks.7 order=10 -- --built
 // Tests of scripts/architecture-article.mjs (the architecture article's link
 // check and pages), on small boards and a fake git, then on the real board.
 //   node scripts/test-architecture-article.mjs

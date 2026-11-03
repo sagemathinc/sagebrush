@@ -9,6 +9,12 @@ export const MAX_FILE = 50 * 2 ** 20;
 export const PUSH_BATCH = 80 * 2 ** 20;
 /** The automatic push: every 10 minutes when something changed (M3). */
 export const AUTO_MS = 10 * 60_000;
+/** (M4b) A branch name to copy from: git's rules as git check-ref-format holds them, for the names a person types
+ * (ASCII letters, digits, ".", "_", "-" and "/"; no "..", "//", segment starting with "." or ending with ".lock",
+ * and no "/" at either end). */
+export const GIT_BRANCH = /^(?!.*\.\.)(?!.*\/\/)(?!\/)(?!.*\/$)(?!.*(^|\/)\.)(?!.*\.lock(\/|$))(?!.*\.$)[A-Za-z0-9._\/-]{1,100}$/;
+/** At most this many files in a copied branch (Upload's own count). */
+export const COPY_FILES = 10_000;
 /** Pushes go only to branches named so: never main, never anything the person didn't make here. */
 export const BRANCH = /^sagebrush\/[a-z0-9][a-z0-9._-]{0,59}$/;
 const SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/;
@@ -70,4 +76,11 @@ export function pushWords(err: { code?: string; data?: { statusCode?: number } }
   if (status === 429) return "Too many pushes for now: try again in a minute.";
   if (typeof status === "number") return `The push failed (${status}).`;
   return "Couldn't reach GitHub through the push proxy.";
+}
+
+/** The words for a failed fetch (M4b's copy): fixed, as pushWords. */
+export function fetchWords(err: { code?: string; data?: { statusCode?: number } } | undefined, branch: string, repo: string): string {
+  if (err?.code === "NotFoundError") return `${repo} has no branch ${branch}.`;
+  if (err?.code === "PushRejectedError") return "The copy failed.";
+  return pushWords(err, branch, repo).replace("The push failed", "The copy failed");
 }

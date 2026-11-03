@@ -4,7 +4,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { AgentPairing, parseStrict, actorOf } from "./agent-pair.ts";
+import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -385,6 +385,219 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const bytes = new TextEncoder().encode(JSON.stringify(a)).length;
   ok(a.error?.data?.code === "limit" && bytes <= 12 * 2 ** 20, `a read whose answer escapes past the frame bound: a limit error, not the frame (${bytes} bytes)`);
   S.srv.stop(true);
+}
+
+// ---- A14: the reload record (plan r3.1 §1-§2 + r3.2): its closed parse (U-3), its decision (U-7, U-8), take/put
+{
+  const scope = { workspace: "sagebrush-ws", page: "http://127.0.0.1:1/agents/" };
+  const good = { v: 1, pairingId: "a".repeat(24), session: "B".repeat(43), port: 4321, agent: { name: "Claude Code", client: "claude-code" }, grant: { folders: ["/notes"], write: true, expires: null }, workspace: scope.workspace, page: scope.page, leftAt: 1000 };
+  const js = (o) => JSON.stringify(o);
+  ok(JSON.stringify(parseReloadRecord(js(good))) === js(good), "U-3.ok: an exact record parses as itself");
+  const { leftAt, ...noLeft } = good;
+  ok(parseReloadRecord(js(noLeft)) !== null, "U-3.noleft: a record without leftAt parses (a page still open)");
+  const bad = {
+    "not-json": "{", "array": "[]", "big": js({ ...good, page: "x".repeat(5000) }), "extra-key": js({ ...good, x: 1 }), "missing-key": js({ ...noLeft, port: undefined }),
+    "v": js({ ...good, v: 2 }), "pairingId": js({ ...good, pairingId: "zz" }), "session": js({ ...good, session: "short" }), "port-0": js({ ...good, port: 0 }), "port-str": js({ ...good, port: "4321" }),
+    "agent-missing": js({ ...good, agent: undefined }), "agent-extra": js({ ...good, agent: { ...good.agent, v: "1" } }), "agent-long": js({ ...good, agent: { name: "n".repeat(81), client: "c" } }),
+    "grant-extra": js({ ...good, grant: { ...good.grant, run: true } }), "folders-empty": js({ ...good, grant: { ...good.grant, folders: [] } }), "folder-relative": js({ ...good, grant: { ...good.grant, folders: ["notes"] } }),
+    "write-str": js({ ...good, grant: { ...good.grant, write: "true" } }), "expires-str": js({ ...good, grant: { ...good.grant, expires: "3600000" } }), "expires-inf": js({ ...good, grant: { ...good.grant, expires: 1 } }).replace('"expires":1', '"expires":1e999'),
+    "leftAt-str": js({ ...good, leftAt: "1000" }), "leftAt-inf": js(good).replace('"leftAt":1000', '"leftAt":1e999'), "workspace-empty": js({ ...good, workspace: "" }), "dup-key": js(good).replace('"v":1', '"v":1,"v":1'),
+  };
+  for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
+  ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
+  const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
+  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
+  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
+  ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
+  ok(d(good, "navigate", 1500) === "click", "U-7.nav: not a reload: kept for one click (R1-a)");
+  ok(d(noLeft, "reload", 1500) === "click", "U-7.noleft: no leftAt (a copy taken while the original lived): kept for one click");
+  ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
+  const timed = { ...good, grant: { ...good.grant, expires: 5000 } };
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 4999) === "silent", "U-8.before: now = expires - 1, fresh: silent");
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
+  ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
+  ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // take/put/markLeft over a Storage-like map; and storage that throws
+  const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  const taken = takeReloadRecord(s1);
+  ok(taken.kind === "ok" && taken.record.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
+  ok(takeReloadRecord(s1).kind === "none", "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
+  const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2).kind === "bad" && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is \"bad\" (not absent: no silent fallback)");
+  const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
+  ok(takeReloadRecord(thrower).kind === "bad" && takeReloadRecord(null).kind === "none", "U-3.storage: storage that throws on read is \"bad\"; no storage is \"none\"");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
+  // S1: a record that reads but can't be removed is never used (consumed before any attempt, or not at all)
+  const s3 = store(); s3.setItem(RELOAD_KEY, JSON.stringify(good)); s3.removeItem = () => { throw new Error("denied"); };
+  const t3 = takeReloadRecord(s3);
+  ok(parseReloadRecord(s3.getItem(RELOAD_KEY)) !== null && t3.kind === "bad" && !("record" in t3), "U-11.remove-throws: an exact record whose removal throws is \"bad\": no record is handed out");
+  // S3: the 4 KiB bound in UTF-8 bytes, reading and writing; an unfitting write stores nothing and drops an older entry
+  const wide = { ...good, grant: { ...good.grant, folders: Array.from({ length: 6 }, (_, i) => `/f${i}/` + Array.from({ length: 3 }, () => "é".repeat(120)).join("/")) } };
+  const wideRaw = JSON.stringify(wide), narrowRaw = JSON.stringify({ ...wide, grant: { ...wide.grant, folders: wide.grant.folders.map((f) => f.replace(/é/g, "e")) } });
+  ok(wideRaw.length <= 4096 && new TextEncoder().encode(wideRaw).length > 4096 && parseReloadRecord(narrowRaw) !== null && parseReloadRecord(wideRaw) === null, "U-12.bytes-read: under 4096 characters but over 4096 UTF-8 bytes is refused (the same record in ASCII parses)");
+  const s4 = store(); putReloadRecord(s4, good); putReloadRecord(s4, wide);
+  ok(s4.getItem(RELOAD_KEY) === null, "U-12.bytes-write: a record over the byte bound isn't written, and the older entry is removed (nothing oversized stored)");
+  const s5 = store(); putReloadRecord(s5, { ...good, extra: 1 });
+  ok(s5.getItem(RELOAD_KEY) === null, "U-12.shape-write: a record the reader wouldn't take back exactly isn't written");
+}
+// ---- A14: the record kept by AgentPairing itself (U-1, U-2, U-4, U-5, U-6), against the fake server
+{
+  const SESSION = "A".repeat(42) + "w"; // (43 base64url characters: 32 bytes)
+  const pair43 = (agent = { name: "Claude Code", client: "claude-code" }) => (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { ...agent, version: "2.0" }, wants: { write: true, run: false }, ...("code" in m.params ? { session: SESSION } : {}) } }));
+  const memStore = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
+  const scope = { workspace: "sagebrush-workspace/0123456789abcdef", page: "http://127.0.0.1:1/agents/" };
+  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
+  const held = (store) => parseReloadRecord(store.getItem(RELOAD_KEY));
+  const NOW = 1_800_000_000_000;
+
+  // U-1: written for every unremembered grant (page, 1 hour, 1 day), exactly as allowed; never for a remembered one
+  for (const [id, expires, remember] of [["U-1.page", null, false], ["U-1.hour", NOW + 3_600_000, false], ["U-1.day", NOW + 86_400_000, false], ["U-1.remembered", NOW + 3_600_000, true]]) {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st, { now: () => NOW });
+    await P.paired();
+    await P.allow({ folders: ["/A"], write: true, expires }, remember);
+    const r = held(st);
+    if (remember) ok(r === null && st.m.size === 0 && W.store.size === 1, `${id}: a remembered grant writes no reload record (IndexedDB keeps it, as before)`);
+    else ok(r !== null && r.session === SESSION && r.pairingId === P.id && r.port === S.port && r.agent.name === "Claude Code" && r.agent.client === "claude-code" && r.grant.folders.join() === "/A" && r.grant.write === true && r.grant.expires === expires && r.workspace === scope.workspace && r.page === scope.page && !("leftAt" in r) && W.store.size === 0, `${id}: the record is written, exactly the grant allowed (expires ${expires === null ? "null" : "+" + (expires - NOW)}), with no leftAt while the page lives`);
+    await P.revoke(); S.srv.stop(true);
+  }
+
+  // U-2: what each end does to the record (one id per path)
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired(); await P.allow({ folders: ["/A"], write: false, expires: null }, false);
+    const before = held(st);
+    await P.revoke("revoked by the person");
+    ok(before !== null && st.m.size === 0 && P.lostRecord === null, "U-2.revoke: the person's Revoke removes the record, and keeps none in memory");
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore();
+    let t = NOW;
+    const P = mkR(S, W, st, { now: () => t });
+    await P.paired(); await P.allow({ folders: ["/A"], write: false, expires: NOW + 60 }, false);
+    const before = held(st);
+    await until(() => P.state === "closed", 3000);
+    ok(before !== null && P.closeReason === "the grant expired" && st.m.size === 0 && P.lostRecord === null, "U-2.expiry: an expiry removes the record (timer and record both gone), nothing kept for a click", { reason: P.closeReason });
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+    const before = held(st);
+    S.sock.close(1011, "gone");
+    await until(() => P.state === "closed", 3000);
+    ok(before !== null && st.m.size === 0 && P.lostRecord?.pairingId === before.pairingId && P.lostRecord.session === SESSION, "U-2.loss: an involuntary close takes the record out of storage and keeps it in memory for one [Reconnect]");
+    S.srv.stop(true);
+  }
+  {
+    let leaving = false;
+    const S = server(pair43()), W = fakeWs(), st = memStore(), P = mkR(S, W, st, { leaving: () => leaving });
+    await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+    leaving = true; // (pagehide: the page is going, as on a reload)
+    S.sock.close(1001, "going away");
+    await until(() => P.state === "closed", 3000);
+    ok(held(st)?.pairingId === P.id && P.lostRecord === null, "U-2.leaving: a close while the page leaves keeps the record in storage, for the reload's restore");
+    S.srv.stop(true);
+  }
+
+  // U-4: an older pairing (an older gen) touches nothing: neither its late allow() nor its close
+  {
+    const S1 = server(pair43()), S2 = server(pair43()), W = fakeWs(), st = memStore();
+    const P1 = mkR(S1, W, st);
+    await P1.paired();
+    const P2 = mkR(S2, W, st);
+    await P2.paired(); await P2.allow({ folders: ["/B"], write: false, expires: null }, false);
+    const r2 = held(st);
+    await P1.allow({ folders: ["/A"], write: true, expires: null }, false);
+    ok(r2 !== null && held(st)?.pairingId === P2.id && held(st).grant.folders.join() === "/B", "U-4.allow: a stale pairing's late allow() doesn't write the record");
+    S1.sock.close(1011, "gone");
+    await until(() => P1.state === "closed", 3000);
+    ok(held(st)?.pairingId === P2.id && P1.lostRecord === null, "U-4.close: a stale pairing's close doesn't remove the newer pairing's record");
+    await P2.revoke(); S1.srv.stop(true); S2.srv.stop(true);
+  }
+
+  // U-5: a revoke during a restore wins: the attempt ends, a late hello answer does nothing, nothing is written
+  {
+    let late = null;
+    const S = server((ws, m) => (late = () => pair43()(ws, m))), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const settled = P.paired().then(() => "paired", () => "rejected");
+    await until(() => late !== null, 3000);
+    await P.revoke("revoked by the person");
+    try { late(); } catch {}
+    await sleep(200);
+    let allowed = "threw";
+    try { await P.allow({ folders: ["/A"], write: true, expires: null }, false); allowed = "allowed"; } catch {}
+    ok((await settled) === "rejected" && P.state === "closed" && allowed === "threw" && st.m.size === 0, "U-5: a revoke during a restore's hello wins: the attempt is rejected, a late answer and a late allow() do nothing, no record written");
+    S.srv.stop(true);
+  }
+
+  // U-6: identity: a restore's session answered by another agent (name or client) is closed, not paired
+  for (const [id, agent] of [["U-6.name", { name: "Other Agent", client: "claude-code" }], ["U-6.client", { name: "Claude Code", client: "codex" }]]) {
+    const S = server(pair43(agent)), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    await until(() => S.closed !== null, 3000);
+    ok(r === "identity" && P.state === "closed" && S.closed !== null && P.grant === null && st.m.size === 0, `${id}: a hello from another agent's ${id.split(".")[1]} on this page's session is discarded closed`, { r, state: P.state });
+    S.srv.stop(true);
+  }
+  {
+    const S = server(pair43()), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "paired" && P.state === "paired", "U-6.same: the same agent's answer pairs (the identity check isn't a blanket refusal)");
+    await P.revoke(); S.srv.stop(true);
+  }
+}
+// ---- A14 r2: astra's S3 (the live grant is never cut to fit) and S4 (allow() after its await)
+{
+  const SESSION = "A".repeat(42) + "w";
+  const pair43 = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, ...("code" in m.params ? { session: SESSION } : {}) } }));
+  const memStore = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
+  const scope = { workspace: "sagebrush-workspace/0123456789abcdef", page: "http://127.0.0.1:1/agents/" };
+  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, { code: "abcd" }, { verbsFor: W.verbsFor, store: o.storeApi ?? W.storeApi, trashEntry: W.trashEntry, page, reload: { storage: store, scope, leaving: () => false } });
+  {
+    const S = server(pair43), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired();
+    const folders = Array.from({ length: 6 }, (_, i) => `/f${i}/` + Array.from({ length: 3 }, () => "é".repeat(120)).join("/"));
+    await P.allow({ folders, write: true, expires: null }, false);
+    ok(P.state === "granted" && P.grant?.folders.join("|") === folders.join("|") && st.m.size === 0, "U-12.live: an exact grant whose record would pass 4 KiB stays exactly as allowed, and no record is stored");
+    await P.revoke(); S.srv.stop(true);
+  }
+  {
+    // (an allow() suspended at its await; then a revoke; then it goes on: nothing of it may come back)
+    const S = server(pair43), W = fakeWs(), st = memStore(), P = mkR(S, W, st);
+    await P.paired();
+    const pending = P.allow({ folders: ["/A"], write: true, expires: Date.now() + 200 }, false);
+    await P.revoke("revoked by the person");
+    await pending.catch(() => {});
+    const right = P.state; // (at once, before its 200 ms expiry could close it again)
+    await sleep(400);
+    ok(right === "closed" && P.state === "closed" && P.grant === null && st.m.size === 0 && P.closeReason === "revoked by the person", "U-13.pending: a revoke while allow() waits wins: no granted state, no record, and no expiry timer fires after", { right, state: P.state, reason: P.closeReason });
+    S.srv.stop(true);
+  }
+  {
+    // (the same with a remembered grant whose keep is held: the revoke and the store's release in that order)
+    const S = server(pair43), W = fakeWs(), st = memStore();
+    let release;
+    const held = new Promise((r) => (release = r));
+    const storeApi = { agentGrants: W.storeApi.agentGrants, putAgentGrant: async (id, g) => { if (g !== null) await held; return W.storeApi.putAgentGrant(id, g); } };
+    const P = mkR(S, W, st, { storeApi });
+    await P.paired();
+    const pending = P.allow({ folders: ["/A"], write: true, expires: Date.now() + 3_600_000 }, true);
+    await sleep(50);
+    await P.revoke("revoked by the person");
+    release();
+    await pending.catch(() => {});
+    // (at once, as the allow() settles, before the socket's close event could close it again (sock.onclose → end()),
+    //  and again after: a mutant whose allow() goes on is caught in either order (the grader's K14-ae ruling))
+    const right = P.state;
+    await sleep(100);
+    ok(right === "closed" && P.state === "closed" && P.grant === null && st.m.size === 0, "U-13.pending-kept: a revoke while a remembered allow() waits on its store wins: still closed after the store goes on", { right, state: P.state });
+    S.srv.stop(true);
+  }
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

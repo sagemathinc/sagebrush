@@ -1,4 +1,4 @@
-// ci: checks.3 order=110
+// ci: checks.4 order=10
 // Line 3's controls (scripts/line3-measure.mjs; line-3 case r4 §4 and §6, jointly frozen). Every control has a CLOSED
 // expected outcome: the exact set of reasons printed, plus the stated pass/FAIL of each printed check. A bare
 // non-zero exit is never evidence. A control whose own precondition fails stops with control-precondition, which is
