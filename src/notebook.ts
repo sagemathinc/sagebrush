@@ -9,7 +9,7 @@
 // (in the URL it prints and opens; then a cookie); it answers only requests
 // for its own host name (no DNS rebinding) and serves files under DIR only.
 import * as http from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, realpathSync, lstatSync } from "fs";
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
 import { requestCtrlC } from "./runtime/interrupt";
@@ -87,11 +87,28 @@ export async function runNotebookServer(args: string[]) {
   const sessions = new Map<string, Session>();
   const entry = require.main?.filename ?? process.argv[1];
 
-  // a path under dir, or null
+  // a path under dir, or null: lexically, and really. The deepest part of it that exists, its symbolic links followed,
+  // must be under DIR's real path too, so a link in DIR to elsewhere (a folder or a file, or one that points nowhere,
+  // through which a write would make a file elsewhere) is no way out, for reads, writes, listings and a session's folder
+  // alike (astra's LOCAL-RENAME-1, found on the rename, holds for every route: @sagebrush)
+  const rdir = (() => { try { return realpathSync(dir); } catch { return dir; } })();
+  const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
   const inside = (rel: string | null): string | null => {
     if (rel === null) return null;
     const p = resolve(dir, rel.replace(/^\/+/, ""));
-    return p === dir || p.startsWith(dir.endsWith(sep) ? dir : dir + sep) ? p : null;
+    if (!under(p, dir)) return null;
+    for (let q = p; ; ) {
+      let there = true;
+      try { lstatSync(q); } catch { there = false; }
+      if (there) {
+        let real: string;
+        try { real = realpathSync(q); } catch { return null; }
+        return under(real, rdir) ? p : null;
+      }
+      const up = dirname(q);
+      if (up === q) return null;
+      q = up;
+    }
   };
 
   const startSession = (sid: string, nbDir: string): Session => {
