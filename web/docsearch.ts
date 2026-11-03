@@ -73,6 +73,27 @@ export function searchIndex(idx: DocEntry[], query: string, limit = 20): DocEntr
     .slice(0, limit).map(([, e]) => e);
 }
 
+/** The best entries of several languages' indexes, ranked together as
+ * searchIndex ranks; equal scores in the order the indexes are given (the
+ * notebook's own language first). `indexes` pairs a language with its index,
+ * null when it has none or it didn't load. For the agents' search_docs, which
+ * finds a function whatever the notebook's language (agent simulation run 2:
+ * the web search found nothing for Sage functions in a Python notebook). */
+export function searchIndexes(indexes: [string, DocEntry[] | null][], query: string, limit = 20): DocEntry[] {
+  const words = docWords(query);
+  if (!words.length) return [];
+  const phrase = query.trim().toLowerCase();
+  const hits: [number, number, DocEntry][] = [];
+  indexes.forEach(([, idx], i) => {
+    for (const e of idx ?? []) {
+      const s = docScore(e, words, phrase);
+      if (s > 0) hits.push([s, i, e]);
+    }
+  });
+  return hits.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2].name.length - b[2].name.length || (a[2].name < b[2].name ? -1 : 1))
+    .slice(0, limit).map(([, , e]) => e);
+}
+
 /** An entry's head: a signature that starts with "(" follows the name; any
  * other, as MATLAB's "M = max(A)", is a whole call form (catalog/SCHEMA.md;
  * its first form here). */

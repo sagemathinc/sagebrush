@@ -43,13 +43,30 @@ test("verdict: within, at and over the ceiling", () => {
   assert.deepEqual(v.failures, []);
   assert.equal(v.median, 68 * MIB + 5);
   assert.equal(v.max, 69 * MIB);
-  assert.equal(v.headroom, MIB);
+  assert.equal(v.min, 68 * MIB);
+  // (the headroom is the median's)
+  assert.equal(v.headroom, 2 * MIB - 5);
   // (exactly 68 MiB is 68 MiB; 5 bytes more rounds up to 69)
   assert.deepEqual(v.collect_max, [27 * 1024, 28 * 1024]);
   assert.equal(v.collect_floor_at_ceiling, 26 * 1024);
   assert.deepEqual(verdict(budget, [s(70 * MIB)]).failures, []);
-  v = verdict(budget, [s(68 * MIB), s(70 * MIB + 1)]);
-  assert.deepEqual(v.failures, [`the load heap ${70 * MIB + 1} > ceiling ${70 * MIB} (+1)`]);
+  // the verdict is the median's: one run over the ceiling passes (the runs' spread), a median over it fails
+  v = verdict(budget, [s(68 * MIB), s(69 * MIB), s(70 * MIB + 1)]);
+  assert.deepEqual(v.failures, []);
+  assert.equal(v.max, 70 * MIB + 1);
+  v = verdict(budget, [s(68 * MIB), s(70 * MIB + 1), s(71 * MIB)]);
+  assert.deepEqual(v.failures, [`the load heap's median ${70 * MIB + 1} > ceiling ${70 * MIB} (+1), over 3 runs`]);
+  assert.equal(v.headroom, -1);
+  // (an even count: the mean of the middle two, rounded down)
+  assert.deepEqual(verdict(budget, [s(70 * MIB), s(70 * MIB + 2)]).failures, [`the load heap's median ${70 * MIB + 1} > ceiling ${70 * MIB} (+1), over 2 runs`]);
+});
+
+test("verdict: every run keeps collect_floor, though the median is the verdict", () => {
+  const s = (used) => ({ used, max: collectMax(used, 96) });
+  // (77 MiB used leaves 19 * 1024 = 19456 < 20000; the median, 68 MiB, is within the ceiling)
+  const v = verdict(budget, [s(68 * MIB), s(68 * MIB), s(77 * MIB)]);
+  assert.deepEqual(v.failures, [`a run's _COLLECT_MAX 19456 (used ${77 * MIB}) < collect_floor 20000, which the tests rely on`]);
+  assert.deepEqual(verdict(budget, [s(68 * MIB), s(68 * MIB), s(76 * MIB)]).failures, []);
 });
 
 test("verdict: a _COLLECT_MAX that disagrees with the formula fails", () => {
