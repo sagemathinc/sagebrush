@@ -81,6 +81,15 @@ function install(group: string, kind: Kind, bytes: Uint8Array) {
   }
 }
 
+// Told when a group's sources can't be had (plan-b8-offline §10): the worker passes it to the page, which shows a
+// download button for the item under the error; nothing is ever downloaded because of it
+export type OfflineMissing = { code: "SB_OFFLINE_MISSING" | "SB_FETCH_FAILED"; item: string; group: string; offline: boolean; status?: number };
+let onMissing: ((m: OfflineMissing) => void) | null = null;
+export function onOfflineMissing(f: (m: OfflineMissing) => void) {
+  onMissing = f;
+}
+const ITEM_NAMES: Record<string, string> = { python: "Python library", scientific: "Scientific Python library", sage: "Sage library", matlab: "MATLAB library", magma: "Magma library", modules: "Python module" };
+
 function fetchSync(url: string): Uint8Array {
   // (in the runner, which has no network, the page fetches it: web/runner)
   if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") return g.__SAGEBRUSH_FETCH_SYNC__(url);
@@ -88,7 +97,7 @@ function fetchSync(url: string): Uint8Array {
   x.open("GET", url, false);
   x.responseType = "arraybuffer";
   x.send();
-  if (x.status !== 200) throw new Error(`HTTP ${x.status}`);
+  if (x.status !== 200) throw Object.assign(new Error(`HTTP ${x.status}`), { status: x.status });
   return new Uint8Array(x.response);
 }
 
@@ -105,7 +114,15 @@ function loadSync(group: string) {
       if (sha256Hex(bytes) !== ref.sha256) throw new Error("not the chunk this worker was built with");
       install(group, kind, bytes);
     } catch (e: any) {
-      if (kind === "src") throw new Error(`could not load the Python library's ${group} modules (${ref.file}: ${e?.message ?? e}${navigator.onLine === false ? "; offline" : ""})`);
+      if (kind !== "src") continue;
+      // (offline only when the browser says so: an online failure never says "offline")
+      const offline = navigator.onLine === false, item = M.items?.[group] ?? group;
+      const what = item.startsWith("pkg-") ? `The package ${item.slice(4)}` : `The ${ITEM_NAMES[item] ?? item} (${group})`;
+      try {
+        onMissing?.({ code: offline ? "SB_OFFLINE_MISSING" : "SB_FETCH_FAILED", item, group, offline, ...(typeof e?.status === "number" ? { status: e.status } : {}) });
+      } catch {}
+      if (offline) throw new Error(`${what} is not on this device and this device is offline. Storage → Offline lists what is downloaded`);
+      throw new Error(`Could not fetch the Python library's ${group} modules (${ref.file}: ${e?.message ?? e})`);
     }
   }
 }
