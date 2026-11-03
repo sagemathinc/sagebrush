@@ -8,11 +8,11 @@
  "ceiling": 73400320,
  "collect_floor": 20000,
  "measured": {
-  "median": 68767184,
-  "max": 69263592,
+  "median": 72938312,
+  "max": 73237896,
   "collect_max": [
-   29696,
-   30720
+   26624,
+   26624
   ]
  }
 }
