@@ -112,6 +112,24 @@ try {
   check("check-clean-exit-0", cc.code === 0 && cc.out.startsWith("clean.tex: beamer, 1 frame; no problems"), cc);
   const ca = await run(dir, "check", "article.tex", "--json");
   check("check-article-has-no-frames", ca.code === 0 && ca.json.class === "other" && ca.json.frames.length === 0 && ca.json.problems.some((x) => x.kind === "environment" && x.name === "frame"), ca.json);
+  // (a frame the editor's preview shows as a placeholder, over 128 KiB of markup: a warning at its line, exit 0; a
+  //  frame with an image over 128 KiB, inlined as a data: URL, none: the preview shows it, sim run 8)
+  const BIGSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` + `<circle cx="5" cy="5" r="4"/>`.repeat(6000) + "</svg>";
+  const LARGE = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{Picture}
+\includegraphics{big.svg}
+\end{frame}
+\begin{frame}{Long}
+${"many words ".repeat(14000)}
+\end{frame}
+\end{document}
+`;
+  writeFileSync(join(dir, "large.tex"), LARGE); writeFileSync(join(dir, "big.svg"), BIGSVG);
+  const cl = await run(dir, "check", "large.tex", "--json");
+  const tl = (cl.json?.problems ?? []).filter((x) => x.kind === "toolarge");
+  check("check-frame-too-large-warning-with-line", cl.code === 0 && BIGSVG.length > 128 * 1024 && cl.json.frames.length === 2 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === lineOf(LARGE, "\\begin{frame}{Long}")
+    && /^this slide is too large \(\d+ KiB, over 128 KiB\): the preview and Present show a placeholder instead/.test(tl[0].message), { code: cl.code, problems: cl.json?.problems });
 
   // ---- render: one self-contained HTML file
   const r = await run(dir, "render", "talk.tex", "-o", "out.html", "--json");

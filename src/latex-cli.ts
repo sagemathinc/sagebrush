@@ -21,6 +21,7 @@ import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
 import { applyStep } from "../web/latex/overlay";
+import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
 setKatex(katex.renderToString);
 
@@ -146,7 +147,10 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
   const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true });
   const states = r.sageStates as State[];
-  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
+  // (what the editor's preview shows as a placeholder, split as its worker splits it: web/latex/split.ts)
+  const tooLarge: { kind: string; name: string; at: number }[] = [];
+  (r.chunks as string[]).forEach((c, g) => splitChunk(c, (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g]))));
+  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge), frames: r.frames,
     sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
   return { result, html: pageHtml(basename(file), r.chunks.join("\n"), !!r.beamer) };
 }
