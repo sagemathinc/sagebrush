@@ -491,6 +491,11 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("envclose-names-as-latex", ac("\\begin{foo2}|") === "\n\\end{foo2}" && ac("\\begin{foo-bar}|") === "\n\\end{foo-bar}" && ac("\\begin{foo:bar*}|") === "\n\\end{foo:bar*}" && ac("\\begin{a b}|") === null, [ac("\\begin{foo2}|"), ac("\\begin{foo-bar}|")]);
   check("envclose-commented-literal-is-text", ac("% \\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("a % b \\begin{lstlisting}\n\\begin{x}|") === "\n\\end{x}", ac("% \\begin{verbatim}\n\\begin{x}|"));
   check("envclose-escaped-literal-is-text", ac("\\\\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("\\\\\\begin{verbatim}\n\\begin{x}|") === null, [ac("\\\\begin{verbatim}\n\\begin{x}|"), ac("\\\\\\begin{verbatim}\n\\begin{x}|")]);
+  // (DB3-P1A-2b: a % after an even run of backslashes starts a comment, after an odd run it is text: 0..5)
+  {
+    const got = [0, 1, 2, 3, 4, 5].map((k) => ac("\\".repeat(k) + "% \\begin{verbatim}\n\\begin{x}|"));
+    check("envclose-comment-backslash-parity", JSON.stringify(got) === JSON.stringify(["\n\\end{x}", null, "\n\\end{x}", null, "\n\\end{x}", null]), got);
+  }
   check("envclose-percent-inside-verbatim-is-text", ac("\\begin{verbatim}\n% \\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
   check("envclose-only-on-brace", autoClose("\\begin{x", 8) === null && ac("\\begin{x}{cc}|") === null && ac("\\end{x}|") === null, null);
 }

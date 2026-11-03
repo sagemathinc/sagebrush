@@ -1358,7 +1358,7 @@ try {
       check((await st()).v === D0.slice(0, at0) + "\\begin{" + nm + "}\n\\end{" + nm + "}" + D0.slice(at0), "P1a: \\begin{" + nm + "} closed too");
     }
     // (DB3-P1A-2: a commented or escaped \begin{verbatim} earlier is text: a later environment still closes)
-    for (const [what, pre] of [["commented", "% \\begin{verbatim}\n"], ["escaped", "\\\\begin{verbatim}\n"]]) {
+    for (const [what, pre] of [["commented", "% \\begin{verbatim}\n"], ["escaped", "\\\\begin{verbatim}\n"], ["commented after \\\\ (a line break)", "a\\\\% \\begin{verbatim}\n"]]) {
       const T = D0.slice(0, at0) + pre + D0.slice(at0), o = at0 + pre.length;
       await setAt(T, o); await typed("\\begin{x"); await keyChar("}");
       check((await st()).v === T.slice(0, o) + "\\begin{x}\n\\end{x}" + T.slice(o), "P1a: after a " + what + " \\begin{verbatim}, \\begin{x} still closes");

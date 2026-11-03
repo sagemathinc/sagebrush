@@ -21,7 +21,7 @@ function literalOpen(head: string): boolean {
   for (const line of head.split("\n")) {
     // (a line's text up to its first unescaped %, unless inside a literal environment, where % is text)
     let text = line;
-    if (open === null) { const c = /(?:^|[^\\\\])(?:\\\\\\\\)*%/.exec(line); if (c) text = line.slice(0, c.index + c[0].length - 1); }
+    if (open === null) { const c = /(?:^|[^\\])(?:\\\\)*%/.exec(line); if (c) text = line.slice(0, c.index + c[0].length - 1); }
     MARK.lastIndex = 0;
     for (let r = MARK.exec(text); r; r = MARK.exec(text)) {
       if (r[1].length % 2 === 0) continue;   // (\\begin: a line break, then text)
