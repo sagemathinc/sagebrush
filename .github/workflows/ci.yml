@@ -945,7 +945,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, board-a, board-b, board-c,
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
         group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
@@ -971,7 +971,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
+      # (the latex group: the LaTeX editor's build with its page also on loopback hosts, which its page tests open;
+      # every other group the site's build)
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+        env:
+          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.group == 'latex' && 'test' || '' }}
       - name: browser group ${{ matrix.group }}
         env:
           CHROME: google-chrome
@@ -1024,6 +1028,11 @@ jobs:
               # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
               # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
               node scripts/web-tests.mjs run web-browser/remote-preview
+              ;;
+            latex)
+              # (the LaTeX editor's page and its agent tools, end to end against the build above: William's top
+              # priority made binding; the grader's finding on #566)
+              node scripts/web-tests.mjs run web-browser/latex
               ;;
             board-unit)
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)
