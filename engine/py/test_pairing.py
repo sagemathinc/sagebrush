@@ -54,11 +54,11 @@ ORIGIN = "https://sagebrush.space"
 class Client:
     """A minimal WebSocket client: the page, or an attacker."""
 
-    def __init__(self, port, origin=ORIGIN, host=None, path="/sagebrush", version="13", key=None):
+    def __init__(self, port, origin=ORIGIN, host=None, path="/sagebrush", version="13", key=None, upgrade="websocket"):
         self.s = socket.create_connection(("127.0.0.1", port), timeout=10)
         key = key or base64.b64encode(os.urandom(16)).decode()
-        req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
-               "Sec-WebSocket-Version: %s\r\n%s\r\n" % (path, host or "127.0.0.1:%d" % port, key, version, "Origin: %s\r\n" % origin if origin else ""))
+        req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: %s\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+               "Sec-WebSocket-Version: %s\r\n%s\r\n" % (path, host or "127.0.0.1:%d" % port, upgrade, key, version, "Origin: %s\r\n" % origin if origin else ""))
         self.s.sendall(req.encode())
         head = b""
         while b"\r\n\r\n" not in head:
@@ -792,6 +792,7 @@ def test_origin_refused_close():
         assert refusal(port, origin=site, version="8") == "403"
         assert refusal(port, origin=site, key="short") == "403"
         assert refusal(port, origin=site, path="/") == "403"
+        assert refusal(port, origin=site, upgrade="h2c") == "403"  # (not a WebSocket upgrade: grader's X4)
         for _ in range(5):  # (more than the wrong-code limit: a refusal is never a try)
             assert refusal(port, origin=site) == "4403"
         assert not p.status()["paired"] and p.status()["code_valid"]
