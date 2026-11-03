@@ -114,3 +114,91 @@ export function statesOf(items, got, stopped) {
 
 /** The results file's text. */
 export const resultsText = (states) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states }) + "\n";
+
+// ---- the session: in the runner, the opaque-origin sandbox, only (astra's LATEX-RUN-2)
+// The board's siteEngine gives the runner a fallback, a plain worker of the page's own origin, for a frame that
+// doesn't start; this path has none: document code never runs in the page's origin. A runner that fails says so (its
+// status, "error: ..."), or doesn't start in startMs: the start fails with SANDBOX_FAILED, the kernel is stopped, and
+// the next Run starts a new runner (the sandbox again, never anything else).
+export const SANDBOX_FAILED = "Sage couldn't start in the sandbox; reload and try again";
+export const SANDBOX_START_MS = 60_000;
+/** The engine's parts for Run: the notebook module beside the page and its runner, with no fallback. */
+export function sandboxEngine(base) {
+  return {
+    module: () => import(new URL("sagebrush-notebook.js", base).href),
+    worker: (mod) => new mod.RunnerWorker(new URL("runner/", base).href, {}),
+  };
+}
+/** A Sage session, started once on the first call and kept; a start that fails is forgotten (the next call starts
+ * again). `eng`: sandboxEngine(base) (a test's fake). Resolves to the kernel, ready; rejects with SANDBOX_FAILED. */
+export function sessionOf(eng, startMs = SANDBOX_START_MS) {
+  let start = null;
+  const get = () => (start ??= (async () => {
+    const mod = await eng.module();
+    const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod) });
+    k.start();
+    const ok = await new Promise((res) => {
+      if (k.ready) return res(true);
+      const offs = [];
+      const done = (v) => { clearTimeout(t); for (const f of offs) f(); res(v); };
+      const t = setTimeout(() => done(false), startMs);
+      offs.push(k.on("ready", () => done(true)), k.on("status", (s) => { if (/^error/.test(String(s))) done(false); }));
+    });
+    if (!ok) { try { k.worker?.terminate?.(); } catch {} k.worker = null; throw new Error(SANDBOX_FAILED); }
+    get.kernel = k;
+    return k;
+  })().catch((e) => { start = null; throw e; }));
+  get.kernel = null;
+  return get;
+}
+/** The session's script run in kernel `k`: what it printed (bounded by `max`) and why it ended early, if it did. */
+export const runIn = (k, code, max) => new Promise((resolve) => {
+  let out = "";
+  k.execute(code, { mode: "sage" }, {
+    start() {}, display() {}, interact() {}, clear() {}, input(_p, reply) { reply(null); },
+    out(t, isErr) { if (!isErr && out.length < max) out += t; },
+    done(_ms, o) { resolve({ out, stopped: o?.interrupted ? "the run was stopped" : out.length >= max ? "the results are too large" : o?.error ? "the session stopped with an error" : "" }); },
+    stopped(m) { resolve({ out, stopped: String(m || "the session stopped").trim().slice(0, 300) }); },
+    skipped() { resolve({ out, stopped: "the session didn't run it" }); },
+  });
+});
+
+// ---- a Run, start to results file (astra's LATEX-RUN-1)
+// A Run whose page was closed or replaced, or that a newer Run has superseded (`current()` false), writes nothing:
+// checked after every wait, and once more inside the workspace's lock (write's admit) before the bytes are written.
+// The results file is pinned: an existing one is written only if it is still that file (its fid) at the revision just
+// read (base), and a new one only created, never written over (a create that finds one made meanwhile writes
+// nothing): a newer Run's results, another tab's, or a file put at that path, are never replaced by this one's.
+/** -> { ok: true, states, ms } | { stale: true } | { msg } (why nothing was written). `o`: { items (the worker's
+ * check items), session (sessionOf), exec (runIn), ws, fid (the .tex's), current () => boolean, signal, max, now } */
+export async function runAndSave(o) {
+  const stale = () => !o.current() || !!o.signal?.aborted;
+  const t0 = o.now();
+  const k = await o.session();
+  if (stale()) return { stale: true };
+  const { out, stopped } = await o.exec(k, driver(runnable(o.items)), o.max);
+  if (stale()) return { stale: true };
+  const states = statesOf(o.items, parseOutput(out), stopped);
+  const bytes = new TextEncoder().encode(resultsText(states));
+  if (bytes.length > o.max) return { msg: "Not saved: the results are too large" };
+  // (the .tex where it is now, by its id, as Save finds it)
+  const at = await o.ws.pathOfFile(o.fid);
+  if (stale()) return { stale: true };
+  if (!at.ok) return { msg: "Not saved: this file isn't here any more" };
+  const rp = at.path + ".results.json";
+  const e = await o.ws.stat(rp).catch(() => undefined);
+  if (stale()) return { stale: true };
+  const STALE = "stale run";
+  const admit = () => { if (stale()) throw Object.assign(new Error(STALE), { code: STALE }); };
+  const changed = { msg: "Not saved: the results file changed meanwhile (another tab or Run): press Run again" };
+  try {
+    if (e && e.trashed) return { msg: "Not saved: the results file is in the Trash: restore or delete it, then press Run" };
+    if (e) await o.ws.write(rp, bytes, { fid: e.fid, base: e.rev ?? 0, admit });
+    else await o.ws.createByPerson(rp, { content: bytes, signal: o.signal });
+  } catch (err) {
+    if (err?.code === STALE || stale()) return { stale: true };
+    if (err?.code === "conflict" || err?.code === "exists") return changed;
+    throw err;
+  }
+  return { ok: true, states, ms: o.now() - t0 };
+}
