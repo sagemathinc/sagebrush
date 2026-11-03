@@ -11,8 +11,10 @@ Line magics:
     %time STATEMENT           the wall time (Sagebrush cannot measure CPU time)
     %timeit [-n N -r R -p P -q -o] STATEMENT
 Cell magics: %%time (nothing after it on its line), %%timeit [options] [setup].
-Shell commands (!cmd, %system, %pip, ...) are errors: Sagebrush runs in the
-browser and has no shell or package installer.
+Shell commands: !cmd, x = !cmd, !!cmd, %system and %sx are expanded as
+IPython's (sagebrush.shell); the shell isn't connected to Python yet, so they
+then raise ShellUnavailableError.  %%bash, %cd and the rest are errors, and
+so is %pip: Sagebrush has no package installer.
 
 %autoreload reloads the changed modules of your files before each cell, as
 importlib.reload does.  A class keeps its identity: the class first loaded
@@ -560,13 +562,19 @@ _LINE = {
     "time": _time,
     "timeit": _timeit,
 }
-_NO_SHELL = {"system", "sx", "sc", "cd", "ls", "pwd", "env", "set_env", "bash", "sh", "script"}
+_NO_SHELL = {"sc", "cd", "ls", "pwd", "env", "set_env", "bash", "sh", "script"}
 _NO_INSTALL = {"pip", "conda", "mamba", "micromamba", "uv"}
 _CELL = {"time": _time, "timeit": _timeit}
+# !cmd (system), x = !cmd and !!cmd (getoutput), %system and %sx: sagebrush.shell,
+# given the calling code's namespaces (src/magic-syntax.ts passes globals(), locals())
+_SHELL = {"system": "system", "getoutput": "getoutput", "sx": "getoutput"}
 
 
-def run_line_magic(name, line):
+def run_line_magic(name, line, g=None, l=None):
     """Run the line magic %name with its argument line (IPython's run_line_magic)."""
+    if name in _SHELL:
+        import _pyjs_shell as shell
+        return getattr(shell, _SHELL[name])(line, g, l)
     if name in _NO_SHELL:
         _no_shell(line)
     if name in _NO_INSTALL:
@@ -611,7 +619,17 @@ class _Shell:
         return run_cell_magic(magic_name, line, cell)
 
     def system(self, cmd):
-        _no_shell(cmd)
+        import _pyjs_shell as shell
+        return shell.system(cmd, _user_ns())
+
+    def getoutput(self, cmd, split=True, depth=0):
+        import _pyjs_shell as shell
+        return shell.getoutput(cmd, _user_ns())
+
+    def var_expand(self, cmd, depth=0):
+        """cmd with {expr}, $name and $$ expanded in the user's namespace, as IPython's."""
+        import _pyjs_shell as shell
+        return shell.var_expand(cmd, dict(_user_ns()))
 
     @property
     def user_ns(self):

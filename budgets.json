@@ -348,7 +348,7 @@
   },
   "engine/lib/mod-pyjs-magic.src": {
    "exact": false,
-   "ceiling": 24994,
+   "ceiling": 25237,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -363,6 +363,13 @@
   "engine/lib/mod-pyjs-pretty.src": {
    "exact": false,
    "ceiling": 27021,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-shell.src": {
+   "exact": false,
+   "ceiling": 7648,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -551,7 +558,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 375956,
+   "ceiling": 376434,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -712,6 +719,7 @@
    "engine/lib/mod-pyjs-magic.src": 21074,
    "engine/lib/mod-pyjs-open.src": 8323,
    "engine/lib/mod-pyjs-pretty.src": 24565,
+   "engine/lib/mod-pyjs-shell.src": 6953,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sage-ec-ff.src": 23918,

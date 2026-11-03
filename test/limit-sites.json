@@ -3860,6 +3860,26 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
+ "lib/_pyjs_shell.py ::  :: ShellUnavailableError. ShellError is an OSError; ShellLimitError, #0": {
+  "class": "none",
+  "owner": "shell forms (U11)"
+ },
+ "lib/_pyjs_shell.py ::  :: __all__ = [\"ShellError\", \"ShellLimitError\", \"ShellUnavailableError\", \"BashError\", \"SList\", \"var_expand\", #0": {
+  "class": "none",
+  "owner": "shell forms (U11)"
+ },
+ "lib/_pyjs_shell.py ::  :: for _c in (ShellError, ShellLimitError, ShellUnavailableError, BashError, SList): #0": {
+  "class": "none",
+  "owner": "shell forms (U11)"
+ },
+ "lib/_pyjs_shell.py :: ShellLimitError :: \"\"\"A command stopped at one of the shell's limits (key, value).\"\"\" #0": {
+  "class": "none",
+  "owner": "shell forms (U11)"
+ },
+ "lib/_pyjs_shell.py :: ShellLimitError :: class ShellLimitError(ShellError): #0": {
+  "class": "none",
+  "owner": "shell forms (U11)"
+ },
  "lib/_sage_combinat.py :: Partitions :: \"\"\"The partitions of n (keywords length, max_part, min_part). #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",

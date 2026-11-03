@@ -1,0 +1,294 @@
+{
+ "ipython": "9.17.1",
+ "transform": [
+  {
+   "src": "!ls",
+   "py": "get_ipython().system('ls')\n"
+  },
+  {
+   "src": "  !ls -l",
+   "py": "get_ipython().system('ls -l')\n"
+  },
+  {
+   "src": "!ls {x}",
+   "py": "get_ipython().system('ls {x}')\n"
+  },
+  {
+   "src": "x = !ls",
+   "py": "x = get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "x=!ls",
+   "py": "x=get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "x =  !  ls -a",
+   "py": "x =  get_ipython().getoutput('  ls -a')\n"
+  },
+  {
+   "src": "a, b = !ls",
+   "py": "a, b = get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "x.y = !ls",
+   "py": "x.y = get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "x[0] = !ls",
+   "py": "x[0] = get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "x = 1 if y else !ls",
+   "py": "x = 1 if y else !ls\n"
+  },
+  {
+   "src": "%sx ls",
+   "py": "get_ipython().run_line_magic('sx', 'ls')\n"
+  },
+  {
+   "src": "x = %sx ls",
+   "py": "x = get_ipython().run_line_magic('sx', 'ls')\n"
+  },
+  {
+   "src": "%system ls",
+   "py": "get_ipython().run_line_magic('system', 'ls')\n"
+  },
+  {
+   "src": "x = %system ls",
+   "py": "x = get_ipython().run_line_magic('system', 'ls')\n"
+  },
+  {
+   "src": "if True:\n    !ls\n    y = !pwd",
+   "py": "if True:\n    get_ipython().system('ls')\n    y = get_ipython().getoutput('pwd')\n"
+  },
+  {
+   "src": "!!ls",
+   "py": "get_ipython().getoutput('ls')\n"
+  },
+  {
+   "src": "print(1) !ls",
+   "py": "print(1) !ls\n"
+  },
+  {
+   "src": "s = '!ls'",
+   "py": "s = '!ls'\n"
+  },
+  {
+   "src": "x = !ls # comment",
+   "py": "x = get_ipython().getoutput('ls # comment')\n"
+  },
+  {
+   "src": "!echo $HOME",
+   "py": "get_ipython().system('echo $HOME')\n"
+  },
+  {
+   "src": "f = lambda: 0\n!ls",
+   "py": "f = lambda: 0\nget_ipython().system('ls')\n"
+  }
+ ],
+ "expand": [
+  {
+   "cmd": "echo {x}",
+   "out": "echo 3"
+  },
+  {
+   "cmd": "echo {x+1}",
+   "out": "echo 4"
+  },
+  {
+   "cmd": "echo $x",
+   "out": "echo 3"
+  },
+  {
+   "cmd": "echo $name.upper",
+   "out": "echo <built-in method upper of str object at 0x7d2e3c7ad1a0>"
+  },
+  {
+   "cmd": "echo $$x",
+   "out": "echo $x"
+  },
+  {
+   "cmd": "echo $$$x",
+   "out": "echo $$x"
+  },
+  {
+   "cmd": "echo {{x}}",
+   "out": "echo {x}"
+  },
+  {
+   "cmd": "echo $undefined",
+   "out": "echo $undefined"
+  },
+  {
+   "cmd": "echo {undefined}",
+   "out": "echo {undefined}"
+  },
+  {
+   "cmd": "echo $x {undefined}",
+   "out": "echo $x {undefined}"
+  },
+  {
+   "cmd": "echo {files}",
+   "out": "echo ['a.txt', 'b c.txt']"
+  },
+  {
+   "cmd": "echo {' '.join(files)}",
+   "out": "echo a.txt b c.txt"
+  },
+  {
+   "cmd": "echo {d['k']}",
+   "out": "echo v"
+  },
+  {
+   "cmd": "echo $obj.attr",
+   "out": "echo 7"
+  },
+  {
+   "cmd": "echo '$x'",
+   "out": "echo '$x'"
+  },
+  {
+   "cmd": "echo \"$x\"",
+   "out": "echo \"3\""
+  },
+  {
+   "cmd": "echo '$x' $x",
+   "out": "echo '$x' 3"
+  },
+  {
+   "cmd": "echo $x$x",
+   "out": "echo 33"
+  },
+  {
+   "cmd": "echo ${x}",
+   "out": "echo $3"
+  },
+  {
+   "cmd": "echo {x:>5}",
+   "out": "echo {x:>5}"
+  },
+  {
+   "cmd": "echo {x!r}",
+   "out": "echo 3"
+  },
+  {
+   "cmd": "echo {s}",
+   "out": "echo it's"
+  },
+  {
+   "cmd": "echo $s",
+   "out": "echo it's"
+  },
+  {
+   "cmd": "echo {1/0}",
+   "out": "echo {1/0}"
+  },
+  {
+   "cmd": "echo $",
+   "out": "echo $"
+  },
+  {
+   "cmd": "echo $1",
+   "out": "echo 1"
+  },
+  {
+   "cmd": "echo cost: 5$",
+   "out": "echo cost: 5$"
+  },
+  {
+   "cmd": "echo {x}{x}",
+   "out": "echo 33"
+  },
+  {
+   "cmd": "echo a{",
+   "out": "echo a{"
+  },
+  {
+   "cmd": "echo }",
+   "out": "echo }"
+  },
+  {
+   "cmd": "echo $x.",
+   "out": "echo $x."
+  },
+  {
+   "cmd": "echo $x.real",
+   "out": "echo 3"
+  },
+  {
+   "cmd": "echo {files[1:]}",
+   "out": "echo ['b c.txt']"
+  }
+ ],
+ "slist": {
+  "l": [
+   "  Cat 1",
+   "dog 22 x",
+   "",
+   "Bird 3"
+  ],
+  "s": "  Cat 1 dog 22 x  Bird 3",
+  "n": "  Cat 1\ndog 22 x\n\nBird 3",
+  "grep_c": [
+   "  Cat 1"
+  ],
+  "grep_prune": [
+   "dog 22 x",
+   "",
+   "Bird 3"
+  ],
+  "grep_field": [
+   "dog 22 x"
+  ],
+  "grep_callable": [
+   "dog 22 x"
+  ],
+  "fields": [
+   [
+    "Cat",
+    "1"
+   ],
+   [
+    "dog",
+    "22",
+    "x"
+   ],
+   [],
+   [
+    "Bird",
+    "3"
+   ]
+  ],
+  "fields_1_0": [
+   "1 Cat",
+   "22 dog",
+   "3 Bird"
+  ],
+  "fields_-1": [
+   "1",
+   "x",
+   "3"
+  ],
+  "fields_5": [],
+  "sort1": [
+   "c 1",
+   "a 10",
+   "b 2"
+  ],
+  "sort1n": [
+   "c 1",
+   "b 2",
+   "a 10"
+  ],
+  "sort_plain": [
+   "C",
+   "a",
+   "b"
+  ],
+  "type_grep": "SList",
+  "type_fields": "SList",
+  "type_fields0": "list",
+  "repr": "['a', 'b']"
+ },
+ "expand_locals": "echo local local"
+}

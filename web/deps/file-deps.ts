@@ -869,7 +869,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
       const [k, a1, a2] = n.args.map((x: Node) => (x?._type === "Constant" ? x.value : null));
       const line = n.lineno ?? 0;
       if (typeof k !== "string") return;
-      if (!cell && k === "system") for (const x of shellWords(a1)) existing(x, line, mv);
+      if (!cell && (k === "system" || k === "getoutput" || k === "sx")) for (const x of shellWords(a1)) existing(x, line, mv);
       else if (!cell && k === "run") {
         const f = shellWords(a1)[0];
         if (!f) return;

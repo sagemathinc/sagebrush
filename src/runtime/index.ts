@@ -756,6 +756,9 @@ B.builtins.exec = Obj.builtin((src: any, gl: any = undefined, lo: any = undefine
 B.builtins.eval = Obj.builtin((src: any, gl: any = undefined, lo: any = undefined) => evalIn(src, gl ?? null, lo, null, null), "eval");
 B.builtins.globals = Obj.builtin(() => raise(T.RuntimeError, "globals() called indirectly is not supported"), "globals");
 B.builtins.locals = Obj.builtin(() => raise(T.RuntimeError, "locals() called indirectly is not supported"), "locals");
+// (the shell forms' spellings of globals() and locals(), src/magic-syntax.ts: the compiler's, called directly only)
+B.builtins.__pyjs_globals__ = Obj.builtin(() => raise(T.RuntimeError, "__pyjs_globals__() called indirectly is not supported"), "__pyjs_globals__");
+B.builtins.__pyjs_locals__ = Obj.builtin(() => raise(T.RuntimeError, "__pyjs_locals__() called indirectly is not supported"), "__pyjs_locals__");
 // The builtins the compiler runs in place (introspection calls, consuming
 // calls of a generator expression, `for` over range): their own functions,
 // which a call's guard compares with, not the builtins' names, which code

@@ -3,7 +3,9 @@
 // 1. magicSyntax (text): at the start of a statement,
 //      %name args       a line magic (indented too)
 //      %%name args      a cell magic, on the cell's first line
-//      !command         a shell command (Sagebrush has no shell: an error)
+//      !command         a shell command, x = !command and !!command its output
+//                       (lib/_pyjs_shell.py; given the caller's namespaces for
+//                       the command's {expr} and $name, as IPython's)
 //    become calls of the builtins __pyjs_magic__(name, args) and
 //    __pyjs_cell_magic__(name, args[, body]), as IPython turns them into
 //    get_ipython().run_line_magic(...).  Such lines are never valid Python.
@@ -147,8 +149,12 @@ export function splitTimeit(args: string): [string, string] {
 
 export function magicSyntax(src: string): string {
   if (!src.includes("%") && !src.includes("!")) return src;
-  const lines = src.split("\n");
+  let lines = src.split("\n");
   const first = lines.findIndex((l) => l.trim() !== "");
+  // (IPython's leading_indent: a cell whose first line is indented, "  !ls",
+  // loses that indentation on every line that has it)
+  const indent = first >= 0 ? /^[ \t]+/.exec(lines[first])?.[0] : undefined;
+  if (indent) lines = lines.map((l) => (l.startsWith(indent) ? l.slice(indent.length) : l));
   const before = lines.slice(0, Math.max(first, 0));
   const head = (s: string) => before.concat([s]);
   if (first >= 0) {
@@ -168,15 +174,58 @@ export function magicSyntax(src: string): string {
   return lineMagics(lines).join("\n");
 }
 
+// the shell's forms, given the calling code's namespaces for their {expr} and
+// $name (lib/_pyjs_shell.py): IPython reads its caller's frame.  Reserved
+// spellings of globals() and locals() that src/emit.ts compiles to the
+// namespaces themselves, never through a name, so no binding of the code's
+// (globals, locals, or these names) can stand in for them.
+const SHELL_MAGICS = new Set(["system", "sx"]);
+const NS = ", __pyjs_globals__(), __pyjs_locals__()";
+
+// `target = !cmd` and `target = %sx cmd` (or %system), as IPython's: the
+// first `=` outside brackets and strings that is an assignment (not ==, <=,
+// +=, ...), followed by ! or one of those magics; the target is anything
+// before it.  null: not that form.
+function assignFrom(line: string): string | null {
+  let depth = 0, q = "";
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === "\\") i++; else if (c === q) q = ""; continue; }
+    if (c === "'" || c === '"') q = c;
+    else if (c === "#") return null;
+    else if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) depth--;
+    else if (c === "=" && depth === 0) {
+      if (line[i + 1] === "=" || "=!<>:+-*/%&|^@".includes(line[i - 1] ?? "")) return null;
+      const lhs = line.slice(0, i + 1), rest = line.slice(i + 1).trimStart();
+      if (!lhs.slice(0, -1).trim()) return null;
+      if (rest.startsWith("!") && !rest.startsWith("!=")) return `${lhs} __pyjs_magic__("getoutput", ${lit(rest.slice(1).trimEnd())}${NS})`;
+      const m = /^%([A-Za-z_]\w*)(.*)$/.exec(rest);
+      if (m && SHELL_MAGICS.has(m[1])) return `${lhs} __pyjs_magic__(${lit(m[1])}, ${lit(m[2].trim())}${NS})`;
+      return null;
+    }
+  }
+  return null;
+}
+
 function lineMagics(lines: string[]): string[] {
   const lex = new Lexer();
   const out: string[] = [];
   for (const line of lines) {
     if (lex.atStatement()) {
       let m = LINE_MAGIC.exec(line);
-      if (m) { out.push(`${m[1]}__pyjs_magic__(${lit(m[2])}, ${lit(m[3].trim())})`); continue; }
+      if (m) { out.push(`${m[1]}__pyjs_magic__(${lit(m[2])}, ${lit(m[3].trim())}${SHELL_MAGICS.has(m[2]) ? NS : ""})`); continue; }
       m = SHELL.exec(line);
-      if (m && !m[2].startsWith("=")) { out.push(`${m[1]}__pyjs_magic__("system", ${lit(m[2].trim())})`); continue; }
+      if (m && !m[2].startsWith("=")) {
+        // (!!cmd: its output, as an expression, as IPython's)
+        const two = m[2].startsWith("!");
+        out.push(`${m[1]}__pyjs_magic__(${two ? '"getoutput"' : '"system"'}, ${lit((two ? m[2].slice(1) : m[2]).trimEnd())}${NS})`);
+        continue;
+      }
+      if (line.includes("!") || line.includes("%")) {
+        const a = assignFrom(line);
+        if (a !== null) { out.push(a); continue; }
+      }
     }
     lex.line(line);
     out.push(line);
