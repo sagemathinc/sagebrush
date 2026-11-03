@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Engine gaps from agent simulation run 4: ufunc.at (lib/numpy), matplotlib's semilogx/semilogy/loglog/get_xscale/get_yscale, a Sage polygon's ignored options warned as Sage does, GraphicsArray.show/save figsize, catalog entries, tests. Re-measured with bun 1.4.4 (size-record.sh) on master 34e0bbbd vs head 7c126390: cli/lib.gen.js +2328, cli/pyjs.cjs +10648, engine/lib/sage.pre +10913, engine/lib/sage.src +3337, engine/lib/sci.pre +15540, engine/lib/sci.src +3359 (pyjs with 32 B of margin, as it moves with master); no other row moves.",
+ "reason": "Engine gaps from agent simulation run 4: ufunc.at (lib/numpy), matplotlib's semilogx/semilogy/loglog/get_xscale/get_yscale, a Sage polygon's ignored options warned as Sage does, GraphicsArray.show/save figsize, catalog entries, tests. Re-measured with bun 1.4.4 (size-record.sh) on master 85999b33 vs head 839e030a: cli/lib.gen.js +2384, cli/pyjs.cjs +10864, engine/lib/sage.pre +10913, engine/lib/sage.src +3337, engine/lib/sci.pre +15986, engine/lib/sci.src +3580 (pyjs with 32 B of margin, as it moves with master); no other row moves.",
  "bytes": {
-  "cli/lib.gen.js": 2328,
-  "cli/pyjs.cjs": 10648,
+  "cli/lib.gen.js": 2384,
+  "cli/pyjs.cjs": 10864,
   "engine/lib/sage.pre": 10913,
   "engine/lib/sage.src": 3337,
-  "engine/lib/sci.pre": 15540,
-  "engine/lib/sci.src": 3359
+  "engine/lib/sci.pre": 15986,
+  "engine/lib/sci.src": 3580
  }
 }
