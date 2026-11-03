@@ -139,6 +139,7 @@ function check(cache, key, p, serve, opts) {
   return run;
 }
 async function checkNow(cache, key, p, serve, opts) {
+  for (const [x, t] of skipRead) t > Date.now() || skipRead.delete(x);
   const k = String(key?.url ?? key), skip = skipRead.get(k);
   if (skip !== undefined && Date.now() < skip) return null;
   skipRead.delete(k);
@@ -918,7 +919,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, marks: skipRead.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>
