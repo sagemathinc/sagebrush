@@ -149,11 +149,11 @@ body.wsfiles .tex-page { left: 272px; }
 .tex-page table.tabular.bl td:first-child { border-left: 1px solid currentColor; }
 .tex-page table.tabular tr.ht td { border-top: 1px solid currentColor; }
 .tex-page .mbox { white-space: nowrap; }
-.tex-page .fbox { display: inline-block; border: 1px solid currentColor; padding: .15em .35em; text-indent: 0; }
-.tex-page .fbox.frame { padding: 0; }
-.tex-page .fbox.shadow { box-shadow: 3px 3px 0 currentColor; }
-.tex-page .fbox.double { border-style: double; border-width: 3px; }
-.tex-page .fbox.oval { border-radius: .8em; }
+.tex-page .tex-fbox { display: inline-block; border: 1px solid currentColor; padding: .15em .35em; text-indent: 0; }
+.tex-page .tex-fbox.frame { padding: 0; }
+.tex-page .tex-fbox.shadow { box-shadow: 3px 3px 0 currentColor; }
+.tex-page .tex-fbox.double { border-style: double; border-width: 3px; }
+.tex-page .tex-fbox.oval { border-radius: .8em; }
 .tex-page .mkbox { display: inline-block; text-indent: 0; white-space: nowrap; }
 .tex-page .parbox { display: inline-block; vertical-align: middle; text-indent: 0; text-align: left; }
 .tex-page .parbox.va-t { vertical-align: top; }
@@ -166,9 +166,8 @@ body.wsfiles .tex-page { left: 272px; }
 .tex-page .phantom { visibility: hidden; }
 .tex-page .phantom.hph { display: inline-block; height: 0; overflow: hidden; }
 .tex-page .phantom.vph { display: inline-block; width: 0; overflow: hidden; }
-.tex-page .llap, .tex-page .rlap { position: relative; display: inline-block; width: 0; }
-.tex-page .llap > span { position: absolute; right: 0; white-space: nowrap; }
-.tex-page .rlap > span { position: absolute; left: 0; white-space: nowrap; }
+.tex-page .tex-llap, .tex-page .tex-rlap { display: inline-block; width: 0; white-space: nowrap; text-indent: 0; }
+.tex-page .tex-llap > span { display: inline-block; transform: translateX(-100%); }
 .tex-page .smash { display: inline-block; height: 1em; line-height: 1em; }
 .tex-page .marginpar { float: right; clear: right; width: 9em; margin-right: -11.5em; font-size: .85em; text-indent: 0; text-align: left; }
 .tex-page .marginpar.todo { background: #fff6c8; padding: .2em .4em; border-radius: 3px; }
@@ -220,6 +219,12 @@ body { margin: 0; background: #eef0f2; }
 .tex-page.sb-standalone { position: static; display: block; min-height: 100vh; }
 .sb-standalone .page.beamer { max-width: none; width: 1024px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
+@media print {
+  body { background: #fff; }
+  .sb-standalone .page.beamer { padding: 0; }
+  .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
+  .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
+}
 </style>
 </head>
 <body><div class="tex-page sb-standalone"><div class="page tex-preview">
