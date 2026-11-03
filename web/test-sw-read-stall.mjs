@@ -79,6 +79,19 @@ try {
     c.port1.onmessage = (e) => resolve(e.data);
     navigator.serviceWorker.controller.postMessage({ offlineTest: ${J(t)} }, [c.port2]);
   })`);
+  // (T565-QUIESCE, grader: the service worker idle: no reservation held or waited for, no check running or queued, no
+  // key marked, no put in flight (a request's copy is put, then read back, in the background), three polls in a row;
+  // every phase starts from here, so what it snapshots or holds is its own)
+  const quiesce = async () => {
+    let calm = 0, last;
+    for (let i = 0; i < 150 && calm < 3; i++) {
+      last = await hook();
+      calm = last && last.budgetUsed === 0 && last.waiting === 0 && last.checking === 0 && last.skipping === 0 && last.putting === 0 ? calm + 1 : 0;
+      if (calm < 3) await sleep(100);
+    }
+    if (calm < 3) throw new Error("the service worker never went idle: " + J(last));
+    return last;
+  };
   // (the chunk fetched by the page, through its service worker, within `ms`: its size and SHA-256, or a timeout)
   const get = (ms) => ev(`new Promise((resolve) => {
     const t0 = performance.now(), t = setTimeout(() => resolve({ timeout: true, ms: performance.now() - t0 }), ${ms});
@@ -101,6 +114,7 @@ try {
     const first = await get(30000);
     ok(first.size === want.size && first.sha256 === want.sha256, `${v}: the chunk fetched once (${first.size ?? first.error ?? "timeout"})`);
     ok(await until(() => kept(v), 15000), `${v}: …and kept by the service worker`);
+    await quiesce();
     await hook({ scale: 0.1, holdRead: url });
     await clearHttp();
     const before = fromServer(), h0 = await hook(), budget = h0?.budgetUsed;
@@ -125,6 +139,7 @@ try {
   // (T565-SERIAL, grader's advisory: two requests for the held URL at once: the second waits its turn behind the
   // stalled check, then reads the copy; both answered, the chain of checks empty after)
   at = "two requests at once, the first one's read held";
+  await quiesce();
   await hook({ holdRead: url });
   await clearHttp();
   const two = await ev(`Promise.all([0, 1].map(() => {
@@ -143,6 +158,7 @@ try {
   // never each stalling in turn behind the one before)
   at = "three requests at once, every read held";
   await until(() => kept(A), 15000);
+  await quiesce();
   await hook({ holdRead: url, holdKeep: true });
   await clearHttp();
   const h3 = (await hook())?.heldReads;
@@ -161,8 +177,8 @@ try {
   await until(() => kept(A), 15000);
   // (the phase before leaves its mark until its network copy is put, in the background: it starts from none, so its
   // own stall is the one that marks the key; CI's run 41619463054 started while the mark was still there)
-  let skipping;
-  ok(await until(async () => (skipping = (await hook())?.skipping) === 0, 15000), "(no key marked before the phase: " + skipping + ")");
+  const idle = await quiesce();
+  ok(idle.skipping === 0, "(the service worker idle before the phase, no key marked: " + idle.skipping + ")");
   overrides[url] = { status: 503 };
   saveOverrides();
   const held0 = (await hook())?.heldReads;
