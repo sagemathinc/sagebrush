@@ -1413,17 +1413,20 @@ export class Workspace {
    * WorkspaceError("conflict") with the current contents, nothing written. */
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
+  /** `ref` (a notebook or board): the same, for a document: only if the document at `p` is still that one, its own
+   * ref (a board's shared copy filled in, web/board/page.ts: never another board put at its path since). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; ref?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted): Promise<{ entry: Entry; rev: number }> {
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; ref?: string } & Collect & Admitted): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
+      if (opts.ref !== undefined && (e.kind === "file" || e.ref !== opts.ref)) throw new WorkspaceError("conflict", `${e.path} is another document now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
       // (a document listed from the server: its content comes in slice 2, read-only until then)
       if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);

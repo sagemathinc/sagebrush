@@ -87,28 +87,43 @@ try {
   await sleep(1500);
   check(/This shared board couldn't be opened/.test(await caption()) && /sessionStorage/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before, `sessionStorage refused: no copy made, said why (${before} boards before and after)`);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s1.identifier });
-  // (the probe kept, the pause's own key refused: no copy either, nothing left behind, its code never run; a warning
-  // and a copy would run it at the next reload, @sagebrush)
+  // (the probe kept, the pause's own key refused: only an inert placeholder (a note, no code) is left, nothing in
+  // Trash, nothing removed, the shared code never kept nor run, also after a reload: astra's BOARD-SHARE-1/2)
+  const codeIn = () => ev(`window.sagebrush.workspace.list("/", { recursive: true }).then(async (l) => { let n = 0; for (const e of l.filter((x) => x.kind === "board")) { const r = await window.sagebrush.workspace.read(e.path); n += (r.content?.nodes ?? []).filter((x) => x.code && x.code.includes("range(2, 100)")).length; } return n; })`);
+  const codeBefore = await codeIn();
   const s2 = await refuse("(k) => k.startsWith('sagebrush-board-paused:') && k !== 'sagebrush-board-paused:probe'");
   await open(link);
   await sleep(1500);
   const trash = await ev(`window.sagebrush.workspace.list("/Trash").then((l) => l.filter((e) => e.kind === "board").length).catch(() => 0)`);
-  check(/This shared board couldn't be opened/.test(await caption()) && /keeps a shared board's code paused/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before && trash === 0, `the pause's own key refused: no copy kept (not in the files, not in Trash: ${trash}), said why`);
+  check(/This shared board couldn't be opened/.test(await caption()) && /keeps a shared board's code paused/.test(await caption()) && /holding no code/.test(await caption()) && !/[?&]doc=local:/.test(await ev("location.search")), "the pause's own key refused: not opened, said why, and that an empty board is left");
+  check((await boards()) === before + 1 && trash === 0 && (await codeIn()) === codeBefore, `…only the inert placeholder is left (${before} -> ${await boards()} boards, Trash ${trash}): the shared code isn't in any board`);
   const o1 = await outs();
   check(!/\b25\b/.test(o1), `…and the shared code never ran (outputs ${o1.slice(0, 60)})`);
   // (astra's reload negative: reloaded before any Run, there is still no copy to open, nothing ran)
   await send("Page.reload");
   await until("!!window.sagebrush?.board", 20000);
   await sleep(1000);
-  check(!/[?&]doc=local:/.test(await ev("location.search")) && (await boards()) === before && !/\b25\b/.test(await outs()), "…reloaded before any Run: still no copy, nothing ran");
+  check(!/[?&]doc=local:/.test(await ev("location.search")) && (await codeIn()) === codeBefore && !/\b25\b/.test(await outs()), "…reloaded before any Run: the shared code still in no board, nothing ran");
   // (and this browser's own boards, without the workspace (?workspace=0): no copy kept there either)
   const localIds = () => ev(`JSON.parse(localStorage.getItem("sagebrush-boards") ?? "[]").map((b) => b.id).join(",")`);
   await open(`${origin}/board/?workspace=0&new=python`);
   const localBefore = await localIds();
   await open(`${origin}/board/?workspace=0${link.slice(link.indexOf("#"))}`);
   await sleep(1500);
-  check(/keeps a shared board's code paused/.test(await caption()) && (await localIds()) === localBefore && !/[?&]doc=local:/.test(await ev("location.search")), `without the workspace, the pause's own key refused: no copy in this browser's boards either (${localBefore.split(",").length} before and after)`);
+  const localCode = () => ev(`JSON.parse(localStorage.getItem("sagebrush-boards") ?? "[]").map((b) => localStorage.getItem("sagebrush-board:local:" + b.id) ?? "").filter((t) => t.includes("range(2, 100)")).length`);
+  check(/keeps a shared board's code paused/.test(await caption()) && (await localCode()) === 0 && !/[?&]doc=local:/.test(await ev("location.search")), `without the workspace, the pause's own key refused: the shared code in none of this browser's boards (${localBefore.split(",").length} before)`);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s2.identifier });
+  // (the copy's path replaced between the fill's check and its write: the board now there is left as it was, the shared
+  // code written nowhere: the fill is checked against the placeholder's own id, BOARD-SHARE-2)
+  const seam = await send("Page.addScriptToEvaluateOnNewDocument", { source: `globalThis.__sbShareSeam = async (ws, id, p) => { await ws.rename(p, "/moved-away.board.json"); await ws.create(p, { content: { title: "Someone else's", nodes: [{ id: "k", text: "keep me", x: 0, y: 0 }] } }); };` });
+  await open(`${origin}/board/?new=python`);
+  const codeBefore2 = await codeIn();
+  await open(link);
+  await sleep(1500);
+  const other = await ev(`window.sagebrush.workspace.list("/").then(async (l) => { const all = await Promise.all(l.filter((x) => x.kind === "board").map(async (x) => ({ path: x.path, doc: (await window.sagebrush.workspace.read(x.path)).content }))); return all.filter((x) => x.doc?.title === "Someone else's").map((x) => ({ path: x.path, nodes: x.doc.nodes })); })`);
+  check(/This shared board couldn't be opened/.test(await caption()) && /moved before it was filled in/.test(await caption()), "the copy's path replaced before the fill: refused, said why");
+  check(other.length === 1 && JSON.stringify(other[0].nodes.map((x) => x.text ?? x.code)) === '["keep me"]' && (await codeIn()) === codeBefore2, `…the board put at that path is left as it was (${JSON.stringify(other).slice(0, 120)}), the shared code written nowhere`);
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: seam.identifier });
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 } catch (e) {
   check(false, "threw: " + String(e?.stack ?? e).slice(0, 800));

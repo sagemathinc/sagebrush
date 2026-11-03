@@ -111,19 +111,38 @@ async function shareLinkOf(json: string): Promise<string> {
   if (url.length > MAX_LINK) throw new Error(`this board is ${(url.length / 1e6).toFixed(1)} MB as a link, more than a browser's address takes (${MAX_LINK / 1e6} MB): share it as a file instead (File > Download > HTML)`);
   return url;
 }
-/** A shared board's copy undone, as if never made: from the workspace (to Trash, then out of it), or from this
- * browser's boards. */
-async function discardCopy(id: string) {
-  try {
-    if (ws) {
-      const p = await ws.pathOf("board", id);
-      if (p) { const t = await ws.remove(p); await ws.emptyTrash([t.path]); }
-    } else {
-      localStorage.removeItem(localKey(id));
-      localStorage.removeItem(localKey(id) + "#here");
-      writeList(localBoards().filter((b) => b.id !== id));
+/** A shared board's copy, made in three steps so that its code is never kept unpaused (astra's BOARD-SHARE-1/2,
+ * @sagebrush's ruling): (1) an inert placeholder (a note, no code) gives the copy its id; (2) the pause, under that
+ * id, written and read back; (3) only then the shared board written into that same board, its entry checked to be
+ * the placeholder before and after. Nothing is ever removed: a failure leaves at most the inert placeholder. */
+async function sharedCopyOf(d: BoardDoc): Promise<string> {
+  const inert: BoardDoc = { ...blankBoard(d.mode ?? "python"), title: d.title, nodes: [{ id: "n0", text: "**A shared board was to be copied here,** but it couldn't be kept with its code paused, so it wasn't. This board holds no code: delete it, or open the link again.", x: 40, y: 40 }] as BoardDoc["nodes"] };
+  const left = "an empty board of that name, holding no code, is left in your boards: delete it";
+  if (ws) {
+    const id = await makeInWorkspace(ws, inert, true);
+    pauseBoard(id);
+    if (!isPaused(id)) throw new Error(`this browser didn't keep the note (sessionStorage) that keeps a shared board's code paused until you run it; ${left}`);
+    sharedCopy = id;
+    const p = await ws.pathOf("board", id), e = p ? await ws.stat(p) : undefined;
+    if (!p || !e || e.kind !== "board" || e.ref !== id) throw new Error(`its copy moved before it was filled in; ${left}`);
+    // (a test's way in, between the check and the write: another board put at the path, web/board/test-board-share.mjs)
+    await (globalThis as any).__sbShareSeam?.(ws, id, p);
+    // (into that board only, by its ref, checked holding the workspace's lock: never another put at its path since)
+    try { await ws.write(p, d, { base: e.rev ?? 1, ref: id }); } catch (err: any) {
+      if (err?.code === "conflict") throw new Error(`its copy moved before it was filled in; ${left}`);
+      throw err;
     }
-  } catch (e) { console.warn("board: a shared board's copy not undone:", e); }
+    return id;
+  }
+  const id = makeLocal(inert);
+  if (!id) throw new Error(STORAGE_REFUSED);
+  pauseBoard(id);
+  if (!isPaused(id)) throw new Error(`this browser didn't keep the note (sessionStorage) that keeps a shared board's code paused until you run it; ${left}`);
+  sharedCopy = id;
+  const text = JSON.stringify(d);
+  try { localStorage.setItem(localKey(id), text); } catch {}
+  if (localStorage.getItem(localKey(id)) !== text || !listLocal(id, d)) throw new Error(STORAGE_REFUSED);
+  return id;
 }
 /** Whether this tab's sessionStorage keeps a board's pause: written and read back (a probe key, removed). */
 function pauseKept(): boolean {
@@ -397,17 +416,7 @@ if (location.hash.startsWith("#z=") && !embedded() && !q.has("doc")) {
     // (fails closed: no copy is made unless its pause can be kept, in this tab's sessionStorage, and read back;
     // a reload of the copy reads it there)
     if (!pauseKept()) throw new Error("this browser won't keep a note for this tab (sessionStorage), which a shared board's code needs to stay paused until you run it");
-    const id = ws ? await makeInWorkspace(ws, d, true) : makeLocal(d);
-    if (!id) throw new Error(STORAGE_REFUSED);
-    sharedCopy = id;
-    pauseBoard(id);
-    // (its own pause key written and read back, or no copy at all: removed for good, @sagebrush on BOARD-SHARE-1; a
-    // warning and a copy would run its code at the next reload)
-    if (!isPaused(id)) {
-      sharedCopy = null;
-      await discardCopy(id);
-      throw new Error("this browser didn't keep the note (sessionStorage) that keeps a shared board's code paused until you run it");
-    }
+    const id = await sharedCopyOf(d);
     q.set("doc", "local:" + id);
     history.replaceState(null, "", location.pathname + "?" + q.toString().replace("local%3A", "local:"));
   } catch (err) {
