@@ -141,7 +141,7 @@ r, m = run(kc, "def g():\n    z = 11\n    %time print(z)\ng()\n%time 2^10")
 out = "".join(c["text"] for c in of(m, "stream"))
 check("%time (Sage)", of(m, "execute_result")[0]["data"]["text/plain"] == "1024" and out.startswith("11\nWall time: ") and out.count("Wall time") == 2, m)
 r, m = run(kc, "!ls")
-check("!ls is refused", r["status"] == "error" and "shell commands are not available" in r["evalue"], r)
+check("!ls is refused", r["status"] == "error" and "shell commands aren't available in Sagebrush yet" in r["evalue"], r)
 km.shutdown_kernel(now=False)
 check("shutdown", not km.is_alive())
 

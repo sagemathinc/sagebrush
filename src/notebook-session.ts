@@ -370,10 +370,12 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // A magic Sagebrush does not have, or used wrongly (lib/_pyjs_magic.py's
       // UsageError): its one line, as IPython prints a UsageError, without the
       // frames of the magic's machinery.
+      // (and so is a shell command's error, lib/_pyjs_shell.py: no frames
+      // of the shell's machinery)
       const ty = R.typeOf(exc);
-      if (ty.$qualname === "UsageError" && ty.$module === "_pyjs_magic") {
+      if ((ty.$qualname === "UsageError" && ty.$module === "_pyjs_magic") || ty.$module === "_pyjs_shell") {
         const lines = String(R.formatException(exc)).trimEnd().split("\n");
-        R.stderr.write(lines[lines.length - 1].replace(/^_pyjs_magic\.UsageError\b/, "UsageError") + "\n");
+        R.stderr.write(lines[lines.length - 1].replace(/^(_pyjs_magic|_pyjs_shell|sagebrush\.shell)\.(\w+)\b/, "$2") + "\n");
         return false;
       }
       // (a cell's renamed `_` names are shown as written)
