@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Engine gaps from agent simulation run 3: board_checks.symbolic_equal proves wrong answers with sin or e^x by RIF enclosures (lib/board_checks.py), matplotlib.patches with Axes.add_patch and fill (lib/matplotlib/), PermutationGroup.is_isomorphic (lib/sage_permgroup.py), with docstring examples. Re-measured with bun 1.4.4 (size-record.sh) on master 4261c163 vs head 863ced53: cli/lib.gen.js +4772, cli/pyjs.cjs +9454, engine/lib/mod-board-checks.src +1330, engine/lib/mod-matplotlib.src +6278, engine/lib/sage.pre +23441, engine/lib/sage.src +3995, engine/lib/sci.pre +9014, engine/lib/sci.src +2850, engine/sagebrush-worker.js +41 (pyjs with 32 B of margin, as it moves with master); no other row moves.",
+ "reason": "Engine gaps from agent simulation run 3: board_checks.symbolic_equal proves wrong answers with sin or e^x by RIF enclosures (lib/board_checks.py), matplotlib.patches with Axes.add_patch and fill (lib/matplotlib/), PermutationGroup.is_isomorphic (lib/sage_permgroup.py), with docstring examples. Re-measured with bun 1.4.4 (size-record.sh) on master 9aaa53ab vs head 8559e056: cli/lib.gen.js +4772, cli/pyjs.cjs +9290, engine/lib/mod-board-checks.src +1330, engine/lib/mod-matplotlib.src +6278, engine/lib/sage.pre +23441, engine/lib/sage.src +3995, engine/lib/sci.pre +9014, engine/lib/sci.src +2850, engine/sagebrush-worker.js +41 (pyjs with 32 B of margin, as it moves with master); no other row moves.",
  "bytes": {
   "cli/lib.gen.js": 4772,
-  "cli/pyjs.cjs": 9454,
+  "cli/pyjs.cjs": 9290,
   "engine/lib/mod-board-checks.src": 1330,
   "engine/lib/mod-matplotlib.src": 6278,
   "engine/lib/sage.pre": 23441,
