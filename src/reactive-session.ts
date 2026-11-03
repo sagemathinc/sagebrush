@@ -100,10 +100,13 @@ export interface CellsRun {
   errors: Map<string, string>;
 }
 
-/** The cells run as the reactive notebook runs them, in this interpreter: `only` given, those (and their stale
- * ancestors first, then their descendants within the budget); else all. Each run's messages go to `onMessage`.
+/** The cells run as the reactive notebook runs them, in this interpreter. Two explicit behaviours (@sagebrush's
+ * ruling on daybreak3's #557 HOLD), never one implicit: `only: [N]`, N and its stale ancestors, nothing after (`latex
+ * run --item N`); `descendantsWithinMs` added, also its descendants within that autorun budget, by each one's last
+ * measured time (`lastMs`), a slower one left stale (the editor's Run). Neither given: all. Each run's messages go to
+ * `onMessage`.
  * `seedOf` gives each cell's seed; `timeoutMs` an item's time. `noun` names cells in the errors ("item", "block"). */
-export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mode; seedOf: (key: string) => string; timeoutMs: number; onMessage: (key: string, m: any) => void; only?: string[]; label?: (key: string) => string; noun?: string }): Promise<CellsRun> {
+export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mode; seedOf: (key: string) => string; timeoutMs: number; onMessage: (key: string, m: any) => void; only?: string[]; descendantsWithinMs?: number; lastMs?: Map<string, number>; label?: (key: string) => string; noun?: string }): Promise<CellsRun> {
   const timedOut = new Set<string>(), syntax = new Map<string, string>(), states = new Map<string, CellState>();
   const analyses = new Map<string, Analysis>();
   const mangle = (id: string) => id.replace(/[^A-Za-z0-9]/g, "");
@@ -128,11 +131,14 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
     },
     status: (id, st) => states.set(id, st),
   });
+  // (each cell's last measured time, for the budget: from an earlier run, the results file's)
+  for (const [k, ms] of o.lastMs ?? []) if (Number.isFinite(ms) && ms >= 0) reactive.times.set(k, ms);
   const failed = new Set<string>(), cancelled = new Set<string>();
   const note = (r: RunReport) => { for (const id of r.failed) failed.add(id); for (const id of r.cancelled) cancelled.add(id); };
   if (cells.length) {
     await reactive.load({ stale: true });
-    note(o.only ? await reactive.run(o.only, { budget: Infinity }) : await reactive.runAll());
+    const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity;
+    note(o.only ? await reactive.run(o.only, { budget }) : await reactive.runAll());
     // (a cell out of time stops the scheduler's run, as Stop does in a notebook; the interpreter is still there: the
     //  others run, but not what reads a cell out of time; with `only`, just what was asked)
     const asked = new Set(o.only ?? cells.map((c) => c.key));
@@ -141,7 +147,7 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
       const left = cells.map((c) => c.key).filter((id) => asked.has(id) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id));
       if (!left.length) break;
       const before = reactive.outcome.size;
-      note(await reactive.run(left, { budget: Infinity }));
+      note(await reactive.run(left, { budget }));
       if (reactive.outcome.size === before) break;
     }
     // (a syntax error: the interpreter says it, where, in the document's language; such code defines nothing)
