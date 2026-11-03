@@ -124,5 +124,59 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.add_patch",
+    "kind": "method",
+    "signature": "(self, p)",
+    "summary": "Add a patch (matplotlib.patches: Rectangle, Circle, Ellipse, Polygon) to the Axes; returns the patch.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfrom matplotlib.patches import Rectangle, Circle\nfig, ax = plt.subplots()\nax.add_patch(Rectangle((0, 0), 2, 1, color='tab:blue', label='box'))\nax.add_patch(Circle((3, 0.5), 0.5, color='tab:orange'))\nax.set_xlim(-1, 4)\nax.set_ylim(-1, 2)\nax.set_title('Patches')\nplt.show()",
+        "expected": "[figure 1: Plot: \"Patches\"; filled region \"box\", filled region; x from -1 to 4, y from -1 to 2]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.fill",
+    "kind": "method",
+    "signature": "(self, *args, data=None, **kwargs)",
+    "summary": "Filled polygons: fill(x, y), fill(x, y, 'color'), several x, y groups; returns the list of Polygons.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.fill([0, 1, 0.5], [0, 0, 1], 'g', alpha=0.5, label='triangle')\nax.set_title('A filled triangle')\nplt.show()",
+        "expected": "[figure 1: Plot: \"A filled triangle\"; filled region \"triangle\"; x from -0.05 to 1.05, y from -0.05 to 1.05]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.fill",
+    "kind": "function",
+    "signature": "(*args, data=None, **kwargs)",
+    "summary": "Filled polygons on the current Axes: fill(x, y), fill(x, y, 'color'); returns the list of Polygons.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nimport numpy as np\nt = np.linspace(0, 2 * np.pi, 7)\nplt.fill(np.cos(t), np.sin(t), 'tab:purple')\nplt.title('A hexagon')\nplt.show()",
+        "expected": "[figure 1: Plot: \"A hexagon\"; filled region; x from -1.1 to 1.1, y from -0.9526 to 0.9526]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]
