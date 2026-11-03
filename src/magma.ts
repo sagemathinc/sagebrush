@@ -153,7 +153,7 @@ export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPo
   "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py0: string) => {
-  // (a for loop's private name, iʹloop<n>: its variable's)
+  // (a for loop's private name, i + U+02B9 + loop<n>: its variable's)
   const py = py0.replace(/\u02b9loop\d+$/, "");
   return py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py;
 };
@@ -913,7 +913,7 @@ class Parser {
   // untouched by `for i in ...`, a new one stays unassigned after the loop,
   // and in the loop's own range i is that unassigned variable ("Variable 'i'
   // has not been initialized", checked against Magma 2.18).  In the loop's
-  // range and body the name is a private Python name, iʹloop<n> (a spelling
+  // range and body the name is a private Python name, i + U+02B9 + loop<n> (a spelling
   // typed Magma can't have), deleted when the loop is left, however it is.
   // Everything there that names i (reads, assignments, parameters, nested
   // functions' captures) goes through nm(), so it stays one variable.

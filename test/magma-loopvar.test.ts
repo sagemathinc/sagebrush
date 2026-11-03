@@ -29,7 +29,7 @@ function runPython(py: string): string {
 test("Magma's loop variables: as one session, Magma's output exactly", () => {
   const out = runPython(magmaToPython(program, "<session>", { recover: "session" }));
   assert.equal(out, want);
-  assert.ok(!out.includes("ʹ"), "a private name shown");
+  assert.ok(!out.includes("\u02b9"), "a private name shown");
 });
 
 test("Magma's loop variables: as notebook cells (a statement each), the same values", () => {

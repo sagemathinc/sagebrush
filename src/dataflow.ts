@@ -509,9 +509,9 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     defs.delete("ans");
     for (const n of ["ans", "globals", "locals", "BaseException"]) refs.delete(n);
   }
-  // (a Magma for loop's variable is the loop's own, a private iʹloop<n> in
+  // (a Magma for loop's variable is the loop's own, a private i + U+02B9 + loop<n> in
   // the translation, src/magma.ts forStmt: no cell's name)
-  const loopOwn = (n: string) => opts.mode === "magma" && /ʹloop\d+$/.test(n);
+  const loopOwn = (n: string) => opts.mode === "magma" && /\u02b9loop\d+$/.test(n);
   for (const n of [...defs]) if (loopOwn(n)) defs.delete(n);
   for (const n of [...refs]) if (loopOwn(n)) refs.delete(n);
   return {

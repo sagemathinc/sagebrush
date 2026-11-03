@@ -139,10 +139,16 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+# (U+02B9, the separator of a for loop's private name, made here: a character
+# beyond Latin-1 anywhere in this file's source would make the whole loaded
+# module's text two bytes a character, megabytes of Magma mode's load heap)
+_LOOPSEP = chr(0x2B9)
+
+
 def _mname(name):
     """A Python name as the Magma name it stands for: a for loop's private
-    name, iʹloop<n>, is its variable i (src/magma.ts forStmt)."""
-    return _re.sub("\u02b9loop[0-9]+$", "", name)
+    name, i + U+02B9 + loop<n>, is its variable i (src/magma.ts forStmt)."""
+    return _re.sub(_LOOPSEP + "loop[0-9]+$", "", name)
 
 
 def _uninit(name, pos=None):
@@ -157,7 +163,7 @@ def _report(e, line, col):
     session goes on."""
     if isinstance(e, SystemExit):
         raise e
-    m = _re.match("name '([A-Za-z_][A-Za-z0-9_\u02b9]*)' is not defined", str(e)) if isinstance(e, NameError) else None
+    m = _re.match("name '([A-Za-z_][A-Za-z0-9_" + _LOOPSEP + "]*)' is not defined", str(e)) if isinstance(e, NameError) else None
     if m:
         # Magma rejects a statement that uses an undeclared identifier
         # (before running it) and goes on, in a file too
@@ -184,7 +190,7 @@ def _report(e, line, col):
     if isinstance(e, _UserError):
         _sys.stdout.write("%s\n" % _wrap("Runtime error: %s" % e, 0, 0))
     else:
-        um = _re.search("local variable '([A-Za-z_][A-Za-z0-9_\u02b9]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
+        um = _re.search("local variable '([A-Za-z_][A-Za-z0-9_" + _LOOPSEP + "]*)'", str(e)) if isinstance(e, UnboundLocalError) else None
         if um:
             # a function's local read before it is assigned: Magma's words
             v = _mname(um.group(1))
