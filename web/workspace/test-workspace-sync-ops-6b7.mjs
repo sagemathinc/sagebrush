@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=100 runner=bun chrome
 // astra's probes on sync-ops 6b7d8e3c (CORR-6B7-1: an old copy's mark is cleaned up on the next start whatever
 // the migration's state, an older tab's bytes recovered; several older-tab writes each kept), with their cases
 // in astra-6b7-cases.js:

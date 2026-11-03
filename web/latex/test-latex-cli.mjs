@@ -1,3 +1,4 @@
+// ci: none (its PNG cases need $CHROME as a path on the runner, not google-chrome: the web-latex follow-up wires it)
 // `sagebrush latex check|render` (src/latex-cli.ts, built as build/cli/sagebrush-latex.cjs) on real files in a temp
 // folder, through the CLI's own bundle: what an agent runs to verify a .tex and see it. Check's problems and their
 // lines, frames, images and exit codes; render's HTML (self-contained, no script); beamer frames as slides (titles,
