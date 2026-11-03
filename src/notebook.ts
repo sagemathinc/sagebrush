@@ -9,7 +9,7 @@
 // (in the URL it prints and opens; then a cookie); it answers only requests
 // for its own host name (no DNS rebinding) and serves files under DIR only.
 import * as http from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, realpathSync, lstatSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, realpathSync, lstatSync, openSync, writeSync, closeSync, unlinkSync } from "fs";
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
 import { requestCtrlC } from "./runtime/interrupt";
@@ -213,9 +213,22 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
           res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(data);
         } else if (method === "PUT") {
           const data = await body(req);
-          mkdirSync(dirname(p), { recursive: true });
-          writeFileSync(p + ".sagebrush-tmp", data);
-          renameSync(p + ".sagebrush-tmp", p); // never a half-written notebook
+          // (checked again now that the body is here: a link in the path changed while it came is seen, astra's
+          // LOCAL-CONTAIN-2; and written in the folder's real path, as checked, not through the path as given)
+          const q = inside(url.searchParams.get("path"));
+          if (!q) { res.writeHead(400).end("bad path"); return; }
+          mkdirSync(dirname(q), { recursive: true });
+          let folder: string;
+          try { folder = realpathSync(dirname(q)); } catch { res.writeHead(400).end("bad path"); return; }
+          if (!under(folder, rdir)) { res.writeHead(400).end("bad path"); return; }
+          // (a temporary file of a fresh random name, made exclusively: never an entry that is there, a link to
+          // elsewhere included, astra's LOCAL-CONTAIN-1; renamed over the notebook: never a half-written one)
+          const tmp = join(folder, `.${basename(q)}.sagebrush-tmp-${randomBytes(8).toString("hex")}`);
+          let fd: number;
+          try { fd = openSync(tmp, "wx", 0o644); } catch (e: any) { res.writeHead(500).end(String(e?.message ?? e)); return; }
+          try { writeSync(fd, data); } catch (e: any) { closeSync(fd); try { unlinkSync(tmp); } catch {} res.writeHead(500).end(String(e?.message ?? e)); return; }
+          closeSync(fd);
+          renameSync(tmp, join(folder, basename(q)));
           res.writeHead(200).end("ok");
         } else res.writeHead(405).end();
         return;
