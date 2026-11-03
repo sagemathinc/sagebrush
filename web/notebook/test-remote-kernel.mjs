@@ -808,7 +808,7 @@ check(sinks.every((s) => s.terminals === 1), `every request had exactly one term
   const { runGateTests } = await import("./test-remote-gate.mjs");
   const ran = await runGateTests(check);
   console.log(`remote-gate: ${ran} controls ran`);
-  check(ran === 33, `remote-gate: every control ran (${ran} of 33)`);
+  check(ran === 34, `remote-gate: every control ran (${ran} of 34)`);
 }
 // ---- waves: one reactive action, one request (the policy, the gateway, the page, admitWave per attempt)
 {

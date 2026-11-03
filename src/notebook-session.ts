@@ -54,7 +54,7 @@
 import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
 import { needsMore, complete, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
-import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { magmaToPython, MagmaSyntaxError, PageOrderError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
@@ -527,13 +527,17 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       } else
       if (m.magma) {
         // Magma: translated to Python (src/magma.ts); Magma prints its own values
+        // (page-order scoping's renames, beside the code: checked by the translator, src/magma.ts PageOrder)
         let py: string | null = null;
         try {
-          py = magmaToPython(m.code, m.repl ? "<stdin>" : "<cell>");
+          py = magmaToPython(m.code, m.repl ? "<stdin>" : "<cell>", m.pageOrder !== undefined && !m.repl ? { pageOrder: m.pageOrder } : {});
         } catch (e) {
-          if (!(e instanceof MagmaSyntaxError)) throw e;
-          const line = m.code.split("\n")[e.line - 1] ?? "";
-          R.stderr.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (line ${e.line})\n`);
+          if (e instanceof PageOrderError) { R.stderr.write(`\nNot run: ${e.message}.\n`); ok = false; }
+          else if (!(e instanceof MagmaSyntaxError)) throw e;
+          else {
+            const line = m.code.split("\n")[e.line - 1] ?? "";
+            R.stderr.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (line ${e.line})\n`);
+          }
         }
         if (py !== null) ok = run(py, main, "exec", "<cell>");
         else ok = false;

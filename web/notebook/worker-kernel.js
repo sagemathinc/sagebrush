@@ -132,6 +132,9 @@ export class WorkerKernel {
    *   anything else supplied (an object, a number...) is passed on as it is, for the worker to refuse:
    *   settings given wrongly are never the defaults (astra CORR-FF93-1)
    */
+  /** a Magma cell's page-order map (opts.pageOrder) goes to the interpreter with its code (src/notebook-reactive.ts pageOrderMaps) */
+  get pageOrderMaps() { return true; }
+
   constructor({ createWorker, onStart, onMessage, limits = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
@@ -336,7 +339,7 @@ export class WorkerKernel {
     this.retryStart();
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
+    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}), ...(opts.pageOrder ? { pageOrder: opts.pageOrder } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
     // (what the run is, and the document version its code is from, are taken
     // now ("execute"); it goes to the worker once the start is done, and into

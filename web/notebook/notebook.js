@@ -1006,11 +1006,15 @@ export function createNotebook(root, opts = {}) {
       const baseHost = {
         // (a cell's code is its text version's text: what a consent captured is what is registered)
         cells: () => (shown() ? (lastCells = cells().filter((c) => c.type === "code").map((c) => ({ id: c.id, code: c.version.text, version: c.version, manual: !!c.metadata?.sagebrush?.manual }))) : lastCells),
-        analyze(code) {
-          const key = mode + "\0" + code;
+        // (Magma: a cell's page-order map goes beside its code to the translation, the analyzer's and the
+        // interpreter's; only an interpreter here that takes it: a remote one doesn't yet, so its cells keep
+        // their multiple-definition errors, src/notebook-reactive.ts pageOrderMaps)
+        pageOrderMaps: k.pageOrderMaps === true && !k.remote,
+        analyze(code, pageOrder) {
+          const key = mode + "\0" + code + (pageOrder ? "\0" + JSON.stringify(pageOrder) : "");
           if (!analyses.has(key)) {
             if (analyses.size > 2000) analyses.clear();
-            analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
+            analyses.set(key, (pageOrder ? opts.analyzer.analyze(code, mode, pageOrder) : opts.analyzer.analyze(code, mode)).then((a) => {
               // (the analyzer failed, not the code: not kept, so that the next run asks again)
               if (a.error?.kind === "analyzer") analyses.delete(key);
               return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
@@ -1077,9 +1081,10 @@ export function createNotebook(root, opts = {}) {
       case "analyzer":
         return `This cell could not be analyzed (${e.message}). Run it again.`;
       case "multiple-definition":
-        return e.reading
+        return (e.reading
           ? `${e.name} is defined by ${labels(e.cells)}, so this cell cannot tell which one it reads. Rename it in all but one of them.`
-          : `${e.name} is also defined by ${labels(e.cells)}. A name read by other cells can be defined by only one cell: rename it in one of them, or start it with _ to keep it private to its cell.`;
+          : `${e.name} is also defined by ${labels(e.cells)}. A name read by other cells can be defined by only one cell: rename it in one of them, or start it with _ to keep it private to its cell.`) +
+          (e.note === "remote" ? " (Redefinition across cells isn't supported for remote runs yet.)" : "");
       case "cycle":
         return `${labels(e.cells)} depend on each other in a cycle, so none of them can run first. Move a definition to break it.`;
       case "import-star":

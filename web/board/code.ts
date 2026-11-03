@@ -151,7 +151,7 @@ export class BoardCode {
       });
     };
     const analyzer = {
-      analyze: (code: string, mode: string) => ask({ code, mode }),
+      analyze: (code: string, mode: string, pageOrder?: object) => ask({ code, mode, ...(pageOrder ? { pageOrder } : {}) }),
       rename: (request: any) => ask({ rename: request }).then((r) => r.sources),
     };
     // (out of sight, but in the document: the notebook keeps only the output of a cell that is)

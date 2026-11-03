@@ -1183,7 +1183,8 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
-  if (opts.mode === "magma" || opts.mode === "matlab") return null;
+  if (opts.mode === "magma") return magmaRename(source, name, to, opts);
+  if (opts.mode === "matlab") return null;
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
   try {
@@ -1401,6 +1402,8 @@ function wordSpans(line: string, name: string): [number, number][] {
  * name_3, ...), and the cells below it read that one, until the next.
  * `cells`: the code cells in page order, with whether each defines and reads
  * `name`; `taken`: names in use.  Returns the new sources (by id) or null.
+ * Magma: `pageOrder` gets each renamed cell's renames (by id), which the
+ * translator needs beside its code (src/magma.ts PageOrder).
  */
 export function renameRedefinitions(
   cells: { id: string; code: string; defines: boolean; reads: boolean }[],
@@ -1408,6 +1411,7 @@ export function renameRedefinitions(
   taken: Set<string>,
   mode: Mode = "python",
   sep = "_",
+  pageOrder?: Map<string, { to: string; before?: string }>,
 ): Map<string, string> | null {
   // (a quoted annotation naming it, in any cell, resolves to the global as
   // written: refused, REACT-9848-1)
@@ -1433,6 +1437,8 @@ export function renameRedefinitions(
       // (Sage: var('x') also sets the global x, the first definition's: SR.var does not)
       if (mode === "sage") code = srVar(code, name);
       out.set(c.id, code);
+      // (Magma: the renames beside the code, the translator's; src/magma.ts PageOrder)
+      if (mode === "magma") pageOrder?.set(c.id, { to, before: current });
       current = to;
     } else if (c.defines) {
       seen = true;
@@ -1440,6 +1446,7 @@ export function renameRedefinitions(
       const code = renameInCell(c.code, name, current, { mode });
       if (code === null) return null;
       out.set(c.id, code);
+      if (mode === "magma") pageOrder?.set(c.id, { to: current });
     }
   }
   return out;
@@ -1582,3 +1589,20 @@ def _sb_lowering():
 _b.__sb_push__, _b.__sb_pop__ = _sb_lowering()
 del _b, _sb_lowering
 `;
+
+// Magma (U13a): the cell as written, with an inert comment at the end (so the
+// code that runs differs when the renames do, and its line numbers don't
+// move); the renames themselves go beside the code, never in it
+// (renameRedefinitions' `pageOrder`, src/magma.ts PageOrder): the translator
+// never reads the comment.  Only the renamer's own names (NAME + U+02B9 +
+// digits); refused: code that names variables at run time (eval) or defines
+// intrinsics.
+const MAGMA_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const magmaScoped = (n: string, name: string) => n.startsWith(name + "\u02b9") && /^[1-9][0-9]{0,5}$/.test(n.slice(name.length + 1));
+function magmaRename(source: string, name: string, to: string, opts: { from?: "all" | "definition"; before?: string }): string | null {
+  if (/\b(eval|declare|intrinsic)\b/.test(source)) return null;
+  const before = opts.before ?? name;
+  if (!MAGMA_NAME.test(name) || !magmaScoped(to, name) || (opts.from === "definition" && before !== name && !magmaScoped(before, name))) return null;
+  const mode = opts.from === "definition" ? `definition ${before}` : "all";
+  return `${source.replace(/\s*$/, "")}\n// sagebrush page-order: ${name} ${to} ${mode}`;
+}
