@@ -49,10 +49,12 @@ export async function openExport(w: Workspace, host: ExportHost, box: HTMLElemen
   if (owner) { host.say("An export is already running in this tab. Finish or cancel it first."); return; }
   const me = {};
   owner = me;
-  const free = () => { if (owner === me) owner = null; };
-  // (the member names are this export's while it owns the page's export state, and set back when it no longer does)
+  // (the member names are this export's while it owns the page's export state: set back in the release itself, and
+  // only by the owner releasing, so an export ending after a newer one began (its stopped panel's Export again) never
+  // resets the newer one's names: astra's U3-NAMING-1)
+  const free = () => { if (owner === me) { owner = null; setNaming(); } };
   setNaming(opts.root);
-  try { await flow(w, host, box, free, opts); } finally { setNaming(); free(); }
+  try { await flow(w, host, box, free, opts); } finally { free(); }
 }
 
 async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () => void, opts: { root?: string } = {}): Promise<void> {

@@ -1444,6 +1444,33 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const note = f.stopped ? "" : member(join(out, "u3.zip"), "not-included.txt").toString("utf8");
     check(/^1 file isn't on this device/.test(note) && note.includes("/U3/cloud.csv") && !note.includes("/far.csv"), "U3: not-included.txt lists the one under the folder: " + JSON.stringify(note.slice(0, 200)));
     check((await lastAt()) === before, "U3: a folder's download is not a backup: \"Last export prepared\" unchanged");
+    // (astra's U3-NAMING-1: a folder export that stops, then Export again on its panel while the stopped one's call is
+    // still settling: the new archive's names are still the folder's, never files/...)
+    {
+      await hooks("cutRows: true");
+      await start();
+      // (cutRows stops it at writing: Ready first, then Save…, then the stopped panel)
+      if (await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 120000)) await panelButton(/^Save…$/);
+      const stoppedShown = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Export again")`, 120000);
+      const stopText = (await panelText()).slice(-300);
+      await hooks();
+      await ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "Export again")?.click(); return 1; })()`);
+      const ready = await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((b) => b.textContent === "Save…")`, 120000);
+      if (ready) await panelButton(/^Save…$/);
+      const got = ready && (await until(`!!window.__exp`, 120000));
+      let names = [], zname = null;
+      if (got) {
+        const b64 = await ev(`(async () => { const b = new Uint8Array(await window.__exp.blob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); })()`);
+        writeFileSync(join(out, "u3-again.zip"), Buffer.from(b64, "base64"));
+        zname = await ev(`window.__exp.name`);
+        await handed();
+        names = [...(inspect(join(out, "u3-again.zip"), {}, "/U3").names ?? [])].sort();
+      }
+      await closeFlow();
+      await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      check(stoppedShown && got && zname === "U3.zip" && names.length > 0 && names.every((n) => n.startsWith("U3/") || n === "manifest.json" || n === "not-included.txt"),
+        "U3 (astra's U3-NAMING-1): a folder export stopped, then Export again from its panel: the new archive is still named from the folder: " + JSON.stringify({ stoppedShown, stopText, zname, names }));
+    }
     // (afterwards an export of everything names its members files/... again)
     await hooks();
     const g = await exportOnce(join(out, "u3-all.zip"));
