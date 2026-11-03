@@ -290,6 +290,22 @@ try {
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
   }
+  // BH-1 (William, Nov 3: no history grows without bounds): chats saved before their bounds load within them, said at
+  // the top of the chat; a save the browser refuses (its storage full) is said, never lost silently
+  {
+    const many = { threads: [{ id: "big", title: "Big", artifacts: [], applied_seq: 0, entries: Array.from({ length: 1200 }, (_, i) => ({ kind: "user", id: "e" + i, text: "line " + i, mode: "note", time: i })) }], current: "big" };
+    await fresh(1280, { query: "" });
+    await ev(`(() => { localStorage.setItem("sagebrush-agents-preview-v1", ${JSON.stringify(JSON.stringify(many))}); return 1; })()`);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=20` });
+    await until(`!!window.__sbChats`);
+    const note = await ev(`window.__sbChats.note()`);
+    ok("BH1-load", /200 older entries of this chat aren't kept \(a chat keeps its last 1,000\)/.test(note) && (await ev(`document.querySelectorAll("#log .user, #log [data-entry]").length >= 0`)), "a chat saved with 1,200 entries loads with its last 1,000, saying so", { note });
+    await ev(`(() => { const set = Storage.prototype.setItem; window.__sbSet = set; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-agents-preview-v1") throw new DOMException("full", "QuotaExceededError"); return set.call(this, k, v); }; window.__sbChats.saveNow(); return 1; })()`);
+    const said = await ev(`window.__sbChats.note()`);
+    ok("BH1-refused", /couldn't be saved in this browser \(QuotaExceededError\)/.test(said), "a save the browser refuses is said on the page", { said });
+    await ev(`(() => { Storage.prototype.setItem = window.__sbSet; window.__sbChats.saveNow(); return 1; })()`);
+    ok("BH1-cleared", !/couldn't be saved/.test(await ev(`window.__sbChats.note()`)), "…and no longer said once a save goes through");
+  }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;
 } finally {

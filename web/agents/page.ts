@@ -12,7 +12,7 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
+import { apply, boundEntries, boundSaved, CHAT_BOUNDS, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -55,11 +55,40 @@ function id() {
 }
 
 const state = load();
+// (chats saved before their bounds (BH-1) are bounded as they load: the current one kept)
+boundSaved(state, new Set([state.current]));
 let saveTimer = 0;
+// The chats saved, within their bounds (events.ts CHAT_BOUNDS: the current chat and running turns are kept; the oldest
+// entries go first).  A save the browser refuses (its storage full) is said on the page, never lost silently: then the
+// chats are bounded to half the bytes and saved once more.
+function saveNow() {
+  saveTimer = 0;
+  const keep = new Set([state.current, ...agents.keys(), ...liveRunning]);
+  boundSaved(state, keep);
+  try {
+    localStorage.setItem(STORE, JSON.stringify(state));
+    saveRefused(null);
+  } catch (e) {
+    boundSaved(state, keep, { ...CHAT_BOUNDS, bytes: CHAT_BOUNDS.bytes / 2 });
+    try {
+      localStorage.setItem(STORE, JSON.stringify(state));
+      saveRefused("This browser's storage was nearly full: older messages of your chats weren't kept.");
+    } catch (e2) {
+      saveRefused(`Your chats couldn't be saved in this browser (${(e2 as Error)?.name ?? "refused"}): what's shown stays only until this page closes.`);
+    }
+  }
+  renderCapNote();
+}
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(state)), 300);
+  saveTimer = window.setTimeout(saveNow, 300);
 }
+let refusedSay: string | null = null;
+function saveRefused(say: string | null) {
+  refusedSay = say;
+}
+// (tests: the chats' save, now, and what the page says of their bounds)
+(window as any).__sbChats = { saveNow, note: () => (document.getElementById("capnote")?.hidden ? "" : document.getElementById("capnote")?.textContent ?? "") };
 
 const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
 const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
@@ -113,6 +142,7 @@ function submit(mode: UserEntry["mode"]) {
   if (mode === "queued" && !busy) mode = "sent";
   const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
   thread.entries.push(entry);
+  boundEntries(thread);
   if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
   editor.value = "";
   if (mode === "queued") {
@@ -253,6 +283,20 @@ function renderSidebar() {
   }
 }
 
+// What isn't kept (BH-1): the chat's oldest entries let go by its bounds, and a save the browser refused, said at the
+// top of the chat, never silently
+function renderCapNote() {
+  const note = $("#capnote");
+  if (!note) return;
+  const d = current().dropped;
+  const parts: string[] = [];
+  if (d?.entries) parts.push(`${d.entries.toLocaleString("en-US")} older ${d.entries === 1 ? "entry" : "entries"} of this chat ${d.entries === 1 ? "isn't" : "aren't"} kept (a chat keeps its last ${CHAT_BOUNDS.entries.toLocaleString("en-US")}).`);
+  if (d?.artifacts) parts.push(`${d.artifacts} older artifact${d.artifacts === 1 ? "" : "s"} ${d.artifacts === 1 ? "isn't" : "aren't"} kept.`);
+  if (refusedSay) parts.push(refusedSay);
+  note.textContent = parts.join(" ");
+  note.hidden = parts.length === 0;
+}
+
 // What's in the DOM, by entry, so a streaming turn re-renders alone.
 const rendered = new Map<string, { node: HTMLElement; key: string }>();
 let renderedThread = "";
@@ -266,13 +310,14 @@ function renderThread() {
     renderedThread = thread.id;
   }
   $("#empty").hidden = thread.entries.length > 0;
+  renderCapNote();
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error]);
+    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, entry.cut]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -334,6 +379,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
       if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
     }
   }
+  if (turn.cut?.parts) parts.push(`<div class="status">${turn.cut.parts.toLocaleString("en-US")} more step${turn.cut.parts === 1 ? "" : "s"} of this turn ${turn.cut.parts === 1 ? "isn't" : "aren't"} kept (a turn keeps ${CHAT_BOUNDS.parts.toLocaleString("en-US")})</div>`);
   if (turn.error) parts.push(`<div class="turn-error">Error: ${esc(turn.error.message)}</div>`);
   const status =
     turn.outcome === "interrupted"
@@ -1252,7 +1298,7 @@ $("#ws-retry").onclick = async () => {
 };
 addEventListener("pagehide", () => {
   // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
-  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
+  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
