@@ -4,6 +4,16 @@
 
 Links here are relative to the site serving this file (sagebrush.space, or dev.sagebrush.space for the development site).
 
+## How code runs (read this first)
+
+Sagebrush notebooks are **reactive, but they are not marimo**: in Python and Sage, **a name may be defined again in a later cell**, as in a Jupyter notebook read from the top.
+
+- **Order is the page order.** A cell reads the nearest **earlier** definition of a name when there is one; if all its definitions are below it, it reads the first one. A later redefinition is a new value from that cell down.
+- **Editing a cell reruns what depends on it**: the cells that read the edited definition, and their own dependents, within the notebook's time budget (slow or manual cells are marked stale instead). A later definition of a name stops dependencies through that name.
+- Example (Sage mode, where `^` is a power; in Python mode write `**`), four cells: `x = 1`; `print(x^2)` prints 1; `x = 17`; `print(x^3)` prints 4913. Change the first cell to `x = 2`: the edited cell and `print(x^2)` run (it prints 4); `print(x^3)` does not rerun: it still reads `x = 17` and shows 4913.
+- A **board** runs its code items the same way, in its reading order (top to bottom, then left to right; a group's items together).
+- **For agents:** don't rename an ordinary Python or Sage variable (`x2`, `x_new`) just because it is redefined, and don't refuse such a redefinition. But if the notebook does report an error, heed it: a few redefinitions can't be scoped this way (some decorator, class or quoted-annotation cases, and Magma and MATLAB code), and those are real multiple-definition errors.
+
 ## Using the page
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
