@@ -18,15 +18,18 @@ on:
   schedule:
     - cron: "17 8 * * *"
 
-# A newer run cancels an older one in its group: a pull request's new revision
-# its obsolete run, and a master push the master runs still queued or running
-# (each master push runs the full tier, so the newest one tests every merge
-# before it).  The schedule and a dispatch are groups of their own, so a merge
-# never cancels them; a dispatch's group is its commit's, so a dispatch on
-# another commit (a release's, say) never cancels it either.
+# A pull request's new revision cancels its obsolete run.  On master a run in
+# progress is never cancelled: it finishes, and of the pushes queued behind it
+# only the newest runs next (GitHub replaces an older pending run in the group).
+# So while merges come faster than a full run takes, every cycle still ends in
+# a master commit with a completed run, which the deploy script requires
+# (cancelling in progress left no master commit with one: Nov 2, cloud #91's
+# core c26ead62), at about the same cost.  The schedule and a dispatch are
+# groups of their own, so a merge never displaces them; a dispatch's group is
+# its commit's, so a dispatch on another commit (a release's, say) doesn't either.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.sha) || '' }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   changes:
