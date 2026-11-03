@@ -123,3 +123,23 @@ test("Sage var(): names of any script define; a private one with keywords is the
     assert.equal(st.value.keywords.length, 1);
   }
 });
+
+test("import * is refused in Sagebrush's words: why, and the way forward (no 'marimo')", () => {
+  const msg = (code: string) => {
+    try {
+      analyzeCell(code, "c1");
+    } catch (e: any) {
+      assert.ok(e instanceof ImportStarError, String(e));
+      return String(e.message);
+    }
+    assert.fail("no ImportStarError for " + code);
+  };
+  const m = msg("from pylab import *");
+  assert.match(m, /^`from pylab import \*` can't be used here: Sagebrush reruns the cells that use a cell's names when it changes, so it must know which names each cell defines/);
+  assert.match(m, /`import pylab as plt`/);
+  assert.match(m, /`from pylab import plot, show`/);
+  assert.doesNotMatch(m, /marimo/i);
+  // (a module with no example of its own: generic names; a relative import keeps its dots)
+  assert.match(msg("from os.path import *"), /`import os\.path`\) or the names you use \(`from os\.path import a, b`\)/);
+  assert.match(msg("x = 1\nfrom ..pkg import *"), /`from \.\.pkg import \*`/);
+});
