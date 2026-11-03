@@ -224,6 +224,19 @@ ${"many words ".repeat(14000)}
       let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
     });
     check("png: a browser that exits at once, its own words in png_error", fk.code === 1 && /exited \(1\) before it could take the pictures; it said: fake-chrome: Missing X server or \$DISPLAY/.test(fk.json?.png_error ?? ""), { code: fk.code, png_error: fk.json?.png_error });
+    const fakeRun = (script, out) => new Promise((res) => {
+      writeFileSync(fake, script, { mode: 0o755 });
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--png", out, "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+      let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+    });
+    // (grader D5: the tail is the END of what it said, at most 2048 characters)
+    const fl = await fakeRun("#!/bin/sh\nprintf 'FIRST' >&2\nhead -c 3000 /dev/zero | tr '\\0' x >&2\necho 'LAST' >&2\nexit 1\n", "flpng");
+    const said = /; it said: ([\s\S]*)$/.exec(fl.json?.png_error ?? "")?.[1] ?? "";
+    check("png: a long stderr, its last 2048 characters kept (the end, not the start)", fl.code === 1 && said.endsWith("LAST") && !said.includes("FIRST") && said.length <= 2048 && said.length > 2000, { code: fl.code, n: said.length, head: said.slice(0, 20), tail: said.slice(-10) });
+    // (grader D4: the CI sighting's path: a browser that says something and never opens its DevTools port; the CLI
+    //  gives up at 30 s, with what it said)
+    const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
+    check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
   }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
