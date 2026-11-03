@@ -109,8 +109,6 @@ export interface CellsRun {
 export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mode; seedOf: (key: string) => string; timeoutMs: number; onMessage: (key: string, m: any) => void; only?: string[]; descendantsWithinMs?: number; lastMs?: Map<string, number>; label?: (key: string) => string; noun?: string }): Promise<CellsRun> {
   const timedOut = new Set<string>(), syntax = new Map<string, string>(), states = new Map<string, CellState>();
   const analyses = new Map<string, Analysis>();
-  // (the cells actually sent to the interpreter in this run: a cancelled one never was)
-  const executed = new Set<string>();
   const mangle = (id: string) => id.replace(/[^A-Za-z0-9]/g, "");
   const reactive = new Reactive({
     cells: () => cells.map((c) => ({ id: c.key, code: c.code })),
@@ -123,7 +121,6 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
       return analyses.get(code)!;
     },
     async execute(id, code, forget, scoped) {
-      executed.add(id);
       const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
       if (r.timedOut) timedOut.add(id);
       return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
@@ -140,28 +137,38 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
   const note = (r: RunReport) => { for (const id of r.failed) failed.add(id); for (const id of r.cancelled) cancelled.add(id); };
   if (cells.length) {
     await reactive.load({ stale: true });
-    const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity;
     // (each cell's predicted time, as the budget counts it: its last measured time before this run)
     const predicted = new Map(reactive.times);
-    note(o.only ? await reactive.run(o.only, { budget }) : await reactive.runAll());
+    note(o.only ? await reactive.run(o.only, { budget: 0 }) : await reactive.runAll());
     // (a cell out of time stops the scheduler's run, as Stop does in a notebook; the interpreter is still there: the
-    //  others run, but not what reads a cell out of time. With `only`, what was asked; with descendantsWithinMs, also
-    //  its descendants that weren't reached, each within the budget by its last time, in page order: one that timed
-    //  out stays stale, the independent ones after it still run (daybreak3's DB3-RS-3))
+    //  cells asked for that weren't reached are run, but not what reads a cell out of time)
     const asked = new Set(o.only ?? cells.map((c) => c.key));
-    const optional = o.only && budget > 0 ? reactive.graph.closure(o.only, { inclusive: false }) : new Set<string>();
-    // (the budget is one for the whole Run: what the descendants actually run took, by their predicted times, the one
-    //  out of time too and a cancelled one not, is spent, and each retry has only what is left: daybreak3's DB3-RS-3)
-    let spent = 0;
-    for (const id of optional) if (executed.has(id)) spent += predicted.get(id) ?? 0;
     for (let round = 0; round < cells.length && timedOut.size && !interp.dead(); round++) {
       const blocked = reactive.graph.closure([...timedOut]);
-      const left = cells.map((c) => c.key).filter((id) => (asked.has(id) || optional.has(id)) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id))
-        .filter((id) => { if (asked.has(id)) return true; const t = predicted.get(id) ?? 0; if (spent + t > budget) return false; spent += t; return true; });
+      const left = cells.map((c) => c.key).filter((id) => asked.has(id) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id));
       if (!left.length) break;
       const before = reactive.outcome.size;
-      note(await reactive.run(left, { budget: Math.max(0, budget - spent) }));
+      note(await reactive.run(left, o.only ? { budget: 0 } : { budget: Infinity }));
       if (reactive.outcome.size === before) break;
+    }
+    // (the editor's Run: then the descendants, one at a time, in the graph's order (ties in page order), by one rule
+    //  (@sagebrush, after daybreak3's DB3-RS-3): remaining = the budget minus the predicted times of the cells sent in
+    //  this Run; a descendant is sent iff every cell it reads ran ok in this Run and its predicted time is at most what
+    //  remains. No reservations: a cell not sent spends nothing; one that fails or runs out of time leaves its readers
+    //  unsent (their parent didn't run ok). Each is run alone (budget 0: nothing of its own descendants with it).
+    if (o.only && (o.descendantsWithinMs ?? 0) > 0) {
+      let remaining = o.descendantsWithinMs!;
+      const ranOk = new Set([...reactive.outcome].filter(([, v]) => v === "ok").map(([k]) => k));
+      const desc = reactive.graph.closure(o.only, { inclusive: false });
+      for (const id of reactive.graph.order(desc)) {
+        if (interp.dead()) break;
+        if (reactive.errors.has(id) || ![...reactive.graph.parents(id)].every((p) => ranOk.has(p))) continue;
+        const t = predicted.get(id) ?? 0;
+        if (t > remaining) continue;
+        remaining -= t;
+        note(await reactive.run([id], { budget: 0 }));
+        if (reactive.outcome.get(id) === "ok" && !timedOut.has(id)) ranOk.add(id);
+      }
     }
     // (a syntax error: the interpreter says it, where, in the document's language; such code defines nothing)
     for (const { key: id, code } of cells) {
