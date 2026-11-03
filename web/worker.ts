@@ -5,6 +5,7 @@
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
+//           {fsWritable: boolean}  whether this document may change files (the page's `files` permission)
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -13,6 +14,7 @@
 //                                       accepted once; never from a document, a URL
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//           {fsRefused: path, what}  a change refused, the files permission off (ready's `writable`: its shared word)
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
 //           {initFailed: message}      the limits are invalid: this worker is done
@@ -48,7 +50,7 @@ declare const __SB_RASTER_HASH__: string;
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
-import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
+import { __hooks, load as loadFiles, mount, put as putFile, setWritable } from "./shims/fs";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
@@ -106,6 +108,16 @@ __hooks.changed = (path, data) => {
   if (mine(path)) writes.add(path);
   postMessage({ fsChanged: path, data });
 };
+// (a change refused, its files permission off: the page shows "This notebook wants to change files")
+__hooks.refused = (path, what) => postMessage({ fsRefused: path, what });
+// Whether this document may change files (the page's `files` permission): one word shared with whoever holds this
+// worker (the page, or the runner's frame), as the interrupt flag is, so a change of it reaches a run in flight at
+// its next write; else (no SharedArrayBuffer: files mode) the {fsWritable} message, between runs. The page sends it
+// before anything runs; writable until then (a board's interpreter, which the page keeps no files of)
+const writableWord = typeof SharedArrayBuffer === "function" && (globalThis as any).crossOriginIsolated ? new Int32Array(new SharedArrayBuffer(4)) : null;
+if (writableWord) Atomics.store(writableWord, 0, 1);
+let writableNow = true;
+setWritable(() => (writableWord ? Atomics.load(writableWord, 0) === 1 : writableNow));
 __hooks.read = (path, origin) => {
   if (mine(path)) reads.add(path);
   // (the versions of the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
@@ -221,6 +233,11 @@ self.onmessage = async (ev: MessageEvent) => {
     pkgsetReady = useSet(String(m.pkgset), fetchBytes).catch((e) => postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) }));
     return;
   }
+  if (typeof m.fsWritable === "boolean") {
+    writableNow = m.fsWritable;
+    if (writableWord) Atomics.store(writableWord, 0, m.fsWritable ? 1 : 0);
+    return;
+  }
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data, typeof m.tok === "string" ? m.tok : undefined);
   if (m.mount) return mount(m.mount);
@@ -259,7 +276,7 @@ session.ready.then(
     if (gate === "failed") return;
     gate = "ready";
     // (context: what this worker itself sees, for the app's self-test report)
-    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, writable: writableWord?.buffer ?? null, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
   },
   (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );

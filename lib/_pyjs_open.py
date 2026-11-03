@@ -256,6 +256,8 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
         data = b""
         if "w" in mode or "x" in mode:
             _fs.write(file, b"", False)
+        elif "a" in mode:
+            _fs.may_append(file)
     append = "a" in mode
     if binary:
         return BinaryFile(file, mode, data, append)

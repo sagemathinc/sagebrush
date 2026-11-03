@@ -53,7 +53,7 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
         Atomics.store(ctrl, 0, 1);
         Atomics.notify(ctrl, 0);
       };
-      let flag = null;
+      let flag = null, writable = null;
       // input() (design/runner.md, How 7): open requests by key, {id: the run,
       // buffer}; an answer writes only to the one its key and run name.  A
       // request is over at its answer, its run's next question or end, a Stop.
@@ -97,6 +97,8 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
+        // (may it change files: the page's {fsWritable})
+        if (d && d.ready && d.writable) { writable = new Int32Array(d.writable); d = { ...d, writable: null }; }
         // (the shared progress slots stay here too: a SharedArrayBuffer can't
         // cross to the page, and this frame doesn't relay them)
         if (d && d.ready && d.progress) d = { ...d, progress: null };
@@ -115,6 +117,7 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           }
           return;
         }
+        if (d && typeof d.fsWritable === "boolean" && writable) Atomics.store(writable, 0, d.fsWritable ? 1 : 0);
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
           if (e && e.id === d.runnerInput) {
