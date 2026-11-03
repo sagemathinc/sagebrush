@@ -2706,6 +2706,75 @@ class EllipticCurve_rational_field:
         """
         return _ap.moments(self._a, int(n), int(kmax))
 
+    def base_extend(self, R):
+        """The curve with the a-invariants mapped into R: QQ (or ZZ, which
+        gives QQ, as in Sage) or a prime field GF(p) / Zmod(p); a reduction
+        that is singular is an ArithmeticError, as in Sage.
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve('37a'); E.base_extend(GF(7))
+            Elliptic Curve defined by y^2 + y = x^3 + 6*x over Finite Field of size 7
+            sage: E.change_ring(GF(7)).order(), E.base_extend(QQ) == E
+            (9, True)
+            sage: E.base_extend(GF(37))
+            Traceback (most recent call last):
+            ...
+            ArithmeticError: y^2 + y = x^3 + 36*x defines a singular curve
+            sage: E.base_extend(RR)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet
+        """
+        from _sage_poly import QQ, ZZ
+        if R is QQ or R is ZZ:
+            return EllipticCurve_rational_field(list(self._a))
+        import _sage_ec_ff
+        if not _sage_ec_ff._is_modp_ring(R):
+            raise NotImplementedError("elliptic curves over %s are not available in Sagebrush yet" % (R,))
+        p = R._n
+        E = _sage_ec_ff.elliptic_curve(R, [int(a) % p for a in self._a])
+        if self.discriminant() % p == 0:
+            # (Sage's message: the reduced equation)
+            raise ArithmeticError("%s defines a singular curve" % (repr(E).split(" defined by ", 1)[1].rsplit(" over ", 1)[0],))
+        return E
+
+    def change_ring(self, R):
+        """The same as base_extend(R).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('389a1').change_ring(GF(101)).a_invariants()
+            (0, 1, 1, 99, 0)
+        """
+        return self.base_extend(R)
+
+    def plot(self, xmin=None, xmax=None, components='both', **args):
+        """The real points, as Sage draws them: the bounded component (if
+        any) as one closed line, the unbounded one from its vertex; the x
+        range by Sage's rules (both components, the flex points, the
+        horizontal tangents).  plot_points, adaptive_tolerance and
+        adaptive_recursion are the sampling's; other options go to line().
+        Sagebrush's samples are deterministic (Sage's randomize=True
+        perturbs its own).
+
+        EXAMPLES::
+
+            sage: E = EllipticCurve([0, -1]); plot(E, rgbcolor=hue(0.7))
+            Graphics object consisting of 1 graphics primitive
+            sage: E = EllipticCurve('37a'); plot(E)
+            Graphics object consisting of 2 graphics primitives
+            sage: E.plot(components='bounded'), E.plot(components='unbounded')
+            (Graphics object consisting of 1 graphics primitive, Graphics object consisting of 1 graphics primitive)
+            sage: EllipticCurve('11a1').plot(components='bounded')
+            Traceback (most recent call last):
+            ...
+            ValueError: no bounded component for this curve
+        """
+        # (in a module of its own, loaded on first use: the load heap)
+        import _sage_ec_plot
+        return _sage_ec_plot.plot(self, xmin, xmax, components, **args)
+
     def __eq__(self, other):
         return isinstance(other, EllipticCurve_rational_field) and other._a == self._a
 

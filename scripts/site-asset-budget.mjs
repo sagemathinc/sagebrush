@@ -170,8 +170,8 @@ check("DEV bootstrap (line 3): the DEV-only bytes on the measuring pages, exact 
   line3 !== null && line3.reasons.length === 0, line3 ? (line3.metrics ? { reasons: line3.reasons, ...line3.metrics } : { reasons: line3.reasons }) : { notMeasured: "no measuring pages given" });
 // 4. the LaTeX group
 // (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
-const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js", TOOLS = "dist/sagebrush-latex-tools.js";
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT && n !== TOOLS);
+const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js", TOOLS = "dist/sagebrush-latex-tools.js", PRESENT = "dist/sagebrush-latex-present.js";
+const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT && n !== TOOLS && n !== PRESENT);
 const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
 const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
 // (224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -190,6 +190,9 @@ if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX a
 // 4e. the agent tools' work (web/latex/tools.ts: latex_check's report, latex_render's pictures): at most 16 KiB
 //     minified, 6 KiB gzip, fetched only on an agent's first call
 if (dev.has(TOOLS)) { const b = readFileSync(dev.get(TOOLS)); check("the LaTeX agent tools' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
+// 4f. the presenter (web/latex/present.ts with overlay.ts): at most 16 KiB minified, 6 KiB gzip, fetched only when
+//     Present is pressed
+if (dev.has(PRESENT)) { const b = readFileSync(dev.get(PRESENT)); check("the LaTeX presenter's chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
 // (16 KiB gzip, was 14: @sagebrush's ruling, Oct 31, for the shared pass in the comments' core, measured 35,707 / 14,289
 //  at master 7ff6d103 -> 39,564 / 15,774 at its head; it holds only with the pass's measured benefit on VM3)
 if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 16 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 16 * 1024, { raw: b.length, gzip: gz(b) }); }

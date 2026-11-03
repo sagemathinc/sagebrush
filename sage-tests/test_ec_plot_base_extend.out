@@ -1,0 +1,39 @@
+S01 Graphics object consisting of 1 graphics primitive
+S02 Graphics object consisting of 2 graphics primitives
+S03 Graphics object consisting of 2 graphics primitives
+S04 Graphics object consisting of 1 graphics primitive
+S05 Graphics object consisting of 1 graphics primitive
+S06 ERR ValueError: no bounded component for this curve
+S07 ERR ValueError: component must be one of 'both', 'bounded' or 'unbounded'
+S08 [(True, 2.797447, 2.797447)]
+S09 [(True, 2.173081, 2.173081), (True, -1.10716, -1.10716)]
+S10 [(True, -1.10716, -1.10716)]
+S11 [(True, 1.884723, 1.884723)]
+S12 [(True, 10.650617, 10.650617)]
+S13 [(True, 2.765023, 2.765023), (True, -2.040302, -2.040302)]
+S14 [(True, 9.693708, 9.693708), (True, -5.0, -5.0)]
+S15 [(True, 3.0, 3.0), (True, -1.10716, -1.10716)]
+S16 [(True, -1.0, -1.0)]
+S17 [(True, 0.0, 0.0)]
+S18 ERR ValueError: xmax must be None if xmin is a tuple
+S19 ERR ValueError: if xmin is a tuple it must have length 2
+S20 ERR ValueError: xmin must be less than xmax
+S21 True
+S22 True
+S23 [(True, 2.173081, 2.173081), (True, -1.10716, -1.10716)]
+S24 [40]
+S25 Graphics object consisting of 2 graphics primitives
+S26 Elliptic Curve defined by y^2 + y = x^3 + 6*x over Finite Field of size 7
+S27 Elliptic Curve defined by y^2 + y = x^3 + 6*x over Finite Field of size 7
+S28 9
+S29 ERR ArithmeticError: y^2 + y = x^3 + 36*x defines a singular curve
+S30 ERR ArithmeticError: y^2 + y = x^3 + 10*x^2 + x + 2 defines a singular curve
+S31 Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+S32 True
+S33 Elliptic Curve defined by y^2 + y = x^3 - x over Rational Field
+S34 Elliptic Curve defined by y^2 + y = x^3 + 6*x over Ring of integers modulo 7
+S35 Elliptic Curve defined by y^2 + y = x^3 + x over Finite Field of size 2
+S36 (0, 1, 1, 99, 0)
+S37 Finite Field of size 7
+S39 Elliptic Curve defined by y^2 + y = x^3 + 2*x over Finite Field of size 3
+S40 3

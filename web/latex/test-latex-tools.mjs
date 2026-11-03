@@ -118,6 +118,56 @@ try {
   const one = await call("latex_render", { frames: [3] });
   check(JSON.parse(one[0].text).shown.length === 1 && JSON.parse(one[0].text).shown[0].n === 3 && one.length === 2, "latex_render: one chosen frame", JSON.parse(one[0].text));
 
+  // ---- Present (present.ts): the slides full screen, step by step through their overlays; and latex_render's steps
+  const OV = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}{Step by step}
+\begin{itemize}[<+->]
+\item First, the question.
+\item Then, an idea.
+\end{itemize}
+\only<3>{Only on three.}
+\end{frame}
+\begin{frame}{Second}
+Plain.
+\end{frame}
+\end{document}
+`;
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const ofid = await mk("/ov.tex", OV);
+  await send("Page.navigate", { url: base + "?tex=" + ofid + "&latex=1" });
+  check(await until(`document.querySelectorAll(".tex-preview section.slide").length === 2 && !document.querySelector(".tex-present-btn").hidden`, 30000), "a beamer document: Present offered");
+  const oc = JSON.parse((await call("latex_check"))[0].text);
+  check(oc.frames.map((f) => f.steps).join(",") === "3,1", "latex_check: each frame's overlay steps", oc.frames);
+  await ev(`document.querySelector(".tex-present-btn").click(), 1`);
+  const P = `document.querySelector(".tex-present")`;
+  check(await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.dataset.step === "1"`, 15000), "Present: the presenter open at frame 1, step 1");
+  const vis = () => ev(`[...${P}.querySelectorAll("li")].map((li) => getComputedStyle(li).visibility).join(",") + "|" + (${P}.querySelector(".tp-stage").textContent.includes("Only on three") && getComputedStyle(${P}.querySelector('[data-ovm="only"]')).display !== "none")`);
+  const v1 = await vis();
+  const key = async (k, code) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: { ArrowRight: 39, ArrowLeft: 37, Escape: 27, End: 35 }[k] }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+  await key("ArrowRight", "ArrowRight");
+  const v2 = await vis();
+  await key("ArrowRight", "ArrowRight");
+  const v3 = await vis();
+  check(v1 === "visible,hidden|false" && v2 === "visible,visible|false" && v3 === "visible,visible|true", "Present: Right steps through the overlays (an item at a time, then \\only<3>)", { v1, v2, v3 });
+  await key("ArrowRight", "ArrowRight");
+  check(await until(`${P}.dataset.frame === "2" && ${P}.dataset.step === "1" && ${P}.textContent.includes("2 / 2")`, 5000), "Present: after the last step, the next frame", await ev(`${P}.textContent.slice(-40)`));
+  await key("ArrowLeft", "ArrowLeft");
+  check(await until(`${P}.dataset.frame === "1" && ${P}.dataset.step === "3"`, 5000), "Present: Left goes back to the last step of the frame before");
+  const box = await ev(`(() => { const r = ${P}.querySelector(".tp-stage > .slide").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), innerWidth, innerHeight]; })()`);
+  check(Math.abs(box[0] / box[1] - 16 / 9) < 0.02 && (Math.abs(box[0] - box[2]) <= 1 || Math.abs(box[1] - box[3]) <= 1), "Present: the slide as large as the window allows, 16:9", box);
+  // (an edit while presenting: shown at once)
+  await typeInto(OV.replace("Then, an idea.", "Then, a better idea."));
+  check(await until(`${P}.querySelector(".tp-stage").textContent.includes("a better idea")`, 15000), "Present: an edit shows at once");
+  await key("Escape", "Escape");
+  check(await until(`!${P}`, 5000), "Present: Escape stops it");
+  const rs = await call("latex_render", { steps: true });
+  const rsum = JSON.parse(rs[0].text);
+  check(rs.length === 1 + 4 && rsum.shown.map((x) => x.n + "." + x.step).join(",") === "1.1,1.2,1.3,2.1" && rsum.shown.every((x) => png(rs[1 + rsum.shown.indexOf(x)].data)?.[0] === 1024), "latex_render steps: each frame at each step", rsum.shown);
+  check(rs[1].data !== rs[2].data && rs[2].data !== rs[3].data, "latex_render steps: the steps' pictures differ");
+  await typeInto(OV);
+
   // ---- the code's saved results (`sagebrush latex run`'s file beside the .tex): drawn in the page, and in its report
   const SAGE = String.raw`\documentclass{beamer}
 \begin{document}

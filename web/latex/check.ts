@@ -6,7 +6,7 @@ export interface Problem { severity: "error" | "warning"; kind: string; name: st
 export interface ImageReport { name: string; found: boolean; path?: string; why?: string }
 export interface CheckResult {
   file: string; ok: boolean; class: "beamer" | "other"; outcome: string;
-  frames: { n: number; title: string; line: number | null }[];
+  frames: { n: number; title: string; line: number | null; steps: number }[];
   problems: Problem[];
   images: ImageReport[];
   code: { n: number; mode: string; line: number | null; state: string }[];
@@ -15,7 +15,7 @@ export interface CheckResult {
 export interface EngineCheck {
   outcome: string; beamer: boolean;
   problems: { kind: string; name: string; at: number }[];
-  frames: { n: number; title: string; at: number }[];
+  frames: { n: number; title: string; at: number; steps?: number }[];
   /** The code items in order: refused (err), and their state if they were run (s: ok, error, blocked; msg). */
   sage: { mode: string; err?: string | null; at?: number; s?: string; msg?: string }[];
 }
@@ -68,7 +68,7 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),
-    frames: r.frames.map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at) })),
+    frames: r.frames.map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at), steps: f.steps ?? 1 })),
     problems, images, code,
   };
 }
