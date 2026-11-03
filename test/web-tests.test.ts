@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -77,6 +83,36 @@ test("web-tests run: in order, with each run's environment and arguments; the fi
   assert.match(r.stdout, /^START web: node web\/test-1\.mjs$/m);
   assert.match(r.stderr, /FAILED web: node web\/test-3\.mjs \(exit 3\)/);
   assert.equal(cli(dir, "run", "nothing").status, 1);
+});
+
+test("web-tests run: by any path to the script (a symlink too), it runs, and it ends with ran N of N", () => {
+  const dir = repo({
+    "web/test-1.mjs": suite("// ci: web order=10"),
+    "web/test-2.mjs": suite("// ci: web order=20"),
+    ".github/workflows/ci.yml": workflow("web"),
+  });
+  // (a guard that compared the raw argv[1] ran nothing through a symlink, and exited 0 with no output)
+  const link = join(
+    mkdtempSync(join(tmpdir(), "web-tests-link-")),
+    "web-tests.mjs",
+  );
+  symlinkSync(script, link);
+  const via = (...args: string[]) =>
+    spawnSync(process.execPath, [link, ...args], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+  const r = via("run", "web");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^web-tests: ran 2 of 2 \(web\)$/m);
+  assert.equal(
+    readFileSync(join(dir, "log.txt"), "utf8"),
+    "test-1.mjs -\ntest-2.mjs -\n",
+  );
+  const none = via("run", "nosuch");
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no suite names target nosuch/);
+  assert.equal(via("check").status, 0);
 });
 
 test("web-tests check: a suite without a header, a target no workflow runs, a workflow target with no suite", () => {
