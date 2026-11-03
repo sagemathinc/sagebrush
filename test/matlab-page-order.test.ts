@@ -10,7 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { matlabToPython } from "../src/matlab";
+import { matlabToPython, matlabFunctionNames } from "../src/matlab";
 import { PageOrderError, type PageOrder } from "../src/page-order";
 import { analyzeCell } from "../src/dataflow";
 import { renameRedefinitions } from "../src/rename";
@@ -149,6 +149,14 @@ test("MATLAB page order: a function defined again in a later cell is not renamed
   for (const def of ["function f", "function f()", "function y = f(x)", "function [a, b] = f(x)", "  function y=f(x) % f"]) {
     assert.equal(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code: `${def}\nend`, defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP), null, def);
   }
+  // (declarations continued over lines, as Octave and MATLAB accept them: MATPO-SEM-1A)
+  for (const def of ["function y = ...\n f(x)\n  y = x;\nend", "function [a, ...\n b] = ...\n f(x)\n  a = x; b = x;\nend"]) {
+    const code = `f = 2;\n${def}`;
+    assert.ok(matlabFunctionNames(code)?.includes("f"), code);
+    assert.equal(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code, defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP), null, def);
+  }
+  // (a function line in a block comment is a comment: the variable is renamed)
+  assert.ok(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code: "%{\nfunction y = f(x)\n%}\nf = 2;", defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP));
   // (a function whose name only starts so, or a variable f in a cell with another function: renamed)
   assert.ok(renameRedefinitions([{ id: "a", code: "f = 1;", defines: true, reads: false }, { id: "b", code: "f = 2;\nfunction y = fg(x)\n  y = x;\nend", defines: true, reads: false }], "f", new Set(["f"]), "matlab", SCOPE_SEP));
   assert.throws(() => matlabToPython(cells[2], "<cell>", { cell: true, pageOrder: { f: { to: `f${S}2`, before: "f" } } }), PageOrderError);

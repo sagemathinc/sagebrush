@@ -1810,6 +1810,18 @@ export function unparse(e: Expr, prec = 0): string {
  * cells, and an error is reported (MATLAB's message on stderr) without ending
  * the session; `_matlab.cell_failed()` then says the cell failed.
  */
+/** The functions a MATLAB cell defines, as the translator parses them (src/rename.ts: page order); null if it doesn't parse. */
+export function matlabFunctionNames(src: string): string[] | null {
+  try {
+    const p = new Parser(lex(src));
+    p.program();
+    return p.functions.map((f) => f.name);
+  } catch (e) {
+    if (e instanceof MatlabSyntaxError) return null;
+    throw e;
+  }
+}
+
 export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean; pageOrder?: PageOrder } = {}): string {
   const po = checkPageOrder(opts.pageOrder);
   if (po.size && !opts.cell) throw new PageOrderError("not a notebook cell");

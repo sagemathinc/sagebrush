@@ -14,6 +14,7 @@
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
 import { MATLAB_DYNAMIC_NAMES } from "./page-order";
+import { matlabFunctionNames } from "./matlab";
 
 type Mode = "python" | "sage" | "magma" | "matlab";
 
@@ -1614,11 +1615,14 @@ function magmaRename(source: string, name: string, to: string, opts: { from?: "a
 // code (src/matlab.ts applies them at the top level).  Refused: code that
 // names variables at run time (clear, eval, exist, who, load, assignin, global,
 // ...: src/page-order.ts MATLAB_DYNAMIC_NAMES), ans, which every expression
-// sets, and a cell defining a function of that name (page order renames
-// variables only: MATPO-SEM-1).
+// sets, and a cell defining a function of that name as the translator parses
+// it (src/matlab.ts matlabFunctionNames; page order renames variables only:
+// MATPO-SEM-1).
 function matlabRename(source: string, name: string, to: string, opts: { from?: "all" | "definition"; before?: string }): string | null {
   if (MATLAB_DYNAMIC_NAMES.test(source) || name === "ans") return null;
-  if (MAGMA_NAME.test(name) && new RegExp(`^[ \\t]*function\\b[^\\n%]*?(?:=\\s*|\\s)${name}\\s*(?:\\(|$|[;,%\\n])`, "m").test(source)) return null;
+  // (the functions as the translator parses them: continued declaration lines too, MATPO-SEM-1A)
+  const fns = matlabFunctionNames(source);
+  if (fns === null || fns.includes(name)) return null;
   const before = opts.before ?? name;
   if (!MAGMA_NAME.test(name) || !magmaScoped(to, name) || (opts.from === "definition" && before !== name && !magmaScoped(before, name))) return null;
   const mode = opts.from === "definition" ? `definition ${before}` : "all";
