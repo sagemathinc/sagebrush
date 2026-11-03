@@ -2,7 +2,9 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { gateInputs } from "./size-measure.mjs";
+import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
@@ -74,9 +76,31 @@ const fullTierPaths = [
   // (the workspace's API: Trash's remove, restore and move, and emptying it)
   /^web\/workspace\/api\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
   /^scripts\/check-export-size\.mjs$/,
+  // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
+  // offline pages), the dependency files and the site preview (web-sync.4))
+  /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
 ];
+// A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
+// neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
+// CI_PATHS_ROOT, for the tests).  A suite of a job only the full tier runs selects the full tier; a web-browser
+// suite selects its group, and a web-runner, export or lookalike suite its job.  (a deleted suite runs nowhere)
+const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
+const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
+const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
+  let text;
+  try {
+    text = readFileSync(join(suiteRoot, file), "utf8");
+  } catch {
+    return [];
+  }
+  return headers(file, text).filter((h) => h.kind === "run").map((h) => h.target);
+});
+const suiteJobs = new Set(suiteTargets.map((target) => target.split(/[./]/)[0]));
+const suiteGroups = new Set(suiteTargets.filter((target) => target.startsWith("web-browser/")).map((target) => target.slice("web-browser/".length).split(".")[0]));
 const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
-const fullTier = event === "pull_request" && (labels.includes("full-ci") || matches(fullTierPaths));
+const fullTier = event === "pull_request" &&
+  (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const full = event === "workflow_dispatch" || event === "schedule" ||
   (event === "push" && ref === "refs/heads/master") || fullTier;
 
@@ -223,21 +247,27 @@ const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) =
 const webCore = webFiles.some((file) => !Object.values(webAreas).some((patterns) => patterns.some((pattern) => pattern.test(file))));
 const allWeb = full || workflowOrBuild || fallback || webCore;
 const webRuntime = allWeb || runtime;
+// (a source another area's group tests, beside its own area's: test-latex-page opens a .tex from the board's
+// newLatexHere, #566)
+const groupSources = { latex: [/^web\/board\/page\.ts$/] };
+const testedBy = (group) => matches(groupSources[group]);
 const webGroups = [
-  ["notebook", webRuntime],
+  ["notebook", webRuntime || suiteGroups.has("notebook")],
   // (the LaTeX editor's page and agent tools, on a build with the editor on loopback hosts: web/latex/ is the core)
-  ["latex", webRuntime],
-  ["board-a", webRuntime || inArea("board")],
-  ["board-b", webRuntime || inArea("board")],
-  ["board-c", webRuntime || inArea("board")],
+  ["latex", webRuntime || suiteGroups.has("latex") || testedBy("latex")],
+  ["board-a", webRuntime || inArea("board") || suiteGroups.has("board-a")],
+  ["board-b", webRuntime || inArea("board") || suiteGroups.has("board-b")],
+  ["board-c", webRuntime || inArea("board") || suiteGroups.has("board-c")],
   // (board-unit also runs the export's measure and reminder units)
-  ["board-unit", webRuntime || inArea("board") || inArea("workspace")],
-  ["terminal", webRuntime || inArea("shell")],
-  ["remote-preview", webRuntime],
+  ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
+  ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
+  ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
-const webRunner = web && (webRuntime || inArea("board") || inArea("workspace"));
+const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
+const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
+const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
 
 const outputs = {
   full,
@@ -253,8 +283,8 @@ const outputs = {
   webkit,
   web_groups: JSON.stringify(webGroups),
   web_runner: webRunner,
-  web_export: webWorkspace,
-  web_lookalike: webWorkspace,
+  web_export: webExport,
+  web_lookalike: webLookalike,
   census,
   unsafe_sweep: unsafeSweep,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
