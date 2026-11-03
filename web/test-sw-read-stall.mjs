@@ -1,4 +1,4 @@
-// ci: none (needs the service worker's test build, SAGEBRUSH_OFFLINE_TEST=1, as test-offline-hook.mjs: a wiring candidate)
+// ci: web-sync.2 order=50 chrome
 // A kept copy whose read never gives data doesn't hold its request: the service worker gives the read up after
 // READ_STALL_MS (half web/stall-fetch.js's bound) and answers from the network (web/sw.js check(); the grader's
 // plain-worker investigation: VM1, Nov 3, a cache-hit body read that never settled held a Sage run for good).  The
@@ -6,7 +6,11 @@
 // data), with the time scale at 0.1 (the bound 1 s).  The control: the same build with the bound taken out, as a
 // new deploy, where the same held read leaves the request unanswered.
 //
-//   SAGEBRUSH_OFFLINE_TEST=1 bun web/build.ts && node web/test-sw-read-stall.mjs      (CHROME=... for the browser)
+// The test build's service worker is web/dist-test/sw.test.js when there is one (SAGEBRUSH_OFFLINE_TEST=1); else it is
+// made here as the build makes it: web/sw.js with the values the build gave web/dist/sw.js (each line of the five
+// checked to be there once), so a plain build, as CI's, runs it too.
+//
+//   bun web/build.ts && node web/test-sw-read-stall.mjs      (CHROME=... for the browser)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
@@ -18,9 +22,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0, count = 0;
 const ok = (cond, name) => { count++; console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; return cond; };
 const here = new URL(".", import.meta.url).pathname;
-const testSw = join(here, "dist-test", "sw.test.js");
-if (!existsSync(testSw)) throw new Error("no web/dist-test/sw.test.js: build with SAGEBRUSH_OFFLINE_TEST=1");
+const tmp = mkdtempSync(join(tmpdir(), "sb-sw-stall-"));
+let testSw = join(here, "dist-test", "sw.test.js");
+if (!existsSync(testSw)) {
+  const shipped = readFileSync(join(here, "dist", "sw.js"), "utf8");
+  let made = readFileSync(join(here, "sw.js"), "utf8");
+  for (const [name, hole] of [["VERSION", '"__VERSION__"'], ["SHELL", "__SHELL__"], ["LAZY", "__LAZY__"], ["DIGESTS", "__DIGESTS__"], ["STALL_LIMIT_MS", "__STALL_LIMIT_MS__"]]) {
+    const lines = shipped.split("\n").filter((l) => l.startsWith(`const ${name} = `));
+    const holes = made.split(`const ${name} = ${hole};`).length - 1;
+    if (lines.length !== 1 || holes !== 1) throw new Error(`web/dist/sw.js or web/sw.js: const ${name} not there once (${lines.length}, ${holes})`);
+    made = made.replace(`const ${name} = ${hole};`, () => lines[0]);
+  }
+  testSw = join(tmp, "sw.test.js");
+  writeFileSync(testSw, made);
+}
 const SW = readFileSync(testSw, "utf8");
+if (!SW.includes("// <offline-test>")) throw new Error("the test service worker has no hook block");
 const A = /^const VERSION = "([0-9a-f]{16})";$/m.exec(SW)[1];
 const DIGESTS = JSON.parse(/^const DIGESTS = (.*);$/m.exec(SW)[1]);
 const BOUND_LINE = "const READ_STALL_MS = STALL_LIMIT_MS / 2;";
@@ -29,7 +46,6 @@ if (!SW.includes(BOUND_LINE)) throw new Error("sw.test.js has no READ_STALL_MS l
 const chunk = Object.keys(DIGESTS).find((p) => /^lib\/core\.src\.[0-9a-f]{16}\.json$/.test(p));
 const want = DIGESTS[chunk], url = "/" + chunk;
 
-const tmp = mkdtempSync(join(tmpdir(), "sb-sw-stall-"));
 const overridesFile = join(tmp, "overrides.json"), logFile = join(tmp, "requests.log");
 const overrides = { "/sw.js": { file: testSw } };
 const saveOverrides = () => writeFileSync(overridesFile, JSON.stringify(overrides));
