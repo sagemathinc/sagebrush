@@ -91,8 +91,8 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
   };
   // (the entries' records (E1 r2a heap plan r2c §1; astra's obligations): owned from here, before their file is opened
   // and before preflight's first record, under this export's lock; removed on every exit before any panel is shown
-  // (the refusal, Cancel at ready, a stop, a Cancel), or by writing's own cleanup once it has them; Ready and a closed
-  // picker keep them, for the Save… that follows)
+  // (the refusal, a stop, a Cancel), or by writing's own cleanup once it has them; Cancel at ready shows no panel, and
+  // lets the page go first (below); Ready and a closed picker keep them, for the Save… that follows)
   const rows = new Spool(`${id}-rows`, opfs ? worker : null, Number.MAX_SAFE_INTEGER, true, ac.signal);
   // (each way out of the work below breaks out of `work`, never returns: the end panel is shown after `finally`)
   try { work: {
@@ -103,7 +103,14 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
     const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs);
     await (globalThis as any).__SB_EXPORT_TEST__?.onPlan?.(plan);
     for (;;) {
-      if ((await ready(plan)) === "cancel") { await rows.remove(); box.replaceChildren(); break work; }
+      // (Cancel at ready: the panel cleared and the flow over at once, so the panel's button is back, a new export can
+      // start and no Save… is left to press; this export's own records (its id's file) removed after, as what outlives
+      // the flow (`after`: its worker and lock kept until then): the B3 hang, CI's web-export, Nov 3)
+      if ((await ready(plan)) === "cancel") {
+        box.replaceChildren();
+        after = (async () => { await (globalThis as any).__SB_EXPORT_TEST__?.beforeCancelRemove?.(); await rows.remove(); })();
+        break work;
+      }
       // (Save…: the picker, on this click, where the browser has one; else OPFS or a Blob, chosen on the bound.  The
       // picker's writable is write()'s from the moment it exists: any failure aborts it)
       let picked: any = null;
