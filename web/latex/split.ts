@@ -5,6 +5,7 @@
 //    head), so styles carry over; list items keep their explicit labels (span.lbl: the list CSS has no counters);
 //  - a paragraph div.p is split at the boundaries between its inline runs, each later piece a div.p.cont;
 //  - a table is never split (its columns would misalign): over PIECE_MAX it is a placeholder, with its size;
+//  - nor a beamer slide (section.slide: a box of fixed size), the same way;
 //  - anything that can't be split into pieces of PIECE_MAX or less (one inline element, one cell, one formula), and
 //    any chunk over CHUNK_MAX, is a placeholder saying so, with its size.
 // The input is the renderer's own HTML: well formed, every text escaped (no raw "<" in text), attributes quoted.
@@ -78,6 +79,8 @@ export function splitChunk(h: string): string[] {
   const o = outer(h);
   if (!o) return [placeholder("this block is too large to display in the prototype", n)];
   const cls = (/\sclass="([^"]*)"/.exec(o.open) || [])[1] || "";
+  // (a beamer slide neither: it is one box of a fixed size, and its pieces would each be a slide)
+  if (o.tag === "section" && /\bslide\b/.test(cls)) return n <= PIECE_MAX ? [h] : [placeholder("this slide is too large to display in the prototype", n)];
   if (o.tag === "table" || /\btabular\b/.test(cls) || o.kids.some((k) => /^<table\b/.test(h.slice(k.start, k.end)) && bytes(h.slice(k.start, k.end)) > PIECE_MAX))
     return n <= PIECE_MAX ? [h] : [placeholder("this table is too large to display in the prototype", n)];
   const para = o.tag === "div" && /(^|\s)p(\s|$)/.test(cls);

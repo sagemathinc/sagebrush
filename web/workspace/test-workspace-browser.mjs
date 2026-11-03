@@ -1207,11 +1207,17 @@ try {
     const box = (p, shift = false) => ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))} + " .sel").dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: ${shift} })); return 1; })()`);
     const ps = await paths();
     const b0 = await bar();
+    // (U2, William: "Selecting a checkbox MUST NOT move the checkbox or row": every drawn row's top and the first row's
+    // checkbox, before and after a selection appears, the bar over the search box, the same height)
+    const layout = () => ev(`(() => { const rs = [...document.querySelectorAll(${JSON.stringify(sel)})], b = document.querySelector("#wssidebar .fsel").getBoundingClientRect(), s = document.querySelector("#wssidebar .fsearch").getBoundingClientRect(); return { tops: rs.map((r) => Math.round(r.getBoundingClientRect().top)), box: Math.round(rs[0].querySelector(".sel").getBoundingClientRect().top), bar: [Math.round(b.top), Math.round(b.height)], search: [Math.round(s.top), Math.round(s.height)] }; })()`);
+    const l0 = await layout();
     // (Recent's rows: those before the "This browser" heading)
     const recent = await ev(`(() => { const out = []; for (const el of document.querySelectorAll("#wssidebar .ftree > *")) { if (el.classList.contains("fgrp") && el.textContent !== "Recent") break; if (el.classList.contains("frow")) out.push(!!el.querySelector(".sel")); } return out; })()`);
     check(ps.length >= 4 && b0.hidden && recent.length > 0 && !recent.some(Boolean), "B2: the tree's rows have checkboxes (Recent's don't), the bar hidden with nothing selected: " + JSON.stringify({ n: ps.length, b0, recent }));
     await box(ps[0]);
-    const b1 = await bar(), p1 = await picked();
+    const b1 = await bar(), p1 = await picked(), l1 = await layout();
+    check(JSON.stringify(l1.tops) === JSON.stringify(l0.tops) && l1.box === l0.box && l1.bar[0] === l1.search[0] && l1.bar[1] === l1.search[1] && JSON.stringify(l1.search) === JSON.stringify(l0.search),
+      "U2: selecting a row moves no row and no checkbox; the bar takes the search box's place, at its size: " + JSON.stringify({ l0, l1 }));
     check(!b1.hidden && b1.text === "1 selected" && b1.some && JSON.stringify(p1) === JSON.stringify([ps[0]]) && (await ev(`document.querySelector(${JSON.stringify(rowSel(ps[0]))} + " .sel").getAttribute("aria-checked")`)) === "true", "B2: a checkbox's click selects its row (not opened), the bar says 1 selected: " + JSON.stringify({ b1, p1 }));
     await box(ps[3], true);
     const p2 = await picked();

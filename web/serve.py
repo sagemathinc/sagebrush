@@ -6,10 +6,12 @@ stdout) once it is listening, for a test that starts it and must not race it.
 
 For a test that must see what reaches the server (G-10, web/test-runner.mjs), two optional variables:
   SB_SERVE_LOG=<file>         each request appended as a JSON line: method, path, and its Cookie and Referer
-  SB_SERVE_OVERRIDES=<file>   JSON {path: {"file": <a file served instead>} | {"status": 302, "location": <url>}},
+  SB_SERVE_OVERRIDES=<file>   JSON {path: {"file": <a file served instead>} | {"status": 302, "location": <url>}
+                              | {"status": <another status>} (an empty body)
+                              | {"bytes": <n>, "hang": <bool>} (n bytes with no Content-Length, then, if hang, it never ends)},
                               read on each request (so a test can change it), for that exact path, query included
 Without them it serves as before."""
-import http.server, json, os, posixpath, sys, urllib.parse
+import http.server, json, os, posixpath, sys, time, urllib.parse
 
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
 
@@ -73,6 +75,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Location", rule["location"])
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return True
+        if isinstance(rule.get("bytes"), int):
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(self.path.split("?")[0]))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                left = rule["bytes"]
+                while left > 0:
+                    n = min(left, 1 << 20)
+                    self.wfile.write(b"x" * n)
+                    left -= n
+                self.wfile.flush()
+                if rule.get("hang"):
+                    time.sleep(600)
+            except OSError:
+                pass
+            return True
+        if isinstance(rule.get("status"), int):
+            # (a stub error: never the site's caching headers, so nothing may keep it)
+            self.send_response(rule["status"])
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            http.server.SimpleHTTPRequestHandler.end_headers(self)
             return True
         if "file" in rule:
             body = open(rule["file"], "rb").read()

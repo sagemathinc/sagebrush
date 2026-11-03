@@ -429,7 +429,7 @@ try {
   out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
   ok(out.includes("274177 * 67280421310721") && seen.r2.some((s) => /\/lib\/sage\.src\..* 200$/.test(s)), "...and Sage's library, first used now: " + JSON.stringify(out));
   out = await runCode("import _matlab_sparse");
-  ok(/ImportError: could not load the Python library's matlab modules/.test(out) && !/internal error/.test(out) && seen.r2.some((s) => /\/lib\/matlab\.src\..* 404$/.test(s)), "a chunk found nowhere (not in R2 either) is an ImportError that says which part: " + JSON.stringify(out.slice(-200)));
+  ok(/ImportError: Could not fetch the Python library's matlab modules/.test(out) && !/offline/.test(out) && !/internal error/.test(out) && seen.r2.some((s) => /\/lib\/matlab\.src\..* 404$/.test(s)), "a chunk found nowhere (not in R2 either) is an ImportError that says which part: " + JSON.stringify(out.slice(-200)));
   ws.close();
 } catch (e) {
   failures++;

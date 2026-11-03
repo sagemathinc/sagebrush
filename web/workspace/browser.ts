@@ -30,6 +30,10 @@ export type BrowserHost = {
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
+  /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
+   * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
+   * is web/latex/boot.ts's.) */
+  openFile?(e: Entry, tab: boolean): boolean;
   /** A data file of a kind the page recognises opened as a document: a converted copy beside it (upload.ts, design §3); none: not offered. */
   openAs?(e: Entry, as: DocKind): void | Promise<void | string>;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
@@ -95,7 +99,13 @@ const STYLE = `
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
-.sbfiles .fsearch { margin: 0 10px 6px; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
+/* (U2, William: "Selecting a checkbox MUST NOT move the checkbox or row". The search box and the selection bar share
+   one slot, stacked in a grid cell, both always laid out (the bar hidden by visibility, not display): its height never
+   changes, so nothing under it moves; while rows are selected the bar covers the search box) */
+.sbfiles .ftop { display: grid; margin: 0 10px 6px; }
+.sbfiles .ftop > * { grid-area: 1 / 1; min-width: 0; }
+.sbfiles.selecting .fsearch { visibility: hidden; }
+.sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
@@ -120,8 +130,8 @@ const STYLE = `
 .sbfiles .frow .sel[aria-checked=true] { background: #4a6b49; border-color: #4a6b49; }
 .sbfiles .frow:hover .sel, .sbfiles .frow:focus-within .sel, .sbfiles.selecting .frow .sel { visibility: visible; }
 .sbfiles .frow.picked { background: #e6eedf; }
-.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0 10px 6px; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; }
-.sbfiles .fsel[hidden] { display: none; }
+.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; background: var(--sbf-bg, #f6f5f0); }
+.sbfiles .fsel[hidden] { display: flex; visibility: hidden; }
 .sbfiles .fsel input { margin: 0; cursor: pointer; }
 .sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
@@ -241,7 +251,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
   selBar.setAttribute("role", "toolbar");
   selBar.setAttribute("aria-label", "Selected files");
-  root.append(head, search, selBar, tree, toastEl, foot, picker);
+  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
   container.append(root);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
@@ -389,12 +399,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
+      // (U1: a page with an editor of its own for the file, the board page's .tex)
+      if (e.kind === "file" && host.openFile?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
     r.onauxclick = (ev) => {
       // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
+      if (ev.button === 1 && e.kind === "file") { if (!trashView) host.openFile?.(e, true); return; }
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };
     r.onkeydown = (ev) => {
