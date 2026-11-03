@@ -122,6 +122,9 @@ try {
     const first = await get(30000);
     ok(first.size === want.size && first.sha256 === want.sha256, `${v}: the chunk fetched once (${first.size ?? first.error ?? "timeout"})`);
     ok(await until(() => kept(v), 15000), `${v}: …and kept by the service worker`);
+    // (a new build's walk of an older build's copies reads them in the background, and could take the one-shot hold:
+    // armed only once no older build is left to walk (T576-CONTROL-RACE), and the worker idle again)
+    ok(await until(async () => ((await hook())?.sources ?? []).length === 0, 30000), `${v}: (no older build's copies left to walk)`);
     await quiesce();
     await hook({ scale: 0.1, holdRead: url });
     await clearHttp();
