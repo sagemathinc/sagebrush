@@ -1016,7 +1016,6 @@ jobs:
               node scripts/web-tests.mjs run web-browser/board-b
               ;;
             board-c)
-              board_c_test() { printf 'START board-c: %s\n' "$*"; "$@"; }
               # (the board page under the board journal; its own server, one origin)
               node scripts/web-tests.mjs run web-browser/board-c
               ;;
