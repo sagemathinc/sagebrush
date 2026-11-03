@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -366,3 +366,15 @@ test("examples: ci-paths finds the corpus beside it in a checkout whose path has
   assert.match(r.stdout, /^examples_matrix=\[1\]$/m);
 });
 
+
+// (a job reading an output the changes job doesn't export gets '': the examples jobs once ran on it, one dying on
+// fromJSON('') and the census passing with nothing run; grader, #538)
+test("ci.yml: every needs.changes.outputs.X a job reads is among the changes job's outputs", () => {
+  const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const job = yml.slice(yml.indexOf("\n  changes:\n"));
+  const block = job.slice(job.indexOf("\n    outputs:\n"), job.indexOf("\n    steps:\n"));
+  const exported = new Set([...block.matchAll(/^      ([a-z_]+): /gm)].map((m) => m[1]));
+  assert.ok(exported.has("examples_ids") && exported.has("examples_matrix"), [...exported].join(" "));
+  const read = new Set([...yml.matchAll(/needs\.changes\.outputs\.([a-z_]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...read].filter((k) => !exported.has(k)), []);
+});
