@@ -53,6 +53,7 @@ export class Engine {
     this.prev = res; this.text = text;
     return {
       chunks: out.chunks, chunkPos: out.chunkPos, sageItems: out.sageItems, imageRefs: out.imageRefs || [],
+      frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer,
       stats: Object.assign({}, out.stats, {
         mode, outcome: res.outcome, expandMs: +(t1 - t0).toFixed(1), renderMs: +(t2 - t1).toFixed(1), units: res.units.length, events: events.length,
         reused: inc ? inc.stats.reusedUnits : 0, reexpanded: inc ? inc.stats.reexpandedUnits : res.units.length, chars: text.length,
