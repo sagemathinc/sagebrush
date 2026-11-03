@@ -3,7 +3,7 @@
 // request gate (gate.ts); and the renderer's unclosed formulas (engine/render.mjs, KaTeX stubbed).
 //   bun web/latex/test-latex-units.mjs
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
-import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
+import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes } from "./split.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
@@ -52,15 +52,31 @@ check("open-invalid-utf8-binary", openBytes(new Uint8Array([0x61, 0xff, 0x62])).
 check("open-over-4MiB-no-save", (() => { const o = openBytes(u8("y".repeat(EDIT_MAX + 1))); return o.kind === "text" && !o.saveable; })(), null);
 check("encode-never-prepends-bom", same(encodeText("abc", "\n"), u8("abc")) && same(encodeText("\ufeffabc", "\n"), u8(BOM, "abc")), null);
 
-// ---- images.ts: the resolver (inside the opened file's folder only) and the sniffer
+// ---- images.ts: the resolver (as TeX: the file's folder, then \graphicspath's; up with ../, never above the top) and the sniffer
 const doc = "/papers/a/main.tex";
 const ok = (arg) => { const r = imageCandidates(arg, doc); return r.ok ? r.paths : r.why; };
 check("img-plain", JSON.stringify(ok("fig.png")) === JSON.stringify(["/papers/a/fig.png"]), ok("fig.png"));
 check("img-no-ext", ok("fig").length === 7 && ok("fig")[0] === "/papers/a/fig" && ok("fig")[1] === "/papers/a/fig.png", ok("fig"));
 check("img-subfolder", ok("img/x.svg")[0] === "/papers/a/img/x.svg", ok("img/x.svg"));
-for (const [n, a] of [["escape", "../fig.png"], ["abs", "/abs.png"], ["url", "https://x/y.png"], ["pct", "fig%2f..%2fx.png"], ["pct-dot", "%2e%2e/x.png"], ["backslash", "a\\b.png"], ["empty-seg", "a//b.png"], ["dot", "./x.png"], ["nul", "a\u0000b"], ["data", "data:image/png;base64,AAAA"]])
+for (const [n, a] of [["url", "https://x/y.png"], ["pct", "fig%2f..%2fx.png"], ["pct-dot", "%2e%2e/x.png"], ["backslash", "a\\b.png"], ["above-top", "../../../x.png"], ["nul", "a\u0000b"], ["data", "data:image/png;base64,AAAA"]])
   check("img-refused-" + n, typeof ok(a) === "string", ok(a));
-check("img-prefix-sibling", typeof imageCandidates("../ab/x.png", "/papers/a/main.tex") === "object" && !imageCandidates("../ab/x.png", "/papers/a/main.tex").ok, null);
+// (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top: TeX names it ../images.png)
+check("img-parent", JSON.stringify(ok("../fig.png")) === JSON.stringify(["/papers/fig.png"]) && ok("../../top.png")[0] === "/top.png", [ok("../fig.png"), ok("../../top.png")]);
+// (William, Nov 2: a leading "/" is the workspace's top folder, never the real filesystem's; searched alone, as TeX does)
+check("img-leading-slash", JSON.stringify(ok("/abs.png")) === JSON.stringify(["/abs.png"]) && ok("/d/x")[0] === "/d/x" && imageCandidates("/x.png", doc, ["figs/"]).searched.join() === "/"
+  && imageCandidates("/x.png", "/c/w/a.tex", [], "/c/w").paths[0] === "/c/w/x.png" && typeof ok("/../x.png") === "string" && !imageCandidates("/../x.png", "/c/w/a.tex", [], "/c/w").ok, [ok("/abs.png"), imageCandidates("/x.png", "/c/w/a.tex", [], "/c/w")]);
+check("img-leading-slash-hint", notFoundWhy("/ex/cv.tex", ["/"], [], false, "/images.png") === "not found in the top folder (a leading / is the workspace's top folder)", notFoundWhy("/ex/cv.tex", ["/"], [], false, "/images.png"));
+check("img-dot-and-sibling", ok("./x.png")[0] === "/papers/a/x.png" && ok("a//b.png")[0] === "/papers/a/a/b.png" && ok("../ab/x.png")[0] === "/papers/ab/x.png", [ok("./x.png"), ok("../ab/x.png")]);
+{
+  const r = imageCandidates("fig", doc, ["figs/", "../shared/", "/abs/", "../../../../up/"]);
+  check("img-graphicspath", r.ok && r.paths[0] === "/papers/a/fig" && r.paths.includes("/papers/a/figs/fig.png") && r.paths.includes("/papers/shared/fig.png") && JSON.stringify(r.searched) === JSON.stringify(["/papers/a", "/papers/a/figs", "/papers/shared"]), r);
+  const gp = graphicsPathOf("\\documentclass{article}\n% \\graphicspath{{no/}}\n\\graphicspath{ {figs/} {../shared/} }\n\\begin{document}\n\\graphicspath{{late/}}\n");
+  check("graphicspath-of", JSON.stringify(gp) === JSON.stringify(["figs/", "../shared/"]) && graphicsPathOf("\\begin{document}x").length === 0, gp);
+  const w = notFoundWhy("/LaTeX examples/cv.tex", ["/LaTeX examples"], ["/images.png"]);
+  check("img-not-found-why", w === 'not found in "LaTeX examples/"; it is in the top folder: write {../images.png}, or move the file into "LaTeX examples/"' && notFoundWhy("/cv.tex", ["/"]) === "not found in the top folder"
+    && notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true) === 'not found in this file\'s folder, "figs/"; it is in "../": write {../x.png}, or move the file into this file\'s folder', [w, notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true)]);
+  check("relative-path", relativePath("/a/b", "/a/c/x.png") === "../c/x.png" && relativePath("/", "/x.png") === "x.png" && relativePath("/a", "/a/x.png") === "x.png", null);
+}
 const png = u8([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13], "IHDR", [0, 0, 0x10, 0, 0, 0, 0x10, 0, 8, 6, 0, 0, 0]);
 check("sniff-png", (() => { const s = sniffImage(png); return s.ok && s.mime === "image/png" && s.pixels === 4096 * 4096; })(), sniffImage(png));
 check("sniff-svg", sniffImage(u8('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>')).ok, null);

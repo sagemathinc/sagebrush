@@ -97,7 +97,7 @@ try {
     && j.frames[1].line === lineOf(TALK, "\\begin{frame}{Overlays}") && j.frames[0].line === lineOf(TALK, "\\frame{\\titlepage}"), j.frames);
   const p = (kind, name) => j.problems.find((x) => x.kind === kind && (name === undefined || x.name === name));
   check("check-missing-image-error-with-line", p("image", "missing.png")?.severity === "error" && p("image", "missing.png").line === lineOf(TALK, "{missing.png}"), j.problems);
-  check("check-outside-image-refused", p("image", "../outside.png")?.severity === "error" && /outside this folder/.test(p("image", "../outside.png").message), j.problems);
+  check("check-parent-image-looked-for", p("image", "../outside.png")?.severity === "error" && /: not found in "\.\.\/"$/.test(p("image", "../outside.png").message), j.problems);
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
@@ -112,13 +112,28 @@ try {
   const ca = await run(dir, "check", "article.tex", "--json");
   check("check-article-has-no-frames", ca.code === 0 && ca.json.class === "other" && ca.json.frames.length === 0 && ca.json.problems.some((x) => x.kind === "environment" && x.name === "frame"), ca.json);
 
+  // ---- images as TeX finds them (William's L2, Nov 2): the file's folder, a parent (../), \graphicspath; when not
+  // found, the folders searched and the name to write
+  {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(dir, "ex", "figs"), { recursive: true });
+    writeFileSync(join(dir, "top.svg"), SVG); writeFileSync(join(dir, "ex", "here.svg"), SVG); writeFileSync(join(dir, "ex", "figs", "deep.svg"), SVG);
+    writeFileSync(join(dir, "ex", "cv.tex"), "\\documentclass{article}\n\\graphicspath{{figs/}}\n\\begin{document}\n\\includegraphics{here.svg}\n\\includegraphics{../top.svg}\n\\includegraphics{deep}\n\\includegraphics{top.svg}\n\\includegraphics{nowhere.png}\n\\includegraphics{/here.svg}\n\\includegraphics{/../top.svg}\n\\end{document}\n");
+    const ci = (await run(join(dir, "ex"), "check", "cv.tex", "--json")).json;
+    const im = (n) => ci?.images.find((x) => x.name === n);
+    check("images: same folder, parent (../) and \\graphicspath found", im("here.svg")?.found && im("../top.svg")?.found && im("../top.svg").path === "../top.svg" && im("deep")?.found && im("deep").path === "figs/deep.svg", ci?.images);
+    check("images: a file in a parent folder named without ../: where it is, and what to write", im("top.svg")?.found === false && im("top.svg").why === 'not found in this file\'s folder, "figs/"; it is in "../": write {../top.svg}, or move the file into this file\'s folder', im("top.svg"));
+    check("images: a leading / is the folder the command runs in, never the computer's top, never above it", im("/here.svg")?.found && im("/here.svg").path === "here.svg" && im("/../top.svg")?.found === false && /above the workspace's top folder/.test(im("/../top.svg").why), [im("/here.svg"), im("/../top.svg")]);
+    check("images: missing everywhere: the folders searched, no suggestion", im("nowhere.png")?.found === false && im("nowhere.png").why === 'not found in this file\'s folder, "figs/"', im("nowhere.png"));
+  }
+
   // ---- render: one self-contained HTML file
   const r = await run(dir, "render", "talk.tex", "-o", "out.html", "--json");
   const html = existsSync(join(dir, "out.html")) ? readFileSync(join(dir, "out.html"), "utf8") : "";
   check("render-writes-html", r.code === 0 && r.json?.html === "out.html" && html.startsWith("<!doctype html>"), r);
   check("render-html-no-script-and-csp", !/<script/i.test(html) && html.includes(`content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:"`), html.slice(0, 400));
   check("render-html-fonts-inlined", /@font-face\{[^}]*url\(data:font\/woff2;base64,/.test(html) && !/url\(fonts\//.test(html), html.match(/@font-face\{[^}]{0,200}/)?.[0]);
-  check("render-image-inlined", html.includes('src="data:image/svg+xml;base64,') && html.includes("[image: missing.png: no such file in this folder]"), null);
+  check("render-image-inlined", html.includes('src="data:image/svg+xml;base64,') && html.includes("[image: missing.png: not found in this file&#39;s folder]") || html.includes("[image: missing.png: not found in this file's folder]"), html.match(/\[image: missing[^\]]*\]/)?.[0]);
   const slides = [...html.matchAll(/<section class="slide([^"]*)" data-frame="(\d+)"[^>]*style="([^"]*)"/g)];
   check("render-slides", slides.length === 5 && slides.every((m) => m[3].startsWith("aspect-ratio:160/90;--sfs:")) && slides[2][1] === " va-t", slides.map((m) => m.slice(1)));
   check("render-frame-titles", html.includes('<header class="slide-title">Overlays</header>') && html.includes('<header class="slide-title">A block and a picture<div class="slide-subtitle">with a subtitle</div></header>')

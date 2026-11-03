@@ -9,7 +9,7 @@
 // Built as its own file, sagebrush-latex.cjs, beside the CLI's bundle (scripts/build-cli.mjs). src/cli.ts loads it
 // only for `latex`, so other commands don't carry the engine, KaTeX and its fonts.
 import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, mkdtempSync, rmSync } from "fs";
-import { basename, dirname, join, resolve, delimiter } from "path";
+import { basename, dirname, join, resolve, relative, delimiter, sep } from "path";
 import { tmpdir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
@@ -18,7 +18,7 @@ import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex } from "../web/latex/engine/render.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
-import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
+import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
 
 setKatex(katex.renderToString);
@@ -108,18 +108,21 @@ function fail(why: string): number { process.stderr.write(`sagebrush latex: ${wh
 
 /** The preview of a .tex file: what check reports, and the self-contained HTML page. */
 export function renderTex(file: string, text: string): { result: CheckResult; html: string } {
-  // (a first pass finds the images the document names; the second has them, read from the file's own folder
-  //  as the editor reads them from the workspace: imageCandidates, never outside it)
+  // (a first pass finds the images the document names; the second has them, read as the editor reads them from the
+  //  workspace and as TeX would: the file's folder, then \graphicspath's, imageCandidates; the paths are the disk's, and
+  //  a leading "/" is the folder the command runs in, the workspace's top folder here, never the computer's)
   const first = new Engine({}).update(text, { cold: true });
   const images: Record<string, string | { why: string }> = {};
   const imgReport: ImageReport[] = [];
+  // (disk paths as workspace paths, "/"-separated from a top "/": C:\a\b.tex is /C:/a/b.tex, and back)
+  const toWs = (p: string) => (sep === "/" ? p : "/" + p.split(sep).join("/")), toDisk = (p: string) => (sep === "/" ? p : p.slice(1).split("/").join(sep));
+  const doc = toWs(resolve(file)), dirs = graphicsPathOf(text);
   let kept = 0;
   for (const name of first.imageRefs as string[]) {
-    const c = imageCandidates(name, "/" + basename(file));
+    const c = imageCandidates(name, doc, dirs, toWs(process.cwd()));
     if (!c.ok) { images[name] = { why: c.why }; imgReport.push({ name, found: false, why: c.why }); continue; }
-    let got: { path: string; url: string } | { why: string } = { why: "no such file in this folder" };
-    for (const p of c.paths) {
-      const local = join(dirname(file), p.slice(1));
+    let got: { path: string; url: string } | { why: string } | null = null;
+    for (const local of c.paths.map(toDisk)) {
       if (!existsSync(local) || !statSync(local).isFile()) continue;
       const size = statSync(local).size;
       const why = admitImageBytes(size, size, kept);
@@ -128,8 +131,17 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
       const s = sniffImage(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
       if (!s.ok) { got = { why: s.why }; break; }
       kept += size;
-      got = { path: p.slice(1), url: `data:${s.mime};base64,${b.toString("base64")}` };
+      got = { path: relative(dirname(resolve(file)), local), url: `data:${s.mime};base64,${b.toString("base64")}` };
       break;
+    }
+    // (not found: a file of that name in a folder above, named from this one)
+    if (!got) {
+      const leaf = basename(name), up: string[] = [];
+      for (let d = dirname(dirname(resolve(file))), n = 0; n < 4 && up.length === 0; d = dirname(d), n++) {
+        for (const x of /\.[A-Za-z0-9]+$/.test(leaf) ? [leaf] : IMAGE_EXTS.map((e) => leaf + e)) if (existsSync(join(d, x)) && statSync(join(d, x)).isFile()) { up.push(toWs(join(d, x))); break; }
+        if (d === dirname(d)) break;
+      }
+      got = { why: notFoundWhy(doc, c.searched, up, true, name) };
     }
     if ("url" in got) { images[name] = got.url; imgReport.push({ name, found: true, path: got.path }); }
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
