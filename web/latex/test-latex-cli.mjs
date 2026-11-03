@@ -177,6 +177,19 @@ try {
     check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, pages, files });
     const dims = files.map((f) => { const b = readFileSync(join(dir, "png", f)); return b.subarray(0, 8).toString("hex") === "89504e470d0a1a0a" ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; });
     check("png-slide-size-16-9", dims.length === 5 && dims.every((x) => x && x[0] === 1024 && Math.abs(x[1] - 576) <= 1), dims);
+    // (--steps: each frame at each overlay step)
+    writeFileSync(join(dir, "ov.tex"), "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{S}\n\\begin{itemize}\n\\item<1-> a\n\\item<2-> b\n\\end{itemize}\n\\pause\n\\pause\nc\n\\end{frame}\n\\begin{frame}{T}\nt\n\\end{frame}\n\\end{document}\n");
+    const st = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "ov.tex", "--png", "ovpng", "--steps", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const sp = st.json?.png?.pages ?? [];
+    const ovFiles = existsSync(join(dir, "ovpng")) ? readdirSync(join(dir, "ovpng")).sort() : [];
+    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { files: ovFiles, pages: sp });
+    const bytes = ovFiles.map((f) => readFileSync(join(dir, "ovpng", f)).toString("base64"));
+    check("png --steps: the steps' pictures differ", bytes[0] !== bytes[1] && bytes[1] !== bytes[2], null);
+    // (--pdf: printed by the same browser, a beamer document one page per frame, of the slide's size)
+    const pd = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--pdf", "talk.pdf", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const pdfBytes = existsSync(join(dir, "talk.pdf")) ? readFileSync(join(dir, "talk.pdf")) : Buffer.alloc(0);
+    const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
+    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
   }
 

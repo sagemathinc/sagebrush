@@ -573,9 +573,14 @@ def line(points, **options):
 
         sage: line([(0, 0), (1, 2), (2, 0)], color='green')
         Graphics object consisting of 1 graphics primitive
+        sage: line([])
+        Graphics object consisting of 0 graphics primitives
     """
     gopts, p = _split(options)
     pts = list(points)
+    if not pts:
+        # (Sage: no points, no primitive)
+        return Graphics([], **gopts)
     return Graphics([Line([q[0] for q in pts], [q[1] for q in pts], **_line_options(p))], **gopts)
 
 
