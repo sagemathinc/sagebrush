@@ -26,6 +26,9 @@ import os
 import re
 
 PREFIX = "workspace_"
+#: where the person connects a Sagebrush page to an agent, as every tool that asks them says it
+WHERE_TO_CONNECT = ("the LaTeX editor's Agent button, or Connect an agent on a board opened with ?agents "
+                    "(or in an editor's ⋯ menu, where it has Connect an agent)")
 _SCHEMA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace_schema.json")
 #: the verbs, their parameters and the protocol's limits: board's
 #: web/workspace/schema.json (written by web/workspace/verbs.ts), copied here
@@ -116,14 +119,14 @@ assert set(VERBS) == set(TITLES), "the schema and this server disagree on the ve
 CONNECT = {
     "name": "workspace_connect",
     "title": "Connect to the person's Sagebrush page",
-    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time code (26 letters and digits, valid 5 minutes, used once): show it to the person, who enters it in Sagebrush (Chat, Connect an agent; Chrome or Firefox), and then chooses what you may do there. Calling it again gives a new code. Also says whether a page is paired and what it granted.",
+    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time code (26 letters and digits, valid 5 minutes, used once): show it to the person, who enters it in Sagebrush (Chrome or Firefox: " + WHERE_TO_CONNECT + "), and then chooses what you may do there. Calling it again gives a new code. Also says whether a page is paired and what it granted.",
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
 }
 CONNECT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "result": {"description": "{code, port, expires_in_seconds, paired, granted, grant, page}: the code is null once a page is paired"},
+        "result": {"description": "{code, port, expires_in_seconds, paired, granted, grant, page, last_refused}: the code is null once a page is paired; last_refused, while none is, says why the last page that tried was refused (null if none was)"},
         "error": {"description": "null, or {code, message}"},
     },
     "required": ["result", "error"],
@@ -443,7 +446,7 @@ def call(link, name, args, timeout=60.0):
         if "content" in params:
             params["content"] = _content_out(params["content"])
         if link is None:
-            raise NotConnected("no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (Chat, Connect an agent)")
+            raise NotConnected("no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (%s)" % WHERE_TO_CONNECT)
         result = validate_result(verb, link.request("workspace." + verb, params, timeout))
     except Invalid as e:
         return _error("invalid", "Invalid arguments: %s" % e)

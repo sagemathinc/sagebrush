@@ -130,6 +130,25 @@ class Client:
         self.s.close()
 
 
+def refusal(port, **kw):
+    """How a handshake is refused: "403" (any site: the page can't tell this
+    server from a closed port), "4403" (one of Sagebrush's own sites: the
+    upgrade, then at once a close 4403 "origin not allowed", then EOF), or
+    something else, which is a failure to refuse."""
+    c = Client(port, **kw)
+    try:
+        if c.status == 403:
+            return "403"
+        if c.status == 101:
+            m = c.recv()
+            if isinstance(m, tuple) and m[1] == P.ORIGIN_REFUSED and m[2] == "origin not allowed" and c.recv() is None:
+                return "4403"
+            return "101 then %r" % (m,)
+        return str(c.status)
+    finally:
+        c.close()
+
+
 def serve_verbs(client, page, stop):
     """Answer the server's workspace requests with the fake page, as the
     real page does with window.sagebrush.workspace."""
@@ -645,10 +664,11 @@ def test_dev_origin_preview_site():
         assert "also accepting pages from https://latex.sagebrush.cloud" in err.getvalue(), err.getvalue()
         assert Client(port, origin=dev).status == 101
         assert Client(port, origin=ORIGIN).status == 101
-        for other in ("https://board.sagebrush.cloud", "http://latex.sagebrush.cloud", "https://latex.sagebrush.cloud.evil.com",
-                      "https://latex.sagebrush.cloud/", "https://latex.sagebrush.cloud:443", "https://evil.latex.sagebrush.cloud",
-                      "https://LATEX.sagebrush.cloud", "https://sagebrush.cloud"):
-            assert Client(port, origin=other).status == 403, other
+        for other in ("https://board.sagebrush.cloud", "https://evil.latex.sagebrush.cloud", "https://sagebrush.cloud"):
+            assert refusal(port, origin=other) == "4403", other  # (Sagebrush's own sites: told, not accepted)
+        for other in ("http://latex.sagebrush.cloud", "https://latex.sagebrush.cloud.evil.com",
+                      "https://latex.sagebrush.cloud/", "https://latex.sagebrush.cloud:443", "https://LATEX.sagebrush.cloud"):
+            assert refusal(port, origin=other) == "403", other
         p.close()
         for bad in ("http://latex.sagebrush.cloud", "https://latex.sagebrush.cloud/", "https://latex.sagebrush.cloud:443",
                     "https://latex.sagebrush.cloud.evil.com", "https://a.b.sagebrush.cloud", "https://*.sagebrush.cloud",
@@ -663,6 +683,141 @@ def test_dev_origin_preview_site():
             raise AssertionError("accepted %r" % bad)
     finally:
         del os.environ[P.DEV_ORIGIN_ENV]
+
+
+def test_dev_origin_dev_site():
+    """SAGEBRUSH_MCP_DEV_ORIGIN may name the development site,
+    https://dev.sagebrush.space, exactly: refused when it isn't set, accepted
+    when it is (beside https://sagebrush.space), and no lookalike either way."""
+    import contextlib
+    import io
+    dev = P.DEV_SITE_ORIGIN
+    assert dev == "https://dev.sagebrush.space"
+    with contextlib.redirect_stderr(io.StringIO()):
+        p, port, code = new()
+    assert refusal(port, origin=dev) == "4403"  # (off by default: not a built-in origin, but told so)
+    p.close()
+    lookalikes = ("https://dev.sagebrush.space.evil.example", "http://dev.sagebrush.space", "https://dev.sagebrush.space/",
+                  "https://dev.sagebrush.space:443", "https://DEV.sagebrush.space", "https://x.dev.sagebrush.space",
+                  "https://devsagebrush.space", "https://dev-sagebrush.space", "https://dev.sagebrush.spaces")
+    os.environ[P.DEV_ORIGIN_ENV] = dev
+    try:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            p, port, code = new()
+            assert "also accepting pages from https://dev.sagebrush.space" in err.getvalue(), err.getvalue()
+            assert Client(port, origin=dev).status == 101
+            assert Client(port, origin=ORIGIN).status == 101
+            for other in lookalikes:
+                assert refusal(port, origin=other) == ("4403" if other == "https://x.dev.sagebrush.space" else "403"), other
+            p.close()
+        for bad in lookalikes + ("https://dev.sagebrush.space\n", " https://dev.sagebrush.space"):
+            os.environ[P.DEV_ORIGIN_ENV] = bad
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    P.Pairing({"name": "t"})
+            except ValueError as e:
+                assert "https://dev.sagebrush.space" in str(e)  # (the error names what it may be)
+                continue
+            raise AssertionError("accepted %r" % bad)
+    finally:
+        del os.environ[P.DEV_ORIGIN_ENV]
+
+
+def test_refusal_said_on_stderr():
+    """A refused handshake says why on stderr, for the agent to tell the
+    person: the refused origin (quoted, escaped, cut) and the allowed ones,
+    or the Host; at most MAX_REFUSALS_SAID lines, then one saying the rest
+    aren't.  The page itself still gets only 403."""
+    import contextlib
+    import io
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        p, port, code = new()
+        assert p.status()["last_refused"] is None
+        assert refusal(port, origin="https://dev.sagebrush.space") == "4403"
+        said = err.getvalue()
+        assert "refused a page's connection: refused origin 'https://dev.sagebrush.space'; allowed: https://sagebrush.space" in said, said
+        assert Client(port, host="evil.example:%d" % port).status == 403
+        assert "Host 'evil.example:%d' is not this server (127.0.0.1:%d or localhost:%d)" % (port, port, port) in err.getvalue(), err.getvalue()
+        assert Client(port, origin=None).status == 403
+        assert "refused origin (none)" in err.getvalue()
+        # (a hostile Origin is shown escaped and cut, never raw: no line breaks or control characters reach stderr)
+        assert Client(port, origin="https://x" + "\x1b[2J" + "a" * 500).status == 403
+        line = [l for l in err.getvalue().splitlines() if "x\\x1b[2J" in l]
+        assert len(line) == 1 and "\x1b" not in line[0] and len(line[0]) < 300, err.getvalue()[-400:]
+        assert Client(port, version="8").status == 403
+        assert "not WebSocket version 13" in err.getvalue()
+        # (and the last reason is kept for the agent, which can't always read this server's stderr: workspace_connect gives it)
+        assert p.status()["last_refused"] == "not WebSocket version 13", p.status()
+        assert refusal(port, origin="https://dev.sagebrush.space") == "4403"
+        assert p.status()["last_refused"] == "refused origin 'https://dev.sagebrush.space'; allowed: https://sagebrush.space"
+        # (a paired page's own handshake says nothing)
+        n = err.getvalue().count("\n")
+        assert Client(port).status == 101
+        assert err.getvalue().count("\n") == n
+        # (the cap: a page can knock without end; stderr says MAX_REFUSALS_SAID of them, then one line, then nothing)
+        for _ in range(P.MAX_REFUSALS_SAID + 10):
+            assert Client(port, origin="https://evil.example").status == 403
+        lines = [l for l in err.getvalue().splitlines() if l.startswith("sagebrush-mcp: refused a page's connection:")]
+        assert len(lines) == P.MAX_REFUSALS_SAID, len(lines)
+        assert err.getvalue().count("more connections refused; not saying them") == 1
+        p.close()
+
+
+def test_origin_refused_close():
+    """The honest refusal (4403): only for Sagebrush's own sites, only for an
+    otherwise valid handshake, nothing read after the upgrade, and nothing
+    of the pairing spent: the code stays good for the page that may pair."""
+    import contextlib
+    import io
+    with contextlib.redirect_stderr(io.StringIO()):
+        p, port, code = new()
+        site = "https://dev.sagebrush.space"
+        # (the upgrade, then the close at once, then EOF: a hello sent after it is never read)
+        c = Client(port, origin=site)
+        assert c.status == 101
+        try:
+            c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": code}})
+        except OSError:
+            pass
+        m = c.recv()
+        assert m == ("close", P.ORIGIN_REFUSED, "origin not allowed"), m
+        assert c.recv() is None
+        c.close()
+        # (any other site, and a Sagebrush site with anything else wrong, gets the 403: Host is checked before the origin)
+        assert refusal(port, origin="https://evil.example") == "403"
+        assert refusal(port, origin="https://sagebrush.space.evil.example") == "403"
+        assert refusal(port, origin=site, host="evil.example:%d" % port) == "403"
+        assert refusal(port, origin=site, version="8") == "403"
+        assert refusal(port, origin=site, key="short") == "403"
+        assert refusal(port, origin=site, path="/") == "403"
+        for _ in range(5):  # (more than the wrong-code limit: a refusal is never a try)
+            assert refusal(port, origin=site) == "4403"
+        assert not p.status()["paired"] and p.status()["code_valid"]
+        # (the code is unspent: the page on an allowed site pairs with it)
+        c = Client(port)
+        assert c.status == 101
+        r = c.hello(code)
+        assert "result" in r, r
+        assert p.status()["paired"]
+        c.close()
+        p.close()
+
+
+def test_where_to_connect_text():
+    """What the agent tells the person names the real places to connect,
+    never the "Chat, Connect an agent" that no page has."""
+    where = WS.WHERE_TO_CONNECT
+    assert "LaTeX editor's Agent button" in where and "?agents" in where, where
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("workspace_tools.py", "mcp_server.py", "latex_comments_tools.py"):
+        with open(os.path.join(here, "python", "sagebrush", name), encoding="utf8") as f:
+            src = f.read()
+        assert "Chat, Connect an agent" not in src and "(Connect an agent)" not in src, name
+        assert "WHERE_TO_CONNECT" in src, name
+    connect = [t for t in WS.tools() if t["name"] == "workspace_connect"][0]
+    assert where in connect["description"], connect["description"]
 
 
 if __name__ == "__main__":
