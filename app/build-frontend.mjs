@@ -26,10 +26,15 @@ const checkOnly = process.argv[2] === "--check";
 if (checkOnly && !process.argv[3]) throw new Error("usage: node app/build-frontend.mjs --check DIR");
 const out = checkOnly ? process.argv[3] : join(here, "dist");
 if (!checkOnly) {
-  if (!existsSync(join(src, "index.html"))) throw new Error("no web/dist: run `bun web/build.ts` first");
+  // (everything below comes from a complete `bun web/build.ts`: it can stop part way, with index.html written but
+  // not the notices or the icons, when web/js-dependencies.json changed; scripts/build-all.sh handles that)
+  const FILES = ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
+  const missing = [...FILES, "shell", "pkg", "pkgset", "pkgmeta"].filter((f) => !existsSync(join(src, f)));
+  if (missing.length) throw new Error(`web/dist is missing ${missing.join(", ")}: run \`bun web/build.ts\` to the end (if it stops with "web/js-dependencies.json changed", run node scripts/third-party-notices.mjs and build again), or scripts/build-all.sh, which does both`);
+  if (!existsSync(join(here, "THIRD-PARTY-NOTICES-native.txt"))) throw new Error("app/THIRD-PARTY-NOTICES-native.txt is missing: run node scripts/third-party-notices.mjs (or git checkout -- app/THIRD-PARTY-NOTICES-native.txt)");
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
-  for (const f of ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"])
+  for (const f of FILES)
     cpSync(join(src, f), join(out, f), { recursive: true });
   // the Terminal (⋯ ▸ Terminal, web/shell/): its page module and worker, and the bash package set web/build.ts
   // builds (shell/preview-set.json names it; pkgset/<S>.json pins its package in pkg/), served from the app's own

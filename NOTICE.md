@@ -60,6 +60,10 @@ Copyright (c) 2001 Python Software Foundation. See
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
   Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
+- `lib/_csv.py`: CPython 3.14's `_csv` module, a C module there
+  (`Modules/_csv.c`: its dialect checks, reader state machine, writer and
+  dialect registry), ported to Python, for `lib/csv.py` (CPython 3.14's,
+  unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
 - `lib/pickle.py`: CPython 3.14's `Lib/pickle.py`, changed: protocol 4's
@@ -259,6 +263,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 (github.com/scipy/xsf, commit b6cb4259): `binom`'s algorithm
 (`include/xsf/binom.h`) and the integer-degree Legendre polynomial,
 `eval_legendre_l` (`include/xsf/orthogonal_eval.h`).
+
+`lib/_special_ibeta.py` (the incomplete beta function, its inverse and the
+incomplete gamma function's inverse): its power series and its two continued
+fractions (`_betainc_series`, `_betainc_frac`) follow Cephes's `incbet`
+(`include/xsf/cephes/incbet.h`: pseries, incbcf, incbd and the choice among
+them) closely. Its methods for large parameters are DiDonato and Morris's,
+from their paper ("Significant digit computation of the incomplete beta
+function ratios", ACM TOMS 18, 1992): the cancellation-free prefactor, the
+expansion for large a and the continued fraction in lambda, derived from the
+mathematics and written in Sagebrush's own form, not translated from the
+paper's Fortran (Algorithm 708). The inverses are Sagebrush's, with Numerical
+Recipes' starting values (invbetai, invgammp), formulas only.
 
 ```
 BSD 3-Clause License

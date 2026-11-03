@@ -5,8 +5,9 @@ import { execFileSync } from "node:child_process";
 // lib/board_checks.py, the helpers for a board question's check: numbers
 // within a tolerance (exact when every number is rational), sets,
 // multisets, sequences, permutations and groups, and symbolic equality
-// (right only when the difference simplifies to 0, wrong only with an exact
-// counterexample, else undecided); text answers read by parsers that never
+// (right only when the difference simplifies to 0, wrong only with a proof:
+// an exact counterexample, or each side's interval enclosure (RIF) disjoint
+// at a point where both are defined; else undecided); text answers read by parsers that never
 // evaluate code. Each Verdict printed as its ok and the value the board's
 // check runtime gets from __sagebrush_verdict__ (test/board_checks_cases.sage).
 const TEST = __dirname + "/../../test/";
@@ -42,8 +43,8 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'they differ at $x = 1/2$'",
     "True True",
     "True True",
-    "None {'undecided': 'the check could not decide whether these are equal'}",
-    "None {'undecided': 'the check could not decide whether these are equal'}",
+    "False 'they are different numbers'",
+    "False they differ at $x = 1/2$",
     "CannotDecide: hard",
     "True True",
     "False 'off by $0.1$ (relative $0.1$), more than the tolerance'",
@@ -120,6 +121,7 @@ test("board check helpers: verdicts, reasons, bounds and refusals", () => {
     "False 'off by about $5.5 \\\\times 10^{-17}$, more than the tolerance'",
     "False 'off by about $2.65 \\\\times 10^{-6}$, more than the tolerance'",
     "ValueError: close: a tolerance is a finite real number (an int, a fraction, a float or a Sage real), at least 0",
+    "False 'they differ at $t = 2/3$'",
   ]);
 });
 

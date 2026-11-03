@@ -88,6 +88,13 @@ check("split-table-placeholder", (() => { const t = splitChunk(table); return t.
 const huge = '<div class="p"><span class="katex">' + "x".repeat(PIECE_MAX + 10) + "</span></div>";
 check("split-one-huge-inline-placeholder", (() => { const t = splitChunk(huge); return t.length === 1 && /too large/.test(t[0]); })(), null);
 check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"); return t.length === 1 && /too large/.test(t[0]); })(), null);
+// (a beamer slide is one box: kept whole up to PIECE_MAX, however many paragraphs it has; over it, a placeholder)
+{
+  const slide = (k) => '<section class="slide" data-frame="1" id="frame-1" style="aspect-ratio:128/96;--sfs:3.032"><div class="slide-body">' + '<div class="p">' + "z ".repeat(400) + "</div>".repeat(1) + "".padEnd(0) + '<div class="p">w</div>'.repeat(k) + "</div></section>";
+  const whole = splitChunk(slide(4000)), big = splitChunk(slide(40000));
+  check("split-slide-kept-whole", whole.length === 1 && whole[0] === slide(4000) && bytes(slide(4000)) > 32 * 1024, bytes(slide(4000)));
+  check("split-slide-over-max-placeholder", big.length === 1 && /this slide is too large/.test(big[0]) && bytes(slide(40000)) > PIECE_MAX, bytes(slide(40000)));
+}
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
 
 // ---- highlight.ts: the tokenizer's states
@@ -291,14 +298,12 @@ check("box-file-bad-refused-even-with-env", !!boxClass("timing", "fast\n").error
 check("box-no-file-env", boxClass("build", null).box === "build" && boxClass("timing", null).box === "timing", null);
 check("box-none-refused", !!boxClass(undefined, null).error && !!boxClass("", null).error && !!boxClass("fast", null).error, null);
 
-// ---- boot.ts: the flag
-const DEV = ["dev.sagebrush.space"];   // (the DEV build's hosts, as web/build.ts defines them)
-const on = (host, search, stored) => latexOn(host, new URLSearchParams(search).get("latex") == "1", () => stored, DEV);
-check("flag-dev-url", on("dev.sagebrush.space", "?latex=1", null) && on("dev.sagebrush.space", "", "1"), null);
-check("flag-off-without", !on("dev.sagebrush.space", "", null) && !on("dev.sagebrush.space", "?latex=0", "0"), null);
-check("flag-prod-never", !on("sagebrush.space", "?latex=1", "1"), null);
-check("flag-lookalike-hosts", !on("x.dev.sagebrush.space", "?latex=1", "1") && !on("dev.sagebrush.space.evil", "?latex=1", "1"), null);
-check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space", "127.0.0.1"]) && !latexOn("127.0.0.1", true, () => null, ["dev.sagebrush.space"]), null);
+// ---- boot.ts: on by default, on the hosts that serve the editor (William, Nov 2: no flag)
+const SITE = ["sagebrush.space", "dev.sagebrush.space"];   // (the site build's hosts, as web/build.ts defines them)
+check("on-site-hosts", latexOn("sagebrush.space", SITE) && latexOn("dev.sagebrush.space", SITE), null);
+check("off-elsewhere", !latexOn("127.0.0.1", SITE) && !latexOn("localhost", SITE) && !latexOn("tauri.localhost", SITE), null);
+check("off-lookalike-hosts", !latexOn("x.dev.sagebrush.space", SITE) && !latexOn("dev.sagebrush.space.evil", SITE) && !latexOn("sagebrush.space.evil", SITE), null);
+check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) && !latexOn("127.0.0.1", SITE), null);
 
 // ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
@@ -309,7 +314,7 @@ check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["d
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
   const want = {
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
-    sagetex: ["In this preview", "not connected"], pythontex: ["In this preview", "is not supported in this preview: not run"],
+    sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "is not supported in this preview: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
     tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
@@ -367,6 +372,28 @@ check("flag-test-hosts-only-in-list", latexOn("127.0.0.1", true, () => null, ["d
   const b = g.load(); check("gate-stale-load-not-loaded", !g.loaded(a) && g.loaded(b) && g.canSend(), null);
   const t = g.token(); g.edit();
   check("gate-reply-other-revision", g.accept({ doc: t.doc, rev: t.rev }).patch && !g.accept({ doc: t.doc, rev: t.rev }).current && !g.accept({ doc: a.doc, rev: a.rev }).patch, null);
+}
+
+// ---- our stylesheets never style KaTeX's own classes (William, Nov 2: $n \neq 0$ with its slash below the "="; the
+// preview's .rlap rule, for LaTeX's \rlap, also matched the .rlap KaTeX builds \not from): the classes the real KaTeX
+// emits for math touching its boxes, against every class the preview's, the print and the standalone CSS select
+{
+  const { default: katex } = await import("katex");
+  const { PAGE_CSS } = await import("./style.ts");
+  const { readFileSync } = await import("node:fs");
+  const literal = (file, name) => readFileSync(new URL(file, import.meta.url), "utf8").match(new RegExp("const " + name + " = `([^`]*)`"))?.[1] ?? "";
+  const css = [PAGE_CSS, literal("./page.ts", "PRINT_CSS"), literal("../../src/latex-cli.ts", "STANDALONE_CSS")];
+  const math = String.raw`a \neq b \not\in \notin \not= \not\subset \nleq \ne \boxed{x} \fbox{y} \cancel{x} \sout{x} \xrightarrow{a} \overbrace{ab}^c \sqrt[3]{x} \frac12 \binom{a}{b} \left(\frac ab\right) \widehat{xy} \vec v \overline{x} \colorbox{red}{x} \fcolorbox{red}{blue}{x} \mathbb{R} \text{hi} \operatorname{sp} \sum_{i=1}^n \int_0^1 \rlap{x} \llap{y} \mathrlap{z} \clap{z} \phantom{x} \smash{y} \raisebox{2pt}{x} \rule{1em}{1pt} \tag{1} \begin{matrix}a&b\\c&d\end{matrix} \begin{array}{|c|}a\\\hline b\end{array} \begin{cases}a\\b\end{cases} \begin{aligned}a&=b\\&=c\end{aligned} \stackrel{a}{=} \hspace{1em} \quad`;
+  const emitted = new Set();
+  for (const displayMode of [false, true]) for (const m of katex.renderToString(math, { displayMode, throwOnError: false, strict: false }).matchAll(/class="([^"]*)"/g)) for (const c of m[1].split(/\s+/)) if (c) emitted.add(c);
+  const selected = new Set(css.flatMap((s) => [...s.replace(/\{[^}]*\}/g, "{}").matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1])));
+  // (the wrappers on purpose: .katex's size and color, .katex-display's margins, .katex-error's color)
+  const allowed = new Set(["katex", "katex-display", "katex-error"]);
+  const clash = [...emitted].filter((c) => selected.has(c) && !allowed.has(c));
+  check("css-not-katex-classes", emitted.has("rlap") && emitted.has("fbox") && selected.has("tex-rlap") && clash.length === 0, { clash, emitted: emitted.size });
+  // (and the renderer's own boxes use the prefixed classes)
+  const h = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\rlap{a}\\llap{b}\\fbox{c}\\framebox[2cm]{d}\n\\end{document}\n").chunks.join("");
+  check("tex-boxes-prefixed", /class="tex-rlap"/.test(h) && /class="tex-llap"/.test(h) && /class="tex-fbox"/.test(h) && !/class="(fbox|rlap|llap)[ "]/.test(h), h.slice(0, 600));
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

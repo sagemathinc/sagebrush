@@ -10,6 +10,7 @@ import { migrationState, type MigrationState } from "./migrator";
 import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { TRASH, nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+import { restoreServerVersion, serverVersionBytes, serverVersions } from "./server-versions";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -266,6 +267,7 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
   el.replaceChildren(h("h3", { textContent: list.length ? `Earlier versions (${list.length})` : "Earlier versions" }));
   if (!list.length) {
     el.append(h("p", { className: "note", textContent: "None yet: when this file is written over, what it had is kept here." }));
+    void drawServerVersions(w, e, el, host, close);
     return;
   }
   // (newest first; each by its id, which stays its own while older ones are dropped)
@@ -302,6 +304,38 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
     }, "danger");
     el.append(h("div", { style: "margin-top:8px" }, del));
   }
+  void drawServerVersions(w, e, el, host, close);
+}
+
+/** The server's versions of a synced data file (version-history note r1), below the device's own: each with Download
+ * and Restore; the file's own bytes now aren't listed.  Nothing where the server can't say (sync off, offline). */
+async function drawServerVersions(w: Workspace, e: Entry, el: HTMLElement, host: PreviewHost, close: () => void) {
+  if (NO_SYNC) return;
+  const list = (await serverVersions(e))?.filter((v) => v.sha256 !== e.sha256);
+  if (!list?.length || !el.isConnected) return;
+  const name = nameOf(e.path);
+  const box = h("div", { className: "server-versions" }, h("h3", { textContent: `On the server (${list.length})` }));
+  for (const v of list) {
+    const r = h("div", { className: "vr" }, h("span", { textContent: `${fmtTime(v.t)} · ${who(v.by)} · ${fmtSize(v.size)}` }));
+    r.dataset.sha256 = v.sha256;
+    r.append(
+      button("Download", async () => {
+        try { downloadBytes(await serverVersionBytes(v), `${splitExt(name)[0]} (${new Date(v.t).toISOString().slice(0, 16).replace(":", "-")})${splitExt(name)[1]}`); } catch (err) { host.say(`That version couldn't be downloaded: ${(err as Error).message}`); }
+      }),
+      button("Restore", async () => {
+        try {
+          await restoreServerVersion(w, e, v);
+          host.say(`"${name}" restored to the server's version of ${fmtTime(v.t)}`);
+          close();
+        } catch (err) {
+          if (err instanceof WorkspaceError) stale(err, name, host, close);
+          else host.say(`"${name}" wasn't restored: ${(err as Error).message}`);
+        }
+      }),
+    );
+    box.append(r);
+  }
+  el.append(box);
 }
 
 /** "Delete older versions in this folder" (§2.5): what it frees said and confirmed; only a person. */
@@ -358,6 +392,27 @@ export async function estimate(): Promise<{ usage: number; quota: number } | und
   } catch { return undefined; }
 }
 export const fmtBytes = fmtSize;
+
+/** The push proxy's address when "Push to GitHub" is offered here (DEV, or a page on this machine, with the flag), or null. */
+export function gitpushProxy(): string | null {
+  try {
+    if (!/^(dev\.sagebrush\.space|127\.0\.0\.1|localhost)$/.test(location.hostname)) return null;
+    const v = localStorage.getItem("sagebrush.gitpush");
+    return v && /^(https:\/\/[a-z0-9.-]+|http:\/\/127\.0\.0\.1:\d+)$/.test(v) ? v : null;
+  } catch { return null; }
+}
+
+/** "Push to GitHub"'s automatic push (Stage A MVP M3), started by the page once its workspace is open: with the flag,
+ * its chunk loaded a little after the page starts, pushing every 10 minutes when something changed; without it, nothing. */
+export function startGitpushAuto(w: Workspace, url: (file: string) => string): void {
+  const proxy = gitpushProxy();
+  if (!proxy) return;
+  const delay = (globalThis as any).__SB_GITPUSH_TEST__?.autoDelayMs ?? 20_000;
+  setTimeout(() => {
+    import(url("sagebrush-gitpush-panel.js")).then((m) => m.startAuto(w, { say() {}, fail() {}, workerUrl: url("sagebrush-gitpush-worker.js"), proxy, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }))
+      .catch((e) => console.warn("Push to GitHub:", e));
+  }, delay);
+}
 
 /** The Storage panel (§6.3). */
 export async function openStorage(w: Workspace, host: StorageHost): Promise<void> {
@@ -422,7 +477,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       keep.append(ask);
     }
     body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
-    body.append(exportBox, syncBox);
+    body.append(exportBox, gitBox, syncBox);
   };
   // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
   const exportBox = h("div", { className: "export" });
@@ -454,6 +509,18 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     const go = button("Export all current files (.zip)", () => void start());
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
     void stamp();
+  }
+  // ("Push to GitHub", Stage A MVP r1, DEV only: offered only on DEV or a local page, in a browser whose flag
+  // (localStorage "sagebrush.gitpush") names the push proxy; its flow is the lazy chunk's, web/gitpush)
+  const gitBox = h("div", { className: "export" });
+  const proxy = gitpushProxy();
+  if (host.exportUrl && proxy) {
+    gitBox.append(button("Push to GitHub…", async () => {
+      try {
+        const m = await import(host.exportUrl!("sagebrush-gitpush-panel.js"));
+        await m.openGitpush(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-gitpush-worker.js"), proxy, saveOpen: host.saveOpen, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }, gitBox);
+      } catch (err) { host.fail(err); }
+    }));
   }
   // (sync, step 5: its own section, drawn by its own poll, ended with the panel)
   const syncBox = h("div");
