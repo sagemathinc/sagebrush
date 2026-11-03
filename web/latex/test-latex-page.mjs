@@ -893,6 +893,21 @@ try {
   check(ph.includes('[image: nowhere.png: not found in "img/", "img/figs/"]') && ph.includes("[image: ../../../up.png: above the workspace's top folder]")
     && ph.includes("[image: /nope.png: not found in the top folder (a leading / is the workspace's top folder)]"), "…missing everywhere: the folders searched (a leading /: the workspace's top); above the top folder: refused, with its reason", ph);
 
+  // ---- \input and \include (William's L4, Nov 2: silently ignored, which broke his shared macros file): a macros file
+  // in another folder (../), its macros applied; \include's text shown; a missing file a gray tag naming where it was
+  // looked for; the macros file changed elsewhere (another tab, an agent): the preview shows the new macro
+  {
+    await mk("/shared/macros.tex", enc("\\newcommand{\\greet}{Hello from the macros file}\n"));
+    await mk("/paper/part.tex", enc("Included part text.\n"));
+    const fp = await mk("/paper/main.tex", enc("\\documentclass{article}\n\\input{../shared/macros}\n\\begin{document}\n\\greet.\n\\include{part}\n\\input{missing}\n\\end{document}\n"));
+    await open(fp);
+    const shown = await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello from the macros file") && document.querySelector(".tex-preview").textContent.includes("Included part text.")`, 15000);
+    check(shown, "\\input{../shared/macros}: its macro applied; \\include{part}: its text shown", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+    check(await until(`document.querySelector(".tex-preview").textContent.includes('[input: missing: not found in "paper/"]')`, 15000), "a missing \\input: a gray tag naming where it was looked for", await ev(`[...document.querySelectorAll(".tex-preview .errchip")].map((e) => e.textContent)`));
+    await ev(`${W}.write("/shared/macros.tex", new TextEncoder().encode("\\\\newcommand{\\\\greet}{Changed elsewhere}\\n")).then(() => 1)`);
+    check(await until(`document.querySelector(".tex-preview").textContent.includes("Changed elsewhere.")`, 15000), "the macros file changed elsewhere: the preview shows the new macro", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 200)`));
+  }
+
   // ---- images under overlapping renders (astra3 i1c01 A3-1): the first image read held (the test build's hook),
   // then an edit makes a second current render, which asks for the same names again; released, each name is read
   // once and kept once, and the count bound (64) holds: 66 names, one of them twice, give 64 blobs and 2 refusals

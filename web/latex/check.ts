@@ -36,7 +36,7 @@ const MESSAGES: Record<string, (name: string) => string> = {
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
 };
-const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion"]);
+const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion", "input"]);
 
 /** The first line naming an image (a missing one has no position of its own). */
 function lineFind(text: string, name: string): number | null {
@@ -50,6 +50,8 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   if (r.outcome !== "ok") problems.push({ severity: "error", kind: "expansion", name: String(r.outcome), line: null, message: `expansion stopped (${r.outcome}): the preview shows the document only up to that point` });
   for (const p of r.problems) {
     const m = MESSAGES[p.kind];
+    // (an \input or \include not read: where it was looked for, the renderer's reason)
+    if (p.kind === "input") { problems.push({ severity: "error", kind: "input", name: p.name, line: lineFind(text, p.name) ?? lineOf(text, p.at), message: `\\input{${p.name}}: ${(p as any).why || "not found"}` }); continue; }
     problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
   }
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
