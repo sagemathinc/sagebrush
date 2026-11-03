@@ -213,8 +213,8 @@ disk raises there, where CPython's small buffered write reports it only when
 the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
-- **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console running in the page, and nothing is sent to a server. See
+- **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook running
+  in the page, and nothing is sent to a server. See
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.

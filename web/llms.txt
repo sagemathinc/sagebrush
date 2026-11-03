@@ -16,7 +16,7 @@ Sagebrush notebooks are **reactive, but they are not marimo**: in Python and Sag
 
 ## Using the page
 
-- Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
+- Cells run in a Web Worker in the visitor's browser; variables persist between cells.
 - Cells are code or Markdown (text with headings, lists, tables, links, images and LaTeX math `$...$`/`$$...$$`, rendered with KaTeX), as in Jupyter; the WebMCP tool `add_markdown` adds one.
 - Notebooks and their output are saved in the browser (IndexedDB) as you work; File opens, duplicates, deletes, downloads and uploads `.ipynb` (and `.py`). Python's `open()`, `os.listdir` etc. work on files kept in the browser; the Files panel uploads, downloads and deletes them.
 - A notebook can be put in the URL, as File > Share does: `/#z=<base64url of the raw-deflated JSON array of cells>`, each cell a string of code or `{"md": "<Markdown>"}`; `/#c=<base64url of the JSON, not deflated>` works too. Add `m=sage&`, `m=magma&` or `m=matlab&` before `z=` or `c=` for that language (Python otherwise), and `?run` before the `#` to run all cells on load: `/?run#m=sage&z=...`. In Python, `z` is `base64.urlsafe_b64encode(c.compress(data) + c.flush()).rstrip(b"=")` with `c = zlib.compressobj(9, zlib.DEFLATED, -15)` and `data = json.dumps(cells).encode()`.

@@ -1030,6 +1030,18 @@ try {
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
   const newTex = made && await ev(`${W}.stat("/Untitled (3).tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
   check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled (3).tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX document: /Untitled (3).tex (the phone checks made the first two) made, with a short document, and opened in the editor", newTex);
+  // (the board page's File ▸ New, the same order (U0), and its LaTeX document: made at the top of the files and opened
+  // in the editor, the notebook page's /?tex=<fid>)
+  const untitled = `${W}.list("/").then((l) => l.filter((e) => /^\\/Untitled( \\(\\d+\\))?\\.tex$/.test(e.path)).map((e) => e.fid))`;
+  const texBefore = await ev(untitled);
+  await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
+  await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('[data-sbb=filemenu] [data-group=new]')`, 60000);
+  const boardNew = await ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=new]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
+  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, Board, LaTeX document, Folder, From an example…", boardNew);
+  await mark(); await ev(`(document.querySelector('[data-sbb=newlatex]').click(), true)`);
+  const boardTex = await fresh(`location.pathname === "/" && /[?&]tex=/.test(location.search) && !!document.querySelector(".tex-page .tex-src") && !!${W}`, 60000).catch(() => false);
+  const texAfter = boardTex ? await ev(untitled) : [], opened = await ev(`new URLSearchParams(location.search).get("tex")`);
+  check(boardTex && texAfter.length === texBefore.length + 1 && texAfter.includes(opened) && !texBefore.includes(opened), "U0: the board's New ▸ LaTeX document: a new Untitled .tex made at the top of the files and opened in the editor", { texBefore, texAfter, opened });
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
   const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
   const fu = await mk("/t/ux.tex", enc(UXDOC));
