@@ -10,13 +10,16 @@
 //   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
-const LATEX = process.env.AGENTS_LATEX === "1";
+// (the build's own answer: the LaTeX editor is on by default (web/build.ts), so whether this web/dist has it, not the
+// variable alone, decides which LaTeX checks apply; AGENTS_LATEX=1 then insists that it has it)
+const LATEX = existsSync(join(here, "..", "dist", "sagebrush-latex.js"));
+if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 but this web/dist has no sagebrush-latex.js");
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 const want = (s) => !ONLY || ONLY.has(s);
 let failures = 0;
