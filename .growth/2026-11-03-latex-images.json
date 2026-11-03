@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "LaTeX images found as TeX finds them (L2, #540): cli/pyjs.cjs embeds web/llms.txt, whose LaTeX section now says how \\includegraphics finds a file (relative to the .tex's folder, ../, \\graphicspath, never above the workspace's top folder; check names the folders searched). The resolver itself is in the lazily loaded sagebrush-latex.cjs and the page. +80 in CI's size-gate on 90f227d1 (run 41587381229).",
+ "bytes": {
+  "cli/pyjs.cjs": 96
+ }
+}
