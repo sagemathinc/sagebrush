@@ -1,3 +1,4 @@
+// ci: checks.1 order=20
 // Signals and the interactive prompt (the launcher runs it on its main
 // thread, where a signal handler runs only when the thread is idle).  While
 // the prompt waits for input, SIGTERM and SIGHUP remove its figures and end

@@ -1,3 +1,4 @@
+// ci: web-lookalike order=10 chrome
 // The Storage panel's lookalike report (plan L2b, lookalike-plan-l2b PLAN-r2 + PLAN-r3): api.ts lookalikeGroups reads
 // the entries' byNfc index by VALUES in fixed pages of 500 (no key getter), each full page's trailing group by
 // count() and a value cursor advanced past its rows in hand.  In headless Chromium against the built site, on each

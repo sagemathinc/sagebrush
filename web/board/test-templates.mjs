@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=10
 // Templates (mount.ts, doc.ts templateOf and lookOf): a page made from a
 // template page shows the template's card, background and items under its
 // own; they are not its to edit (not picked, not selected); a change to the

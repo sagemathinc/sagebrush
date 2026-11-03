@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs)
 // The GPU kernel's preview (remote-ui.js): its simulated gateway, whose runs
 // execute on a local interpreter (here a stub Kernel that records what it is
 // asked), and startPreview's kernel.  Run by test-remote-kernel.mjs (CI's

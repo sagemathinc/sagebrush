@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=70 runner=bun
 // The board's palette (plan-board-dark r2 §2, step 1): every color board.css
 // and the canvas use is one of the custom properties board.css defines on
 // :where(.sbb, .sbb-layer, #board-print), the canvas's with palette.ts's LIGHT values

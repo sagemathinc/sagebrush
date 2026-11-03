@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=80
 // The block Markdown editor (web/board/blocks.ts), as a note's text is
 // written in place on a board, with the keyboard in headless Chromium: the
 // text is blocks, each shown rendered until it is clicked, then its own

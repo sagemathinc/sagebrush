@@ -1,3 +1,4 @@
+// ci: web-browser/terminal.4 order=10 runner=bun
 // The Terminal in the desktop and Android apps (William, Oct 30): the app's page, app/dist from
 // app/build-frontend.mjs, served as the app serves it (app/serve-app.py: lib.rs's headers, the shell worker's CSP
 // included), in headless Chromium with window.__TAURI__ before the page's scripts, as the app's web view has it.

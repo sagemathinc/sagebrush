@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=40
 // input() on the full page in headless Chromium: the run asks for a line, a
 // field under the cell takes it (typed, then Enter), and the prompt with the
 // line is the cell's output, as in Jupyter; several in one cell; a Stop while

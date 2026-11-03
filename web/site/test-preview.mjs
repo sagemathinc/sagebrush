@@ -1,3 +1,4 @@
+// ci: web-sync.4 order=10 runner=bun
 // A shared collection's page with its link preview (web/site/src/preview.ts,
 // share-ux-plan r2 §6.3-6.5), against the real web/share-client/view.html
 // served by a stand-in for the site's assets (an ETag, a CSP, 304s), and a

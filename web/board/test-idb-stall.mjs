@@ -1,3 +1,4 @@
+// ci: web-runner order=570 chrome
 // A board's code runs even when its outputs' cache never answers: an
 // IndexedDB open of "sagebrush-outputs" queued, for good, behind another
 // page's upgrade that waits on a connection never closed.  That is what kept

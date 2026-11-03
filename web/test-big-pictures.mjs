@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=120
 // Pictures whose headers say they are huge (image-size.ts) in headless Chrome:
 // a notebook output over the bounds shows a placeholder ("Show it" shows it),
 // is saved as it was, and a document's pictures stop at 80 MP in all; a

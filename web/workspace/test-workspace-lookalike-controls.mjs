@@ -1,3 +1,4 @@
+// ci: lookalike-controls order=10 chrome
 // The lookalike report's controls (plan L2; grader's L2-a/b/c, astra's L-4 declaration): each rule undone in
 // web/workspace/api.ts (a fixed text substitution, asserted to happen once), the site built, then
 // test-workspace-lookalike.mjs runs the fixtures that cover the rule; exactly the declared checks must FAIL, at least

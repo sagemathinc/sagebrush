@@ -1,3 +1,4 @@
+// ci: export-controls order=10 chrome -- --ci
 // "Export all current files (.zip)" at scale (export plan E1 r2d §6-§7, test 8), in headless Chromium against the built
 // site.  Each context is a fresh browser profile with 100,000 entries (folders, written straight into the workspace's
 // entries store in a few transactions: what is measured is the export's metadata path, the enumeration, the spool,

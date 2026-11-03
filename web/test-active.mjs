@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // First-party active-user counting, the browser side (active-users plan r2 §5, r3 §F/§G, r4, r4b; country r2 adds
 // nothing client-side).  Run with bun:   bun web/test-active.mjs            (after bun web/build.ts)
 //   ACTIVE_CONTROL=K-25 bun web/test-active.mjs     the tests, then that control only;  =none: the tests only

@@ -1,3 +1,4 @@
+// ci: checks.3 order=60
 // The Support entry (William, Oct 31): the notebook page's ⋯ menu has one plain link to CoCalc's support form, in a new
 // tab. It adds no query, fragment or page data, and rel withholds the opener and the referrer. No script. It and
 // "How cells run" tell a screen reader they open in a new tab.

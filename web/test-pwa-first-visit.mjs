@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=30 chrome
 // A first visit, offline afterwards (web/sw.js): the library's chunks the
 // page fetched before the service worker controlled it are kept, once it
 // does (the page tells it which: web/notebook/worker-kernel.js), so the

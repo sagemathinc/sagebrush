@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=70 runner=bun chrome
 // astra's probes on sync-ops 9c224981 (CORR-9C2-1: the bytes hashed are the bytes kept, whatever the caller
 // does with its buffer meanwhile; CORR-9C2-2: a data file written before its hash was kept, moved, has its
 // op carry the hash), with their cases in astra-sync-ops-cases.js:

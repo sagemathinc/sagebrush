@@ -1,3 +1,4 @@
+// ci: checks.3 order=20
 // The bundle's own workers, started through the launcher (the npm package's
 // command): board check's interpreter, the notebook's sessions and the
 // Jupyter kernel each start require.main's file, which is the launcher, in a

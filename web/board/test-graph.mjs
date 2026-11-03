@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=60 runner=bun
 // A graph layout of several parts (doc.ts graph(); friction 5): two dozen
 // items, a few of them linked, are not one long row: each linked part is
 // laid out on its own, the items with no edges as a grid, the parts packed

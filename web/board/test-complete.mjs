@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=110 runner=bun
 // A code item's Tab completions as the board takes them from its
 // interpreter (code.ts admitCompletion): within COMPLETION_LIMITS and the
 // contract (a prefix that ends the code before the caret, names that each

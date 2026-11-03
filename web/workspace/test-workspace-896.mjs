@@ -1,3 +1,4 @@
+// ci: web-runner order=320 runner=bun chrome
 // astra's probes on 89685b0c (CORR-C05-2's array length and serialization hook, CORR-896-1), from
 // /scratch/astra-detect-896/web/workspace/astra-896-probes.mjs, with history-chain cases of mine after hers in
 // astra-896-cases.js:  CHROME=google-chrome bun web/workspace/test-workspace-896.mjs

@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=140 runner=bun
 // A pen stroke's outline (ink.ts): a closed shape around the line, as wide
 // as the pen (wider where it pressed harder; thinner where a mouse moved
 // faster), smoother than a shaky hand, round at a sharp turn and at its ends

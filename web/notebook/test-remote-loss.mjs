@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/notebook/test-remote-kernel.mjs)
 // The loss cascade (plan r8, C1): 20 independent cells Run at once over a seeded lossy link, in each mode (waves,
 // and cell by cell).  A lost reply loses the whole answer (the gateway did the work); a lost stream chunk breaks
 // the stream.  Every decision is the seed's LCG, in the order the messages arrive: no timers, no Math.random.

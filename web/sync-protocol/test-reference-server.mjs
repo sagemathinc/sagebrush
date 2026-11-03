@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=100 runner=bun
 // The open reference server (reference-server.ts) against the protocol it
 // models: slice 1's account socket, and slice 2's claims and fences
 // (plan-sync-slice2-r9.md §5.8's shared vectors), batches with recv and chain

@@ -1,3 +1,4 @@
+// ci: checks.1 order=10
 // Ctrl-C in a program the CLI runs (the launcher, build/cli/pyjs, runs it in
 // a worker thread): SIGINT raises KeyboardInterrupt inside it, so `except
 // KeyboardInterrupt` and `finally` run; an uncaught one prints CPython's
