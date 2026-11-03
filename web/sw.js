@@ -851,7 +851,17 @@ self.addEventListener("message", (ev) => {
 let stopAt = null, resume = null;
 const instance = Math.random().toString(36).slice(2, 8), started = Date.now(), saw = [];
 for (const e of ["install", "activate"]) self.addEventListener(e, () => saw.push(e + "@" + Date.now()));
-let putting = 0;
+// (skipping: the keys whose mark hasn't run out; sw.js drops a mark only when the key is next read, so an expired one
+// can stay in the map: CI run 41627015378, a three-at-once phase's read-back marked the key with nobody reading it after)
+let putting = 0, serialBusy = 0;
+// (the offline queue's pending tasks, e.g. a put's read-back (fetchAndKeep, offlineKeep): wrapped here, counted)
+const offlineSerial0 = offlineSerial;
+offlineSerial = (f) => {
+  serialBusy++;
+  const p = offlineSerial0(f);
+  p.finally(() => serialBusy--).catch(() => {});
+  return p;
+};
 const holds = [], grants = [], deletes = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
 reserve = (n, serve) => reserve0(n, serve).then((release) => (grants.push(serve ? "serve" : "bg"), release));
 caches.open = async (name) => { const c = await open(name); cacheNames.set(c, name); return c; };
@@ -908,7 +918,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: skipRead.size, putting, deletes });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>

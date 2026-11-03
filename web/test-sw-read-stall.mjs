@@ -82,16 +82,19 @@ try {
   // (T565-QUIESCE, grader: the service worker idle: no reservation held or waited for, no check running or queued, no
   // key marked, no put in flight (a request's copy is put, then read back, in the background), three polls in a row;
   // every phase starts from here, so what it snapshots or holds is its own)
-  const quiesce = async () => {
+  // (settled: the background work done, a key's mark aside; idle: settled and no key marked)
+  const counters = (h) => J({ budgetUsed: h?.budgetUsed, waiting: h?.waiting, checking: h?.checking, putting: h?.putting, serialBusy: h?.serialBusy, skipping: h?.skipping });
+  const calmUntil = async (marks) => {
     let calm = 0, last;
     for (let i = 0; i < 150 && calm < 3; i++) {
       last = await hook();
-      calm = last && last.budgetUsed === 0 && last.waiting === 0 && last.checking === 0 && last.skipping === 0 && last.putting === 0 ? calm + 1 : 0;
+      calm = last && last.budgetUsed === 0 && last.waiting === 0 && last.checking === 0 && last.putting === 0 && last.serialBusy === 0 && (marks || last.skipping === 0) ? calm + 1 : 0;
       if (calm < 3) await sleep(100);
     }
-    if (calm < 3) throw new Error("the service worker never went idle: " + J(last));
+    if (calm < 3) throw new Error(`the service worker never went ${marks ? "settled" : "idle"}: ${counters(last)}`);
     return last;
   };
+  const quiesce = () => calmUntil(false), settle = () => calmUntil(true);
   // (the chunk fetched by the page, through its service worker, within `ms`: its size and SHA-256, or a timeout)
   const get = (ms) => ev(`new Promise((resolve) => {
     const t0 = performance.now(), t = setTimeout(() => resolve({ timeout: true, ms: performance.now() - t0 }), ${ms});
@@ -131,6 +134,9 @@ try {
   ok(fixed.r.size === want.size && fixed.r.sha256 === want.sha256, "…and the request is answered, the right bytes: " + J(fixed.r));
   ok(fixed.network === 1, "…from the network: the server served it once more: " + fixed.network);
   ok(fixed.r.ms >= 900 && fixed.r.ms < 8000, `…after the bound (1 s at scale 0.1), not before and not much after: ${Math.round(fixed.r.ms)} ms`);
+  // (the network's copy, once put, ends the key's mark at once, well inside STALL_SKIP_MS: the kept copy is read again)
+  const settled = await settle();
+  ok(settled.skipping === 0, "…and once the network's copy is put, the key isn't marked any more: " + counters(settled));
   // (T565-RELEASE, grader: the stalled read's reservation released, so stalls can't drain the budget into reserve())
   const after = await until(async () => (await hook())?.budgetUsed === fixed.budget, 3000);
   ok(after, `…its reservation released: the budget back to ${fixed.budget} B (now ${(await hook())?.budgetUsed} B)`);
