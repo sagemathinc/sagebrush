@@ -30,7 +30,8 @@ export function createPermissions() {
       if (perm !== "files" || !doc) return false;
       const set = explicit()[doc];
       if (set && typeof set.files === "boolean") return set.files;
-      const how = made.get(doc) ?? (read(HOST_MADE, []).includes(doc) ? "host" : undefined);
+      // (the page's own record of its bundled examples first: a reopen finds the workspace entry's "elsewhere" there)
+      const how = read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc);
       return how === "person" || how === "host";
     },
     /** The person's own choice for `doc` (the page's handlers, only for an isTrusted click): kept, and told. */
@@ -48,7 +49,7 @@ export function createPermissions() {
     /** The record, read-only (the tests', and U11's adapter's): what it decides for `doc` now. */
     record(doc) {
       const set = explicit()[doc] ?? null;
-      return { doc, provenance: made.get(doc) ?? "unknown", explicit: set, files: this.may(doc, "files"), network: false };
+      return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", explicit: set, files: this.may(doc, "files"), network: false };
     },
   };
 }
