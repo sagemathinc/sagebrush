@@ -50,6 +50,14 @@ function guardRunaway(name, fn) {
 }
 let POS_EPOCH = 0;
 export function setPosEpoch(n) { POS_EPOCH = n; }
+// \input, \include (William's L4, Nov 2: they were silently ignored): each name given to the host's resolver
+// (setInputResolver: as TeX finds a file, from the .tex's folder, images.ts texCandidates) for a key of the files
+// snapshot, or why there is none; read from the snapshot, never fetched here. Each \input marks {k:"inref", name} (the
+// host gathers the files to read from them) and, when nothing is read, a visible note {k:"err", code:"input"}: a
+// file not found or refused, or nested deeper than INPUT_NEST (a cycle)
+let INPUT_RESOLVE = null;
+export function setInputResolver(f) { INPUT_RESOLVE = f; }
+const INPUT_NEST = 16;
 
 export class Machine extends CoreMachine {
   constructor(opts) {
@@ -84,6 +92,20 @@ export class Machine extends CoreMachine {
     if (f.path !== this.mainPath) return;
     const ls = f.lineStart ?? 0;
     if (ls > this.posFrontier) { this.posFrontier = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+  }
+  doInput(name) {
+    name = String(name).trim();
+    this.mark({ k: "inref", name });
+    let r;
+    if (INPUT_RESOLVE) r = INPUT_RESOLVE(name);
+    else { const k = [this.mainDir + name + ".tex", this.mainDir + name].find((c) => this.files.has(c)); r = k ? { key: k } : { why: "not found" }; }
+    const miss = (why) => this.mark({ k: "err", code: "input", name, text: why });
+    if (!r || !r.key) return miss(r?.why || "not found");
+    if (!this.files.has(r.key)) return miss(r.why || "not read yet");
+    const open = this.stack.filter((f) => f.kind === "file");
+    // (a file may \input itself, guarded by a conditional, as TeX allows; one that never stops is a cycle, stopped here)
+    if (open.length > INPUT_NEST) return miss(open.some((f) => f.path === r.key) ? "an \\input cycle: stopped " + INPUT_NEST + " deep" : "nested more than " + INPUT_NEST + " deep");
+    this.openFile(r.key);
   }
   // push "{s}" back as an argument, for a core primitive that reads it again
   pushArg(s) {

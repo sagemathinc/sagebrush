@@ -25,6 +25,11 @@ export type EditorOpts = {
   // the image names: the same object is sent with every request; a host that resolves them fills it and calls request()
   images?: Record<string, string | { why: string }>;
   onImageRefs?(refs: string[], tok: Token): void;
+  // the files \input and \include read (inputs.ts): the host fills `known` (by workspace path), bumps `version` and
+  // calls request(); they are sent again only when the version changed (or to a new worker), and the names the
+  // document asked for come back to onInputRefs
+  inputs?: { docPath: string; known: Map<string, unknown>; version: number };
+  onInputRefs?(refs: string[], tok: Token): void;
   // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
   // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
   sage?: { wrapper: string | null; saved: unknown[] };
@@ -73,8 +78,10 @@ export function createEditor(o: EditorOpts) {
   let posTok: Token | null = null;
   const rendered = new Set<() => void>();
   let destroyed = false;
+  let inputsSent = -1;
   const startWorker = () => {
     worker?.terminate();
+    inputsSent = -1;
     worker = new Worker(o.workerUrl, { type: "module", name: "sagebrush-latex" });
     worker.onmessage = (m) => {
       // (the test build only: the page test can hold a reply here; elsewhere this folds away)
@@ -96,7 +103,9 @@ export function createEditor(o: EditorOpts) {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
+    const inputs = o.inputs && o.inputs.version !== inputsSent ? { docPath: o.inputs.docPath, known: [...o.inputs.known], version: o.inputs.version } : undefined;
+    if (o.inputs) inputsSent = o.inputs.version;
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
   };
   // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
   let lastCheck: { text: string; rev: number; check: any } | null = null;
@@ -115,7 +124,7 @@ export function createEditor(o: EditorOpts) {
     if (ok.current) lastCheck = { text: src.value, rev: r.rev as number, check: r.check };
     schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], { doc: r.doc as number, rev: r.rev as number });
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
-    if (ok.current) o.onImageRefs?.(r.imageRefs as string[], gate.token());
+    if (ok.current) { o.onImageRefs?.(r.imageRefs as string[], gate.token()); o.onInputRefs?.((r.inputRefs ?? []) as string[], gate.token()); }
   };
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then

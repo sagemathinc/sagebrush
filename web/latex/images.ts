@@ -41,6 +41,17 @@ export function graphicsPathOf(text: string): string[] {
  * as TeX's may, but never above the workspace's top folder; a leading "/" is that top folder (`root`; William, Nov 2:
  * never the real filesystem's), searched alone, as TeX searches an absolute name; never a URL or a backslash. */
 export function imageCandidates(arg: string, docPath: string, dirs: string[] = [], root = "/"): { ok: true; paths: string[]; searched: string[] } | { ok: false; why: string } {
+  return candidates(arg, docPath, dirs, root, (base) => (IMAGE_EXTS.some((x) => base.toLowerCase().endsWith(x)) ? [base] : [base, ...IMAGE_EXTS.map((x) => base + x)]));
+}
+
+/** The workspace paths an \input or \include argument may name, as TeX tries them (with .tex added first, then as
+ * written; \include{x} reads x.tex), found as images are (imageCandidates: the file's folder, ../, a leading "/";
+ * TeX's \input doesn't search \graphicspath), and the folders searched; or why it names none. */
+export function texCandidates(arg: string, docPath: string, root = "/"): { ok: true; paths: string[]; searched: string[] } | { ok: false; why: string } {
+  return candidates(arg, docPath, [], root, (base) => (base.toLowerCase().endsWith(".tex") ? [base] : [base + ".tex", base]));
+}
+
+function candidates(arg: string, docPath: string, dirs: string[], root: string, names: (base: string) => string[]): { ok: true; paths: string[]; searched: string[] } | { ok: false; why: string } {
   const s = String(arg).trim();
   if (s === "" || s.length > 512) return { ok: false, why: "not a file name" };
   if (/[\u0000-\u001f\u007f]/.test(s)) return { ok: false, why: "not a file name" };
@@ -58,8 +69,7 @@ export function imageCandidates(arg: string, docPath: string, dirs: string[] = [
     if (base === null || base === "/" || paths.includes(base) || (s.startsWith("/") && base !== root && !base.startsWith(root === "/" ? "/" : root + "/"))) continue;
     // (the folder the file would be in: "../x.png" is looked for in the parent)
     if (!searched.includes(parentOf(base))) searched.push(parentOf(base));
-    const lower = base.toLowerCase();
-    paths.push(base, ...(IMAGE_EXTS.some((x) => lower.endsWith(x)) ? [] : IMAGE_EXTS.map((x) => base + x)));
+    paths.push(...names(base));
   }
   if (!paths.length) return { ok: false, why: "above the workspace's top folder" };
   return { ok: true, paths, searched };
