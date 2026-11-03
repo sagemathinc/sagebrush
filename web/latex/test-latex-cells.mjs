@@ -1,4 +1,5 @@
-// ci: none (new with cells.ts: a wiring candidate for the web-latex follow-up, runner=bun, no browser, about 1 s)
+// ci: checks.3 order=107 runner=bun
+// (checks.3 with the other latex suites; no browser and no build output needed, about 1 s)
 // cells.ts (plan L1b r4b §5 step 1): the code items of a .tex found with their exact ranges, and their ids carried
 // through edits by the identity rule, checked against a reference that tracks each character's identity (an old item
 // corresponds to a new one when one of its characters is in it; an id is kept only through a unique one-to-one
@@ -109,6 +110,11 @@ function refRule(oldCells, oldItems, newCells, newItems) {
   check("reopen-unique-moved-keeps", JSON.stringify(re("\\sage{b} \\sage{b} \\sage{a}")) === JSON.stringify(["i2", "i3", "i1"]), re("\\sage{b} \\sage{b} \\sage{a}"));
   check("reopen-group-size-changed-fresh", JSON.stringify(re("\\sage{a} \\sage{b} \\sage{b} \\sage{b}")) === JSON.stringify(["i1", "i4", "i5", "i6"]), re("\\sage{a} \\sage{b} \\sage{b} \\sage{b}"));
   check("reopen-unmatched-fresh", JSON.stringify(re("\\sage{c} \\sage{a}")) === JSON.stringify(["i4", "i1"]), re("\\sage{c} \\sage{a}"));
+  // (grader's T555-DUP-ID: a saved file giving one id to two items, each matched: the first keeps it, the second is
+  //  given a fresh one; one id never names two items)
+  const td = "\\sage{a} \\sage{b}", sd = signatures(scanItems(td), H).map((s) => ({ id: "i1", ...s }));
+  const dup = reopenIds(scanItems(td), sd, H, idSource(sd.map((s) => s.id)));
+  check("reopen-duplicate-saved-id-fresh", JSON.stringify(dup) === JSON.stringify(["i1", "i2"]), dup);
 }
 
 // ---- 5. the results file's identities: v2 only, a malformed item dropped alone, a malformed file none
