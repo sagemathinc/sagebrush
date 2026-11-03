@@ -2,10 +2,12 @@
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
 //   - a middle-click on a file row: a new tab of the editor only for a .tex it takes; otherwise nothing, as before;
-//   - opening by fid, the banner, Save gated on edits, Ctrl/Cmd+S, "Saved" / "No changes to save", cleared by an edit;
-//   - the byte rules: the fixtures saved and read back; mixed endings and NUL open without Save;
-//   - the save target: a rename followed; the file in Trash, refused; another tab's save overwritten (and kept as a
-//     version); beforeunload with unsaved edits;
+//   - opening by fid, the banner; saving as you type (U8, autosave.ts): Saved ✓, Ctrl/Cmd+S at once, no leave prompt
+//     but after a failed write, the choice when the file changed elsewhere (Keep mine, Use theirs, each keeping the
+//     other text as a version), the draft recovered after the page went away with a write in flight;
+//   - the byte rules: the fixtures saved and read back; mixed endings and NUL open read-only;
+//   - the save target: a rename followed; the file in Trash, refused; another tab's save taken in, then mine over it
+//     (kept as a version); leaving right after an edit, no prompt;
 //   - images: one in the folder shown from a blob: URL; one outside refused with its reason; a held read under a
 //     second render: each name read and kept once, within the count bound;
 //   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once;
@@ -84,6 +86,9 @@ const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", 
 // (LATEX_SHOTS=dir: screenshots at a few moments, for a look; nothing is checked from them)
 const shot = async (name) => { if (!process.env.LATEX_SHOTS) return; const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.LATEX_SHOTS, name + ".png"), Buffer.from(r.data, "base64")); };
 const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-status")?.textContent ?? "")`, ms);
+// (the save state, as autosave.ts shows it: "Saved ✓" once every edit is written)
+const savedNow = (ms = 10000) => until(`document.querySelector(".tex-savestate")?.textContent === "Saved ✓"`, ms);
+const saveStateIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-savestate")?.textContent ?? "")`, ms);
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
@@ -195,16 +200,19 @@ try {
     await ev(`(history.back(), true)`);
     const bk = await until(`window.__noReload === true && document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     check(bk, "B2: Back returns to the first file, in place");
-    // ---- (astra B5-A1) Back and Forward with unsaved text ask first, as opening another file does: declined, the
-    // history goes back to the shown file's entry and its text stays; accepted, the other file opens; clean, nothing asked
+    // ---- (astra B5-A1) Back and Forward with text that couldn't be saved ask first, as opening another file does:
+    // declined, the history goes back to the shown file's entry and its text stays; accepted, the other file opens (its
+    // own unsaved draft recovered); with everything saved, nothing asked (U8: edits are saved as you type, so the
+    // question comes only after a write failed: here every write fails while window.__failWrites is set)
     const S = (x) => `(${x})`;
-    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; return true; })()`);
+    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__failWrites = true; return true; })()`);
     const state = S(`{ asked: window.__asked, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value, pages: document.querySelectorAll(".tex-page").length, kept: window.__noReload === true }`);
     await ev(`(history.forward(), true)`);
     const fw0 = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
     const fw0s = await ev(state);
     check(fw0 && fw0s.asked === 0 && fw0s.at === 1 && fw0s.kept, "B5-A1: Forward with nothing unsaved: the next file, nothing asked", fw0s);
     await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% unsaved in B\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await saveStateIs(/^Not saved: test: the write failed/);
     await ev(`(history.back(), true)`); await sleep(1500);
     const db = await ev(state);
     check(db.asked === 1 && db.url === fb && db.at === 1 && db.title === "b.tex" && db.src.includes("% unsaved in B") && db.pages === 1 && db.kept, "B5-A1: Back with unsaved text asks; declined, the file, its URL, its history entry and its text stay", db);
@@ -212,13 +220,17 @@ try {
     const ab = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const abs = await ev(state);
     check(ab && abs.asked === 2 && abs.at === 0 && abs.title === "a.tex" && abs.kept, "B5-A1: Back with unsaved text, accepted: the first file opens", abs);
-    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); history.forward(); return true; })()`); await sleep(1500);
+    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await saveStateIs(/^Not saved: test: the write failed/);
+    await ev(`(history.forward(), true)`); await sleep(1500);
     const df = await ev(state);
     check(df.asked === 3 && df.url === fa && df.at === 0 && df.title === "a.tex" && df.src.includes("% unsaved in A") && df.pages === 1 && df.kept, "B5-A1: Forward with unsaved text asks; declined, the file, its URL, its history entry and its text stay", df);
     await ev(`(window.__answer = true, history.forward(), true)`);
     const af = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
     const afs = await ev(state);
-    check(af && afs.asked === 4 && afs.at === 1 && !afs.src.includes("% unsaved") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, as saved", afs);
+    check(af && afs.asked === 4 && afs.at === 1 && afs.src.includes("% unsaved in B") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, its own unsaved draft recovered (U8)", afs);
+    // (writes work again: B's recovered draft saved, then Back to A: A's draft recovered and saved; nothing asked)
+    await ev(`(window.__failWrites = false, true)`); await ctrlS(); await savedNow();
     await ev(`(history.back(), true)`);
     const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const cbs = await ev(state);
@@ -235,11 +247,13 @@ try {
         const at = () => ({ url: new URLSearchParams(location.search).get("tex"), hash: location.hash, at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length });
         const edit = (m) => { const t = document.querySelector(".tex-src"); t.value += m; t.dispatchEvent(new Event("input")); };
         const out = { nav: typeof window.navigation?.traverseTo === "function" };
+        // (an edit, then its write failed: the one state that asks before leaving)
+        const failed = () => until(() => /^Not saved/.test(document.querySelector(".tex-savestate")?.textContent ?? ""));
         location.hash = "section"; await wait(300);
         out.hash = at();
         window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await until(() => shows("File B here."));
         out.b = at();
-        edit("% unsaved in B\\n");
+        window.__failWrites = true; edit("% unsaved in B\\n"); await failed();
         let before = window.__asked; window.__answer = false;
         history.back(); await wait(1500);
         out.back1 = { asked: window.__asked - before, ...at() };
@@ -249,13 +263,14 @@ try {
         before = window.__asked; window.__answer = true;
         history.go(-2); await until(() => shows("File A here.")); await wait(300);
         out.back2yes = { asked: window.__asked - before, ...at() };
-        edit("% unsaved in A\\n");
+        await wait(300); edit("% unsaved in A\\n"); await failed();
         before = window.__asked; window.__answer = false;
         history.go(2); await wait(1500);
         out.fwd2 = { asked: window.__asked - before, ...at() };
-        // (leave A as saved, at its first entry, for what follows)
+        // (leave A saved, at its first entry, for what follows: writes work again)
         window.__answer = true; history.go(2); await until(() => shows("File B here.")); await wait(300);
         history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        window.__failWrites = false; edit(""); await until(() => document.querySelector(".tex-savestate")?.textContent === "Saved ✓");
         out.end = at();
         if (!${withNav}) delete window.navigation;
         return out; })()`).catch((e) => ({ threw: String(e?.message ?? e).slice(0, 300) })) ?? { threw: "no result: the page's context ended (a reload or a navigation away)" };
@@ -266,7 +281,7 @@ try {
         && r.back2.asked === 1 && r.back2.url === fb && r.back2.hash === "" && r.back2.at === 2 && r.back2.title === "b.tex" && r.back2.src.includes("% unsaved in B")
         && r.back2yes.asked === 1 && r.back2yes.url === fa && r.back2yes.hash === "" && r.back2yes.at === 0 && r.back2yes.title === "a.tex"
         && r.fwd2.asked === 1 && r.fwd2.url === fa && r.fwd2.hash === "" && r.fwd2.at === 0 && r.fwd2.title === "a.tex" && r.fwd2.src.includes("% unsaved in A")
-        && r.end.url === fa && r.end.at === 0 && !r.end.src.includes("% unsaved");
+        && r.end.url === fa && r.end.at === 0;
       check(ok, `B5-R1-A1 (${withNav ? "Navigation API" : "no Navigation API"}): a fragment's entry between; Back one and two steps and Forward two steps, declined, stay on the exact entry shown, its URL and text; accepted, the other file`, r);
     }
     // ---- (astra B5-A2) a mount replaced while it waits stops there: A's read held, B opened and shown, then A's read
@@ -284,14 +299,18 @@ try {
       const shownA = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.");
       release?.(); await wait(2000);
       const out = { held, shownA, title: document.querySelector(".tex-title")?.textContent, doc: document.title, url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, made: made.length, live: made.filter((w) => w.live).length };
+      window.__failWrites = true;
       const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input"));
+      for (let i = 0; i < 50 && !/^Not saved/.test(document.querySelector(".tex-savestate")?.textContent ?? ""); i++) await wait(100);
       const before = window.__asked; window.__answer = false;
       window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await wait(300);
       out.asked = window.__asked - before; out.stays = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.") && document.querySelector(".tex-src").value.includes("% unsaved in A");
       window.Worker = W0;
+      window.__failWrites = false; t.dispatchEvent(new Event("input"));
       return out; })()`);
     check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
-    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    await savedNow();
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); delete window.__sbTexSaveWrite; delete window.__failWrites; true`);
   }
   // ---- comments on a document, end to end (plan latex-comments r4.2 §5): a person comments in the preview and the
   // source; an agent (this test, with the format's core, through the workspace: as the MCP tools will) lists them,
@@ -401,7 +420,7 @@ try {
     const before = C.list(d5, TEX2, { all: true }).threads.find((t) => t.id === t3.id);
     await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("\\\\begin{document}") + 17; t.setRangeText("Inserted line.\\n\\n", i, i, "end"); t.dispatchEvent(new Event("input")); return true; })()`);
     await sleep(800);
-    await ctrlS(); await statusIs(/^Saved$/);
+    await ctrlS(); await savedNow();
     await sleep(1500);
     const TEX3 = await texNow(), after = C.list(await sideDoc(), TEX3, { all: true }).threads.find((t) => t.id === t3.id);
     const a3 = (await sideDoc()).threads.find((t) => t.id === t3.id).anchor.value;
@@ -542,20 +561,25 @@ try {
       await until(`document.querySelectorAll(${BUB}).length === 2`, 20000);
       const side9 = async () => C.parse(new TextDecoder().decode(new Uint8Array(await bytesOf(S9))), {});
       const tex9 = async () => new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/snap.tex")));
-      // (a) an edit above the anchors, saved; while the save's write is held, another edit before them
-      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Alpha"); t.setRangeText("Zero. ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__held = new Promise((r) => (window.__releaseSave = r)); window.__sbTexSaveWrite = () => window.__held; return true; })()`);
+      // (a) an edit above the anchors, written; while that write is held, another edit before them (its own write held
+      // too, so the first write's anchors are seen alone)
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Alpha"); t.setRangeText("Zero. ", i, i, "end"); t.dispatchEvent(new Event("input"));
+        const hold = () => { let r; const p = new Promise((x) => (r = x)); return { p, r }; }; window.__h1 = hold(); window.__h2 = hold(); const q = [window.__h1.p, window.__h2.p];
+        window.__sbTexSaveWrite = () => q.shift(); return true; })()`);
       await ctrlS();
       await sleep(400);
-      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Zero"); t.setRangeText("MORE TEXT ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__releaseSave(); delete window.__sbTexSaveWrite; return true; })()`);
-      await statusIs(/^Saved$/); await sleep(1500);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Zero"); t.setRangeText("MORE TEXT ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__h1.r(); return true; })()`);
+      for (let i = 0; i < 60; i++) { const tx = await tex9(), an = (await side9()).threads.find((t) => t.id === r9a.id)?.anchor.value; if (tx.includes("Zero. Alpha") && an?.textSha === C.sha256(tx)) break; await sleep(100); }
       const saved9 = await tex9(), a9 = (await side9()).threads.find((t) => t.id === r9a.id).anchor.value;
       check(!saved9.includes("MORE TEXT") && saved9.includes("Zero. Alpha") && a9.textSha === C.sha256(saved9) && saved9.slice(a9.start, a9.end) === "Beta words" && a9.quote === "Beta words", "comments: an edit while the save's .tex write is held: the anchors written are the saved text's, each on its own words", { quote: a9.quote, at: saved9.slice(a9.start, a9.end) });
-      // (b) save again (the MORE TEXT edit); the agent reattaches the gamma thread just before the page's anchor write
+      await ev(`(window.__h2.r(), delete window.__sbTexSaveWrite, true)`); await savedNow();
+      // (b) another edit written; the agent reattaches the gamma thread just before the page's anchor write
       const texAt = await ev(`document.querySelector(".tex-src").value`), gi = texAt.indexOf("A last line");
       const cur9 = await side9(), agentDoc = C.reattach(cur9, r9b.id, C.makeAnchor(texAt, gi, gi + 11), { author: "agent:claude" }).doc;
       await ev(`(() => { window.__raced9 = 0; window.__sbTexCommentsWrite = async () => { if (window.__raced9) return; window.__raced9 = 1;
-        const r = await ${W}.read(${J(S9)}); await ${W}.write(${J(S9)}, new TextEncoder().encode(${J(C.serialize(agentDoc))}), { base: r.entry.rev ?? 0 }); }; return true; })()`);
-      await ctrlS(); await statusIs(/^Saved$/); await sleep(2000);
+        const r = await ${W}.read(${J(S9)}); await ${W}.write(${J(S9)}, new TextEncoder().encode(${J(C.serialize(agentDoc))}), { base: r.entry.rev ?? 0 }); };
+        const t = document.querySelector(".tex-src"), i = t.value.indexOf("\\end{document}"); t.setRangeText("% (b)\\n", i, i, "end"); t.dispatchEvent(new Event("input")); return true; })()`);
+      await ctrlS(); await savedNow(); await sleep(2000);
       await ev(`(delete window.__sbTexCommentsWrite, true)`);
       const saved9b = await tex9(), f9 = await side9(), g9 = f9.threads.find((t) => t.id === r9b.id).anchor.value, b9 = f9.threads.find((t) => t.id === r9a.id).anchor.value;
       check(await ev(`window.__raced9`) === 1 && g9.quote === "A last line" && g9.by === undefined && f9.threads.find((t) => t.id === r9b.id).anchor.by === "agent:claude" && b9.textSha === C.sha256(saved9b) && saved9b.slice(b9.start, b9.end) === "Beta words", "comments: an agent's reattachment landing during the page's anchor write survives the retry (the page skips that thread), the other anchor written for the saved text", { g: g9.quote, by: f9.threads.find((t) => t.id === r9b.id).anchor.by, b: saved9b.slice(b9.start, b9.end) });
@@ -789,16 +813,19 @@ try {
   check(await until(`document.querySelector(".tex-preview h2, .tex-preview h1")?.textContent.includes("Hello")`, 20000), "the preview renders the section");
   const cold = { requests: requests.length, bytes: [...sizes.values()].reduce((a, b) => a + b, 0), latex: [...sizes.entries()].filter(([u]) => /sagebrush-latex/.test(u)).reduce((a, [, b]) => a + b, 0) };
   console.log("cold first click (loopback, uncompressed; the gated number is the TIMING protocol's against DEV):", JSON.stringify(cold));
-  check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file.")`), "the banner says save overwrites");
-  check(await page(`P.querySelector(".tex-save").disabled === true && P.querySelector(".tex-dirty").hidden === true`), "Save disabled, nothing unsaved");
+  check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Your edits are saved as you type.")`), "the banner says edits are saved as you type");
+  check(await page(`!P.querySelector(".tex-save") && !P.querySelector(".tex-dirty") && P.querySelector(".tex-savestate").textContent === "Saved ✓"`), "U8: no Save button, no Unsaved changes: Saved ✓");
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
   await ctrlS();
-  check(await statusIs(/No changes to save/), "Ctrl+S on clean text: no write, said");
-  check((await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`)) === rev0, "…and the revision unchanged");
+  check(await savedNow(), "Ctrl+S on clean text: Saved ✓");
+  check((await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`)) === rev0, "…and no write (the revision unchanged)");
+  // (U8) typing is saved without a click: Edited, then Saved ✓ after the debounce, the bytes the text; and the browser's
+  // leave prompt not asked for while a write is merely pending
   await typeInto(DOC.replace("Some text", "Edited text"));
-  check(await page(`P.querySelector(".tex-dirty").hidden === false && P.querySelector(".tex-save").disabled === false`), "an edit: Unsaved changes, Save enabled");
+  const noPrompt = await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`);
+  check(noPrompt, "U8: an edit pending: no leave prompt");
   // (plan r5 §6's marks, for the TIMING harness: an edit's input, request, reply, patch and paint carry its revision;
   // the highlighter's done mark carries its wall and busy ms)
   const marksOk = await until(`(() => { const m = (n) => performance.getEntriesByName(n); const inp = m("tex-input").at(-1); if (!inp) return false; const r = inp.detail.rev;
@@ -806,15 +833,47 @@ try {
       && m("tex-highlight-done").some((e) => e.startTime >= inp.startTime && e.detail.wall >= e.detail.busy && e.detail.busy >= 0)
       && m("tex-mount").length === 1 && m("tex-read-done").length === 1; })()`, 10000);
   check(marksOk, "the §6 marks: an edit's input, request, parse, patch and paint by revision; the highlighter's wall and busy", await ev(`performance.getEntriesByType("mark").map((e) => [e.name, e.detail]).slice(-12)`));
-  await ctrlS();
-  check(await statusIs(/^Saved$/), "Ctrl+S: Saved");
+  check(await savedNow(), "U8: typing is saved by itself: Saved ✓");
   check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "…the bytes written are the text");
-  check(await page(`P.querySelector(".tex-dirty").hidden === true && P.querySelector(".tex-save").disabled === true`), "…and nothing unsaved after");
-  // the next keystroke after "Saved": the old message goes, beside "Unsaved changes" (board i1c01 U2)
+  // (Ctrl+S writes at once, before the debounce)
   await typeInto(DOC.replace("Some text", "Edited again"));
-  check(await page(`P.querySelector(".tex-status").textContent === "" && P.querySelector(".tex-dirty").hidden === false`), "an edit after Saved: the status cleared, Unsaved changes shown", await page(`P.querySelector(".tex-status").textContent`));
+  await ctrlS();
+  check(await savedNow(600) && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited again"))), "Ctrl+S: written at once, Saved ✓");
+  // (a failed write: the one state that keeps the leave prompt; the text stays; written again on the next edit)
+  await ev(`(window.__sbTexSaveWrite = () => { throw new Error("storage full (test)"); }, true)`);
+  await typeInto(DOC.replace("Some text", "Edited, failing"));
+  check(await saveStateIs(/^Not saved: storage full \(test\)/), "U8: a failed write: a persistent Not saved with the reason", await page(`P.querySelector(".tex-savestate").textContent`));
+  const prompt = await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()`);
+  check(prompt, "U8: …and only then the leave prompt");
+  await ev(`(delete window.__sbTexSaveWrite, true)`);
   await typeInto(DOC.replace("Some text", "Edited text"));
-  check(await page(`P.querySelector(".tex-dirty").hidden === true`), "…typed back to the saved text: nothing unsaved");
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "U8: …written on the next edit: Saved ✓");
+  // (U8-CONFLICT-1) changed elsewhere while an edit is pending (its write held): nothing written over it; Keep mine
+  // writes mine over the revision shown, the other text kept as a version
+  const conflictSetup = async (mine, theirs) => {
+    await ev(`(() => { window.__hc = new Promise((r) => (window.__hcr = r)); window.__sbTexSaveWrite = () => window.__hc; return true; })()`);
+    await typeInto(DOC.replace("Some text", mine)); await ctrlS(); await sleep(200);
+    await ev(`${W}.write("/t/doc.tex", new TextEncoder().encode(${JSON.stringify(DOC.replace("Some text", theirs))})).then(() => 1)`);
+    await ev(`(window.__hcr(), delete window.__sbTexSaveWrite, true)`);
+    return until(`!document.querySelector(".tex-conflict").hidden && /changed elsewhere/.test(document.querySelector(".tex-conflict").textContent)`, 10000);
+  };
+  check(await conflictSetup("Mine one", "Theirs one") && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Theirs one"))), "U8: changed elsewhere with an edit pending: the choice shown, nothing written over the other text");
+  await ev(`(document.querySelector(".tex-keepmine").click(), true)`);
+  const versionsHave = (t) => ev(`(async () => { const h = await ${W}.history("/t/doc.tex"); for (let i = 0; i < h.length; i++) { const b = await ${W}.version("/t/doc.tex", i).catch(() => null); if (b && new TextDecoder().decode(b).includes(${JSON.stringify(t)})) return true; } return false; })()`);
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Mine one"))) && await versionsHave("Theirs one") && await page(`P.querySelector(".tex-conflict").hidden`), "U8: Keep mine: mine written, theirs kept in the file's versions");
+  // (U8-CONFLICT-2) Use theirs: mine kept as a version first, then theirs in the editor
+  check(await conflictSetup("Mine two", "Theirs two"), "U8: a second conflict shown");
+  await ev(`(document.querySelector(".tex-usetheirs").click(), true)`);
+  check(await savedNow() && (await ev(`document.querySelector(".tex-src").value`)).includes("Theirs two") && await versionsHave("Mine two") && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Theirs two"))), "U8: Use theirs: mine kept in the file's versions, theirs in the editor");
+  // (U8-DURABLE-1) the page goes away with an edit whose write never lands: on opening again, the exact text recovered
+  // and written
+  await ev(`(window.__sbTexSaveWrite = () => new Promise(() => {}), true)`);
+  await typeInto(DOC.replace("Some text", "Typed just before the tab went away"));
+  await ctrlS(); await sleep(300);
+  await go(base + "?tex=" + fid + "&latex=1");
+  check(await until(`document.querySelector(".tex-src")?.value.includes("Typed just before the tab went away")`, 20000) && await savedNow(15000), "U8: reloaded with a write in flight: the draft recovered into the editor, then saved");
+  check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Typed just before the tab went away"))), "U8: …the file has the recovered text");
+  await typeInto(DOC.replace("Some text", "Edited text")); await savedNow();
 
   // ---- the byte rules, through the page: the fixtures saved after an edit and read back
   const BOM = [0xef, 0xbb, 0xbf];
@@ -822,17 +881,17 @@ try {
   for (const [name, b, expect] of fixtures) {
     const f = await mk(`/t/${name}.tex`, b);
     await open(f);
-    // (the head, Save included, is drawn before the file is read; the source after it)
-    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden && !!document.querySelector(".tex-src")`, 10000);
+    // (the head is drawn before the file is read; the source and the save state after it)
+    await until(`document.querySelector(".tex-savestate")?.textContent === "Saved ✓" && !!document.querySelector(".tex-src")`, 10000);
     const text = await ev(`document.querySelector(".tex-src").value`);
     await typeInto(text + "c\n"); await ctrlS();
-    await statusIs(/^Saved$/);
+    await savedNow();
     const got = await bytesOf(`/t/${name}.tex`), want = expect(text + "c\n");
     check(JSON.stringify(got) === JSON.stringify(want) && got.filter((x, i) => x === 0xef && got[i + 1] === 0xbb && got[i + 2] === 0xbf).length === (b[0] === 0xef ? 1 : 0), "fixture " + name + ": saved and read back exactly, one BOM at most", { got: got.slice(0, 12), want: want.slice(0, 12) });
   }
   const mixed = await mk("/t/mixed.tex", enc("a\r\nb\nc\n"));
   await open(mixed); await sleep(800);
-  check(await page(`P.querySelector(".tex-save").hidden === true && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`), "mixed line endings: no Save, the banner says why");
+  check(await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`), "mixed line endings: read-only, the banner says why");
   const mrev = await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`);
   await typeInto("changed\n"); await ctrlS(); await sleep(500);
   check((await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`)) === mrev && (await statusIs(/can't be saved here/, 3000)), "…Ctrl+S writes nothing, says why");
@@ -846,22 +905,25 @@ try {
   await open(f2); await sleep(500);
   await ev(`${W}.rename("/t/r.tex", "/t/moved.tex").then(() => 1)`);
   await typeInto(DOC + "% x\n"); await ctrlS();
-  check(await statusIs(/^Saved$/) && JSON.stringify(await bytesOf("/t/moved.tex")) === JSON.stringify(enc(DOC + "% x\n")), "a rename elsewhere: the save follows the file");
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/moved.tex")) === JSON.stringify(enc(DOC + "% x\n")), "a rename elsewhere: the save follows the file");
   await ev(`${W}.remove("/t/moved.tex").then(() => 1)`);
   await typeInto(DOC + "% y\n"); await ctrlS();
-  check(await statusIs(/Not saved: this file isn't here any more/), "the file in Trash: not saved");
-  // another tab's save, then this one's: last write wins, the other kept as a version
+  check(await saveStateIs(/Not saved: this file isn't here any more/), "the file in Trash: Not saved, with the reason");
+  // another tab's save while this one has no edits pending: this editor takes its text (U8); then mine written over it,
+  // the other kept as a version
   const f3 = await mk("/t/lw.tex", enc(DOC));
   await open(f3); await sleep(500);
   await ev(`${W}.write("/t/lw.tex", new TextEncoder().encode("other tab\\n")).then(() => 1)`);
-  await typeInto(DOC + "% mine\n"); await ctrlS(); await statusIs(/^Saved$/);
+  check(await until(`document.querySelector(".tex-src").value === "other tab\\n"`, 10000), "U8: another tab saved, nothing pending here: the editor shows its text");
+  await typeInto(DOC + "% mine\n"); await ctrlS(); await savedNow();
   const hist = await ev(`${W}.history("/t/lw.tex").then((h) => h.length)`);
-  check(JSON.stringify(await bytesOf("/t/lw.tex")) === JSON.stringify(enc(DOC + "% mine\n")) && hist >= 2, "another tab saved: overwritten (last write wins), its bytes kept as a version", { hist });
-  // beforeunload with unsaved edits
-  await typeInto(DOC + "% unsaved\n");
+  check(JSON.stringify(await bytesOf("/t/lw.tex")) === JSON.stringify(enc(DOC + "% mine\n")) && hist >= 2, "…then mine written over it, its bytes kept as a version", { hist });
+  // leaving right after an edit: no prompt (U8: William, "a user should never see 'Leave this file without saving
+  // your changes?'"); the edit written on the way out, or recovered from its draft
+  await typeInto(DOC + "% just typed\n");
   dialogs.length = 0;
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
-  check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
+  check(!dialogs.includes("beforeunload"), "U8: leaving right after an edit: the browser doesn't ask", dialogs);
 
   // ---- images: in the folder, from a blob: URL; outside, refused with its reason
   const png = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15, 4, 0, 9, 251, 3, 253, 227, 85, 242, 156, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
