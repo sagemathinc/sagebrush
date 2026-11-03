@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "B3 (William's Nov 2 DEV report): the notebook page's wait for a notebook still arriving from sync (Downloading…, opened once its history is here), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge on master 85999b334 (pyjs +2568, with the arrival fence); the export's own chunk has its ceiling in web/workspace/export/size-ceiling.json.",
+ "reason": "B3 (William's Nov 2 DEV report): the notebook page's wait for a notebook still arriving from sync (Downloading…, opened once its history is here), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge on master c06c81398 (pyjs +2568, with the arrival fence; the same on 85999b33); the export's own chunk has its ceiling in web/workspace/export/size-ceiling.json.",
  "bytes": {
   "cli/pyjs.cjs": 2700
  }
