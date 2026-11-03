@@ -299,6 +299,15 @@ try {
   await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA)} && !!sagebrush.kernel?.context`, 30000);
   const reopened = await ev("window.__statuses");
   check(!reopened.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "A reopened while the page runs: its interpreter a plain one from the start (no refusing interpreter's ready), files allowed: " + JSON.stringify(reopened.filter((t) => /ready/.test(t))));
+  // (and one of Sagebrush's own examples, opened from the Examples dialog while the page runs: host-made before it opens)
+  await ev("(window.__statuses.length = 0, 1)");
+  await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="examples"]').click(); return 1; })()`);
+  await until("!!document.querySelector('#exlist button')", 10000);
+  const exBefore = await ev("localStorage.getItem('sagebrush-current')");
+  await ev("(document.querySelector('#exlist button').click(), 1)");
+  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)} && !!sagebrush.kernel?.context`, 30000);
+  const exStatuses = await ev("window.__statuses");
+  check(!exStatuses.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "an example opened from the Examples dialog while the page runs: a plain interpreter from the start, files allowed: " + JSON.stringify(exStatuses.filter((t) => /ready/.test(t))));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: statusLog });
 
   // ---- no workspace (it can't be opened): the old store's write asks the same authority, in its own transaction
