@@ -9,8 +9,9 @@
 // (in the URL it prints and opens; then a cookie); it answers only requests
 // for its own host name (no DNS rebinding) and serves files under DIR only.
 import * as http from "http";
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, renameSync, realpathSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, mkdirSync, realpathSync, lstatSync } from "fs";
 import { moveNoReplace, MoveError, isLink } from "./fs-move";
+import { writeReplacing } from "./fs-write";
 import { join, resolve, relative, dirname, basename, sep } from "path";
 import { randomBytes } from "crypto";
 import { requestCtrlC } from "./runtime/interrupt";
@@ -88,11 +89,28 @@ export async function runNotebookServer(args: string[]) {
   const sessions = new Map<string, Session>();
   const entry = require.main?.filename ?? process.argv[1];
 
-  // a path under dir, or null
+  // a path under dir, or null: lexically, and really. The deepest part of it that exists, its symbolic links followed,
+  // must be under DIR's real path too, so a link in DIR to elsewhere (a folder or a file, or one that points nowhere,
+  // through which a write would make a file elsewhere) is no way out, for reads, writes, listings and a session's folder
+  // alike (astra's LOCAL-RENAME-1, found on the rename, holds for every route: @sagebrush)
+  const rdir = (() => { try { return realpathSync(dir); } catch { return dir; } })();
+  const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
   const inside = (rel: string | null): string | null => {
     if (rel === null) return null;
     const p = resolve(dir, rel.replace(/^\/+/, ""));
-    return p === dir || p.startsWith(dir.endsWith(sep) ? dir : dir + sep) ? p : null;
+    if (!under(p, dir)) return null;
+    for (let q = p; ; ) {
+      let there = true;
+      try { lstatSync(q); } catch { there = false; }
+      if (there) {
+        let real: string;
+        try { real = realpathSync(q); } catch { return null; }
+        return under(real, rdir) ? p : null;
+      }
+      const up = dirname(q);
+      if (up === q) return null;
+      q = up;
+    }
   };
 
   const startSession = (sid: string, nbDir: string): Session => {
@@ -197,9 +215,17 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
           res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(data);
         } else if (method === "PUT") {
           const data = await body(req);
-          mkdirSync(dirname(p), { recursive: true });
-          writeFileSync(p + ".sagebrush-tmp", data);
-          renameSync(p + ".sagebrush-tmp", p); // never a half-written notebook
+          // (checked again now that the body is here: a link in the path changed while it came is seen, astra's
+          // LOCAL-CONTAIN-2; and written in the folder's real path, as checked, not through the path as given)
+          const q = inside(url.searchParams.get("path"));
+          if (!q) { res.writeHead(400).end("bad path"); return; }
+          mkdirSync(dirname(q), { recursive: true });
+          let folder: string;
+          try { folder = realpathSync(dirname(q)); } catch { res.writeHead(400).end("bad path"); return; }
+          if (!under(folder, rdir)) { res.writeHead(400).end("bad path"); return; }
+          // (whole or not at all: a fresh temporary file made exclusively, every byte written and flushed, then renamed
+          // over the notebook; a failure leaves it as it was: src/fs-write.ts, astra's LOCAL-CONTAIN-1 and 3)
+          try { writeReplacing(folder, basename(q), data); } catch (e: any) { res.writeHead(500).end(String(e?.message ?? e)); return; }
           res.writeHead(200).end("ok");
         } else res.writeHead(405).end();
         return;

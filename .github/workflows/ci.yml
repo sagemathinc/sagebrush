@@ -236,6 +236,11 @@ jobs:
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
           node scripts/test-site-asset-budget.mjs
+          # (the offline catalog's own gate, plan-b8-offline §3: its eight rows on the build above, and their controls)
+          node scripts/test-offline-size-gate.mjs
+          node web/test-sw-hook.mjs
+          node web/test-offline-inventory.mjs
+          node scripts/offline-size-gate.mjs --check
           node scripts/test-line3-measure.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
@@ -646,6 +651,8 @@ jobs:
           CHROME=google-chrome node web/test-board-open.mjs
           # (`sagebrush notebook DIR`: a title edit renames the notebook's file, never over another; William's B2)
           CHROME=google-chrome node web/test-local-rename.mjs
+          # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
+          node web/test-local-contain.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
           CHROME=google-chrome bun web/notebook/test-myst.mjs

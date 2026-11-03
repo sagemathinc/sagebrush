@@ -860,7 +860,9 @@ def symbolic_equal(answer, expected):
     defined at 0): an algebraic equality, not equality of functions on a
     domain. Wrong only with a proof: a point with positive rational
     coordinates where each side, on its own, evaluates to an exact rational
-    and the two differ. Else it can't decide; sampling never makes it right.
+    and the two differ; or, where they don't (sin, e^x), where the difference
+    evaluated in rigorous intervals (RIF) has an enclosure without 0. Else it
+    can't decide; sampling never makes it right.
     With assumptions in force (assume()), it only simplifies: a point might
     break them. A string is read by parse_expression. Sage boards only.
 
@@ -873,6 +875,14 @@ def symbolic_equal(answer, expected):
         'they differ at $x = 1/2$'
         sage: symbolic_equal(sin(x)^2, 1 - cos(x)^2).ok
         True
+
+    A wrong answer with sin or e^x is proven wrong by an interval enclosure of
+    the difference that excludes 0 (agent simulation run 3)::
+
+        sage: symbolic_equal(2*x*sin(x) + x*cos(x), diff(x^2*sin(x), x)).verdict()
+        'they differ at $x = 1/2$'
+        sage: symbolic_equal(e^x, 1 + x + x^2/2).ok
+        False
     """
     try:
         import sage_all
@@ -901,11 +911,26 @@ def symbolic_equal(answer, expected):
             va = _exact(a, at, QQ)
             ve = _exact(e, at, QQ)
         except Exception:
+            va = ve = None
+        where = ", ".join("%s = %s" % (v, at[v]) for v in vs)
+        if va is not None and ve is not None:
+            if va != ve:
+                return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
             continue
-        if va is None or ve is None:
+        # (not both exact rationals, as with sin or e^x: each side on its own
+        # in rigorous intervals (RIF); disjoint enclosures prove they differ,
+        # overlapping ones decide nothing. A point where a side isn't defined
+        # (a pole, a log of 0) is skipped: the simplified difference, which
+        # may be defined there, is never what is evaluated.)
+        try:
+            ra = sage_all.RIF(a.subs(at))
+            re_ = sage_all.RIF(e.subs(at))
+            ends = [float(t) for t in (ra.lower(), ra.upper(), re_.lower(), re_.upper())]
+        except Exception:
             continue
-        if va != ve:
-            where = ", ".join("%s = %s" % (v, at[v]) for v in vs)
+        if not all(math.isfinite(t) for t in ends):
+            continue
+        if ends[1] < ends[2] or ends[3] < ends[0]:
             return _wrong("they differ at $%s$" % where if vs else "they are different numbers")
     return Verdict(None, "the check could not decide whether these are equal")
 
