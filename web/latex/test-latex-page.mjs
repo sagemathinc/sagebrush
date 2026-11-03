@@ -876,15 +876,37 @@ try {
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
   check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
 
-  // ---- images: in the folder, from a blob: URL; outside, refused with its reason
+  // ---- images as TeX finds them (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top, "not
+  // found"): in the folder, in a parent (../), in a \graphicspath folder, each from a blob: URL; a file of that name
+  // elsewhere named without ../: where it is and what to write; missing everywhere: the folders searched; above the top
   const png = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15, 4, 0, 9, 251, 3, 253, 227, 85, 242, 156, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
   await go(base + "?latex=1"); await until(`!!${W}`, 60000);
   await mk("/img/fig.png", png);
   await mk("/other.png", png);
-  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\end{document}\n"));
+  await mk("/img/figs/deep.png", png);
+  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\graphicspath{{figs/}}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\includegraphics{deep}\n\\includegraphics{other.png}\n\\includegraphics{nowhere.png}\n\\includegraphics{../../../up.png}\n\\includegraphics{/other.png}\n\\includegraphics{/nope.png}\n\\end{document}\n"));
   await open(fi);
-  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 15000), "an image in the folder: shown from a blob: URL");
-  check(await until(`document.querySelector(".tex-preview").textContent.includes("[image: ../other.png: outside this folder]")`, 15000), "an image outside the folder: refused, with its reason");
+  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].filter((i) => i.src.startsWith("blob:")).map((i) => i.alt).sort().join() === "../other.png,/other.png,deep,fig"`, 15000),
+    "images in the folder, in a parent (../), in a \\graphicspath folder and from the workspace's top (/other.png): each shown from a blob: URL", await ev(`[...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.alt)`));
+  const ph = await ev(`[...document.querySelectorAll(".tex-preview .imgph")].map((e) => e.textContent)`);
+  check(ph.includes('[image: other.png: not found in "img/", "img/figs/"; it is in the top folder: write {../other.png}, or move the file into "img/"]'), "a file of that name in a parent, named without ../: the folders searched, where it is and what to write", ph);
+  check(ph.includes('[image: nowhere.png: not found in "img/", "img/figs/"]') && ph.includes("[image: ../../../up.png: above the workspace's top folder]")
+    && ph.includes("[image: /nope.png: not found in the top folder (a leading / is the workspace's top folder)]"), "…missing everywhere: the folders searched (a leading /: the workspace's top); above the top folder: refused, with its reason", ph);
+
+  // ---- \input and \include (William's L4, Nov 2: silently ignored, which broke his shared macros file): a macros file
+  // in another folder (../), its macros applied; \include's text shown; a missing file a gray tag naming where it was
+  // looked for; the macros file changed elsewhere (another tab, an agent): the preview shows the new macro
+  {
+    await mk("/shared/macros.tex", enc("\\newcommand{\\greet}{Hello from the macros file}\n"));
+    await mk("/paper/part.tex", enc("Included part text.\n"));
+    const fp = await mk("/paper/main.tex", enc("\\documentclass{article}\n\\input{../shared/macros}\n\\begin{document}\n\\greet.\n\\include{part}\n\\input{missing}\n\\end{document}\n"));
+    await open(fp);
+    const shown = await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello from the macros file") && document.querySelector(".tex-preview").textContent.includes("Included part text.")`, 15000);
+    check(shown, "\\input{../shared/macros}: its macro applied; \\include{part}: its text shown", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+    check(await until(`document.querySelector(".tex-preview").textContent.includes('[input: missing: not found in "paper/"]')`, 15000), "a missing \\input: a gray tag naming where it was looked for", await ev(`[...document.querySelectorAll(".tex-preview .errchip")].map((e) => e.textContent)`));
+    await ev(`${W}.write("/shared/macros.tex", new TextEncoder().encode("\\\\newcommand{\\\\greet}{Changed elsewhere}\\n")).then(() => 1)`);
+    check(await until(`document.querySelector(".tex-preview").textContent.includes("Changed elsewhere.")`, 15000), "the macros file changed elsewhere: the preview shows the new macro", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 200)`));
+  }
 
   // ---- images under overlapping renders (astra3 i1c01 A3-1): the first image read held (the test build's hook),
   // then an edit makes a second current render, which asks for the same names again; released, each name is read
@@ -1287,6 +1309,20 @@ try {
   {
     const RUN_DOC = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nvar('t')\nx = 2^10\n\\end{sagesilent}\nWe have $x = \\sage{x}$ and $\\int_0^1 t^2\\,dt = \\sage{integrate(t^2, t, 0, 1)}$.\n\\begin{sagesilent}\nx = 7\n\\end{sagesilent}\nNow $x = \\sage{x}$.\n\\end{document}\n";
     const resultsOf = (p) => ev(`${W}.stat(${JSON.stringify(p + ".results.json")}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p + ".results.json")}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    // (sim run 8, RD03: a new document with no SageTeX code, the code then typed into it: Run must appear once the
+    // preview shows the items, without a save or a reopen. It didn't: the reply's own render ran before the editor
+    // kept that reply's check, so Run's listener read the check of the text before the edit)
+    {
+      const fb = await mk("/t/run-typed.tex", enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n"));
+      await open(fb);
+      await until(`document.querySelector(".tex-preview")?.textContent !== undefined && !!document.querySelector(".tex-head .tex-run")`, 20000);
+      await sleep(1000);
+      const hiddenBefore = await ev(`document.querySelector(".tex-head .tex-run").hidden`);
+      await typeInto("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nTwo is $\\sage{1+1}$.\n\\end{document}\n");
+      const shownItem = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Two is")`, 20000);
+      const visible = await until(`document.querySelector(".tex-head .tex-run")?.hidden === false`, 10000);
+      check(hiddenBefore === true && shownItem && visible, "Run: a new document's SageTeX code typed in: Run appears once the preview shows it (no save, no reopen)", { hiddenBefore, shownItem, visible });
+    }
     const fr = await mk("/t/run.tex", enc(RUN_DOC));
     const n0 = requests.length;
     await open(fr);
