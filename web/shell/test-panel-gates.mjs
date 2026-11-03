@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The terminal panel's main-thread gates (plan-bash-shell r8c E5.5), in headless Chromium against web/dist built with
 // SAGEBRUSH_TERMINAL=1: from "the command finished" (its outcome in) to the first and the last slice's paint (the
 // animation frame after it), over 20 runs of each control, with no Long Task over 50 ms and every slice <= 50 ms.

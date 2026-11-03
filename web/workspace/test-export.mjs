@@ -1,3 +1,4 @@
+// ci: web-export order=10 chrome
 // "Export all current files (.zip)" (export plan E1 r2d, web/workspace/export) in headless Chromium against the
 // built site.  The archive is checked outside the browser by Python's zipfile and by unzip -t: every member's bytes,
 // the manifest's sizes and SHA-256 (and the data files' bytes against the workspace's own), the manifest the last

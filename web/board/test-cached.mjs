@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=30
 // Open from IndexedDB first (cached.ts cachedStore), with a fake remote that
 // answers after a delay: a document opened the first time waits for the
 // remote; opened again, its copy is drawn at once and the remote asked for

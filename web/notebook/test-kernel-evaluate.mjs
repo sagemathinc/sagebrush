@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=20 runner=bun
 // A board question's check (WorkerKernel.evaluate) given to an interpreter
 // that never takes it up (a worker that never answers): given up within its
 // bound, nothing left pending, rather than holding its Check, and the queue

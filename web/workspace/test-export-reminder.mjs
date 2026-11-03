@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=160 runner=bun
 // The Storage panel's export reminder (web/workspace/preview.ts exportReminder): when it is due, and its words.
 //   bun web/workspace/test-export-reminder.mjs
 import { EXPORT_DUE_DAYS, exportReminder, exportStatus } from "./preview.ts";

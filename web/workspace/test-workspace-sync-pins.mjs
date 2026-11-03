@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=50 runner=bun chrome
 // Sync client step 2b-2 (design/sync-client.md C2 and its "As built" plan) in headless Chromium: pins at the local
 // commit, kept apart, exempt, orphaned and released; the pending summary, its base, held writes and their
 // successors; the cap and its collapse; the lease's lifecycle; bounded costs (each save's IndexedDB calls and

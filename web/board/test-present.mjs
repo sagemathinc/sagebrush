@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=110
 // Present (mount.ts): a slideshow of the board, the whole window (or
 // screen): a slide's card fitted, the rest dark; its tour's steps after it,
 // each step's words under it (not the page's intro, a slide's speaker

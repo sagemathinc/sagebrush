@@ -1,3 +1,4 @@
+// ci: web-runner order=10 chrome
 // The runner (design/runner.md) in headless Chromium: the notebook page runs
 // Python in an opaque-origin sandboxed frame (?runner=0: in a plain worker,
 // where NO_RUNNER=1 checks that these tests fail).  Checks that code

@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // End-to-end checks of the notebook page in headless Chromium: notebooks and
 // files persist across reloads, File > New/Open/Download/Upload, the files
 // panel, share links.  Serve web/dist first:

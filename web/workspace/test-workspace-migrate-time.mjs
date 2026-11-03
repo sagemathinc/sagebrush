@@ -1,3 +1,4 @@
+// ci: web-runner order=460 runner=bun chrome
 // The migrator moving the largest file a page can have kept the old way
 // (200 MB: maxFileBytes) without freezing the page (design/capabilities.md
 // §2b; daybreak2's requirement): a workspace as version 1 made it, with one

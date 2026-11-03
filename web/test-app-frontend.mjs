@@ -1,3 +1,4 @@
+// ci: checks.3 order=30
 // The desktop app's page (app/build-frontend.mjs) builds from web/dist with
 // every file its worker needs, the pinned zone data's included, and its check
 // fails on what does not match: a file in lib/tzdata the worker does not name,

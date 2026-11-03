@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.1 order=30 runner=bun
 // X1 (design r3): WorkerKernel's per-language state, with a fake worker
 // that answers when told.  One warm-up per language and interpreter while
 // it is pending or ready, whatever the number of triggers; the next trigger

@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=30
 // Groups' titles (board.ts, board.css, svg.ts; friction 10 and 11): drawn
 // far out, every group's title is drawn, wrapper and long ones too, in the
 // band the layout keeps above the group's members (not over them), at its

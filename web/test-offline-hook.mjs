@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // Storage -> Offline's controls that need the service worker's test-only hook (plan-b8-offline r3.4; cases v2, rows
 // marked [hook]): the test build's web/dist-test/sw.test.js is served as /sw.js, and a "deploy" is that file with
 // another VERSION (and, for some rows, another catalog or inventory).  The hook gives the counters, the time scale,

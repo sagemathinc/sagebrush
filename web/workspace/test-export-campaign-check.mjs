@@ -1,3 +1,4 @@
+// ci: export-controls order=30
 // The campaign 3 parser and gate (export-campaign-check.mjs) on exact fixtures (grader's and daybreak2's list), and,
 // given TRACE=<a saved run record from the scale test's trace pass>, on that real trace as saved and with one
 // main-thread MajorGC of 60 ms inserted into its export window: the unmodified trace judged as it was, the mutated one

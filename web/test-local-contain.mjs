@@ -1,3 +1,4 @@
+// ci: web-runner order=120
 // `sagebrush notebook DIR` (src/notebook.ts) reads, writes and lists only what is really inside DIR: a symbolic link in
 // DIR to elsewhere (a folder, a file, or one that points nowhere) is no way out, for api/file's GET and PUT, the
 // listing and the notebook page alike (astra's LOCAL-RENAME-1, found on #531's rename, for every route: @sagebrush).
