@@ -641,6 +641,8 @@ jobs:
           CHROME=google-chrome bun web/board/test-submit-ids.mjs
           CHROME=google-chrome bun web/board/test-frame-edit.mjs
           CHROME=google-chrome node web/test-board-open.mjs
+          # (the notebook page's agent tools for the notebook and the person's files: each answer checked against what is there)
+          CHROME=google-chrome node web/test-webmcp-tools.mjs
           CHROME=google-chrome node web/notebook/test-render-contain.mjs
           # (Jupytext MyST notebooks: Open as a notebook, and the built site: the renderer fetched only for one)
           CHROME=google-chrome bun web/notebook/test-myst.mjs

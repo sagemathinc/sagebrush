@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The notebook page's agent tools for the notebook and the person's files (sim runs 2 and 3; William: agents must see and verify what they do): notebook_info, new_notebook, rename_notebook, set_language, export_notebook with the HTML report, list_files, read_file, write_file and their descriptions, in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +13244).",
+ "bytes": {
+  "cli/pyjs.cjs": 13300
+ }
+}
