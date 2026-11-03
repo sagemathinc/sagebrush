@@ -5229,6 +5229,106 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: _fields = (\"nobs\", \"minmax\", \"mean\", \"variance\", \"skewness\", \"kurtosis\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: minmax = property(lambda self: self[1]) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: PearsonRResult.confidence_interval :: raise NotImplementedError(\"scipy.stats.PearsonRResult.confidence_interval: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: _rank1 :: val = {\"average\": (pos + end + 2) / 2.0, \"min\": pos + 1.0, \"max\": end + 1.0, \"dense\": float(dense)}[method] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: \"\"\"(nobs, (min, max), mean, variance (ddof), skewness, kurtosis (Fisher's)), as SciPy's\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: maxs = _out([float(np.max(r)) for r in rows], shape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: return DescribeResult(np.int64(n), (mins, maxs), means, vars_, sk, ku) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: an axis of a 2-d array is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: kurtosis :: raise NotImplementedError(\"scipy.stats.kurtosis: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: axis and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: if method not in (\"average\", \"min\", \"max\", \"dense\", \"ordinal\"): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: skew :: raise NotImplementedError(\"scipy.stats.skew: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
  "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
   "class": "3",
   "owner": "special functions",
@@ -8386,6 +8486,11 @@
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: m.float_info = Ty.structseq(\"sys.float_info\", [\"max\", \"max_exp\", \"max_10_exp\", \"min\", \"min_exp\", \"min_10_exp\", \"dig\", \"mant_dig\", \"epsilon\", \"radix\", \"rounds\"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.float_info's values (max is the largest double, a FloatBox): the census word max as a field's name, refusing nothing"
  },
  "src/runtime/modules.ts :: str :: const ZONE_READ_MAX = (1 << 20) + 1; #0": {
   "class": "1",
