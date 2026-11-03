@@ -303,7 +303,7 @@ test("the runner fails a changed output, an error, a hang (killed at the deadlin
   writeFileSync(nbFile, JSON.stringify(nb));
   let r = run(["run", "notebook/hello-python", "--root", root]);
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /the outputs differ from the committed ones/);
+  assert.match(r.stdout, /the outputs differ from the committed ones, first at code cell 2: now .*0 0\\n1 1\\n2 4/);
   code[1].source = "1/0";
   writeFileSync(nbFile, JSON.stringify(nb));
   r = run(["run", "notebook/hello-python", "--root", root]);
@@ -355,7 +355,7 @@ test("ci shards and their census, end to end", () => {
         "--of",
         "2",
         "--ran",
-        join(out, `ran-${k}.json`),
+        join(out, "made-by-ci", `ran-${k}.json`),
         "--root",
         root,
       ],
@@ -363,16 +363,17 @@ test("ci shards and their census, end to end", () => {
     );
     assert.equal(r.status, 0, r.stdout + r.stderr);
   }
-  let c = run(["census", "--ran-dir", out], env);
+  // (each shard made the folder its --ran file goes in: CI's runner temp has none)
+  let c = run(["census", "--ran-dir", join(out, "made-by-ci")], env);
   assert.equal(c.status, 0, c.stderr);
   assert.match(c.stdout, /census: 2 shards, 4 runs: ok/);
-  writeFileSync(join(out, "ran-2.json"), "[]\n");
-  c = run(["census", "--ran-dir", out], env);
+  writeFileSync(join(out, "made-by-ci", "ran-2.json"), "[]\n");
+  c = run(["census", "--ran-dir", join(out, "made-by-ci")], env);
   assert.equal(c.status, 1);
   assert.match(c.stderr, /selected but never ran/);
   // (an empty or missing selection is a wiring fault, never a vacuous pass: the jobs run only for a selection; B2)
   for (const bad of ["", "[]", "{}", "[1]", "not json"]) {
-    c = run(["census", "--ran-dir", out], { EXAMPLES_IDS: bad });
+    c = run(["census", "--ran-dir", join(out, "made-by-ci")], { EXAMPLES_IDS: bad });
     assert.equal(c.status, 1, `census, EXAMPLES_IDS ${JSON.stringify(bad)}`);
     assert.match(c.stderr, /EXAMPLES_IDS is .*not the selection/);
   }
