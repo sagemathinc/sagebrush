@@ -1,0 +1,15 @@
+{
+ "title": "Group theory (Sage)",
+ "summary": "Permutation groups: orders, products, cycle types and the Mathieu groups.",
+ "tags": [
+  "group theory"
+ ],
+ "level": "course",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

@@ -1,0 +1,18 @@
+{
+ "title": "The Collatz map, live",
+ "summary": "Python code items, run reactively in reading order, with their output under their code.",
+ "tags": [
+  "number theory",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "live.json",
+ "files": [
+  "live.json"
+ ],
+ "modes": [
+  "python"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

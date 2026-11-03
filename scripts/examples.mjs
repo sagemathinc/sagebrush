@@ -6,9 +6,11 @@
 //   node scripts/examples.mjs run ID... [--root DIR] [--update]
 //       run each from source in a fresh copy and compare with what is committed:
 //         notebook  its code cells on a fresh session; the normalized outputs must equal the committed ones
-//         board     `sagebrush board check --json`: every code item runs and every check passes; it renders
+//         board     `sagebrush board check --json` (an older board: `board run`): every code item runs and every
+//                   check passes; it renders
 //         latex     `latex run` (executable features), then `latex check` (no errors) and `latex render`,
-//                   whose HTML must equal the committed preview.html byte for byte
+//                   whose HTML must equal the committed preview.html byte for byte, but for KaTeX's shared
+//                   stylesheet, which the committed one holds as a marker (committedPreview: r4.1)
 //       --update rewrites the committed outputs or preview.html from the run (the diff shows in the PR)
 //   node scripts/examples.mjs ci --shard K --of N --ran FILE [--root DIR]
 //       CI's shard: the selected ids (EXAMPLES_IDS, a JSON list) at positions i mod N == K - 1, run 2 at a
@@ -35,6 +37,8 @@ import {
   ID,
   SLUG_MAX,
   census,
+  committedOutputs,
+  committedPreview,
   folderFiles,
   leaks,
   listExamples,
@@ -167,7 +171,7 @@ export async function runExample(root, id, { update = false } = {}) {
         for (const c of committed.cells)
           freshNb.cells.push(
             c.cell_type === "code"
-              ? { ...c, execution_count: null, outputs: fresh[ci++] ?? [] }
+              ? { ...c, execution_count: null, outputs: committedOutputs(fresh[ci++]) }
               : c,
           );
         const fn = normalizeNotebook(freshNb, m.loose ?? []);
@@ -295,7 +299,9 @@ export async function runExample(root, id, { update = false } = {}) {
         if (r.killed || r.code !== 0)
           problems.push(`latex render: ${r.killed ? "killed" : tail(r.err)}`);
         else {
-          const got = readFileSync(html);
+          const { html: page, fonts } = committedPreview(readFileSync(html, "utf8"));
+          if (!fonts) problems.push("latex render: not one KaTeX stylesheet to share (scripts/examples-lib.mjs committedPreview)");
+          const got = Buffer.from(page);
           if (update && !problems.length)
             writeFileSync(join(e.dir, "preview.html"), got);
           else if (

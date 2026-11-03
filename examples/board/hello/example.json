@@ -1,0 +1,17 @@
+{
+ "title": "Hello, board: every kind of item",
+ "summary": "Every kind of item: notes in many shapes, Markdown and math, a group, a sticker, ink, and Python code items that run.",
+ "tags": [
+  "basics"
+ ],
+ "level": "intro",
+ "main": "gallery-hello.board.json",
+ "files": [
+  "gallery-hello.board.json"
+ ],
+ "modes": [
+  "python"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

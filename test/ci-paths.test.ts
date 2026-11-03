@@ -305,9 +305,11 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
     return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
   };
   // the board: its browser groups and web-runner (the board frame); no export, lookalike, terminal or notebook
-  for (const f of ["web/board/frame.ts", "web/graph/spring.ts", "examples/primes.json", "packages/sagebrush-board/test.mjs"]) {
+  for (const f of ["web/board/frame.ts", "web/graph/spring.ts", "examples/board/hello/gallery-hello.board.json", "packages/sagebrush-board/test.mjs"]) {
     assert.deepEqual(pick([f]), { groups: ["board-a", "board-b", "board-c", "board-unit"], runner: "true", export: "false", lookalike: "false" }, f);
   }
+  // (the corpus's notebooks and LaTeX documents are in the notebook page and the LaTeX editor: every web group)
+  for (const f of ["examples/notebook/welcome/main.ipynb", "examples/latex/article/article.tex"]) assert.deepEqual(pick([f]).groups, ALL, f);
   // the terminal panel: its group alone
   assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
   // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)

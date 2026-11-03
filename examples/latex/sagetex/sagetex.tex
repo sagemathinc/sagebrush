@@ -1,0 +1,21 @@
+\documentclass{article}
+\usepackage{sagetex}
+\begin{document}
+\section*{SageTeX}
+
+\emph{In this preview:} SageTeX code is found and listed; each \texttt{\textbackslash sage\{...\}} shows as a
+placeholder until the code is run. \texttt{sagebrush latex run} runs it with Sagebrush's Sage, in order, and
+keeps the results beside this file; the preview then shows them, with the plot.
+
+\begin{sagesilent}
+f(x) = x^3 - 2*x + 1
+g = f.diff(x)
+\end{sagesilent}
+
+The derivative of $f(x) = x^3 - 2x + 1$ is $f'(x) = \sage{g(x)}$, and
+$\int_0^1 f(x)\,dx = \sage{integral(f(x), x, 0, 1)}$.
+
+The 10th prime is $\sage{nth_prime(10)}$, and $2^{100} = \sage{2^100}$.
+
+\sageplot[width=0.5\textwidth]{plot(sin(x), (x, 0, 2*pi))}
+\end{document}

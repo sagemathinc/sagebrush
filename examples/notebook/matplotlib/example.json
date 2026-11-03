@@ -1,0 +1,16 @@
+{
+ "title": "matplotlib",
+ "summary": "Line plots, histograms, bar charts and an animation with matplotlib.",
+ "tags": [
+  "plots",
+  "data"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

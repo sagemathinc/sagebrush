@@ -1,0 +1,16 @@
+{
+ "title": "Polynomials (Sage)",
+ "summary": "Factoring over ZZ and QQ, cyclotomic and Swinnerton-Dyer polynomials, roots and gcds.",
+ "tags": [
+  "polynomials",
+  "algebra"
+ ],
+ "level": "course",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

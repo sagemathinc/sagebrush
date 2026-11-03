@@ -389,7 +389,10 @@ function boardMystClosure(what: string, r: any) {
   // other sites embed (below) nor a downloaded board (export.ts) ever carries it)
   writeFileSync(join(here, "dist", "board", "index.html"), withAlphaBanner(readFileSync(join(here, "board", "index.html"), "utf8")));
   mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
-  for (const f of readdirSync(join(here, "board", "examples"))) if (/\.(json|md|mmd)$/.test(f)) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
+  // (the corpus's boards, examples/board/<slug>/, under their own file names, and the menu: web/examples/legacy.ts)
+  const { boardFiles, boardMenu } = await import("./examples/legacy.ts");
+  for (const [f, path] of boardFiles()) copyFileSync(path, join(here, "dist", "board", "examples", f));
+  writeFileSync(join(here, "dist", "board", "examples", "index.json"), JSON.stringify(boardMenu(), null, 1) + "\n");
   // (and the generated ones: scripts/board-examples.mjs)
   const gen = Bun.spawnSync(["node", join(here, "..", "scripts", "board-examples.mjs"), join(here, "dist", "board", "examples")]);
   if (gen.exitCode !== 0) { console.error(gen.stderr.toString()); process.exit(1); }

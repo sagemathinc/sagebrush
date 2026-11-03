@@ -32,6 +32,8 @@ export const LIMITS = {
   depth: 4,
   file: 200 * 1024,
   total: 512 * 1024,
+  // (a notebook's committed outputs, its preview: section 5's "generated preview, at most 1 MB" row; r4.1)
+  outputs: 1024 * 1024,
   summary: 160,
   title: 120,
 };
@@ -329,19 +331,65 @@ export function filesJson(dir, m) {
   };
 }
 
-/** An example's size problems (plan section 5). */
+/**
+ * An example's size problems (plan section 5). A notebook's committed outputs are its preview, not its sources:
+ * the source limits count the notebook as it is without them, and its outputs have their own limit (r4.1).
+ */
 export function sizeProblems(dir, m) {
   const p = [];
-  let total = 0;
+  let total = 0,
+    outputs = 0;
   for (const f of m.files ?? []) {
     if (pathProblem(f) || !existsSync(join(dir, f))) continue;
-    const n = statSync(join(dir, f)).size;
+    let n = statSync(join(dir, f)).size;
+    if (/\.ipynb$/.test(f)) {
+      try {
+        const nb = JSON.parse(readFileSync(join(dir, f), "utf8"));
+        const bare = {
+          ...nb,
+          cells: (nb.cells ?? []).map((c) => (c.cell_type === "code" ? { ...c, outputs: [] } : c)),
+        };
+        const k = Buffer.byteLength(JSON.stringify(bare, null, 1) + "\n");
+        outputs += Math.max(0, n - k);
+        n = k;
+      } catch {}
+    }
     total += n;
     if (n > LIMITS.file) p.push(`${f}: ${n} bytes, more than ${LIMITS.file}`);
   }
   if (total > LIMITS.total)
     p.push(`${total} bytes in all, more than ${LIMITS.total}`);
+  if (outputs > LIMITS.outputs)
+    p.push(`its outputs: ${outputs} bytes, more than ${LIMITS.outputs}`);
   return p;
+}
+
+/**
+ * The committed form of a LaTeX preview (r4.1): `latex render` inlines KaTeX's stylesheet with its fonts, the same
+ * 369 KB in every preview; the committed preview.html holds an empty marker in its place, and the site puts the one
+ * shared copy back (`fonts`, from the same render). Everything else is the render's bytes.
+ */
+export const FONTS_MARK = '<style data-sagebrush-shared="katex"></style>';
+const KATEX_STYLE = /<style>(@font-face\{font-display:block;font-family:KaTeX_[^<]*)<\/style>/g;
+export function committedPreview(html) {
+  const found = [...html.matchAll(KATEX_STYLE)];
+  if (found.length !== 1) return { html, fonts: null };
+  return { html: html.replace(found[0][0], FONTS_MARK), fonts: found[0][1] };
+}
+
+/**
+ * The outputs a notebook commits (r4.1): a display output with a static image (SVG or PNG) keeps the image and its
+ * text/plain, not the interactive forms beside it (a 3D scene's viewer HTML and scene JSON), which a static page
+ * never shows and which are the bulk of the bytes. Everything else is kept as it came.
+ */
+export const KEEP_WITH_IMAGE = ["image/svg+xml", "image/png", "text/plain"];
+export function committedOutputs(outputs) {
+  return (outputs ?? []).map((o) => {
+    const d = o.data;
+    if (!d || !("image/svg+xml" in d || "image/png" in d)) return o;
+    const keep = (x) => Object.fromEntries(Object.entries(x ?? {}).filter(([k]) => KEEP_WITH_IMAGE.includes(k)));
+    return { ...o, data: keep(d), ...(o.metadata ? { metadata: keep(o.metadata) } : {}) };
+  });
 }
 
 // ---- SVG canonicalization (A5): ids renamed by order of appearance, a fixed list of nondeterministic

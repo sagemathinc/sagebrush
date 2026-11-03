@@ -1,0 +1,15 @@
+{
+ "title": "How Sagebrush is built",
+ "summary": "The architecture, with a tour: where it runs, the notebook, the compiler, the runtime, the library and the engines.",
+ "tags": [
+  "sagebrush",
+  "diagrams"
+ ],
+ "level": "intro",
+ "main": "sagebrush.json",
+ "files": [
+  "sagebrush.json"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

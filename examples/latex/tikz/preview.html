@@ -1,0 +1,230 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>tikz.tex</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:">
+<meta name="generator" content="sagebrush latex render">
+<style data-sagebrush-shared="katex"></style>
+<style>
+.tex-page { position: fixed; inset: 0; display: flex; flex-direction: column; background: #eef0f2; color: #222; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; z-index: 10; }
+.tex-page .tex-banner { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 6px 12px; font-size: 13px; }
+.tex-page .tex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; background: #2f3b2f; color: #eef; }
+.tex-page .tex-head button[aria-pressed="true"] { background: #dfe8d8; }
+.tex-page .tex-tools { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.tex-page .tex-tl { opacity: .8; margin: 0 2px 0 8px; }
+.tex-page .tex-zoomv { min-width: 3.2em; text-align: center; }
+.tex-page .tex-head button { font: inherit; font-size: 13px; padding: 2px 8px; }
+.tex-page .tex-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tex-page .tex-dirty { font-size: 12px; color: #ffd27a; }
+.tex-page .tex-status { margin-left: auto; font-size: 12px; opacity: .9; }
+.tex-page .tex-toggle { display: none; }
+.tex-page .tex-main { flex: 1; display: flex; min-height: 0; }
+.tex-page .tex-left { flex: 1 1 50%; min-width: 0; position: relative; border-right: 1px solid #ccc; background: #fbfbf8; }
+.tex-page .tex-right { flex: 1 1 50%; min-width: 0; overflow: auto; background: #e3e5e8; }
+.tex-page .tex-ed { position: absolute; inset: 0; }
+.tex-page .tex-src, .tex-page .tex-hl { position: absolute; inset: 0; margin: 0; padding: 10px 12px; font: var(--tex-src-fs, 13px)/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; tab-size: 4; }
+.tex-page .tex-ed.nowrap .tex-src, .tex-page .tex-ed.nowrap .tex-hl { white-space: pre; overflow-wrap: normal; }
+.tex-page .tex-src { border: 0; outline: 0; resize: none; background: transparent; color: transparent; caret-color: #1d2330; z-index: 1; }
+.tex-page .tex-hl { color: #1d2330; pointer-events: none; overflow: hidden; }
+.tex-page .hl-line { min-height: 1.45em; }
+.tex-page .c-cmd { color: #2a4d9b; } .tex-page .c-cmt { color: #7a7a72; font-style: italic; } .tex-page .c-math { color: #8a3b12; } .tex-page .c-brace { color: #6b6b6b; } .tex-page .c-verb { color: #2b6b38; }
+.tex-page .tex-gone { margin: 40px auto; max-width: 40em; font-size: 15px; }
+.tex-page .pc > .p.cont, .tex-page .p.cont { text-indent: 0; }
+.tex-page .cont { margin-top: 0; }
+.tex-page .tex-preview .pc { content-visibility: auto; contain-intrinsic-size: auto 600px; }
+.tex-page .toolarge { color: #8a3b12; }
+.tex-page .tex-preview .ch.sync-flash { outline: 2px solid #e8b931; outline-offset: 4px; border-radius: 2px; }
+.tex-page .mathopen { font: 11px system-ui, sans-serif; color: #8a1c0e; background: #fde7e3; border-radius: 3px; padding: 0 .3em; margin-left: .3em; vertical-align: .1em; white-space: nowrap; }
+body.wsfiles .tex-page { left: 272px; }
+@media (max-width: 640px) { body.wsfiles .tex-page { left: 0; } }
+@media (max-width: 700px) {
+  .tex-page .tex-toggle { display: inline-block; }
+  .tex-page .tex-left, .tex-page .tex-right { flex-basis: 100%; }
+  .tex-page:not(.show-preview) .tex-right { display: none; }
+  .tex-page.show-preview .tex-left { display: none; }
+}
+.tex-page .page { max-width: 46em; margin: 18px auto; padding: 48px 64px 72px 64px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  font-family: "Latin Modern Roman", "Computer Modern Serif", "CMU Serif", Georgia, "Times New Roman", serif; font-size: 16.5px; line-height: 1.38; color: #111; position: relative; }
+.tex-page .page .p { margin: 0; text-indent: 1.5em; text-align: justify; hyphens: auto; }
+.tex-page .page .p.ni, .tex-page .page .ni { text-indent: 0; }
+.tex-page .page .ch { display: block; }
+.tex-page .page .ch + .ch > .p { margin-top: .35em; }
+.tex-page .page h1, .tex-page .page h2, .tex-page .page h3, .tex-page .page h4 { font-weight: 700; line-height: 1.2; margin: 1.4em 0 .6em; }
+.tex-page .page h1.chapter { font-size: 1.9em; margin-top: 2.2em; }
+.tex-page .page h1.chapter .chapnum { font-size: .6em; font-weight: 600; margin-bottom: .4em; }
+.tex-page .page h1.part { font-size: 2.1em; text-align: center; margin: 2.4em 0; }
+.tex-page .page h2 { font-size: 1.35em; }
+.tex-page .page h3 { font-size: 1.15em; }
+.tex-page .page h4 { font-size: 1.03em; }
+.tex-page .page .secnum { margin-right: .9em; }
+.tex-page .page .runin { font-weight: 700; margin-right: .5em; }
+.tex-page .titleblock { text-align: center; margin: 1em 0 2em; }
+.tex-page .titleblock .title { font-size: 1.75em; margin-bottom: .6em; }
+.tex-page .titleblock .author { font-size: 1.15em; }
+.tex-page .titleblock .auth { display: inline-block; margin: 0 1em; }
+.tex-page .titleblock .date { margin-top: .4em; font-size: 1.05em; }
+.tex-page .titleblock .thanks { font-size: .8em; margin-top: 1em; text-align: left; }
+.tex-page .abstract { margin: 1.2em 3em; font-size: .93em; }
+.tex-page .abstract .abshead { text-align: center; font-weight: 700; margin-bottom: .4em; }
+.tex-page .toc { margin: 1em 0 2em; }
+.tex-page .toc h2 { margin-top: 0; }
+.tex-page .toc a { color: inherit; text-decoration: none; }
+.tex-page .toc a:hover { text-decoration: underline; }
+.tex-page .toc .toc-1, .tex-page .toc .toc0 { font-weight: 700; margin-top: .5em; }
+.tex-page .toc .toc1 { margin-left: 1.5em; }
+.tex-page .toc .toc2 { margin-left: 3.2em; font-size: .95em; }
+.tex-page .toc .tocnum { display: inline-block; min-width: 2.6em; }
+.tex-page .b { font-weight: 700; }
+.tex-page .it { font-style: italic; }
+.tex-page .sl { font-style: oblique; }
+.tex-page .sc { font-variant: small-caps; }
+.tex-page .ul { text-decoration: underline; }
+.tex-page .so { text-decoration: line-through; }
+.tex-page .tt, .tex-page code.verb, .tex-page pre.verbatim { font-family: "Latin Modern Mono", "CMU Typewriter Text", ui-monospace, Menlo, Consolas, monospace; font-size: .92em; }
+.tex-page .sf { font-family: "Latin Modern Sans", "CMU Sans Serif", Helvetica, Arial, sans-serif; }
+.tex-page .sz-tiny { font-size: .5em; }
+.tex-page .sz-script { font-size: .7em; }
+.tex-page .sz-foot { font-size: .8em; }
+.tex-page .sz-small { font-size: .9em; }
+.tex-page .sz-large { font-size: 1.2em; }
+.tex-page .sz-Large { font-size: 1.44em; }
+.tex-page .sz-LARGE { font-size: 1.73em; }
+.tex-page .sz-huge { font-size: 2.07em; }
+.tex-page .sz-Huge { font-size: 2.49em; }
+.tex-page .latex { font-family: inherit; letter-spacing: -.02em; }
+.tex-page .latex .a { font-size: .75em; vertical-align: .25em; margin-left: -.36em; margin-right: -.15em; }
+.tex-page .latex .e { vertical-align: -.5ex; margin-left: -.1667em; margin-right: -.125em; text-transform: uppercase; }
+.tex-page pre.verbatim { white-space: pre; overflow-x: auto; margin: .6em 0; padding: .4em .6em; background: #f7f7f4; border-left: 3px solid #ddd; text-indent: 0; }
+.tex-page pre.verbatim.code { background: #f4f6fa; }
+.tex-page .al-c { text-align: center !important; text-indent: 0 !important; }
+.tex-page .al-l { text-align: left !important; }
+.tex-page .al-r { text-align: right !important; text-indent: 0 !important; }
+.tex-page .center .p, .tex-page .flushright .p { text-indent: 0; }
+.tex-page .center .p { text-align: center; }
+.tex-page .flushleft .p { text-align: left; text-indent: 0; }
+.tex-page .flushright .p { text-align: right; }
+.tex-page blockquote { margin: .7em 2.5em; }
+.tex-page blockquote.quotation .p { text-indent: 1.5em; }
+.tex-page blockquote.quote .p, .tex-page blockquote.verse .p { text-indent: 0; }
+.tex-page blockquote.verse .p { text-indent: 0; text-align: left; }
+.tex-page .multicols { column-gap: 2em; margin: .6em 0; }
+.tex-page .multicols .p { text-align: justify; }
+.tex-page .minipage { display: inline-block; vertical-align: middle; }
+.tex-page .minipage.va-t { vertical-align: top; }
+.tex-page .minipage.va-b { vertical-align: bottom; }
+.tex-page .minipage .p { text-indent: 0; }
+.tex-page ul.list, .tex-page ol.list { list-style: none; margin: .5em 0; padding-left: 2.2em; }
+.tex-page ul.list li, .tex-page ol.list li { position: relative; margin: .2em 0; }
+.tex-page ul.list li > .lbl, .tex-page ol.list li > .lbl { position: absolute; right: 100%; margin-right: .6em; white-space: nowrap; text-indent: 0; }
+.tex-page li > .p:first-of-type { text-indent: 0; }
+.tex-page li .p { text-indent: 0; }
+.tex-page li .p + .p { margin-top: .3em; }
+.tex-page ul.desc { padding-left: 1.5em; }
+.tex-page ul.desc li { text-indent: -1.5em; padding-left: 0; }
+.tex-page ul.desc .dlabel { font-weight: 700; }
+.tex-page ul.desc li .p { text-indent: 0; display: inline; }
+.tex-page .dmath { margin: .7em 0; overflow-x: auto; overflow-y: hidden; }
+.tex-page .katex { font-size: 1.08em; }
+.tex-page .katex-error { color: #b00; }
+.tex-page .thm { margin: .8em 0; }
+.tex-page .thm .p { text-indent: 0; }
+.tex-page .thm .p:first-child { display: inline; }
+.tex-page .thmhead { font-weight: 700; font-style: normal; }
+.tex-page .thm-definition .thmhead, .tex-page .thm-plain .thmhead { font-weight: 700; }
+.tex-page .thm-remark .thmhead { font-weight: 400; font-style: italic; }
+.tex-page .proof { margin: .6em 0; }
+.tex-page .proof .p { text-indent: 0; }
+.tex-page .proof .proofhead { font-style: italic; }
+.tex-page .proof .qed { float: right; }
+.tex-page .float { margin: 1.2em auto; text-align: center; }
+.tex-page .float .p { text-indent: 0; text-align: center; }
+.tex-page .float.wrap-r { float: right; margin: .3em 0 .5em 1.2em; }
+.tex-page .float.wrap-l { float: left; margin: .3em 1.2em .5em 0; }
+.tex-page .caption { margin: .5em 1em 0; font-size: .95em; text-align: center; }
+.tex-page .capnum { font-weight: 700; }
+.tex-page img.graphic { max-width: 100%; height: auto; vertical-align: middle; }
+.tex-page .imgph { display: inline-block; min-width: 10em; min-height: 6em; padding: 2em 1em; border: 1px dashed #aaa; color: #777; font: 12px system-ui, sans-serif; background: #fafafa; vertical-align: middle; }
+.tex-page .placeholder { margin: .8em 0; padding: .6em 1em; border: 1px dashed #bbb; color: #777; font: 12px system-ui, sans-serif; background: #fafafa; text-align: center; }
+.tex-page table.tabular { border-collapse: collapse; margin: .4em auto; display: inline-table; vertical-align: middle; }
+.tex-page table.tabular td { padding: .15em .5em; vertical-align: top; text-indent: 0; }
+.tex-page table.tabular td .p { text-indent: 0; }
+.tex-page table.tabular.bl td:first-child { border-left: 1px solid currentColor; }
+.tex-page table.tabular tr.ht td { border-top: 1px solid currentColor; }
+.tex-page .mbox { white-space: nowrap; }
+.tex-page .fbox { display: inline-block; border: 1px solid currentColor; padding: .15em .35em; text-indent: 0; }
+.tex-page .fbox.frame { padding: 0; }
+.tex-page .fbox.shadow { box-shadow: 3px 3px 0 currentColor; }
+.tex-page .fbox.double { border-style: double; border-width: 3px; }
+.tex-page .fbox.oval { border-radius: .8em; }
+.tex-page .mkbox { display: inline-block; text-indent: 0; white-space: nowrap; }
+.tex-page .parbox { display: inline-block; vertical-align: middle; text-indent: 0; text-align: left; }
+.tex-page .parbox.va-t { vertical-align: top; }
+.tex-page .parbox.va-b { vertical-align: bottom; }
+.tex-page .parbox .pbin { display: flex; flex-direction: column; height: 100%; }
+.tex-page .pbin.ip-t { justify-content: flex-start; }
+.tex-page .pbin.ip-c { justify-content: center; }
+.tex-page .pbin.ip-b { justify-content: flex-end; }
+.tex-page .parbox .p { text-indent: 0; text-align: left; }
+.tex-page .phantom { visibility: hidden; }
+.tex-page .phantom.hph { display: inline-block; height: 0; overflow: hidden; }
+.tex-page .phantom.vph { display: inline-block; width: 0; overflow: hidden; }
+.tex-page .llap, .tex-page .rlap { position: relative; display: inline-block; width: 0; }
+.tex-page .llap > span { position: absolute; right: 0; white-space: nowrap; }
+.tex-page .rlap > span { position: absolute; left: 0; white-space: nowrap; }
+.tex-page .smash { display: inline-block; height: 1em; line-height: 1em; }
+.tex-page .marginpar { float: right; clear: right; width: 9em; margin-right: -11.5em; font-size: .85em; text-indent: 0; text-align: left; }
+.tex-page .marginpar.todo { background: #fff6c8; padding: .2em .4em; border-radius: 3px; }
+.tex-page .hsp { display: inline-block; }
+.tex-page .vsp { display: block; }
+.tex-page .rule { display: inline-block; background: currentColor; vertical-align: baseline; }
+.tex-page .cbox { padding: 0 .2em; }
+.tex-page .url { font-family: "Latin Modern Mono", ui-monospace, Menlo, monospace; font-size: .9em; word-break: break-all; }
+.tex-page a { color: #1d4f91; }
+.tex-page a.ref { text-decoration: none; }
+.tex-page .missing { color: #b00; font-weight: 700; }
+.tex-page .unk { font: 11px ui-monospace, Menlo, monospace; color: #666; background: #eee; border-radius: 3px; padding: 0 .25em; margin: 0 .1em; vertical-align: .1em; }
+.tex-page .env-unknown { border-left: 2px solid #eee; padding-left: .4em; }
+.tex-page .bounderr { background: #fde7e3; color: #8a1c0e; padding: .5em 1em; margin-bottom: 1em; font: 13px system-ui, sans-serif; }
+.tex-page .picture { position: relative; display: inline-block; vertical-align: bottom; margin: .3em .2em; text-indent: 0; }
+.tex-page .picture svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.tex-page .pictext { position: absolute; white-space: nowrap; line-height: 1; }
+.tex-page .pictext.pc { transform: translate(-50%, 50%); }
+.tex-page .footnotes { margin-top: 2em; padding-top: .5em; border-top: 1px solid #999; width: 40%; min-width: 16em; font-size: .85em; }
+.tex-page .footnotes .fn { margin: .25em 0; }
+.tex-page .footnotes .fn .p { display: inline; text-indent: 0; }
+.tex-page sup.fnref a { text-decoration: none; }
+.tex-page ol.bib { list-style: none; padding-left: 2.6em; }
+.tex-page ol.bib li { position: relative; margin: .3em 0; }
+.tex-page ol.bib .biblab { position: absolute; right: 100%; margin-right: .5em; }
+
+.tex-page .slide { display: flex; flex-direction: column; container-type: inline-size; position: relative; box-sizing: border-box; width: 100%; margin: 0 0 1.2em; overflow: hidden; background: #fff; border: 1px solid #c8c8d0; box-shadow: 0 1px 3px rgba(0,0,0,.15); text-indent: 0; text-align: left; font-family: "Latin Modern Sans", "CMU Sans Serif", "Helvetica Neue", Arial, sans-serif; line-height: 1.25; }
+.tex-page .slide > * { font-size: calc(var(--sfs) * 1cqw); }
+.tex-page .slide > .slide-title { font-size: calc(var(--sfs) * 1.44cqw); color: #2d2da0; padding: .5em .75em .2em; line-height: 1.2; }
+.tex-page .slide-subtitle { font-size: .72em; }
+.tex-page .slide-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: safe center; padding: .3em 1.1em .7em; }
+.tex-page .slide.va-t .slide-body { justify-content: flex-start; }
+.tex-page .slide.va-b .slide-body { justify-content: safe flex-end; }
+.tex-page .slide .p { text-indent: 0; text-align: left; hyphens: manual; margin: .3em 0; }
+.tex-page .slide .titleblock { margin: 0; }
+.tex-page .slide .titleblock .title { color: #2d2da0; }
+.tex-page .slide .titleblock .institute { font-size: .85em; margin-top: .4em; }
+.tex-page .bblock { margin: .45em 0; border-radius: .25em; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.tex-page .bblock-title { background: #3333b3; color: #fff; padding: .15em .5em; }
+.tex-page .bblock.alertblock .bblock-title { background: #c00; }
+.tex-page .bblock.exampleblock .bblock-title { background: #007a00; }
+.tex-page .bblock-body { background: #ececf6; padding: .25em .5em; }
+.tex-page .alert { color: #c00; }
+.tex-page .structure { color: #3333b3; }
+.tex-page .invisible { visibility: hidden; }
+</style>
+<style>
+body { margin: 0; background: #eef0f2; }
+.tex-page.sb-standalone { position: static; display: block; min-height: 100vh; }
+.sb-standalone .page.beamer { max-width: none; width: 1024px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; }
+.sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
+</style>
+</head>
+<body><div class="tex-page sb-standalone"><div class="page tex-preview">
+<h2 id="sec-1">TikZ and pgfplots</h2>
+<div class="p ni"><span class="it">In this preview:</span> TikZ and pgfplots pictures are not drawn yet; each shows as a placeholder with its source. A full LaTeX run draws them.</div>
+<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
+<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
+</div></div></body></html>

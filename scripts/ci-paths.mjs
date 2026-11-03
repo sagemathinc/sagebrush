@@ -217,8 +217,10 @@ const engineFull = full || matches([/^src\/runtime\//]);
 // worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
 // workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
 // alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
+// (the corpus's boards are the board page's examples; its notebooks and LaTeX documents are inlined in the notebook
+// page and the LaTeX editor, web/examples/legacy.ts, so they are the core, until the old menus go: U7 PR 6)
 const webAreas = {
-  board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\//, /^packages\/sagebrush-board\//],
+  board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
 };

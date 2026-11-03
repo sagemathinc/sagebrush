@@ -7,7 +7,7 @@
 //   node --test scripts/test-examples.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 import {
   SHARD_MAX,
   census,
+  committedOutputs,
+  committedPreview,
+  FONTS_MARK,
   leaks,
   listExamples,
   manifestProblems,
@@ -23,6 +26,7 @@ import {
   select,
   shardCount,
   shardIds,
+  sizeProblems,
   sha256,
   svgCanon,
 } from "./examples-lib.mjs";
@@ -202,6 +206,54 @@ test("SVG canonicalization: generated ids don't matter, coordinates do (no round
     '<svg id="title"/>',
     "a name, not a generated id, is kept",
   );
+});
+
+test("committed outputs (r4.1): an image keeps its text/plain, not its interactive forms; the rest as it came", () => {
+  const scene = {
+    output_type: "display_data",
+    data: {
+      "application/vnd.sagebrush.scene3d+json": { polys: [1, 2, 3] },
+      "image/svg+xml": "<svg/>",
+      "text/html": "<div class=sb3d>...</div>",
+      "text/plain": "Graphics3d",
+    },
+    metadata: { "text/html": { isolated: true }, "image/svg+xml": { w: 1 } },
+  };
+  const html = { output_type: "display_data", data: { "text/html": "<table/>", "text/plain": "t" } };
+  const stream = { output_type: "stream", name: "stdout", text: "x\n" };
+  assert.deepEqual(committedOutputs([scene, html, stream]), [
+    { output_type: "display_data", data: { "image/svg+xml": "<svg/>", "text/plain": "Graphics3d" }, metadata: { "image/svg+xml": { w: 1 } } },
+    html,
+    stream,
+  ]);
+  assert.deepEqual(committedOutputs(undefined), []);
+});
+
+test("committed previews (r4.1): KaTeX's shared stylesheet as a marker, exactly one; the rest the render's bytes", () => {
+  const css = "@font-face{font-display:block;font-family:KaTeX_AMS;src:url(data:font/woff2;base64,AAAA)}.katex{x:1}";
+  const page = `<!doctype html><style>${css}</style>\n<style>.tex-page{}</style><p>$x$</p>`;
+  assert.deepEqual(committedPreview(page), { html: `<!doctype html>${FONTS_MARK}\n<style>.tex-page{}</style><p>$x$</p>`, fonts: css });
+  assert.equal(committedPreview("<p>none</p>").fonts, null);
+  assert.equal(committedPreview(`<style>${css}</style><style>${css}</style>`).fonts, null, "two: neither is taken for the shared one");
+});
+
+test("sizes (section 5, r4.1): a notebook's sources without its outputs; its outputs at most 1 MB", () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "examples-size-"));
+  const m = { main: "main.ipynb", files: ["main.ipynb"] };
+  const nb = (outputBytes) => ({
+    cells: [{ cell_type: "code", metadata: {}, source: "1", outputs: [{ output_type: "stream", name: "stdout", text: "x".repeat(outputBytes) }], execution_count: null }],
+    metadata: {},
+    nbformat: 4,
+    nbformat_minor: 5,
+  });
+  writeFileSync(join(dir, "main.ipynb"), JSON.stringify(nb(600 * 1024), null, 1) + "\n");
+  assert.deepEqual(sizeProblems(dir, m), [], "600 KB of outputs: within the outputs' limit, not counted as sources");
+  writeFileSync(join(dir, "main.ipynb"), JSON.stringify(nb(1100 * 1024), null, 1) + "\n");
+  assert.match(sizeProblems(dir, m).join(), /its outputs: \d+ bytes, more than 1048576/);
+  const big = nb(0);
+  big.cells[0].source = "#".repeat(210 * 1024);
+  writeFileSync(join(dir, "main.ipynb"), JSON.stringify(big, null, 1) + "\n");
+  assert.match(sizeProblems(dir, m).join(), /main\.ipynb: \d+ bytes, more than 204800/);
 });
 
 test("normalization (A5): streams joined, HTML exact, images hashed, errors and loose outputs", () => {
