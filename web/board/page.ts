@@ -59,7 +59,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
-import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
+import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG;
@@ -683,6 +683,33 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 // view is kept: the board journal's load bridge)
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
+// A board's title is its file's name, as a notebook's is (William's B2, the notebook page's wsRenameSoon): a title
+// changed here renames its file in the workspace, after the saves before it, to a free name beside it (never over
+// another), only this board (its identity checked holding the lock). A rename in the file browser retitles the board
+// instead (renamed, below), which then matches its file and renames nothing.
+let boardRenameTimer: ReturnType<typeof setTimeout> | undefined, boardRenameGen = 0;
+function boardRenameSoon(id: string, title: unknown) {
+  clearTimeout(boardRenameTimer);
+  const gen = ++boardRenameGen, base = safeTitle(title);
+  boardRenameTimer = setTimeout(async () => {
+    const w = ws;
+    if (!w) return;
+    try {
+      await wsWriting;
+      if (gen !== boardRenameGen) return;
+      const from = await w.pathOf("board", id);
+      if (!from || splitExt(nameOf(from))[0] === base) return;
+      const e = await w.stat(from);
+      if (!e || e.kind !== "board" || e.ref !== id) return;
+      const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
+      const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
+      if (to && to !== from) await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created } });
+    } catch (err: any) {
+      // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
+      if (err?.code !== "missing" && err?.code !== "exists" && err?.code !== "conflict") console.warn("workspace: a board's rename:", err);
+    }
+  }, 800);
+}
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
   // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
   if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
@@ -1196,7 +1223,7 @@ const host: BoardHost = {
       // (a board on this computer: the file is its only copy, written by whoever writes it; nothing kept here)
       if (fromLocal) return;
       if (unsaved) throw new Error(STORAGE_REFUSED);
-      if (local && ws) return wsSave(source.slice(6), d);
+      if (local && ws) { const r = wsSave(source.slice(6), d); boardRenameSoon(source.slice(6), d.title); return r; }
       try { localStorage.setItem(saveKey, JSON.stringify(d)); } catch { throw new Error(STORAGE_REFUSED); }
       if (local && !listLocal(source.slice(6), d)) throw new Error(STORAGE_REFUSED);
     },

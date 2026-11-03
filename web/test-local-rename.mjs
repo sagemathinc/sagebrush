@@ -1,0 +1,96 @@
+// Renaming a notebook of `sagebrush notebook DIR` (src/notebook.ts; William's B2), in headless Chromium: its title is
+// its file's name, so editing the title renames the FILE, to a free name beside it (" (2)" when the name is taken:
+// never over another file), and then the page's address and its "saved to" say the new name; later saves go there,
+// and the file opens again at its new address. And the server's api/rename refuses what it must.
+//   node web/test-local-rename.mjs [bundle]     (default build/cli/pyjs.cjs; CHROME=... for the browser)
+import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { devtoolsPort, freePort } from "./test-port.mjs";
+
+const bundle = process.argv[2] ?? new URL("../build/cli/pyjs.cjs", import.meta.url).pathname;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let failures = 0, count = 0;
+const ok = (cond, name) => { count++; console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
+
+const dir = mkdtempSync(join(tmpdir(), "sb-local-rename-"));
+mkdirSync(join(dir, "sub"));
+// (a notebook already called "stats": the rename must not overwrite it)
+const STATS = JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [{ cell_type: "code", source: "print('the other stats')", metadata: {}, outputs: [], execution_count: null }] });
+writeFileSync(join(dir, "stats.ipynb"), STATS);
+const port = await freePort();
+const server = spawn(process.execPath, [bundle, "notebook", dir, "--port", String(port), "--no-browser"], { stdio: ["ignore", "pipe", "inherit"] });
+let printed = "";
+server.stdout.on("data", (d) => (printed += d));
+for (let i = 0; i < 100 && !/token=/.test(printed); i++) await sleep(100);
+const url = /http:\/\/127\.0\.0\.1:\d+\/\?token=\w+/.exec(printed)?.[0];
+ok(!!url, "the server prints its URL with a token");
+const base = `http://127.0.0.1:${port}`, token = /token=(\w+)/.exec(url ?? "")?.[1], cookie = `sagebrush_token=${token}`;
+
+const profile = mkdtempSync(join(tmpdir(), "sb-local-rename-chrome-"));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const cdpPort = await devtoolsPort(profile);
+let targets;
+for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
+const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+await new Promise((r) => (ws.onopen = r));
+let n = 0; const waiting = new Map();
+ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
+const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
+const go = async (u) => { await send("Page.navigate", { url: u }); await sleep(800); return until("document.querySelector('#status')?.textContent.startsWith('ready') && !!document.querySelector('#cells textarea')", 60000); };
+const read = (name) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name), "utf8") : null);
+const rename = (title) => ev(`(() => { const t = document.querySelector("#nbname"); t.value = ${JSON.stringify(title)}; t.dispatchEvent(new Event("input")); return true; })()`);
+const setCode = (code) => ev(`(() => { const c = sagebrush.notebook.cells()[0]; sagebrush.notebook.setInput(c, ${JSON.stringify(code)}); sagebrush.notebook.flush?.(); return true; })()`);
+
+try {
+  await send("Page.enable"); await send("Runtime.enable");
+  await send("Page.navigate", { url }); await sleep(500);
+  ok(await go(`${base}/nb/Untitled.ipynb/`), "a new notebook, Untitled.ipynb, opens");
+  await setCode("x = 'mine'");
+  ok(await until(`/saved to Untitled\\.ipynb/.test(document.querySelector("#saved").textContent)`, 20000) && (read("Untitled.ipynb") ?? "").includes("x = 'mine'"), "…saved to Untitled.ipynb on disk");
+
+  // the title to a name that's taken: the file renamed to the free "stats (2).ipynb", the other one untouched
+  await rename("stats");
+  ok(await until(`location.pathname === "/nb/stats%20(2).ipynb/"`, 15000), `the address follows: ${await ev("location.pathname")}`);
+  ok(read("Untitled.ipynb") === null && (read("stats (2).ipynb") ?? "").includes("x = 'mine'"), "the FILE is renamed: Untitled.ipynb is gone, stats (2).ipynb holds the notebook");
+  ok(read("stats.ipynb") === STATS, "…and the stats.ipynb already there is untouched (never overwritten)");
+  ok(await until(`/saved to stats \\(2\\)\\.ipynb/.test(document.querySelector("#saved").textContent)`, 10000), `the caption says the new name: ${await ev(`document.querySelector("#saved").textContent`)}`);
+  ok(/stats \(2\)\.ipynb/.test(await ev("document.title")), "…and the tab's title");
+
+  // later saves go to the new file; it opens again at its new address
+  await setCode("x = 'mine, edited'");
+  ok(await until(`/saved to stats \\(2\\)\\.ipynb/.test(document.querySelector("#saved").textContent)`, 20000) && (await (async () => { for (let i = 0; i < 100; i++) { if ((read("stats (2).ipynb") ?? "").includes("mine, edited")) return true; await sleep(100); } return false; })()), "a later edit is saved to stats (2).ipynb");
+  ok(read("Untitled.ipynb") === null && read("stats.ipynb") === STATS, "…and nothing else is written");
+  ok(await go(`${base}/nb/stats%20(2).ipynb/`) && /mine, edited/.test(await ev(`sagebrush.notebook.cells()[0].ta.value`)), "the notebook opens again at its new address");
+
+  // a free name: the file takes it exactly
+  await rename("fresh");
+  ok(await until(`location.pathname === "/nb/fresh.ipynb/"`, 15000) && read("stats (2).ipynb") === null && (read("fresh.ipynb") ?? "").includes("mine, edited"), "a free name: stats (2).ipynb renamed to fresh.ipynb");
+
+  // the server's api/rename: what it refuses
+  const api = (q, method = "POST") => fetch(`${base}/api/rename?${q}`, { method, headers: { Cookie: cookie } }).then((r) => r.status);
+  writeFileSync(join(dir, "a.ipynb"), "{}");
+  writeFileSync(join(dir, "b.ipynb"), "{}");
+  ok((await api("path=a.ipynb&to=b.ipynb")) === 409 && read("a.ipynb") === "{}" && read("b.ipynb") === "{}", "api/rename: onto a file that exists is 409, both left as they were");
+  ok((await api("path=a.ipynb&to=sub/a.ipynb")) === 400, "…into another folder: 400");
+  ok((await api("path=a.ipynb&to=a.txt")) === 400 && (await api("path=a.txt&to=c.ipynb")) === 400, "…from or to a name that isn't .ipynb: 400");
+  ok((await api("path=a.ipynb&to=../evil.ipynb")) === 400 && (await api("path=../x.ipynb&to=y.ipynb")) === 400, "…outside DIR: 400");
+  ok((await api("path=a.ipynb&to=c.ipynb", "GET")) === 405, "…not POST: 405");
+  ok((await fetch(`${base}/api/rename?path=a.ipynb&to=c.ipynb`, { method: "POST" }).then((r) => r.status)) === 403 && read("a.ipynb") === "{}", "…without the token: 403, nothing moved");
+  ok((await fetch(`${base}/api/rename?path=a.ipynb&to=c.ipynb`, { method: "POST", headers: { Cookie: cookie, Origin: "http://evil.example" } }).then((r) => r.status)) === 403, "…from another origin: 403");
+  const r = await fetch(`${base}/api/rename?path=nope.ipynb&to=nope2.ipynb`, { method: "POST", headers: { Cookie: cookie } });
+  ok(r.status === 200 && JSON.stringify(await r.json()) === '{"path":"nope2.ipynb","moved":false}' && read("nope2.ipynb") === null, "…a notebook not saved yet: only the name is checked free, nothing made");
+} catch (e) {
+  ok(false, "threw: " + String(e?.stack ?? e).slice(0, 600));
+} finally {
+  const gone = chrome.exitCode !== null ? Promise.resolve() : new Promise((r) => chrome.once("exit", r));
+  chrome.kill(); server.kill();
+  await Promise.race([gone, sleep(5000)]);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
+console.log(failures ? `${failures} of ${count} failed` : `all ${count} passed`);
+process.exit(failures ? 1 : 0);
