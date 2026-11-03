@@ -199,8 +199,8 @@ const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace"
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
 async function browser() {
   const profile = mkdtempSync(join(tmpdir(), "sb-a14-"));
-  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
-  const port = await devtoolsPort(profile);
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  const port = await devtoolsPort(profile, undefined, { child: chrome });
   let ver;
   for (let i = 0; i < 200 && !ver; i++) ver = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json(), () => null) ?? (await sleep(100), null);
   const ws = new WebSocket(ver.webSocketDebuggerUrl);
