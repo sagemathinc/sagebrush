@@ -74,7 +74,7 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # tentative epochs, the waits, the ledger's rows) are class 1 (PR #128's LIMIT-PR128-3); the rest of web/ is a follow-up)
 # and the text-overlap detector shared by the notebook and board merges, whose per-diff bound turns into a conflict, never a
 # truncation: class 1)
-WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts"}
+WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js"}
 
 
 def short(key):

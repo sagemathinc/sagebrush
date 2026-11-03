@@ -4,12 +4,22 @@
 
 Links here are relative to the site serving this file (sagebrush.space, or dev.sagebrush.space for the development site).
 
+## How code runs (read this first)
+
+Sagebrush notebooks are **reactive, but they are not marimo**: in Python and Sage, **a name may be defined again in a later cell**, as in a Jupyter notebook read from the top.
+
+- **Order is the page order.** A cell reads the nearest **earlier** definition of a name when there is one; if all its definitions are below it, it reads the first one. A later redefinition is a new value from that cell down.
+- **Editing a cell reruns what depends on it**: the cells that read the edited definition, and their own dependents, within the notebook's time budget (slow or manual cells are marked stale instead). A later definition of a name stops dependencies through that name.
+- Example (Sage mode, where `^` is a power; in Python mode write `**`), four cells: `x = 1`; `print(x^2)` prints 1; `x = 17`; `print(x^3)` prints 4913. Change the first cell to `x = 2`: the edited cell and `print(x^2)` run (it prints 4); `print(x^3)` does not rerun: it still reads `x = 17` and shows 4913.
+- A **board** runs its code items the same way, in its reading order (top to bottom, then left to right; a group's items together).
+- **For agents:** don't rename an ordinary Python or Sage variable (`x2`, `x_new`) just because it is redefined, and don't refuse such a redefinition. But if the notebook does report an error, heed it: a few redefinitions can't be scoped this way (some decorator, class or quoted-annotation cases, and Magma and MATLAB code), and those are real multiple-definition errors.
+
 ## Using the page
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
 - Cells are code or Markdown (text with headings, lists, tables, links, images and LaTeX math `$...$`/`$$...$$`, rendered with KaTeX), as in Jupyter; the WebMCP tool `add_markdown` adds one.
 - Notebooks and their output are saved in the browser (IndexedDB) as you work; File opens, duplicates, deletes, downloads and uploads `.ipynb` (and `.py`). Python's `open()`, `os.listdir` etc. work on files kept in the browser; the Files panel uploads, downloads and deletes them.
-- A notebook can be put in the URL, as File > Share does: `/#z=<base64url of the raw-deflated JSON array of cells>`, each cell a string of code or `{"md": "<Markdown>"}`; `/#c=<base64url of the JSON, not deflated>` works too. Add `m=sage&`, `m=magma&` or `m=matlab&` before `z=` or `c=` for that language (Python otherwise), and `?run` before the `#` to run all cells on load: `/?run#m=sage&z=...`. In Python, `z` is `base64.urlsafe_b64encode(c.compress(data) + c.flush()).rstrip(b"=")` with `c = zlib.compressobj(9, zlib.DEFLATED, -15)` and `data = json.dumps(cells).encode()`.
+- A notebook can be put in the URL, as File > Share does: `/#z=<base64url of the raw-deflated JSON array of cells>`, each cell a string of code or `{"md": "<Markdown>"}`; `/#c=<base64url of the JSON, not deflated>` works too. Add `m=sage&`, `m=magma&` or `m=matlab&` before `z=` or `c=` for that language (Python otherwise): `/#m=sage&z=...`. Nothing runs on open: the person (or an agent through the page's tools) presses Run all. In Python, `z` is `base64.urlsafe_b64encode(c.compress(data) + c.flush()).rstrip(b"=")` with `c = zlib.compressobj(9, zlib.DEFLATED, -15)` and `data = json.dumps(cells).encode()`.
 - numpy: the NumPy 2 API (ndarray, ufuncs, random, linalg, fft, polynomials), checked against NumPy itself: same printed output and the same seeded random numbers.
 - IPython's magics in cells: `%matplotlib inline`, `%load_ext autoreload` with `%autoreload 2` (your modules reload when their files change; classes are updated in place, but an old function kept in a list, closure or default keeps its old code, and a class using `super()` without arguments is not updated, with a message), `%time`, `%timeit`, `%%time` and `%%timeit` (wall time only). Every other magic is an error, and so are shell commands (`!cmd`) and `%pip`: nothing can be installed.
 - Sage mode syntax (as Sage's preparser): `^` power, `^^` xor, exact `2/3`, `[1..10]`, `[1,3..99]`, `(1..)` iterators, reals print as Sage's RR (`1.5` -> `1.50000000000000`), `100r` raw ints, Integer methods on ints (`12.factor()`, `(2^64-1).divisors()`), `R.<x> = ZZ[]`, `R.0`, `f(x) = x^2 + 1` (prints `x |--> x^2 + 1`). Not yet: `type(1)` is `int`.

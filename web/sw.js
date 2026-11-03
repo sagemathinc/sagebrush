@@ -25,6 +25,12 @@ const SHELL = __SHELL__;
 const LAZY = __LAZY__;
 const DIGESTS = __DIGESTS__;
 const CACHE = "sagebrush-" + VERSION;
+// (web/stall-fetch.js's bound, given by the build: a client's chunk fetch is given up after this long without data)
+const STALL_LIMIT_MS = __STALL_LIMIT_MS__;
+// A kept copy's read is given up after half that without data, so the copy's request falls through to the network
+// well before its client gives up: a cache-hit body that never settled held a Sage run for good (the grader's
+// plain-worker investigation; VM1, Nov 3: the reservation taken, the read never answered, nobody waiting)
+const READ_STALL_MS = STALL_LIMIT_MS / 2;
 
 self.addEventListener("install", (ev) => {
   ev.waitUntil((async () => {
@@ -64,7 +70,9 @@ function reserve(n, serve) {
 }
 
 // exactly `size` bytes of a body in one buffer, or null (shorter or longer); with this script's own buffer (BYOB),
-// or, for serving only, chunk by chunk up to the first byte too many (§16)
+// or, for serving only, chunk by chunk up to the first byte too many (§16); STALLED thrown when a read gives no data
+// for READ_STALL_MS (the reader then cancelled)
+const STALLED = new Error("stalled");
 async function readExact(body, size, serving) {
   let r = null, ab = new ArrayBuffer(size), off = 0;
   if (!body) return size ? null : ab;
@@ -72,7 +80,9 @@ async function readExact(body, size, serving) {
   const d = r ?? body.getReader();
   try {
     for (;;) {
-      const { value, done } = await (r ? d.read(new Uint8Array(off < size ? ab : new ArrayBuffer(1), off < size ? off : 0, off < size ? Math.min(size - off, MiB) : 1)) : d.read());
+      let timer;
+      const stalled = new Promise((_, no) => (timer = setTimeout(() => no(STALLED), READ_STALL_MS * timeScale)));
+      const { value, done } = await Promise.race([r ? d.read(new Uint8Array(off < size ? ab : new ArrayBuffer(1), off < size ? off : 0, off < size ? Math.min(size - off, MiB) : 1)) : d.read(), stalled]).finally(() => clearTimeout(timer));
       if (done) return off === size ? ab : null;
       if (off + value.byteLength > size) return null;
       if (r) ab = value.buffer;
@@ -110,20 +120,45 @@ function stored(p, body, onBytes) {
 }
 
 // the bytes of the cache's entry under `key` if it is this build's file `p`, with the budget's release (kept while
-// they are served, §14 S3); a wrong entry (length, bytes, a redirect) is deleted
-async function check(cache, key, p, serve, opts) {
+// they are served, §14 S3); a wrong entry (length, bytes, a redirect) is deleted; a read that stalled (READ_STALL_MS
+// without data) is not an answer: null, the entry left, so the request goes to the network, and that key's kept copy
+// isn't read again until a new copy is put (fetchAndKeep) or STALL_SKIP_MS pass, so requests waiting their turn
+// behind a stalled read don't each stall on the same entry (sync-docs' APP-565-1).  The digest after the read is CPU
+// work and isn't bounded.  One check of a key at a time: a page's request and the keep it then asks for
+// (offlineKeep's entryVerified) read the same entry, and a stalled read was seen with that overlap (VM1, Nov 3)
+let stallSaid = false;
+const checking = new Map();
+const STALL_SKIP_MS = 6 * READ_STALL_MS;
+const skipRead = new Map(); // key -> until when its kept copy isn't read (a read of it stalled)
+function check(cache, key, p, serve, opts) {
+  const k = String(key?.url ?? key), prev = checking.get(k) ?? Promise.resolve();
+  const run = prev.then(() => checkNow(cache, key, p, serve, opts));
+  const tail = run.catch(() => {});
+  checking.set(k, tail);
+  tail.then(() => checking.get(k) === tail && checking.delete(k));
+  return run;
+}
+async function checkNow(cache, key, p, serve, opts) {
+  const k = String(key?.url ?? key), skip = skipRead.get(k);
+  if (skip !== undefined && Date.now() < skip) return null;
+  skipRead.delete(k);
   const w = wanted.get(p), hit = w && (await cache.match(key, opts));
   if (!hit) return null;
-  let release = null, bytes = null;
+  let release = null, bytes = null, stalled = false;
   if (hit.status === 200 && !hit.redirected) {
     try { release = await reserve(2 * w.size, serve); } catch { return null; }
     try {
       bytes = await readExact(hit.body, w.size, serve);
       if (bytes && hex(await crypto.subtle.digest("SHA-256", bytes)) !== w.sha256) bytes = null;
-    } catch { bytes = null; }
+    } catch (e) { (stalled = e === STALLED), (bytes = null); }
   }
   if (bytes) return { bytes, release };
   release?.();
+  if (stalled) {
+    skipRead.set(k, Date.now() + STALL_SKIP_MS * timeScale);
+    if (!stallSaid) (stallSaid = true), console.warn(`sagebrush: a kept copy of ${p} gave no data for ${READ_STALL_MS / 1000} s; fetched from the network instead`);
+    return null;
+  }
   await cache.delete(key, opts);
   return null;
 }
@@ -227,7 +262,7 @@ async function fetchAndKeep(req, key, p, ev) {
   if (copy) {
     ev.waitUntil((async () => {
       const cache = await caches.open(CACHE), release = await reserve(INGEST, false);
-      try { await cache.put(key, copy); } finally { release(); }
+      try { await cache.put(key, copy); skipRead.delete(String(key?.url ?? key)); } finally { release(); }
       await offlineSerial(async () => (await entryVerified(cache, key, p)) && offlineVerified.add(p));
     })().catch(() => {}));
   }
@@ -816,7 +851,18 @@ self.addEventListener("message", (ev) => {
 let stopAt = null, resume = null;
 const instance = Math.random().toString(36).slice(2, 8), started = Date.now(), saw = [];
 for (const e of ["install", "activate"]) self.addEventListener(e, () => saw.push(e + "@" + Date.now()));
-const holds = [], grants = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
+// (skipping: the keys whose mark hasn't run out; sw.js drops a mark only when the key is next read, so an expired one
+// can stay in the map: CI run 41627015378, a three-at-once phase's read-back marked the key with nobody reading it after)
+let putting = 0, serialBusy = 0;
+// (the offline queue's pending tasks, e.g. a put's read-back (fetchAndKeep, offlineKeep): wrapped here, counted)
+const offlineSerial0 = offlineSerial;
+offlineSerial = (f) => {
+  serialBusy++;
+  const p = offlineSerial0(f);
+  p.finally(() => serialBusy--).catch(() => {});
+  return p;
+};
+const holds = [], grants = [], deletes = [], reserve0 = reserve, cacheNames = new WeakMap(), open = caches.open.bind(caches);
 reserve = (n, serve) => reserve0(n, serve).then((release) => (grants.push(serve ? "serve" : "bg"), release));
 caches.open = async (name) => { const c = await open(name); cacheNames.set(c, name); return c; };
 for (const op of ["put", "delete"]) {
@@ -826,11 +872,24 @@ for (const op of ["put", "delete"]) {
     const s = stopAt, hit = s?.op === op && String(k?.url ?? k).includes(s.url) && (!s.cache || s.cache === cacheNames.get(this)) && (!s.walk || (await recGet("moving"))?.key === String(k?.url ?? k));
     const halt = () => ((stopAt = null), new BroadcastChannel("sb-offline-test").postMessage({ stopped: s, key: String(k?.url ?? k), instance }), new Promise((r) => (resume = r)));
     if (hit && s.when === "before") await halt();
-    const r = await f.call(this, k, ...a);
+    putting += op === "put" ? 1 : 0;
+    const r = await f.call(this, k, ...a).finally(() => (putting -= op === "put" ? 1 : 0));
+    if (op === "delete" && deletes.length < 200) deletes.push(String(k?.url ?? k));
     if (hit && s.when !== "before") await halt();
     return r;
   };
 }
+// (a held read: the next cache hit whose URL includes `holdRead` gets a body that never gives data, once: the stall
+// a kept copy's read was seen in, VM1 Nov 3)
+let holdRead = null, holdKeep = false, heldReads = 0;
+const match0 = Cache.prototype.match;
+Cache.prototype.match = async function (k, ...a) {
+  const r = await match0.call(this, k, ...a), h = holdRead;
+  if (!r || !h || !String(k?.url ?? k).includes(h)) return r;
+  if (!holdKeep) holdRead = null;
+  heldReads++;
+  return new Response(new ReadableStream({ type: "bytes", pull: () => new Promise(() => {}) }), { status: 200, headers: r.headers });
+};
 // (a deploy's settings, one shot, set by the test page for this build before it installs: read before install ends)
 const set = (t) => {
   if (typeof t.scale === "number" && t.scale > 0) timeScale = t.scale;
@@ -838,6 +897,7 @@ const set = (t) => {
   else if (t.quota) estimateFn = async () => ({ quota: t.quota.quota, usage: t.quota.usage });
   if (t.probe === false) probed = Promise.resolve(false);
   if ("stop" in t) stopAt = t.stop;
+  if ("holdRead" in t) (holdRead = t.holdRead), (holdKeep = !!t.holdKeep);
 };
 const boot = new Promise((done) => {
   const o = indexedDB.open("sb-offline-test", 1);
@@ -858,7 +918,7 @@ self.addEventListener("message", (ev) => {
   // (budget held and released by the test itself, outside the grant log)
   if (t.hold) reserve0(t.hold, true).then((r) => holds.push(r), () => {});
   if (t.release) holds.splice(0).forEach((r) => r());
-  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt });
+  port.postMessage({ budgetPeak, budgetUsed, inflightPeak, keysLooked, waiting: waiters.length, grants, version: VERSION, sources: sources ?? null, instance, started, saw, paused: !!resume, stopArmed: !!stopAt, heldReads, checking: checking.size, skipping: [...skipRead.values()].filter((t) => Date.now() < t).length, putting, serialBusy, deletes });
   if (t.reset) (budgetPeak = budgetUsed), (inflightPeak = 0), (keysLooked = 0), (grants.length = 0);
 });
 // </offline-test>
