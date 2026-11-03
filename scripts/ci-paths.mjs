@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { gateInputs } from "./size-measure.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
@@ -242,8 +243,8 @@ const webWorkspace = web && (allWeb || inArea("workspace"));
 
 // The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
 // its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
-// test/ci-paths.test.ts)
-const exampleSelection = selectExamples(files, listExamples(process.env.CI_EXAMPLES_ROOT || new URL("../examples", import.meta.url).pathname), { all: full }).ids;
+// test/ci-paths.test.ts. fileURLToPath, not .pathname: a checkout path with a space read as an empty corpus)
+const exampleSelection = selectExamples(files, listExamples(process.env.CI_EXAMPLES_ROOT || fileURLToPath(new URL("../examples", import.meta.url))), { all: full }).ids;
 const outputs = {
   full,
   docs_only: docsOnly,

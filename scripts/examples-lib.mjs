@@ -181,7 +181,11 @@ export function pathProblem(p) {
   return null;
 }
 
-const MAIN = { notebook: /\.ipynb$/, board: /\.board\.json$/, latex: /\.tex$/ };
+const MAIN = {
+  notebook: /\.ipynb$/,
+  board: /\.(board\.json|json|md)$/,
+  latex: /\.tex$/,
+};
 const COMMON = [
   "title",
   "summary",

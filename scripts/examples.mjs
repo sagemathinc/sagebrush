@@ -81,6 +81,16 @@ function validate(root) {
       problems.push(`${e.id}: ${p}`);
     for (const p of sizeProblems(e.dir, e.manifest))
       problems.push(`${e.id}: ${p}`);
+    // (a .board.json is the current format, which `board check` checks; without its header the runner
+    // would take it for an older board)
+    if (e.kind === "board" && /\.board\.json$/.test(e.manifest.main ?? "")) {
+      let format;
+      try {
+        format = JSON.parse(readFileSync(join(e.dir, e.manifest.main), "utf8")).format;
+      } catch {}
+      if (format !== "sagebrush-board")
+        problems.push(`${e.id}: main: a .board.json needs "format": "sagebrush-board"`);
+    }
   }
   return problems;
 }
@@ -188,12 +198,20 @@ export async function runExample(root, id, { update = false } = {}) {
           );
       }
     } else if (e.kind === "board") {
+      // (a board in the current format: `board check`, which runs its code items and checks the rest; an older
+      // board, which check refuses for its missing header: `board run`. The verdict needs both the exit code
+      // and the report's own `ok`)
+      const text = readFileSync(join(work, m.main), "utf8");
+      let current = false;
+      try {
+        current = JSON.parse(text).format === "sagebrush-board";
+      } catch {}
       const r = await sh(
         process.execPath,
         [
           CLI,
           "board",
-          "check",
+          current ? "check" : "run",
           m.main,
           "--json",
           "--timeout",
@@ -201,11 +219,22 @@ export async function runExample(root, id, { update = false } = {}) {
         ],
         { cwd: work, env, deadline },
       );
+      let report = null;
+      try {
+        report = JSON.parse(r.out);
+      } catch {}
       if (r.killed) problems.push(`killed at ${DEADLINE_MS / 1000} s`);
-      else if (r.code !== 0)
+      else if (r.code !== 0 || report?.ok !== true) {
+        const why =
+          report?.problems?.map((x) => x.message) ??
+          report?.items
+            ?.filter((i) => i.status !== "ok")
+            .map((i) => `${i.id}: ${i.status}`) ??
+          [];
         problems.push(
-          `board check failed (exit ${r.code}): ${tail(r.out + r.err)}`,
+          `board ${current ? "check" : "run"} failed (exit ${r.code}, ok ${report?.ok}): ${why.slice(0, 4).join("; ") || tail(r.out + r.err)}`,
         );
+      }
       const g = r.killed
         ? null
         : await sh(

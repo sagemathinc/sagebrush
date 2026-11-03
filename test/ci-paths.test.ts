@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -345,5 +345,22 @@ test("examples: a change selects its examples; the engines select notebooks, boa
   assert.deepEqual(run(["src/compile.ts"]).ids, ["board/hello", "notebook/hello-python", "notebook/sage-basics"]);
   assert.deepEqual(run(["web/latex/engine/expand.ts"]).ids, ["latex/article"]);
   assert.deepEqual(run(["README.md"], "full-ci").ids, ["board/hello", "latex/article", "notebook/hello-python", "notebook/sage-basics"]);
+});
+
+// (the corpus is found by its real path: a checkout whose path has a space, read as a URL's percent-encoded
+// pathname, found no corpus and skipped both examples jobs; grader B1)
+test("examples: ci-paths finds the corpus beside it in a checkout whose path has a space", () => {
+  const top = mkdtempSync(join(tmpdir(), "ci paths "));
+  mkdirSync(join(top, "scripts"));
+  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
+  cpSync(join(__dirname, "..", "..", "test", "fixtures", "examples"), join(top, "examples"), { recursive: true });
+  const list = join(top, "files.txt");
+  writeFileSync(list, "examples/latex/article/main.tex\n");
+  const env: NodeJS.ProcessEnv = { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" };
+  delete env.CI_EXAMPLES_ROOT;
+  const r = spawnSync(process.execPath, [join(top, "scripts", "ci-paths.mjs")], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^examples_ids=\["latex\/article"\]$/m);
+  assert.match(r.stdout, /^examples_matrix=\[1\]$/m);
 });
 

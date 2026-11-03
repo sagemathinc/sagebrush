@@ -318,6 +318,21 @@ test("the runner fails a changed output, an error, a hang (killed at the deadlin
   assert.equal(r.status, 1);
   assert.match(r.stdout, /killed at 3 s/);
   assert.ok(Date.now() - t < 20_000, "killed promptly");
+  // (a board whose code item raises fails, through board check's report)
+  const bFile = join(root, "board", "hello", "main.board.json");
+  const board = JSON.parse(readFileSync(bFile, "utf8"));
+  const items = JSON.stringify(board).match(/"code":"[^"]*"/g) ?? [];
+  assert.ok(items.length > 0, "the fixture board has a code item");
+  writeFileSync(bFile, JSON.stringify(board).replace(items[0], '"code":"1/0"'));
+  r = run(["run", "board/hello", "--root", root]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /board check failed/);
+  // (a .board.json without its format header doesn't validate: the runner would take it for an older board)
+  delete board.format;
+  writeFileSync(bFile, JSON.stringify(board));
+  r = run(["validate", "--root", root]);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout + r.stderr, /board\/hello: main: a \.board\.json needs "format": "sagebrush-board"/);
   writeFileSync(join(root, "latex", "article", "preview.html"), "<p>stale</p>");
   r = run(["run", "latex/article", "--root", root]);
   assert.equal(r.status, 1);
