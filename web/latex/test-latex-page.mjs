@@ -1425,6 +1425,29 @@ $P = \sage{g[0]}$
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
   check(await ev(`document.querySelector(".tex-page")?.textContent.includes("This file isn't here any more.")`), "an unknown fid: Gone");
+  // (grader R5 on #546) the worker replaced by its watchdog (a reply held past its 15 s): the new worker is sent the
+  // \input files again, so a macro from the macros file still renders in its reply
+  {
+    const rHook = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__holdReplies = false; window.__replyHolds = [];
+      window.__sbTexReplyHold = () => { if (window.__holdReplies) return new Promise((r) => window.__replyHolds.push(r)); };
+    })()` });
+    await mk("/shared2/macros.tex", enc("\\newcommand{\\greet}{Hello again from the macros file}\n"));
+    const MAIN = "\\documentclass{article}\n\\input{../shared2/macros}\n\\begin{document}\n\\greet.\n\\end{document}\n";
+    await open(await mk("/paper2/main.tex", enc(MAIN)));
+    const first = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Hello again from the macros file")`, 20000);
+    await ev(`window.__holdReplies = true`);
+    await typeInto(MAIN.replace("\\greet.", "\\greet. After the restart."));
+    const held = await until(`window.__replyHolds.length === 1`, 20000);
+    // (only that reply held: the replaced worker's reply, after the watchdog's 15 s, is installed)
+    await ev(`window.__holdReplies = false`);
+    const shown = await until(`(() => { const t = document.querySelector(".tex-preview")?.textContent ?? ""; return t.includes("After the restart") && t.includes("Hello again from the macros file"); })()`, 40000);
+    check(first && held && shown, "\\input: after the worker is replaced (its watchdog), the macros file's macro still renders",
+      { first, held, shown, text: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });
+    await ev(`(() => { for (const r of window.__replyHolds.splice(0)) r(); return true; })()`);
+    await sleep(500);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
+  }
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
