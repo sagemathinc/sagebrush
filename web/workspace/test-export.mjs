@@ -1420,8 +1420,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     await ev(`${W}.mkdir("/U3").then(() => ${W}.mkdir("/U3/sub")).then(() => ${W}.create("/U3/a.txt", { content: "aa" })).then(() => ${W}.create("/U3/sub/b.txt", { content: "bbb" })).then(() => ${W}.create("/U3/n.ipynb", { content: ${nb("u3")} })).then(() => ${W}.create("/U3x.txt", { content: "a sibling whose name starts with the folder's" })).then(() => 1)`);
     for (const p of ["/U3/cloud.csv", "/far.csv"]) await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: ${JSON.stringify(p)}, kind: "file", ref: ${JSON.stringify(p)}, size: 10, created: t, updated: t, fid: ${JSON.stringify("fid" + p.length)}, ident: ${JSON.stringify("id" + p)}, sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
     const before = await lastAt();
-    const row = `#wssidebar .frow[data-sel][data-path="/U3"]`;
-    const start = async () => {
+    // (one folder's export from the file panel: the folder's checkbox, then the bar's Download)
+    const startFor = (folder) => async () => {
+      const row = `#wssidebar .frow[data-sel][data-path=${JSON.stringify(folder)}]`;
       await closeFlow();
       await ev(`(() => { document.querySelector(".sbfprev button.x")?.click(); window.__exp = null; return 1; })()`);
       await until(`!${P}`, 5000);
@@ -1429,6 +1430,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await ev(`(() => { document.querySelector(${JSON.stringify(row + " .sel")}).click(); [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Download").click(); return 1; })()`);
       await until(`!!${P}`, 10000);
     };
+    const start = startFor("/U3");
     await hooks();
     const f = await exportOnce(join(out, "u3.zip"), { start });
     await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
@@ -1470,6 +1472,48 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
       check(stoppedShown && got && zname === "U3.zip" && names.length > 0 && names.every((n) => n.startsWith("U3/") || n === "manifest.json" || n === "not-included.txt"),
         "U3 (astra's U3-NAMING-1): a folder export stopped, then Export again from its panel: the new archive is still named from the folder: " + JSON.stringify({ stoppedShown, stopText, zname, names }));
+    }
+    // (sync-docs' U3-TREE-1: a folder's export minds only what touches it. Held at its first member's capture:
+    // (a) a write to a file outside the folder: the zip is made; (b) a rename of the folder's parent: it stops;
+    // (c) a move of a file from outside into the folder: it stops)
+    {
+      const clear = () => ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      const during = (code) => hooks(`beforeCapture: async (p) => { if (!window.__did && p.startsWith("/P/U3t/")) { window.__did = 1; ${code} } }`);
+      await ev(`${W}.mkdir("/P").then(() => ${W}.mkdir("/P/U3t")).then(() => ${W}.create("/P/U3t/z.txt", { content: "zz" })).then(() => ${W}.create("/away.txt", { content: "1" })).then(() => { window.__did = 0; return 1; })`);
+      await until(`!!document.querySelector('#wssidebar .frow[data-path="/P"]')`, 15000);
+      // (the parent opened in the file panel, so the folder's own row is there to select)
+      await ev(`(() => { const r = document.querySelector('#wssidebar .frow[data-sel][data-path="/P"]'); if (r && r.getAttribute("aria-expanded") !== "true") r.click(); return 1; })()`);
+      await during(`await window.sagebrush.workspace.write("/away.txt", "2");`);
+      const ta = await exportOnce(join(out, "u3-a.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      const na = ta.stopped ? [] : (inspect(join(out, "u3-a.zip"), {}, "/P/U3t").names ?? []);
+      check(!ta.stopped && ta.name === "U3t.zip" && na.includes("U3t/z.txt"), "U3-TREE-1 (a): a write outside the folder during its export: the zip is still made: " + JSON.stringify(ta.stopped ?? na));
+      await ev(`(() => { window.__did = 0; return 1; })()`);
+      await during(`await window.sagebrush.workspace.create("/inbound.txt", { content: "in" }); await window.sagebrush.workspace.rename("/inbound.txt", "/P/U3t/inbound.txt");`);
+      const tc = await exportOnce(join(out, "u3-c.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      check(!!tc.stopped && /while exporting/.test(tc.stopped), "U3-TREE-1 (c): a file moved into the folder during its export stops it: " + String(tc.stopped ?? "not stopped").slice(-160));
+      await ev(`(() => { window.__did = 0; return 1; })()`);
+      // ((b): the parent renamed away and straight back during a capture: every capture still finds its path, so only the
+      // tree check's ancestor rule can stop it; (c)'s file taken out first)
+      await ev(`${W}.remove("/P/U3t/inbound.txt").then(() => 1, () => 0)`);
+      await until(`!document.querySelector('#wssidebar .frow[data-path="/P/U3t/inbound.txt"]')`, 10000);
+      await during(`await window.sagebrush.workspace.rename("/P", "/P2"); await window.sagebrush.workspace.rename("/P2", "/P");`);
+      const tb = await exportOnce(join(out, "u3-b.zip"), { start: startFor("/P/U3t") });
+      await clear();
+      check(!!tb.stopped && /\/P \(to \/P2\): "rename" while exporting/.test(tb.stopped), "U3-TREE-1 (b): the folder's parent renamed during its export stops it (the tree check's ancestor rule): " + String(tb.stopped ?? "not stopped").slice(-160));
+      await hooks();
+      for (const p of ["/P2", "/P", "/away.txt"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
+    }
+    // (sync-docs: a folder named like the archive's own top-level members keeps the files/... names, so nothing collides)
+    {
+      await ev(`${W}.mkdir("/manifest.json").then(() => ${W}.create("/manifest.json/x.txt", { content: "x" })).then(() => 1)`);
+      await hooks();
+      const tm = await exportOnce(join(out, "u3-m.zip"), { start: startFor("/manifest.json") });
+      await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+      const zm = tm.stopped ? { names: [] } : inspect(join(out, "u3-m.zip"));
+      check(!tm.stopped && zm.unzip === 0 && zm.names.includes("files/manifest.json/x.txt") && zm.names.filter((n) => n === "manifest.json").length === 1, "U3: a folder named manifest.json downloads with files/... names, beside the archive's own manifest.json: " + JSON.stringify(tm.stopped ?? zm.names));
+      await ev(`${W}.remove("/manifest.json").then(() => 1, () => 0)`);
     }
     // (afterwards an export of everything names its members files/... again)
     await hooks();

@@ -482,6 +482,8 @@ export class CaptureLog {
 /** A line's length in the capture log, at its widest (preflight's bound). */
 const captureLineLen = (e: Entry) => jsonLen(e.path) + jsonLen(e.kind) + (e.ident === undefined ? 4 : jsonLen(e.ident)) + 5;
 const parentOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+/** Whether path `p` is `folder` or inside it. */
+const under = (p: string, folder: string) => p === folder || p.startsWith(folder + "/");
 
 /** Ops after S0, against the allow-list (E1 r2c §2 rule 1; astra's E1-A1 and E1-R2-A1): a content `write` that kept,
  * exactly as the export captured them, its entry's identity and kind, its folder (by the folder's identity, itself
@@ -489,7 +491,7 @@ const parentOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
  * the export, naming its path; server-applied ops alike.  Two passes: the ops (any other kind stops at once; the writes
  * kept), then the capture log, read once for just the paths the writes need.  The log's floor is read before and
  * after: ops after S0 pruned meanwhile stop it. */
-export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, signal: AbortSignal): Promise<void> {
+export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, signal: AbortSignal, root?: string): Promise<void> {
   const trimmed = "the workspace's change log was trimmed while exporting, so the export can't show nothing moved";
   if ((await w.opsFloor()) > s0) throw new ExportStopped(trimmed);
   const stop = (op: Op): never => { throw new ExportStopped(`${op.path}${op.to ? ` (to ${op.to})` : ""}: "${op.op}" while exporting`); };
@@ -502,6 +504,9 @@ export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, s
     for (const op of ops) {
       { const y = breathe(); if (y) await y; }
       if (op.op === "dropVersions" || op.op === "emptyTrash") continue;
+      // (U3, sync-docs' U3-TREE-1: one folder's export minds only what touches it: an op in it, a move into or out of
+      // it, or a change to it or an ancestor of it (which changes what `root` names); work elsewhere goes on)
+      if (root && !(under(op.path, root) || (op.to && under(op.to, root)) || under(root, op.path))) continue;
       const a = op.after;
       if (op.op !== "write" || !a || a.trashed || a.name !== nameOf(op.path) || a.kind !== op.kind) stop(op);
       writes.push(op);
@@ -670,7 +675,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     }
     { const st = T().stats; if (st) { st.records = records; st.clockReads = clockReads; } }
     // (rule 1: nothing in the tree moved since S0)
-    await treeUnchanged(w, plan.s0, log, opts.signal);
+    await treeUnchanged(w, plan.s0, log, opts.signal, plan.root);
     tick("finishing", true);
     // (§5a: created right before the manifest is serialized; the manifest is the last member)
     const created = new Date().toISOString();
