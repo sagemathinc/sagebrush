@@ -26,10 +26,14 @@ let fail = 0;
 // self-test's COI diagnosis, loaded by selftest() only under
 // SAGEBRUSH_APP_SELFTEST, web/notebook/selftest-diagnose.js)
 const APP_ONLY = ["sagebrush-selftest.js"];
-const verdict = (name, status) => (APP_ONLY.includes(name) ? status === 404 : status === 200);
+// (and the site-only: the LaTeX editor's page module, which the page names but only fetches on the site's own hosts
+// (web/latex/boot.ts latexOn, web/build.ts: sagebrush.space, dev.sagebrush.space), never on the CLI's 127.0.0.1, where
+// the editor is off; the CLI doesn't carry it, so it must be 404 here, as an app-only file is)
+const SITE_ONLY = ["sagebrush-latex.js"];
+const verdict = (name, status) => (APP_ONLY.includes(name) || SITE_ONLY.includes(name) ? status === 404 : status === 200);
 // (the verdict's own control: an app-only file served, or a page file
 // missing, must fail)
-for (const [n, s, want] of [["sagebrush-selftest.js", 404, true], ["sagebrush-selftest.js", 200, false], ["sagebrush-history.js", 200, true], ["sagebrush-history.js", 404, false]]) {
+for (const [n, s, want] of [["sagebrush-selftest.js", 404, true], ["sagebrush-selftest.js", 200, false], ["sagebrush-history.js", 200, true], ["sagebrush-history.js", 404, false], ["sagebrush-latex.js", 404, true], ["sagebrush-latex.js", 200, false]]) {
   if (verdict(n, s) !== want) { fail++; console.log(`FAIL the verdict's control: ${n} ${s}`); }
 }
 try {

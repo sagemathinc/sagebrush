@@ -146,11 +146,18 @@ export class AgentPairing {
   private pairingId = "";
   private remember = false;
   private helloSent: Promise<Hello>;
+  // (A14: the session secret this pairing holds, from the hello or the reload record it was restored from; its
+  //  generation, so an older pairing's end can't touch a newer one's record; the record it would restore from after
+  //  an involuntary loss, kept in memory only)
+  private sessionSecret: string | undefined;
+  private readonly gen = ++pairingGen;
+  lostRecord: ReloadRecord | null = null;
+  private revoked = false;
 
   constructor(
     readonly port: number,
-    how: { code: string } | { session: string; pairingId: string },
-    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown> },
+    how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
+    private opts: { verbsFor: (actor: string) => AgentVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -158,7 +165,7 @@ export class AgentPairing {
     this.refill = now;
     const WS = opts.WebSocketImpl ?? WebSocket;
     this.sock = new WS(`ws://127.0.0.1:${port}/sagebrush`);
-    if ("pairingId" in how) this.pairingId = how.pairingId;
+    if ("pairingId" in how) { this.pairingId = how.pairingId; this.sessionSecret = how.session; }
     this.helloSent = new Promise<Hello>((resolve, reject) => {
       this.sock.onopen = () => {
         const params: Record<string, unknown> = { protocol: 1, page: opts.page };
@@ -190,7 +197,13 @@ export class AgentPairing {
           const r = msg.result;
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
           this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [] };
+          // (A14: a restore's session must be answered by the agent it was given to, name and client; else closed)
+          if ("agent" in how && how.agent && (this.hello.agent.name !== how.agent.name || this.hello.agent.client !== how.agent.client)) {
+            this.close(1000, "another agent answered this page's session");
+            return reject(new AgentError("identity", "another agent answered this page's session"));
+          }
           if (!this.pairingId) this.pairingId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (this.hello.session) this.sessionSecret = this.hello.session;
           this.state = "paired";
           this.emit();
           return resolve(this.hello);
@@ -232,6 +245,10 @@ export class AgentPairing {
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
+    // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
+    //  of this allow() goes on, no record, no timer, no "granted")
+    if ((this.state as AgentPairing["state"]) === "closed" || this.grant !== grant) return;
+    this.keepForReload();
     if (this.timer) clearTimeout(this.timer);
     if (grant.expires !== null) this.timer = setTimeout(() => void this.revoke("the grant expired"), Math.max(0, grant.expires - now));
     this.state = "granted";
@@ -243,9 +260,28 @@ export class AgentPairing {
     if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.hello?.session, port: this.port } satisfies Kept);
   }
 
+  /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
+   * with the grant exactly as allowed; never for a pairing without a session secret. */
+  private keepForReload() {
+    const r = this.opts.reload, g = this.grant, h = this.hello;
+    if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, expires: g.expires }, workspace: r.scope.workspace, page: r.scope.page });
+  }
+  /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
+  private dropReload() {
+    const r = this.opts.reload;
+    if (!r || this.gen !== pairingGen) return;
+    let held: ReloadRecord | null = null;
+    try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
+    if (!held || held.pairingId === this.pairingId) putReloadRecord(r.storage, null);
+  }
+
   /** Revoke: the server told ({}), the socket closed, the kept grant and session forgotten, at once. */
   async revoke(why = "revoked") {
     const id = this.pairingId;
+    this.revoked = true;
+    this.lostRecord = null;
+    this.dropReload();
     this.grant = null;
     this.verbs = null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
@@ -272,6 +308,15 @@ export class AgentPairing {
   private end(why: string) {
     if (this.state === "closed") return;
     this.closeReason ||= why;
+    // (A14: an involuntary loss, while the page stays: the record leaves storage, so a later reload doesn't try a
+    //  session that just failed, and stays in memory for the bar's one [Reconnect]; a revoke dropped it already; the
+    //  page leaving (a reload) keeps it, for the restore)
+    const r = this.opts.reload;
+    if (r && !this.revoked && !r.leaving() && this.gen === pairingGen) {
+      let held: ReloadRecord | null = null;
+      try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
+      if (held && held.pairingId === this.pairingId) { this.lostRecord = held; putReloadRecord(r.storage, null); }
+    }
     this.state = "closed";
     this.grant = null;
     this.verbs = null;
@@ -429,4 +474,104 @@ export class AgentPairing {
     }
     throw new AgentError("invalid", `not a verb: ${verb}`);
   }
+}
+
+// ---- the reload record (A14 plan r3.1 + r3.2): an unremembered grant survives a reload of the same page
+// One record in sessionStorage per page, closed and bounded: the pairing, its session secret, the agent it was, and the
+// grant exactly. It newly keeps an unremembered bearer secret for the page's life (remembered ones are in IndexedDB,
+// longer). It is never in a URL, the chat, a toast, diagnostics or an export. A copy in another tab (window.open, a
+// duplicated or restored tab) is independent: a consume here doesn't reach it, so each page's own checks decide.
+
+export const RELOAD_KEY = "sb-agent-reload-v1";
+// (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
+let pairingGen = 0;
+/** At most this long between the page leaving (pagehide) and its reload for the restore to be silent (R1-b). */
+export const RELOAD_FRESH_MS = 30_000;
+const RELOAD_MAX = 4096;
+
+export type ReloadRecord = {
+  v: 1; pairingId: string; session: string; port: number;
+  agent: { name: string; client: string };
+  grant: { folders: string[]; write: boolean; expires: number | null };
+  workspace: string; page: string; leftAt?: number;
+};
+/** The page a record belongs to: its workspace's store and its own address (R1-d). */
+export type ReloadScope = { workspace: string; page: string };
+type ReloadStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+const isStr = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
+const keysAre = (o: object, want: string[], optional: string[] = []) => {
+  const k = Object.keys(o);
+  return want.every((w) => k.includes(w)) && k.every((x) => want.includes(x) || optional.includes(x));
+};
+
+/** A record as kept, or null for anything else: the exact keys, each in its bounds (finite numbers only), its
+ * folders as grantFolders gives them back. Fails closed: a record that isn't exactly this is no record. */
+export function parseReloadRecord(raw: string | null): ReloadRecord | null {
+  // (the bound in UTF-8 bytes, as stored, not UTF-16 code units: a non-ASCII record is counted as it is, S3)
+  if (typeof raw !== "string" || raw.length > RELOAD_MAX || enc.encode(raw).length > RELOAD_MAX) return null;
+  let v: any;
+  try { v = parseStrict(raw); } catch { return null; }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  if (!keysAre(v, ["v", "pairingId", "session", "port", "agent", "grant", "workspace", "page"], ["leftAt"])) return null;
+  if (v.v !== 1 || typeof v.pairingId !== "string" || !/^[0-9a-f]{24}$/.test(v.pairingId)) return null;
+  if (typeof v.session !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(v.session)) return null;
+  if (!Number.isInteger(v.port) || v.port < 1 || v.port > 65535) return null;
+  const a = v.agent, g = v.grant;
+  if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
+  if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"])) return null;
+  if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
+  if (typeof g.write !== "boolean") return null;
+  if (g.expires !== null && !(typeof g.expires === "number" && Number.isFinite(g.expires))) return null;
+  let folders: string[];
+  try { folders = grantFolders(g.folders); } catch { return null; }
+  if (folders.length !== g.folders.length || folders.some((f, i) => f !== g.folders[i])) return null;
+  if (!isStr(v.workspace, 256) || !isStr(v.page, 256)) return null;
+  if ("leftAt" in v && !(typeof v.leftAt === "number" && Number.isFinite(v.leftAt))) return null;
+  return v as ReloadRecord;
+}
+
+/** What a page may do with a parsed record:
+ *  - "silent": reconnect now, with no gesture (a reload, fresh, same scope, not expired: R1-a..e);
+ *  - "click": keep it in memory for one [Reconnect] (the same scope, not expired; only the reload or freshness failed);
+ *  - "discard": never usable (another workspace or page, or the grant is over). */
+export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
+  if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
+  if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
+  if (o.navType !== "reload" || r.leftAt === undefined) return "click";
+  const age = o.now - r.leftAt;
+  return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
+}
+
+/** What taking the record found (S1): "none", no storage or no entry (genuinely absent); "bad", an entry this page
+ * may not use: unreadable, not removable (consumed before any attempt, R1-c, or not at all), or not exactly a
+ * record; "ok", the record, already removed. A "bad" take is never silently replaced by another grant. */
+export type ReloadTake = { kind: "none" } | { kind: "bad" } | { kind: "ok"; record: ReloadRecord };
+/** The record, taken: read, removed at once (before any attempt, R1-c, this page only), then parsed. Fails closed: an
+ * entry that can't be read or removed is "bad", never used. */
+export function takeReloadRecord(s: ReloadStorage | null): ReloadTake {
+  if (!s) return { kind: "none" };
+  let raw: string | null = null;
+  try { raw = s.getItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
+  if (raw === null) return { kind: "none" };
+  try { s.removeItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
+  const record = parseReloadRecord(raw);
+  return record ? { kind: "ok", record } : { kind: "bad" };
+}
+/** The record written (or, with null, removed). Only a record the reader would take back exactly is written (its
+ * shape and its byte bound, S3); anything else is not stored, and any older entry goes: the live grant itself is
+ * never cut to fit. */
+export function putReloadRecord(s: ReloadStorage | null, r: ReloadRecord | null): void {
+  if (!s) return;
+  const raw = r ? JSON.stringify(r) : null;
+  const fits = raw !== null && parseReloadRecord(raw) !== null;
+  try { if (fits) s.setItem(RELOAD_KEY, raw!); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
+}
+/** On pagehide: the time the page left, on the record it holds (if it holds a valid one). */
+export function markReloadLeft(s: ReloadStorage | null, now: number): void {
+  if (!s) return;
+  let r: ReloadRecord | null = null;
+  try { r = parseReloadRecord(s.getItem(RELOAD_KEY)); } catch { return; }
+  if (r) putReloadRecord(s, { ...r, leftAt: now });
 }

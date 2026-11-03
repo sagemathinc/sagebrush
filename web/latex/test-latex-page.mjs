@@ -88,7 +88,7 @@ const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
-  // ---- the flag: off (no ?latex=1, nothing stored): ?tex= shows the note, and nothing of the editor is fetched
+  // ---- no flag (on by default; ?latex=1 below is ignored, kept from when it was the switch)
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
@@ -691,9 +691,8 @@ try {
   requests.length = 0;
   await go(base + "?tex=" + fid);
   await sleep(1500);
-  check(await ev(`!document.querySelector(".tex-page") && document.body.innerText.includes("The LaTeX editor isn't enabled here.")`), "flag off: the note, no editor");
-  check(latexFetches().length === 0, "flag off: no LaTeX file fetched", latexFetches());
-  check(await ev(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Preview it")`), "flag off: the note offers the file's preview");
+  // (on by default, William Nov 2: no ?latex=1, nothing stored, and ?tex= opens the editor on an allowed host)
+  check(await until(`!!document.querySelector(".tex-page") && !document.body.innerText.includes("The LaTeX editor isn't enabled here.")`, 20000), "on by default: ?tex= opens the editor with no flag");
   // ---- a middle-click on a file row (board i1c01 U1): a new tab of the editor only for a .tex file it takes; any
   // other file (or the flag off), nothing, as before the editor: no preview here, no tab
   await mk("/mid.txt", enc("plain\n")); const midFid = await mk("/mid.tex", enc(DOC));
@@ -715,7 +714,7 @@ try {
   };
   const nothing = (r) => r && r.opened.length === 0 && !r.preview && r.here;
   const mOff = await middle("");
-  check(mOff.rows && nothing(mOff["/mid.txt"]) && nothing(mOff["/mid.tex"]), "flag off: a middle-click on a file does nothing (no preview here, no tab)", mOff);
+  check(mOff.rows && nothing(mOff["/mid.txt"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
@@ -986,7 +985,7 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "Folder"]), "A0: the editor off: New offers no LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
   check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
@@ -1167,6 +1166,31 @@ try {
   const hb = await until(`!!document.querySelector(".tex-preview .errchip") && document.querySelector(".tex-preview").textContent.includes("End text.")`, 20000);
   check(hb && await ev(`document.querySelector(".tex-preview .errchip").textContent.includes("not finished") && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "a half-typed \\begin{: a note, and the document after it still renders", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
+  // ---- Print / Save as PDF (William, Nov 2): the button prints the rendered preview alone; the agent's route
+  {
+    const fp = await mk("/t/print.tex", enc("\\documentclass{article}\n\\begin{document}\n\\section{Printed}\nA formula $$\\int_0^1 x^2\\,dx = \\frac13$$ in it.\n\\end{document}\n"));
+    await open(fp);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Printed") && !!document.querySelector(".tex-preview .katex")`, 20000);
+    const b = await ev(`(() => { const b = document.querySelector(".tex-head .tex-printbtn"); if (!b) return null;
+      window.__printed = []; const real = window.print; window.print = () => window.__printed.push(document.documentElement.classList.contains("tex-print"));
+      b.click(); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
+    await sleep(50);
+    const after = await ev(`document.documentElement.classList.contains("tex-print")`);
+    check(b && b.label === "Print / Save as PDF" && JSON.stringify(b.printed) === "[true]" && !after, "Print / Save as PDF: the preview's button opens the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
+    check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
+    await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const shown = await ev(`(() => { const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : "absent"; };
+      return { head: d(".tex-head"), banner: d(".tex-banner"), left: d(".tex-left"), preview: d(".tex-preview"), sidebar: d("#wssidebar"), page: getComputedStyle(document.querySelector(".tex-page")).position, katex: d(".tex-preview .katex") }; })()`);
+    check(shown.head === "none" && shown.banner === "none" && shown.left === "none" && shown.preview !== "none" && (shown.sidebar === "none" || shown.sidebar === "absent") && shown.page === "static" && shown.katex !== "none",
+      "…in print, only the rendered preview: no header, banner, source or file browser; its math there", shown);
+    const pdf = await send("Page.printToPDF", { printBackground: false });
+    const bytes = Buffer.from(pdf?.data ?? "", "base64");
+    check(bytes.subarray(0, 5).toString() === "%PDF-" && bytes.length > 2000, "…and a browser an agent drives prints it to a PDF (Page.printToPDF): " + bytes.length + " bytes");
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    await ev(`(window.sagebrush.latex.printMode(false), 1)`);
+    check(!(await ev(`document.documentElement.classList.contains("tex-print")`)) && (await ev(`getComputedStyle(document.querySelector(".tex-head")).display`)) !== "none", "…printMode(false): the page as it was");
+  }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);

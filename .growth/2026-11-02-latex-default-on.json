@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The LaTeX editor on by default (William, Nov 2 12:52 PM PST): its bootstrap (web/latex/boot.ts) and hooks now in every build of the page the CLI embeds (the editor itself stays off on the CLI's host, and its lazy chunks sagebrush-latex*.js are not embedded). Measured with bun 1.4.4 at the exact probe merge (pyjs +3008).",
+ "bytes": {
+  "cli/pyjs.cjs": 3060
+ }
+}

@@ -25,6 +25,9 @@ export type EditorOpts = {
   // the image names: the same object is sent with every request; a host that resolves them fills it and calls request()
   images?: Record<string, string | { why: string }>;
   onImageRefs?(refs: string[], tok: Token): void;
+  // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
+  // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
+  sage?: { wrapper: string | null; saved: unknown[] };
   onEdit?(): void;                // after each edit by the person (not setText), once the request for it is made
 };
 
@@ -93,8 +96,10 @@ export function createEditor(o: EditorOpts) {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
   };
+  // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
+  let lastCheck: { text: string; rev: number; check: any } | null = null;
   const onReply = (r: any) => {
     if (destroyed) return;
     const tReply = performance.now();
@@ -107,7 +112,7 @@ export function createEditor(o: EditorOpts) {
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
     schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], { doc: r.doc as number, rev: r.rev as number });
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
-    if (ok.current) o.onImageRefs?.(r.imageRefs as string[], gate.token());
+    if (ok.current) { lastCheck = { text: src.value, rev: r.rev as number, check: r.check }; o.onImageRefs?.(r.imageRefs as string[], gate.token()); }
   };
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
@@ -266,6 +271,8 @@ export function createEditor(o: EditorOpts) {
     groups: () => { const out: { el: HTMLElement; start: number; end: number }[] = []; groups.forEach((g, k) => { const r = rangeOf(k); if (r) out.push({ el: g, ...r }); }); return out; },
     groupOf: (el: Node | null) => { const w = (el instanceof Element ? el : el?.parentElement)?.closest(".ch") as HTMLElement | null; return w ? groups.indexOf(w) : -1; },
     findIn, rangeOf,
+    // the check data of the preview now shown, if it is of the source now in the editor (else null: one is coming)
+    lastCheck: () => (lastCheck && lastCheck.text === src.value ? lastCheck.check : null),
     onRendered: (f: () => void) => { rendered.add(f); return () => { rendered.delete(f); }; },
     destroy: () => { destroyed = true; clearTimeout(watchdog); worker?.terminate(); worker = null; fitObs.disconnect(); rendered.clear(); },
   };

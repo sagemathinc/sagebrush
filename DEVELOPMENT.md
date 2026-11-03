@@ -36,7 +36,7 @@ CI's versions, which some checks need exactly:
 | Rust | via rustup | `engine/rust-toolchain.toml` pins the engine's toolchain (1.99.1, with `wasm32-unknown-unknown`); rustup installs it on first use | `curl https://sh.rustup.rs -sSf \| sh` |
 | Node.js | **24.21.0** | `heap-budget.json` records V8's load heap, which differs between Node versions | [nodejs.org](https://nodejs.org/dist/v24.21.0/), or `fnm install 24.21.0` |
 | pnpm | 11 | the lock file is pnpm's (`npm ci` doesn't apply) | `npm install -g pnpm@11` |
-| bun | **1.4.4** | `size-budget.json` records exact bytes, and bun's output differs between releases | `curl -fsSL https://bun.sh/install \| bash -s bun-v1.4.4` |
+| bun | **1.4.4** | `size-budget.json` records exact bytes, and bun's output differs between releases; an older bun's `Bun.build` gives `web/build.ts` no metafile (1.2.21's doesn't), so `build-all.sh` refuses one | `curl -fsSL https://bun.sh/install \| bash -s bun-v1.4.4` |
 | Deno | 2.x | a few tests and the conformance suite run under Deno too | `curl -fsSL https://deno.land/install.sh \| sh` |
 | uv | any recent | makes the Python 3.14 venv (`engine/.venv`) both scripts use | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Python | 3.14 (CI's); the package itself needs 3.10+ | installed by uv: `uv python install 3.14` | |
