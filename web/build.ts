@@ -103,8 +103,13 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
   const list = runnerFetchList(engineSha256, rasterSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   const build0 = Bun.build.bind(Bun);
+  // (and the editors' old example lists, web/examples/legacy.ts: in a bundle, its lists as literals, never its file
+  // reading code)
+  const { legacySource } = await import("./examples/legacy.ts");
+  const legacy = legacySource();
+  const examplesLegacyPlugin = { name: "examples-legacy", setup(b: any) { b.onLoad({ filter: /[\\/]web[\\/]examples[\\/]legacy\.ts$/ }, () => ({ contents: legacy, loader: "js" })); } };
   (Bun as any).build = async (o: any) => {
-    const r = await build0({ ...o, define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
+    const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
     if (r.success) checkRunnerDefine(String(o.entrypoints?.[0] ?? "a bundle"), Object.keys(r.metafile?.inputs ?? {}), await Promise.all(r.outputs.map((x: any) => x.text())));
     return r;
   };

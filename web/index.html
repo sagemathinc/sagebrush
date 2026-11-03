@@ -565,8 +565,8 @@ const session = pageSession({
   get docSwitch() { return docSwitch; }, set docSwitch(v) { docSwitch = v; },
   get docSyncNeedsReload() { return docSyncNeedsReload; }, set docSyncNeedsReload(v) { docSyncNeedsReload = v; },
 });
-// File > Examples…'s notebooks, from the corpus in examples/notebook/ (inlined while bundling: web/examples/legacy.ts)
-import { notebookExamples } from "./examples/legacy.ts" with { type: "macro" };
+// File > Examples…'s notebooks, from the corpus in examples/notebook/ (as literals in the bundle: web/examples/legacy.ts)
+import { notebookExamples } from "./examples/legacy.ts";
 const { cells: EXAMPLES, sage: SAGE_TITLES, magma: MAGMA_TITLES, matlab: MATLAB_TITLES } = notebookExamples();
 const SAGE_EXAMPLES = new Set(SAGE_TITLES);
 const MAGMA_EXAMPLES = new Set(MAGMA_TITLES);
