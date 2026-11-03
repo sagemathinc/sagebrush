@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Engine gaps from agent simulation run 2: Expression.minpoly through QQbar (lib/_sage_expr.py), NumberField of a list refused with a pointer to the absolute field (lib/_sage_nf.py), a generator declaration after other statements (src/sagepre.ts), with docstring examples. Measured with bun 1.4.4 (size-record.sh) on master 7884afed vs this PR's content head 6349b166: cli/lib.gen.js +648, cli/pyjs.cjs +2460, engine/lib/sage.pre +4808, engine/lib/sage.src +1929, engine/sagebrush-analyze.js +85, engine/sagebrush-worker.js +85; no other row moves.",
+ "reason": "Engine gaps from agent simulation run 2: Expression.minpoly through QQbar (lib/_sage_expr.py), NumberField of a list refused with a pointer to the absolute field (lib/_sage_nf.py), a generator declaration after other statements (src/sagepre.ts), with docstring examples. Re-measured with bun 1.4.4 (size-record.sh) on master 098a8f42 vs head 858332fc: cli/lib.gen.js +648, cli/pyjs.cjs +2580, engine/lib/sage.pre +4808, engine/lib/sage.src +1929, engine/sagebrush-analyze.js +85, engine/sagebrush-worker.js +85; no other row moves. (pyjs marker 2612: measured +2580 and 32 B of margin, as pyjs moves with master.)",
  "bytes": {
   "cli/lib.gen.js": 648,
-  "cli/pyjs.cjs": 2460,
+  "cli/pyjs.cjs": 2612,
   "engine/lib/sage.pre": 4808,
   "engine/lib/sage.src": 1929,
   "engine/sagebrush-analyze.js": 85,
