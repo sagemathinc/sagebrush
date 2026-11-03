@@ -37,8 +37,8 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
-const paused = [];
-ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+const paused = [], pausedUrls = [];
+ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.method === "Fetch.requestPaused") { paused.push(m.params.requestId); pausedUrls.push(m.params.request.url); } if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
 const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
@@ -85,6 +85,36 @@ try {
   await send("Fetch.disable");
   ok(await until(`location.pathname === "/nb/held.ipynb/"`, 15000), "the rename lands: /nb/held.ipynb/");
   ok(await (async () => { for (let i = 0; i < 100; i++) { if ((read("held.ipynb") ?? "").includes("during the rename")) return true; await sleep(100); } return false; })() && read("fresh.ipynb") === null, "…the edit made during it is saved to held.ipynb, and fresh.ipynb isn't made again");
+
+  // (astra's LOCAL-RENAME-3 recovery) a rename answered "exists" tries the next name; one answered "kept" (another program
+  // made both names meanwhile; the file as it was left at its staging name) stops there: no other name tried, the
+  // staging name said, and nothing more saved from this page
+  const fulfill = (id, status, body) => send("Fetch.fulfillRequest", { requestId: id, responseCode: status, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(body)).toString("base64") });
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*api/rename*", requestStage: "Request" }] });
+  paused.length = 0; pausedUrls.length = 0;
+  await rename("again");
+  for (let i = 0; i < 100 && !paused.length; i++) await sleep(100);
+  await fulfill(paused.shift(), 409, { code: "exists", message: "a file of that name is there" });
+  for (let i = 0; i < 100 && !paused.length; i++) await sleep(100);
+  ok(pausedUrls.length === 2 && /to=again%20\(2\)\.ipynb/.test(pausedUrls[1]), `"exists": the next name is tried (${pausedUrls.map((u) => decodeURIComponent(u.split("to=")[1] ?? "")).join(", ")})`);
+  await send("Fetch.continueRequest", { requestId: paused.shift() });
+  ok(await until(`location.pathname === "/nb/again%20(2).ipynb/"`, 15000), "…and taken");
+  const before = read("again (2).ipynb");
+  paused.length = 0; pausedUrls.length = 0;
+  await rename("kept here");
+  for (let i = 0; i < 100 && !paused.length; i++) await sleep(100);
+  await fulfill(paused.shift(), 409, { code: "kept", message: "kept as .again (2).ipynb.sagebrush-rename-0123456789ab", stage: ".again (2).ipynb.sagebrush-rename-0123456789ab" });
+  await sleep(1500);
+  ok(pausedUrls.length === 1, `"kept": no other name is tried (${pausedUrls.length} request)`);
+  ok(/kept as \.again \(2\)\.ipynb\.sagebrush-rename-0123456789ab/.test(await ev(`document.querySelector("#status").textContent`)) && (await ev("location.pathname")) === "/nb/again%20(2).ipynb/", "…the page says where the file is kept, and stays at its address");
+  await setCode("x = 'after kept'");
+  await sleep(2500);
+  ok(read("again (2).ipynb") === before && !(read("kept here.ipynb") ?? "").length && /not saved/.test(await ev(`document.querySelector("#saved").textContent`)), "…and saves nothing more (an edit after it isn't written anywhere)");
+  await send("Fetch.disable");
+  // (the route says which: a taken name is code "exists")
+  writeFileSync(join(dir, "c.ipynb"), "{}"); writeFileSync(join(dir, "d.ipynb"), "{}");
+  const taken = await fetch(`${base}/api/rename?path=c.ipynb&to=d.ipynb`, { method: "POST", headers: { Cookie: cookie } });
+  ok(taken.status === 409 && (await taken.json()).code === "exists", "api/rename: a taken name answers code \"exists\"");
 
   // (astra's LOCAL-RENAME-1) a folder that is a symbolic link out of DIR, or a notebook that is one: refused, nothing moved
   const outside = mkdtempSync(join(tmpdir(), "sb-local-rename-outside-"));

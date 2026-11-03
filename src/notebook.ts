@@ -210,23 +210,28 @@ const p=${htmlJson(rel)}?${htmlJson(rel)}+"/"+n:n;location.href="/nb/"+encodeURI
       // 409, also one made meanwhile; a save of OLD by another program during the move is left as it is). A notebook not
       // saved yet has nothing to move: the new name is only checked free. Answers {path} (relative to DIR) and whether
       // it moved.
+      // (every refusal is {code, message}: "exists" a taken name, which a page may try again with another; "kept" the
+      // file left at its staging name, `stage` (another program made both names meanwhile: never try again, say it;
+      // astra's LOCAL-RENAME-3 recovery); "bad", "failed")
       if (/^\/(?:nb\/.+?\.ipynb\/)?api\/rename$/is.test(path)) {
+        const refuse = (status: number, code: string, message: string, extra: Record<string, unknown> = {}) =>
+          res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ code, message, ...extra }));
         if (method !== "POST") { res.writeHead(405, { Allow: "POST" }).end(); return; }
         const from = inside(url.searchParams.get("path")), to = inside(url.searchParams.get("to"));
-        if (!from || !to || !/\.ipynb$/i.test(from) || !/\.ipynb$/i.test(to) || dirname(from) !== dirname(to) || basename(to).length > 255) { res.writeHead(400).end("bad path"); return; }
+        if (!from || !to || !/\.ipynb$/i.test(from) || !/\.ipynb$/i.test(to) || dirname(from) !== dirname(to) || basename(to).length > 255) return void refuse(400, "bad", "bad path");
         const real = (p: string) => { try { return realpathSync(p); } catch { return null; } };
         const rdir = real(dir), rfolder = real(dirname(from));
-        if (!rdir || !rfolder || !(rfolder === rdir || rfolder.startsWith(rdir.endsWith(sep) ? rdir : rdir + sep))) { res.writeHead(400).end("bad path: its folder isn't inside the directory"); return; }
-        if (isLink(from)) { res.writeHead(400).end("bad path: a symbolic link isn't renamed here"); return; }
+        if (!rdir || !rfolder || !(rfolder === rdir || rfolder.startsWith(rdir.endsWith(sep) ? rdir : rdir + sep))) return void refuse(400, "bad", "bad path: its folder isn't inside the directory");
+        if (isLink(from)) return void refuse(400, "bad", "bad path: a symbolic link isn't renamed here");
         const answer = (moved: boolean) => res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify({ path: relative(dir, to), moved }));
         if (from === to) return void answer(false);
-        if (existsSync(to) || isLink(to)) { res.writeHead(409).end("a file of that name is there"); return; }
+        if (existsSync(to) || isLink(to)) return void refuse(409, "exists", "a file of that name is there");
         if (!existsSync(from)) return void answer(false);
         try { moveNoReplace(from, to); } catch (e: any) {
           const code = e instanceof MoveError ? e.code : "failed";
           if (code === "missing") return void answer(false);
-          res.writeHead(code === "failed" ? 500 : 409).end(String(e?.message ?? e));
-          return;
+          if (code === "kept") return void refuse(409, "kept", String(e.message), { stage: relative(dir, e.stage) });
+          return void refuse(code === "exists" ? 409 : 500, code, String(e?.message ?? e));
         }
         return void answer(true);
       }

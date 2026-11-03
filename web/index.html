@@ -1512,8 +1512,21 @@ async function localRename() {
     if (to === at) return;
     let r;
     try { r = await fetch(`api/rename?path=${encodeURIComponent(at)}&to=${encodeURIComponent(to)}`, { method: "POST" }); } catch (e) { statusEl.textContent = `not renamed: ${e?.message ?? e}`; return; }
-    if (r.status === 409) continue;
-    if (!r.ok) { statusEl.textContent = `not renamed: ${await r.text()}`; return; }
+    if (!r.ok) {
+      const why = await r.json().catch(() => ({ code: "failed", message: `${r.status}` }));
+      // (a taken name: the next one; anything else ends here)
+      if (why.code === "exists") continue;
+      if (why.code === "kept") {
+        // (another program made both names meanwhile: the notebook as it was is at its staging name; this page saves
+        // nothing more over either name until it is opened again: astra's LOCAL-RENAME-3 recovery)
+        localStore.failed = `this notebook wasn't renamed: another program changed ${at} and ${to} meanwhile, so the file as it was is kept as ${why.stage}. Nothing more is saved from this page: open the notebook you want again`;
+        statusEl.textContent = localStore.failed;
+        savedEl.textContent = "not saved: see the status";
+        return;
+      }
+      statusEl.textContent = `not renamed: ${why.message ?? why.code}`;
+      return;
+    }
     const { path } = await r.json();
     LOCAL.path = path;
     LOCAL.name = path.slice(path.lastIndexOf("/") + 1);

@@ -48,7 +48,7 @@ test("the new name made meanwhile: refused (exists), that file untouched, the ol
 test("the new name AND the old one made meanwhile: refused (kept), nothing overwritten, the moved file kept at its staging name", () => {
   const d = fresh(), a = join(d, "a.ipynb"), b = join(d, "b.ipynb");
   writeFileSync(a, "MINE");
-  assert.throws(() => moveNoReplace(a, b, (s) => { if (s === "staged") { writeFileSync(b, "THEIRS"); writeFileSync(a, "ALSO THEIRS"); } }), (e: unknown) => e instanceof MoveError && e.code === "kept");
+  assert.throws(() => moveNoReplace(a, b, (s) => { if (s === "staged") { writeFileSync(b, "THEIRS"); writeFileSync(a, "ALSO THEIRS"); } }), (e: unknown) => e instanceof MoveError && e.code === "kept" && !!e.stage && readFileSync(e.stage, "utf8") === "MINE");
   assert.equal(read(b), "THEIRS");
   assert.equal(read(a), "ALSO THEIRS");
   const staged = left(d).filter((f) => f.startsWith(".a.ipynb.sagebrush-rename-"));

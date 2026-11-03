@@ -11,7 +11,8 @@ import { basename, dirname, join } from "path";
 import { randomBytes } from "crypto";
 
 export class MoveError extends Error {
-  constructor(public code: "exists" | "missing" | "kept" | "failed", message: string) { super(message); }
+  /** `stage` (code "kept"): where the file is now, its hidden staging name beside `from`. */
+  constructor(public code: "exists" | "missing" | "kept" | "failed", message: string, public stage?: string) { super(message); }
 }
 
 /** `from` moved to `to` (the same folder), never over a file at `to`. `between` is a test's way in between the steps. */
@@ -24,7 +25,7 @@ export function moveNoReplace(from: string, to: string, between?: (step: "staged
     linkSync(stage, to);
   } catch (e: any) {
     // (put back where it was, never over a file there now)
-    try { linkSync(stage, from); unlinkSync(stage); } catch { throw new MoveError("kept", `${basename(to)} wasn't free, and ${basename(from)} was made again meanwhile: the file is kept as ${basename(stage)}`); }
+    try { linkSync(stage, from); unlinkSync(stage); } catch { throw new MoveError("kept", `${basename(to)} wasn't free, and ${basename(from)} was made again meanwhile: the file is kept as ${basename(stage)}`, stage); }
     throw e?.code === "EEXIST" ? new MoveError("exists", "a file of that name is there") : new MoveError("failed", String(e?.message ?? e));
   }
   between?.("linked");
