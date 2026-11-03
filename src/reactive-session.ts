@@ -138,6 +138,8 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
   if (cells.length) {
     await reactive.load({ stale: true });
     const budget = o.only ? o.descendantsWithinMs ?? 0 : Infinity;
+    // (each cell's predicted time, as the budget counts it: its last measured time before this run)
+    const predicted = new Map(reactive.times);
     note(o.only ? await reactive.run(o.only, { budget }) : await reactive.runAll());
     // (a cell out of time stops the scheduler's run, as Stop does in a notebook; the interpreter is still there: the
     //  others run, but not what reads a cell out of time. With `only`, what was asked; with descendantsWithinMs, also
@@ -145,14 +147,17 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
     //  out stays stale, the independent ones after it still run (daybreak3's DB3-RS-3))
     const asked = new Set(o.only ?? cells.map((c) => c.key));
     const optional = o.only && budget > 0 ? reactive.graph.closure(o.only, { inclusive: false }) : new Set<string>();
+    // (the budget is one for the whole Run: what the descendants already run took, by their predicted times, the one
+    //  out of time too, is spent, and each retry has only what is left: daybreak3's DB3-RS-3)
+    let spent = 0;
+    for (const id of optional) if (reactive.outcome.has(id) || timedOut.has(id)) spent += predicted.get(id) ?? 0;
     for (let round = 0; round < cells.length && timedOut.size && !interp.dead(); round++) {
       const blocked = reactive.graph.closure([...timedOut]);
-      let spent = 0;
       const left = cells.map((c) => c.key).filter((id) => (asked.has(id) || optional.has(id)) && !reactive.outcome.has(id) && !reactive.errors.has(id) && !blocked.has(id) && !cancelled.has(id))
-        .filter((id) => asked.has(id) || (spent += reactive.times.get(id) ?? 0) <= budget);
+        .filter((id) => { if (asked.has(id)) return true; const t = predicted.get(id) ?? 0; if (spent + t > budget) return false; spent += t; return true; });
       if (!left.length) break;
       const before = reactive.outcome.size;
-      note(await reactive.run(left, { budget }));
+      note(await reactive.run(left, { budget: Math.max(0, budget - spent) }));
       if (reactive.outcome.size === before) break;
     }
     // (a syntax error: the interpreter says it, where, in the document's language; such code defines nothing)
