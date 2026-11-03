@@ -81,6 +81,7 @@ import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "..
 declare const __SB_NO_SYNC__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
+import { latexOn } from "../latex/boot";
 // (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
 // board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
 // fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
@@ -975,6 +976,16 @@ const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
 // (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
+// (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
+// notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
+// open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+function openTex(e: Entry, tab: boolean): boolean {
+  if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
+  const url = "/?tex=" + e.fid;
+  if (tab) window.open(url, "_blank", "noopener");
+  else void leaveFor(url, nameOf(e.path));
+  return true;
+}
 function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
@@ -1578,6 +1589,7 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
+      openFile: openTex,
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),

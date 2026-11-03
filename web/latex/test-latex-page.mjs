@@ -717,6 +717,41 @@ try {
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
+  // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
+  // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
+  // middle-click in a new tab; any other file still its preview, the board kept
+  {
+    // (a board of the workspace's own: the file panel is a workspace board's, not an example's)
+    await go(base); await until(`!!${W}`, 60000);
+    const bref = await ev(`${W}.create("/u1.board.json").then((e) => e.ref)`);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + "board/?doc=local:" + bref);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.txt")})`, 30000);
+    const mid = rows && await ev(`(async () => {
+      window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
+      document.querySelector(${sel("/mid.tex")}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+      await new Promise((s) => setTimeout(s, 500));
+      return { opened: window.__opened, board: location.pathname };
+    })()`);
+    const txt = rows && await ev(`(async () => {
+      document.querySelector(${sel("/mid.txt")}).click();
+      await new Promise((s) => setTimeout(s, 800));
+      const p = !!document.querySelector(".sbfprev");
+      document.querySelector(".sbfprev")?.remove();
+      return { preview: p, board: location.pathname };
+    })()`);
+    let left = false, editor = false;
+    if (rows) {
+      await mark();
+      await ev(`(() => { document.querySelector(${sel("/mid.tex")}).click(); return 1; })()`);
+      left = await fresh(`location.pathname === "/" && location.search === "?tex=${midFid}"`, 30000).then(() => true, () => false);
+      editor = left && await until(`!!document.querySelector(".tex-page")`, 20000);
+    }
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    check(rows && mid && mid.opened.length === 1 && mid.opened[0].includes("?tex=" + midFid) && mid.board.startsWith("/board") && txt && txt.preview && txt.board.startsWith("/board") && left && editor,
+      "U1: with a board open, a .tex file in the file panel opens the LaTeX editor (a click here, a middle-click in a new tab); another file still previews, the board kept", { rows, mid, txt, left, editor });
+  }
   // on, by the URL: no LaTeX file fetched before a .tex is opened
   requests.length = 0;
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
