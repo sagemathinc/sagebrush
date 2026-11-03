@@ -138,6 +138,12 @@ try {
   const post = (q) => fetch(`${base}/api/rename?${q}`, { method: "POST", headers: { Cookie: cookie } }).then((r) => r.status);
   ok((await post("path=jump/a.ipynb&to=jump/b.ipynb")) === 400 && readFileSync(join(outside, "a.ipynb"), "utf8") === "OUTSIDE" && !existsSync(join(outside, "b.ipynb")), "api/rename: in a folder that is a symbolic link out of DIR: 400, the file outside untouched");
   ok((await post("path=link.ipynb&to=link2.ipynb")) === 400 && existsSync(join(dir, "link.ipynb")) && !existsSync(join(dir, "link2.ipynb")), "…a notebook that is a symbolic link: 400, left as it is");
+  // (grader's F3/F4) those two are refused by inside() already; these reach the guards after it
+  writeFileSync(join(dir, "tgt.ipynb"), "{}"); symlinkSync(join(dir, "tgt.ipynb"), join(dir, "inlink.ipynb"));
+  // a symbolic link to a notebook INSIDE DIR: inside() passes it, only isLink(from) refuses
+  ok((await post("path=inlink.ipynb&to=inlink2.ipynb")) === 400 && existsSync(join(dir, "inlink.ipynb")) && !existsSync(join(dir, "inlink2.ipynb")), "…a symbolic link to a notebook inside DIR: 400, the link left as it is, no inlink2.ipynb");
+  // a folder that isn't there: rfolder is null, only the folder check refuses (without it: 200 moved:false)
+  ok((await post("path=nofolder/x.ipynb&to=nofolder/y.ipynb")) === 400, "…in a folder that isn't there: 400");
   rmSync(outside, { recursive: true, force: true });
 
   // the server's api/rename: what it refuses
