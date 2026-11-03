@@ -876,15 +876,22 @@ try {
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
   check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
 
-  // ---- images: in the folder, from a blob: URL; outside, refused with its reason
+  // ---- images as TeX finds them (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top, "not
+  // found"): in the folder, in a parent (../), in a \graphicspath folder, each from a blob: URL; a file of that name
+  // elsewhere named without ../: where it is and what to write; missing everywhere: the folders searched; above the top
   const png = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15, 4, 0, 9, 251, 3, 253, 227, 85, 242, 156, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
   await go(base + "?latex=1"); await until(`!!${W}`, 60000);
   await mk("/img/fig.png", png);
   await mk("/other.png", png);
-  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\end{document}\n"));
+  await mk("/img/figs/deep.png", png);
+  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\graphicspath{{figs/}}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\includegraphics{deep}\n\\includegraphics{other.png}\n\\includegraphics{nowhere.png}\n\\includegraphics{../../../up.png}\n\\includegraphics{/other.png}\n\\includegraphics{/nope.png}\n\\end{document}\n"));
   await open(fi);
-  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 15000), "an image in the folder: shown from a blob: URL");
-  check(await until(`document.querySelector(".tex-preview").textContent.includes("[image: ../other.png: outside this folder]")`, 15000), "an image outside the folder: refused, with its reason");
+  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].filter((i) => i.src.startsWith("blob:")).map((i) => i.alt).sort().join() === "../other.png,/other.png,deep,fig"`, 15000),
+    "images in the folder, in a parent (../), in a \\graphicspath folder and from the workspace's top (/other.png): each shown from a blob: URL", await ev(`[...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.alt)`));
+  const ph = await ev(`[...document.querySelectorAll(".tex-preview .imgph")].map((e) => e.textContent)`);
+  check(ph.includes('[image: other.png: not found in "img/", "img/figs/"; it is in the top folder: write {../other.png}, or move the file into "img/"]'), "a file of that name in a parent, named without ../: the folders searched, where it is and what to write", ph);
+  check(ph.includes('[image: nowhere.png: not found in "img/", "img/figs/"]') && ph.includes("[image: ../../../up.png: above the workspace's top folder]")
+    && ph.includes("[image: /nope.png: not found in the top folder (a leading / is the workspace's top folder)]"), "…missing everywhere: the folders searched (a leading /: the workspace's top); above the top folder: refused, with its reason", ph);
 
   // ---- images under overlapping renders (astra3 i1c01 A3-1): the first image read held (the test build's hook),
   // then an edit makes a second current render, which asks for the same names again; released, each name is read
