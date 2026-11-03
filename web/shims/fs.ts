@@ -311,6 +311,13 @@ export function readdirSync(p: string): string[] {
   }
   return [...names].sort();
 }
+// (whether `p` may be written (mode's W_OK, 2), with nothing changed: open()'s "a", which writes only at its flush,
+// refused at the open as CPython's is)
+export function accessSync(p: string, mode = 0) {
+  const r = resolve(p);
+  if (!files.has(r) && !dirs.has(r)) fail("ENOENT", -2, "access", p);
+  if (mode & 2) mayChange(r, "open");
+}
 export function statSync(p: string) {
   const r = resolve(p);
   const f = files.get(r), d = dirs.get(r);
