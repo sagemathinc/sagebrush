@@ -5,6 +5,7 @@
 // as data: URLs) and its images as data: URLs: an SVG drawn as an image loads nothing.
 import { checkResult, checkText, type CheckResult } from "./check";
 import type { ToolTarget } from "./agent-tools";
+import { applyStep, stepsOf } from "./overlay";
 
 type Content = ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
 const SLIDE_W = 1024, PAGE_W = 816, MAX_SHOTS = 40;
@@ -22,7 +23,7 @@ export function latexCheck(t: ToolTarget, format?: string): { content: Content }
   return { content: [{ type: "text", text: format === "text" ? checkText(r) : JSON.stringify(r) }] };
 }
 
-export async function latexRender(t: ToolTarget, frames?: number[]): Promise<{ content: Content }> { return shots(t, frames); }
+export async function latexRender(t: ToolTarget, frames?: number[], steps?: boolean): Promise<{ content: Content }> { return shots(t, frames, !!steps); }
 
 let katexCss: Promise<string> | null = null;
 const dataUrl = async (blob: Blob) => await new Promise<string>((ok, no) => { const f = new FileReader(); f.onload = () => ok(String(f.result)); f.onerror = () => no(f.error); f.readAsDataURL(blob); });
@@ -48,7 +49,7 @@ const SHOT_CSS = `
 .sb-shot .pc, .sb-shot .ch { content-visibility: visible !important; }
 `;
 
-async function shots(t: ToolTarget, want?: number[]): Promise<{ content: Content }> {
+async function shots(t: ToolTarget, want?: number[], steps = false): Promise<{ content: Content }> {
   const live = [...t.preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")] as HTMLElement[];
   const beamer = live.length > 0;
   const css = t.css + (await katexStyles()) + SHOT_CSS;
@@ -69,20 +70,26 @@ async function shots(t: ToolTarget, want?: number[]): Promise<{ content: Content
       await Promise.all([...root.querySelectorAll("img")].map((i) => (i as HTMLImageElement).decode().catch(() => null)));
     };
     const out: Content = [];
-    const info: { n: number; title?: string; overflow_px?: number }[] = [];
+    const info: { n: number; step?: number; steps?: number; title?: string; overflow_px?: number }[] = [];
     const check = report(t);
     if (beamer) {
       const nums = (want && want.length ? want : live.map((_, k) => k + 1).slice(0, DEFAULT_SHOTS)).filter((n) => n >= 1 && n <= live.length).slice(0, MAX_SHOTS);
+      // (steps: each frame at each of its overlay steps, as the presenter shows them, overlay.ts; else all at once,
+      //  as the preview shows them)
       for (const n of nums) {
         const copy = live[n - 1].cloneNode(true) as HTMLElement;
         copy.removeAttribute("id");
         page.textContent = ""; page.appendChild(copy);
         await inline(copy); await document.fonts.ready;
-        const body = copy.querySelector(".slide-body") as HTMLElement | null;
-        const over = body ? Math.max(0, Math.ceil(body.scrollHeight - body.clientHeight), Math.ceil(body.scrollWidth - body.clientWidth)) : 0;
-        const h = Math.round(copy.getBoundingClientRect().height);
-        out.push(await draw(page, css, SLIDE_W, h, 0));
-        info.push({ n, ...(check?.frames[n - 1]?.title ? { title: check.frames[n - 1].title } : {}), ...(over ? { overflow_px: over } : {}) });
+        const all = stepsOf(copy);
+        for (let s = 1; s <= (steps ? all : 1) && out.length < MAX_SHOTS; s++) {
+          if (steps) applyStep(copy, s);
+          const body = copy.querySelector(".slide-body") as HTMLElement | null;
+          const over = body ? Math.max(0, Math.ceil(body.scrollHeight - body.clientHeight), Math.ceil(body.scrollWidth - body.clientWidth)) : 0;
+          const h = Math.round(copy.getBoundingClientRect().height);
+          out.push(await draw(page, css, SLIDE_W, h, 0));
+          info.push({ n, ...(steps ? { step: s } : {}), steps: all, ...(check?.frames[n - 1]?.title ? { title: check.frames[n - 1].title } : {}), ...(over ? { overflow_px: over } : {}) });
+        }
       }
     } else {
       for (const ch of t.preview.querySelectorAll(":scope > .ch:not([hidden])")) page.appendChild(ch.cloneNode(true));
@@ -95,7 +102,7 @@ async function shots(t: ToolTarget, want?: number[]): Promise<{ content: Content
     }
     const total = beamer ? live.length : info.length;
     const summary = { file: t.file(), class: beamer ? "beamer" : "other", [beamer ? "frames" : "pages"]: total, shown: info,
-      overflowing: info.filter((x) => x.overflow_px).map((x) => x.n), problems: check?.problems.length ?? 0 };
+      overflowing: [...new Set(info.filter((x) => x.overflow_px).map((x) => x.n))], problems: check?.problems.length ?? 0 };
     return { content: [{ type: "text", text: JSON.stringify(summary) }, ...out] };
   } finally {
     host.remove(); style.remove();
