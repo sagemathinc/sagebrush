@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Rename follows the title (William's B2): the notebook page's rename of a `sagebrush notebook DIR` file (api/rename in src/notebook.ts, the free-name loop, the address and caption), and the board page's rename of a board's file on a title edit, in the pages and server the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +5774 at master f6870ba15, with the kept/exists recovery and astra's LOCAL-RENAME fixes: src/fs-move.ts and the queued rename, and the board rename only for a title edited on the page that the file still holds, its rename bound to the revision read: astra's BOARD-RENAME-1).",
+ "reason": "Rename follows the title (William's B2): the notebook page's rename of a `sagebrush notebook DIR` file (api/rename in src/notebook.ts, the free-name loop, the address and caption), and the board page's rename of a board's file on a title edit, in the pages and server the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +5826 at master 34e0bbbd2, +5822 in CI, with the kept/exists recovery and astra's LOCAL-RENAME fixes: src/fs-move.ts and the queued rename, and the board rename only for a title edited on the page that the file still holds, its rename bound to the revision read: astra's BOARD-RENAME-1).",
  "bytes": {
-  "cli/pyjs.cjs": 5800
+  "cli/pyjs.cjs": 6000
  }
 }
