@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The notebook page decluttered (William, Nov 2): the landing view at /?home (the marketing, its start buttons), the tools row and the ⋯ items, and their styles, in the page the CLI embeds (its inline CSS and HTML aren't minified). Measured with bun 1.4.4 at the exact probe merge (pyjs +7268, the language select as large as the buttons included).",
+ "bytes": {
+  "cli/pyjs.cjs": 7330
+ }
+}
