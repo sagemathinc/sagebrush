@@ -259,6 +259,11 @@ async function reportStuck({ navAt, runAt }) {
   for (const r of stuckNet.values())
     console.log(`  stuck net [${r.session}] ${r.url.slice(0, 70)} sent ${at(r.sent)} answered ${at(r.answered) ?? "-"} (${r.status ?? "-"}${r.sw ? ", service worker" : ""}, ${r.bytes ?? 0}/${r.len ?? "?"} B) ${r.finished ? "finished " + at(r.finished) : r.failed ? "FAILED " + at(r.failed) + " " + r.error : "NEVER FINISHED"}`);
   if (!stuckNet.size) console.log("  stuck net: no library requests seen");
+  // (the service worker's serving budget, web/sw.js reserve(): what it holds and who waits, read in its own session)
+  for (const t of [...attached.values()].filter((t) => t.type === "service_worker" && !t.detached)) {
+    const b = await evWithin(3000, "the service worker's budget", `(() => { try { return JSON.stringify({ used: budgetUsed, peak: budgetPeak, waiting: waiters.map((w) => ({ n: w.n, serve: w.serve })) }); } catch (e) { return "unreadable: " + e.message; } })()`, t.sessionId);
+    console.log(`  stuck sw [${t.sessionId.slice(0, 6)}] budget: ${b.fail ?? b.value}`);
+  }
   for (const l of stuckLog.slice(-60)) console.log(`  stuck console [${l.session} ${at(Math.round(l.at))}] ${String(l.text).slice(0, 300)}`);
 }
 
