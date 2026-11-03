@@ -236,6 +236,11 @@ jobs:
           node web/latex/test-comments-core.mjs
           node web/latex/test-latex-comments-cli.mjs
           node scripts/test-site-asset-budget.mjs
+          # (the offline catalog's own gate, plan-b8-offline §3: its eight rows on the build above, and their controls)
+          node scripts/test-offline-size-gate.mjs
+          node web/test-sw-hook.mjs
+          node web/test-offline-inventory.mjs
+          node scripts/offline-size-gate.mjs --check
           node scripts/test-line3-measure.mjs
           node scripts/third-party-notices.mjs --check
           node scripts/packages.mjs --check
