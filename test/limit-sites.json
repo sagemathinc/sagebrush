@@ -8236,6 +8236,58 @@
   "owner": "package runtime",
   "row": "src-19"
  },
+ "src/reactive-session.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's own limits passed to its worker, not a limit of this file: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: clamp :: send(msg: { cell: string; code: string; opts?: Record<string, unknown> }, on: (m: any) => void, limitMs?: number, absolute?: boolean): Promise<Sent>; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run(left, { budget: Infinity })); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an unbounded autorun budget for the cells asked for (the scheduler's, not a cap): board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget: Infinity }) : await reactive.runAll()); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an unbounded autorun budget for the cells asked for (the scheduler's, not a cap): board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: over :: if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, and START_GRACE_MS to be begun: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const send: Interpreter[\"send\"] = (msg, on, limit = Infinity, absolute = false) => new Promise<Sent>((resolve) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, from when the interpreter begins it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
  "src/remote-approval.ts :: beginAction :: beginAction(limits: Partial<Record<BudgetKind, number>> = BUDGET): Budget { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
