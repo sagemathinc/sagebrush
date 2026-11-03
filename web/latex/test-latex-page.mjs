@@ -1165,6 +1165,31 @@ try {
   const hb = await until(`!!document.querySelector(".tex-preview .errchip") && document.querySelector(".tex-preview").textContent.includes("End text.")`, 20000);
   check(hb && await ev(`document.querySelector(".tex-preview .errchip").textContent.includes("not finished") && document.querySelector(".tex-preview h2")?.textContent.includes("Later")`), "a half-typed \\begin{: a note, and the document after it still renders", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
+  // ---- Print / Save as PDF (William, Nov 2): the button prints the rendered preview alone; the agent's route
+  {
+    const fp = await mk("/t/print.tex", enc("\\documentclass{article}\n\\begin{document}\n\\section{Printed}\nA formula $$\\int_0^1 x^2\\,dx = \\frac13$$ in it.\n\\end{document}\n"));
+    await open(fp);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Printed") && !!document.querySelector(".tex-preview .katex")`, 20000);
+    const b = await ev(`(() => { const b = document.querySelector(".tex-head .tex-printbtn"); if (!b) return null;
+      window.__printed = []; const real = window.print; window.print = () => window.__printed.push(document.documentElement.classList.contains("tex-print"));
+      b.click(); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
+    await sleep(50);
+    const after = await ev(`document.documentElement.classList.contains("tex-print")`);
+    check(b && b.label === "Print / Save as PDF" && JSON.stringify(b.printed) === "[true]" && !after, "Print / Save as PDF: the preview's button opens the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
+    check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
+    await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const shown = await ev(`(() => { const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : "absent"; };
+      return { head: d(".tex-head"), banner: d(".tex-banner"), left: d(".tex-left"), preview: d(".tex-preview"), sidebar: d("#wssidebar"), page: getComputedStyle(document.querySelector(".tex-page")).position, katex: d(".tex-preview .katex") }; })()`);
+    check(shown.head === "none" && shown.banner === "none" && shown.left === "none" && shown.preview !== "none" && (shown.sidebar === "none" || shown.sidebar === "absent") && shown.page === "static" && shown.katex !== "none",
+      "…in print, only the rendered preview: no header, banner, source or file browser; its math there", shown);
+    const pdf = await send("Page.printToPDF", { printBackground: false });
+    const bytes = Buffer.from(pdf?.data ?? "", "base64");
+    check(bytes.subarray(0, 5).toString() === "%PDF-" && bytes.length > 2000, "…and a browser an agent drives prints it to a PDF (Page.printToPDF): " + bytes.length + " bytes");
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    await ev(`(window.sagebrush.latex.printMode(false), 1)`);
+    check(!(await ev(`document.documentElement.classList.contains("tex-print")`)) && (await ev(`getComputedStyle(document.querySelector(".tex-head")).display`)) !== "none", "…printMode(false): the page as it was");
+  }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
   await ev(`${W}.remove("/t/trashme.tex").then(() => 1)`);

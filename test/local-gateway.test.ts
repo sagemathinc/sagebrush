@@ -1761,7 +1761,7 @@ const BUNDLED_PACKAGES: Record<string, { version: string; importers: string[] }>
  * change to the loader fails until it is reviewed and the pin renewed (astra's L41-LAZY-1). The census then follows it
  * into the target, whose closure is checked like the rest; any other createRequire fails. */
 const LAZY_REVIEWED: Record<string, { fn: string; target: string; sha256: string }> = {
-  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "b6f9186bfcea6fd8ee8108644176672fa7058ddd06dc22a46aef3b7c5b69c71d" },
+  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "509fb7c10875efbd20e842a7d5f1a44291cfbabcd03bb47bd8c6b94c18eef006" },
 };
 /** The lockfile's package entries, parsed exactly (the `packages:` section's `name@version:` keys). */
 function lockEntries(root: string) {
