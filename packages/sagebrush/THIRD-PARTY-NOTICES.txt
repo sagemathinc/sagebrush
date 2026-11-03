@@ -46,6 +46,10 @@ Copyright (c) 2001 Python Software Foundation. See
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
   Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
+- `lib/_csv.py`: CPython 3.14's `_csv` module, a C module there
+  (`Modules/_csv.c`: its dialect checks, reader state machine, writer and
+  dialect registry), ported to Python, for `lib/csv.py` (CPython 3.14's,
+  unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
 - `lib/pickle.py`: CPython 3.14's `Lib/pickle.py`, changed: protocol 4's
