@@ -1302,6 +1302,54 @@ try {
     check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
   }
+  // ---- an environment closed as it is opened (William's L2, P1a): the "}" of \begin{X} typed puts \end{X} on the next
+  // line at its indentation, the caret left after the "}" (X's arguments can follow; Enter opens the body); one edit,
+  // and one undo takes back only the close; not in a comment, a verbatim environment, before other text, as a second
+  // close, nor for the host's setText
+  {
+    const D0 = "\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n", at0 = "\\documentclass{article}\n\\begin{document}\n".length;
+    await open(await mk("/t/autoclose.tex", enc(D0)));
+    await until(`!!document.querySelector(".tex-src")`, 20000);
+    const st = () => ev(`(() => { const s = document.querySelector(".tex-src"); return { v: s.value, a: s.selectionStart, b: s.selectionEnd, edits: performance.getEntriesByName("tex-input").length }; })()`);
+    const setAt = (text, off) => ev(`(() => { const s = document.querySelector(".tex-src"); s.value = ${JSON.stringify(text)}; s.dispatchEvent(new Event("input")); s.focus(); s.setSelectionRange(${off}, ${off}); return true; })()`);
+    const typed = async (t) => { await send("Input.insertText", { text: t }); };
+    const keyChar = async (c) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: c, text: c, unmodifiedText: c }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: c }); };
+    const enter = async () => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); };
+    // (typed: tabular, its arguments after, then Enter)
+    await setAt(D0, at0); await typed("  \\begin{tabular");
+    const s0 = await st(); await keyChar("}"); const s1 = await st();
+    const c1 = at0 + "  \\begin{tabular}".length;
+    check(s1.v === D0.slice(0, at0) + "  \\begin{tabular}\n  \\end{tabular}" + D0.slice(at0) && s1.a === c1 && s1.b === c1 && s1.edits === s0.edits + 1,
+      "P1a: the } of \\begin{tabular} puts \\end{tabular} on the next line, at its indentation; the caret after the }; one edit", { edits: [s0.edits, s1.edits], s1 });
+    await typed("{cc}"); await enter(); const s2 = await st();
+    check(s2.v === D0.slice(0, at0) + "  \\begin{tabular}{cc}\n\n  \\end{tabular}" + D0.slice(at0) && s2.a === c1 + "{cc}\n".length,
+      "P1a: its arguments typed after the } stay on the opening line; Enter opens the body between", s2);
+    // (one undo: the close only; the person's \begin{itemize} kept)
+    await setAt(D0, at0); await typed("\\begin{itemize"); await keyChar("}");
+    const u0 = await st(); await ev(`document.execCommand("undo"), 1`); const u1 = await st();
+    check(u0.v.includes("\\begin{itemize}\n\\end{itemize}") && u1.v === D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0), "P1a: one undo takes back only the inserted \\end{itemize}", { u0: u0.v, u1: u1.v });
+    // (starred, nested at a deeper indentation)
+    const NEST = D0.slice(0, at0) + "\\begin{itemize}\n    \n\\end{itemize}" + D0.slice(at0), atN = NEST.indexOf("    \n") + 4;
+    await setAt(NEST, atN); await typed("\\begin{align*"); await keyChar("}"); const sn = await st();
+    check(sn.v.includes("\\begin{itemize}\n    \\begin{align*}\n    \\end{align*}\n\\end{itemize}") && sn.a === atN + "\\begin{align*}".length, "P1a: a starred name, nested: \\end{align*} at the inner indentation", sn.v);
+    // (no close: a comment, a verbatim environment, text after the caret, an existing close, an escaped \\begin)
+    const none = async (text, off, prefix, what) => {
+      await setAt(text, off); await typed(prefix); const b = await st(); await keyChar("}"); const a = await st();
+      check(a.v === b.v.slice(0, b.a) + "}" + b.v.slice(b.a) && a.edits === b.edits + 1, "P1a: no close " + what, { before: b.v, after: a.v });
+    };
+    await none(D0, at0, "% \\begin{itemize", "in a comment");
+    const VERB = D0.slice(0, at0) + "\\begin{verbatim}\n\n\\end{verbatim}" + D0.slice(at0);
+    await none(VERB, VERB.indexOf("\n\n\\end{verbatim}") + 1, "\\begin{itemize", "inside a verbatim environment");
+    const MID = D0.slice(0, at0) + "x  y" + D0.slice(at0);
+    await none(MID, at0 + 1, " \\begin{itemize", "before other text on the line");
+    const HAS = D0.slice(0, at0) + "\n\\end{itemize}" + D0.slice(at0);
+    await none(HAS, at0, "\\begin{itemize", "when its \\end{itemize} is already next");
+    await none(D0, at0, "a\\\\begin{itemize", "after \\\\ (a line break, not \\begin)");
+    // (the host's setText, a paste-like programmatic value: nothing added)
+    const PROG = D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0);
+    await setAt(PROG, at0 + "\\begin{itemize}".length);
+    check((await st()).v === PROG, "P1a: a programmatic change of the text (setText) closes nothing");
+  }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
   // preview toggle (and after File ▾, where the page has it); never on open; a Run made stale by opening another file

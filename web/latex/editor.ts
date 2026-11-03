@@ -5,6 +5,7 @@
 import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { mark } from "./marks";
+import { autoClose } from "./envclose";
 
 declare const __SB_LATEX_TEST__: boolean | undefined;
 
@@ -206,7 +207,22 @@ export function createEditor(o: EditorOpts) {
     request();
     if (byPerson) o.onEdit?.();
   };
-  src.addEventListener("input", () => edited(true));
+  // (a "}" typed that completes \begin{X}: \end{X} put on the next line as well, envclose.ts, the caret left after the
+  //  "}" for X's arguments. The browser's own insertion, a second undo step after the "}" (one undo takes back only the
+  //  close); its nested input event is folded into the person's, so one edit, one render. Never for a paste, an IME
+  //  composition, a selection or setText)
+  let closing = false;
+  src.addEventListener("input", (ev) => {
+    const e = ev as InputEvent;
+    if (closing || src.readOnly || e.isComposing || e.inputType !== "insertText" || e.data !== "}" || src.selectionStart !== src.selectionEnd) return;
+    const at = src.selectionStart, ins = autoClose(src.value, at);
+    if (!ins) return;
+    closing = true;
+    // (the caret moved away and back first: the browser then starts a new undo step, not one with the typed "}")
+    try { src.setSelectionRange(at - 1, at - 1); src.setSelectionRange(at, at); if (!document.execCommand("insertText", false, ins)) src.setRangeText(ins, at, at, "end"); } finally { closing = false; }
+    src.setSelectionRange(at, at);
+  });
+  src.addEventListener("input", () => { if (!closing) edited(true); });
   // the host's own change of the text: drawn and rendered as an edit is, but not reported back to it (onEdit)
   const setText = (t: string) => { if (t === src.value) return; src.value = t; edited(false); };
 
