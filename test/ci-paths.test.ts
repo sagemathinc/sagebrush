@@ -325,3 +325,25 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   assert.deepEqual(pick(["README.md"]), { groups: [], runner: "false", export: "false", lookalike: "false" });
 });
 
+// The examples job (plan U7 section 2): its ids and shard matrix, here on the fixture corpus
+test("examples: a change selects its examples; the engines select notebooks, boards and executable latex; the full tier all", () => {
+  const root = join(__dirname, "..", "..", "test", "fixtures", "examples");
+  const run = (files: string[], labels = "") => {
+    const list = join(dir, "examples-files.txt");
+    writeFileSync(list, files.join("\n") + "\n");
+    const r = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: { ...process.env, CI_PATHS_FILES: list, CI_EXAMPLES_ROOT: root, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const o = Object.fromEntries(r.stdout.trim().split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+    return { ids: JSON.parse(o.examples_ids), matrix: JSON.parse(o.examples_matrix) };
+  };
+  assert.deepEqual(run(["README.md"]), { ids: [], matrix: [] });
+  assert.deepEqual(run(["test/fixtures/examples/notebook/hello-python/main.ipynb"]).ids, [], "the fixtures are not the corpus's paths");
+  assert.deepEqual(run(["examples/latex/article/main.tex"]), { ids: ["latex/article"], matrix: [1] });
+  assert.deepEqual(run(["src/compile.ts"]).ids, ["board/hello", "notebook/hello-python", "notebook/sage-basics"]);
+  assert.deepEqual(run(["web/latex/engine/expand.ts"]).ids, ["latex/article"]);
+  assert.deepEqual(run(["README.md"], "full-ci").ids, ["board/hello", "latex/article", "notebook/hello-python", "notebook/sage-basics"]);
+});
+

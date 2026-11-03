@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { gateInputs } from "./size-measure.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
+import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -167,7 +168,9 @@ const optionalOnly = !full && every(optionalPaths);
 // Unknown paths deliberately fall back to the fast suite, file by file: an
 // unknown path beside known ones still triggers it.  Skips are allowed only
 // for the two narrow, audited classes above.
-const knownPaths = [...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
+// (the examples gallery: examples/ and its fixture corpus; which examples run is examples-lib.mjs select)
+const examplesPaths = [/^examples\//, /^test\/fixtures\/examples\//];
+const knownPaths = [...examplesPaths, ...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
 const fallback = files.some((file) => !knownPaths.some((pattern) => pattern.test(file)));
 const node = full || workflowOrBuild || runtime || webChange || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
@@ -237,6 +240,10 @@ const webGroups = [
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
 
+// The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
+// its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
+// test/ci-paths.test.ts)
+const exampleSelection = selectExamples(files, listExamples(process.env.CI_EXAMPLES_ROOT || new URL("../examples", import.meta.url).pathname), { all: full }).ids;
 const outputs = {
   full,
   docs_only: docsOnly,
@@ -259,6 +266,9 @@ const outputs = {
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
   files: files.length,
+  // (the examples job: the ids it runs and its shard matrix, at most 24 examples a shard; plan U7 section 2)
+  examples_ids: JSON.stringify(exampleSelection),
+  examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);
