@@ -80,12 +80,19 @@ class Index(object):
 
     def __getitem__(self, i):
         if isinstance(i, slice):
-            start, stop, step = i.indices(len(self))
-            # (indices' stop is -1 for a negative step that runs past
-            # position 0: "before the start", which Python slicing would read
-            # as the last position again)
-            if stop < 0:
-                stop = None
+            # (the positions the slice selects, as range() gives them from
+            # indices: then a plain slice from the first to just past the
+            # last, whose bounds are never negative, so Python slicing can't
+            # read a -1 from indices ("before position 0") as the last
+            # position; astra's PD626-1)
+            r = range(*i.indices(len(self)))
+            if len(r) == 0:
+                start, stop, step = 0, 0, 1
+            else:
+                start, step = r[0], r.step
+                stop = r[-1] + step
+                if stop < 0:
+                    stop = None
             return Index(self._pd_column().slice(start, stop, step), name=self._pd_name)
         if isinstance(i, int):
             n = len(self)

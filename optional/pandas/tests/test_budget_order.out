@@ -32,3 +32,11 @@
 ('refused', 8, 0)
 == mangle.unique-zero
 !! ValueError: read_csv: the decoded-memory budget would be exceeded by the column labels (64 B more, 0 B in use, limit 0 B: Sagebrush's limit 'pandas.decoded_bytes')
+== chain.at-least
+('x.41', 1300)
+== chain.one-short
+('refused', 0)
+== chain.least-minus-kept
+4200
+== short.least-minus-kept
+300

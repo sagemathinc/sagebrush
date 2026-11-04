@@ -65,3 +65,26 @@ case("idx.reversed-singleton", lambda: pd.Index([7])[::-1].tolist())
 case("idx.range-reversed", lambda: pd.RangeIndex(3)[::-1].tolist())
 case("idx.columns-reversed", lambda: pd.DataFrame({"a": [1, 2]}).columns[::-1].tolist())
 case("idx.columns-reversed-2", lambda: pd.DataFrame({"a": [1], "b": [2]}).columns[::-1].tolist())
+# before-the-beginning negative starts (astra's PD626-1 r2)
+case("idx.neg-start-before-reversed", lambda: pd.Index([0, 1, 2])[-10::-1].tolist())
+case("idx.neg-start-before-range", lambda: pd.RangeIndex(3)[-10::-1].tolist())
+case("idx.neg-start-before-str", lambda: pd.Index(["a", "b", "c"])[-4::-1].tolist())
+case("idx.neg-start-before-singleton", lambda: pd.Index([7])[-2::-1].tolist())
+
+
+# every slice of small indexes: start and stop in -5..5 or None, step in
+# -3..3 (not 0) or None; one line per index, each slice's labels in order
+def sweep(ix):
+    bounds = [None] + list(range(-5, 6))
+    out = []
+    for a in bounds:
+        for b in bounds:
+            for c in [None, -3, -2, -1, 1, 2, 3]:
+                out.append(ix[slice(a, b, c)].tolist())
+    return out
+
+
+for n in range(4):
+    case("idx.sweep-int-%d" % n, lambda n=n: sweep(pd.Index(list(range(10, 10 + 10 * n, 10)), dtype="int64")))
+    case("idx.sweep-range-%d" % n, lambda n=n: sweep(pd.RangeIndex(n)))
+case("idx.sweep-str-3", lambda: sweep(pd.Index(["a", "b", "c"])))

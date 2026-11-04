@@ -140,3 +140,47 @@ case("mangle.least", lambda: L)
 case("mangle.at-least", lambda: mangle_at(L))
 case("mangle.one-short", lambda: mangle_at(L - 1))
 case("mangle.unique-zero", lambda: (lambda h, b: (_mangle(h, b), h.reads))(Header(["x", "y"]), _Budget(0)))
+
+
+# a long collision chain (daybreak3's r2 note): a repeated label whose
+# candidates "x.1" ... "x.40" (each 200+ code points) are all taken.  Each
+# candidate is charged before it is made, and a taken one's reference is
+# dropped before its charge is returned (_mangle), so one candidate at most is
+# live at a time.  What Python can observe is the charge side: the least
+# budget that admits the chain is what the result keeps plus the names-seen
+# entries (100 B each), the same overhead as a chain with no collisions; the
+# 40 taken candidates add nothing.  (A str can't be weakly referenced, so the
+# reference's own drop is ordered in the code, not observed here.)
+LONG = "x" * 200
+CHAIN = [LONG + ".%d" % k for k in range(1, 41)] + [LONG, LONG]
+
+
+def chain_at(limit, labels):
+    b = _Budget(limit)
+    try:
+        out = _mangle(labels, b)
+    except Exception as e:
+        if not refused(e):
+            raise
+        return "refused", b.used
+    return out[-1][-4:], b.used
+
+
+def chain_least(labels):
+    lo, hi = 0, 1 << 22
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if chain_at(mid, labels)[0] == "refused":
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+short = CHAIN[:1] + CHAIN[-2:]
+case("chain.at-least", lambda: chain_at(chain_least(CHAIN), CHAIN))
+case("chain.one-short", lambda: chain_at(chain_least(CHAIN) - 1, CHAIN))
+# (least - kept: 42 seen entries = 4200 B for the chain, 3 = 300 B without
+# its collisions)
+case("chain.least-minus-kept", lambda: chain_least(CHAIN) - chain_at(chain_least(CHAIN), CHAIN)[1])
+case("short.least-minus-kept", lambda: chain_least(short) - chain_at(chain_least(short), short)[1])

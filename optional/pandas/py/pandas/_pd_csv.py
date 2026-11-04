@@ -842,7 +842,9 @@ def _mangle(labels, budget):
                     new = "%s.%d" % (lab, k)
                     if new not in seen:
                         break
-                    # (a name already taken: dropped)
+                    # (a name already taken: dropped, its reference first,
+                    # then its charge; daybreak3's r2 note)
+                    new = None
                     budget.release(c)
                     charged -= c
                     k += 1
