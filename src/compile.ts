@@ -13,7 +13,8 @@ import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
 import { cwdPath, isBuiltinModule } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
-import { admitIndex, checkChunk, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
+import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
+import { INTR, INTR_GRADING } from "./runtime/interrupt";
 import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
@@ -639,9 +640,19 @@ export function packageSetId(): string | null {
 // Mount package `id` and its dependencies (each once): all of a package's
 // chunks are fetched and checked before any of it is mounted.
 function mountOptional(id: string, name: string): string {
+  const { plan, fetch } = optional!;
+  // (a package no grade may use yet, while a grading allowance is armed: refused, mounted or not; src/pkgset.ts)
+  if (Atomics.load(INTR, 0) & INTR_GRADING) {
+    for (const dep of plan.closure.get(id)!) {
+      const why = gradingExcluded(dep);
+      if (why === null) continue;
+      const err = (R.T as any).ImportError(`No module named '${name}' in a graded run: ${dep} is ${why}`);
+      err.name = name;
+      throw err;
+    }
+  }
   const done = optMounted.get(id);
   if (done !== undefined) return done;
-  const { plan, fetch } = optional!;
   for (const dep of plan.closure.get(id)!) {
     if (optMounted.has(dep)) continue;
     const p = plan.packages.get(dep)!;

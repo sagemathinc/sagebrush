@@ -76,6 +76,39 @@ export function parseTzIndex(bytes) {
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
+/** A package set's index (src/pkgset.ts), read only for the chunks the runner may then fetch for it: the set of
+ * pkg/<sha256>.json paths its Python packages pin (source, and precompiled for any build), or null for anything
+ * that isn't such an index within PKGSET_LIMITS' bounds.  (The worker admits the index itself, fully, with every
+ * pin checked: this only decides which URLs the page fetches.  A js package's chunk is the terminal's, loaded by
+ * the page, never by the runner: not listed.) */
+export function parsePkgsetIndex(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > 262144) return null;
+  let o;
+  try {
+    o = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  } catch {
+    return null;
+  }
+  const plain = (x) => x !== null && typeof x === "object" && !Array.isArray(x) && Object.getPrototypeOf(x) === Object.prototype;
+  if (!plain(o) || o.format !== "sagebrush-pkgset" || !plain(o.packages)) return null;
+  const ids = Object.keys(o.packages);
+  if (ids.length > 32) return null;
+  const set = new Set();
+  const ref = (r) => {
+    if (!plain(r) || typeof r.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(r.sha256)) return false;
+    set.add(`pkg/${r.sha256}.json`);
+    return true;
+  };
+  for (const id of ids) {
+    const p = o.packages[id];
+    if (!plain(p)) return null;
+    if ("js" in p) continue;
+    if (!ref(p.src) || !plain(p.pre) || Object.keys(p.pre).length > 4) return null;
+    for (const b of Object.keys(p.pre)) if (!ref(p.pre[b])) return null;
+  }
+  return set;
+}
+
 // Files mode: the runner for a page that has the engine's files itself (a
 // board downloaded as one HTML file).  A file:// page is never cross-origin
 // isolated, so there is no SharedArrayBuffer and no broker: the frame (a
@@ -152,6 +185,10 @@ export class RunnerWorker {
     this.allowed = new Set(this.base ? RUNNER_FETCH.files.map((f) => new URL(f, this.base).href) : []);
     this.tzIndex = this.base && RUNNER_FETCH.tzIndex ? { url: new URL(RUNNER_FETCH.tzIndex.file, this.base).href, sha256: RUNNER_FETCH.tzIndex.sha256 } : null;
     this.zones = new Set();
+    // (the optional package set the page pinned for this interpreter, its index by exact URL and id; its chunks
+    // join once the index's bytes have that id and pass parsePkgsetIndex: web/pkgset-browser.ts asks for them)
+    this.pkgIndex = null;
+    this.pkgChunks = new Set();
     const ch = new MessageChannel();
     ch.port1.onmessage = (e) => {
       const d = e.data;
@@ -221,7 +258,8 @@ export class RunnerWorker {
       // the mounted files: nothing the interpreter could vary, a query, a fragment, a dot segment, gets through)
       const raw = String(url);
       const isIndex = !!this.tzIndex && raw === this.tzIndex.url;
-      if (this.base && raw === new URL(raw).href && (this.allowed.has(raw) || isIndex || this.zones.has(raw) || this.mounted.has(raw))) {
+      const isPkgIndex = !!this.pkgIndex && raw === this.pkgIndex.url;
+      if (this.base && raw === new URL(raw).href && (this.allowed.has(raw) || isIndex || this.zones.has(raw) || this.mounted.has(raw) || isPkgIndex || this.pkgChunks.has(raw))) {
         // (bounded between pieces of data, as the plain worker's own fetches: web/stall-fetch.js)
         const u = await fetchMoving(raw, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" });
         // (its own buffer when the bytes fill it, as one piece does: no copy of a 13.6 MB chunk)
@@ -232,6 +270,12 @@ export class RunnerWorker {
           const set = hex(await crypto.subtle.digest("SHA-256", bytes)) === this.tzIndex.sha256 ? parseTzIndex(new Uint8Array(bytes)) : null;
           if (set === null) bytes = null;
           else for (const f of set) this.zones.add(new URL(f, this.base).href);
+        }
+        if (bytes && isPkgIndex) {
+          // (the set's index: the bytes its id names, then the chunks it pins, admitted before it is answered)
+          const set = hex(await crypto.subtle.digest("SHA-256", bytes)) === this.pkgIndex.sha256 ? parsePkgsetIndex(new Uint8Array(bytes)) : null;
+          if (set === null) bytes = null;
+          else for (const f of set) this.pkgChunks.add(new URL(f, this.base).href);
         }
       }
     } catch {
@@ -244,6 +288,10 @@ export class RunnerWorker {
     if (this.inner) return this.inner.postMessage(m);
     // (a shared collection's files: the interpreter may ask for these)
     if (m && Array.isArray(m.mount)) for (const [, r] of m.mount) if (r && typeof r.url === "string") this.mounted.add(new URL(r.url).href);
+    // (the package set this interpreter uses, one for its life as in the worker: its index the page may fetch)
+    if (m && typeof m.pkgset === "string" && /^[0-9a-f]{64}$/.test(m.pkgset) && this.base && !this.pkgIndex) {
+      this.pkgIndex = { url: new URL(`pkgset/${m.pkgset}.json`, this.base).href, sha256: m.pkgset };
+    }
     if (!this.port) return void this.queue.push(m);
     this.port.postMessage(m);
     if (!this.alive && this.keep) {

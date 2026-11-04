@@ -591,6 +591,14 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
   if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the terminal preview's package set: not an id: ${JSON.stringify(S)}`);
   mkdirSync(join(here, "dist", "shell"), { recursive: true });
   writeFileSync(join(here, "dist", "shell", "preview-set.json"), JSON.stringify({ S }) + "\n");
+  // the notebooks' package set (QRPM 1b): pandas, source only, so its id changes only when the package does,
+  // never with the core's build; named in pkgset/latest.json, which a notebook without a pin resolves once and
+  // pins (index.html notebookPkgset, plan-modular-packages-r4 §4.4).  Nothing is fetched until a cell imports
+  // it (web/pkgset-browser.ts).  For notebooks only: no grading context admits pandas yet (src/pkgset.ts
+  // gradingExcluded).
+  const N = execFileSync("node", [join(here, "..", "scripts", "optional-packages.mjs"), "build", "--out", join(here, "dist"), "pandas"], { encoding: "utf8" }).trim().split("\n").pop()!;
+  if (!/^[0-9a-f]{64}$/.test(N)) throw new Error(`the notebooks' package set: not an id: ${JSON.stringify(N)}`);
+  writeFileSync(join(here, "dist", "pkgset", "latest.json"), JSON.stringify({ id: N }) + "\n");
   if (hasSite) {
     for (const d of ["pkg", "pkgset", "pkgmeta"]) {
       rmSync(join(siteDir, "public", d), { recursive: true, force: true });

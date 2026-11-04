@@ -9,7 +9,7 @@
 //
 // Three pages, each with a server of its own (nothing crosses between them: a fresh server, log and override file,
 // a fresh origin by its port, so a fresh RunnerWorker, its allowlist, zones and frame cache):
-//   P1  the cases that need no change to the files: G2c (before the index), G1, G2a, G6-i..v, G3, G13, G2b, G5, G8
+//   P1  the cases that need no change to the files: G2c (before the index), G1, G2a, G6-i..v, G3, G13, G2b, PK1-3, G5, G8
 //   P2  the index served with one byte changed (SB_SERVE_OVERRIDES): G11
 //   P3  the test's barrier held until the zone's answer (r2.3.1): G14
 // The barrier `globalThis.__g14Barrier` is the test page's only: P1 and P2 resolve it at once, P3 after the
@@ -17,7 +17,7 @@
 //
 //   bun web/build.ts && node web/test-runner-broker.mjs      (CHROME=... for another browser)
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,13 @@ const indexBytes = readFileSync(join(dist, list.tzIndex.file));
 const index = JSON.parse(indexBytes.toString("utf8"));
 const LONDON = index.zones["Europe/London"];
 const notInIndex = createHash("sha256").update("G2b: not a zone of the index").digest("hex");
+// (the notebooks' package set, web/build.ts: latest.json's id, the chunks its index pins, and the site's other set
+// and its chunks, which no notebook pinned)
+const pkgLatest = JSON.parse(readFileSync(join(dist, "pkgset", "latest.json"), "utf8")).id;
+const pkgIndex = JSON.parse(readFileSync(join(dist, "pkgset", pkgLatest + ".json"), "utf8"));
+const pkgPinned = new Set(Object.values(pkgIndex.packages).flatMap((p) => (p.src ? [p.src.sha256, ...Object.values(p.pre).map((r) => r.sha256)] : [])));
+const pkgOtherSet = readdirSync(join(dist, "pkgset")).map((f) => f.slice(0, -5)).find((x) => /^[0-9a-f]{64}$/.test(x) && x !== pkgLatest);
+const pkgOtherChunk = readdirSync(join(dist, "pkg")).map((f) => f.slice(0, -5)).find((x) => /^[0-9a-f]{64}$/.test(x) && !pkgPinned.has(x));
 
 // ---- a server per page: web/serve.py on a free port, with its own log and override file
 const servers = [];
@@ -90,7 +97,7 @@ const refused = (name, what, r, token) => refusedBy(ok, name, what, r, (u) => !S
 // (each page in a try of its own, with its roster: a page that doesn't start, or a step that throws, is a FAIL line by
 // the page's name, its cases not reached are NOT RUN, and the pages after it still run)
 const ROSTER = {
-  P1: ["P1-pre", "G2c", "G1", "G2a", "G6-i", "G6-ii", "G6-iii", "G6-iv", "G6-v", "G3", "G13", "G2b", "G5's setup", "G5", "G8"],
+  P1: ["P1-pre", "G2c", "G1", "G2a", "G6-i", "G6-ii", "G6-iii", "G6-iv", "G6-v", "G3", "G13", "G2b", "PK1", "PK2", "PK3", "G5's setup", "G5", "G8"],
   P2: ["G11"],
   P3: ["G14"],
 };
@@ -138,6 +145,14 @@ try {
     `G13: the index answered whole (${JSON.stringify(idxAns.map((x) => x.bytes))} of ${indexBytes.length} bytes), then Europe/London's zone fetched and answered (${JSON.stringify(zoneAns.map((x) => x.bytes))} bytes)`);
   // G2b: after the index, a 64-hex zone file it doesn't list
   refused("G2b", "an unlisted zone after the index", await forge(p1, E(`lib/tzdata/${notInIndex}.tzif`)), notInIndex);
+  // PK1-PK3 (QRPM 1b): the package set the page pinned, through the broker. Its index is fetched at the
+  // interpreter's start; an import fetches a chunk it pins (PK1). Another set's index (PK2) and a chunk the pinned
+  // index doesn't list (PK3) are refused: both are real files of the site, so only the broker's rule stops them.
+  const pk1 = (await run("import pandas\nprint(pandas.Series([1, 2]).sum())")).trim();
+  const pkPaths = s1.lines().map((l) => l.path).filter((x) => x.startsWith("/pkg/") || x.startsWith("/pkgset/"));
+  ok(pk1.split("\n")[0] === "3" && pkPaths.includes(`/pkgset/${pkgLatest}.json`) && pkPaths.some((x) => pkgPinned.has(x.slice(5, -5))), `PK1: import pandas runs through the broker, its pinned index and a chunk it pins fetched (${JSON.stringify(pk1)}; ${pkPaths.join(", ")})`);
+  refused("PK2", "another set's index, a real file of the site", await forge(p1, E(`pkgset/${pkgOtherSet}.json`)), pkgOtherSet);
+  refused("PK3", "a package chunk the pinned index doesn't list, a real file of the site", await forge(p1, E(`pkg/${pkgOtherChunk}.json`)), pkgOtherChunk);
   // G5 and G8: the broker's own requests carry no Cookie and no Referer (the server's log), while the page's do carry
   // the cookie (so the cookie was there to send)
   const brokered = new Set(l1.filter((x) => x.kind === "answer" && x.bytes !== null).map((x) => pathOf(x.url)));
