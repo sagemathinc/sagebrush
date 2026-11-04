@@ -13,6 +13,7 @@ export const LATEX_LAZY = {
   AGENT: "dist/sagebrush-latex-agent.js",
   TOOLS: "dist/sagebrush-latex-tools.js",
   PRESENT: "dist/sagebrush-latex-present.js",
+  BEAMER: "dist/sagebrush-latex-beamer.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -40,6 +41,10 @@ export const LATEX_LAZY_CAPS = {
   TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+  // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
+  //  class beamer, or an overlay command). @sagebrush, 2026-11-04: make room for beamer's page furniture by moving
+  //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come)
+  BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */

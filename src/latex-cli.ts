@@ -15,7 +15,8 @@ import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
-import { setKatex } from "../web/latex/engine/render.mjs";
+import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
+import * as beamerCode from "../web/latex/engine/beamer.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
@@ -25,6 +26,8 @@ import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
 setKatex(katex.renderToString);
+// (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
+installBeamer(beamerCode);
 
 /** The largest .tex read (the editor's own bound on a document is far below it). */
 const TEX_MAX = 4 * 2 ** 20;
