@@ -525,6 +525,70 @@ throwsCode(() => P.jcs("é".repeat(10), 21), "limit", "jcs: two-byte characters 
   }
 }
 
+// ---- checkpoints (BH-0 server design r9, 83f3dd5a): the new request fields, the refusals and answers a checkpointing
+// client reads, and the old front's exchange byte for byte as it was
+{
+  const J = JSON.stringify;
+  const C = V.checkpoint ?? {};
+  const sorted = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
+  check(Array.isArray(C.requests) && C.requests.length === 12 && Array.isArray(C.refusals) && C.refusals.length === 12 && Array.isArray(C.answers) && C.answers.length === 4 && Array.isArray(C.old_front) && C.old_front.length === 3, "the checkpoint vectors: 12 requests, 12 refusals, 4 answers, 3 old-front exchanges");
+  // (requests: each as checkSnapshot / checkPullStart says, its result exactly the vector's, or refused with its code)
+  const run = (r) => {
+    if (r.for === "snapshot") return P.checkSnapshot(r.message);
+    const extra = Object.keys(r.message).filter((k) => !P.PULL_FIELDS.includes(k));
+    if (extra.length) throw new P.DocError("invalid", "pull: unknown field " + extra[0]);
+    return P.checkPullStart(r.message, r.message.after);
+  };
+  for (const r of C.requests ?? []) {
+    if ("ok" in r) {
+      let got;
+      try { got = run(r); } catch (e) { got = { threw: e?.code ?? String(e) }; }
+      check(J(sorted(got)) === J(sorted(r.ok)), `checkpoint request ${r.for}, ${r.when}: ${J(got)}`);
+    } else throwsCode(() => run(r), r.refused, `checkpoint request ${r.for}, ${r.when}`);
+  }
+  // (a token's integers have no leading zero, and its HMAC is 64 lowercase hex; nothing else is one)
+  const T = "2.1730000000000." + "d".repeat(64);
+  check(P.isCoverageToken(T) && P.isCoverageToken("0.0." + "0".repeat(64)), "a coverage token: <gen>.<issued>.<hmac>");
+  for (const bad of ["02.1." + "d".repeat(64), "2.1." + "D".repeat(64), "2.1." + "d".repeat(63), "2." + "d".repeat(64), "2.1.1." + "d".repeat(64), " " + T, T + "\n", 2, null, "2.12345678901234567." + "d".repeat(64)])
+    check(!P.isCoverageToken(bad), "not a coverage token: " + J(bad));
+  // (the refusals: existing codes only (INV-A7), each read as itself; a batch's and a pull's are transient on every
+  // front (busy, unavailable), so an old front that meets one waits, never stops)
+  const codes = new Set(R.CODES);
+  for (const r of C.refusals ?? []) {
+    check(codes.has(r.error?.code), `checkpoint refusal ${r.for}, ${r.when}: its code is Code's`);
+    const e = R.refusalOf({ ...r.error, message: "m" });
+    check(e.code === r.error.code && J(e.detail ?? null) === J(r.error.detail ?? null), `checkpoint refusal ${r.for}, ${r.when}: read as itself`);
+    if (r.for === "batch" || r.for === "pull") check(["busy", "unavailable"].includes(r.error.code), `checkpoint refusal ${r.for}, ${r.when}: transient (busy or unavailable): ${r.error.code}`);
+  }
+  const cap = (C.refusals ?? []).filter((r) => r.for === "batch");
+  check(cap.length === 3 && cap.every((r) => ["split", "required"].includes(r.error.detail.checkpoint)) && cap.some((r) => r.error.detail.checkpoint === "split" && r.error.detail.room_patches > 0 && r.error.detail.room_bytes > 0) && cap.filter((r) => r.error.detail.checkpoint === "required").every((r) => r.error.detail.room_patches === 0 || r.error.detail.room_bytes === 0), "the cap's refusals: split only with room in both, required when either room is 0");
+  const conf = (C.refusals ?? []).filter((r) => r.for === "checkpoint" && r.error.code === "conflict");
+  check(conf.length === 2 && conf.every((r) => Array.isArray(r.error.detail.kept) && r.error.detail.kept.every((k) => J(Object.keys(k)) === J(["at_seq", "sha256", "bytes"]))), "a checkpoint's conflicts carry the kept identities: {at_seq, sha256, bytes} each");
+  // (the answers: well-formed shapes; a sample frame of each matches; the old page's shape refuses each new key, so a
+  // client of the old shape is never sent one it didn't ask for)
+  const by = (f, w) => (C.answers ?? []).find((a) => a.for === f && a.when.startsWith(w))?.shape;
+  const head = { epoch: 1, seq: 2, chain: "ab".repeat(32) };
+  const page = { t: "batches", req: 5, owner: "f".repeat(64), doc: "0123456789ab", epoch: 1, head, items: [], more: false };
+  const desc = { epoch: 1, at_seq: 1, recv_at: 1, chain_at: "ab".repeat(32), cut_patch: "0000000000a_c", sha256: "a".repeat(64), bytes: 9 };
+  check(P.shapeMismatch({ t: "ack", req: 3, batch: { seq: 2, new: 1, resent: {}, head, checkpoint: { due: true, tail_patches: 600, tail_bytes: 9 } } }, by("batch", "a new patch stored, a checkpoint due")) === null, "shapes: an ack with checkpoint due matches");
+  check(P.shapeMismatch({ ...page, checkpoint: desc, token: T }, by("pull", "start: the newest")) === null, "shapes: a start answer with its descriptor and token matches");
+  check(/checkpoint\.cut_patch: missing/.test(P.shapeMismatch({ ...page, checkpoint: { ...desc, cut_patch: undefined }, token: T }.checkpoint && { ...page, checkpoint: Object.fromEntries(Object.entries(desc).filter(([k]) => k !== "cut_patch")), token: T }, by("pull", "start: the newest")) ?? ""), "shapes: a descriptor without cut_patch is refused");
+  check(P.shapeMismatch({ ...page, checkpoint: null, token: T }, by("pull", "start: no checkpoint")) === null, "shapes: a start answer with no checkpoint (null) matches");
+  check(P.shapeMismatch({ ...page, token: T }, by("pull", "a page, a token")) === null, "shapes: a page with its asked-for token matches");
+  const oldPage = (V.answers ?? []).find((a) => a.for === "pull" && a.when.startsWith("a page"))?.shape;
+  check(/token: not in the shape/.test(P.shapeMismatch({ ...page, token: T }, oldPage) ?? "") && /checkpoint: not in the shape/.test(P.shapeMismatch({ ...page, checkpoint: null }, oldPage) ?? ""), "shapes: the old page's shape (unchanged) refuses token and checkpoint: they go only to a request that asks");
+  const oldAck = (V.answers ?? []).find((a) => a.for === "batch" && a.when.startsWith("a new patch"))?.shape;
+  check(/checkpoint: not in the shape/.test(P.shapeMismatch({ t: "ack", req: 3, batch: { seq: 2, new: 1, resent: {}, head, checkpoint: { due: true, tail_patches: 1, tail_bytes: 1 } } }, oldAck) ?? ""), "shapes: the old ack's shape (unchanged) refuses checkpoint: it is sent only with the cap effective");
+  // (the old front's exchange, byte for byte: checkSnapshot's result has no new key, not even an absent one, and a pull
+  // without start or token checks to nothing)
+  for (const x of C.old_front ?? []) {
+    const got = x.for === "snapshot" ? J(P.checkSnapshot(x.message)) : J(P.checkPullStart(x.message, x.message.after));
+    check(got === x.ok, `the old front's ${x.for}: byte for byte as before: ${got}`);
+    if (x.for === "snapshot") check(J(Object.keys(P.checkSnapshot(x.message))) === J(Object.keys(JSON.parse(x.ok))), `the old front's snapshot: exactly the old keys, none absent-but-present: ${J(Object.keys(P.checkSnapshot(x.message)))}`);
+  }
+  check(J(P.checkSnapshot({ t: "snapshot", req: 1, at_seq: 2, sha256: "b".repeat(64), bytes: 3 }, { socket: "document", doc: "0123456789ab", owner: "e".repeat(64) })) === J({ t: "snapshot", req: 1, at_seq: 2, sha256: "b".repeat(64), bytes: 3, doc: "0123456789ab", owner: "e".repeat(64) }), "the old front's snapshot on a document socket: byte for byte as before");
+}
+
 console.log(`${checks - fails.length}/${checks} checks passed`);
 if (fails.length) {
   for (const f of fails.slice(0, 40)) console.log("FAIL", f);
