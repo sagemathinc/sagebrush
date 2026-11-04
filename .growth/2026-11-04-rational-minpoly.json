@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Rational.minpoly() and Rational.charpoly() over QQ, with docstring examples (lib/sage_all.py), as Sage 10.9. Re-measured with bun 1.4.4 (size-record.sh) on master 7fb1755f vs head 39d0c0f3: cli/lib.gen.js +608, cli/pyjs.cjs +1616, engine/lib/sage.pre +5469, engine/lib/sage.src +1536; no other row moves. Markers: exact, except cli/pyjs.cjs 1648 (+1616 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Rational.minpoly() and Rational.charpoly() over QQ, with docstring examples (lib/sage_all.py), as Sage 10.9. Re-measured with bun 1.4.4 (size-record.sh) on master 464c893b vs head a488b876: cli/lib.gen.js +608, cli/pyjs.cjs +1616, engine/lib/sage.pre +5469, engine/lib/sage.src +1536; no other row moves. Markers: exact, except cli/pyjs.cjs 1648 (+1616 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
   "cli/lib.gen.js": 608,
   "cli/pyjs.cjs": 1648,
