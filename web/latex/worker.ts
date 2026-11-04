@@ -7,7 +7,7 @@
 //   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
 // KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
-import { Engine, withBeamer, retryable } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
 import { setKatex, installBeamer } from "./engine/render.mjs";
 import { splitChunk, bytes, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
@@ -21,8 +21,8 @@ let eng: any = null;
 let inputs: { docPath: string; known: Map<string, Known>; version: number } | null = null;
 const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.location.href).href).then((m: any) => setKatex(m.renderToString));
 // (beamer's code, engine/beamer.mjs: a chunk of its own beside this worker (same origin, the same dist/ as the worker
-//  itself), fetched when a render first says it needs it; again after a failed fetch)
-const loadBeamer = retryable(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
+//  itself), fetched once, when a render first says it needs it; a failed fetch stays failed until a reload)
+const loadBeamer = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
 
 self.onmessage = async (e: MessageEvent) => {
   const m = e.data || {};

@@ -14,7 +14,7 @@ import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
 import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
-import { Engine, withBeamer, retryable } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex, render, installBeamer } from "./engine/render.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
@@ -178,13 +178,20 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-chunk-needed-every-way", Object.values(ways).every(Boolean), ways);
   // (a chunk that can't be loaded: the render without it, saying why; one that can: the render again)
   const failed = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("HTTP 404")), () => null);
-  check("beamer-chunk-load-failed", failed.chunks[0].includes("could not be loaded (HTTP 404)") && failed.problems.some((p) => p.kind === "beamer" && p.name === "HTTP 404"), failed.chunks[0]);
+  check("beamer-chunk-load-failed", failed.chunks[0].includes("could not be loaded (HTTP 404); reload the page to try again.") && failed.problems.some((p) => p.kind === "beamer" && p.name === "HTTP 404")
+    && failed.chunkPos[0] === -1 && failed.chunkPos.length === failed.chunks.length, { first: failed.chunks[0], pos: failed.chunkPos.length, chunks: failed.chunks.length });
+  // (the reason is the error's text: escaped in the notice, and cut at 200 characters)
+  const tagged = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("<b>x</b>")), () => null);
+  const long = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("y".repeat(300))), () => null);
+  const longWhy = long.problems.find((p) => p.kind === "beamer")?.name;
+  check("beamer-chunk-load-failed-why", tagged.chunks[0].includes("(&lt;b&gt;x&lt;/b&gt;)") && !tagged.chunks[0].includes("<b>x") && longWhy === "y".repeat(200) && long.chunks[0].includes("(" + "y".repeat(200) + ")"), { tagged: tagged.chunks[0], longWhy: longWhy?.length });
   let again = 0, plainLoads = 0; const ok = await withBeamer(new Engine().update(beamerDoc), async () => {}, () => (again++, "again")), none = await withBeamer(plain, async () => { plainLoads++; }, () => "again");
   check("beamer-chunk-loaded-renders-again", ok === "again" && again === 1 && none === plain && plainLoads === 0, { ok, again, plainLoads });
-  // (the worker's fetch, retryable(): one load for every caller while it is pending or done; after a failure, again)
-  let loads = 0; const fail = retryable(() => (++loads === 1 ? Promise.reject(new Error("x")) : Promise.resolve("m")));
-  const r1 = await fail().catch((e) => e.message), r2 = await fail(), r3 = await fail();
-  check("beamer-chunk-retryable", r1 === "x" && r2 === "m" && r3 === "m" && loads === 2, { r1, r2, r3, loads });
+  // (the worker's fetch, once(): one load for every caller, a failed one too; each later render says reload)
+  let loads = 0; const fail = once(() => (++loads, Promise.reject(new Error("x")))), good = once(() => (++loads, Promise.resolve("m")));
+  const r1 = await fail().catch((e) => e.message), r2 = await fail().catch((e) => e.message), r3 = await good(), r4 = await good();
+  const again1 = await withBeamer(new Engine().update(beamerDoc), fail, () => null);
+  check("beamer-chunk-once", r1 === "x" && r2 === "x" && r3 === "m" && r4 === "m" && loads === 2 && again1.chunks[0].includes("(x); reload the page to try again."), { r1, r2, r3, r4, loads });
   installBeamer(beamerCode);
   const after = e.update(beamerDoc);
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
