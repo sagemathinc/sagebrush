@@ -55,7 +55,17 @@ def _stacked(f, a, *rest):
     if a.ndim == 2:
         return f(a, *rest)
     lead = a.shape[:-2]
-    flat = a.reshape((-1,) + a.shape[-2:])
+    count = 1
+    for d in lead:
+        count *= d
+    # (the stack's count, not -1: a matrix axis of 0 leaves -1 undetermined)
+    flat = a.reshape((count,) + a.shape[-2:])
+    if count == 0:
+        # (an empty stack: f once on a rectangular identity, never singular, gives each output's shape and dtype)
+        one = f(_np.eye(a.shape[-2], a.shape[-1], dtype=a.dtype), *rest)
+        if isinstance(one, tuple):
+            return tuple(_np.zeros(lead + _np.asarray(x).shape, dtype=_np.asarray(x).dtype) for x in one)
+        return _np.zeros(lead + _np.asarray(one).shape, dtype=_np.asarray(one).dtype)
     res = [f(flat[i], *rest) for i in range(flat.shape[0])]
     if isinstance(res[0], tuple):
         return tuple(_np.array([r[k] for r in res]).reshape(lead + _np.asarray(res[0][k]).shape) for k in range(len(res[0])))
@@ -256,6 +266,9 @@ def pinv(a, rcond=None, hermitian=False, *, rtol=None):
     a = _float(a)
     if rtol is None:
         rtol = 1e-15 if rcond is None else rcond
+    if a.ndim >= 2 and (a.shape[-1] == 0 or a.shape[-2] == 0 or a.size == 0):
+        # (no singular values: the pseudoinverse of an m x n empty matrix is n x m, empty, per matrix)
+        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a.dtype)
     u, s, vh = svd(a, full_matrices=False)
     cutoff = rtol * _np.max(s, axis=-1, keepdims=True)
     sinv = _np.where(s > cutoff, 1.0 / _np.where(s > cutoff, s, 1.0), 0.0)
@@ -267,6 +280,9 @@ def matrix_rank(A, tol=None, hermitian=False, *, rtol=None):
     if A.ndim < 2:
         return int(not _np.all(A == 0))
     S = svd(A, compute_uv=False)
+    if S.shape[-1] == 0:
+        # (no singular values: rank 0 for each matrix)
+        return _np.zeros(A.shape[:-2], dtype=_np.int64) if A.ndim > 2 else 0
     if tol is None:
         if rtol is None:
             rtol = max(A.shape[-2:]) * _np.finfo(_np.float64).eps

@@ -65,3 +65,14 @@ for shp in [(0, 0), (0, 3), (2, 0)]:
     u, s, vh = np.linalg.svd(Z, full_matrices=False)
     print("svd empty econ", shp, u.shape, s.shape, vh.shape)
     print("svdvals/pinv/rank empty", shp, np.linalg.svd(Z, compute_uv=False).shape, np.linalg.pinv(Z).shape, int(np.linalg.matrix_rank(Z)))
+# stacks of empty matrices, and empty stacks (daybreak3 on #647)
+for shp in [(2, 0, 3), (2, 2, 0), (0, 2, 3), (0, 0, 0)]:
+    Z = np.zeros(shp)
+    u, s, vh = np.linalg.svd(Z)
+    print("svd stack", shp, u.shape, s.shape, vh.shape, u.tolist(), vh.tolist())
+    u, s, vh = np.linalg.svd(Z, full_matrices=False)
+    print("svd stack econ", shp, u.shape, s.shape, vh.shape)
+    print("svdvals/pinv/rank stack", shp, np.linalg.svd(Z, compute_uv=False).shape, np.linalg.pinv(Z).shape, np.linalg.matrix_rank(Z).tolist())
+for shp in [(0, 2, 2), (3, 0, 0)]:
+    Z = np.zeros(shp)
+    print("square stack", shp, np.linalg.det(Z).shape, np.linalg.inv(Z).shape, [x.shape for x in np.linalg.qr(np.zeros(shp))])
