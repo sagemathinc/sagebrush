@@ -415,6 +415,13 @@ def validate_result(verb, result):
         return _paging(result, {"versions": versions})
     if verb == "version":
         return {"content": _content_in(result.get("content"))}
+    if verb.startswith("git_"):
+        # (PROTOTYPE git-proto: web/git/agent.ts returns its own plain JSON objects, not entries)
+        try:
+            strict_json(result)
+        except ValueError:
+            raise PageError("protocol", "the page returned a git result that is not strict JSON")
+        return result
     if verb == "stat":
         # (schema.json: "One entry, or null": null, given explicitly, is no
         # entry at that path; an omitted or malformed entry is not)
