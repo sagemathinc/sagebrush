@@ -735,6 +735,10 @@ https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10
 ## Used only by tests and benchmarks (not distributed in any package)
 
 - `upstream/micropython/`: MicroPython's test suite (MIT; its `LICENSE`).
+- `upstream/numbl/`: the MATLAB test scripts of numbl (Flatiron Institute),
+  `numbl_test_scripts/` at commit e2396e2f, unchanged, minus the scripts listed
+  in its `README.md` (Apache-2.0; its `LICENSE`; numbl has no NOTICE file).
+  Run only by `scripts/numbl-ratchet.py`, on CI's full tier.
 - `conformance/upstream/`: the test suites of CPython, PyPy, GraalPy,
   IronPython and RustPython, each under its own license (the `LICENSE` file
   in its directory).

@@ -3031,7 +3031,252 @@ def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, usecol
     return a.T if unpack else a
 
 
-genfromtxt = loadtxt
+class _ConversionWarning(UserWarning):
+    """Rows genfromtxt skipped (invalid_raise=False), as NumPy's numpy.lib._iotools.ConversionWarning
+    (not a name of numpy's namespace)."""
+
+
+_ConversionWarning.__name__ = _ConversionWarning.__qualname__ = "ConversionWarning"
+
+
+def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, skip_footer=0,
+               converters=None, missing_values=None, filling_values=None, usecols=None,
+               names=None, excludelist=None, deletechars=None, replace_space="_",
+               autostrip=False, case_sensitive=True, defaultfmt="f%i", unpack=None,
+               usemask=False, loose=True, invalid_raise=True, max_rows=None,
+               encoding=None, *, ndmin=0, like=None):
+    """An array from a text file (or a list of lines) whose fields may be
+    missing, as NumPy 2.5's genfromtxt: missing fields ('' or missing_values)
+    and fields that don't convert take filling_values (nan for floats, -1
+    for integers); a row with another number of columns is an error, or is
+    skipped with a ConversionWarning (invalid_raise=False).
+
+    Examples:
+        >>> import numpy as np, io
+        >>> np.genfromtxt(io.StringIO("1,2,3\\n4,,6\\n"), delimiter=",")
+        array([[ 1.,  2.,  3.],
+               [ 4., nan,  6.]])
+        >>> np.genfromtxt(io.StringIO("x,y\\n1,2\\n3,N/A\\n"), delimiter=",", skip_header=1, missing_values="N/A", filling_values=0)
+        array([[1., 2.],
+               [3., 0.]])
+    """
+    import numpy as _self
+    if names is not None:
+        raise NotImplementedError("genfromtxt with names=: structured arrays are not supported by sagebrush's numpy yet")
+    if usemask:
+        raise NotImplementedError("genfromtxt with usemask=True: masked arrays are not supported by sagebrush's numpy yet")
+    if ndmin not in (0, 1, 2):
+        raise ValueError("Illegal value of ndmin keyword: %s" % (ndmin,))
+    if max_rows is not None:
+        if skip_footer:
+            raise ValueError("The keywords 'skip_footer' and 'max_rows' can not be specified at the same time.")
+        if max_rows < 1:
+            raise ValueError("'max_rows' must be at least 1.")
+    # (a column name as a dictionary key: NumPy looks it up in names=, which
+    # this numpy doesn't have, so the key is refused in words, never ignored)
+    for opt in (missing_values, filling_values, converters):
+        if isinstance(opt, dict):
+            for c in opt:
+                if isinstance(c, str):
+                    raise ValueError("genfromtxt: column name key %r needs names=" % (c,))
+    # (NumPy skips no lines for a negative count)
+    # (this module's max is numpy's: plain comparisons here)
+    skip_header = skip_header if skip_header > 0 else 0
+    skip_footer = skip_footer if skip_footer > 0 else 0
+    listed = isinstance(fname, (list, tuple)) or (not hasattr(fname, "read") and not isinstance(fname, (str, bytes)) and hasattr(fname, "__iter__"))
+    if listed:
+        chunks = [l.decode() if isinstance(l, bytes) else str(l) for l in fname]
+    else:
+        chunks = [_read_text(fname)]
+    # the lines, and whether each ended with a newline
+    lines, nl = [], []
+    for chunk in chunks:
+        keep = chunk.splitlines(True)
+        for p, q in zip(chunk.splitlines(), keep):
+            lines.append(p)
+            nl.append(len(q) > len(p))
+        if not keep and listed:
+            lines.append("")
+            nl.append(False)
+    if isinstance(dtype, (list, tuple, dict)):
+        raise NotImplementedError("genfromtxt with a structured dtype: structured arrays are not supported by sagebrush's numpy yet")
+    if dtype is not None:
+        # (str, bytes, object and the like: string arrays, which this numpy doesn't have)
+        try:
+            kind = _self.dtype(dtype).kind
+        except TypeError:
+            kind = "U"
+        if kind not in "biufc":
+            raise NotImplementedError("string arrays are not supported by sagebrush's numpy yet")
+    # the splitting, as NumPy's LineSplitter: a string (empty: whitespace),
+    # widths (a list: one per field; an int: every field; 0: whitespace)
+    if delimiter is not None and not isinstance(delimiter, str) and not hasattr(delimiter, "__iter__"):
+        delimiter = int(delimiter) or None
+    if isinstance(delimiter, str):
+        delimiter = delimiter or None
+    slices = None
+    if delimiter is not None and not isinstance(delimiter, (str, int)):
+        slices, at = [], 0
+        for w in delimiter:
+            slices.append((at, at + w))
+            at += w
+    # the data rows: (line number, fields), after the header, comments and blank lines
+    rows = []
+    for k in range(skip_header, len(lines)):
+        if max_rows is not None and len(rows) >= max_rows:
+            break
+        line = lines[k]
+        cut = False
+        if comments:
+            parts = line.split(comments, 1)
+            cut = len(parts) > 1
+            line = parts[0]
+        if delimiter is None or isinstance(delimiter, str):
+            if not line.strip():
+                continue
+            fields = line.split(delimiter)
+        elif slices is None:
+            fields = [line[i:i + delimiter] for i in range(0, len(line), delimiter)]
+        else:
+            # (a blank line is a row of missing fields, as NumPy's, whose
+            # line keeps its newline: only a comment's or a bare one is nothing)
+            if not line and (cut or not nl[k]):
+                continue
+            fields = [line[a:b] for a, b in slices]
+        if not fields:
+            continue
+        rows.append((k + 1, [f.strip() for f in fields]))
+    found = bool(rows)
+    if skip_footer > 0:
+        rows = rows[:-skip_footer] if skip_footer < len(rows) else []
+    if not rows:
+        # (no data at all: NumPy's warning; data all in the footer: none)
+        if not found:
+            import warnings
+            warnings.warn('genfromtxt: Empty input file: "%s"' % (fname,), UserWarning, stacklevel=2)
+        a = array([], dtype=float if dtype is None else dtype)
+        if ndmin == 2:
+            a = a.reshape((0, 1))
+        return a.T if unpack else a
+    if isinstance(usecols, int):
+        usecols = [usecols]
+    ncols = len(rows[0][1])
+    # a row of another number of columns: an error, or skipped (invalid_raise=False)
+    errors, kept = [], []
+    for ln, fields in rows:
+        if usecols is not None:
+            try:
+                fields = [fields[c] for c in usecols]
+            except IndexError:
+                errors.append("    Line #%d (got %d columns instead of %d)" % (ln, len(fields), len(usecols)))
+                continue
+            kept.append(fields)
+        elif len(fields) != ncols:
+            errors.append("    Line #%d (got %d columns instead of %d)" % (ln, len(fields), ncols))
+        else:
+            kept.append(fields)
+    if errors:
+        msg = "Some errors were detected !\n" + "\n".join(errors)
+        if invalid_raise:
+            raise ValueError(msg)
+        import warnings
+        warnings.warn(_ConversionWarning(msg), stacklevel=2)
+    # (usecols as NumPy normalizes it: a negative column counted from the end of the first row)
+    cols = [c + ncols if c < 0 else c for c in usecols] if usecols is not None else list(range(ncols))
+    width = len(cols)
+    # a dictionary key's slot, as NumPy's: a column usecols selects is its
+    # position there; any other key is a position itself (negative from the end)
+    slot = lambda c: cols.index(c) if c in cols else c
+    # each column's missing strings: '' and missing_values (a dict: by column,
+    # None for all; a list or tuple: one per column; a string: split at commas)
+    missings = [{""} for _ in range(width)]
+    if isinstance(missing_values, bytes):
+        missing_values = missing_values.decode("latin1")
+    if isinstance(missing_values, dict):
+        for c, v in missing_values.items():
+            vals = {str(x) for x in v} if isinstance(v, (list, tuple)) else {str(v)}
+            if c is None:
+                for m in missings:
+                    m |= vals
+            else:
+                missings[slot(c)] |= vals
+    elif isinstance(missing_values, (list, tuple)):
+        for m, v in zip(missings, missing_values):
+            m.add(str(v))
+    elif isinstance(missing_values, str):
+        for m in missings:
+            m |= set(missing_values.split(","))
+    elif missing_values:
+        for m in missings:
+            m.add(str(missing_values))
+    # the column types: dtype=None infers one (each column's own would be a structured array)
+    if dtype is None:
+        def col_kind(j):
+            vals = [r[j] for r in kept if r[j] not in missings[j]]
+            def ok(conv):
+                try:
+                    for v in vals:
+                        conv(v)
+                    return True
+                except ValueError:
+                    return False
+            return "i" if ok(int) else "f" if ok(float) else "c" if ok(lambda t: complex(t.replace("i", "j"))) else "U"
+        kinds = {col_kind(j) for j in range(width)}
+        if "U" in kinds:
+            raise NotImplementedError("genfromtxt with dtype=None and text fields: string arrays are not supported by sagebrush's numpy yet")
+        if len(kinds) > 1:
+            raise NotImplementedError("genfromtxt with dtype=None and columns of different types: structured arrays are not supported by sagebrush's numpy yet")
+        dtype = {"i": int64, "f": float64, "c": complex128}[kinds.pop()]
+    kind = _self.dtype(dtype).kind
+    default_fill = False if kind == "b" else -1 if kind in "iu" else complex(float("nan"), 0) if kind == "c" else float("nan")
+    fills = [None] * width
+    if isinstance(filling_values, dict):
+        for c, v in filling_values.items():
+            j = slot(c)
+            if not -width <= j < width:
+                raise IndexError("list assignment index out of range")
+            fills[j] = v
+    elif isinstance(filling_values, (list, tuple)):
+        for j, v in enumerate(filling_values[:width]):
+            fills[j] = v
+    elif filling_values is not None:
+        fills = [filling_values] * width
+    # (None: the dtype's own default, as NumPy's)
+    fills = [default_fill if f is None else f for f in fills]
+    def str2bool(t):
+        # (NumPy's: TRUE or FALSE, in any case; nothing else is a bool)
+        if t.upper() == "TRUE":
+            return True
+        if t.upper() == "FALSE":
+            return False
+        raise ValueError("Invalid boolean")
+    conv = str2bool if kind == "b" else int if kind in "iu" else (lambda t: complex(t.replace("i", "j"))) if kind == "c" else float
+    convs = [conv] * width
+    # (a converter's column: through usecols when given, an unselected one unused, as NumPy's)
+    for c, f in (converters or {}).items():
+        if usecols:
+            if c in cols:
+                convs[cols.index(c)] = f
+        else:
+            convs[c] = f
+    out = []
+    for fields in kept:
+        row = []
+        for j, t in enumerate(fields):
+            # (as NumPy's converters: the conversion first, so a missing value that
+            # converts is that value; one that doesn't is filled, and with
+            # loose=False, so is only one of its column's missing values)
+            try:
+                row.append(convs[j](t))
+            except (ValueError, TypeError):
+                if not loose and t not in missings[j]:
+                    raise ValueError("Cannot convert string '%s'" % t)
+                row.append(fills[j])
+        out.append(row)
+    a = squeeze(array(out, dtype=dtype))
+    if a.ndim < ndmin:
+        a = atleast_1d(a) if ndmin == 1 else atleast_2d(a)
+    return a.T if unpack else a
 
 from numpy import linalg, random, fft, testing  # noqa: E402
 
