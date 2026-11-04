@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "QRPM 1b, pandas on demand for notebooks. (1) No grading context admits pandas: pkgset.ts gradingExcluded, refused by graderAdmission and, while grading is armed, at import (compile.ts mountOptional); daybreak3's condition, Nov 4. (2) The runner's fetch broker (runner-worker.js) fetches the pinned index by exact URL, checks its SHA-256 against the pin, then only the chunks it pins; before this the runner refused every package set. (3) sw.js fetches package files with the asking request's credentials and referrer policy, so broker requests carry no cookie or Referer (G-10's G5, G8). The pandas set is a site file (pkg/, pkgset/latest.json), in no core artifact. Measured (bun 1.4.4, node 24.21.0, size-measure.mjs --record) on #626's head 5c1880ed vs this branch: worker +381, notebook +1222, pyjs.cjs +2136; no other row moves. Markers exact, except pyjs.cjs 2168 (+32 B margin, it moves with master).",
+ "reason": "QRPM 1b, pandas on demand for notebooks. (1) No grading context admits pandas: pkgset.ts gradingExcluded, refused by graderAdmission and, while grading is armed, at import (compile.ts mountOptional); daybreak3's condition, Nov 4. (2) The runner's fetch broker (runner-worker.js) fetches the pinned index by exact URL, checks its SHA-256 against the pin, then only the chunks it pins; it shares one checked-index path with the zone data. Before this the runner refused every package set. (3) sw.js fetches package files with the asking request's credentials and referrer policy, so broker requests carry no cookie or Referer (G-10's G5, G8). The pandas set is a site file, in no core artifact. (4) An index not fetched (offline) is asked for again at the next run, quietly (worker.ts SetUnfetched). Measured (bun 1.4.4, size-measure.mjs --record) on a probe merge of this head onto master 2e8c1957: worker +569, notebook +413 (ceiling 237,346 = landing + 64), pyjs.cjs +1150; no other row moves. Markers: about 30 B margin.",
  "bytes": {
-  "cli/pyjs.cjs": 2168,
-  "engine/sagebrush-notebook.js": 1222,
-  "engine/sagebrush-worker.js": 381
+  "cli/pyjs.cjs": 1180,
+  "engine/sagebrush-notebook.js": 440,
+  "engine/sagebrush-worker.js": 600
  }
 }

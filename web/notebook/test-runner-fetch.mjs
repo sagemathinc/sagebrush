@@ -123,7 +123,10 @@ ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
 }
 
 // PKu (QRPM 1b): the package set index's grammar for the broker (parsePkgsetIndex): the site's notebooks' set
-// (pkgset/latest.json) admits exactly the chunks its Python packages pin; each bound refuses on its own
+// (pkgset/latest.json) admits exactly the chunks its Python packages pin, and a pin that isn't one refuses the
+// whole index.  The index's own grammar and bounds (format, 256 KiB, 32 packages, 4 builds) are the worker's
+// (src/pkgset.ts admitIndex), not the broker's: only bytes with the SHA-256 the page pinned reach this parser,
+// so these only check it never admits a file the bytes don't pin
 {
   const S = JSON.parse(readFileSync(join(dist, "pkgset", "latest.json"), "utf8")).id;
   const bytes = new Uint8Array(readFileSync(join(dist, "pkgset", S + ".json")));
@@ -135,13 +138,17 @@ ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
   const p0 = ix.packages[id0];
   const with0 = (p) => enc({ ...ix, packages: { ...ix.packages, [id0]: p } });
   const no = (name, what, b) => ok(parsePkgsetIndex(b) === null, `${name}: ${what}: refused`);
-  no("PKu-format", "another format", enc({ ...ix, format: "sagebrush-tzdata" }));
-  no("PKu-packages", "packages not an object", enc({ ...ix, packages: [] }));
+  const only = (name, what, b, want) => {
+    const got = parsePkgsetIndex(b);
+    ok(got !== null && got.size === want.length && want.every((x) => got.has(x)), `${name}: ${what}: only the chunks its bytes pin (${want.length})`);
+  };
+  only("PKu-format", "another format", enc({ ...ix, format: "sagebrush-tzdata" }), pins);
+  only("PKu-packages", "packages an empty array", enc({ ...ix, packages: [] }), []);
   no("PKu-src", "a src sha256 not 64 lowercase hex", with0({ ...p0, src: { ...p0.src, sha256: p0.src.sha256.toUpperCase() } }));
   no("PKu-pre", "a pre entry with no sha256", with0({ ...p0, pre: { "0123456789abcdef": { size: 1 } } }));
-  no("PKu-pre-builds", "5 precompiled builds", with0({ ...p0, pre: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`${i}`.repeat(16), p0.src])) }));
-  no("PKu-count", "33 packages", enc({ ...ix, packages: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`@sagebrush/p${i}@0.1.0`, p0])) }));
-  no("PKu-bytes", "262,145 bytes (the real index padded with spaces)", enc(JSON.stringify(ix) + " ".repeat(262145 - bytes.length)));
+  only("PKu-pre-builds", "5 precompiled builds, each the src chunk", with0({ ...p0, pre: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`${i}`.repeat(16), p0.src])) }), [`pkg/${p0.src.sha256}.json`]);
+  only("PKu-count", "33 packages, each the first", enc({ ...ix, packages: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`@sagebrush/p${i}@0.1.0`, p0])) }), [p0.src, ...Object.values(p0.pre)].map((r) => `pkg/${r.sha256}.json`));
+  only("PKu-bytes", "262,145 bytes (the real index padded with spaces)", enc(JSON.stringify(ix) + " ".repeat(262145 - bytes.length)), pins);
   no("PKu-json", "not JSON", enc("{"));
   const js = parsePkgsetIndex(enc({ ...ix, packages: { ...ix.packages, "@sagebrush/bash@0.3.0": { dir: "bash", js: { sha256: "a".repeat(64), size: 1 } } } }));
   ok(js !== null && js.size === pins.length && !js.has(`pkg/${"a".repeat(64)}.json`), "PKu-js: a js package's chunk is not one the runner may fetch");

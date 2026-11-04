@@ -29,11 +29,16 @@ const ok = (c, msg) => {
 };
 
 let poison = false;
+let unfetched = false; // (the sets' indexes: 503, as offline; /refetch ends it)
+let indexAsked = 0;
 const types = { ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".wasm": "application/wasm", ".html": "text/html" };
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/test.html") return res.writeHead(200, { "Content-Type": "text/html" }).end("<!doctype html><title>pkgset</title>");
+  if (url.pathname === "/refetch") return (unfetched = false), res.writeHead(204).end();
   const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(url.pathname);
+  if (m && m[1] === "pkgset") indexAsked++;
+  if (m && m[1] === "pkgset" && unfetched) return res.writeHead(503).end();
   if (m) {
     const f = join(setDir, m[1], m[2] + ".json");
     if (!existsSync(f)) return res.writeHead(404).end();
@@ -113,6 +118,25 @@ try {
   poison = false;
   const d = await run("not-a-set", "print(1)");
   ok(d.out === "1\n" && /64 lowercase hex/.test(d.note), `a pin that isn't a set id is refused; the interpreter still runs (${JSON.stringify(d)})`);
+  // an index that can't be fetched now (offline, say): nothing said, the run runs; the next run asks for it
+  // again and, once it comes, imports from the set
+  unfetched = true;
+  indexAsked = 0;
+  const u = await ev(`new Promise((resolve) => {
+    const w = new Worker("sagebrush-worker.js", { type: "module" });
+    w.postMessage({ init: { limits: null } });
+    let out = "", note = "";
+    w.onmessage = (e) => {
+      const m = e.data;
+      if (m.ready) { w.postMessage({ pkgset: ${JSON.stringify(S)} }); w.postMessage({ id: 1, code: "print(1)" }); }
+      if (m.pkgsetError) note = m.pkgsetError;
+      if (m.stream) out += m.text;
+      if (m.id === 1 && m.done) fetch("/refetch").then(() => w.postMessage({ id: 2, code: ${JSON.stringify("import hello\nprint(hello.greet())")} }));
+      if (m.id === 2 && m.done) { w.terminate(); resolve({ out, error: !!m.error, note }); }
+    };
+    setTimeout(() => resolve({ out, timeout: true, note }), 60000);
+  })`);
+  ok(u.out === "1\nhello, world\n" && !u.error && u.note === "" && indexAsked === 2, `an index not fetched (503) is not said; the next run fetches it and imports (${JSON.stringify({ ...u, indexAsked })})`);
 
   // the service worker (web/sw.js, SEC-PKG-1): the set's files are kept in
   // its own cache, by content; a kept copy is served only if its bytes still
