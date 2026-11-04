@@ -4,7 +4,8 @@
 // real bundled npm once (a smoke test: a fake can't catch npm's own config
 // loading failing), the base binding, the report, and the workflow contract.
 //   node scripts/test-npm-pack-metrics.mjs
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bindFetched, isolationProblem, literalEntryProblem, makeRecord, md, packDir, parsePack, readRecord, recordProblems, report, runNpm, ARGS, CAPS, FORMAT } from "./npm-pack-metrics.mjs";
@@ -71,8 +72,7 @@ try {
   writeFileSync(join(fake, "good.json"), pkgOut());
   // (the hang modes' pid, written whole or not at all (a temp file, then mv), just before the exec that keeps
   // it: a read never sees a file the timeout's kill cut short. "hangslow" never writes it (as a hang killed
-  // before it did);
-  // "orphan" also leaves a child of its own the kill can't reach, the check's control)
+  // before it did))
   writeFileSync(join(bin, "npm"), `#!/bin/sh
 pidout() { echo "$1" > "$FAKE_DIR/hang.tmp" && mv -f "$FAKE_DIR/hang.tmp" "$FAKE_DIR/hang.pid"; }
 echo "$*" >> "$FAKE_DIR/calls"
@@ -85,7 +85,6 @@ case "$FAKE_NPM" in
   trailing) cat "$FAKE_DIR/good.json"; echo garbage ;;
   hang) pidout "$$"; exec sleep 30 ;;
   hangslow) exec sleep 30 ;;
-  orphan) sleep 30 </dev/null >/dev/null 2>&1 & pidout "$!"; exec sleep 30 ;;
   selfkill) kill -9 $$ ;;
   *) cat "$FAKE_DIR/good.json" ;;
 esac
@@ -137,9 +136,17 @@ esac
     const slow = timedOut("hangslow");
     reason("wrapper: a hang before the pid times out", slow.r, "npm timed out after 200 ms");
     check("wrapper: killed before its pid was written: nothing left", slow.s.state === "none", JSON.stringify(slow.s));
-    const orphan = timedOut("orphan");
-    check("wrapper: the check sees a process the kill missed", orphan.s.state === "alive", JSON.stringify(orphan.s));
-    if (orphan.s.pid) try { process.kill(orphan.s.pid, "SIGKILL"); } catch {}
+    // (the check's own control: a process left running is seen alive. Started here, not by a timed-out fake (whose
+    // pid could still be unwritten when the 200 ms kill lands: the "none" red of #599 run 41795365622), its pid
+    // written whole as the hang modes write theirs, and killed after)
+    rmSync(hangPid, { force: true });
+    const orphan = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    orphan.unref();
+    writeFileSync(hangPid + ".tmp", `${orphan.pid}\n`);
+    renameSync(hangPid + ".tmp", hangPid);
+    const left = survivor();
+    try { process.kill(orphan.pid, "SIGKILL"); } catch {}
+    check("wrapper: the check sees a process the kill missed", left.state === "alive" && left.pid === orphan.pid, JSON.stringify(left));
   }
   {
     // (NPM-PACK-138-3: only spawnSync's own timeout is a timeout; a SIGKILL from elsewhere is a failure)
