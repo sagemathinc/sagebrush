@@ -2368,6 +2368,39 @@ const shareTest = {
   exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }),
 };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
+// Share folder… (Files ▸ ⋯ on a folder; book links B2): its dialog in a chunk of its own, loaded when chosen; the
+// folder's share kept in the workspace by its fid, and this device's upload records under "folder:<fid>"
+async function openFolderShare(e) {
+  const w = await wsNow();
+  if (!w || w.closed || !e.fid) return sayNotLeft(new Error("this folder can't be shared from here"));
+  let m;
+  try {
+    m = await import(new URL("sagebrush-share-folder.js", location.href).href);
+  } catch {
+    return sayNotLeft(new Error("Share folder couldn't be loaded; check your connection and try again"));
+  }
+  const key = "folder:" + e.fid;
+  await m.openShareFolder({
+    folder: { path: e.path, fid: e.fid },
+    list: () => w.list(e.path, { recursive: true }),
+    readFile: (f) => storedFileBytes({ path: f.path, fid: f.fid }),
+    // (a notebook's saved record, still the one listed)
+    readNotebook: async (f) => {
+      const now = await w.stat(f.path);
+      if (!now || now.kind !== "notebook" || now.ref !== f.ref) throw new Error(`${f.path.replace(/^\/+/, "")} changed; share the folder again`);
+      const d = await w.contents(now);
+      if (!d || typeof d !== "object") throw new Error(`${f.path.replace(/^\/+/, "")} can't be read`);
+      return d;
+    },
+    notebookText: (doc) => toIpynb(doc),
+    saveOpen: async () => { saveNow(); await nb.saved(); },
+    getShare: () => w.folderShare(e.fid),
+    setShare: (expect, next) => w.setFolderShare(e.fid, expect, next),
+    sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
+    sentMax: SHARE_SENT_MAX,
+    fmtSize,
+  });
+}
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
   const w = await wsNow();
@@ -3805,6 +3838,8 @@ function wsShowFiles(on) {
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
+      // (Share folder…: not under `sagebrush notebook`, which has no sharing)
+      shareFolder: LOCAL ? undefined : (e) => void openFolderShare(e),
       saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
