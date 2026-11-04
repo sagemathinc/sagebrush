@@ -82,14 +82,19 @@ export function install(proto, CMDS, deps) {
     },
     // the furniture of frame n: its sidebar (w "s"), headline ("h") or footline ("f"), as the theme draws it (THEMES),
     // from the short title, author, institute and date, the sections and the frame's number; none where the document
-    // sets that template itself (a footline of [frame number] or [page number]: the number). Nothing is built for a part
+    // sets that template itself (a footline of [frame number] or [page number]: TeX's numbers). Nothing is built for a part
     // the theme doesn't draw; over the budget (furnBudget), a short form. used gets the fields it shows whole (their
     // SageTeX shown); a field cut in the short form is its text only
     furnishPart(w, n, used) {
       const [hl, fl] = this.bth ?? [], tpl = this.btpl ?? {};
       if (w === "s" ? hl !== "sb" || tpl["sidebar left"] : w === "h" ? !hl || hl === "sb" || tpl.headline : !(tpl.footline ? /number/.test(tpl.footline) : fl)) return "";
       const fr = this.bfr[n - 1];
-      if (w === "f" && tpl.footline) return '<div class="slide-foot"><div class="fno">' + fr.num + "</div></div>";
+      // (a footline of [frame number]: TeX's "n/N", beamer's counter; of [page number]: the page among all of them, each
+      //  overlay step a page, as the PDF's (the frame's first))
+      if (w === "f" && tpl.footline) {
+        const F = this.frameList, steps = (k) => F[k].steps || 1, page = F.slice(0, n - 1).reduce((t, x, k) => t + steps(k), 1), pages = F.reduce((t, x, k) => t + steps(k), 0);
+        return '<div class="slide-foot"><div class="fno">' + (/frame/.test(tpl.footline) ? fr.num + "/" + (this.bnum ?? 0) : page + "/" + pages) + "</div></div>";
+      }
       const z = this.bz === undefined ? (this.bz = this.furnBudget()) : this.bz, S = this.bsec ?? [], cur = S[fr.s];
       // (in the short form: names and fields as their text, cut to z characters)
       const cut = (h) => { if (!z) return h; const t = h.replace(/<[^>]*>/g, "").replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[e]); return t.length > z ? esc(t.slice(0, z - 1) + "\u2026") : h; };

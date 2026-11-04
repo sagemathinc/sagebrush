@@ -256,7 +256,7 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const plain = html(deck("\\usetheme{Warsaw}\n", one));
   check("beamer-furniture-plain-frame", !/slide-(head|foot)/.test(frameOf(plain, 1)) && /slide-head/.test(frameOf(plain, 2)) && /slide-foot/.test(frameOf(plain, 2)), frameOf(plain, 1).slice(0, 300));
   const own = html(deck("\\usetheme{Warsaw}\n\\setbeamertemplate{footline}{mine}\n\\setbeamertemplate{headline}{mine too}\n", one)), num = html(deck("\\usetheme{Madrid}\n\\setbeamertemplate{footline}[frame number]\n", one));
-  check("beamer-furniture-own-templates", !/slide-(head|foot)/.test(frameOf(own, 2)) && !own.includes("mine") && words(frameOf(num, 2)) === "2", [frameOf(own, 2).slice(0, 300), words(frameOf(num, 2))]);
+  check("beamer-furniture-own-templates", !/slide-(head|foot)/.test(frameOf(own, 2)) && !own.includes("mine") && words(frameOf(num, 2)) === "/ 2 2", [frameOf(own, 2).slice(0, 300), words(frameOf(num, 2))]);
   const side = html(deck("\\usetheme{Berkeley}\n\\setbeamertemplate{sidebar left}{}\n", one));
   check("beamer-furniture-own-sidebar", !/slide-side|sbar/.test(frameOf(side, 2)), frameOf(side, 2).slice(0, 200));
   // (starred sections listed too, as TeX's beamer lists them (not in the contents); a short form's markup dropped, as
@@ -318,6 +318,20 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-furniture-sage-cut", cutR.problems.some((p) => p.kind === "furniture") && cutR.sageItems.every((x) => x.err === "hidden") && hiddenNote(cutR) && !/42/.test(frameOf(cutR.chunks.join(""), 1)) && /A{70,}\u2026/.test(frameOf(cutR.chunks.join(""), 1))
     && inR.sageItems.every((x) => x.err !== "hidden") && !hiddenNote(inR) && /slide-foot[\s\S]*Short[\s\S]*42/.test(frameOf(inR.chunks.join(""), 1)),
     { cut: [cutR.sageItems.map((x) => x.err), hiddenNote(cutR)], within: [inR.sageItems.map((x) => x.err), hiddenNote(inR)], f1: frameOf(cutR.chunks.join(""), 1).slice(-300) });
+  // (the footline templates' numbers as TeX's (TeX Live 2025): [frame number] "0/1" then "1/1" after a [noframenumbering]
+  //  frame; [page number] each overlay step a page: "1/4", "2/4", "4/4" for frames of 1, 2 and 1 steps)
+  const fnums = (src) => [...html(src).matchAll(/<div class="fno">([^<]*)<\/div>/g)].map((m) => m[1]).join(",");
+  const fno = fnums(deck("\\setbeamertemplate{footline}[frame number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b\\end{frame}\n"));
+  const pno = fnums(deck("\\setbeamertemplate{footline}[page number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b \\pause c\\end{frame}\n\\begin{frame}{C}d\\end{frame}\n"));
+  check("beamer-furniture-number-templates", fno === "0/1,1/1" && pno === "1/4,2/4,4/4", { fno, pno });
+  // (the short form's cut text is escaped (grader F8: a field over the cut, decoded to measure it, is never HTML again)
+  //  and cut to exactly 80 characters, the last "\u2026" (F10))
+  const evil = "\\title{<img src=x onerror=alert(1)> \\& " + "B".repeat(100) + "}\\author{" + "C".repeat(100) + "}\n";
+  const evilH = new Engine().update("\\documentclass{beamer}\n\\usetheme{Madrid}\n" + evil + "\\begin{document}\n" + bigSecs + "\\end{document}\n").chunks.join(""), evilF = frameOf(evilH, 1);
+  const cells = [...(evilF.match(/<div class="slide-foot">([\s\S]*?)<\/div><\/div>/)?.[1] ?? "").matchAll(/<div>([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+  const visible = (h) => h.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  check("beamer-furniture-short-form-escaped", !/<img/.test(evilH) && /&lt;img src=x onerror=alert\(1\)&gt; &amp; B+\u2026/.test(evilF) && visible(cells[1] ?? "").length === 80 && visible(cells[0] ?? "") === "C".repeat(79) + "\u2026",
+    { title: cells[1], author: cells[0], lens: cells.map((c) => visible(c).length) });
   // (in another class: \usetheme's and \setbeamertemplate's arguments read and dropped, \title[..] as TeX reads it there:
   //  its argument the "[")
   const art = new Engine().update("\\documentclass{article}\n\\usetheme{Madrid}\\setbeamertemplate{footline}{F}\n\\title[S]{T}\n\\begin{document}\n\\maketitle X \\only<2>{Y}\n\\end{document}\n").chunks.join("");
