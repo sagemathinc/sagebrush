@@ -43,8 +43,11 @@ export const LATEX_LAZY_CAPS = {
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
   //  class beamer, or an overlay command). @sagebrush, 2026-11-04: make room for beamer's page furniture by moving
-  //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come)
-  BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3 * 1024 },
+  //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come.
+  //  8 KiB / 3.5 KiB: @sagebrush's ruling with daybreak2's number, Nov 4, #644 r2: the furniture (6,107 / 2,681) plus
+  //  the review-required fixes FURN644-SAGE-1, FURN644-FRAME-NO-1 and BEAMER644-FURN-1 (7,566 / 3,312), about 7.6% room
+  //  on each; lazy: no growth for other documents)
+  BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
