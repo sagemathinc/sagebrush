@@ -4,7 +4,8 @@
 // be within LATEX_CAPS, raw and gzip. Before it, small synthetic trees check the measure itself: at the cap passes, one
 // byte over (raw, or gzip) fails, an empty group fails, and the lazy chunks are left out.
 //   bun web/build.ts && node scripts/test-latex-group-budget.mjs
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -26,6 +27,9 @@ function files(web) {
   })(join(web, "dist"));
   return out;
 }
+
+// ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
+check(LATEX_CAPS.raw === 237568 && LATEX_CAPS.gzip === 79872, "the caps are 232 KiB raw and 78 KiB gzip (William, 2026-11-03: \"OK 232/78\")", LATEX_CAPS);
 
 // ---- the measure, on synthetic trees
 const tmp = mkdtempSync(join(tmpdir(), "latex-group-"));
@@ -56,7 +60,7 @@ try {
   check(!empty.ok && empty.js.length === 0, "no LaTeX file at all fails (a build without the editor is not a pass)", empty.js);
   const lazy = Object.fromEntries(Object.values(LATEX_LAZY).map((p) => [p.slice("dist/".length), zeros(LATEX_CAPS.raw + 1)]));
   const withLazy = tree("lazy", { "sagebrush-latex.js": zeros(1000), ...lazy, "sagebrush-latex.css": zeros(10), "other.js": zeros(LATEX_CAPS.raw + 1) });
-  check(withLazy.ok && withLazy.js.join() === "dist/sagebrush-latex.js" && withLazy.css.join() === "dist/sagebrush-latex.css", "the lazy chunks and other files are not in the group; CSS is listed apart", { js: withLazy.js, css: withLazy.css });
+  check(withLazy.ok && withLazy.raw === 1000 && withLazy.js.join() === "dist/sagebrush-latex.js" && withLazy.css.join() === "dist/sagebrush-latex.css", "the lazy chunks and other files are not in the group; CSS is listed apart", { js: withLazy.js, css: withLazy.css });
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
@@ -68,6 +72,25 @@ else {
   const g = latexGroup(files(web));
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+}
+
+// ---- every input of the two bundles selects the full tier on a pull request (scripts/ci-paths.mjs fullTierPaths), so
+// a change that grows the group is checked here before it merges, not first on master
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const metaFile = join(root, "build", "latex-metafile.json");
+if (!existsSync(metaFile)) check(false, "build/latex-metafile.json is there (bun web/build.ts writes it)");
+else {
+  const meta = JSON.parse(readFileSync(metaFile, "utf8"));
+  const inputs = [...new Set([...(meta["the LaTeX editor (sagebrush-latex.js)"] ?? []), ...(meta["the LaTeX editor (sagebrush-latex-worker.js)"] ?? [])])].sort();
+  const dir = mkdtempSync(join(tmpdir(), "latex-group-paths-"));
+  const notFull = inputs.filter((f) => {
+    writeFileSync(join(dir, "files.txt"), f + "\n");
+    const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
+    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+  });
+  rmSync(dir, { recursive: true, force: true });
+  check(inputs.length > 0 && notFull.length === 0, `each of the group's ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
 }
 
 console.log(fails.length ? `FAIL: the LaTeX group's budget, ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX group's budget, ${checks} checks`);
