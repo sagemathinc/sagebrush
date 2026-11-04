@@ -1671,10 +1671,13 @@ pub(crate) mod tests {
             let (l, _) = triangles(n, 40 + n as u32);
             for r in 1..=9 {
                 for zeros in [0usize, 1, 2, 3] {
-                    // (with every x_0 zero, an Inf under it in L: skipping the step keeps x, fusing it gives NaN)
+                    // (with every x_0 zero, Infs under it in L, inside block 0 (rows 1, 2) and below it (row 6):
+                    // skipping the step keeps x, taking it gives 0 * Inf = NaN)
                     let mut l = l.clone();
-                    if zeros == 3 && n > 6 {
-                        l[6] = f64::INFINITY;
+                    if zeros == 3 {
+                        for i in [1, 2, 6].into_iter().filter(|&i| i < n) {
+                            l[i] = f64::INFINITY;
+                        }
                     }
                     let ldx = n + 2;
                     let mut x0 = vec![f64::NAN; ldx * r];
