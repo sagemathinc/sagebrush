@@ -270,6 +270,24 @@ const fetched = (s, S) => s.asked.includes(`/pkgset/${S}.json`);
   } finally { await c.close(); await s.stop(); }
 }
 
+// 6. the run whose import pins the set ends only once that pin is durable: its save held, the run waits
+{
+  const s = await site(), c = await chromium();
+  try {
+    s.setAuto(S1);
+    const t = await c.tab();
+    await t.open(s.url + "?runner=0");
+    await t.ev(`(() => { const n = sagebrush.notebook, saved = n.saved; window.__held = 0; window.__release = null;
+      n.saved = () => { __held++; return new Promise((r) => { window.__release = () => r(saved.call(n)); }); }; return 1; })()`);
+    const k = await t.startRun(HELLO);
+    ok(await t.until("window.__held > 0 && !!window.__release", 60000), "the import's pin waits on the notebook's save");
+    await sleep(2000);
+    ok(!(await t.ran(k)), "while that save is held, the run has not ended");
+    await t.ev("(window.__release(), 1)");
+    ok(await t.done(k) && (await t.out(k)).includes("hello, world") && (await t.ev("sagebrush.notebook.meta.pkgset")) === S1, "released, the run ends, pinned to the set it used");
+  } finally { await c.close(); await s.stop(); }
+}
+
 rmSync(setDir, { recursive: true, force: true });
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
