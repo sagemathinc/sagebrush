@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Proposals · Sagebrush</title>
+<meta name="description" content="A prototype: changes an agent proposes, before and after, to accept or reject.">
+<style>
+  :root { --ink: #24231f; --muted: #6b6a63; --line: #e3e0d6; --bg: #faf9f5; --card: #fff; --accent: #c2410c; --add: #e6f4e6; --addi: #1e5e24; --del: #fbe7e4; --deli: #8a2a1c; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e8e6df; --muted: #a3a197; --line: #3a3934; --bg: #1c1b18; --card: #24231f; --add: #1f3a22; --addi: #b6e3b8; --del: #43231f; --deli: #f1b8ae; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .banner { background: #fff7d6; color: #5a4b10; border-bottom: 1px solid #e8dca0; font-size: 13px; padding: 5px 14px; }
+  .app { display: flex; min-height: calc(100vh - 30px); }
+  nav { width: 290px; flex: none; border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  nav h1 { font-size: 17px; margin: 2px 4px 8px; }
+  nav h1 a { color: inherit; text-decoration: none; }
+  .item { display: flex; flex-direction: column; text-align: left; border: 1px solid transparent; background: none; border-radius: 8px; padding: 8px 10px; }
+  .item:hover { background: var(--card); border-color: var(--line); }
+  .item.on { background: var(--card); border-color: var(--accent); }
+  .item.done { opacity: .6; }
+  .item .t { font-weight: 600; }
+  .item .m, .m, .muted { color: var(--muted); font-size: 13px; }
+  details { margin-top: auto; font-size: 13px; }
+  details pre { white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; }
+  main { flex: 1; min-width: 0; padding: 16px 22px 40px; }
+  h2 { margin: 0 0 2px; font-size: 21px; }
+  .desc { white-space: pre-wrap; margin: 12px 0; max-width: 80ch; }
+  .actions { display: flex; align-items: center; gap: 10px; margin: 12px 0 18px; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 2; border-bottom: 1px solid var(--line); }
+  .actions button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 16px; }
+  .actions button.primary { background: #2f7d3a; border-color: #2f7d3a; color: #fff; font-weight: 600; }
+  .say { color: var(--muted); font-size: 14px; }
+  .bad { color: #b3412f; }
+  .done-note { background: #e6f4e6; color: #1e5e24; border: 1px solid #b9dcb9; border-radius: 8px; padding: 8px 12px; }
+  section.change { margin: 18px 0 28px; }
+  h3 { font-size: 15px; font-family: ui-monospace, Menlo, monospace; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+  .tag { font-family: system-ui, sans-serif; font-size: 12px; font-weight: 500; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--muted); }
+  .tag.warn { border-color: #d9a400; color: #8a6500; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .tabs button { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 2px 10px; font-size: 13px; }
+  .tabs button.on { background: var(--card); border-color: var(--accent); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } nav { width: 200px; } }
+  .cap { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 4px; }
+  .render { border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #111; height: 70vh; overflow: auto; }
+  .render .tex-page { height: 100%; }
+  .marked .render { height: 75vh; }
+  .key { margin-left: 12px; display: inline-flex; gap: 8px; }
+  .kadd { color: blue; text-decoration: underline; }
+  .kdel { color: red; text-decoration: line-through; }
+  .diff { font: 12.5px/1.5 ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 8px; overflow: auto; background: var(--card); }
+  .dl { white-space: pre-wrap; padding: 0 10px 0 0; }
+  .dl .s { display: inline-block; width: 22px; text-align: center; color: var(--muted); user-select: none; }
+  .dl.add { background: var(--add); color: var(--addi); }
+  .dl.del { background: var(--del); color: var(--deli); }
+  .dl.gap { color: var(--muted); font-style: italic; padding-left: 22px; background: var(--bg); }
+</style>
+</head>
+<body>
+<div class="banner">A prototype of proposals: an agent proposes, you accept or reject. Nothing here is final.</div>
+<div class="app">
+  <nav>
+    <h1><a href="/board/">Sagebrush</a> · Proposals</h1>
+    <div id="list" aria-label="Proposals"></div>
+    <details><summary>For your agent</summary>
+      <p>Paste this to your agent (paired with this browser), then ask it to propose a change:</p>
+      <pre id="agenthelp"></pre>
+      <button id="copyhelp">Copy</button>
+    </details>
+  </nav>
+  <main id="one"></main>
+</div>
+<script type="module" src="./proposals.js"></script>
+</body>
+</html>
