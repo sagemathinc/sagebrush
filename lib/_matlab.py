@@ -6907,9 +6907,17 @@ def inv_(x):
     return _unmat(Mi)
 
 
+def _svd_finite(M):
+    """M for an SVD (svd, rank, pinv, null, orth): one with a NaN or Inf is refused, with MATLAB's message,
+    rather than given a plausible-looking answer"""
+    if not np.all(np.isfinite(M)):
+        raise _err("Input to SVD must not contain NaN or Inf.", "MATLAB:svd:matrixWithNaNInf")
+    return M
+
+
 @_bs("pinv")
 def pinv_(x):
-    return _unmat(np.linalg.pinv(_mat(x)))
+    return _unmat(np.linalg.pinv(_svd_finite(_mat(x))))
 
 
 @_bs("det")
@@ -6944,7 +6952,7 @@ def det_(x):
 
 @_bs("rank")
 def rank_(x, tol=None):
-    M = _mat(x)
+    M = _svd_finite(_mat(x))
     if M.size == 0:
         return 0.0
     s = np.linalg.svd(M, compute_uv=False)
@@ -7141,7 +7149,7 @@ def _left_vectors(A, B, w, balance=True):
 
 @_bi("svd")
 def svd_(nargout, x, *args):
-    M = _mat(x)
+    M = _svd_finite(_mat(x))
     if nargout <= 1:
         return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)))
     econ = bool(args)
@@ -7271,7 +7279,7 @@ def chol_(nargout, x, *args):
 
 @_bs("null")
 def null_(x):
-    M = _mat(x)
+    M = _svd_finite(_mat(x))
     U, s, Vh = np.linalg.svd(M)
     tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
     r = int(np.sum(s > tol))

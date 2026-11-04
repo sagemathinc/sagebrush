@@ -375,3 +375,17 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
     "127 0",
   ]);
 });
+
+test("svd, rank, pinv, null and orth refuse NaN and Inf with MATLAB's message, not a plausible-looking answer (astra3 batch 1: MCF-01)", () => {
+  // (before: pinv(NaN) and rank(NaN) were 0, null(NaN) was 1, orth(NaN) empty; svd of a 2x2 with a NaN failed to converge)
+  const out = lines(run([
+    "c = {@() svd(NaN), @() svd([1 NaN; 2 3]), @() rank(NaN), @() rank([1 2; 3 Inf]), @() pinv(NaN), @() pinv([1 -Inf]), @() null(NaN), @() orth([NaN 1])};",
+    "for k = 1:numel(c), try, y = c{k}(); disp('no error'), catch e, fprintf('%s | %s\\n', e.identifier, e.message); end, end",
+    "try, [U, S, V] = svd([1 Inf]); disp('no error'), catch e, fprintf('%s | %s\\n', e.identifier, e.message); end",
+    "fprintf('%g %g %g %g\\n', rank(magic(4)), svd([3 0; 0 4]), pinv(2));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    ...Array(9).fill("MATLAB:svd:matrixWithNaNInf | Input to SVD must not contain NaN or Inf."),
+    "3 4 3 0.5",
+  ]);
+});
