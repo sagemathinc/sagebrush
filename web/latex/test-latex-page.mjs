@@ -1302,15 +1302,20 @@ try {
   }
 
   // ---- non-ASCII HTML (daybreak2 i1c01): the patch budget's 512 KiB is UTF-8 bytes, split.ts's measure: a 1.95 MB
-  // (UTF-8) paragraph of three-byte characters is patched with no step over 512 KiB, the byte stop seen ending steps
-  const cjk = "\\documentclass{article}\n\\begin{document}\n" + "中文字体 ".repeat(150000) + "\n\\end{document}\n";
+  // (UTF-8) paragraph of three-byte characters is patched with no step over 512 KiB, the byte stop seen ending steps.
+  // (the paragraph's source in lines of 100 words, a newline being a space to TeX: the same one paragraph and the same
+  //  preview (60 pieces, 1,951,554 UTF-8 bytes), without the page laying out a 1.95 MB one-line source in one main-thread
+  //  task. That task (9 s on a build box, 52 s at 4x CPU throttling) ran past the 180 s wait below on CI runners twice
+  //  (master 576f0bf6 job 126471282729, #617 job 126576160008: no reply, the 15 s watchdog firing at 209 s); in lines,
+  //  2.3 s and 7.8 s)
+  const cjk = "\\documentclass{article}\n\\begin{document}\n" + Array.from({ length: 1500 }, () => "中文字体 ".repeat(100).trimEnd()).join("\n") + "\n\\end{document}\n";
   const fc = await mk("/t/cjk.tex", enc(cjk));
   await open(fc);
   // (the case is the patch, so its bound is the patch's: the wait for it starts once the worker's reply is in, the
-  // editor's tex-parse-done mark. Before that the page lays out the 1.95 MB one-line source, one native main-thread
-  // task of about 9 s on a build box (measured, Nov 3: "(program)" in a CPU profile, one long task), which grows with
-  // the host's load: 21-24 s at 2x CPU throttling, 52-57 s at 4x, against the patch itself in 0.2-0.5 s with no step
-  // over 9 ms. Whatever the case sees is returned, and the check fails with it, never a throw on a missing field)
+  // editor's tex-parse-done mark. Before that the page lays out the 1.95 MB source, in lines above so no longer one
+  // long native task (one line was 9 s on a build box, 52-57 s at 4x CPU throttling), against the patch itself in
+  // 0.2-0.5 s with no step over 9 ms. Whatever the case sees is returned, and the check fails with it, never a throw on
+  // a missing field)
   const parsedIn = await (async () => { const t = Date.now(); return (await until(`performance.getEntriesByType("mark").some((m) => m.name === "tex-parse-done")`, 180000)) ? Date.now() - t : null; })();
   const cjkOk = parsedIn !== null && await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
   const cj = await ev(`(() => { const p = document.querySelector(".tex-preview"), d = p?.dataset ?? {}; const pcs = p ? [...p.querySelectorAll(".pc")] : []; const enc = new TextEncoder(); let stops = null; try { stops = JSON.parse(d.stops); } catch {}
