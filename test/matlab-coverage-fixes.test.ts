@@ -375,3 +375,36 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
     "127 0",
   ]);
 });
+
+test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart: the pages' forms, Octave 11.1's values (astra3 batch 1: missing functions)", () => {
+  const out = lines(run([
+    "[R, p] = rref([1 2 1; 2 4 0; 3 6 1]); fprintf('%s %s\\n', mat2str(R), mat2str(p));",
+    "fprintf('%s %s\\n', mat2str(rref([1 2 3; 4 5 6; 7 8 10])), mat2str(rref([1 1e-20; 1e-20 1e-40], 1e-30)));",
+    "[R, p] = rref(zeros(2)); fprintf('%s %s %s\\n', mat2str(R), mat2str(size(p)), class(rref(single([2 4]))));",
+    "fprintf('%s %s %s %d\\n', mat2str(nextpow2([0 1 2 3 4 5 0.3 -5 Inf NaN 1024 1025])), class(nextpow2(int8(5))), class(nextpow2(single(5))), nextpow2(uint8(200)));",
+    "fprintf('%s %s %s\\n', mat2str(cumtrapz([1 2 3 4])), mat2str(cumtrapz([1; 2; 3])), mat2str(cumtrapz([0 1 3], [1 2 3])));",
+    "fprintf('%s %s %s %s\\n', mat2str(cumtrapz(0.5, [1 2 3])), mat2str(cumtrapz([1 2; 3 4])), mat2str(cumtrapz([1 2; 3 4], 2)), mat2str(size(cumtrapz([]))));",
+    "fprintf('%s %s %s\\n', mat2str(unwrap([0 3.5 7]), 6), mat2str(unwrap([0 pi 0]), 6), mat2str(unwrap([0 -pi 0]), 6));",
+    "fprintf('%s %s %s\\n', mat2str(unwrap([0 4 8], 2), 6), mat2str(unwrap([0 4; 0 4], [], 2), 6), mat2str(unwrap([0 NaN 7]), 6));",
+    "fprintf('%g %g %s %s\\n', deg2rad(180), rad2deg(pi/2), class(deg2rad(single(90))), class(rad2deg(single(1))));",
+    "[t, r] = cart2pol([1 0 -1], [0 1 0]); [t3, r3, z3] = cart2pol(1, 1, 5); fprintf('%s %s %.4f %.4f %d\\n', mat2str(t, 5), mat2str(r), t3, r3, z3);",
+    "[x, y] = pol2cart(pi/2, 2); [x2, y2, z2] = pol2cart([0 pi], [1 2], [3 4]); fprintf('%.4g %g %s %s\\n', x, y, mat2str(x2), mat2str(z2));",
+    "try, deg2rad(int8(90)), catch e, disp(e.message), end",
+    "try, cart2pol([1 1; 0 2]), catch e, disp(e.message), end",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "[1 2 0;0 0 1;0 0 0] [1 3]",
+    "[1 0 0;0 1 0;0 0 1] [1 1e-20;0 0]",
+    "[0 0;0 0] [1 0] single",
+    "[0 0 1 2 2 3 -1 3 Inf NaN 10 11] int8 single 8",
+    "[0 1.5 4 7.5] [0;1.5;4] [0 1.5 6.5]",
+    "[0 0.75 2] [0 0;2 3] [0 1.5;0 3.5] [0 0]",
+    "[0 -2.78319 -5.56637] [0 3.14159 0] [0 -3.14159 0]",
+    "[0 -2.28319 -4.56637] [0 -2.28319;0 -2.28319] [0 NaN 0.716815]",
+    "3.14159 90 single single",
+    "[0 1.5708 3.1416] [1 1 1] 0.7854 1.4142 5",
+    "1.225e-16 2 [1 -2] [3 4]",
+    "deg2rad: the input must be double or single, not int8.",
+    "Not enough input arguments.",
+  ]);
+});
