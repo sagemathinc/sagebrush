@@ -62,6 +62,44 @@ test("--matlab FILE.m and a .m file still run as MATLAB; a syntax error in a fil
   }
 });
 
+test("a function file run as the program calls its function with no arguments, as matlab -batch NAME does", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-ffile-"));
+  try {
+    const put = (name: string, text: string) => (writeFileSync(join(dir, name), text), join(dir, name));
+    const ok = (args: string[], out: string, input = "") => {
+      const r = run(args, input);
+      assert.deepEqual([r.status, r.stdout, r.stderr], [0, out, ""], args.join(" "));
+    };
+    // (before: the file only defined ff, printed nothing and exited 0)
+    const ff = put("ff.m", "function ff()\ndisp('ran')\nend\n");
+    ok(["--matlab", ff], "ran\n");
+    ok([ff], "ran\n");
+    // (a comment first, and a local function the main one calls)
+    const m2 = put("m2.m", "% the file's help\nfunction m2()\ndisp(helper(3))\nend\nfunction y = helper(x)\ny = x * 2;\nend\n");
+    ok([m2], "     6\n");
+    // (an output, unassigned: shown as ans, as the bare call `g2` shows it)
+    const g2 = put("g2.m", "function y = g2()\ny = 5;\nend\n");
+    ok([g2], "\nans =\n\n     5\n\n");
+    // (an error inside: exit status 1, and the report has the function's frame only, none for the call)
+    const e = run([put("bad1.m", "function bad1()\ndisp(1)\nerror('boom')\nend\n")], "");
+    assert.deepEqual([e.status, e.stdout], [1, "     1\n"]);
+    assert.match(e.stderr, /boom/);
+    assert.match(e.stderr, /Error in bad1 \(line 3\)/);
+    assert.equal(e.stderr.match(/Error in /g)?.length, 1, e.stderr);
+    // (a script, and a script with local functions at its end, run as before)
+    const sc = put("sc.m", "disp(twice(4))\nfunction y = twice(x)\n  y = 2 * x;\nend\n");
+    ok([sc], "     8\n");
+    // (no function, nothing to call: an empty file and a comment-only one run as empty programs)
+    ok([put("empty.m", "")], "");
+    ok([put("comments.m", "% only a comment\n%{\nand a block one\n%}\n")], "");
+    // (--emit shows the call; MATLAB on stdin is a program, not a file, so only functions there still run nothing)
+    assert.match(run(["--emit", ff], "").stdout, /_m\.call\(ff, \[\], 0\)/);
+    ok(["--matlab"], "", "function f()\ndisp(1)\nend\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a program on stdin past 8 MiB is refused before it is kept, in each mode, under a 96 MiB heap", () => {
   // (9 MiB of statements: the reader stops at the chunk that crosses 8 MiB, so the rest of
   // the input may be left unread, and writing it can fail with EPIPE)

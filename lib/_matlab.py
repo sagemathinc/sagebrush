@@ -206,7 +206,8 @@ def report(e, line):
         # (error() or argument validation in a function: MATLAB names the function first)
         out = ["Error using %s" % st[0][0], _message(e)]
     lines = _src[1]
-    for fname, ln in list(getattr(e, "_mstack", None) or []) + [(_scriptname(), line)]:
+    # (no frame for line 0: the call that runs a function file, src/matlab.ts, is no line of the file)
+    for fname, ln in list(getattr(e, "_mstack", None) or []) + ([(_scriptname(), line)] if line else []):
         out.append("")
         out.append("Error in %s (line %d)" % (fname, ln))
         if 0 < ln <= len(lines):
