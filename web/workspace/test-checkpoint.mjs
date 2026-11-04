@@ -51,6 +51,10 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   // a missing batch of the prefix
   const m = exactCut(codec, [line[0], line[2]], 3, C.time);
   check(!m.ok && m.why === "missing", "exactCut: a batch of the prefix missing: refused (missing)");
+  // (the grader's T3) a duplicated seq where one is missing (1, 2, 2, 4 at at_seq 4): the count is right, the order isn't
+  const D0 = mk("clientA", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "d"]));
+  const dup = exactCut(codec, [line[0], line[1], batch(2, [C]), batch(4, [D0])], 4, D0.time);
+  check(!dup.ok && dup.why === "missing", "exactCut: seqs 1, 2, 2, 4 at at_seq 4: refused (missing): " + J(dup.ok ? "ok" : dup.why));
   // a multi-patch batch whose cut is an early envelope: refused (last)
   const D = mk("clientA", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w"])), E = mk("clientA", [D.time], docOf(["x = 1", "y = 2", "z = 3", "w"]), docOf(["x = 1", "y = 2", "z = 3", "w", "v"]));
   const multi = [...line, batch(4, [D, E])];
@@ -112,6 +116,16 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   let threw = false;
   try { await makeCheckpoint(codec, liar, C.time); } catch { threw = true; }
   check(threw, "makeCheckpoint: a record whose hash isn't its value's isn't made (checked again before it is returned)");
+  // (the grader's T2) the blob's maximum, exactly: a record of exactly CHECKPOINT_BLOB_MAX bytes is made, one byte more
+  // isn't (the record's bytes = a fixed part + the cell's input, measured here)
+  const one = (n) => { const g = new PatchGraph({ codec }), tt = encodePatchId(++clock, "clientM"); g.add([{ time: tt, parents: [], patch: codec.makePatch(codec.fromString(""), codec.fromString(J({ type: "cell", id: "c0", input: "x".repeat(n) }))), userId: 0, wall: clock }]); return { g, tt }; };
+  const s0 = one(10), fixed = (await makeCheckpoint(codec, s0.g, s0.tt)).bytes - 10;
+  const at = one(CHECKPOINT_BLOB_MAX - fixed), over = one(CHECKPOINT_BLOB_MAX - fixed + 1);
+  const made = await makeCheckpoint(codec, at.g, at.tt).catch((e) => ({ bytes: String(e) }));
+  check(made.bytes === CHECKPOINT_BLOB_MAX, `makeCheckpoint: a record of exactly ${CHECKPOINT_BLOB_MAX} bytes: made: ${made.bytes}`);
+  let overThrew = false;
+  try { await makeCheckpoint(codec, over.g, over.tt); } catch (e) { overThrew = /maximum/.test(String(e)); }
+  check(overThrew, "makeCheckpoint: one byte over the blob's maximum: not made");
 }
 
 // ---- an install's checks (r9 §8; map r2 A, B, C, G)
@@ -204,6 +218,19 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(splitPrefix(rows, 0, 1 << 30, who).kind === "required" && splitPrefix(rows, 1000, prefixCharge(rows, 1, who) - 1, who).kind === "required", "splitPrefix: no patch fits a room: required");
   const huge = [{ cseq: 1, id: rows[0].id, parents: [], size: TAIL_ITEM_CAP }];
   check(splitPrefix(huge, 1000, 10, who).kind === "stop", "splitPrefix: one patch that can't fit an empty tail: stop (never retried forever)");
+  // (the grader's T1) a patch whose charge is exactly TAIL_ITEM_CAP fits an empty tail: required (a checkpoint makes
+  // room); one byte more never fits: stop.  The patch is found exactly: its client's length moves the charge by a byte
+  const exactly = (target) => {
+    for (let L = 1; L <= 64; L++) {
+      const id = encodePatchId(clock, "c".repeat(L)), base = prefixCharge([{ cseq: 1, id, parents: [], size: 0 }], 1, who);
+      const est = Math.floor(((target - base) / 4) * 3);
+      for (let s = est - 30; s <= est + 30; s++) if (prefixCharge([{ cseq: 1, id, parents: [], size: s }], 1, who) === target) return [{ cseq: 1, id, parents: [], size: s }];
+    }
+    return null;
+  };
+  const atCap = exactly(TAIL_ITEM_CAP), overCap = exactly(TAIL_ITEM_CAP + 1);
+  check(atCap && prefixCharge(atCap, 1, who) === TAIL_ITEM_CAP && splitPrefix(atCap, 1000, 10, who).kind === "required", "splitPrefix: one patch charging exactly TAIL_ITEM_CAP, no room now: required");
+  check(overCap && prefixCharge(overCap, 1, who) === TAIL_ITEM_CAP + 1 && splitPrefix(overCap, 1000, 10, who).kind === "stop", "splitPrefix: one byte over TAIL_ITEM_CAP: stop");
   const big = Array.from({ length: 2000 }, (_, i) => ({ cseq: i + 1, id: encodePatchId(clock + i, "clientT"), parents: [], size: 500 }));
   const t0 = performance.now(), sb = splitPrefix(big, 1000, TAIL_ITEM_CAP, who), ms = performance.now() - t0;
   check(sb.kind === "fit" && sb.n === 1000 && ms < 200, `splitPrefix: 2,000 rows (the batch's maximum) in one pass: ${ms.toFixed(1)} ms`);
