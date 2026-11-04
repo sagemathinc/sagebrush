@@ -9352,6 +9352,21 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"set_printoptions\", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -9361,6 +9376,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: strRefuse :: return raise(T.NotImplementedError, \"this operation on string arrays is not supported by sagebrush's numpy yet (string arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "NumPy shim",
+  "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",

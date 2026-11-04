@@ -131,6 +131,7 @@ export function toDtype(x: any, dflt: DType | null = null): DType {
     // (NumPy's longdouble is x87 extended precision, 80 bits: not float64)
     if (n === "longdouble" || n === "clongdouble") return raise(T.NotImplementedError, `dtype '${x}': ${n} (extended precision) is not supported yet`) as never;
     if (n) return D[n];
+    if (strSpec(x) !== null || /^>U *\d*$/.test(x)) strRefuse();
     raise(T.TypeError, `data type '${x}' not understood`);
   }
   const t = typeDtypes.get(x);
@@ -140,8 +141,10 @@ export function toDtype(x: any, dflt: DType | null = null): DType {
   if (x === T.int) return D.int64;
   if (x === T.bool) return D.bool;
   if (x === T.complex) return D.complex128;
+  if (strSpec(x) !== null) strRefuse();
   const dt = Obj.getattr(x, "dtype", null);
   if (dt instanceof DType) return dt;
+  if (dt instanceof StrDType) strRefuse();
   return raise(T.TypeError, `Cannot interpret '${F.repr(x)}' as a data type`);
 }
 
@@ -675,14 +678,14 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     if (hasArrayProtocol(x)) throw PROTOCOL;
     inhomogeneous(Math.min(depth, shape.leaf), shape);
   }
-  if (shapeOnly && typeof x !== "string") {
+  if (shapeOnly && !strLike(x)) {
     if (hasArrayProtocol(x)) throw PROTOCOL;
     return;
   }
   const w = pyScalar(x);
   if (w === null) {
     if (hasArrayProtocol(x)) throw PROTOCOL;
-    if (typeof x === "string") raise(T.NotImplementedError, "string arrays are not supported by sagebrush's numpy yet");
+    if (strLike(x)) throw STRS;
     const f = Ty.floatCallSafe(x);
     if (f === undefined) raise(T.TypeError, `float() argument must be a string or a real number, not '${typeName(x)}'`);
     kinds.dt = kinds.dt ? promote(kinds.dt, D.float64) : D.float64;
@@ -856,6 +859,9 @@ export function asarray(x: any, dtype: any = null): NDArray {
 // dtype positionally, and np.array's copy= keyword at the top only.  A list
 // or tuple subclass with __array__ is its array, not a sequence, as NumPy's.
 const PROTOCOL = { mark: "array protocol" };
+// (discover meets a string, or the protocol gives a string array: fromPy
+// makes a string array if its caller takes one, else refuses)
+const STRS = { mark: "strings" };
 const NO_ATTR = { mark: "no __array__" };
 function arrayMethod(x: any): any {
   if (x === null || typeof x !== "object" || x instanceof NDArray || x instanceof DType || pyScalar(x) !== null) return undefined;
@@ -908,6 +914,7 @@ function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
       legacy = true;
     }
   }
+  if (r instanceof StrArray) throw STRS;
   if (!(r instanceof NDArray)) raise(T.ValueError, "object __array__ method not producing an array");
   // (a method that can't promise a copy: np.array's copy=True copies its result)
   if (legacy && O.truth(copyKw)) r = copy(r);
@@ -918,17 +925,28 @@ const LEGACY_COPY_WARNING =
   "__array__ implementation doesn't accept a copy keyword, so passing copy=False failed. __array__ must implement 'dtype' and 'copy' keyword arguments. To learn more, see the migration guide https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword";
 const NO_COPY_ERROR =
   "Unable to avoid copy while creating an array as requested.\nIf using `np.array(obj, copy=False)` replace it with `np.asarray(obj)` to allow a copy when needed (no behavior change in NumPy 1.x).\nFor more details, see https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword.";
-export function fromPy(x: any, dtype: any = null, copyKw: any = undefined): NDArray {
+// (strOK: the caller takes a string array, which is returned for data with
+// strings in it or a string dtype; any other caller gets none: refused)
+export function fromPy(x: any, dtype: any = null, copyKw: any = undefined, strOK = false): NDArray {
   const shape: number[] & { leaf?: number } = [];
   const kinds = { dt: null as DType | null };
   const given = dtype !== null && dtype !== undefined;
+  if (strOK && given && strSpec(dtype) !== null) return strFromPy(x, dtype) as any;
+  const strs = (): NDArray => (strOK ? (strFromPy(x, dtype) as any) : strRefuse());
   try {
     discover(x, 0, shape, kinds, given);
   } catch (e) {
+    if (e === STRS) return strs();
     if (e !== PROTOCOL) throw e;
-    const y = viaArrayProtocol(x, given ? toDtype(dtype) : null, copyKw);
+    let y: any;
+    try {
+      y = viaArrayProtocol(x, given ? toDtype(dtype) : null, copyKw);
+    } catch (e2) {
+      if (e2 === STRS) return strs();
+      throw e2;
+    }
     if (y instanceof NDArray) return asarray(y, dtype);
-    return fromPy(y, dtype);
+    return fromPy(y, dtype, undefined, strOK);
   }
   const dt = given ? toDtype(dtype) : (kinds.dt ?? D.float64);
   const out = empty(shape, dt);
@@ -2524,7 +2542,7 @@ export const printopts = Obj.table({
   floatmode: "maxprec", nanstr: "nan", infstr: "inf",
   // formatter's functions by kind (bool, int, float, complex), resolved from
   // the formatter dict (lib/numpy set_printoptions); override_repr
-  fmt: { b: null, i: null, f: null, c: null } as Record<string, any>,
+  fmt: { b: null, i: null, f: null, c: null, U: null } as Record<string, any>,
   overrideRepr: null as any,
 });
 
@@ -2914,6 +2932,11 @@ function intFormatter(strs: string[], signMode: string): (s: string) => string {
 // The formatter for an array's elements, by their positions in a.data: its
 // widths come from the elements at `positions`.
 function elementFormatter(a: NDArray, positions: number[]): (p: number) => string {
+  if ((a as unknown) instanceof StrArray) {
+    // (each element's repr, unpadded, as NumPy's; a formatter is called with the np.str_)
+    const f = printopts.fmt.U;
+    return f ? (p) => F.str(Obj.callObj(f, [strScalarOf(a.data[p])])) : (p) => F.repr(a.data[p]);
+  }
   const dt = a.dt;
   // a formatter function for the kind: called with each element (as a NumPy scalar)
   const user = printopts.fmt[dt.cplx ? "c" : dt.kind === "b" ? "b" : dt.isInt ? "i" : "f"];
@@ -3051,6 +3074,8 @@ function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): st
   return rec(0, nextLinePrefix, lineWidth);
 }
 
+// (a dtype as repr shows it: a string one quoted, dtype='<U3')
+const dtypeText = (dt: any): string => (dt instanceof StrDType ? `'${dt.str}'` : dt.name);
 export function arrayRepr(a: NDArray, override = true): string {
   // np.set_printoptions(override_repr=f): repr(array) is f(array)
   if (override && printopts.overrideRepr) {
@@ -3061,13 +3086,13 @@ export function arrayRepr(a: NDArray, override = true): string {
   const skipDtype = a.dt === D.float64 || a.dt === D.int64 || a.dt === D.bool || a.dt === D.complex128;
   if (a.size === 0) {
     const sh = a.ndim === 1 ? "" : `shape=${shapeStr(a.shape).replace(/,/g, ", ").replace(", )", ",)")}, `;
-    return `array([], ${sh}dtype=${a.dt.name})`;
+    return `array([], ${sh}dtype=${dtypeText(a.dt)})`;
   }
   const arrStr = "array(" + arrayText(a, ", ", "array(", ")") + ")";
   // NumPy 2.2: a summarized array also shows its shape
   const extras: string[] = [];
   if (a.size > printopts.threshold) extras.push(`shape=${shapeStr(a.shape).replace(/,(?=\d)/g, ", ")}`);
-  if (!skipDtype) extras.push(`dtype=${a.dt.name}`);
+  if (!skipDtype) extras.push(`dtype=${dtypeText(a.dt)}`);
   if (!extras.length) return arrStr;
   const extraStr = extras.join(", ") + ")";
   const lastLine = arrStr.length - (arrStr.lastIndexOf("\n") + 1);
@@ -3077,7 +3102,7 @@ export function arrayRepr(a: NDArray, override = true): string {
 export function arrayStr(a: NDArray): string {
   if (a.size === 0) return "[]";
   // a 0-d array prints as its element does
-  if (a.ndim === 0) return F.str(pyScalarOf(a.dt, a.data, a.offset));
+  if (a.ndim === 0) return (a as unknown) instanceof StrArray ? a.data[a.offset] : F.str(pyScalarOf(a.dt, a.data, a.offset));
   return arrayText(a, " ", "");
 }
 
@@ -3197,6 +3222,427 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   return ascontig(transpose(out, inv));
 }
 
+// ------------------------------------------------------------------ string arrays
+// NumPy's unicode string arrays, dtype '<Un' (n code points an element, 4n
+// bytes): made, cast to and from numbers, reshaped and indexed, compared,
+// sorted, made unique, chosen between (where) and printed as NumPy's. A
+// string array is a StrArray and its dtype a StrDType, deliberately neither
+// an NDArray nor a DType: every numeric path tests `instanceof NDArray` (or
+// takes a DType from toDtype), so none of them ever sees a string array. One
+// given to any other operation is refused there (fromPy, toDtype), and a
+// numeric array never pays for strings: the string operations are tested for
+// only where an operation begins, never in a loop.
+export class StrDType {
+  kind = "U";
+  char = "U";
+  cplx = false;
+  isInt = false;
+  rank = -1;
+  // (a numeric allocation of a string dtype is refused, never made)
+  ctor = function () {
+    strRefuse();
+  };
+  constructor(public n: number) {}
+  get itemsize() {
+    return 4 * this.n;
+  }
+  get name() {
+    return this.n ? `str${32 * this.n}` : "str";
+  }
+  get str() {
+    return `<U${this.n}`;
+  }
+}
+export class StrArray {
+  ro = false;
+  fixedRO = false;
+  bufBase: any = null;
+  unaligned = false;
+  constructor(
+    public dt: StrDType,
+    public data: string[],
+    public shape: number[],
+    public strides: number[],
+    public offset = 0,
+    public base: StrArray | null = null,
+  ) {}
+}
+export interface StrArray {
+  readonly size: number;
+  readonly ndim: number;
+  isC(): boolean;
+}
+for (const k of ["size", "ndim", "isC"]) Object.defineProperty(StrArray.prototype, k, Object.getOwnPropertyDescriptor(NDArray.prototype, k)!);
+
+export function strRefuse(): never {
+  return raise(T.NotImplementedError, "this operation on string arrays is not supported by sagebrush's numpy yet (string arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing)");
+}
+// (a string array where a generic helper reads only its shape, strides and
+// offset; and such a helper's view back as a string array)
+const N = (a: StrArray): NDArray => a as unknown as NDArray;
+function strView(v: NDArray): StrArray {
+  const s = new StrArray(v.dt as unknown as StrDType, v.data, v.shape, v.strides, v.offset, v.base as unknown as StrArray | null);
+  s.ro = v.ro;
+  return s;
+}
+const STR_DTS = new Map<number, StrDType>();
+function strDtype(n: number): StrDType {
+  let d = STR_DTS.get(n);
+  if (d === undefined) STR_DTS.set(n, (d = new StrDType(n)));
+  return d;
+}
+// NumPy's scalar type for an element (np.str_, registered by lib/numpy)
+let strScalar: any = null;
+const strScalarOf = (s: string): any => (strScalar === null ? s : Obj.callObj(strScalar, [s]));
+// a Python str, or an instance of a str subclass (np.str_)
+const strLike = (x: any): boolean => typeof x === "string" || (x instanceof Obj.PrimBox && typeof x.$v === "string");
+// The string dtype a dtype argument names, or null: 'U', 'U3', '<U3' (' ' or
+// '=' or '|' for '<'), 'str', str, np.str_, or a StrDType ('>U3', big-endian,
+// is not one: toDtype refuses it)
+function strSpec(x: any): StrDType | null {
+  if (x === null || x === undefined || x instanceof DType) return null;
+  if (x instanceof StrDType) return x;
+  if (x === T.str || (strScalar !== null && x === strScalar)) return strDtype(0);
+  if (typeof x !== "string") return null;
+  if (x === "str" || x === "str_" || x === "unicode") return strDtype(0);
+  const m = /^[<=|]?U *(\d*)$/.exec(x);
+  if (m === null) return null;
+  const n = m[1] ? Number(m[1]) : 0;
+  return n < 2 ** 29 ? strDtype(n) : null;
+}
+
+// Code points, as NumPy counts and orders them (a JS string's length and
+// order are UTF-16's: an astral character is two units, and sorts below
+// U+E000..U+FFFF there)
+function cpLen(s: string): number {
+  let n = s.length;
+  for (let i = 0; i + 1 < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c < 0xdc00) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d < 0xe000) {
+        n--;
+        i++;
+      }
+    }
+  }
+  return n;
+}
+function cpCut(s: string, n: number): string {
+  if (s.length <= n) return s;
+  let i = 0;
+  for (let k = 0; k < n && i < s.length; k++) {
+    const c = s.charCodeAt(i);
+    i += c >= 0xd800 && c < 0xdc00 && i + 1 < s.length && s.charCodeAt(i + 1) >= 0xdc00 && s.charCodeAt(i + 1) < 0xe000 ? 2 : 1;
+  }
+  return s.slice(0, i);
+}
+// (an element as stored: at most n code points, trailing NULs dropped, as
+// NumPy's fixed-width storage reads back)
+const strStore = (s: string, n: number): string => cpCut(s, n).replace(/\0+$/, "");
+// (the code points where the strings first differ: a valid pair is one
+// code point, a lone surrogate itself; from one unit earlier when the common
+// prefix ends in a high surrogate that a low one after it makes a pair in
+// either string)
+const isHigh = (u: number) => u >= 0xd800 && u < 0xdc00, isLow = (u: number) => u >= 0xdc00 && u < 0xe000;
+function cpCompare(a: string, b: string): number {
+  if (a === b) return 0;
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  if (i === n) return a.length < b.length ? -1 : 1;
+  if (i > 0 && isHigh(a.charCodeAt(i - 1)) && (isLow(a.charCodeAt(i)) || isLow(b.charCodeAt(i)))) i--;
+  return a.codePointAt(i)! < b.codePointAt(i)! ? -1 : 1;
+}
+
+// The length of the strings NumPy makes from a dtype's values (astype(str))
+function defaultLen(dt: DType): number {
+  if (dt.kind === "b") return 5;
+  if (dt.kind === "f") return 32;
+  if (dt.cplx) return 64;
+  return (dt.kind === "u" ? { 1: 3, 2: 5, 4: 10, 8: 20 } : { 1: 4, 2: 6, 4: 11, 8: 21 } as Record<number, number>)[dt.itemsize];
+}
+// A float32's repr and str, as NumPy's: its shortest digits, positional
+// when 1e-4 <= |x| < 1e6 (float32's six decimal digits) or zero, else
+// scientific with a two-digit exponent: 3.8923753e+13, 1e+06
+export function f32Text(v: number): string {
+  if (!Number.isFinite(v)) return F.floatRepr(v);
+  const a = Math.abs(v), sign = v < 0 || Object.is(v, -0) ? "-" : "";
+  const d = Number(shortestF32(a));
+  if (a === 0 || (a >= 1e-4 && a < 1e6)) return F.floatRepr(d * (sign ? -1 : 1));
+  return sign + d.toExponential().replace(/e([+-])(\d)$/, "e$10$2");
+}
+// An element of a numeric array as NumPy's str of it (a complex64's as
+// Python's complex repr is laid out, its parts float32's shortest digits)
+function numStr(dt: DType, data: any, p: number): string {
+  if (dt.kind === "b") return data[p] ? "True" : "False";
+  if (dt.isInt) return String(intOf(data[p]));
+  if (dt === D.float64) return F.floatRepr(data[p]);
+  if (dt === D.complex64) {
+    const part = (x: number) => f32Text(x).replace(/\.0$/, "");
+    const re = data[2 * p], im = part(data[2 * p + 1]);
+    if (re === 0 && !Object.is(re, -0)) return im + "j";
+    return `(${part(re)}${im.startsWith("-") ? "" : "+"}${im}j)`;
+  }
+  return F.str(pyScalarOf(dt, data, p));
+}
+
+export function strEmpty(shape: number[], dt: StrDType): StrArray {
+  admitArray(shape, dt as unknown as DType);
+  return new StrArray(dt, new Array(prod(shape)).fill(""), shape.slice(), cStrides(shape));
+}
+// a C-ordered copy
+export function strCopy(a: StrArray, dt: StrDType = a.dt): StrArray {
+  const out = strEmpty(a.shape, dt), od = out.data, d = a.data;
+  if (dt.n >= a.dt.n) loop1(a.shape, a.strides, a.offset, (p, k) => (od[k] = d[p]));
+  else loop1(a.shape, a.strides, a.offset, (p, k) => (od[k] = strStore(d[p], dt.n)));
+  return out;
+}
+function strReshape(a: StrArray, shape: number[]): StrArray {
+  return strView(reshape(N(a.isC() ? a : strCopy(a)), shape));
+}
+function numToStr(a: NDArray, sd: StrDType): StrArray {
+  const n = sd.n || defaultLen(a.dt);
+  const out = strEmpty(a.shape, strDtype(n)), od = out.data;
+  loop1(a.shape, a.strides, a.offset, (p, k) => (od[k] = strStore(numStr(a.dt, a.data, p), n)));
+  return out;
+}
+
+// Python data with strings in it (or a string dtype) -> a string array, as
+// NumPy's: the shape as for numbers; each element's string (a number's as
+// str gives it); the length the given one, else the longest element's,
+// where a number counts as its type's string length (np.array(['a', 1]) is
+// '<U21'), but a Python number's own length with dtype=str (np.array([1,
+// 2], dtype=str) is '<U1'). A numeric dtype: the strings are parsed (astype)
+function strFromPy(x: any, dtype: any): StrArray | NDArray {
+  const sd = dtype === null || dtype === undefined ? null : strSpec(dtype);
+  const sized = sd !== null && sd.n > 0, given = sd !== null;
+  const shape: number[] & { leaf?: number } = [];
+  const vals: string[] = [];
+  let len = 0;
+  const leafAt = (d: number) => {
+    if (shape.length > d) inhomogeneous(d, shape);
+    shape.leaf ??= d;
+    if (shape.leaf !== d) inhomogeneous(Math.min(d, shape.leaf), shape);
+  };
+  const walk = (v: any, d: number) => {
+    if (v instanceof StrArray || v instanceof NDArray) {
+      for (let i = 0; i < v.ndim; i++) setDim(shape, d + i, v.shape[i]);
+      leafAt(d + v.ndim);
+      if (v instanceof StrArray) {
+        len = Math.max(len, v.dt.n);
+        loop1(v.shape, v.strides, v.offset, (p) => vals.push(v.data[p]));
+      } else {
+        len = Math.max(len, defaultLen(v.dt));
+        loop1(v.shape, v.strides, v.offset, (p) => vals.push(numStr(v.dt, v.data, p)));
+      }
+      return;
+    }
+    if (isSeq(v)) {
+      const items = seqItems(v);
+      setDim(shape, d, items.length);
+      for (const it of items) walk(it, d + 1);
+      return;
+    }
+    leafAt(d);
+    if (strLike(v)) {
+      const s = Obj.unbox(v) as string;
+      vals.push(s);
+      len = Math.max(len, cpLen(s));
+      return;
+    }
+    const w = pyScalar(v);
+    if (w === null) strRefuse();
+    const s = F.str(v);
+    vals.push(s);
+    len = Math.max(len, w.dt ? defaultLen(w.dt) : given ? cpLen(s) : ({ b: 5, i: 21, f: 32, c: 64 } as Record<string, number>)[w.kind]);
+  };
+  walk(x, 0);
+  const n = sized ? sd.n : Math.max(1, len);
+  const out = new StrArray(strDtype(n), vals.map((s) => strStore(s, n)), shape.slice(), cStrides(shape));
+  admitArray(shape, out.dt as unknown as DType);
+  return given || dtype === null || dtype === undefined ? out : strAstype(out, dtype);
+}
+// a value given to a string array (setitem, fill, full, where): each element
+// as str gives it
+const strOperand = (v: any): StrArray => (v instanceof StrArray ? v : (strFromPy(v, strDtype(0)) as StrArray));
+
+// astype from a string array: to a string dtype (cut to its length), or a
+// number parsed from each element by Python's int, float or complex of the
+// np.str_, as NumPy's (its range checks and messages), a bool its truth
+function strAstype(a: StrArray, dtype: any): StrArray | NDArray {
+  const sd = strSpec(dtype);
+  if (sd !== null) return strCopy(a, sd.n ? sd : a.dt);
+  const dt = toDtype(dtype);
+  const out = empty(a.shape, dt), od = out.data, d = a.data;
+  loop1(a.shape, a.strides, a.offset, (p, k) => {
+    const s = d[p];
+    if (dt.kind === "b") od[k] = s.length > 0 ? 1 : 0;
+    else if (dt.isInt) {
+      const v = Obj.callObj(T.int, [strScalarOf(s)]);
+      const w = pyScalar(v)!;
+      checkWeak(dt, w);
+      od[k] = w.v;
+    } else if (dt.cplx) {
+      const c = Obj.callObj(T.complex, [strScalarOf(s)]) as PyComplex;
+      od[2 * k] = c.re;
+      od[2 * k + 1] = c.im;
+    } else od[k] = toNum(Obj.callObj(T.float, [strScalarOf(s)]));
+  });
+  return out;
+}
+
+function strGetitem(a: StrArray, key: any): any {
+  const r = resolveIndex(N(a), key);
+  if ("view" in r) {
+    // (an element is the np.str_; a[...] stays an array, 0-d too, as NumPy's)
+    const v = r.view;
+    const ell = key === Obj.Ellipsis || (Array.isArray(key) && (key as any).$t && key.includes(Obj.Ellipsis));
+    return v.ndim === 0 && !ell ? strScalarOf(v.data[v.offset]) : strView(v);
+  }
+  const out = strEmpty(r.shape, a.dt);
+  r.offsets.forEach((p, k) => (out.data[k] = a.data[p]));
+  return out;
+}
+function strSetitem(a: StrArray, key: any, value: any) {
+  writable(N(a));
+  const r = resolveIndex(N(a), key);
+  let src = strOperand(value);
+  // (overlapping: read from a copy)
+  if (src.data === a.data) src = strCopy(src);
+  const n = a.dt.n, d = a.data, sd = src.data;
+  if ("view" in r) {
+    const v = r.view;
+    loop2(v.shape, v.strides, v.offset, bstrides(N(src), v.shape), src.offset, (p, q) => (d[p] = strStore(sd[q], n)));
+  } else loop2(r.shape, cStrides(r.shape), 0, bstrides(N(src), r.shape), src.offset, (k, q) => (d[r.offsets[k]] = strStore(sd[q], n)));
+}
+function strTolist(a: StrArray): any {
+  if (a.ndim === 0) return a.data[a.offset];
+  const rec = (dd: number, off: number): any[] => {
+    const out = new Array(a.shape[dd]);
+    for (let i = 0; i < a.shape[dd]; i++) out[i] = dd === a.ndim - 1 ? a.data[off + i * a.strides[dd]] : rec(dd + 1, off + i * a.strides[dd]);
+    return out;
+  };
+  return rec(0, a.offset);
+}
+
+// Comparisons, elementwise and broadcast, by code point. With a value that
+// isn't a string (a number, None, a numeric array): the operator == is all
+// False and != all True, as NumPy's; an order, or any ufunc (np.equal),
+// raises, as NumPy's
+const STR_CMP: Record<string, (c: number) => boolean> = {
+  equal: (c) => c === 0, not_equal: (c) => c !== 0, less: (c) => c < 0, less_equal: (c) => c <= 0, greater: (c) => c > 0, greater_equal: (c) => c >= 0,
+};
+function strCompare(op: string, a: StrArray, o: any, ufunc = false): NDArray {
+  let b: StrArray | null = null, other: number[] = [];
+  if (o instanceof StrArray) b = o;
+  else if (strLike(o)) b = new StrArray(strDtype(Math.max(1, cpLen(Obj.unbox(o)))), [Obj.unbox(o)], [], []);
+  else if (isSeq(o)) {
+    const r = fromPy(o, null, undefined, true) as any;
+    if (r instanceof StrArray) b = r;
+    else other = r.shape;
+  } else if (o instanceof NDArray) other = o.shape;
+  if (b === null) {
+    if (ufunc) raise(T.TypeError, `ufunc '${op}' did not contain a loop for a string array and '${typeName(o)}'`);
+    if (op !== "equal" && op !== "not_equal") raise(T.TypeError, `'${{ less: "<", less_equal: "<=", greater: ">", greater_equal: ">=" }[op]}' not supported between a string array and '${typeName(o)}'`);
+    const out = empty(broadcastShapes(a.shape, other), D.bool);
+    if (op === "not_equal") out.data.fill(1);
+    return out;
+  }
+  const shape = broadcastShapes(a.shape, b.shape);
+  const out = empty(shape, D.bool), od = out.data, f = STR_CMP[op], ad = a.data, bd = b.data;
+  loop2(shape, bstrides(N(a), shape), a.offset, bstrides(N(b), shape), b.offset, (p, q, k) => (od[k] = f(cpCompare(ad[p], bd[q])) ? 1 : 0));
+  return out;
+}
+const STR_FLIP: Record<string, string> = { equal: "equal", not_equal: "not_equal", less: "greater", less_equal: "greater_equal", greater: "less", greater_equal: "less_equal" };
+// (a 0-d result is NumPy's scalar, np.True_ or np.False_)
+const strCompareOut = (op: string, a: StrArray, o: any, ufunc = false): any => {
+  const r = strCompare(op, a, o, ufunc);
+  return r.ndim === 0 ? pyScalarOf(D.bool, r.data, 0) : r;
+};
+
+// sort and argsort along an axis, by code point, stable
+function strSort(a: StrArray, axis: number, arg: boolean): NDArray | StrArray {
+  admitWork(a.size * (arg ? 24 : 16), arg ? "argsort" : "sort");
+  const t = moveAxisToEnd(N(a), axis);
+  const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
+  const out: any = arg ? empty(t.shape, D.int64) : strEmpty(t.shape, a.dt);
+  const vals = new Array(n), idx = new Array(n);
+  const cmp = (i: number, j: number) => cpCompare(vals[i], vals[j]) || i - j;
+  loop1(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, (base, k) => {
+    for (let i = 0; i < n; i++) {
+      vals[i] = t.data[base + i * st];
+      idx[i] = i;
+    }
+    idx.sort(cmp);
+    for (let i = 0; i < n; i++) out.data[k * n + i] = arg ? idx[i] : vals[idx[i]];
+  });
+  const order = a.shape.map((_, i) => i).filter((i) => i !== axis);
+  const inv = new Array(a.ndim);
+  [...order, axis].forEach((src, dst) => (inv[src] = dst));
+  return arg ? ascontig(transpose(out, inv)) : strCopy(strView(transpose(N(out), inv)));
+}
+function strUnique(a: StrArray): StrArray {
+  const s = (strSort(strReshape(a, [a.size]), 0, false) as StrArray).data;
+  const u: string[] = [];
+  for (const v of s) if (u.length === 0 || u[u.length - 1] !== v) u.push(v);
+  const out = strEmpty([u.length], a.dt);
+  for (let i = 0; i < u.length; i++) out.data[i] = u[i];
+  return out;
+}
+// (an argument a string operation takes: a string array, a string, or a
+// list whose first element is a string)
+function strArg(x: any): boolean {
+  if (x instanceof StrArray || strLike(x)) return true;
+  while (isSeq(x)) {
+    const items = seqItems(x);
+    if (items.length === 0) return false;
+    x = items[0];
+  }
+  return x instanceof StrArray || strLike(x);
+}
+function strWhere(c: NDArray, x: any, y: any): StrArray {
+  const X = fromPy(x, null, undefined, true) as any, Y = fromPy(y, null, undefined, true) as any;
+  if (!(X instanceof StrArray && Y instanceof StrArray)) raise(T.TypeError, "np.where: a string array and a numeric one have no common dtype");
+  const shape = broadcastShapes(c.shape, X.shape, Y.shape);
+  const out = strEmpty(shape, strDtype(Math.max(X.dt.n, Y.dt.n))), od = out.data;
+  loop3(shape, bstrides(c, shape), c.offset, bstrides(N(X), shape), X.offset, bstrides(N(Y), shape), Y.offset, (pc, px, py, k) => (od[k] = c.data[pc] !== 0 ? X.data[px] : Y.data[py]));
+  return out;
+}
+function strConcat(arrs: StrArray[], axis: number): StrArray {
+  const nd = arrs[0].ndim;
+  if (nd === 0) raise(T.ValueError, "zero-dimensional arrays cannot be concatenated");
+  const ax = normAxis(axis, nd);
+  for (const a of arrs.slice(1)) if (a.ndim !== nd) raise(T.ValueError, `all the input array dimensions except for the concatenation axis must match exactly, but along dimension 0, the array at index 0 has ${nd} dimension(s) and the array at index 1 has ${a.ndim} dimension(s)`);
+  const shape = arrs[0].shape.slice();
+  shape[ax] = arrs.reduce((s, a) => s + a.shape[ax], 0);
+  const out = strEmpty(shape, strDtype(Math.max(...arrs.map((a) => a.dt.n))));
+  let at = 0;
+  for (const a of arrs) {
+    const key = out.shape.map((_, d) => (d === ax ? new O.PySlice(at, at + a.shape[ax], null) : new O.PySlice(null, null, null)));
+    strSetitem(out, tuple(key), a);
+    at += a.shape[ax];
+  }
+  return out;
+}
+
+// (the ndarray members and module functions that take a string array too:
+// its string operation; the rest refuse it by themselves, through operand
+// or fromPy)
+const isS = (a: any): a is StrArray => a instanceof StrArray;
+const tr = (a: any, axes: number[] | null): any => (isS(a) ? strView(transpose(N(a), axes)) : transpose(a, axes));
+const cp = (a: any): any => (isS(a) ? strCopy(a) : copy(a));
+const rs = (a: any, shape: number[]): any => (isS(a) ? strReshape(a, shape) : reshape(a, shape));
+// (a string array printed as itself)
+const printed = (a: any): NDArray => (a instanceof StrArray ? N(a) : asarray(a));
+// a string array of a shape, every element v (as str gives it, cut to sd's length)
+function strFull(shape: number[], v: any, sd: StrDType | null): StrArray {
+  const src = sd !== null ? (strFromPy(v, sd) as StrArray) : strOperand(v);
+  const a = strEmpty(shape, sd !== null && sd.n ? sd : src.dt);
+  strSetitem(a, Obj.Ellipsis, src);
+  return a;
+}
+
 // ------------------------------------------------------------------ the Python module
 
 newBuiltinModule("_numpy", (m) => {
@@ -3204,16 +3650,20 @@ newBuiltinModule("_numpy", (m) => {
   const opt = (x: any) => (x === undefined ? null : x);
 
   // dtype
-  const DT = Ty.builtinTypeFor("dtype", DType, "numpy", (x: any) => toDtype(x));
+  const DT = Ty.builtinTypeFor("dtype", DType, "numpy", (x: any) => strSpec(x) ?? toDtype(x));
+  Ty.bindClass(StrDType, DT);
   const DM = (name: string, f: any) => Ty.method(DT, name, f);
   Ty.getset(DT, "name", (d: DType) => d.name);
   Ty.getset(DT, "kind", (d: DType) => d.kind);
   Ty.getset(DT, "char", (d: DType) => d.char);
   Ty.getset(DT, "itemsize", (d: DType) => d.itemsize);
-  Ty.getset(DT, "type", (d: DType) => scalarCtors[d.name] ?? null);
-  DM("__repr__", (d: DType) => `dtype('${d.name}')`);
-  DM("__str__", (d: DType) => d.name);
+  Ty.getset(DT, "type", (d: DType) => (d instanceof StrDType ? strScalar : scalarCtors[d.name] ?? null));
+  // (a string dtype's '<U3'; a numeric one's is not here yet)
+  Ty.getset(DT, "str", (d: DType) => (d instanceof StrDType ? d.str : raise(T.AttributeError, "'numpy.dtype' object has no attribute 'str'")));
+  DM("__repr__", (d: DType) => (d instanceof StrDType ? `dtype('${d.n ? d.str : "<U"}')` : `dtype('${d.name}')`));
+  DM("__str__", (d: DType) => (d instanceof StrDType ? d.str : d.name));
   DM("__eq__", (d: DType, o: any) => {
+    if (d instanceof StrDType) return strSpec(o)?.n === d.n;
     try {
       return toDtype(o) === d;
     } catch {
@@ -3221,6 +3671,7 @@ newBuiltinModule("_numpy", (m) => {
     }
   });
   DM("__ne__", (d: DType, o: any) => {
+    if (d instanceof StrDType) return strSpec(o)?.n !== d.n;
     try {
       return toDtype(o) !== d;
     } catch {
@@ -3234,8 +3685,9 @@ newBuiltinModule("_numpy", (m) => {
   // ndarray
   const A = Ty.builtinTypeFor("ndarray", NDArray, "numpy", (shape: any, dtype: any = null) => empty(shapeArg(shape), toDtype(dtype ?? null)));
   const M = (name: string, f: any, s: Obj.Signature | null = null) => Ty.method(A, name, f, s);
+  Ty.bindClass(StrArray, A);
   Ty.getset(A, "shape", (a: NDArray) => tuple(a.shape.slice()), (a: NDArray, v: any) => {
-    const r = reshape(a, shapeArg(v));
+    const r: any = isS(a) ? strReshape(a, shapeArg(v)) : reshape(a, shapeArg(v));
     if (r.data !== a.data) raise(T.AttributeError, "Incompatible shape for in-place modification. Use `.reshape()` to make a copy with the desired shape.");
     a.shape = r.shape;
     a.strides = r.strides;
@@ -3246,8 +3698,11 @@ newBuiltinModule("_numpy", (m) => {
   Ty.getset(A, "itemsize", (a: NDArray) => a.dt.itemsize);
   Ty.getset(A, "nbytes", (a: NDArray) => a.dt.itemsize * a.size);
   Ty.getset(A, "strides", (a: NDArray) => tuple(a.strides.map((s) => s * a.dt.itemsize)));
-  Ty.getset(A, "T", (a: NDArray) => transpose(a, null));
-  Ty.getset(A, "mT", (a: NDArray) => transpose(a, [...a.shape.keys()].map((i) => (i === a.ndim - 1 ? a.ndim - 2 : i === a.ndim - 2 ? a.ndim - 1 : i))));
+  Ty.getset(A, "T", (a: NDArray) => tr(a, null));
+  Ty.getset(A, "mT", (a: NDArray) => {
+    if (a.ndim < 2) raise(T.ValueError, "matrix transpose with ndim < 2 is undefined");
+    return tr(a, [...a.shape.keys()].map((i) => (i === a.ndim - 1 ? a.ndim - 2 : i === a.ndim - 2 ? a.ndim - 1 : i)));
+  });
   Ty.getset(A, "base", (a: NDArray) => a.base ?? a.bufBase);
   Ty.getset(A, "flags", (a: NDArray) => new FlagsObj(a));
   M("setflags", (a: NDArray, write: any = null, align: any = null, uic: any = null) => {
@@ -3307,11 +3762,17 @@ newBuiltinModule("_numpy", (m) => {
   FM("__repr__", flagsText);
   FM("__str__", flagsText);
   FM("__eq__", (f: FlagsObj, g: any) => (g instanceof FlagsObj ? f.num === g.num : Obj.NotImplemented));
-  Ty.getset(A, "real", (a: NDArray) => realPart(a), (a: NDArray, v: any) => assign(realPart(a), asarray(v)));
+  Ty.getset(A, "real", (a: NDArray) => realPart(a), (a: NDArray, v: any) => (isS(a) ? strRefuse() : assign(realPart(a), asarray(v))));
   Ty.getset(A, "imag", (a: NDArray) => imagPart(a), (a: NDArray, v: any) => assign(imagPart(a), asarray(v)));
   // (a noncontiguous array's .flat is a copy: read-only, so that a write
   // raises instead of being silently lost)
   Ty.getset(A, "flat", (a: NDArray) => {
+    if (isS(a)) {
+      if (a.isC()) return strReshape(a, [a.size]);
+      const c = strReshape(strCopy(a), [a.size]);
+      c.ro = true;
+      return c;
+    }
     if (a.isC()) return ravel(a);
     const c = ravel(copy(a));
     c.ro = true;
@@ -3319,21 +3780,23 @@ newBuiltinModule("_numpy", (m) => {
   });
   Ty.getset(A, "__array_priority__", () => 0);
   M("__len__", (a: NDArray) => (a.ndim === 0 ? raise(T.TypeError, "len() of unsized object") : a.shape[0]));
-  M("__getitem__", (a: NDArray, k: any) => getitem(a, k));
-  M("__setitem__", (a: NDArray, k: any, v: any) => (setitem(a, k, v), null));
+  M("__getitem__", (a: NDArray, k: any) => (isS(a) ? strGetitem(a, k) : getitem(a, k)));
+  M("__setitem__", (a: NDArray, k: any, v: any) => (isS(a) ? strSetitem(a, k, v) : setitem(a, k, v), null));
   M("__iter__", (a: NDArray) => {
     if (a.ndim === 0) raise(T.TypeError, "iteration over a 0-d array");
     const items = new Array(a.shape[0]);
-    for (let i = 0; i < a.shape[0]; i++) items[i] = getitem(a, i);
+    for (let i = 0; i < a.shape[0]; i++) items[i] = isS(a) ? strGetitem(a, i) : getitem(a, i);
     return new O.ListIter(items);
   });
   M("__repr__", (a: NDArray) => arrayRepr(a));
   M("__str__", (a: NDArray) => arrayStr(a));
   M("__bool__", (a: NDArray) => {
     if (a.size !== 1) raise(T.ValueError, "The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()");
+    if (isS(a)) return a.data[a.offset] !== "";
     return a.dt.cplx ? a.data[2 * a.offset] !== 0 || a.data[2 * a.offset + 1] !== 0 : a.data[a.offset] !== 0;
   });
   const scalarOf = (a: NDArray) => {
+    if (isS(a)) strRefuse();
     if (a.size !== 1) raise(T.TypeError, "only length-1 arrays can be converted to Python scalars");
     const c = ascontig(a);
     return pyPlain(a.dt, c.data, 0);
@@ -3393,7 +3856,7 @@ newBuiltinModule("_numpy", (m) => {
   M("__rmatmul__", (a: NDArray, o: any) => matmul(o, a));
   M("__divmod__", (a: NDArray, o: any) => tuple([binary("floor_divide", a, o), binary("remainder", a, o)]));
   const CMPS: [string, string][] = [["eq", "equal"], ["ne", "not_equal"], ["lt", "less"], ["le", "less_equal"], ["gt", "greater"], ["ge", "greater_equal"]];
-  for (const [py, op] of CMPS) M(`__${py}__`, (a: NDArray, o: any) => (isOperand(o) ? binary(op, a, o) : py === "eq" ? false : py === "ne" ? true : NotImplemented));
+  for (const [py, op] of CMPS) M(`__${py}__`, (a: NDArray, o: any) => (isS(a) ? strCompareOut(op, a, o) : isOperand(o) ? binary(op, a, o) : py === "eq" ? false : py === "ne" ? true : NotImplemented));
   M("__neg__", (a: NDArray) => (O.FRESH.v = unary("negative", a))).$fresh = true;
   // reuse a temporary operand t (see FRESH in ops.ts) for t op o or o op t
   const REUSE: Record<string, string> = { add: "add", sub: "subtract", mul: "multiply", truediv: "true_divide" };
@@ -3408,12 +3871,14 @@ newBuiltinModule("_numpy", (m) => {
   M("__pos__", (a: NDArray) => unary("positive", a));
   M("__abs__", (a: NDArray) => unary("absolute", a));
   M("__invert__", (a: NDArray) => unary("invert", a));
-  M("__copy__", (a: NDArray) => copy(a));
-  M("__deepcopy__", (a: NDArray) => copy(a));
+  M("__copy__", cp);
+  M("__deepcopy__", (a: any, memo: any) => cp(a));
   M("__array__", (a: NDArray) => a);
-  M("copy", (a: NDArray) => copy(a));
-  M("tolist", (a: NDArray) => tolist(a));
+  M("copy", cp);
+  M("tolist", (a: NDArray) => (isS(a) ? strTolist(a) : tolist(a)));
   M("item", (a: NDArray, ...idx: any[]) => {
+    // (a string array's element as a Python str)
+    if (isS(a)) return a.data[itemPos(a, idx)];
     // (a 1-D array's a.item(i), the common call, inline: no position to unravel)
     if (idx.length === 1 && typeof idx[0] === "number" && a.shape.length === 1) {
       const n = a.shape[0];
@@ -3422,20 +3887,23 @@ newBuiltinModule("_numpy", (m) => {
     }
     return pyPlain(a.dt, a.data, itemPos(a, idx));
   });
-  M("reshape", (a: NDArray, ...s: any[]) => reshape(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
-  M("ravel", (a: NDArray) => ravel(a));
-  M("flatten", (a: NDArray) => copy(ravel(a)));
-  M("transpose", (a: NDArray, ...axes: any[]) => transpose(a, axes.length === 0 || (axes.length === 1 && axes[0] === null) ? null : shapeArg(axes.length === 1 ? axes[0] : tuple(axes))));
+  M("reshape", (a: NDArray, ...s: any[]) => rs(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
+  M("ravel", (a: NDArray) => rs(a, [a.size]));
+  M("flatten", (a: NDArray) => cp(rs(a, [a.size])));
+  M("transpose", (a: NDArray, ...axes: any[]) => tr(a, axes.length === 0 || (axes.length === 1 && axes[0] === null) ? null : shapeArg(axes.length === 1 ? axes[0] : tuple(axes))));
   M("swapaxes", (a: NDArray, x: any, y: any) => {
     const order = a.shape.map((_, i) => i);
     const i = normAxis(Number(x), a.ndim), j = normAxis(Number(y), a.ndim);
     [order[i], order[j]] = [order[j], order[i]];
-    return transpose(a, order);
+    return tr(a, order);
   });
-  M("fill", (a: NDArray, v: any) => (assign(a, operand(v).arr), null));
+  M("fill", (a: NDArray, v: any) => (isS(a) ? strSetitem(a, Obj.Ellipsis, v) : assign(a, operand(v).arr), null));
   M("conj", (a: NDArray) => conj(a));
   M("conjugate", (a: NDArray) => conj(a));
-  M("view", (a: NDArray) => viewOf(new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a), a));
+  M("view", (a: NDArray) => {
+    const v = viewOf(new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a), a);
+    return isS(a) ? strView(v) : v;
+  });
   m.ndarray = A;
 
   const shapeArg = (s: any): number[] => {
@@ -3450,22 +3918,46 @@ newBuiltinModule("_numpy", (m) => {
     return c;
   };
 
-  // creation
+  // creation (strings in the data, a string array or a string dtype: a string array)
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
-    let r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag);
-    while (r.ndim < Number(ndmin)) r = reshape(r, [1, ...r.shape]);
+    let r: any;
+    if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
+    else if (obj instanceof NDArray && dtype !== null && strSpec(dtype) !== null) r = numToStr(obj, strSpec(dtype)!);
+    else r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag, true);
+    while (r.ndim < Number(ndmin)) r = rs(r, [1, ...r.shape]);
     return r;
   });
-  fn("asarray", (obj: any, dtype: any = null) => asarray(obj, dtype));
-  fn("empty", (shape: any, dtype: any = null) => empty(shapeArg(shape), toDtype(dtype)));
-  fn("zeros", (shape: any, dtype: any = null) => empty(shapeArg(shape), toDtype(dtype)));
+  fn("asarray", (obj: any, dtype: any = null) => {
+    // (with a dtype, a new array, as NumPy's for a string array)
+    if (obj instanceof StrArray) return dtype === null ? obj : strAstype(obj, dtype);
+    if (obj instanceof NDArray) return dtype !== null && strSpec(dtype) !== null ? numToStr(obj, strSpec(dtype)!) : asarray(obj, dtype);
+    return fromPy(obj, dtype, undefined, true);
+  });
+  fn("empty", (shape: any, dtype: any = null) => {
+    const sd = strSpec(dtype);
+    return sd !== null ? strFull(shapeArg(shape), "", sd.n ? sd : strDtype(1)) : empty(shapeArg(shape), toDtype(dtype));
+  });
+  fn("zeros", (shape: any, dtype: any = null) => {
+    const sd = strSpec(dtype);
+    return sd !== null ? strFull(shapeArg(shape), "", sd.n ? sd : strDtype(1)) : empty(shapeArg(shape), toDtype(dtype));
+  });
   fn("ones", (shape: any, dtype: any = null) => {
+    const sd = strSpec(dtype);
+    if (sd !== null) return strFull(shapeArg(shape), "1", sd.n ? sd : strDtype(1));
     const a = empty(shapeArg(shape), toDtype(dtype));
     if (a.dt.cplx) for (let k = 0; k < a.size; k++) a.data[2 * k] = 1;
     else a.data.fill(1);
     return a;
   });
   fn("full", (shape: any, value: any, dtype: any = null) => {
+    const sd = dtype !== null ? strSpec(dtype) : null;
+    if (sd !== null || (dtype === null && strArg(value))) return strFull(shapeArg(shape), value, sd);
+    if (strArg(value)) {
+      // (strings into a numeric dtype: parsed, as NumPy's np.full(2, '5', dtype=int))
+      const a = empty(shapeArg(shape), toDtype(dtype));
+      assign(a, strFromPy(value, dtype) as NDArray);
+      return a;
+    }
     // (a Python value into int64/uint64 converted once, by the admission)
     if (dtype !== null && isWide(toDtype(dtype)) && !(value instanceof NDArray)) {
       const a = empty(shapeArg(shape), toDtype(dtype));
@@ -3592,7 +4084,7 @@ newBuiltinModule("_numpy", (m) => {
     return out;
   });
   fn("eye", (n: any, mm: any = null, k: any = 0, dtype: any = null) => {
-    const N = Number(n), Mm = mm === null ? N : Number(mm), K = Number(k);
+    const N = intNum(n), Mm = mm === null ? N : intNum(mm), K = intNum(k);
     const a = empty([N, Mm], toDtype(dtype));
     for (let i = 0; i < N; i++) {
       const j = i + K;
@@ -3610,6 +4102,9 @@ newBuiltinModule("_numpy", (m) => {
   fn("binary", (op: string, x: any, y: any) => {
     // two real scalars (np.float64(1.5) + 2 ...): compute directly
     if (!(x instanceof NDArray) && !(y instanceof NDArray)) {
+      // (a string array: its comparisons, a flipped one for a string on the left; else refused)
+      if (x instanceof StrArray) return STR_CMP[op] ? strCompareOut(op, x, y, true) : strRefuse();
+      if (y instanceof StrArray) return STR_CMP[op] ? strCompareOut(STR_FLIP[op], y, x, true) : strRefuse();
       const wa = pyScalar(x), wb = pyScalar(y);
       const spec = BIN[op];
       if (wa && wb && wa.kind !== "c" && wb.kind !== "c" && spec && !spec.noBool) {
@@ -3662,10 +4157,10 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("cumsum", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), false, opt(dtype)));
   fn("cumprod", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), true, opt(dtype)));
-  fn("reshape", (a: any, shape: any) => reshape(asarray(a), shapeArg(shape)));
-  fn("transpose", (a: any, axes: any = null) => transpose(asarray(a), axes === null ? null : shapeArg(axes)));
-  fn("ravel", (a: any) => ravel(asarray(a)));
-  fn("copy", (a: any) => copy(asarray(a)));
+  fn("reshape", (a: any, shape: any) => (a instanceof StrArray ? strReshape(a, shapeArg(shape)) : reshape(asarray(a), shapeArg(shape))));
+  fn("transpose", (a: any, axes: any = null) => tr(a instanceof StrArray ? a : asarray(a), axes === null ? null : shapeArg(axes)));
+  fn("ravel", (a: any) => (a instanceof StrArray ? strReshape(a, [a.size]) : ravel(asarray(a))));
+  fn("copy", (a: any) => (a instanceof StrArray ? strCopy(a) : copy(asarray(a))));
   // raw bytes in and out (little-endian, or '>' dtypes byte-swapped)
   fn("frombuffer", (buffer: any, dtype: any = null, count: any = -1, offset: any = 0) => {
     const spec = typeof dtype === "string" ? dtype : null;
@@ -3716,15 +4211,39 @@ newBuiltinModule("_numpy", (m) => {
     }
     return new Obj.PyBytes(view);
   });
-  fn("astype", (a: any, dtype: any) => copy(asarray(a), toDtype(dtype)));
+  fn("astype", (a: any, dtype: any) => {
+    if (a instanceof StrArray) return strAstype(a, dtype);
+    const sd = strSpec(dtype);
+    return sd !== null ? numToStr(asarray(a), sd) : copy(asarray(a), toDtype(dtype));
+  });
   fn("nonzero", (a: any) => tuple(nonzero(asarray(a))));
   fn("matmul", (a: any, b: any) => matmul(a, b));
   fn("concatenate", (arrays: any, axis: any = 0) => {
-    const arrs = O.toArray(arrays).map((x: any) => asarray(x));
+    const xs = O.toArray(arrays);
+    if (xs.some(strArg)) {
+      // (strings with numbers: the numbers as str gives them, as long as their type's strings, as NumPy's)
+      // (strings with a numeric array: its elements as str gives them, as long
+      // as its type's strings, as NumPy's; with a Python number, no common
+      // dtype, NumPy's DTypePromotionError, a TypeError)
+      const sa = xs.map((x: any) => {
+        if (!(x instanceof NDArray) && pyScalar(x) !== null) raise(T.TypeError, "concatenate: a string array and a Python number have no common dtype");
+        const r: any = x instanceof StrArray || x instanceof NDArray ? x : fromPy(x, null, undefined, true);
+        return r instanceof StrArray ? r : numToStr(r, strDtype(0));
+      });
+      if (axis === null) return strConcat(sa.map((a: StrArray) => strReshape(a, [a.size])), 0);
+      return strConcat(sa, intNum(axis));
+    }
+    const arrs = xs.map((x: any) => asarray(x));
     if (axis === null) return concat(arrs.map(ravel), 0);
     return concat(arrs, Number(axis));
   });
   fn("broadcast_to", (a: any, shape: any) => {
+    if (a instanceof StrArray) {
+      const sh = shapeArg(shape);
+      const v = new StrArray(a.dt, a.data, sh, bstrides(N(a), sh), a.offset, a.base ?? a);
+      v.ro = true;
+      return v;
+    }
     const x = asarray(a), sh = shapeArg(shape);
     // read-only, as in NumPy: a write would change every repeated element
     const v = new NDArray(x.dt, x.data, sh, bstrides(x, sh), x.offset, x.base ?? x);
@@ -3740,6 +4259,7 @@ newBuiltinModule("_numpy", (m) => {
     return a;
   });
   fn("where3", (c: any, x: any, y: any) => {
+    if (strArg(x) || strArg(y)) return strWhere(asarray(c), x, y);
     const C = asarray(c), X = operand(x), Y = operand(y);
     const rt = resultType(X, Y);
     const shape = broadcastShapes(C.shape, X.arr.shape, Y.arr.shape);
@@ -3753,11 +4273,13 @@ newBuiltinModule("_numpy", (m) => {
     return out;
   });
   fn("sort", (a: any, axis: any = -1) => {
+    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, false);
     return sortAxis(x, normAxis(Number(axis), x.ndim), false);
   });
   fn("argsort", (a: any, axis: any = -1) => {
+    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, true);
     return sortAxis(x, normAxis(Number(axis), x.ndim), true);
@@ -3776,6 +4298,7 @@ newBuiltinModule("_numpy", (m) => {
   });
   // sorted distinct values of a real array (np.unique without extras)
   fn("unique1d", (x: any) => {
+    if (strArg(x)) return strUnique(strOperand(x));
     const a = asarray(x);
     const s = copy(ravel(a));
     if (!(s.data instanceof Float64Array && wasmSort(s.data))) s.data.sort();
@@ -3821,13 +4344,24 @@ newBuiltinModule("_numpy", (m) => {
     Obj.bumpVersion(A);
     return null;
   });
+  fn("str_refuse", () => strRefuse());
+  // (lib/numpy's: asarray(x, float64) of data a function computes with in
+  // floats, the one numeric path; a string array refused, as NumPy has no
+  // loop for it (lib/numpy's own asarray with a dtype would parse it))
+  fn("floats", (x: any) => (x instanceof StrArray ? strRefuse() : asarray(x, D.float64)));
+  // (lib/numpy's asarray(x) where only numbers may come: a string array or strings refused)
+  fn("numeric", (x: any) => (x instanceof NDArray ? x : x instanceof StrArray ? strRefuse() : fromPy(x)));
+  fn("register_str", (cls: any) => {
+    strScalar = cls;
+    return null;
+  });
   fn("register_scalar", (name: string, cls: any) => {
     scalarCtors[name] = cls;
     typeDtypes.set(cls, D[name]);
     return null;
   });
   // (lib/numpy's set_printoptions validates and passes every option)
-  fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, overrideRepr: any) => {
+  fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => {
     printopts.precision = Number(precision);
     printopts.threshold = Number(threshold);
     printopts.edgeitems = Number(edgeitems);
@@ -3837,18 +4371,18 @@ newBuiltinModule("_numpy", (m) => {
     printopts.floatmode = String(floatmode);
     printopts.nanstr = String(nanstr);
     printopts.infstr = String(infstr);
-    printopts.fmt = { b: fb, i: fi, f: ff, c: fc };
+    printopts.fmt = { b: fb, i: fi, f: ff, c: fc, U: fU };
     printopts.overrideRepr = overrideRepr;
     return null;
   });
   // np.array2string's text (prefix: what the first line follows, for the indent)
   fn("array_text", (a: any, sep: any, prefix: any, suffix: any) => {
-    const arr = asarray(a);
+    const arr = printed(a);
     if (arr.size === 0) return "[]";
     return arrayText(arr, String(sep), String(prefix), String(suffix));
   });
-  fn("array_repr", (a: any) => arrayRepr(asarray(a), false));
-  fn("array_str", (a: any) => arrayStr(asarray(a)));
+  fn("array_repr", (a: any) => arrayRepr(printed(a), false));
+  fn("array_str", (a: any) => arrayStr(printed(a)));
   const trimOf = (t: any): Trim => t as Trim;
   const optInt = (v: any) => (v === null || v === undefined ? null : Number(v));
   fn("format_float_positional", (x: any, precision: any, unique: any, fractional: any, trim: any, sign: any, padLeft: any, padRight: any, minDigits: any, f32: any) =>
@@ -3857,17 +4391,8 @@ newBuiltinModule("_numpy", (m) => {
     dragon4Scientific(toNum(x), { precision: optInt(precision), unique: O.truth(unique), trim: trimOf(trim), sign: O.truth(sign), padLeft: optInt(padLeft), expDigits: optInt(expDigits), minDigits: optInt(minDigits), f32: O.truth(f32) }));
   fn("printopt", (k: string) => (typeof k === "string" && Object.hasOwn(printopts, k) ? (printopts as any)[k] : null));
   fn("format_float", (x: any) => positional(toNum(x), printopts.precision, true));
-  // (a float32 scalar's repr and str, as NumPy's: its shortest digits,
-  // positional when 1e-4 <= |x| < 1e6 (float32's six decimal digits) or
-  // zero, else scientific with a two-digit exponent: 3.8923753e+13, 1e+06)
-  fn("format_f32", (x: any) => {
-    const v = toNum(x);
-    if (!Number.isFinite(v)) return F.floatRepr(v);
-    const a = Math.abs(v), sign = v < 0 || Object.is(v, -0) ? "-" : "";
-    const d = Number(shortestF32(a));
-    if (a === 0 || (a >= 1e-4 && a < 1e6)) return F.floatRepr(d * (sign ? -1 : 1));
-    return sign + d.toExponential().replace(/e([+-])(\d)$/, "e$10$2");
-  });
+  // (a float32 scalar's repr and str: f32Text)
+  fn("format_f32", (x: any) => f32Text(toNum(x)));
   fn("from_flat", (data: any, shape: any, dtype: any) => {
     // a Python list of numbers -> array (fast path for lib code)
     const sh = shapeArg(shape);
