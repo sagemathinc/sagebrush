@@ -24,9 +24,12 @@
 use crate::gemm::{scratch_len, span, Kernel, Mat};
 
 /// At or below this many columns, a panel is factored unblocked (dgetf2); above it, recursively (dgetrf2).
-pub const LU_SMALL: usize = 32;
+pub const LU_SMALL: usize = 64;
 /// At or below this many rows of the triangle, a triangular solve substitutes directly; above it, it recurses.
-pub const TRSM_SMALL: usize = 16;
+pub const TRSM_SMALL: usize = 64;
+/// At or below this many right-hand sides, a triangular solve substitutes directly whatever the triangle's size
+/// (a matrix-vector solve: the recursion's GEMM updates and copies cost more than they save).
+pub const TRSM_NARROW: usize = 4;
 
 /// LAPACK's safe minimum (dlamch('S')): below it, a pivot's reciprocal would overflow, so dgetf2 divides.
 const SFMIN: f64 = f64::MIN_POSITIVE;
@@ -64,7 +67,7 @@ fn laswp(a: &mut [f64], lda: usize, cols: usize, ipiv: &[usize], k0: usize, k1: 
     }
 }
 
-/// Unblocked LU of the m x n panel (dgetf2): `ipiv[k]` is the row interchanged with row k at step k; returns
+/// Unblocked LU of the m x n panel (dgetf2; the reference [`getf2b`] is tested against): `ipiv[k]` is the row interchanged with row k at step k; returns
 /// the first zero pivot's column, if any.
 fn getf2(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
     let mut info = None;
@@ -99,13 +102,145 @@ fn getf2(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> O
     info
 }
 
+/// The panel width of the blocked small-n LU ([`getf2b`]).
+pub const SMALL_NB: usize = 4;
+/// At or below this many columns the unblocked [`getf2`] is used instead of [`getf2b`] (its panel bookkeeping
+/// costs more than it saves on tiny matrices); the two give the same bits, so the choice is speed only.
+pub const GETF2_TINY: usize = 32;
+
+/// c := c - l0 t0 - l1 t1 - l2 t2 - l3 t3, element by element and in that order (the order of four successive
+/// dgetf2 rank-1 steps), over equally long slices.
+#[inline(always)]
+fn sub4(c: &mut [f64], l: [&[f64]; 4], t: [f64; 4]) {
+    let n = c.len();
+    let (l0, l1, l2, l3) = (&l[0][..n], &l[1][..n], &l[2][..n], &l[3][..n]);
+    for i in 0..n {
+        c[i] = (((c[i] - l0[i] * t[0]) - l1[i] * t[1]) - l2[i] * t[2]) - l3[i] * t[3];
+    }
+}
+
+/// [`sub4`] on two columns at once (the four L columns loaded once for both).
+#[inline(always)]
+fn sub4x2(c: &mut [f64], d: &mut [f64], l: [&[f64]; 4], t: [f64; 4], u: [f64; 4]) {
+    let n = c.len();
+    let d = &mut d[..n];
+    let (l0, l1, l2, l3) = (&l[0][..n], &l[1][..n], &l[2][..n], &l[3][..n]);
+    for i in 0..n {
+        let (x0, x1, x2, x3) = (l0[i], l1[i], l2[i], l3[i]);
+        c[i] = (((c[i] - x0 * t[0]) - x1 * t[1]) - x2 * t[2]) - x3 * t[3];
+        d[i] = (((d[i] - x0 * u[0]) - x1 * u[1]) - x2 * u[2]) - x3 * u[3];
+    }
+}
+
+/// The small-n LU: dgetf2's arithmetic, blocked by [`SMALL_NB`] columns so that the trailing matrix is updated
+/// once per panel instead of once per step. For each panel: dgetf2's steps on the panel's own columns (full-row
+/// interchanges, as dgetf2); then, for each trailing column, the panel's U rows by forward substitution and the
+/// rows below by one fused update (`sub4`), two columns at a time. Every element receives the same
+/// subtractions in the same order as in [`getf2`], and a zero multiplier skips its step as dger does (a column
+/// with one falls back to the step-by-step update), so the result is bit-identical to [`getf2`]'s.
+fn getf2b(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
+    let mn = m.min(n);
+    let mut info = None;
+    let mut k0 = 0;
+    while k0 < mn {
+        let kend = (k0 + SMALL_NB).min(mn);
+        // the panel's dgetf2 steps, updating only the panel's columns
+        for k in k0..kend {
+            let p = k + idamax(&a[k + k * lda..m + k * lda]);
+            ipiv[k] = p;
+            if a[p + k * lda] != 0.0 {
+                swap_rows(a, lda, n, k, p);
+                let piv = a[k + k * lda];
+                let col = &mut a[k + 1 + k * lda..m + k * lda];
+                if piv.abs() >= SFMIN {
+                    let r = 1.0 / piv;
+                    col.iter_mut().for_each(|x| *x *= r);
+                } else {
+                    col.iter_mut().for_each(|x| *x /= piv);
+                }
+            } else if info.is_none() {
+                info = Some(k);
+            }
+            for j in k + 1..kend {
+                let t = a[k + j * lda];
+                if t != 0.0 {
+                    let (lo, hi) = a.split_at_mut(j * lda);
+                    let x = &lo[k + 1 + k * lda..m + k * lda];
+                    for (d, &xi) in hi[k + 1..m].iter_mut().zip(x) {
+                        *d -= xi * t;
+                    }
+                }
+            }
+        }
+        if kend >= n {
+            break; // (no trailing columns: the slice may end inside the last panel's column)
+        }
+        // the trailing columns: U rows k0..kend, then rows kend..m in one fused update per column
+        let (panel, rest) = a.split_at_mut(kend * lda);
+        let full = kend - k0 == SMALL_NB;
+        let ls: [&[f64]; 4] = core::array::from_fn(|q| if k0 + q < kend { &panel[(k0 + q) * lda + kend..(k0 + q) * lda + m] } else { &[] });
+        let u_rows = |col: &mut [f64]| {
+            for q in k0..kend {
+                let t = col[q];
+                if t != 0.0 {
+                    for i in q + 1..kend {
+                        col[i] -= panel[i + q * lda] * t;
+                    }
+                }
+            }
+        };
+        let stepwise = |col: &mut [f64]| {
+            for q in k0..kend {
+                let t = col[q];
+                if t != 0.0 {
+                    for (d, &x) in col[kend..m].iter_mut().zip(&panel[q * lda + kend..q * lda + m]) {
+                        *d -= x * t;
+                    }
+                }
+            }
+        };
+        let cols = n - kend;
+        let mut j = 0;
+        while j < cols {
+            let pair = full && j + 1 < cols;
+            let left = rest.len() - j * lda;
+            let (c, rest2) = rest[j * lda..].split_at_mut(lda.min(left));
+            u_rows(c);
+            let t: [f64; 4] = core::array::from_fn(|q| if k0 + q < kend { c[k0 + q] } else { 0.0 });
+            let t_ok = full && t.iter().all(|&x| x != 0.0);
+            if pair {
+                let d = &mut rest2[..m];
+                u_rows(d);
+                let u: [f64; 4] = core::array::from_fn(|q| d[k0 + q]);
+                if t_ok && u.iter().all(|&x| x != 0.0) {
+                    let (cc, dd) = (&mut c[kend..m], &mut d[kend..m]);
+                    sub4x2(cc, dd, ls, t, u);
+                } else {
+                    stepwise(c);
+                    stepwise(d);
+                }
+                j += 2;
+            } else {
+                if t_ok {
+                    sub4(&mut c[kend..m], ls, t);
+                } else {
+                    stepwise(c);
+                }
+                j += 1;
+            }
+        }
+        k0 = kend;
+    }
+    info
+}
+
 /// The recursive LU of the m x n panel (the module's steps 1-6). `work` holds a GEMM scratch then at least
 /// min(m, n) * n more elements (checked by the public entry).
 #[allow(clippy::too_many_arguments)]
 fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize], work: &mut [f64]) -> Option<usize> {
     let mn = m.min(n);
     if n <= LU_SMALL || mn <= 1 {
-        return getf2(a, lda, m, n, ipiv);
+        return if n <= GETF2_TINY { getf2(a, lda, m, n, ipiv) } else { getf2b(a, lda, m, n, ipiv) };
     }
     let (n1, n2) = (mn / 2, n - mn / 2);
     let (left, right) = a.split_at_mut(n1 * lda);
@@ -144,6 +279,79 @@ fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
     info
 }
 
+/// One column of X := L^-1 X (unit lower, n x n, leading dimension `ldl`) by forward substitution, blocked by
+/// four: each block's rows by plain substitution, the rows below by one fused update ([`sub4`]). Every element
+/// subtracts x_k * l(i,k) for k in increasing order and skips a zero x_k, as plain substitution does, so the
+/// bits are plain substitution's (the reference BLAS dtrsm's).
+fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
+    let mut k0 = 0;
+    while k0 < n {
+        let kend = (k0 + SMALL_NB).min(n);
+        for q in k0..kend {
+            let t = col[q];
+            if t != 0.0 {
+                for i in q + 1..kend {
+                    col[i] -= t * l[i + q * ldl];
+                }
+            }
+        }
+        if kend < n {
+            let t: [f64; 4] = core::array::from_fn(|q| if k0 + q < kend { col[k0 + q] } else { 0.0 });
+            if kend - k0 == SMALL_NB && t.iter().all(|&x| x != 0.0) {
+                let ls: [&[f64]; 4] = core::array::from_fn(|q| &l[(k0 + q) * ldl + kend..(k0 + q) * ldl + n]);
+                sub4(&mut col[kend..n], ls, t);
+            } else {
+                for q in k0..kend {
+                    let t = col[q];
+                    if t != 0.0 {
+                        for (d, &x) in col[kend..n].iter_mut().zip(&l[q * ldl + kend..q * ldl + n]) {
+                            *d -= t * x;
+                        }
+                    }
+                }
+            }
+        }
+        k0 = kend;
+    }
+}
+
+/// One column of X := U^-1 X (non-unit upper) by back substitution, blocked by four from the bottom: each
+/// block's rows by plain substitution (a zero x_k skips its division and update, as dtrsm), the rows above by
+/// one fused update over the block's columns in decreasing order. The bits are plain back substitution's.
+fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
+    let mut kend = n;
+    while kend > 0 {
+        let k0 = kend.saturating_sub(SMALL_NB);
+        for k in (k0..kend).rev() {
+            if col[k] != 0.0 {
+                col[k] /= u[k + k * ldu];
+                let xk = col[k];
+                for i in k0..k {
+                    col[i] -= xk * u[i + k * ldu];
+                }
+            }
+        }
+        if k0 > 0 {
+            // (the block's columns in decreasing order: kend-1, ..., k0)
+            let t: [f64; 4] = core::array::from_fn(|q| if kend - k0 == SMALL_NB { col[kend - 1 - q] } else { 0.0 });
+            if kend - k0 == SMALL_NB && t.iter().all(|&x| x != 0.0) {
+                let us: [&[f64]; 4] = core::array::from_fn(|q| &u[(kend - 1 - q) * ldu..(kend - 1 - q) * ldu + k0]);
+                sub4(&mut col[..k0], us, t);
+            } else {
+                for k in (k0..kend).rev() {
+                    let xk = col[k];
+                    if xk != 0.0 {
+                        for (d, &x) in col[..k0].iter_mut().zip(&u[k * ldu..k * ldu + k0]) {
+                            *d -= xk * x;
+                        }
+                    }
+                }
+            }
+        }
+        kend = k0;
+    }
+}
+
 /// X := L^-1 X for the n x n unit lower triangle of `l` (leading dimension `ldl`) and the n x r matrix X
 /// (`x`, leading dimension `ldx`): top first, then the bottom updated, then the bottom (dtrsm, left, lower,
 /// no transpose, unit). `tmp` holds at least (n / 2) * r elements; `scratch` is a GEMM scratch.
@@ -152,17 +360,9 @@ fn trsm_lower_unit(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64],
     if n == 0 || r == 0 {
         return;
     }
-    if n <= TRSM_SMALL {
-        for j in 0..r {
-            let col = &mut x[j * ldx..j * ldx + n];
-            for k in 0..n {
-                let xk = col[k];
-                if xk != 0.0 {
-                    for i in k + 1..n {
-                        col[i] -= xk * l[i + k * ldl];
-                    }
-                }
-            }
+    if n <= TRSM_SMALL || r <= TRSM_NARROW {
+        for j in lower_unit_pairs(l, ldl, n, x, ldx, r)..r {
+            lower_unit_col(l, ldl, n, &mut x[j * ldx..j * ldx + n]);
         }
         return;
     }
@@ -188,18 +388,9 @@ fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx:
     if n == 0 || r == 0 {
         return;
     }
-    if n <= TRSM_SMALL {
-        for j in 0..r {
-            let col = &mut x[j * ldx..j * ldx + n];
-            for k in (0..n).rev() {
-                if col[k] != 0.0 {
-                    col[k] /= u[k + k * ldu];
-                    let xk = col[k];
-                    for i in 0..k {
-                        col[i] -= xk * u[i + k * ldu];
-                    }
-                }
-            }
+    if n <= TRSM_SMALL || r <= TRSM_NARROW {
+        for j in upper_pairs(u, ldu, n, x, ldx, r)..r {
+            upper_col(u, ldu, n, &mut x[j * ldx..j * ldx + n]);
         }
         return;
     }
@@ -330,6 +521,137 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
     let info = getrf(kern, a, n, n, lda, ipiv, work)?;
     getrs(kern, a, n, lda, ipiv, b, r, ldb, work)?;
     Ok(info.map_or(Status::Solved, Status::Singular))
+}
+
+/// Native only: [`lower_unit_col`] on columns j, j+1 of X for each pair of right-hand sides, the rows below a
+/// block by one [`sub4x2`] (the four L columns loaded once for both) when both columns take the fused update,
+/// else each column's own update as in [`lower_unit_col`]. Each column's bits are [`lower_unit_col`]'s; the
+/// saving is in L loads, which matters natively at n = 256 (where the GEMM outruns these loops). Wasm keeps
+/// the single-column loop (bound for #620; its stub below does no columns). Returns the number of columns
+/// done (r rounded down to even).
+#[cfg(not(target_arch = "wasm32"))]
+fn lower_unit_pairs(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    let mut j = 0;
+    while j + 1 < r {
+        let (c, d) = x[j * ldx..].split_at_mut(ldx);
+        let (c, d) = (&mut c[..n], &mut d[..n]);
+        let mut k0 = 0;
+        while k0 < n {
+            let kend = (k0 + SMALL_NB).min(n);
+            for col in [&mut *c, &mut *d] {
+                for q in k0..kend {
+                    let t = col[q];
+                    if t != 0.0 {
+                        for i in q + 1..kend {
+                            col[i] -= t * l[i + q * ldl];
+                        }
+                    }
+                }
+            }
+            if kend < n {
+                let fused = |col: &[f64]| {
+                    let t: [f64; 4] = core::array::from_fn(|q| if k0 + q < kend { col[k0 + q] } else { 0.0 });
+                    (kend - k0 == SMALL_NB && t.iter().all(|&x| x != 0.0)).then_some(t)
+                };
+                let ls: [&[f64]; 4] = core::array::from_fn(|q| if k0 + q < kend { &l[(k0 + q) * ldl + kend..(k0 + q) * ldl + n] } else { &[] });
+                match (fused(c), fused(d)) {
+                    (Some(t), Some(u)) => sub4x2(&mut c[kend..n], &mut d[kend..n], ls, t, u),
+                    (tc, td) => {
+                        for (col, t) in [(&mut *c, tc), (&mut *d, td)] {
+                            if let Some(t) = t {
+                                sub4(&mut col[kend..n], ls, t);
+                            } else {
+                                for q in k0..kend {
+                                    let t = col[q];
+                                    if t != 0.0 {
+                                        for (e, &v) in col[kend..n].iter_mut().zip(&l[q * ldl + kend..q * ldl + n]) {
+                                            *e -= t * v;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            k0 = kend;
+        }
+        j += 2;
+    }
+    j
+}
+
+/// Native only: [`upper_col`] on pairs of right-hand sides ([`sub4x2`] when both columns take the fused
+/// update); each column's bits are [`upper_col`]'s. Returns the number of columns done.
+#[cfg(not(target_arch = "wasm32"))]
+fn upper_pairs(u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    let mut j = 0;
+    while j + 1 < r {
+        let (c, d) = x[j * ldx..].split_at_mut(ldx);
+        let (c, d) = (&mut c[..n], &mut d[..n]);
+        let mut kend = n;
+        while kend > 0 {
+            let k0 = kend.saturating_sub(SMALL_NB);
+            for col in [&mut *c, &mut *d] {
+                for k in (k0..kend).rev() {
+                    if col[k] != 0.0 {
+                        col[k] /= u[k + k * ldu];
+                        let xk = col[k];
+                        for i in k0..k {
+                            col[i] -= xk * u[i + k * ldu];
+                        }
+                    }
+                }
+            }
+            if k0 > 0 {
+                // (the block's columns in decreasing order: kend-1, ..., k0)
+                let fused = |col: &[f64]| {
+                    let t: [f64; 4] = core::array::from_fn(|q| if kend - k0 == SMALL_NB { col[kend - 1 - q] } else { 0.0 });
+                    (kend - k0 == SMALL_NB && t.iter().all(|&x| x != 0.0)).then_some(t)
+                };
+                match (fused(c), fused(d)) {
+                    (Some(t), Some(w)) => {
+                        let us: [&[f64]; 4] = core::array::from_fn(|q| &u[(kend - 1 - q) * ldu..(kend - 1 - q) * ldu + k0]);
+                        sub4x2(&mut c[..k0], &mut d[..k0], us, t, w);
+                    }
+                    (tc, td) => {
+                        for (col, t) in [(&mut *c, tc), (&mut *d, td)] {
+                            if let Some(t) = t {
+                                let us: [&[f64]; 4] = core::array::from_fn(|q| &u[(kend - 1 - q) * ldu..(kend - 1 - q) * ldu + k0]);
+                                sub4(&mut col[..k0], us, t);
+                            } else {
+                                for k in (k0..kend).rev() {
+                                    let xk = col[k];
+                                    if xk != 0.0 {
+                                        for (e, &v) in col[..k0].iter_mut().zip(&u[k * ldu..k * ldu + k0]) {
+                                            *e -= xk * v;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            kend = k0;
+        }
+        j += 2;
+    }
+    j
+}
+
+/// Wasm: no pairs (the direct solves stay single-column there; see the native [`lower_unit_pairs`]).
+#[cfg(target_arch = "wasm32")]
+#[inline(always)]
+fn lower_unit_pairs(_: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
+    0
+}
+
+/// Wasm: no pairs (see the native [`upper_pairs`]).
+#[cfg(target_arch = "wasm32")]
+#[inline(always)]
+fn upper_pairs(_: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
+    0
 }
 
 #[cfg(test)]
@@ -614,10 +936,282 @@ pub(crate) mod tests {
         assert_eq!(idamax(&[-0.0, 0.0]), 0);
     }
 
+    /// The blocked small-n LU is bit-identical to the unblocked one, pivots and zero-pivot report included, on
+    /// shapes around every panel boundary, tall and wide, with zeros (dger's skip) and a NaN.
+    #[test]
+    fn blocked_small_lu_equals_unblocked_bitwise() {
+        let mut cases: Vec<(usize, usize, Vec<f64>)> = Vec::new();
+        for (m, n) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (7, 7), (8, 8), (9, 9), (13, 13), (31, 31), (32, 32), (33, 33), (64, 32), (100, 32), (20, 7), (7, 20), (40, 40)] {
+            cases.push((m, n, seeded(m * n, &mut (m as u32 * 31 + n as u32))));
+        }
+        let mut z = seeded(16 * 16, &mut 9);
+        for i in 0..16 {
+            z[i + 5 * 16] = 0.0; // a zero column: a zero pivot
+        }
+        z[3 + 9 * 16] = 0.0; // a zero multiplier (dger's skip) in a trailing column
+        cases.push((16, 16, z));
+        let mut h = seeded(12 * 12, &mut 10);
+        h[7] = f64::NAN;
+        cases.push((12, 12, h));
+        // (dgetf2's zero skips meeting NaN multipliers: column 6 is zero, so every step's t for it is 0, while row
+        // 3's multiplier in column 0 and row 11's in column 2 are NaN; a step with t = 0 must leave the column
+        // alone (0), never 0 - NaN * 0 = NaN, both in the panel's U rows and below them)
+        let mut g = seeded(12 * 12, &mut 11);
+        for i in 0..12 {
+            g[i + 6 * 12] = 0.0;
+        }
+        g[3] = f64::NAN; // A(3, 0)
+        g[11] = 0.0; // A(11, 0)
+        g[11 + 12] = 0.0; // A(11, 1)
+        g[11 + 2 * 12] = f64::NAN; // A(11, 2)
+        cases.push((12, 12, g));
+        // (grader U3: the same witness for a pair's second column: column 7 zero, column 6 not, so in the first
+        // panel's trailing pairs (4, 5), (6, 7) the fused update must not run with column 7's zero multipliers)
+        let mut g7 = seeded(12 * 12, &mut 11);
+        for i in 0..12 {
+            g7[i + 7 * 12] = 0.0;
+        }
+        g7[3] = f64::NAN;
+        g7[11] = 0.0;
+        g7[11 + 12] = 0.0;
+        g7[11 + 2 * 12] = f64::NAN;
+        cases.push((12, 12, g7));
+        // (grader U1: a subnormal pivot through getf2b, n > GETF2_TINY: column 0's largest entry is 2^-1060, so
+        // 1 / pivot overflows and dgetf2 divides; the rows below hold 2^-1070 or 0, which a reciprocal would
+        // turn into 2^-10 * ... and 0 * Inf = NaN)
+        let n1 = 40;
+        let mut s = seeded(n1 * n1, &mut 12);
+        for i in 0..n1 {
+            s[i] = if i == 0 { f64::from_bits(1 << 14) } else if i % 2 == 1 { f64::from_bits(1 << 4) } else { 0.0 };
+        }
+        assert!(s[0] == 2f64.powi(-1060) && s[1] == 2f64.powi(-1070) && 1.0 / s[0] == f64::INFINITY);
+        cases.push((n1, n1, s));
+        for (m, n, a) in cases {
+            let (mut x, mut y) = (a.clone(), a.clone());
+            let (mut px, mut py) = (vec![0; m.min(n)], vec![0; m.min(n)]);
+            let ix = getf2(&mut x, m, m, n, &mut px);
+            let iy = getf2b(&mut y, m, m, n, &mut py);
+            assert_eq!((px, ix), (py, iy), "{m}x{n}: pivots");
+            assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()), "{m}x{n}: bits differ");
+        }
+        // (grader U2: two zero pivots through getf2b, n > GETF2_TINY; both report the FIRST, dgetf2's info)
+        let n2 = 40;
+        let mut z2 = seeded(n2 * n2, &mut 13);
+        for i in 0..n2 {
+            z2[i + 5 * n2] = 0.0;
+            z2[i + 17 * n2] = 0.0;
+        }
+        let (mut x, mut y) = (z2.clone(), z2);
+        let (mut px, mut py) = (vec![0; n2], vec![0; n2]);
+        assert_eq!(getf2(&mut x, n2, n2, n2, &mut px), Some(5));
+        assert_eq!(getf2b(&mut y, n2, n2, n2, &mut py), Some(5), "getf2b reports the first zero pivot");
+        assert!(px == py && x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()));
+    }
+
+    /// The blocked substitution columns are bit-identical to plain substitution (zeros and a zero diagonal included).
+    #[test]
+    fn blocked_substitution_equals_plain_bitwise() {
+        for n in [1usize, 3, 4, 5, 8, 9, 15, 31, 64, 70] {
+            let mut t = seeded(n * n, &mut (n as u32 + 40));
+            if n > 5 {
+                t[2 + 5 * n] = 0.0; // (an exact zero in the triangle)
+                t[4 + 4 * n] = 0.0; // (a zero diagonal for the upper solve: Inf/NaN, the same in both)
+            }
+            let x0 = { let mut x = seeded(n, &mut (n as u32 + 41)); if n > 6 { x[1] = 0.0; x[6] = 0.0; } x };
+            // lower unit: plain
+            let mut p = x0.clone();
+            for k in 0..n { let xk = p[k]; if xk != 0.0 { for i in k + 1..n { p[i] -= xk * t[i + k * n]; } } }
+            let mut q = x0.clone();
+            lower_unit_col(&t, n, n, &mut q);
+            assert!(p.iter().zip(&q).all(|(a, b)| a.to_bits() == b.to_bits()), "lower n={n}");
+            // upper non-unit: plain
+            let mut p = x0.clone();
+            for k in (0..n).rev() { if p[k] != 0.0 { p[k] /= t[k + k * n]; let xk = p[k]; for i in 0..k { p[i] -= xk * t[i + k * n]; } } }
+            let mut q = x0.clone();
+            upper_col(&t, n, n, &mut q);
+            if n > 6 {
+                // (and the case where the skip decides: a zero diagonal at row 4 with x_4 = 0 and nothing above it
+                // to change that; plain substitution leaves x_4 = 0, a division would make it 0 / 0 = NaN)
+                let mut tz = t.clone();
+                for k in 5..n {
+                    tz[4 + k * n] = 0.0;
+                }
+                let mut xz = x0.clone();
+                xz[4] = 0.0;
+                let mut q2 = xz.clone();
+                upper_col(&tz, n, n, &mut q2);
+                assert_eq!(q2[4], 0.0, "upper n={n}: x_4 must stay 0");
+            }
+            assert!(p.iter().zip(&q).all(|(a, b)| a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan())), "upper n={n}");
+        }
+        // (grader U3: a zero x_k in a full block must skip its column even where the fused update would run:
+        // x_0 = 0 with l(8, 0) = Inf below the first block, x_11 = 0 with u(2, 11) = Inf above the last; the
+        // plain loops never multiply them, a fused update would make Inf * 0 = NaN)
+        let n = 12;
+        let mut t = seeded(n * n, &mut 52);
+        for k in 0..n {
+            t[k + k * n] = 1.5 + t[k + k * n];
+        }
+        t[8] = f64::INFINITY;
+        t[2 + 11 * n] = f64::INFINITY;
+        let mut x0 = seeded(n, &mut 53);
+        x0[0] = 0.0;
+        x0[n - 1] = 0.0;
+        let mut q = x0.clone();
+        lower_unit_col(&t, n, n, &mut q);
+        assert_eq!(q, plain_lower(&t, n, &x0, 1), "lower: the zero x_0 must skip its column");
+        assert!(q.iter().all(|v| v.is_finite()));
+        let mut q = x0.clone();
+        upper_col(&t, n, n, &mut q);
+        assert_eq!(q, plain_upper(&t, n, &x0, 1), "upper: the zero x_11 must skip its column");
+        assert!(q.iter().all(|v| v.is_finite()));
+    }
+
+    /// Plain forward substitution, unit lower, n x n (leading dimension n), on the r columns of x (each n long).
+    fn plain_lower(l: &[f64], n: usize, x: &[f64], r: usize) -> Vec<f64> {
+        let mut y = x.to_vec();
+        for j in 0..r {
+            for k in 0..n {
+                let yk = y[k + j * n];
+                if yk != 0.0 {
+                    for i in k + 1..n {
+                        y[i + j * n] -= yk * l[i + k * n];
+                    }
+                }
+            }
+        }
+        y
+    }
+
+    /// Plain back substitution, non-unit upper (a zero x_k skips its division and column, as dtrsm).
+    fn plain_upper(u: &[f64], n: usize, x: &[f64], r: usize) -> Vec<f64> {
+        let mut y = x.to_vec();
+        for j in 0..r {
+            for k in (0..n).rev() {
+                if y[k + j * n] != 0.0 {
+                    y[k + j * n] /= u[k + k * n];
+                    let yk = y[k + j * n];
+                    for i in 0..k {
+                        y[i + j * n] -= yk * u[i + k * n];
+                    }
+                }
+            }
+        }
+        y
+    }
+
+    /// A seeded n x n unit lower triangle and a well-conditioned upper one (diagonal 1.5 + (-0.5, 0.5)).
+    fn triangles(n: usize, seed: u32) -> (Vec<f64>, Vec<f64>) {
+        let a = seeded(n * n, &mut (seed as u32));
+        let (mut l, mut u) = (a.clone(), a);
+        for k in 0..n {
+            l[k + k * n] = 1.0;
+            u[k + k * n] += 1.5;
+            for i in 0..k {
+                l[i + k * n] = 0.0;
+            }
+            for i in k + 1..n {
+                u[i + k * n] = 0.0;
+            }
+        }
+        (l, u)
+    }
+
+    /// Both triangular solves of x0 (n x r) with the kernel's direct/recursive choice; (lower, upper) results.
+    fn trsm_both(l: &[f64], u: &[f64], n: usize, x0: &[f64], r: usize) -> (Vec<f64>, Vec<f64>) {
+        let mut tmp = vec![0.0; n * r];
+        let mut scratch = vec![0.0; scratch_len()];
+        let mut x = x0.to_vec();
+        trsm_lower_unit(Kernel::Scalar, l, n, n, &mut x, n, r, &mut tmp, &mut scratch);
+        let mut y = x0.to_vec();
+        trsm_upper(Kernel::Scalar, u, n, n, &mut y, n, r, &mut tmp, &mut scratch);
+        (x, y)
+    }
+
+    fn same_bits(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.to_bits() == q.to_bits())
+    }
+
+    /// The direct solves taken two right-hand sides at a time (native) keep each column's plain-substitution
+    /// bits: odd and even counts, columns whose zero x_k (with Inf beside it in L or U) forbids the fused update
+    /// in the first, the second or both columns of a pair, and a ldx larger than n.
+    #[test]
+    fn pairs_of_right_hand_sides_keep_each_columns_bits() {
+        for (n, r) in [(1usize, 2usize), (5, 2), (12, 5), (13, 4), (64, 7), (37, 6)] {
+            let (mut l, mut u) = triangles(n, 60 + n as u32);
+            let mut x0 = seeded(n * r, &mut (61 + r as u32));
+            if n >= 12 {
+                l[8] = f64::INFINITY; // l(8, 0): reached only by x_0
+                u[2 + (n - 1) * n] = f64::INFINITY; // u(2, n-1): reached only by x_{n-1}
+                for j in [1, 2, 3] {
+                    if j < r {
+                        x0[j * n] = 0.0;
+                        x0[n - 1 + j * n] = 0.0;
+                    }
+                }
+                // (grader Q8: rows 5 and 8 of U zero to the right of their diagonals, which are 0 and -1.5, and
+                // x_5 = x_8 = +0 in every column: both stay +0, and back substitution must skip their divisions, in
+                // pairs as single; a division would give 0 / 0 = NaN and +0 / -1.5 = -0)
+                for k in 6..n {
+                    u[5 + k * n] = 0.0;
+                }
+                for k in 9..n {
+                    u[8 + k * n] = 0.0;
+                }
+                u[5 + 5 * n] = 0.0;
+                u[8 + 8 * n] = -1.5;
+                for j in 0..r {
+                    x0[5 + j * n] = 0.0;
+                    x0[8 + j * n] = 0.0;
+                }
+            }
+            let (x, y) = trsm_both(&l, &u, n, &x0, r);
+            assert!(same_bits(&x, &plain_lower(&l, n, &x0, r)), "lower n={n} r={r}");
+            assert!(same_bits(&y, &plain_upper(&u, n, &x0, r)), "upper n={n} r={r}");
+            for j in (1..4).filter(|&j| n >= 12 && j < r) {
+                // (the zeroed columns never reach the Inf: a fused update over them would give Inf * 0 = NaN)
+                let col = |v: &[f64]| v[j * n..(j + 1) * n].iter().all(|v| v.is_finite());
+                assert!(col(&x) && col(&y), "n={n} r={r} j={j}: a skipped Inf * 0");
+            }
+            // (a padded ldx: the columns' spans, not their storage, are solved)
+            let ldx = n + 3;
+            let mut xp = vec![7.0; ldx * r];
+            for j in 0..r {
+                xp[j * ldx..j * ldx + n].copy_from_slice(&x0[j * n..(j + 1) * n]);
+            }
+            let mut tmp = vec![0.0; n * r];
+            let mut scratch = vec![0.0; scratch_len()];
+            trsm_lower_unit(Kernel::Scalar, &l, n, n, &mut xp, ldx, r, &mut tmp, &mut scratch);
+            for j in 0..r {
+                assert!(same_bits(&xp[j * ldx..j * ldx + n], &x[j * n..(j + 1) * n]), "ldx n={n} r={r} j={j}");
+                assert!(xp[j * ldx + n..(j + 1) * ldx].iter().all(|&v| v == 7.0), "padding written");
+            }
+        }
+    }
+
+    /// The narrow-solve threshold, pinned at its value (grader U4): above TRSM_SMALL, r = 4 right-hand sides are
+    /// still solved by plain substitution, with its bits, for both triangles; r = 5 recurses (GEMM updates:
+    /// other bits, the same solution within u).
+    #[test]
+    fn the_narrow_threshold_is_where_wide_solves_recurse() {
+        assert_eq!(TRSM_NARROW, 4);
+        let n = 80;
+        assert!(n > TRSM_SMALL);
+        let (l, u) = triangles(n, 5);
+        for r in [4, 5] {
+            let x0 = seeded(n * r, &mut 6);
+            let (x, y) = trsm_both(&l, &u, n, &x0, r);
+            assert_eq!(same_bits(&x, &plain_lower(&l, n, &x0, r)), r <= 4, "lower r={r}");
+            assert_eq!(same_bits(&y, &plain_upper(&u, n, &x0, r)), r <= 4, "upper r={r}");
+        }
+    }
+
     #[test]
     fn the_small_threshold_is_where_the_recursion_starts() {
         // at T and below, getrf is dgetf2 exactly (same bits); above it, the recursion (still within the oracle)
-        for n in [LU_SMALL - 1, LU_SMALL, LU_SMALL + 1] {
+        // (pinned at the pre-registered value, grader U5: 64 is dgetf2's bits, 65 the recursion's)
+        assert_eq!(LU_SMALL, 64);
+        for n in [63, 64, 65] {
             let a = random(n, 21);
             let mut g = a.clone();
             let mut gp = vec![0; n];
@@ -627,7 +1221,7 @@ pub(crate) mod tests {
             let mut work = vec![0.0; getrf_work_len(n, n).unwrap()];
             getrf(Kernel::Scalar, &mut f, n, n, n, &mut fp, &mut work).unwrap();
             let same = f.iter().zip(&g).all(|(x, y)| x.to_bits() == y.to_bits());
-            if n <= LU_SMALL {
+            if n <= 64 {
                 assert!(same, "n={n} <= LU_SMALL must be the unblocked factorization");
             } else {
                 assert!(!same, "n={n} > LU_SMALL must take the recursive path (different rounding order)");
@@ -706,37 +1300,19 @@ pub(crate) mod tests {
         assert_eq!(a[1], 0.5);
     }
 
-    /// The triangular solve's threshold (grader advisory): at TRSM_SMALL it substitutes directly (the plain
-    /// substitution's bits); just above, it recurses (a GEMM update: other bits, the same solution within u).
+    /// The triangular solve's threshold, pinned at its value (grader advisory, U5): at n = 64 both triangles
+    /// substitute directly (the plain substitution's bits); at 65 they recurse (a GEMM update: other bits, the
+    /// same solution within u). r = 8, above the narrow threshold.
     #[test]
     fn the_trsm_threshold_is_where_its_recursion_starts() {
-        for n in [TRSM_SMALL, TRSM_SMALL + 1] {
-            let r = 8;
-            let mut l = seeded(n * n, &mut 3);
-            for k in 0..n {
-                l[k + k * n] = 1.0;
-                for i in 0..k {
-                    l[i + k * n] = 0.0;
-                }
-            }
+        assert_eq!(TRSM_SMALL, 64);
+        let r = 8;
+        for n in [64, 65] {
+            let (l, u) = triangles(n, 3);
             let x0 = seeded(n * r, &mut 4);
-            let mut x = x0.clone();
-            let mut tmp = vec![0.0; n * r];
-            let mut scratch = vec![0.0; scratch_len()];
-            trsm_lower_unit(Kernel::Scalar, &l, n, n, &mut x, n, r, &mut tmp, &mut scratch);
-            let mut y = x0.clone();
-            for j in 0..r {
-                for k in 0..n {
-                    let yk = y[k + j * n];
-                    if yk != 0.0 {
-                        for i in k + 1..n {
-                            y[i + j * n] -= yk * l[i + k * n];
-                        }
-                    }
-                }
-            }
-            let same = x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits());
-            assert_eq!(same, n <= TRSM_SMALL, "n={n}");
+            let (x, y) = trsm_both(&l, &u, n, &x0, r);
+            assert_eq!(same_bits(&x, &plain_lower(&l, n, &x0, r)), n <= 64, "lower n={n}");
+            assert_eq!(same_bits(&y, &plain_upper(&u, n, &x0, r)), n <= 64, "upper n={n}");
         }
     }
 
@@ -805,8 +1381,8 @@ pub(crate) mod tests {
 
     /// The per-family bit pins (grader 2): the same seeded 120 x 120 system with 3 right-hand sides solves to
     /// one set of bits per kernel family. The Wasm SIMD128 module must give SOLVE_FNV (test/nd-wasm.test.ts).
-    pub(crate) const SOLVE_FNV: u64 = 0xe59c250a548b1cd0;
-    pub(crate) const SOLVE_FNV_FMA: u64 = 0x67e31b567579aa60;
+    pub(crate) const SOLVE_FNV: u64 = 0xd44c10badbe88400;
+    pub(crate) const SOLVE_FNV_FMA: u64 = 0x6b97bbab2f230dbc;
 
     #[test]
     fn solve_bits_per_family() {
