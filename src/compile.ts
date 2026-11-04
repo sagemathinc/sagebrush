@@ -414,22 +414,31 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   for (const d of dirs) {
     const pkg = join(d, leaf, "__init__.py");
-    if (fileExists(pkg)) return optTagged(execModule(fileRead(pkg), pkg, name, true), pkg);
+    if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
     const file = join(d, leaf + ".py");
-    if (fileExists(file)) return optTagged(execModule(fileRead(file), file, name), file);
+    if (fileExists(file)) return execFile(fileRead(file), file, name, false);
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  return found === null ? null : optTagged(execModule(found[0], found[1], name, found[1].endsWith("/__init__.py")), found[1]);
+  return found === null ? null : execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
 };
-// A module made from one of the optional set's mounted files (found by name or,
-// a submodule, through its package's __path__) is remembered as the set's, by
-// identity: R.loader.graded checks it when an import finds it in sys.modules.
-function optTagged(m: any, file: string): any {
+// Every module the loader runs from a file goes through here.  A file of the
+// optional set (optKeys, by its mounted path, whatever name or sys.path entry
+// found it) is refused before any of it runs while a grading allowance is armed
+// (astra's Q7 residual on #628: its directory on sys.path, a fresh name); else
+// the module made from it is remembered as the set's, by identity, for
+// R.loader.graded's check when an import finds it in sys.modules.
+function execFile(text: string, file: string, name: string, isPackage: boolean): any {
   const k = optKeys.get(file);
+  if (k !== undefined) gradedFile(k.id, name);
+  const m = execModule(text, file, name, isPackage);
   if (k !== undefined && m !== null && typeof m === "object") optModules.set(m, k.id);
   return m;
+}
+// (refuseGraded when a grading allowance is armed: package `id`'s file, asked for as `name`)
+function gradedFile(id: string, name: string): void {
+  if (Atomics.load(INTR, 0) & INTR_GRADING) refuseGraded(id, name);
 }
 // A module of the optional set that sys.modules already holds, imported again
 // while a grading allowance is armed: refused as a first import is
@@ -586,13 +595,19 @@ export function findModuleSource(name: string): [string, string] | null {
     dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
   }
   const leaf = parts[parts.length - 1];
+  let found: [string, string] | null = null;
   for (const d of dirs) {
     const main = join(d, leaf, "__main__.py");
-    if (fileExists(main)) return [fileRead(main), main];
     const file = join(d, leaf + ".py");
-    if (fileExists(file)) return [fileRead(file), file];
+    if (fileExists(main)) found = [fileRead(main), main];
+    else if (fileExists(file)) found = [fileRead(file), file];
+    if (found !== null) break;
   }
-  return packageModule(name, true) ?? optionalModule(name, true);
+  found ??= packageModule(name, true) ?? optionalModule(name, true);
+  // (an optional set's file, however found, is refused as an import is while grading is armed: execFile)
+  const k = found === null ? undefined : optKeys.get(found[1]);
+  if (k !== undefined) gradedFile(k.id, name);
+  return found;
 }
 
 // Optional packages (optional/<name>/; src/pkgset.ts; plan-modular-packages-r4):

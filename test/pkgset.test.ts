@@ -322,6 +322,24 @@ test("pandas imported before a grading allowance is armed doesn't import after i
   assert.equal(await run(before, s, { armThen: "import hello, json\nprint(hello.GREETING)" }), "1 1\n | hi\n");
 });
 
+test("pandas's mounted files are refused under a fresh name once a grading allowance is armed, its directory on sys.path: a submodule loaded before and one never loaded, before any of it runs (Q7 residual, astra)", async () => {
+  const pd: Pkg = {
+    name: "pandas",
+    modules: ["pandas", "pandas.sub", "pandas.side"],
+    files: { "py/pandas/__init__.py": "X = 1\n", "py/pandas/sub.py": "Y = 2\n", "py/pandas/side.py": "import builtins\nbuiltins.SIDE = 1\nZ = 3\n" },
+  };
+  const s = makeSet([pd, hello]);
+  const before = "import pandas, pandas.sub, sys\nsys.path.insert(0, pandas.__path__[0])\nprint(pandas.X)";
+  const tryImport = (name: string) =>
+    `import builtins\ntry:\n    import ${name}\n    print('imported', ${name}.__name__)\nexcept ImportError as e:\n    print('refused', str(e).startswith("No module named '${name}' in a graded run: @sagebrush/pandas@0.1.0"))\nprint('ran', hasattr(builtins, 'SIDE'))`;
+  // (the alias path works before arming: the bypass is real, not a missing file)
+  assert.equal(await run(before + "\nimport sub, side\nprint(sub.Y, side.Z)", s), "1\n2 3\n");
+  assert.equal(await run(before, s, { armThen: tryImport("sub") }), "1\n | refused True\nran False\n");
+  assert.equal(await run(before, s, { armThen: tryImport("side") }), "1\n | refused True\nran False\n");
+  // (the control: an allowed package's mounted file under a fresh name still imports while grading)
+  assert.equal(await run("import hello, sys\nsys.path.insert(0, hello.__path__[0])\nprint(1)", s, { armThen: "import sub\nprint(sub.X)" }), "1\n | 2\n");
+});
+
 test("dependencies mount first; a module the set doesn't have is not found", async () => {
   const s = makeSet([{ name: "a", modules: ["aa"], files: { "py/aa.py": "import bb\nV = bb.W + 1\n" }, requires: ["@sagebrush/b@0.1.0"] }, { name: "b", modules: ["bb"], files: { "py/bb.py": "W = 41\n" } }]);
   assert.equal(await run("import aa\nprint(aa.V)", s), "42\n");
