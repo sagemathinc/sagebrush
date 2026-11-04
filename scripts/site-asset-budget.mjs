@@ -20,7 +20,7 @@
 //   3. the DEV bootstrap: its own bytes, measured on the identifier-stable measuring pages and cross-checked against
 //      index.html's shipped growth over PROD (scripts/line3-measure.mjs, line-3 case r4); without the measuring pages
 //      line 3 FAILs as not measured;
-//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 232 KiB minified and 78 KiB gzip; no CSS
+//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most LATEX_CAPS (scripts/latex-group.mjs: 232 KiB minified, 78 KiB gzip); no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
 //      LaTeX bundle and KaTeX's inputs in exactly one output (the math module).
@@ -31,6 +31,7 @@ import { gzipSync } from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { checkLine3 } from "./line3-measure.mjs";
+import { latexGroup, LATEX_CAPS, LATEX_LAZY } from "./latex-group.mjs";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
@@ -170,16 +171,11 @@ check("DEV bootstrap (line 3): the DEV-only bytes on the measuring pages, exact 
   line3 !== null && line3.reasons.length === 0, line3 ? (line3.metrics ? { reasons: line3.reasons, ...line3.metrics } : { reasons: line3.reasons }) : { notMeasured: "no measuring pages given" });
 // 4. the LaTeX group
 // (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
-const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js", TOOLS = "dist/sagebrush-latex-tools.js", PRESENT = "dist/sagebrush-latex-present.js";
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT && n !== TOOLS && n !== PRESENT);
-const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
-const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
-// (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
-//  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
-//  priority; the group is fetched only when a .tex is opened, so the first page load is unaffected): each PR reports
-//  its delta, and what can be a lazy chunk of its own stays out of the group; was 192 / 64
-//  (2026-10-29, the ten examples and the embeddable editor), 180 / 60 before)
-check("the LaTeX group's JS: at most 232 KiB minified, 78 KiB gzip", js.length > 0 && jsRaw <= 232 * 1024 && jsGz <= 78 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
+const { COMMENTS, COMMENTS_DOC, AGENT, TOOLS, PRESENT } = LATEX_LAZY;
+// (the group, its measure and its cap: scripts/latex-group.mjs, shared with CI's web-artifacts check)
+const lg = latexGroup(dev), js = lg.js, css = lg.css, jsRaw = lg.raw, jsGz = lg.gzip;
+const fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
+check(`the LaTeX group's JS: at most ${LATEX_CAPS.raw / 1024} KiB minified, ${LATEX_CAPS.gzip / 1024} KiB gzip`, lg.ok, { files: js, raw: jsRaw, gzip: jsGz });
 // 4b. the comments' chunk: at most 16 KiB minified, 6 KiB gzip (@sagebrush, 2026-10-29: comments in a lazy chunk of
 //     their own, so a document without comments never pays for them)
 if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
