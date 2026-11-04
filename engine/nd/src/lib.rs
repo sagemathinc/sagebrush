@@ -1,8 +1,8 @@
 //! Sagebrush's numerics core: dense f64 kernels on column-major storage (design: numerics-core r4.2).
 //!
 //! The operation and blocking layers ([`gemm`]) are written once; under them, one small microkernel per
-//! target ([`micro`]): portable scalar, and WebAssembly SIMD128. Native AVX2/AVX-512/NEON microkernels come
-//! later, each enabled only once a CI host executes it (r4.2 §12).
+//! target ([`micro`]): portable scalar, WebAssembly SIMD128, AVX2+FMA (x86-64, detected) and NEON (aarch64),
+//! each enabled only once a CI host executes it (r4.2 §12); AVX-512 later.
 //!
 //! Determinism (r4.2 §7): every element of a product is summed in the same order (k in blocks of
 //! [`gemm::KC`], in order; within a block p = 0, 1, ...; then added into C) whatever the thread count, the

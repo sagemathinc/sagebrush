@@ -10,7 +10,7 @@ fn main() {
     let sizes: Vec<usize> = args.get(1).map_or("1000", |s| s).split(',').map(|x| x.parse().unwrap()).collect();
     let threads: Vec<usize> = args.get(2).map_or("1", |s| s).split(',').map(|x| x.parse().unwrap()).collect();
     let reps: usize = args.get(3).map_or(21, |s| s.parse().unwrap());
-    // (kernel: "selected" (default), "scalar", or "neon" on aarch64, which dispatch doesn't select yet)
+    // (kernel: "selected" (default; NEON on aarch64, AVX2+FMA on x86-64 if detected), "scalar", or "neon" on aarch64)
     let kern = match args.get(4).map(String::as_str) {
         Some("scalar") => Kernel::Scalar,
         #[cfg(target_arch = "aarch64")]

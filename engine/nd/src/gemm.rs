@@ -51,8 +51,8 @@ pub enum Kernel {
 
 impl Kernel {
     /// The fastest kernel this build and CPU may use: on Wasm, the module's own (one SIMD level per module);
-    /// natively, AVX2+FMA if the CPU has it, else the portable one. (NEON is compiled but not selected until
-    /// a CI host executes it: micro::NEON_ENABLED.) Natively the CPU check runs once and is cached.
+    /// natively, AVX2+FMA if the CPU has it, else the portable one; on aarch64, NEON (part of every aarch64
+    /// target; micro::NEON_ENABLED, CI-executed). Natively the CPU check runs once and is cached.
     pub fn selected() -> Kernel {
         #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
         return Kernel::Simd128;
@@ -623,7 +623,7 @@ pub(crate) mod tests {
         #[cfg(target_arch = "x86_64")]
         assert_eq!(k.name(), if crate::micro::Avx2Fma::detect().is_some() { "avx2-fma-8x6" } else { "scalar" });
         #[cfg(target_arch = "aarch64")]
-        assert_eq!(k.name(), "scalar", "NEON must not be selected until a CI host runs it");
+        assert_eq!(k.name(), "neon-fma-8x6", "aarch64 selects NEON (engine-nd-neon executes it in CI)");
         assert!(k.nr() > 0);
     }
 
