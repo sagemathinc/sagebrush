@@ -54,10 +54,11 @@ article says so.
   mistakes). See [what is shared](/articles/#independent).
 - **Clean-room.** Papers and books only. PARI, Sage, Magma and GAP were
   used as binary oracles and benchmarks; their sources were not read.
-  smalljac 4.1.3 was used the same way; the a_p engine is a from-scratch
-  Rust implementation of its published genus-1 strategy, no smalljac source
-  was translated or copied, and its author gave permission for the
-  implementation's licensing (`engine/ap/PROVENANCE.md`).
+  The a_p engine is an independent Rust implementation that follows
+  smalljac's genus-1 strategy: the smalljac C source was read with Andrew
+  Sutherland's permission, no smalljac code is copied or shared, and
+  smalljac 4.1.3 was run as an oracle and benchmark
+  (`engine/ap/PROVENANCE.md`).
 - **Checked against independent data.** Examples: Cremona's tables, the
   LMFDB, Magma's transitive group database, PARI's `quadclassunit` and
   `bnfinit`, and smalljac's output.

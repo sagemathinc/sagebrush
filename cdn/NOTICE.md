@@ -9,10 +9,10 @@ This package bundles three components.
    The Rust crates it links are listed, with their licenses and license
    texts, in `THIRD-PARTY-NOTICES.txt`.
 
-   The a_p engine is a from-scratch implementation of the genus-1 strategy of
-   Andrew V. Sutherland's smalljac (no smalljac source was translated or
-   copied), used with his permission (see `engine/ap/PROVENANCE.md` in the
-   repository).
+   The a_p engine is an independent Rust implementation that follows the
+   genus-1 strategy of Andrew V. Sutherland's smalljac (its C source was read
+   with his permission; no smalljac code is copied or shared), used with his
+   permission (see `engine/ap/PROVENANCE.md` in the repository).
 
 2. **pyparse** (`pyparse.mjs`): a Python 3.14 parser generated from CPython's
    `Grammar/python.gram`, `Grammar/Tokens` and `Parser/Python.asdl`, with
