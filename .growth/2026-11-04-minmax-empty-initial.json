@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "np.max/np.min over no elements refused along an axis too, as NumPy's (they returned -inf/+inf; norm(empty, 2) was -inf), and initial= and where= for amax/amin/ndarray.max/min/nanmax/nanmin, as NumPy 2.5.1 (lib/numpy/__init__.py, src/runtime/numpy.ts minmax). Re-measured with bun 1.4.4 (size-record.sh) on master e2859b85 vs head 907d79e8: cli/lib.gen.js +612, cli/pyjs.cjs +740, engine/lib/sci.pre +7760, engine/lib/sci.src +1795, engine/sagebrush-worker.js +47; no other row moves. Markers: exact, except cli/pyjs.cjs 772 (+740 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 612,
+  "cli/pyjs.cjs": 772,
+  "engine/lib/sci.pre": 7760,
+  "engine/lib/sci.src": 1795,
+  "engine/sagebrush-worker.js": 47
+ }
+}
