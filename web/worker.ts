@@ -182,7 +182,8 @@ onOfflineMissing((m) => postMessage({ offlineMissing: m }));
 // is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
 // can't be used is said once, and imports from it then fail saying why.
 let pkgsetReady: Promise<void> = Promise.resolve();
-// The notebook's own folder ({startDir}, sent at the start): runs wait for it to be the working folder and sys.path[0].
+// The notebook's own folder ({startDir}, sent at the start): what the session is asked waits for it to be the working
+// folder and sys.path[0].
 let placed: Promise<void> = Promise.resolve();
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
 
@@ -275,10 +276,11 @@ self.onmessage = async (ev: MessageEvent) => {
     } else p.catch(() => {});
   }
   if (m.code !== undefined) {
-    await placed;
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }
+  // (a run, and a question of the session (importInfo: where it resolves files and imports), as of its own folder)
+  await placed;
   try {
     await session.handle(m);
   } catch (e) {

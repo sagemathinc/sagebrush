@@ -4,6 +4,8 @@
 //   - a notebook in a folder starts there: os.getcwd() is its folder and sys.path[0] too, so it reads a neighbouring
 //     data file by its relative name and imports a neighbouring .py module;
 //   - a top-level notebook's working folder is "/", as before, and a relative read finds the file beside it there;
+//   - the session's own answer of where it resolves files and imports (importInfo, the file-dependency check's), asked
+//     at once after a start, before any run, is that folder;
 //   - a rename or a move takes effect at the next start: the running interpreter keeps the folder it started in (it
 //     reads its old neighbour's name, now gone, and says so), and a restart starts in the new folder.
 //   bun web/build.ts, then node web/test-notebook-own-folder.mjs
@@ -87,6 +89,9 @@ try {
   check(a.split("|")[1] === "/Book", `…and sys.path[0] is /Book (${a})`);
   check(a.split("|")[2] === "one", `…it reads its neighbour data.csv by the relative name (${a})`);
   check(a.split("|")[3] === "1", `…and imports its neighbour helper.py (${a})`);
+  await restart();
+  const info = await ev(`sagebrush.kernel.ask({ importInfo: true }, "python", null).then((m) => JSON.stringify([m?.cwd, m?.path?.[0]]))`);
+  check(info === JSON.stringify(["/Book", "/Book"]), `the session's importInfo, asked at once after a restart, before any run: cwd and sys.path[0] /Book (${info})`);
 
   // ---- a move: the running interpreter keeps its folder; the next start is in the new one
   const moved = await ev(`${W}.rename("/Book/ch.ipynb", "/Book2/ch.ipynb").then((e) => e.path, (e) => "refused: " + (e?.message ?? e))`);
