@@ -6,6 +6,8 @@
 //     of a document that declares beamer before its first render: its stats' mode "cold", not the second pass's
 //     "unchanged");
 //   - an article from /art/ (the same dist): no request for the chunk;
+//   - from /fb/, a beamer document whose class isn't the first thing (\listfiles before it): not fetched early, so its
+//     slides come from needBeamer, the second pass ("unchanged"), with one request;
 //   - /bad/: one request for the chunk (a browser keeps a module that failed to load as failed: no second one), and
 //     each render the document without slides, with the notice that says why and to reload.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-beamer-chunk.mjs
@@ -23,9 +25,9 @@ const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); con
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // (the server: /ok/ and /bad/ are web/dist; under /bad/ the chunk is a 404; each mode's chunk requests counted)
-const asks = { ok: 0, bad: 0, art: 0 };
+const asks = { ok: 0, bad: 0, art: 0, fb: 0 };
 const server = createServer((req, res) => {
-  const m = /^\/(ok|bad|art)\/([^?]*)/.exec(new URL(req.url, "http://x").pathname);
+  const m = /^\/(ok|bad|art|fb)\/([^?]*)/.exec(new URL(req.url, "http://x").pathname);
   if (!m) return res.writeHead(404).end();
   const [, mode, name] = m;
   if (name === "blank.html") return res.writeHead(200, { "Content-Type": "text/html" }).end("<title>beamer chunk</title>");
@@ -70,6 +72,8 @@ try {
   check(ok[0].mode === "cold", "served: the first render in one pass (the chunk fetched before it)", ok.map((r) => r.mode));
   const art = await run("art", "\\documentclass{article}\n\\begin{document}\nPlain.\n\\end{document}\n");
   check(asks.art === 0 && art.every((r) => r.ok && r.html.includes("Plain.")), "an article: no request for the chunk", { asks, art });
+  const fb = await run("fb", "\\listfiles\n" + doc);
+  check(asks.fb === 1 && fb[0].mode === "unchanged" && fb.every((r) => r.ok && r.frames === 1 && r.html.includes('class="slide')), "a beamer class not first: its slides by needBeamer's second pass", { asks, fb: fb.map((r) => [r.mode, r.frames]) });
   const bad = await run("bad");
   check(asks.bad === 1, "a 404: the chunk asked for once, not again on the next render", asks);
   check(bad.every((r) => r.ok && !r.html.includes('class="slide') && r.html.includes("Beamer's slides could not be loaded (") && r.html.includes("reload the page to try again") && r.problems.some((p) => p.startsWith("beamer:"))), "a 404: each render without slides, the notice saying why and to reload", bad);

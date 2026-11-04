@@ -192,15 +192,27 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const r1 = await fail().catch((e) => e.message), r2 = await fail().catch((e) => e.message), r3 = await good(), r4 = await good();
   const again1 = await withBeamer(new Engine().update(beamerDoc), fail, () => null);
   check("beamer-chunk-once", r1 === "x" && r2 === "x" && r3 === "m" && r4 === "m" && loads === 2 && again1.chunks[0].includes("(x); reload the page to try again."), { r1, r2, r3, r4, loads });
-  // (the worker's early fetch: a source that declares beamer, with options, spaces or after other lines, its first
+  // (the worker's early fetch: a source that declares beamer, with options, spaces, after blank or comment lines, its first
   //  \documentclass the one read (a later one is text, here in \verb); not one in a
   //  comment, another class, or beamer only mentioned)
-  const decl = ["\\documentclass{beamer}", "x\n  \\documentclass[handout, 11pt] {beamer}\n", "\\documentclass [t]{beamer}", "\\documentclass{beamer}\n\\begin{document}\nWrite \\verb|\\documentclass{article}| for a paper."].map(declaresBeamer);
-  const notDecl = ["% \\documentclass{beamer}", "\\documentclass{article}\n\\usepackage{beamerarticle}", "\\documentclass{beamerposter}", "beamer", "x % y \\documentclass{beamer}"].map(declaresBeamer);
+  const decl = ["\\documentclass{beamer}", "\n  \\documentclass[handout, 11pt] {beamer}\n", "\\documentclass [t]{beamer}", "\\documentclass{beamer}\n\\begin{document}\nWrite \\verb|\\documentclass{article}| for a paper.",
+    "% a talk\n\n  %% (draft)\n\\documentclass{beamer}", "\ufeff\\documentclass{beamer}",
+    "\\RequirePackage{fix-cm}\n\\PassOptionsToClass{t}{beamer} % for the slides\n\\RequirePackage[l2tabu]{nag}\n\\documentclass{beamer}",
+    "% my talk\n\\documentclass{beamer}", "\\documentclass{beamer} % x"].map(declaresBeamer);
+  // (and daybreak3's, BEAMER641-DECL-1: a declaration quoted or stored before the file's own, or after a \\; anything
+  //  else first (\listfiles), or on \RequirePackage's line, isn't known either: needBeamer's; nor a class beamerx, nor {beamer}
+  //  later after another class (grader S7), nor { beamer }, which TeX's own reading fails (it looks for "beamer .cls"))
+  const notDecl = ["% \\documentclass{beamer}", "\\documentclass{article}\n\\usepackage{beamerarticle}", "\\documentclass{beamerposter}", "beamer", "x % y \\documentclass{beamer}",
+    "\\verb|\\documentclass{beamer}|\n\\documentclass{article}", "\\newcommand{\\x}{%\n\\documentclass{beamer}}\n\\documentclass{article}", "\\\\documentclass{beamer}",
+    "x\\\\\n\\documentclass{beamer}", "\\begin{verbatim}\n\\documentclass{beamer}\n\\end{verbatim}\n\\documentclass{article}", "%\\documentclass{beamer}",
+    "\\listfiles\n\\documentclass{beamer}", "\\RequirePackage{fix-cm}\\documentclass{beamer}", "\\documentclass{beamerx}",
+    "\\verb|\\documentclass{beamer}|", "\\begin{verbatim}\n\\documentclass{beamer}\n\\end{verbatim}", "\\newcommand{\\x}{%\n\\documentclass{beamer}}",
+    "\\\\documentclass{beamer}\n\\documentclass{article}", "\\documentclass{article}\\title{beamer}", "\\documentclass{article}\n\\title{beamer}",
+    "\\documentclass{ beamer }"].map(declaresBeamer);
   check("beamer-chunk-declared", decl.every(Boolean) && !notDecl.some(Boolean), { decl, notDecl });
   // (linear on malformed declarations a MiB long (astra BEAMER641-SCAN-1: the regex before was quadratic in them, over 3 s
   //  at 64 KiB): spaces with no class, an option list never closed, a class brace never closed)
-  const MiB = 1 << 20, bad = ["\\documentclass" + " ".repeat(MiB) + "x", "\\documentclass[" + "a ".repeat(MiB / 2), "\\documentclass  {" + " ".repeat(MiB), " ".repeat(MiB) + "\\documentclass" + " \t".repeat(MiB / 2)];
+  const MiB = 1 << 20, bad = ["\n".repeat(MiB) + "x\\documentclass{beamer}", "%\n".repeat(MiB / 2) + "\\documentclass" + " ".repeat(MiB), "\\documentclass" + " ".repeat(MiB) + "x", "\\documentclass[" + "a ".repeat(MiB / 2), "\\documentclass  {" + " ".repeat(MiB), " ".repeat(MiB) + "\\documentclass" + " \t".repeat(MiB / 2)];
   const t0 = performance.now(), badRes = bad.map(declaresBeamer), scanMs = performance.now() - t0;
   check("beamer-chunk-declared-linear", !badRes.some(Boolean) && scanMs < 250, { badRes, scanMs });
   // (the window: a class past 1 KiB after \documentclass isn't looked for (needBeamer finds it); within it, it is)
