@@ -12,8 +12,11 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 pub mod boundary;
+pub mod chol;
+pub mod cond;
 pub mod gemm;
 pub mod lu;
 pub mod micro;
+pub mod solve;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;

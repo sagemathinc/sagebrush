@@ -736,10 +736,95 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
  },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"mode u32::MAX\", 12, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
  "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"n overflowing\", 5, u32::MAX); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/chol.rs :: refusals :: assert!(potrf_work_len(usize::MAX).is_none() && potrs_work_len(usize::MAX, 1).is_none() && potrs_work_len(4, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/chol.rs :: solves_within_the_oracle :: let an = (0..n).map(|i| (0..n).map(|p| a[i + p * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/chol.rs :: solves_within_the_oracle :: let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/chol.rs :: the_square_root_is_the_correctly_rounded_one :: for x in [0.0, -0.0, 1.0, 2.0, 3.0, 4.0, 0.25, f64::MIN_POSITIVE, f64::MAX, f64::EPSILON, 5e-324, 1e-310, -1.0, -5e-324, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/cond.rs ::  :: const ITMAX: usize = 5; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
+ "engine/nd/src/cond.rs :: argmax_abs :: fn argmax_abs(x: &[f64]) -> usize { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[1.0, -3.0, 3.0]), 1); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[1.0, f64::NAN, 5.0]), 1); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[f64::NAN, 5.0]), 0); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: fn argmax_and_sign_follow_numpy() { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: inv_norm1 :: (0..n).map(|j| asum(&x[j * n..(j + 1) * n])).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: if x[last] == x[j].abs() || it >= ITMAX { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: j = argmax_abs(x); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: let mut j = argmax_abs(x); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: norm1 :: (0..n).map(|j| asum(&a[j * n..(j + 1) * n])).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: the_tie_and_the_starting_vector :: assert_eq!(ITMAX, 5); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
  },
  "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
   "class": "none",
@@ -800,6 +885,31 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/solve.rs :: empty_nonfinite_and_refused :: assert!(solve_work_len(mode, usize::MAX, 1).is_none() && solve_work_len(mode, 1 << 33, 1).is_none() && solve_work_len(mode, 4, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/solve.rs :: eta :: let an = (0..n).map(|i| (0..n).map(|p| a[i + p * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: eta :: let res = (0..n).map(|i| (b[i] - (0..n).map(|p| a[i + p * n] * x[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: nearly_singular_on_each_path :: assert!((rep.rcond - d).abs() <= 2.0 * eps * d, \"diagonal rcond is (1 / max |1/d_i|) / max |d_i|: {rep:?}\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: structure_near_misses :: let want = (0..n).map(|j| (0..n).map(|i| t[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
  },
  "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
   "class": "none",
