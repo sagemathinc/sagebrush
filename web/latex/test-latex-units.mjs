@@ -197,6 +197,64 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
 }
 
+// ---- beamer's furniture (engine/beamer.mjs): what each theme draws around a frame, against TeX Live's beamer. The
+//      words of frame 2's headline, sidebar and footline in the probe deck below are those of TeX's page 2 (pdftotext),
+//      for a theme of each kind (probed 2026-11-04, all 27 themes the chunk knows of, TeX Live 2025)
+{
+  const deck = (pre, frames) => "\\documentclass{beamer}\n" + pre + "\\title[ShortTitle]{LongTitleWords}\n\\author[ShortAuthor]{LongAuthorName}\n" +
+    "\\institute[ShortInst]{LongInstituteName}\n\\date[ShortDate]{LongDateText}\n\\begin{document}\n" + (frames ?? "\\begin{frame}\\titlepage\\end{frame}\n" +
+    "\\section[SecOneShort]{SectionOneLong}\n\\subsection{SubOneA}\n\\begin{frame}{FrameTwo}BodyTwo\\end{frame}\n\\section{SectionTwo}\n" +
+    "\\subsection{SubTwoA}\n\\begin{frame}{FrameThree}BodyThree\\end{frame}\n") + "\\end{document}\n";
+  const html = (src) => new Engine().update(src).chunks.join("");
+  const frameOf = (h, k) => (new RegExp('<section class="slide[^"]*" data-frame="' + k + '"[\\s\\S]*?</section>').exec(h) ?? [""])[0];
+  const words = (h) => (h.replace(/<header class="slide-title">[\s\S]*?<\/header>|<div class="slide-body">[\s\S]*?<\/div><\/div>(?=<div class="slide-foot|<\/section>)/g, " ").replace(/<[^>]+>/g, " ").match(/[A-Za-z0-9]+|\//g) ?? []).sort().join(" ");
+  const tex = { // (TeX's page 2, less FrameTwo and BodyTwo)
+    Madrid: "/ 2 3 ShortAuthor ShortDate ShortInst ShortTitle", AnnArbor: "/ 2 3 SecOneShort ShortAuthor ShortDate ShortInst ShortTitle SubOneA",
+    Antibes: "SecOneShort ShortTitle SubOneA", Berkeley: "SecOneShort SectionTwo ShortAuthor ShortTitle SubOneA SubTwoA",
+    Berlin: "SecOneShort SectionTwo ShortAuthor ShortInst ShortTitle SubOneA", Darmstadt: "SecOneShort SectionTwo SubOneA",
+    Szeged: "SecOneShort SectionTwo ShortInst ShortTitle SubOneA", Frankfurt: "SecOneShort SectionTwo",
+    Warsaw: "SecOneShort SectionTwo ShortAuthor ShortTitle SubOneA", default: "", Rochester: "" };
+  const got = Object.fromEntries(Object.keys(tex).map((t) => [t, words(frameOf(html(deck("\\usetheme{" + t + "}\n")), 2))]));
+  check("beamer-furniture-as-tex", Object.keys(tex).every((t) => got[t] === tex[t]), Object.fromEntries(Object.keys(tex).filter((t) => got[t] !== tex[t]).map((t) => [t, got[t]])));
+  // (the current section and subsection marked; the sidebar's room; an outer theme by name; frame 3 in its own section)
+  const darm = html(deck("\\usetheme{Darmstadt}\n")), berk = html(deck("\\usetheme{Berkeley}\n"));
+  check("beamer-furniture-current", /<span class="cur">SecOneShort<\/span> <span>SectionTwo<\/span>/.test(frameOf(darm, 2)) && /<span>SecOneShort<\/span> <span class="cur">SectionTwo<\/span>/.test(frameOf(darm, 3))
+    && frameOf(berk, 2).startsWith('<section class="slide sbar"') && !frameOf(darm, 2).includes("sbar"), [frameOf(darm, 3).slice(0, 400), frameOf(berk, 2).slice(0, 80)]);
+  const outer = words(frameOf(html(deck("\\useoutertheme{infolines}\n")), 3));
+  check("beamer-furniture-outer-theme", outer === "/ 3 3 SectionTwo ShortAuthor ShortDate ShortInst ShortTitle SubTwoA", outer);
+  // (the title page: the long forms, the short ones only in the furniture; \title[..] once showed "[")
+  const tp = frameOf(html(deck("\\usetheme{Madrid}\n")), 1);
+  check("beamer-short-forms-title-page", /<div class="title">LongTitleWords<\/div>/.test(tp) && tp.includes("LongAuthorName") && tp.includes("LongInstituteName") && tp.includes("LongDateText") && !/>\[</.test(tp) && tp.includes("ShortAuthor (ShortInst)"), tp.slice(0, 600));
+  // (none on a plain frame; none of ours where the document sets the template; [frame number]: the number)
+  const one = "\\begin{frame}[plain]{P}Q\\end{frame}\n\\begin{frame}{R}S\\end{frame}\n";
+  const plain = html(deck("\\usetheme{Warsaw}\n", one));
+  check("beamer-furniture-plain-frame", !/slide-(head|foot)/.test(frameOf(plain, 1)) && /slide-head/.test(frameOf(plain, 2)) && /slide-foot/.test(frameOf(plain, 2)), frameOf(plain, 1).slice(0, 300));
+  const own = html(deck("\\usetheme{Warsaw}\n\\setbeamertemplate{footline}{mine}\n\\setbeamertemplate{headline}{mine too}\n", one)), num = html(deck("\\usetheme{Madrid}\n\\setbeamertemplate{footline}[frame number]\n", one));
+  check("beamer-furniture-own-templates", !/slide-(head|foot)/.test(frameOf(own, 2)) && !own.includes("mine") && words(frameOf(num, 2)) === "2", [frameOf(own, 2).slice(0, 300), words(frameOf(num, 2))]);
+  const side = html(deck("\\usetheme{Berkeley}\n\\setbeamertemplate{sidebar left}{}\n", one));
+  check("beamer-furniture-own-sidebar", !/slide-side|sbar/.test(frameOf(side, 2)), frameOf(side, 2).slice(0, 200));
+  // (starred sections listed too, as TeX's beamer lists them (not in the contents); a short form's markup dropped, as
+  //  TeX's text of it; a frame before any section: every section, none marked. TeX's: "Hidden Sh ort" on both frames)
+  const secs = html(deck("\\usetheme{Frankfurt}\n", "\\begin{frame}{A}a\\end{frame}\n\\section*{Hidden}\n\\section[Sh \\emph{ort}]{Long}\n\\begin{frame}{B}b\\end{frame}\n"));
+  check("beamer-furniture-sections", words(frameOf(secs, 1)) === "Hidden Sh ort" && !frameOf(secs, 1).includes('class="cur"') && /<span>Hidden<\/span> <span class="cur">Sh ort<\/span>/.test(frameOf(secs, 2)), [frameOf(secs, 1).slice(0, 300), frameOf(secs, 2).slice(0, 300)]);
+  // (a section's second subsection: the current one, and split's list of them; a frame before the first: none current)
+  const two = "\\section{A}\n\\begin{frame}{F0}x\\end{frame}\n\\subsection{A1}\n\\begin{frame}{F1}x\\end{frame}\n\\subsection{A2}\n\\begin{frame}{F2}x\\end{frame}\n";
+  const dar2 = html(deck("\\usetheme{Darmstadt}\n", two)), war2 = html(deck("\\usetheme{Warsaw}\n", two));
+  check("beamer-furniture-subsections", words(frameOf(dar2, 1)) === "A" && words(frameOf(dar2, 3)) === "A A2" && words(frameOf(war2, 3)) === "A A1 A2 ShortAuthor ShortTitle"
+    && /<span>A1<\/span> <span class="cur">A2<\/span>/.test(frameOf(war2, 3)), [words(frameOf(dar2, 1)), words(frameOf(dar2, 3)), words(frameOf(war2, 3))]);
+  // (the names read as words, as the page's text and a copy read them (innerText): spaced, not only apart)
+  const text = (h) => h.replace(/<\/?(div|section|header)\b[^>]*>/g, "\n").replace(/<[^>]+>/g, "");   // (blocks a line apart, as innerText)
+  check("beamer-furniture-words-spaced", text(frameOf(darm, 2)).includes("SecOneShort SectionTwo") && text(frameOf(berk, 2)).includes("SubOneA") && !/SubOneASectionTwo|SecOneShortSectionTwo/.test(text(frameOf(berk, 2) + frameOf(war2, 3))) && text(frameOf(war2, 3)).includes("A1 A2")
+    && text(frameOf(html(deck("\\usetheme{Berkeley}\n", two)), 3)).includes("A1 A2"), [text(frameOf(darm, 2)), text(frameOf(berk, 2))]);
+  // (a template set in the document's body: its argument read, not shown)
+  const body = html(deck("\\usetheme{Warsaw}\n", "\\setbeamertemplate{footline}{mine}\n" + one));
+  check("beamer-furniture-template-in-body", !body.includes("mine") && !/slide-foot/.test(frameOf(body, 2)), frameOf(body, 2).slice(0, 300));
+  // (in another class: \usetheme's and \setbeamertemplate's arguments read and dropped, \title[..] as TeX reads it there:
+  //  its argument the "[")
+  const art = new Engine().update("\\documentclass{article}\n\\usetheme{Madrid}\\setbeamertemplate{footline}{F}\n\\title[S]{T}\n\\begin{document}\n\\maketitle X \\only<2>{Y}\n\\end{document}\n").chunks.join("");
+  check("beamer-furniture-other-class", !/Madrid|>F</.test(art) && !/slide-(head|foot)/.test(art) && art.includes("X") && /<div class="title">\[<\/div>/.test(art), art.slice(0, 300));
+}
+
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");

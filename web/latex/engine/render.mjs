@@ -59,7 +59,7 @@ export function buildTree(events, items = []) {
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
       case "be": { const n = { t: "e", env: e.env, user: !!e.user, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "ee": { let i = st.length - 1; while (i > 0 && !(st[i].t === "e" && st[i].env === e.env)) i--; if (i > 0) st.length = i; break; }
-      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, kids: [] }; top().kids.push(n); st.push(n); break; }
+      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
       case "verbenv": {
@@ -853,7 +853,9 @@ class Renderer {
     // resolve references, the table of contents and the title block
     const toc = this.tocHtml(), title = this.titleHtml();
     // eslint-disable-next-line no-control-regex
-    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false)));
+    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false))
+      // (beamer's headline (h), footline (f) or sidebar (s) of frame k: engine/beamer.mjs, once every section is known)
+      .replace(/\u0001B([hfs])(\d+)\u0002/g, (_, w, k) => this.furnish(w, +k)));
     return chunks;
   }
 }
