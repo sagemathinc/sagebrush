@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=140
 // Optional package sets in the browser's worker (web/pkgset-browser.ts;
 // plan-modular-packages-r4 §4.3), in headless Chromium: the worker admits a
 // set the page names ({pkgset: S}) and imports from it, by the asynchronous

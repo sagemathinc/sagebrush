@@ -1,3 +1,4 @@
+// ci: web-artifacts.1 order=20 runner=bun chrome
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
@@ -26,10 +27,10 @@ let server;
 const port = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const origin = `http://127.0.0.1:${port}`;
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-layout-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
 let code = 1;
 try {
-  const cdpPort = await devtoolsPort(profile);
+  const cdpPort = await devtoolsPort(profile, undefined, { child: chrome });
   let targets;
   for (let i = 0; i < 300 && !targets; i++) targets = await fetch(`http://127.0.0.1:${cdpPort}/json`).then((r) => r.json(), () => sleep(100).then(() => undefined));
   const cdp = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);

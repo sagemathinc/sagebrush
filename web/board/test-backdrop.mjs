@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=100
 // A page's backdrop (doc.ts slide and background, board.ts, print.ts): a
 // slide's card is drawn behind its items, its background color on it, the
 // board around it as it was; a page without a card has its color behind the

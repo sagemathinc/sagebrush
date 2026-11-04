@@ -1,3 +1,4 @@
+// ci: checks.3 order=90
 // The comments CLI (scripts/latex-comments.mjs) on real files in a temp folder: the agent's side of the loop (a person
 // comments; the agent lists, edits the .tex with an ordinary write, reattaches, replies, resolves), the lock (LC-T2:
 // held, "locked"; released only by its owner) and two CLI processes at once (both comments kept).

@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=30 runner=bun chrome
 // Sync client step 2b-1 (design/sync-client.md C1) in headless Chromium: the outbox, made by one scan from a
 // durable watermark in one transaction a page, bounded and saying when it is full; decisions; a namespace's
 // fenced lease; the one sender; dropOps held at the watermark.  The cases are in sync-outbox-cases.js.

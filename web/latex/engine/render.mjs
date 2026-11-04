@@ -200,7 +200,7 @@ const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markb
 class Renderer {
   constructor(opts) {
     this.opts = opts || {};
-    this.images = this.opts.images || {}; this.imageRefs = new Set();
+    this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
     this.cls = "article"; this.book = false; this.clsOpt = "";
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
@@ -211,6 +211,8 @@ class Renderer {
     this.labels = new Map(); this.target = { text: "", id: "", kind: "" };
     this.refs = []; this.toc = []; this.fnotes = []; this.bib = new Map(); this.bibN = 0;
     this.meta = { title: null, author: null, date: null, thanks: [] };
+    // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
+    this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
@@ -303,7 +305,7 @@ class Renderer {
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
           const st = stateOf(this.sageStates, n.n, n.it);
-          if (!this.inPreamble) this.sageShown.add(n.n);
+          this.sageSeen(n.n);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           s += mathPart(st, n.it); break;
         }
@@ -335,14 +337,21 @@ class Renderer {
         case "s": this.sec(n, ctx, flow); break;
         case "v": flow.html('<code class="verb">' + esc(n.text) + "</code>", ctx.st); break;
         case "V":
-          if (n.it) { if (!this.inPreamble) this.sageShown.add(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": if (!this.inPreamble) this.sageShown.add(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "S": this.sageSeen(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
         case "err":
+          // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
+          if (n.code === "input") {
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
+            else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
+            break;
+          }
           // (a half-typed argument: what was read, then a note; LaTeX would say "Paragraph ended before \x was complete")
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
@@ -445,7 +454,7 @@ class Renderer {
   sec(n, ctx, flow) {
     if (n.cmd === "footnote") return this.footnote(n, ctx, flow);
     if (n.cmd === "caption") return this.caption(n, ctx, flow);
-    if (n.cmd === "thanks") { this.meta.thanks.push(this.inline(n.kids, ctx)); flow.html("<sup>*</sup>", ctx.st); return; }
+    if (n.cmd === "thanks") { const [h, ks] = this.captured(() => this.inline(n.kids, ctx)); this.meta.thanks.push(h); this.metaSage.thanks.push(...ks); flow.html("<sup>*</sup>", ctx.st); return; }
     const level = SEC_LEVEL[n.cmd];
     const names = ["chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
     let num = "";
@@ -853,6 +862,11 @@ class Renderer {
     if (!this.toc.length) return "";
     return '<div class="toc"><h2>Contents</h2>' + this.toc.map((t) => '<div class="toc' + t.level + '"><a href="#' + t.id + '">' + (t.num ? '<span class="tocnum">' + esc(t.num) + "</span>" : "") + t.title.replace(/<a [^>]*>|<\/a>/g, "") + "</a></div>").join("") + "</div>";
   }
+  // an item rendered: shown, unless in the preamble; inside a title field (\title, \author, \date, \institute, \thanks),
+  // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
+  sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
+  /** fn's result, and the SageTeX items it rendered (a title field's) */
+  captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
     if (!m.title && !m.author) return "";
@@ -883,6 +897,13 @@ class Renderer {
     this.chunkPos = chunks.map((_, k) => flow.rootPos[k] ?? -1);
     // SageTeX S1 (astra4 S1E01-A3): an item the preview never showed (in an argument the renderer drops, the
     // preamble, ...) is never run: it becomes an error (so every later item is blocked), said once at the top
+    // (a title field's items are shown if the title block is printed (a \maketitle or \titlepage chunk) and has that
+    //  field, as titleHtml writes it)
+    // eslint-disable-next-line no-control-regex
+    if (chunks.some((c) => c.includes("\u0001TITLE\u0002")) && (this.meta.title || this.meta.author)) {
+      const m = this.meta, printed = { title: !!m.title, author: !!m.author, institute: !!m.institute, date: m.date === null || !!m.date, thanks: m.thanks.length > 0 };
+      for (const f of Object.keys(printed)) if (printed[f]) for (const k of this.metaSage[f]) this.sageShown.add(k);
+    }
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
     if (hidden.length) this.chunkPos.unshift(-1);
@@ -927,13 +948,13 @@ const CMDS = {
   LaTeXe: function (nodes, i, ctx, flow) { flow.html('<span class="latex">L<span class="a">a</span>T<span class="e">e</span>X&thinsp;2<sub>&epsilon;</sub></span>', ctx.st); return i; },
   TeX: function (nodes, i, ctx, flow) { flow.html('<span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   BibTeX: function (nodes, i, ctx, flow) { flow.html('<span class="sc">Bib</span><span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
-  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.title = this.inline(a, ctx); return j; },
+  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
   author: function (nodes, i, ctx) {
     const [a, j] = this.arg(nodes, i);
     const parts = [[]]; for (const x of a) { if (this.csName(x) === "and") parts.push([]); else parts[parts.length - 1].push(x); }
-    this.meta.author = parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join(""); return j;
+    [this.meta.author, this.metaSage.author] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join("")); return j;
   },
-  date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.date = this.inline(a, ctx); return j; },
+  date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.date, this.metaSage.date] = this.captured(() => this.inline(a, ctx)); return j; },
   maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
   titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
   // (beamer's overlays: every step is shown, so \only, \uncover, \visible and \onslide show their content; \alt its first)
@@ -952,7 +973,7 @@ const CMDS = {
   alert: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="alert">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   structure: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="structure">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   note: function (nodes, i) { const j0 = this.spec(nodes, i); const [, j1] = this.opt(nodes, j0); const [, j] = this.arg(nodes, j1); return j; },
-  institute: function (nodes, i, ctx) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); this.meta.institute = this.inline(a, ctx); return j; },
+  institute: function (nodes, i, ctx) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); [this.meta.institute, this.metaSage.institute] = this.captured(() => this.inline(a, ctx)); return j; },
   tableofcontents: function (nodes, i, ctx, flow) { flow.block("\u0001TOC\u0002"); return i; },
   appendix: function (nodes, i) { this.appendix = true; if (this.book) this.ctr.chapter = 0; else this.ctr.section = 0; return i; },
   url: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const u = this.str(a).replace(/\\([#%&_~$])/g, "$1"); const s = safeUrl(u); flow.html(s ? '<a class="url" href="' + esc(s) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + "</a>" : '<span class="url">' + esc(u) + "</span>", ctx.st); return j; },
@@ -1204,5 +1225,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], inputMisses: R.inputMisses, frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }

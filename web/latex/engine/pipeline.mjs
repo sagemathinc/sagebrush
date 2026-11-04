@@ -2,7 +2,7 @@
 // Used by the Web Worker (worker.mjs) and by the node CLI (tools/render-file.mjs).
 import { coldRun, incremental } from "./incremental-demo.mjs";
 import { render } from "./render.mjs";
-import { setPosEpoch } from "./demo-machine.mjs";
+import { setPosEpoch, setInputResolver } from "./demo-machine.mjs";
 
 const LIMITS = { B0: 1e8, B1: 5e7, k: 1e6, ku: 1e6, safetyWork: 3e8 };   // bounded: a runaway document stops with a bound error
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -16,14 +16,28 @@ export function diffEdit(a, b) {   // the single edit turning a into b (common p
   return { start: p, end: a.length - s, text: b.slice(p, b.length - s) };
 }
 
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+// (a cheap fingerprint of an included file's text, for noticing that it changed)
+function hash32(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); }
+
 export class Engine {
-  constructor(opts = {}) { this.opts = opts; this.prev = null; this.text = null; this.epoch = 0; }
+  constructor(opts = {}) { this.opts = opts; this.prev = null; this.text = null; this.epoch = 0; this.inputs = null; this.inputsKey = ""; }
   // sage: SageTeX S1's item states from the page's executor ({states}); kept until the next one is given
-  update(text, { cold = false, sage } = {}) {
+  // inputs: the files \input and \include read ({files: Map key -> text, resolve(name) -> {key} | {why}}, the host's:
+  // the page's from the workspace, the CLI's from its folder); kept until the next is given; when they change, the
+  // document is expanded again from the start (an included file's macros apply everywhere after it)
+  update(text, { cold = false, sage, inputs } = {}) {
     if (sage !== undefined) this.opts = Object.assign({}, this.opts, { sage });
+    if (inputs !== undefined) {
+      // (the host's version of what it read changes whenever any of it does; without one, the files' fingerprints)
+      const key = !inputs ? "" : inputs.version !== undefined ? "v" + inputs.version : JSON.stringify([...inputs.files].map(([k, v]) => [k, v.length, hash32(v)]));
+      if (key !== this.inputsKey) { this.inputsKey = key; cold = true; }
+      this.inputs = inputs;
+    }
     const t0 = now();
     setPosEpoch(++this.epoch);
-    const files = new Map([["main.tex", text]]);
+    setInputResolver(this.inputs ? this.inputs.resolve : null);
+    const files = new Map([["main.tex", text], ...(this.inputs ? [...this.inputs.files].filter(([k]) => k !== "main.tex") : [])]);
     let res, mode, inc = null;
     const edit = this.prev && this.text !== null ? diffEdit(this.text, text) : null;
     if (!cold && this.prev && this.prev.outcome === "ok" && edit) {
@@ -34,17 +48,24 @@ export class Engine {
     // every earlier version through the resumed machine's checkpoint callback
     res.m = null;
     const t1 = now();
-    const events = [];
+    const events = [], inputRefs = new Set();
     // (source positions in events reused from the last run, from units the edit didn't re-expand: those past the edit
     //  move by its length change; markers made in this run are already right)
     const shift = edit && mode !== "cold" ? { end: edit.end, d: edit.text.length - (edit.end - edit.start) } : null;
     for (const u of res.units) if (u.ev) for (let k = 0; k < u.ev.length; k++) {
       const e = u.ev[k];
       if (typeof e !== "number" && e.k === "pos" && e.ep !== this.epoch) { if (shift && e.at >= shift.end) e.at += shift.d; e.ep = this.epoch; }
+      if (typeof e !== "number" && e.k === "inref" && inputRefs.size < 256) inputRefs.add(e.name);
       events.push(e);
     }
     const out = render(events, res.intern, this.opts);
+    setInputResolver(null);
     const t2 = now();
+    // (an \input in the preamble that wasn't read: a note at the top, as nothing of the preamble is shown)
+    if (out.inputMisses?.length) {
+      out.chunkPos.unshift(-1);
+      out.chunks.unshift('<div class="bounderr inputmiss">Not read: ' + out.inputMisses.map((m) => "\\input{" + escHtml(m.name) + "}: " + escHtml(m.why)).join("; ") + ".</div>");
+    }
     if (res.outcome !== "ok") {
       const why = { "E-BOUND-TIME": "it ran over the 2.5 s time limit (a macro that never stops expanding?)", "E-BOUND-OUTPUT": "it produced too much output (a macro that never stops expanding?)", "E-BOUND-WORK": "it exceeded the work budget (a macro that never stops expanding?)" }[res.outcome] || "a bound was exceeded";
       out.chunkPos.unshift(-1);
@@ -52,7 +73,7 @@ export class Engine {
     }
     this.prev = res; this.text = text;
     return {
-      chunks: out.chunks, chunkPos: out.chunkPos, sageItems: out.sageItems, sageStates: out.sageStates || [], imageRefs: out.imageRefs || [],
+      chunks: out.chunks, chunkPos: out.chunkPos, sageItems: out.sageItems, sageStates: out.sageStates || [], imageRefs: out.imageRefs || [], inputRefs: [...inputRefs],
       frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer,
       stats: Object.assign({}, out.stats, {
         mode, outcome: res.outcome, expandMs: +(t1 - t0).toFixed(1), renderMs: +(t2 - t1).toFixed(1), units: res.units.length, events: events.length,

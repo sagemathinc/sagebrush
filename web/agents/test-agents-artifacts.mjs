@@ -1,3 +1,5 @@
+// ci: web-artifacts.1 order=10 runner=bun chrome
+// ci: web-artifacts.2 order=10 runner=bun chrome env=AGENTS_LATEX=1
 // Notebook and LaTeX artifacts in the agents chat (web/agents; the artifacts plan r2 + r2.1), end to end in headless
 // Chromium: the built page (dist/agents, SAGEBRUSH_AGENTS=1), served cross-origin isolated by web/serve.py on a
 // loopback port, paired as a person pairs it (a ?pair= link, Connect, the grant dialog) with a stand-in for
@@ -121,9 +123,9 @@ const stamps = [];
 const stamp = (what) => stamps.push(`${what} +${Date.now() - t0}ms`);
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-art-"));
 // (--password-store=basic: no OS keyring, whose absence can stall Chrome's first load; c1's F1, the grader's hypothesis)
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
 stamp("spawned");
-const cdpPort = await devtoolsPort(profile);
+const cdpPort = await devtoolsPort(profile, undefined, { child: chrome });
 stamp("devtools port");
 let targets;
 for (let i = 0; i < 300; i++) {

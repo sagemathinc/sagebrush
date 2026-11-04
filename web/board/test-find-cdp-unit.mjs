@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=10
 // Negative controls for the waits that used to leave test-find silent.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";

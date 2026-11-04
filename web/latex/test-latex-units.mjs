@@ -1,10 +1,11 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The LaTeX editor's pure parts, without a browser: the bytes <-> text rules (save.ts), the image resolver and sniffer
 // (images.ts), the chunk splitter (split.ts), the highlighter's tokenizer (highlight.ts), the flag (boot.ts) and the
 // request gate (gate.ts); and the renderer's unclosed formulas (engine/render.mjs, KaTeX stubbed).
 //   bun web/latex/test-latex-units.mjs
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
-import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
-import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes } from "./split.ts";
+import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
+import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
@@ -52,15 +53,32 @@ check("open-invalid-utf8-binary", openBytes(new Uint8Array([0x61, 0xff, 0x62])).
 check("open-over-4MiB-no-save", (() => { const o = openBytes(u8("y".repeat(EDIT_MAX + 1))); return o.kind === "text" && !o.saveable; })(), null);
 check("encode-never-prepends-bom", same(encodeText("abc", "\n"), u8("abc")) && same(encodeText("\ufeffabc", "\n"), u8(BOM, "abc")), null);
 
-// ---- images.ts: the resolver (inside the opened file's folder only) and the sniffer
+// ---- images.ts: the resolver (as TeX: the file's folder, then \graphicspath's; up with ../, never above the top) and the sniffer
 const doc = "/papers/a/main.tex";
 const ok = (arg) => { const r = imageCandidates(arg, doc); return r.ok ? r.paths : r.why; };
 check("img-plain", JSON.stringify(ok("fig.png")) === JSON.stringify(["/papers/a/fig.png"]), ok("fig.png"));
 check("img-no-ext", ok("fig").length === 7 && ok("fig")[0] === "/papers/a/fig" && ok("fig")[1] === "/papers/a/fig.png", ok("fig"));
 check("img-subfolder", ok("img/x.svg")[0] === "/papers/a/img/x.svg", ok("img/x.svg"));
-for (const [n, a] of [["escape", "../fig.png"], ["abs", "/abs.png"], ["url", "https://x/y.png"], ["pct", "fig%2f..%2fx.png"], ["pct-dot", "%2e%2e/x.png"], ["backslash", "a\\b.png"], ["empty-seg", "a//b.png"], ["dot", "./x.png"], ["nul", "a\u0000b"], ["data", "data:image/png;base64,AAAA"]])
+for (const [n, a] of [["url", "https://x/y.png"], ["pct", "fig%2f..%2fx.png"], ["pct-dot", "%2e%2e/x.png"], ["backslash", "a\\b.png"], ["above-top", "../../../x.png"], ["nul", "a\u0000b"], ["data", "data:image/png;base64,AAAA"]])
   check("img-refused-" + n, typeof ok(a) === "string", ok(a));
-check("img-prefix-sibling", typeof imageCandidates("../ab/x.png", "/papers/a/main.tex") === "object" && !imageCandidates("../ab/x.png", "/papers/a/main.tex").ok, null);
+// (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top: TeX names it ../images.png)
+check("img-parent", JSON.stringify(ok("../fig.png")) === JSON.stringify(["/papers/fig.png"]) && ok("../../top.png")[0] === "/top.png", [ok("../fig.png"), ok("../../top.png")]);
+// (William, Nov 2: a leading "/" is the workspace's top folder, never the real filesystem's; searched alone, as TeX does)
+check("img-leading-slash", JSON.stringify(ok("/abs.png")) === JSON.stringify(["/abs.png"]) && ok("/d/x")[0] === "/d/x" && imageCandidates("/x.png", doc, ["figs/"]).searched.join() === "/"
+  && imageCandidates("/x.png", "/c/w/a.tex", [], "/c/w").paths[0] === "/c/w/x.png" && typeof ok("/../x.png") === "string" && !imageCandidates("/../x.png", "/c/w/a.tex", [], "/c/w").ok, [ok("/abs.png"), imageCandidates("/x.png", "/c/w/a.tex", [], "/c/w")]);
+check("img-leading-slash-hint", notFoundWhy("/ex/cv.tex", ["/"], [], false, "/images.png") === "not found in the top folder (a leading / is the workspace's top folder)", notFoundWhy("/ex/cv.tex", ["/"], [], false, "/images.png"));
+check("img-dot-and-sibling", ok("./x.png")[0] === "/papers/a/x.png" && ok("a//b.png")[0] === "/papers/a/a/b.png" && ok("../ab/x.png")[0] === "/papers/ab/x.png", [ok("./x.png"), ok("../ab/x.png")]);
+{
+  const r = imageCandidates("fig", doc, ["figs/", "../shared/", "/abs/", "../../../../up/"]);
+  check("img-graphicspath", r.ok && r.paths[0] === "/papers/a/fig" && r.paths.includes("/papers/a/figs/fig.png") && r.paths.includes("/papers/shared/fig.png") && JSON.stringify(r.searched) === JSON.stringify(["/papers/a", "/papers/a/figs", "/papers/shared"]), r);
+  const gp = graphicsPathOf("\\documentclass{article}\n% \\graphicspath{{no/}}\n\\graphicspath{ {figs/} {../shared/} }\n\\begin{document}\n\\graphicspath{{late/}}\n");
+  check("graphicspath-of", JSON.stringify(gp) === JSON.stringify(["figs/", "../shared/"]) && graphicsPathOf("\\begin{document}x").length === 0, gp);
+  const w = notFoundWhy("/LaTeX examples/cv.tex", ["/LaTeX examples"], ["/images.png"]);
+  check("img-not-found-why", w === 'not found in "LaTeX examples/"; it is in the top folder: write {../images.png}, or move the file into "LaTeX examples/"' && notFoundWhy("/cv.tex", ["/"]) === "not found in the top folder"
+    && notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true) === 'not found in this file\'s folder, "figs/"; it is in "../": write {../x.png}, or move the file into this file\'s folder', [w, notFoundWhy("/p/a/cv.tex", ["/p/a", "/p/a/figs"], ["/p/x.png"], true)]);
+  check("not-found-top-relative", notFoundWhy("/ex/cv.tex", ["/ex"], ["/top.svg"], true) === 'not found in this file\'s folder; it is in "../": write {../top.svg}, or move the file into this file\'s folder', notFoundWhy("/ex/cv.tex", ["/ex"], ["/top.svg"], true));
+  check("relative-path", relativePath("/a/b", "/a/c/x.png") === "../c/x.png" && relativePath("/", "/x.png") === "x.png" && relativePath("/a", "/a/x.png") === "x.png", null);
+}
 const png = u8([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13], "IHDR", [0, 0, 0x10, 0, 0, 0, 0x10, 0, 8, 6, 0, 0, 0]);
 check("sniff-png", (() => { const s = sniffImage(png); return s.ok && s.mime === "image/png" && s.pixels === 4096 * 4096; })(), sniffImage(png));
 check("sniff-svg", sniffImage(u8('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>')).ok, null);
@@ -94,6 +112,26 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   const whole = splitChunk(slide(4000)), big = splitChunk(slide(40000));
   check("split-slide-kept-whole", whole.length === 1 && whole[0] === slide(4000) && bytes(slide(4000)) > 32 * 1024, bytes(slide(4000)));
   check("split-slide-over-max-placeholder", big.length === 1 && /this slide is too large/.test(big[0]) && bytes(slide(40000)) > PIECE_MAX, bytes(slide(40000)));
+  // (the placeholder is still that slide, its own open tag: Present and the tools count every frame; and the warning
+  //  latex check gives, at the chunk's place, with the size and the limit)
+  const open = slide(0).slice(0, slide(0).indexOf("<div"));
+  const told = []; const big2 = splitChunk(slide(40000), (why, size) => told.push(tooLargeProblem(why, size, 61)));
+  check("split-slide-placeholder-is-the-slide", big2.length === 1 && big2[0].startsWith(open) && big2[0].endsWith("</section>") && /class="placeholder toolarge"/.test(big2[0]), big2[0].slice(0, 300));
+  check("split-too-large-told", told.length === 1 && told[0].kind === "toolarge" && told[0].at === 61 && /^this slide is too large \(\d+ KiB, over 128 KiB\)$/.test(told[0].name), told);
+  // (a \sageplot's data: URL over PIECE_MAX: not counted, the slide kept whole, nothing told; the same in a paragraph)
+  const plot = '<img class="sageplot" alt="a plot" src="data:image/svg+xml;base64,' + "A".repeat(PIECE_MAX * 2) + '" style="width:50%">';
+  const ps2 = slide(0).replace('<div class="slide-body">', '<div class="slide-body">' + plot), told2 = [];
+  const kept = splitChunk(ps2, () => told2.push(1));
+  check("split-slide-data-url-not-counted", bytes(ps2) > 2 * PIECE_MAX && kept.length === 1 && kept[0] === ps2 && told2.length === 0, { n: bytes(ps2), pieces: kept.length, told: told2.length });
+  const pp = '<div class="p">a ' + plot + " b</div>";
+  check("split-paragraph-data-url-not-counted", (() => { const t = splitChunk(pp); return t.length === 1 && t[0] === pp; })(), null);
+  // (but the markup still counts: the same plot with a slide too large otherwise, a placeholder; and CHUNK_MAX counts it all)
+  check("split-slide-data-url-markup-still-counted", /this slide is too large/.test(splitChunk(slide(40000).replace('<div class="slide-body">', '<div class="slide-body">' + plot))[0]), null);
+  check("split-data-url-over-chunk-max-placeholder", (() => { const t = splitChunk('<div class="p"><img src="data:image/png;base64,' + "B".repeat(CHUNK_MAX) + '"></div>'); return t.length === 1 && /too large/.test(t[0]); })(), null);
+  const over = slide(0).replace('<div class="slide-body">', '<div class="slide-body"><div class="p">' + "q ".repeat(CHUNK_MAX / 2 + 10) + "</div>"), told3 = [];
+  const ov = splitChunk(over, (why, size) => told3.push(tooLargeProblem(why, size, 5)));
+  check("split-slide-over-chunk-max-still-the-slide", bytes(over) > CHUNK_MAX && ov.length === 1 && ov[0].startsWith(open) && ov[0].endsWith("</section>") && /this slide is too large/.test(ov[0]) && /over 2048 KiB/.test(told3[0]?.name ?? ""), { head: ov[0].slice(0, 200), told3 });
+  check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
 
@@ -326,7 +364,7 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
     const res = { id: ex.id, outcome: r.stats.outcome, unknown: r.stats.unknownCommands, notFinished: (h.match(/not finished/g) || []).length, sage: r.sageItems.length, images: r.imageRefs, missing };
     record.push(res);
     let ok = res.outcome === "ok" && res.unknown === 0 && res.notFinished === 0 && missing.length === 0;
-    if (ex.id === "sagetex") ok &&= res.sage === 6;
+    if (ex.id === "sagetex") ok &&= res.sage === 8;
     if (ex.id === "figure") {
       const png = ex.files.find(([n]) => n === "plot.png");
       const sn = png && sniffImage(Uint8Array.from(atob(png[1]), (c) => c.charCodeAt(0)));
@@ -394,6 +432,45 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   // (and the renderer's own boxes use the prefixed classes)
   const h = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\rlap{a}\\llap{b}\\fbox{c}\\framebox[2cm]{d}\n\\end{document}\n").chunks.join("");
   check("tex-boxes-prefixed", /class="tex-rlap"/.test(h) && /class="tex-llap"/.test(h) && /class="tex-fbox"/.test(h) && !/class="(fbox|rlap|llap)[ "]/.test(h), h.slice(0, 600));
+}
+
+// ---- \input and \include (William's L4, Nov 2: silently ignored, which broke his shared macros file): found as TeX
+// finds them (inputs.ts, images.ts texCandidates), read from the host's snapshot; macros from them apply everywhere
+// after; a file not read is a visible note, in the body or (from the preamble) at the top; a cycle stops with a note
+{
+  const { engineInputs, admitInput, INPUT_BOUNDS } = await import("./inputs.ts");
+  const { texCandidates } = await import("./images.ts");
+  const tc = texCandidates("macros", "/ex/doc.tex"), tc2 = texCandidates("../shared/defs.tex", "/ex/doc.tex"), tc3 = texCandidates("/top", "/ex/doc.tex");
+  check("tex-candidates", tc.ok && tc.paths.join() === "/ex/macros.tex,/ex/macros" && tc2.ok && tc2.paths.join() === "/shared/defs.tex" && tc3.ok && tc3.paths[0] === "/top.tex" && !texCandidates("../../x", "/ex/doc.tex").ok, [tc, tc2, tc3]);
+  const enc = (t) => new TextEncoder().encode(t);
+  const known = new Map([
+    ["/shared/macros.tex", admitInput(enc("\\newcommand{\\RR}{\\mathbb{R}}\n\\input{../shared/more}\n"), 0, 0)],
+    ["/shared/more.tex", { text: "\\newcommand{\\NN}{\\mathbb{N}}\n" }],
+    ["/ex/body.tex", { text: "Included body text $\\NN$.\n" }],
+    ["/ex/loop.tex", { text: "x\\input{loop}" }],
+    ["/ex/nope.tex", { absent: true }], ["/ex/nope", { absent: true }],
+    ["/ex/gone.tex", { absent: true }], ["/ex/gone", { absent: true }],
+    ["/ex/big.tex", { why: "too large" }],
+  ]);
+  const ei = engineInputs("/ex/doc.tex", known);
+  const doc = "\\documentclass{article}\n\\input{../shared/macros}\n\\input{gone}\n\\begin{document}\nReals $\\RR$.\n\\include{body}\n\\input{nope}\n\\input{big}\n\\input{loop}\n\\end{document}\n";
+  const r = new Engine().update(doc, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const h = r.chunks.join("");
+  check("input-macros-apply", /\\mathbb ?\{R\}/.test(h) && h.includes("Included body text") && /\\mathbb ?\{N\}/.test(h), h.slice(0, 900));
+  check("input-missing-visible", h.includes("[input: nope: not found in &quot;ex/&quot;]") && h.includes("[input: big: too large]") && /Not read: \\input\{gone\}: not found in &quot;ex\/&quot;/.test(h), h.slice(0, 900));
+  check("input-cycle-stopped", h.includes("an \\input cycle: stopped 16 deep") && r.stats.outcome === "ok", { outcome: r.stats.outcome, h: h.slice(-600) });
+  check("input-problems", r.problems.some((p) => p.kind === "input" && p.name === "nope") && r.problems.some((p) => p.kind === "input" && p.name === "gone"), r.problems);
+  check("input-refs", ["../shared/macros", "../shared/more", "body", "nope", "gone"].every((n) => r.inputRefs.includes(n)), r.inputRefs);
+  // (what the host reads next: an unknown candidate, for each name, up to the first that might be it)
+  const e2 = engineInputs("/ex/doc.tex", new Map([["/ex/a.tex", { absent: true }]]));
+  check("input-wanted", JSON.stringify(e2.wanted(["a", "b", "../x/c.tex", "doc"])) === JSON.stringify(["/ex/a", "/ex/b.tex", "/x/c.tex"]) && e2.resolve("doc").key === "main.tex" && e2.resolve("b").why === "not read yet", e2.wanted(["a", "b", "../x/c.tex", "doc"]));
+  check("input-admit", "why" in admitInput(new Uint8Array([0, 1]), 0, 0) && admitInput(enc("x"), INPUT_BOUNDS.total, 0).why === "too large" && /too many/.test(admitInput(enc("x"), 0, INPUT_BOUNDS.files).why), null);
+  // (the same text, the inputs changed: expanded again from the start, with the new macro)
+  const k2 = new Map(known); k2.set("/shared/more.tex", { text: "\\newcommand{\\NN}{\\mathbb{Z}}\n" });
+  const ei2 = engineInputs("/ex/doc.tex", k2), eng = new Engine();
+  eng.update(doc, { inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const r2 = eng.update(doc, { inputs: { files: ei2.files, resolve: ei2.resolve, version: 2 } });
+  check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

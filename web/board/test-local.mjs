@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=50
 // Boards of this browser's own (web/board/page.ts, mount.ts), in headless
 // Chromium: ?new=MODE makes a blank board in that language, opened in Edit,
 // at ?doc=local:ID and listed; ?recent=MODE opens that language's latest (a

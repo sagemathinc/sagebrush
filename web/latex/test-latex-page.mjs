@@ -1,3 +1,4 @@
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -752,10 +753,22 @@ try {
     check(rows && mid && mid.opened.length === 1 && mid.opened[0].includes("?tex=" + midFid) && mid.board.startsWith("/board") && txt && txt.preview && txt.board.startsWith("/board") && left && editor,
       "U1: with a board open, a .tex file in the file panel opens the LaTeX editor (a click here, a middle-click in a new tab); another file still previews, the board kept", { rows, mid, txt, left, editor });
   }
-  // on, by the URL: no LaTeX file fetched before a .tex is opened
-  requests.length = 0;
+  // on, by the URL: no LaTeX file fetched before a .tex is opened. Counted from a blank page (T568-EAGER-FETCH-RACE): the
+  // case before leaves the editor open, and its worker's script could still be asked for after the list was cleared and
+  // before the next navigation, counted against the new page; at about:blank the editor's document and worker are gone
+  const fromBlank = async () => { await send("Page.navigate", { url: "about:blank" }); await until(`location.href === "about:blank"`, 10000); await sleep(200); requests.length = 0; };
+  await fromBlank();
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
+  // (its control: the same page with an eager fetch of a LaTeX file added fails that check)
+  {
+    await fromBlank();
+    const eager = await send("Page.addScriptToEvaluateOnNewDocument", { source: `if (location.protocol.startsWith("http")) fetch("/sagebrush-latex-worker.js").catch(() => {});` });
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
+    const seen = latexFetches();
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: eager.identifier });
+    check(seen.length > 0, "…its control: a page that fetches a LaTeX file eagerly is caught by the same count", seen);
+  }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
   // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
   // the new document, whose timeOrigin is after the mark, and only after the delay)
@@ -863,15 +876,37 @@ try {
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
   check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
 
-  // ---- images: in the folder, from a blob: URL; outside, refused with its reason
+  // ---- images as TeX finds them (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top, "not
+  // found"): in the folder, in a parent (../), in a \graphicspath folder, each from a blob: URL; a file of that name
+  // elsewhere named without ../: where it is and what to write; missing everywhere: the folders searched; above the top
   const png = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15, 4, 0, 9, 251, 3, 253, 227, 85, 242, 156, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
   await go(base + "?latex=1"); await until(`!!${W}`, 60000);
   await mk("/img/fig.png", png);
   await mk("/other.png", png);
-  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\end{document}\n"));
+  await mk("/img/figs/deep.png", png);
+  const fi = await mk("/img/doc.tex", enc("\\documentclass{article}\n\\graphicspath{{figs/}}\n\\begin{document}\n\\includegraphics{fig}\n\\includegraphics{../other.png}\n\\includegraphics{deep}\n\\includegraphics{other.png}\n\\includegraphics{nowhere.png}\n\\includegraphics{../../../up.png}\n\\includegraphics{/other.png}\n\\includegraphics{/nope.png}\n\\end{document}\n"));
   await open(fi);
-  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 15000), "an image in the folder: shown from a blob: URL");
-  check(await until(`document.querySelector(".tex-preview").textContent.includes("[image: ../other.png: outside this folder]")`, 15000), "an image outside the folder: refused, with its reason");
+  check(await until(`[...document.querySelectorAll(".tex-preview img.graphic")].filter((i) => i.src.startsWith("blob:")).map((i) => i.alt).sort().join() === "../other.png,/other.png,deep,fig"`, 15000),
+    "images in the folder, in a parent (../), in a \\graphicspath folder and from the workspace's top (/other.png): each shown from a blob: URL", await ev(`[...document.querySelectorAll(".tex-preview img.graphic")].map((i) => i.alt)`));
+  const ph = await ev(`[...document.querySelectorAll(".tex-preview .imgph")].map((e) => e.textContent)`);
+  check(ph.includes('[image: other.png: not found in "img/", "img/figs/"; it is in the top folder: write {../other.png}, or move the file into "img/"]'), "a file of that name in a parent, named without ../: the folders searched, where it is and what to write", ph);
+  check(ph.includes('[image: nowhere.png: not found in "img/", "img/figs/"]') && ph.includes("[image: ../../../up.png: above the workspace's top folder]")
+    && ph.includes("[image: /nope.png: not found in the top folder (a leading / is the workspace's top folder)]"), "…missing everywhere: the folders searched (a leading /: the workspace's top); above the top folder: refused, with its reason", ph);
+
+  // ---- \input and \include (William's L4, Nov 2: silently ignored, which broke his shared macros file): a macros file
+  // in another folder (../), its macros applied; \include's text shown; a missing file a gray tag naming where it was
+  // looked for; the macros file changed elsewhere (another tab, an agent): the preview shows the new macro
+  {
+    await mk("/shared/macros.tex", enc("\\newcommand{\\greet}{Hello from the macros file}\n"));
+    await mk("/paper/part.tex", enc("Included part text.\n"));
+    const fp = await mk("/paper/main.tex", enc("\\documentclass{article}\n\\input{../shared/macros}\n\\begin{document}\n\\greet.\n\\include{part}\n\\input{missing}\n\\end{document}\n"));
+    await open(fp);
+    const shown = await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello from the macros file") && document.querySelector(".tex-preview").textContent.includes("Included part text.")`, 15000);
+    check(shown, "\\input{../shared/macros}: its macro applied; \\include{part}: its text shown", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+    check(await until(`document.querySelector(".tex-preview").textContent.includes('[input: missing: not found in "paper/"]')`, 15000), "a missing \\input: a gray tag naming where it was looked for", await ev(`[...document.querySelectorAll(".tex-preview .errchip")].map((e) => e.textContent)`));
+    await ev(`${W}.write("/shared/macros.tex", new TextEncoder().encode("\\\\newcommand{\\\\greet}{Changed elsewhere}\\n")).then(() => 1)`);
+    check(await until(`document.querySelector(".tex-preview").textContent.includes("Changed elsewhere.")`, 15000), "the macros file changed elsewhere: the preview shows the new macro", await ev(`document.querySelector(".tex-preview").textContent.slice(0, 200)`));
+  }
 
   // ---- images under overlapping renders (astra3 i1c01 A3-1): the first image read held (the test build's hook),
   // then an edit makes a second current render, which asks for the same names again; released, each name is read
@@ -924,10 +959,18 @@ try {
   const cjk = "\\documentclass{article}\n\\begin{document}\n" + "中文字体 ".repeat(150000) + "\n\\end{document}\n";
   const fc = await mk("/t/cjk.tex", enc(cjk));
   await open(fc);
-  const cjkOk = await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
-  const cj = await ev(`(() => { const d = document.querySelector(".tex-preview").dataset; const pcs = [...document.querySelectorAll(".tex-preview .pc")]; const enc = new TextEncoder(); return { pcs: pcs.length, utf8: pcs.reduce((a, p) => a + enc.encode(p.innerHTML).length, 0), units: pcs.reduce((a, p) => a + p.innerHTML.length, 0), stepBytesMax: +d.stepBytesMax, stops: JSON.parse(d.stops) }; })()`);
-  console.log("non-ASCII patch (UTF-8 bytes, UTF-16 units, the most bytes in one step, the stops):", JSON.stringify(cj));
-  check(cjkOk && cj.utf8 > 3 * 512 * 1024 && cj.utf8 > 2 * cj.units && cj.stepBytesMax > 0 && cj.stepBytesMax <= 512 * 1024 && cj.stops.bytes > 0, "non-ASCII: no patch step over 512 KiB of UTF-8, the byte stop ending steps", cj);
+  // (the case is the patch, so its bound is the patch's: the wait for it starts once the worker's reply is in, the
+  // editor's tex-parse-done mark. Before that the page lays out the 1.95 MB one-line source, one native main-thread
+  // task of about 9 s on a build box (measured, Nov 3: "(program)" in a CPU profile, one long task), which grows with
+  // the host's load: 21-24 s at 2x CPU throttling, 52-57 s at 4x, against the patch itself in 0.2-0.5 s with no step
+  // over 9 ms. Whatever the case sees is returned, and the check fails with it, never a throw on a missing field)
+  const parsedIn = await (async () => { const t = Date.now(); return (await until(`performance.getEntriesByType("mark").some((m) => m.name === "tex-parse-done")`, 180000)) ? Date.now() - t : null; })();
+  const cjkOk = parsedIn !== null && await until(`document.querySelectorAll(".tex-preview .pc").length > 10 && !!document.querySelector(".tex-preview").dataset.stops`, 60000);
+  const cj = await ev(`(() => { const p = document.querySelector(".tex-preview"), d = p?.dataset ?? {}; const pcs = p ? [...p.querySelectorAll(".pc")] : []; const enc = new TextEncoder(); let stops = null; try { stops = JSON.parse(d.stops); } catch {}
+    return { pcs: pcs.length, utf8: pcs.reduce((a, p) => a + enc.encode(p.innerHTML).length, 0), units: pcs.reduce((a, p) => a + p.innerHTML.length, 0), stepBytesMax: +(d.stepBytesMax ?? 0), stops, patchMaxMs: d.patchMaxMs ?? null,
+      status: document.querySelector(".tex-status")?.textContent ?? "", marks: performance.getEntriesByType("mark").filter((m) => /^tex-/.test(m.name)).map((m) => m.name + "@" + Math.round(m.startTime)).slice(-8) }; })()`);
+  console.log("non-ASCII patch (reply after, UTF-8 bytes, UTF-16 units, the most bytes in one step, the stops):", JSON.stringify({ parsedIn, ...cj, marks: undefined }));
+  check(cjkOk && cj.utf8 > 3 * 512 * 1024 && cj.utf8 > 2 * cj.units && cj.stepBytesMax > 0 && cj.stepBytesMax <= 512 * 1024 && cj.stops?.bytes > 0, "non-ASCII: no patch step over 512 KiB of UTF-8, the byte stop ending steps", { parsedIn, ...cj });
 
   // ---- a large paragraph and list: pieces of at most 128 KiB, never two versions at once
   const para = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(200000) + "\n\n\\begin{itemize}\n" + "\\item list item text\n".repeat(22000) + "\\end{itemize}\n\\end{document}\n";
@@ -1244,18 +1287,135 @@ try {
         const rel = right ? rels.find((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING) : rels.findLast((m) => vbox.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_PRECEDING);
         if (!rel) return { rel: null };
         const s = r(inner.firstElementChild ?? inner), e = r(rel);
-        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1) };
+        // (the share of the slash's height inside the relation's: at least half, William's DEV report, Nov 3)
+        const over = Math.max(0, Math.min(s.bottom, e.bottom) - Math.max(s.top, e.top)) / Math.max(1e-6, s.bottom - s.top);
+        return { rel: rel.textContent, dy: +(cy(s) - cy(e)).toFixed(1), dx: +(cx(s) - cx(e)).toFixed(1), h: +(e.bottom - e.top).toFixed(1), w: +(e.right - e.left).toFixed(1), over: +over.toFixed(2) };
       });
       // (a lap's text against the paragraph text beside it: the same line box, by the bottom of their glyph boxes)
       const textBeside = (o, after) => { const n = after ? o.nextSibling : o.previousSibling, g = document.createRange(); g.setStart(n, after ? 0 : n.length - 2); g.setEnd(n, after ? 2 : n.length); return g.getBoundingClientRect(); };
-      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o.firstElementChild, a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
+      const lap = (c) => { const o = document.querySelector(".tex-preview ." + c), i = o?.firstElementChild; if (!o || !i) return null; const a = r(o), b = r(i), t = textBeside(o, c === "tex-rlap"), gl = document.createRange(); gl.selectNodeContents(i); const gb = gl.getBoundingClientRect();
         return { start: +(b.left - a.left).toFixed(1), end: +(b.right - a.left).toFixed(1), dBottom: +(gb.bottom - t.bottom).toFixed(1), w: +(b.right - b.left).toFixed(1) }; };
       return { slashes, rlap: lap("tex-rlap"), llap: lap("tex-llap") };
     })()`);
-    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
-      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it`, g.slashes);
-    check(Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
+    check(g.slashes.length >= 5 && g.slashes.every((s) => s.rel && s.over >= 0.5 && Math.abs(s.dy) <= s.h * 0.25 && Math.abs(s.dx) <= s.w * 0.5),
+      `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it: at least half its height inside the relation's`, g.slashes);
+    check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
+  }
+  // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
+  // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
+  // preview toggle (and after File ▾, where the page has it); never on open; a Run made stale by opening another file
+  // in place writes nothing; without the runner (?runner=0 on loopback), it says why and runs nothing.
+  {
+    const RUN_DOC = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nvar('t')\nx = 2^10\n\\end{sagesilent}\nWe have $x = \\sage{x}$ and $\\int_0^1 t^2\\,dt = \\sage{integrate(t^2, t, 0, 1)}$.\n\\begin{sagesilent}\nx = 7\n\\end{sagesilent}\nNow $x = \\sage{x}$.\n\\end{document}\n";
+    const resultsOf = (p) => ev(`${W}.stat(${JSON.stringify(p + ".results.json")}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p + ".results.json")}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    // (sim run 8, RD03: a new document with no SageTeX code, the code then typed into it: Run must appear once the
+    // preview shows the items, without a save or a reopen. It didn't: the reply's own render ran before the editor
+    // kept that reply's check, so Run's listener read the check of the text before the edit)
+    {
+      const fb = await mk("/t/run-typed.tex", enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n"));
+      await open(fb);
+      await until(`document.querySelector(".tex-preview")?.textContent !== undefined && !!document.querySelector(".tex-head .tex-run")`, 20000);
+      await sleep(1000);
+      const hiddenBefore = await ev(`document.querySelector(".tex-head .tex-run").hidden`);
+      await typeInto("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nTwo is $\\sage{1+1}$.\n\\end{document}\n");
+      const shownItem = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Two is")`, 20000);
+      const visible = await until(`document.querySelector(".tex-head .tex-run")?.hidden === false`, 10000);
+      check(hiddenBefore === true && shownItem && visible, "Run: a new document's SageTeX code typed in: Run appears once the preview shows it (no save, no reopen)", { hiddenBefore, shownItem, visible });
+    }
+    const fr = await mk("/t/run.tex", enc(RUN_DOC));
+    const n0 = requests.length;
+    await open(fr);
+    await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    const bar = await ev(`(() => { const h = [...document.querySelector(".tex-head").children]; const i = (c) => h.findIndex((e) => e.classList.contains(c));
+      const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
+    check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
+      "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
+    await sleep(1500);
+    const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
+    check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (the click: its labels as they change, then the results)
+    const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
+      const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
+      o.observe(b, { childList: true, characterData: true, subtree: true }); b.click(); setTimeout(() => { o.disconnect(); res(seen); }, 180000); })`);
+    check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
+    const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
+    await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
+    const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
+    check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
+    const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
+    check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
+      "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
+    // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
+    // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present
+    {
+      const BEAMER_RUN = String.raw`\documentclass{beamer}
+\usepackage{sagetex}
+\title{2026 = $\sage{factor(2026)}$}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{Computed}
+\begin{sagesilent}
+f(x) = x^3 - 2*x
+\end{sagesilent}
+$f'(x) = \sage{diff(f(x), x)}$
+
+\sageplot[width=0.5\textwidth]{plot(f(x), (x, -2, 2))}
+\end{frame}
+\begin{frame}{Curve}
+\begin{sageblock}
+E = EllipticCurve('389a')
+g = E.gens()
+\end{sageblock}
+$P = \sage{g[0]}$
+\end{frame}
+\end{document}
+`;
+      const fbr = await mk("/t/run-beamer.tex", enc(BEAMER_RUN));
+      await open(fbr);
+      await until(`document.querySelectorAll(".tex-preview section.slide").length === 3 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranB = await statusIs(/Ran 6 SageTeX items in [0-9.]+ s$/, 120000);
+      const S = `[...document.querySelectorAll(".tex-preview section.slide")]`;
+      const shownB = await until(`(() => { const s = ${S}; return s.length === 3 && s[0].textContent.includes("1013") && !!s[1].querySelector("img.sageplot") && /\\(0\\s*:\\s*[-\\u2212]1\\s*:\\s*1\\)/.test(s[2].textContent) && !document.querySelector(".tex-preview .sagechip"); })()`, 20000);
+      const bj = JSON.parse((await resultsOf("/t/run-beamer.tex")) ?? "null");
+      check(ranB && shownB && bj?.items?.length === 6 && bj.items.every((x) => x.s === "ok"),
+        "Run, beamer (William's L0/L1): every item ok, the \\title item on the title page, the plot and the point in the slides",
+        { ranB, shownB, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), items: bj?.items?.map((x) => x.s), slides: await ev(`${S}.map((s) => s.textContent.replace(/\\s+/g, " ").slice(0, 80))`) });
+      const P = `document.querySelector(".tex-present")`;
+      const pkey = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      const p1 = await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.querySelector(".tp-stage").textContent.includes("1013") && ${P}.textContent.includes("1 / 3")`, 15000);
+      await pkey("ArrowRight", "ArrowRight", 39);
+      const p2 = await until(`${P}.dataset.frame === "2" && !!${P}.querySelector(".tp-stage img.sageplot")`, 5000);
+      await pkey("ArrowRight", "ArrowRight", 39);
+      const p3 = await until(`${P}.dataset.frame === "3" && /\\(0\\s*:\\s*[-\\u2212]1\\s*:\\s*1\\)/.test(${P}.querySelector(".tp-stage").textContent)`, 5000);
+      await pkey("Escape", "Escape", 27);
+      await until(`!${P}`, 5000);
+      check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+    }
+    // (a Run made stale: another file opened in place while it runs; it writes nothing)
+    const fs = await mk("/t/run-stale.tex", enc(RUN_DOC.replace("x = 2^10", "x = 2^10\n_s = sum(i for i in range(2*10^6))")));
+    const fo = await mk("/t/run-other.tex", enc(DOC));
+    await open(fs);
+    await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const started = await until(`document.querySelector(".tex-head .tex-run")?.textContent === "Running…"`, 60000);
+    await ev(`(window.__sbTex({ path: "/t/run-other.tex", fid: ${JSON.stringify(fo)} }), 1)`);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello")`, 20000);
+    await sleep(15000);
+    check(started && (await resultsOf("/t/run-stale.tex")) === null, "Run: a Run made stale (another file opened in place while it runs) writes no results", { started });
+    // (no runner here: ?runner=0 on a loopback host; Run says why, and runs nothing)
+    const fn0 = await mk("/t/run-none.tex", enc(RUN_DOC));
+    const n1 = requests.length;
+    await open(fn0, "&latex=1&runner=0");
+    await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+    await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const said = await statusIs(/Run needs the sandbox/, 10000);
+    await sleep(1000);
+    check(said && !requests.slice(n1).some((u) => /\/runner\//.test(u)) && (await resultsOf("/t/run-none.tex")) === null, "Run: without the runner, it says why and runs nothing (no plain worker, no results)", { said });
   }
   // ---- a file in Trash, opened by its fid
   const ftr = await mk("/t/trashme.tex", enc(DOC));
@@ -1265,6 +1425,29 @@ try {
   // ---- gone: an unknown fid
   await go(base + "?tex=ffffffffffffffff&latex=1"); await sleep(1500);
   check(await ev(`document.querySelector(".tex-page")?.textContent.includes("This file isn't here any more.")`), "an unknown fid: Gone");
+  // (grader R5 on #546) the worker replaced by its watchdog (a reply held past its 15 s): the new worker is sent the
+  // \input files again, so a macro from the macros file still renders in its reply
+  {
+    const rHook = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__holdReplies = false; window.__replyHolds = [];
+      window.__sbTexReplyHold = () => { if (window.__holdReplies) return new Promise((r) => window.__replyHolds.push(r)); };
+    })()` });
+    await mk("/shared2/macros.tex", enc("\\newcommand{\\greet}{Hello again from the macros file}\n"));
+    const MAIN = "\\documentclass{article}\n\\input{../shared2/macros}\n\\begin{document}\n\\greet.\n\\end{document}\n";
+    await open(await mk("/paper2/main.tex", enc(MAIN)));
+    const first = await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("Hello again from the macros file")`, 20000);
+    await ev(`window.__holdReplies = true`);
+    await typeInto(MAIN.replace("\\greet.", "\\greet. After the restart."));
+    const held = await until(`window.__replyHolds.length === 1`, 20000);
+    // (only that reply held: the replaced worker's reply, after the watchdog's 15 s, is installed)
+    await ev(`window.__holdReplies = false`);
+    const shown = await until(`(() => { const t = document.querySelector(".tex-preview")?.textContent ?? ""; return t.includes("After the restart") && t.includes("Hello again from the macros file"); })()`, 40000);
+    check(first && held && shown, "\\input: after the worker is replaced (its watchdog), the macros file's macro still renders",
+      { first, held, shown, text: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });
+    await ev(`(() => { for (const r of window.__replyHolds.splice(0)) r(); return true; })()`);
+    await sleep(500);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
+  }
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

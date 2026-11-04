@@ -1,3 +1,4 @@
+// ci: web-browser/board-a order=80
 // Ink on a board (doc.ts strokes, board.ts, print.ts): strokes are drawn
 // where they are, above the notes (a stroke over a note shows over it), a
 // highlighter's see-through, still there far out; a group holds its

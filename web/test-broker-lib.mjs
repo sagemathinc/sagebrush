@@ -1,3 +1,4 @@
+// ci: none (imported by other suites, not one itself: web/share/test-share-broker.mjs, web/test-runner-broker.mjs)
 // G-10's browser harness, shared by web/test-runner-broker.mjs (the notebook page) and web/share/test-share-broker.mjs
 // (the share client): a Chromium of its own, the page's sessions (each frame in a process of its own and each worker,
 // by CDP auto-attach), the recorder the page gets before it starts, the runner's worker found by the frame it belongs

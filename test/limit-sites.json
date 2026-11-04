@@ -7427,7 +7427,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
- "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, delimiter } from \"path\"; #0": {
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from \"path\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
@@ -7441,6 +7441,14 @@
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: inputsNow :: else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: \"too large\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: an \\input/\\include file over web/latex/inputs.ts INPUT_BOUNDS.perFile (4 MiB, the editor's EDIT_MAX) is refused before it is read: the same bound the page applies to included files"
  },
  "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
   "class": "none",
@@ -8235,6 +8243,72 @@
   "class": "1",
   "owner": "package runtime",
   "row": "src-19"
+ },
+ "src/reactive-session.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's own limits passed to its worker, not a limit of this file: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: clamp :: send(msg: { cell: string; code: string; opts?: Record<string, unknown> }, on: (m: any) => void, limitMs?: number, absolute?: boolean): Promise<Sent>; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run([id], { budget: 0 })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run(left, o.only ? { budget: 0 } : { budget: Infinity })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget: 0 }) : await reactive.runAll()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: over :: if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, and START_GRACE_MS to be begun: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const send: Interpreter[\"send\"] = (msg, on, limit = Infinity, absolute = false) => new Promise<Sent>((resolve) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, from when the interpreter begins it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
  "src/remote-approval.ts :: beginAction :: beginAction(limits: Partial<Record<BudgetKind, number>> = BUDGET): Budget { #0": {
   "class": "none",
@@ -9441,6 +9515,22 @@
   },
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
+ },
+ "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/stall-fetch.js :: fetchMoving :: export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

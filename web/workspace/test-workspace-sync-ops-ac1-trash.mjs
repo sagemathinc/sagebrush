@@ -1,3 +1,4 @@
+// ci: web-sync-ops order=120 runner=bun chrome
 // astra's probes on sync-ops ac1c27eb (a pending Trash recovery's destination, after a restart, recovered once), with their cases in astra-ac1-trash-cases.js:
 //   CHROME=google-chrome bun web/workspace/test-workspace-sync-ops-ac1-trash.mjs
 import { spawn } from "node:child_process";

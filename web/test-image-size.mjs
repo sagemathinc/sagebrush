@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=120 runner=bun
 // image-size.ts: a picture's size from its header (PNG, JPEG, WebP, GIF),
 // the bounds (MAX_SIDE, MAX_PIXELS each, LOAD_PIXELS in all), and Markdown's
 // data: images held to them (safe-html.ts).   bun web/test-image-size.mjs
