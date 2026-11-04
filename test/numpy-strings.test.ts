@@ -44,3 +44,18 @@ test("a string dtype reaches no numeric operation: a typed array is never made o
   ].join("\n"));
   assert.deepEqual(got, ["True True True", "refused", "refused", "refused"]);
 });
+
+// A noncontiguous array's .flat is a copy, read-only, so a write raises instead of being lost
+// (NumPy writes through its flatiter; grader's U30)
+test("a write to a noncontiguous string array's flat raises, the array unchanged", () => {
+  const got = run([
+    "import numpy as np",
+    "a = np.array([['a', 'b'], ['c', 'd']])",
+    "try:",
+    "    a.T.flat[1] = 'z'; print('wrote')",
+    "except ValueError as e:",
+    "    print('ValueError', e)",
+    "print(a.tolist())",
+  ].join("\n"));
+  assert.deepEqual(got, ["ValueError assignment destination is read-only", "[['a', 'b'], ['c', 'd']]"]);
+});

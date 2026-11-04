@@ -12,6 +12,9 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECORD = os.path.join(HERE, "string_walk.json")
+# (the calls Sagebrush handles, as recorded under Sagebrush by --write-handled: one that becomes
+# refused, or newly handled, is printed, so each change of the handled set is a reviewed one)
+HANDLED = os.path.join(HERE, "string_walk_handled.txt")
 REAL = not hasattr(np, "_np")  # (Sagebrush's numpy has its core module as _np)
 
 
@@ -191,5 +194,16 @@ for key in sorted(want):
     else:
         handled += 1
 # (a name NumPy 2 doesn't have, which Sagebrush keeps for NumPy 1's programs, isn't walked)
+if not REAL:
+    now = sorted(k for k in want if k in got and not got[k].startswith("E "))
+    if "--write-handled" in sys.argv:
+        with open(HANDLED, "w") as f:
+            f.write("".join(k + "\n" for k in now))
+    with open(HANDLED) as f:
+        was = [l.rstrip("\n") for l in f if l.strip()]
+    for k in sorted(set(was) - set(now)):
+        print("NOW REFUSED", k)
+    for k in sorted(set(now) - set(was)):
+        print("NEWLY HANDLED", k)
 print("walked %d calls" % len(want))
 sys.stderr.write("handled %d\n" % handled)

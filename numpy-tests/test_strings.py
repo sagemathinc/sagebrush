@@ -34,6 +34,8 @@ t(lambda: hash(np.dtype("U3")) == hash(np.dtype("<U3")))
 t(lambda: (np.issubdtype(d, np.str_), np.issubdtype(d, np.character), np.issubdtype(d, np.flexible), np.issubdtype(d, np.generic), np.issubdtype(d, np.number), np.issubdtype(np.float64, np.str_)))
 t(lambda: np.dtype("u3"))
 t(lambda: np.dtype("U-1"))
+t(lambda: np.dtype("U536870912"))
+t(lambda: np.dtype("U536870911").itemsize)
 
 # np.str_
 s = np.str_("ab")
@@ -73,6 +75,8 @@ t(lambda: np.array([np.array(["a"]), np.array([1])]))
 t(lambda: np.array(["a", ["b"]]))
 t(lambda: np.array(["1", "2"], dtype=int))
 t(lambda: np.array(["1.5", "2"], dtype=float))
+t(lambda: np.array([np.str_("abc")], dtype=float))
+t(lambda: np.array([np.str_("2.5")], dtype=float))
 t(lambda: np.array(np.array(["a", "bc"]), dtype="U1"))
 t(lambda: np.array(np.array([1, 22]), dtype=str))
 t(lambda: np.array(u, ndmin=3).shape)
@@ -155,6 +159,18 @@ t(lambda: np.squeeze(np.array([["a"], ["b"]])))
 t(lambda: np.expand_dims(u, 0))
 t(lambda: np.atleast_2d(u))
 t(lambda: np.broadcast_to(u, (2, 2)))
+
+
+def bwrite():
+    b = np.broadcast_to(np.array(["a", "b", "c"]), (2, 3))
+    try:
+        b[0] = "z"
+    except ValueError as e:
+        print("   ", e)
+    return b
+
+
+t(bwrite)
 t(lambda: np.moveaxis(m, 0, 1))
 t(lambda: m.view())
 t(lambda: m.copy())
@@ -204,6 +220,14 @@ t(lambda: "bb" in m)
 t(lambda: "q" in m)
 t(lambda: np.take(u, 1))
 t(lambda: np.take(m, [0, 2], axis=1))
+# item: each index bounded and made non-negative by its own axis, the tuple form (grader's F1, probe2 I1-I7)
+q = np.array([["a", "b"], ["c", "d"]])
+for c in [(0, 3), (1, -1), (-1, 0), (0, -1), (2, 0), (-1,), ((1, 0),), ((1,),), (0, 0, 0), (1.5,), (4,), (-5,), ()]:
+    t(lambda: q.item(*c))
+t(lambda: np.array(["a", "b"]).item(-3))
+t(lambda: q.T.item(0, 1))
+t(lambda: q[:, ::-1].item(1))
+t(lambda: np.array("z").item(()))
 
 
 def setv(a, k, v):

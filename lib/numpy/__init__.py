@@ -502,14 +502,10 @@ def _asfarray(a, dtype="float64"):
 _np_dtype = dtype
 
 
-def _floats(x):
-    """asarray(x, float64) of data a function computes with in floats; a
-    string array refused there, as NumPy has no loop for its strings (it
-    converts them only when asked: astype, or array with a dtype)."""
-    a = asarray(x)
-    if a.dtype.kind == "U":
-        _np.str_refuse()
-    return asarray(a, float64)
+# asarray(x, float64) of data a function computes with in floats, a string
+# array refused there, as NumPy has no loop for its strings (it converts them
+# only when asked: astype, or array with a dtype); the runtime's, one call
+_floats = _np.floats
 asfarray = _removed_alias(_asfarray, "asfarray", "np.asarray(a, dtype=float)")
 
 
@@ -1137,9 +1133,8 @@ def clip(a, a_min=None, a_max=None, out=None, **kw):
         a_min = kw["min"]
     if a_max is None and "max" in kw:
         a_max = kw["max"]
-    r = asarray(a)
-    if r.dtype.kind == "U":
-        _np.str_refuse()
+    # (strings refused: NumPy has no clip loop for them, even with no bounds)
+    r = _np.numeric(a)
     if a_min is not None:
         r = maximum(r, a_min)
     if a_max is not None:
@@ -1396,8 +1391,6 @@ def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
 
 def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
     a = asarray(a)
-    if a.dtype.kind == "U":
-        _np.str_refuse()
     if axis is None:
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
@@ -2708,11 +2701,10 @@ def nextafter(x1, x2, out=None, **kw):
     NumPy 2's dtype (float32 for float32 with a Python float, for instance)."""
     if kw:
         raise NotImplementedError("nextafter: %s are not implemented in Sagebrush" % ", ".join(sorted(kw)))
-    if asarray(x1).dtype.kind == "U" or asarray(x2).dtype.kind == "U":
-        _np.str_refuse()
     dt = _nextafter_dtype(x1, x2)
-    # a weak Python int goes straight to the loop's type (70000 with an int16)
-    a, b = (asarray(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
+    # a weak Python int goes straight to the loop's type (70000 with an int16);
+    # strings refused (_np.numeric), never parsed by astype
+    a, b = (_np.numeric(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
     a, b = broadcast_arrays(a, b)
     step = _nextafter32 if dt == float32 else _math.nextafter
     vals = [step(p, q) for p, q in zip(a.ravel().tolist(), b.ravel().tolist())]
