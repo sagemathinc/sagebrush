@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "EllipticCurve.torsion_subgroup() over QQ: Sage's structure, PARI's generators, Sage's order of points; points compare by coordinates as in Sage (lib/_sage_ec_torsion.py, a lazily imported module, and lib/_sage_modular.py), with docstring examples. Re-measured with bun 1.4.4 (size-record.sh) on master 11d300e7 vs head 2400479d: cli/lib.gen.js +3912, cli/pyjs.cjs +4800, engine/lib/sage-more.src +9227, engine/lib/sage.pre +9917, engine/lib/sage.src +2488, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 4832 (+4800 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "EllipticCurve.torsion_subgroup() over QQ: Sage's structure, PARI's generators, Sage's order of points; points compare by coordinates as in Sage (lib/_sage_ec_torsion.py, a lazily imported module, and lib/_sage_modular.py), with docstring examples. Re-measured with bun 1.4.4 (size-record.sh) on master 11d300e7 vs head 0255dccb: cli/lib.gen.js +3980, cli/pyjs.cjs +4768, engine/lib/sage-more.src +9397, engine/lib/sage.pre +9917, engine/lib/sage.src +2488, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 4800 (+4768 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 3912,
-  "cli/pyjs.cjs": 4832,
-  "engine/lib/sage-more.src": 9227,
+  "cli/lib.gen.js": 3980,
+  "cli/pyjs.cjs": 4800,
+  "engine/lib/sage-more.src": 9397,
   "engine/lib/sage.pre": 9917,
   "engine/lib/sage.src": 2488,
   "engine/sagebrush-worker.js": 34
