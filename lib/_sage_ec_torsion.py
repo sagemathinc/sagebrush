@@ -239,8 +239,10 @@ class EllipticCurveTorsionSubgroup_with_category:
             (1 : -1 : 1)
         """
         Q = self._E(P)
-        if not Q.has_finite_order():
-            raise TypeError("%s is not a torsion point" % (Q,))
+        # (Sage 10.9 refuses the point at infinity too, and a point of
+        # infinite order, with its group wrapper's coercion message)
+        if Q.is_zero() or not Q.has_finite_order():
+            raise TypeError("unable to find a common ring for all elements")
         return Q
 
     def __eq__(self, other):

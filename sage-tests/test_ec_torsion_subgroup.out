@@ -82,3 +82,7 @@ S87 ERR TypeError: unsupported operand parent(s) for <=: 'Abelian group of point
 S88 ERR TypeError: unsupported operand parent(s) for >: 'Abelian group of points on Elliptic Curve defined by y^2 = x^3 - x over Rational Field' and 'Abelian group of points on Elliptic Curve defined by y^2 = x^3 - 4*x 
 S89 ERR TypeError: unsupported operand parent(s) for >=: 'Abelian group of points on Elliptic Curve defined by y^2 = x^3 - x over Rational Field' and 'Abelian group of points on Elliptic Curve defined by y^2 = x^3 - 4*x
 S90 (False, True)
+S91 ((2, 2), ((21 : -11 : 1), (-11 : 5 : 1)), [(0 : 1 : 0), (-11 : 5 : 1), (21 : -11 : 1), (-41/4 : 37/8 : 1)])
+S92 ((2, 2), ((2 : -1 : 1), (-2 : 1 : 1)), [(0 : 1 : 0), (-2 : 1 : 1), (2 : -1 : 1), (-5/4 : 5/8 : 1)])
+S93 ERR TypeError: unable to find a common ring for all elements
+S94 ERR TypeError: unable to find a common ring for all elements
