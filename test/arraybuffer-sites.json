@@ -491,7 +491,8 @@
   {"key":"src/runtime/numpy.ts :: <module> :: transpose ( a , axes . length === 0 || ( axes . length === 1 && axes [ 0 ] === null ) ? null : shapeArg ( axes . length === 1 ? axes [ 0 ] : tuple ( axes ) ) ) #0","before":"opaque","after":"absent","replacement":["src/runtime/numpy.ts :: tr :: transpose ( a , axes ) #0"],"reason":"string arrays (#603): the member or function checks for a string array first (its string operation), the numeric path unchanged after it"},
   {"key":"src/runtime/numpy.ts :: <module> :: transpose ( a , null ) #0","before":"opaque","after":"absent","replacement":["src/runtime/numpy.ts :: tr :: transpose ( a , axes ) #0"],"reason":"string arrays (#603): the member or function checks for a string array first (its string operation), the numeric path unchanged after it"},
   {"key":"src/runtime/numpy.ts :: <module> :: transpose ( a , order ) #0","before":"opaque","after":"absent","replacement":["src/runtime/numpy.ts :: tr :: transpose ( a , axes ) #0"],"reason":"string arrays (#603): the member or function checks for a string array first (its string operation), the numeric path unchanged after it"},
-  {"key":"src/runtime/numpy.ts :: <module> :: transpose ( asarray ( a ) , axes === null ? null : shapeArg ( axes ) ) #0","before":"opaque","after":"absent","replacement":["src/runtime/numpy.ts :: tr :: transpose ( a , axes ) #0"],"reason":"string arrays (#603): the member or function checks for a string array first (its string operation), the numeric path unchanged after it"}
+  {"key":"src/runtime/numpy.ts :: <module> :: transpose ( asarray ( a ) , axes === null ? null : shapeArg ( axes ) ) #0","before":"opaque","after":"absent","replacement":["src/runtime/numpy.ts :: tr :: transpose ( a , axes ) #0"],"reason":"string arrays (#603): the member or function checks for a string array first (its string operation), the numeric path unchanged after it"},
+  {"key":"web/pkgset-browser.ts :: boundedFetch :: new PkgsetError ( `${ url }: HTTP ${ r . status }` ) #0","before":"opaque","after":"absent","replacement":"none","reason":"#628 r3: an HTTP error fetching a package set's index is SetUnfetched (web/pkgset-browser.ts), not a PkgsetError: retryable, asked for again at the next run (offline, the notebook loads)"}
 ],
 "parity": {
   "src/compile.ts :: compile :: analyze ( mod ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
@@ -1818,7 +1819,8 @@
   "dbe4d89b4f7ac8b5": {"decl":"src/scope.ts :: SyntaxErr.class","class":"no-new-store"},
   "0e50404cb9129c3b": {"decl":"src/unparse.ts :: UnparseUnsupported.class","class":"no-new-store"},
   "991dcaa4709af2cc": {"decl":"web/lib-lazy.ts :: fetchSync","class":"allocates","via":"web/lib-lazy.ts :: fetchSync :: read x . response #0"},
-  "52860e5f18c0c064": {"decl":"web/pkgset-browser.ts :: boundedFetch","class":"allocates","via":"lib:lib.dom.d.ts :: ReadableStreamDefaultReader.read"},
+  "0474e2575ff48563": {"decl":"web/pkgset-browser.ts :: SetUnfetched.class","class":"no-new-store"},
+  "145f934e45feea5f": {"decl":"web/pkgset-browser.ts :: boundedFetch","class":"allocates","via":"lib:lib.dom.d.ts :: ReadableStreamDefaultReader.read"},
   "845a2a1e8639f1e0": {"decl":"web/pkgset-browser.ts :: syncChunk","class":"allocates","via":"web/pkgset-browser.ts :: syncChunk :: read x . response #0"},
   "75e638b90e1baffd": {"decl":"web/shims/fs.ts :: bytes","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
   "283c0a59eba2da1b": {"decl":"web/shims/fs.ts :: contents","class":"allocates","via":"web/shims/fs.ts :: fetchRemote"},
