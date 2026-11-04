@@ -736,15 +736,10 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
  },
- "engine/nd/src/wasm.rs :: nd_microkernel :: let n = s.len().min(cap as usize); #0": {
+ "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
-  "reason": "cap is the size of the host's output buffer for the microkernel's static name; the name is truncated to fit and nothing is refused (no user work is limited)"
- },
- "engine/nd/src/wasm.rs :: nd_microkernel :: pub unsafe extern \"C\" fn nd_microkernel(out: u32, cap: u32) -> u32 { #0": {
-  "class": "none",
-  "owner": "sagebrush-matlab",
-  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
  },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",

@@ -10,6 +10,7 @@
 //! multiply-add), so the result is bit-identical across thread counts and across these microkernels.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
+pub mod boundary;
 pub mod gemm;
 pub mod micro;
 #[cfg(target_arch = "wasm32")]

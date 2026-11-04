@@ -3,60 +3,18 @@
 //! its own stack) and runs `nd_gemm_part(desc, id)` on every thread; it waits for them with Atomics, since the
 //! Wasm wait instructions are not yet stable in Rust. Every call returns before the host reads C (r4.2 §6).
 //!
-//! The boundary is checked before any slice exists ([`check`], safe code): every address, length and end in
-//! 64-bit arithmetic against the memory's current size, alignment, and the alias rule (the regions written, C
-//! and the scratch, are disjoint from every other region; A and B, only read, may overlap each other). A job
-//! that fails a check returns 0 having written nothing.
+//! The boundary is checked before any pointer is read or slice made ([`crate::boundary`], safe code: the
+//! memory model, what is enforced and what the host must guarantee). A job that fails a check returns 0
+//! having written nothing. `nd_gemm_part` is the only export that writes memory.
 
+use crate::boundary::{check, desc_region, Facts, DESC_WORDS};
 use crate::gemm::{gemm_cols, partition, scratch_len, Mat};
 use core::arch::wasm32::memory_size;
+use core::ptr::{addr_of, with_exposed_provenance, with_exposed_provenance_mut};
 
-/// The job descriptor, laid out by the host as u32s at `desc` (4-aligned):
-/// [a, b, c, m, n, k, threads, scratch0, scratch_stride] (byte addresses; scratch for thread `id` at
-/// scratch0 + id * scratch_stride, at least `scratch_len() * 8` bytes each).
-const DESC_WORDS: usize = 9;
-
-/// A job that passed [`check`]: element offsets (f64 index = byte address / 8) and sizes.
-struct Job {
-    a: usize,
-    b: usize,
-    c: usize,
-    m: usize,
-    n: usize,
-    k: usize,
-    threads: usize,
-    s0: usize,
-    sstride: usize,
-}
-
-/// A byte region [start, start + len), 64-bit; `None` if it overflows or runs past `mem`.
-fn region(start: u64, len: u64, mem: u64) -> Option<(u64, u64)> {
-    let end = start.checked_add(len)?;
-    (end <= mem).then_some((start, end))
-}
-
-/// Whether two byte regions overlap (empty regions overlap nothing).
-fn overlap(x: (u64, u64), y: (u64, u64)) -> bool {
-    x.0 < x.1 && y.0 < y.1 && x.0 < y.1 && y.0 < x.1
-}
-
-/// Every boundary rule, in safe code, from the descriptor words and the memory size in bytes.
-fn check(d: &[u32; DESC_WORDS], mem: u64) -> Option<Job> {
-    let [a, b, c, m, n, k, threads, s0, sstride] = d.map(u64::from);
-    if threads == 0 || [a, b, c, s0, sstride].iter().any(|x| x % 8 != 0) || sstride < scratch_len() as u64 * 8 {
-        return None;
-    }
-    let ra = region(a, m.checked_mul(k)?.checked_mul(8)?, mem)?;
-    let rb = region(b, k.checked_mul(n)?.checked_mul(8)?, mem)?;
-    let rc = region(c, m.checked_mul(n)?.checked_mul(8)?, mem)?;
-    let rs = region(s0, threads.checked_mul(sstride)?, mem)?;
-    // (written regions: C and the scratch, disjoint from everything else; thread partitions within them are
-    // disjoint by construction: C's by partition(), the scratch by stride >= scratch_len)
-    if overlap(rc, ra) || overlap(rc, rb) || overlap(rs, ra) || overlap(rs, rb) || overlap(rs, rc) {
-        return None;
-    }
-    let u = |x: u64| usize::try_from(x).ok();
-    Some(Job { a: u(a / 8)?, b: u(b / 8)?, c: u(c / 8)?, m: u(m)?, n: u(n)?, k: u(k)?, threads: u(threads)?, s0: u(s0 / 8)?, sstride: u(sstride / 8)? })
+extern "C" {
+    /// The linker's end of the module's own memory (static data and its stack): the host's part starts here.
+    static __heap_base: u8;
 }
 
 /// The memory's current size in bytes (64-bit: a 4 GiB memory is 2^32).
@@ -64,68 +22,68 @@ fn memory_bytes() -> u64 {
     memory_size(0) as u64 * 65536
 }
 
-/// The f64 count of one thread's scratch, for the host's layout. (`no_mangle` is the only unsafe part:
-/// an exported symbol name, unique in this module)
+/// Facts for the host's layout (read only; `no_mangle` is the only unsafe part: an exported symbol name,
+/// unique in this module, and reading the linker symbol's address, never its contents): 0, the f64 count of one
+/// thread's scratch; 1, the floor of the host's part of memory; 2 and 3, the address and length of the
+/// selected microkernel's static name (UTF-8); anything else, 0.
 #[no_mangle]
 #[allow(unsafe_code)]
-pub extern "C" fn nd_gemm_scratch_len() -> u32 {
-    scratch_len() as u32
+pub extern "C" fn nd_info(what: u32) -> u32 {
+    match what {
+        0 => scratch_len() as u32,
+        1 => addr_of!(__heap_base) as usize as u32, // (its address only: safe)
+        2 => crate::micro::name().as_ptr() as usize as u32,
+        3 => crate::micro::name().len() as u32,
+        _ => 0,
+    }
 }
 
 /// Thread `id`'s share of C = A * B (its columns, [`partition`]). Returns 1 on success (an `id` at or
 /// beyond the job's thread count has nothing to do), 0 if the job was refused, having written nothing.
 ///
-/// Checked here, before any slice is made ([`check`]): the descriptor lies in memory and is 4-aligned; A, B,
-/// C and the scratch lie in memory, 8-aligned, with lengths and ends computed without overflow; C and the
-/// scratch overlap neither A, B nor each other; the stride holds a thread's scratch.
+/// Checked here, before any pointer is read or slice made ([`check`]): the descriptor and every nonempty
+/// region are aligned, in the host's part of memory (at or above `__heap_base`, so never at 0), within memory
+/// and at most `isize::MAX` bytes long; C and the scratch lie in the job's arena and overlap neither A, B, each
+/// other nor the descriptor (which lies outside the arena); the stride holds a thread's scratch; this thread's
+/// frame lies below the arena. Pointers are made from the checked absolute addresses (exposed provenance: the
+/// host's part of linear memory is foreign to Rust, like memory handed over by FFI).
 ///
 /// # Safety
-/// Host preconditions, not checkable here: no one else writes A, B, C or the scratch during the call, and
-/// every thread of the job is called with the same descriptor contents and a distinct `id` (so the threads'
-/// columns of C and scratch areas, disjoint by construction, belong to one thread each).
+/// Host preconditions, not checkable here: every participating thread's stack lies below the arena (each call
+/// checks its own frame); no one writes the descriptor, A, B, C or the scratch until every participant has
+/// returned; and every thread of the job is called with the same descriptor and a distinct `id` (so the
+/// threads' columns of C and scratch areas, disjoint by construction, belong to one thread each).
 #[no_mangle]
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
-    let mem = memory_bytes();
-    if desc % 4 != 0 || region(u64::from(desc), (DESC_WORDS * 4) as u64, mem).is_none() {
+    let probe = 0u8;
+    let facts = Facts {
+        mem: memory_bytes(),
+        floor: addr_of!(__heap_base) as usize as u64,
+        max_len: isize::MAX as u64,
+        frame: core::hint::black_box(addr_of!(probe)) as usize as u64,
+    };
+    if desc_region(u64::from(desc), &facts).is_none() {
         return 0;
     }
-    // SAFETY: the descriptor's DESC_WORDS u32s lie in memory, 4-aligned (checked above)
-    let d = *(desc as usize as *const [u32; DESC_WORDS]);
-    let Some(j) = check(&d, mem) else { return 0 };
+    // SAFETY: the descriptor's DESC_WORDS u32s lie in the host's part of memory, 4-aligned (checked above)
+    let d = with_exposed_provenance::<[u32; DESC_WORDS]>(desc as usize).read();
+    let Some(j) = check(u64::from(desc), &d, &facts) else { return 0 };
     let id = id as usize;
     if id >= j.threads {
         return 1;
     }
     let (j0, j1) = partition(j.n, j.threads, id);
-    let base = 0 as *mut f64;
-    // SAFETY: every region was checked to lie in memory and be 8-aligned, and the written ones (this thread's
-    // columns of C, its scratch) to be disjoint from the read-only A and B; an empty region is the empty slice
-    let av: &[f64] = if j.m * j.k == 0 { &[] } else { core::slice::from_raw_parts(base.add(j.a), j.m * j.k) };
-    let bv: &[f64] = if j.k * j.n == 0 { &[] } else { core::slice::from_raw_parts(base.add(j.b), j.k * j.n) };
-    let cv: &mut [f64] = if (j1 - j0) * j.m == 0 { &mut [] } else { core::slice::from_raw_parts_mut(base.add(j.c + j0 * j.m), (j1 - j0) * j.m) };
-    let sv: &mut [f64] = core::slice::from_raw_parts_mut(base.add(j.s0 + id * j.sstride), scratch_len());
+    // SAFETY: every nonempty region was checked to lie in the host's part of memory, nonzero, 8-aligned and at
+    // most isize::MAX bytes, and the written ones (this thread's columns of C, its scratch) to lie in the
+    // arena, disjoint from A, B and the descriptor; an empty region is the empty slice (no address used)
+    let (na, nb, nc) = (j.m * j.k, j.k * j.n, (j1 - j0) * j.m);
+    let av: &[f64] = if na == 0 { &[] } else { core::slice::from_raw_parts(with_exposed_provenance(j.a), na) };
+    let bv: &[f64] = if nb == 0 { &[] } else { core::slice::from_raw_parts(with_exposed_provenance(j.b), nb) };
+    let cv: &mut [f64] = if nc == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.c + j0 * j.m * 8), nc) };
+    let sv: &mut [f64] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.s0 + id * j.sstride), scratch_len());
     let (Some(am), Some(bm)) = (Mat::new(av, j.m, j.k, j.m.max(1)), Mat::new(bv, j.k, j.n, j.k.max(1))) else { return 0 };
     gemm_cols(&am, &bm, cv, j.m.max(1), j0, j1, sv) as u32
-}
-
-/// The selected microkernel's name (written as UTF-8 at `out`, at most `cap` bytes); returns its length, or 0
-/// if the buffer does not lie in memory.
-///
-/// # Safety
-/// No host precondition beyond the memory itself: the buffer is checked to lie in memory before it is written.
-#[no_mangle]
-#[allow(unsafe_code)]
-pub unsafe extern "C" fn nd_microkernel(out: u32, cap: u32) -> u32 {
-    let s = crate::micro::name().as_bytes();
-    let n = s.len().min(cap as usize);
-    if n == 0 || out == 0 || region(u64::from(out), n as u64, memory_bytes()).is_none() {
-        return 0;
-    }
-    // SAFETY: [out, out + n) lies in memory (checked above) and is not the source (a static in the data segment
-    // is read-only by convention; copy_nonoverlapping's regions are distinct unless the host aims out at it)
-    core::ptr::copy(s.as_ptr(), out as usize as *mut u8, n);
-    n as u32
 }
 
 #[panic_handler]

@@ -9,8 +9,7 @@
 type Exports = {
   __stack_pointer: WebAssembly.Global;
   nd_gemm_part(desc: number, id: number): number;
-  nd_gemm_scratch_len(): number;
-  nd_microkernel(out: number, cap: number): number;
+  nd_info(what: number): number; // 0 scratch length, 1 floor, 2 and 3 the microkernel name's address and length
 };
 
 // control words (Int32): [0] job generation (−1 = stop), [1] helpers done, [2] helper failures
@@ -58,19 +57,19 @@ function helper(m: { module: WebAssembly.Module; memory: WebAssembly.Memory; id:
   }
 }
 
-function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memory; stackTop: number; ctl: number; desc: number; helpers: number; text: number }) {
+function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memory; stackTop: number; ctl: number; desc: number; helpers: number }) {
   const t0 = performance.now();
   const ex = instantiate(init.module, init.memory, init.stackTop);
   const instantiateMs = performance.now() - t0;
   const mem = init.memory;
   const c = new Int32Array(mem.buffer, init.ctl, 4);
-  const len = ex.nd_microkernel(init.text, 64);
-  const microkernel = new TextDecoder().decode(new Uint8Array(mem.buffer).slice(init.text, init.text + len));
-  postMessage({ ready: 0, microkernel, instantiateMs, scratchLen: ex.nd_gemm_scratch_len() });
+  const at = ex.nd_info(2);
+  const microkernel = new TextDecoder().decode(new Uint8Array(mem.buffer).slice(at, at + ex.nd_info(3)));
+  postMessage({ ready: 0, microkernel, instantiateMs, scratchLen: ex.nd_info(0), floor: ex.nd_info(1) });
 
   // one job: C = A * B with t threads (the pool's other helpers have nothing to do)
   const run = (lay: Layout, t: number) => {
-    new Uint32Array(mem.buffer).set([lay.a, lay.b, lay.c, lay.n, lay.n, lay.n, t, lay.scratch, lay.scratchStride], init.desc / 4);
+    new Uint32Array(mem.buffer).set([lay.a, lay.b, lay.c, lay.n, lay.n, lay.n, t, lay.scratch, lay.scratchStride, lay.lo, lay.hi], init.desc / 4);
     Atomics.store(c, DONE, 0);
     Atomics.store(c, FAIL, 0);
     if (init.helpers > 0) {
@@ -159,4 +158,4 @@ function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memor
   }
 }
 
-type Layout = { n: number; a: number; b: number; c: number; scratch: number; scratchStride: number };
+type Layout = { n: number; a: number; b: number; c: number; scratch: number; scratchStride: number; lo: number; hi: number };

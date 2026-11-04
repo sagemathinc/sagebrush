@@ -5,8 +5,15 @@
 // module load, pool creation and first dispatch reported apart from the warm median and p95; a row whose p95 is
 // over 1.5x its median flagged as noisy.
 //
-// Failures never hang (E3/ND-M3): every worker has error handlers for its whole life, startup and each job are
-// bounded, and any failure terminates the whole pool and drops it, so the next Run starts a new one.
+// Failures never hang (E3/ND-M3): every worker is registered the moment it exists and has error handlers for
+// its whole life (crew.ts), startup and each job are bounded, and any failure, a startup failing partway
+// included, terminates every worker made and drops the pool, so the next Run starts a new one.
+//
+// The memory map (engine/nd/src/boundary.rs): the module's own data and stack below its floor (checked to be
+// below BASE); from BASE the control words and the descriptor; the thread stacks; then the writable
+// arena (A, B, C and the scratch), above every stack.
+
+import { Crew } from "./crew";
 
 const $ = (id: string) => document.getElementById(id)!;
 const STACK = 1 << 20;
@@ -23,14 +30,32 @@ type Result = {
 };
 
 type Pool = {
-  conductor: Worker; helpers: Worker[]; memory: WebAssembly.Memory; scratchLen: number; microkernel: string; maxT: number;
+  crew: Crew<Worker>; conductor: Worker | null; memory: WebAssembly.Memory; scratchLen: number; microkernel: string; maxT: number;
   setup: Record<string, number>; dead: boolean; fail: (why: string) => void;
 };
 let pool: Pool | null = null;
 // the job in flight: its settle functions (a pool failure rejects it)
 let active: { resolve: (r: Result) => void; reject: (e: Error) => void } | null = null;
 
-const fault = new URLSearchParams(location.search).get("fault") ?? undefined; // (a test hook: helper 1 refuses, throws or exits)
+// (test hooks: helper 1 refuses, throws or exits ("refuse", "throw", "exit"); or, on the first startup only, the
+// second worker's constructor ("spawn") or postMessage ("post") throws; window.__ndWorkers counts workers made
+// and terminated)
+const fault = new URLSearchParams(location.search).get("fault") ?? undefined;
+const counts = { made: 0, terminated: 0, startups: 0 };
+if (fault) (self as any).__ndWorkers = counts;
+function makeWorker(url: URL): Worker {
+  const first = counts.startups === 1;
+  if (fault === "spawn" && first && counts.made === 1) throw new Error("injected Worker constructor failure");
+  const w = new Worker(url, { type: "module" });
+  counts.made++;
+  if (fault) {
+    const terminate = w.terminate.bind(w), post = w.postMessage.bind(w);
+    w.terminate = () => { counts.terminated++; terminate(); };
+    if (fault === "post" && first && counts.made === 2) w.postMessage = () => { throw new DOMException("injected postMessage failure", "DataCloneError"); };
+    else w.postMessage = post;
+  }
+  return w;
+}
 
 function threadCounts(max: number): number[] {
   const out: number[] = [];
@@ -56,7 +81,7 @@ function env() {
 function destroy(p: Pool, why: string) {
   if (p.dead) return;
   p.dead = true;
-  for (const w of [p.conductor, ...p.helpers]) w.terminate();
+  p.crew.end(); // (every worker made, whether or not the conductor exists yet)
   if (pool === p) pool = null;
   const a = active;
   active = null;
@@ -64,45 +89,33 @@ function destroy(p: Pool, why: string) {
 }
 
 async function startPool(maxT: number): Promise<Pool> {
+  counts.startups++;
   const setup: Record<string, number> = {};
   let t = performance.now();
   const module = await WebAssembly.compileStreaming(fetch(new URL("sagebrush-nd.wasm", location.href)));
   setup.compileMs = performance.now() - t;
-  const memory = new WebAssembly.Memory({ initial: Math.ceil((BASE + (8 << 20)) / PAGE), maximum: 65536, shared: true });
-  const ctl = BASE, desc = BASE + 64, text = BASE + 1024;
-  const stacks = BASE + PAGE; // T stacks, then the data
+  const memory = new WebAssembly.Memory({ initial: Math.ceil(arenaStart(maxT) / PAGE) + 1, maximum: 65536, shared: true });
+  const ctl = BASE, desc = BASE + 64;
+  const stacks = BASE + PAGE; // T stacks, then the arena
   const workerUrl = new URL("threads-worker.js", location.href);
   t = performance.now();
-  const p: Pool = { conductor: null as unknown as Worker, helpers: [], memory, scratchLen: 0, microkernel: "", maxT, setup, dead: false, fail: (why) => destroy(p, why) };
-  const ready: Promise<any>[] = [];
-  // every worker: error handlers for its whole life (startup and every job), and a first message that settles its startup
-  const spawn = (name: string) => {
-    const w = new Worker(workerUrl, { type: "module" });
-    let settle: ((v: any) => void) | null = null;
-    ready.push(new Promise((res) => (settle = res)));
-    w.onerror = (e) => p.fail(`${name} failed: ${e.message || "error"}`);
-    w.onmessageerror = () => p.fail(`${name}: a message could not be read`);
-    w.onmessage = (e) => {
-      if (e.data?.helperError) return p.fail(e.data.helperError);
-      if (settle) { const s = settle; settle = null; s(e.data); }
-    };
-    return w;
+  const p: Pool = {
+    crew: new Crew<Worker>(() => makeWorker(workerUrl), (why) => destroy(p, why)),
+    conductor: null, memory, scratchLen: 0, microkernel: "", maxT, setup, dead: false, fail: (why) => destroy(p, why),
   };
   try {
-    for (let id = 1; id < maxT; id++) {
-      const w = spawn(`helper ${id}`);
-      w.postMessage({ role: "helper", module, memory, id, stackTop: stacks + (id + 1) * STACK, ctl, desc, fault });
-      p.helpers.push(w);
-    }
-    p.conductor = spawn("the conductor");
-    p.conductor.postMessage({ role: "conductor", module, memory, stackTop: stacks + STACK, ctl, desc, helpers: maxT - 1, text });
+    for (let id = 1; id < maxT; id++)
+      p.crew.add(`helper ${id}`, { role: "helper", module, memory, id, stackTop: stacks + (id + 1) * STACK, ctl, desc, fault });
+    p.conductor = p.crew.add("the conductor", { role: "conductor", module, memory, stackTop: stacks + STACK, ctl, desc, helpers: maxT - 1 });
     const failed = new Promise<never>((_, rej) => {
       const timer = setTimeout(() => rej(new Error(`the thread pool did not start within ${STARTUP_MS / 1000} s`)), STARTUP_MS);
       const check = setInterval(() => { if (p.dead) { clearInterval(check); clearTimeout(timer); rej(new Error("the thread pool failed while starting")); } }, 100);
-      void Promise.all(ready).finally(() => { clearTimeout(timer); clearInterval(check); });
+      void p.crew.started().finally(() => { clearTimeout(timer); clearInterval(check); });
     });
-    const infos = await Promise.race([Promise.all(ready), failed]);
-    const info = infos[infos.length - 1]; // (the conductor's, posted last)
+    const infos = await Promise.race([p.crew.started(), failed]);
+    const info = infos[infos.length - 1]; // (the conductor's, added last)
+    // (the layout's premise: the module's own part ends below the control words, stacks and arena)
+    if (!(info.floor > 0 && info.floor <= BASE)) throw new Error(`the kernel module's data reaches ${info.floor}, above ${BASE}`);
     setup.poolMs = performance.now() - t;
     setup.instantiateMs = info.instantiateMs;
     p.scratchLen = info.scratchLen;
@@ -114,7 +127,7 @@ async function startPool(maxT: number): Promise<Pool> {
     };
     return p;
   } catch (e) {
-    destroy(p, String((e as Error)?.message ?? e)); // (startup failed: no worker of it survives)
+    destroy(p, String((e as Error)?.message ?? e)); // (startup failed: no worker of it survives; e is what is reported)
     throw e;
   }
 }
@@ -133,15 +146,17 @@ function onJobMessage(data: any) {
   a?.resolve(data as Result);
 }
 
+// the arena starts above every stack (the conductor's and maxT - 1 helpers', from BASE + PAGE)
+const arenaStart = (maxT: number) => BASE + PAGE + (maxT + 1) * STACK;
+
 function layout(p: Pool, n: number) {
-  const dataStart = BASE + PAGE + (p.maxT + 1) * STACK;
   const bytes = n * n * 8;
-  const a = dataStart, b = a + bytes, c = b + bytes, scratch = c + bytes;
+  const a = arenaStart(p.maxT), b = a + bytes, c = b + bytes, scratch = c + bytes;
   const scratchStride = p.scratchLen * 8;
   const end = scratch + p.maxT * scratchStride;
   const have = p.memory.buffer.byteLength;
   if (end > have) p.memory.grow(Math.ceil((end - have) / PAGE));
-  return { n, a, b, c, scratch, scratchStride };
+  return { n, a, b, c, scratch, scratchStride, lo: a, hi: end };
 }
 
 function stats(xs: number[]) {
@@ -184,7 +199,7 @@ async function run() {
           p.fail(`no progress for ${QUIET_MS / 1000} s${progressText ? ` (last: ${progressText})` : ""}`);
         }
       }, 1000);
-      p.conductor.postMessage({ cmd: "gemm", lay, threads, reps });
+      p.conductor!.postMessage({ cmd: "gemm", lay, threads, reps });
     });
     if (res.error) {
       // (a job error leaves the pool in an unknown state: drop it)
