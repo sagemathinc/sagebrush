@@ -143,6 +143,13 @@ test("an interactive --magma session: Magma at a > prompt, statements wait for t
   assert.match(r.out, /> y;\n5\n/);
   assert.match(r.out, /end for;\n1\n2\n> quit;/);
   assert.doesNotMatch(r.out, /NameError|Traceback/);
+  // (no continuation prompt: the continued line follows bare, as at Magma's prompt; readline's empty prompt may leave a space)
+  assert.match(r.out, /> y := 2\n ?\+ 3;\n/);
+  // (a syntax error inside a statement is reported at once, not waited on; a comment-only line runs nothing;
+  // the session goes on)
+  const s = tty(["--magma"], "x := ;\n// note\nprint 5;\nquit;\n");
+  assert.equal(s.status, 0, s.out);
+  assert.match(s.out, /> x := ;\n[\s\S]*User error: bad syntax[\s\S]*\n> \/\/ note\n> print 5;\n5\n> quit;/);
 });
 
 test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a line, an error and the session goes on, exit(n)", { skip: !hasScript && "needs util-linux script(1)" }, () => {
@@ -153,6 +160,13 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   assert.match(r.out, /Unrecognized function or variable 'undefined_thing'\.\n>> y = \[1 2 \.\.\.\n/);
   assert.match(r.out, /\ny =\n\n     1     2     3\n\n>> exit\(3\)/);
   assert.doesNotMatch(r.out, /NameError|Traceback/);
+  // (no continuation prompt: the continued line follows bare, as in MATLAB's command window; readline's empty prompt may leave a space)
+  assert.match(r.out, /\.\.\.\n ?3\]\n\ny =/);
+  // (a syntax error at the prompt, one with a single reading (an unclosed [ may continue), is reported with its caret
+  // and the session goes on)
+  const e = tty(["--matlab"], "x = )\ndisp(5)\nexit\n");
+  assert.equal(e.status, 0, e.out);
+  assert.match(e.out, />> x = \)\nline 1\nunexpected '\)'\n\nx = \)\n    \^\n>> disp\(5\)\n     5\n/);
   // (exit and quit, with or without a status, a semicolon or a comment, end it)
   for (const q of ["exit", "quit;", "quit(0)", "exit % bye"]) assert.equal(tty(["--matlab"], `disp(1)\n${q}\n`).status, 0, q);
   // (a function definition at the prompt is refused with MATLAB's command-window error, and the session goes on)
