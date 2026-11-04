@@ -120,3 +120,39 @@ test("a program on stdin past 8 MiB is refused before it is kept, in each mode, 
   const r = spawnSync(process.execPath, ["--max-old-space-size=192", cli, "--matlab"], { input: "x = 1;\n".repeat(2000) + "disp(x)\n", encoding: "utf8", timeout: 60000 });
   assert.deepEqual([r.status, r.stdout], [0, "     1\n"], `signal ${r.signal}; ${r.stderr.slice(0, 300)}`);
 });
+
+// An interactive terminal (#648): `sagebrush --magma` and `sagebrush --matlab` at a prompt speak Magma and MATLAB,
+// as the kernel's cells do, and an error is reported while the session goes on.  Run under a pseudo-terminal with
+// util-linux script(1), so stdin is a TTY; the typed lines are echoed, and the output is read without the
+// terminal's control sequences.
+const tty = (args: string[], input: string) => {
+  const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const r = spawnSync("script", ["-qec", cmd, "/dev/null"], { input, encoding: "utf8", timeout: 60000 });
+  return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
+};
+const hasScript = process.platform === "linux" && spawnSync("script", ["--version"], { encoding: "utf8" }).status === 0;
+
+test("an interactive --magma session: Magma at a > prompt, statements wait for their ;, an error and the session goes on", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const r = tty(["--magma"], "Factorization(2026);\nx := Foo(3);\ny := 2\n+ 3;\ny;\nfor i in [1..2] do\n  print i;\nend for;\nquit;\n");
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /\(Magma\)\n/);
+  assert.match(r.out, /> Factorization\(2026\);\n\[ <2, 1>, <1013, 1> \]\n/);
+  // (an undeclared identifier, reported as Magma reports it; the next input runs)
+  assert.match(r.out, /User error: Identifier 'Foo' has not been declared or assigned\n> y := 2\n/);
+  // (a statement without its ; waits for the next line: y is 2 + 3)
+  assert.match(r.out, /> y;\n5\n/);
+  assert.match(r.out, /end for;\n1\n2\n> quit;/);
+  assert.doesNotMatch(r.out, /NameError|Traceback/);
+});
+
+test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a line, an error and the session goes on, exit(n)", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const r = tty(["--matlab"], "x = rand(2);\nsize(x)\nundefined_thing + 1\ny = [1 2 ...\n3]\nexit(3)\n");
+  assert.equal(r.status, 3, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /\(MATLAB\)\n/);
+  assert.match(r.out, />> size\(x\)\n\nans =\n\n     2     2\n\n/);
+  assert.match(r.out, /Unrecognized function or variable 'undefined_thing'\.\n>> y = \[1 2 \.\.\.\n/);
+  assert.match(r.out, /\ny =\n\n     1     2     3\n\n>> exit\(3\)/);
+  assert.doesNotMatch(r.out, /NameError|Traceback/);
+  // (exit and quit, with or without a status or a semicolon, end it)
+  for (const q of ["exit", "quit;", "quit(0)"]) assert.equal(tty(["--matlab"], `disp(1)\n${q}\n`).status, 0, q);
+});
