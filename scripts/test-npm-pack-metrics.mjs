@@ -69,8 +69,12 @@ try {
   writeFileSync(join(pkg, "dist", "b.cjs"), "hello");
   writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "sagebrush", version: "0.0.1", files: FILES }));
   writeFileSync(join(fake, "good.json"), pkgOut());
+  // (the hang modes' pid, written whole or not at all (a temp file, then mv), just before the exec that keeps
+  // it: a read never sees a file the timeout's kill cut short. "hangslow" never writes it (as a hang killed
+  // before it did);
+  // "orphan" also leaves a child of its own the kill can't reach, the check's control)
   writeFileSync(join(bin, "npm"), `#!/bin/sh
-echo "$$" > "$FAKE_DIR/pid"
+pidout() { echo "$1" > "$FAKE_DIR/hang.tmp" && mv -f "$FAKE_DIR/hang.tmp" "$FAKE_DIR/hang.pid"; }
 echo "$*" >> "$FAKE_DIR/calls"
 env > "$FAKE_DIR/env"
 if [ "$1" = "--version" ]; then echo 11.0.0-fake; exit 0; fi
@@ -79,7 +83,9 @@ case "$FAKE_NPM" in
   exit) echo "the last line" >&2; exit 3 ;;
   notjson) echo "npm notice something" ;;
   trailing) cat "$FAKE_DIR/good.json"; echo garbage ;;
-  hang) exec sleep 30 ;;
+  hang) pidout "$$"; exec sleep 30 ;;
+  hangslow) exec sleep 30 ;;
+  orphan) sleep 30 </dev/null >/dev/null 2>&1 & pidout "$!"; exec sleep 30 ;;
   selfkill) kill -9 $$ ;;
   *) cat "$FAKE_DIR/good.json" ;;
 esac
@@ -102,18 +108,38 @@ esac
   reason("wrapper: npm prints non-JSON", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("notjson") }), "npm output is not JSON");
   reason("wrapper: JSON with trailing garbage", packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("trailing") }), "npm output is not JSON");
   {
-    const t0 = Date.now();
-    const r = packDir(pkg, { pass: FAKE_PASS, env: fakeEnv("hang"), timeoutMs: 200 });
-    reason("wrapper: a hang times out", r, "npm timed out after 200 ms");
-    check("wrapper: the timeout is the injected one", Date.now() - t0 < 10_000, `${Date.now() - t0} ms`);
-    const pid = Number(readFileSync(join(fake, "pid"), "utf8"));
-    let alive = true;
-    try {
-      process.kill(pid, 0);
-    } catch {
-      alive = false;
-    }
-    check("wrapper: the timed-out child was killed", pid > 0 && !alive, `pid ${pid}`);
+    // (the process a hang mode left, after a timed-out run: "none" when it was killed before it wrote its pid
+    // (then nothing of it can be running: only the exec after the write outlives the shell), else alive or not)
+    const hangPid = join(fake, "hang.pid");
+    const survivor = () => {
+      if (!existsSync(hangPid)) return { state: "none" };
+      const text = readFileSync(hangPid, "utf8");
+      if (!/^[1-9][0-9]*\n$/.test(text)) return { state: "bad", text };
+      const pid = Number(text);
+      try {
+        process.kill(pid, 0);
+        return { state: "alive", pid };
+      } catch {
+        return { state: "dead", pid };
+      }
+    };
+    const timedOut = (mode) => {
+      rmSync(hangPid, { force: true });
+      const t0 = Date.now();
+      const r = packDir(pkg, { pass: FAKE_PASS, env: fakeEnv(mode), timeoutMs: 200 });
+      return { r, ms: Date.now() - t0, s: survivor() };
+    };
+    const hang = timedOut("hang");
+    reason("wrapper: a hang times out", hang.r, "npm timed out after 200 ms");
+    check("wrapper: the timeout is the injected one", hang.ms < 10_000, `${hang.ms} ms`);
+    check("wrapper: the timed-out child was killed", hang.s.state === "dead" || hang.s.state === "none", JSON.stringify(hang.s));
+    // (controls: killed before its pid is written is a kill too; a process the kill didn't reach is seen alive)
+    const slow = timedOut("hangslow");
+    reason("wrapper: a hang before the pid times out", slow.r, "npm timed out after 200 ms");
+    check("wrapper: killed before its pid was written: nothing left", slow.s.state === "none", JSON.stringify(slow.s));
+    const orphan = timedOut("orphan");
+    check("wrapper: the check sees a process the kill missed", orphan.s.state === "alive", JSON.stringify(orphan.s));
+    if (orphan.s.pid) try { process.kill(orphan.s.pid, "SIGKILL"); } catch {}
   }
   {
     // (NPM-PACK-138-3: only spawnSync's own timeout is a timeout; a SIGKILL from elsewhere is a failure)
