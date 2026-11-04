@@ -48,13 +48,20 @@ From each document's first run it keeps the PDF, the preview's text and
 `sagebrush latex check --json`, and `fidelity.mjs` compares them:
 
 - **text:** the PDF's words (`pdftotext`) against the preview's, as multisets
-  of tokens (words of letters or digits; each CJK character a token). It
+  of tokens (words of letters or digits, lowercased; each CJK character a
+  token). A one-letter word isn't a token: most are math variables and list
+  labels, which the two sides show differently. A one-digit number is. It
   reports recall (how many of the PDF's tokens the preview has), precision
   (how many of the preview's the PDF has) and their Dice similarity, plus the
   PDF tokens the preview lacks most.
   - Math, page furniture (headers, beamer's navigation bar) and TikZ labels
     differ on both sides, so 1.0 isn't expected. A low number is the signal,
     and the missing words say why.
+  - The preview's text is the browser's (`innerText`). Without the browser
+    part (`--parts oracle,cli`), it is the CLI's HTML as text, marked `ᶜ`. That
+    is close to the browser's but not the same: the HTML also has each
+    formula's source, for one. On C2 at #631: 0.879 ᶜ against the browser's
+    0.851.
 - **structure:** PDF pages; for beamer, the preview's frames and overlay
   steps (each step is a PDF page).
 - **unsupported:** check's problems, counted by kind.
@@ -70,6 +77,7 @@ pnpm build                                     # dist/src, which web/build.ts ne
 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts  # web/dist, the editor also on 127.0.0.1
 CHROME=google-chrome node bench/latex/run.mjs --runs 5 [--docs C0,C2] [--parts oracle,cli,browser]
 node bench/latex/fidelity.mjs bench/latex/results/<date>   # the fidelity table again
+node bench/latex/fidelity.mjs --self-test      # tokens(), compare() and htmlText() on small cases
 ```
 
 It prints a Markdown table and writes `results/<date>/`: `results.json` (every
