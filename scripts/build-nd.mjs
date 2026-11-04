@@ -22,16 +22,29 @@ const FLAGS = [
   "-C link-arg=--no-check-features",
 ].join(" ");
 
-// (its own target directory: these RUSTFLAGS differ from the engine's, and sharing one would rebuild both each time)
+// The two modules (numerics-core P2a): the deterministic SIMD128 one, and the relaxed-SIMD FMA one that
+// browsers validating relaxed SIMD load instead (web/threads/page.ts). Each has its own target directory:
+// their RUSTFLAGS differ from each other's and from the engine's, and sharing one would rebuild all each time.
+export const MODULES = [
+  { file: "sagebrush-nd.wasm", dir: "nd", flags: FLAGS },
+  { file: "sagebrush-nd-fma.wasm", dir: "nd-fma", flags: FLAGS.replace("+simd128,", "+simd128,+relaxed-simd,") },
+];
+
 export function buildNd(target = join(process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target"), "nd")) {
-  execFileSync("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "sagebrush-nd"], {
-    cwd: join(root, "engine"),
-    stdio: "inherit",
-    env: { ...process.env, RUSTFLAGS: FLAGS, CARGO_TARGET_DIR: target },
-  });
-  const built = join(target, "wasm32-unknown-unknown", "release", "sagebrush_nd.wasm");
-  new WebAssembly.Module(readFileSync(built)); // validate
-  return installWasm(built, join(root, "wasm", "sagebrush-nd.wasm"));
+  const sizes = {};
+  for (const m of MODULES) {
+    // (the first module keeps `target` itself, as before; the others get sibling directories)
+    const dir = m.dir === "nd" ? target : `${target}-${m.dir.slice(3)}`;
+    execFileSync("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "sagebrush-nd"], {
+      cwd: join(root, "engine"),
+      stdio: "inherit",
+      env: { ...process.env, RUSTFLAGS: m.flags, CARGO_TARGET_DIR: dir },
+    });
+    const built = join(dir, "wasm32-unknown-unknown", "release", "sagebrush_nd.wasm");
+    new WebAssembly.Module(readFileSync(built)); // validate
+    sizes[m.file] = installWasm(built, join(root, "wasm", m.file));
+  }
+  return sizes;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) console.log(`wasm/sagebrush-nd.wasm: ${buildNd()} bytes`);
+if (import.meta.url === `file://${process.argv[1]}`) for (const [f, n] of Object.entries(buildNd())) console.log(`wasm/${f}: ${n} bytes`);

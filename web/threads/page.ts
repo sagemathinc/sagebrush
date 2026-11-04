@@ -14,6 +14,7 @@
 // arena (A, B, C and the scratch), above every stack.
 
 import { Crew } from "./crew";
+import { chooseModule } from "./kernel-module";
 
 const $ = (id: string) => document.getElementById(id)!;
 const STACK = 1 << 20;
@@ -41,6 +42,8 @@ let active: { resolve: (r: Result) => void; reject: (e: Error) => void } | null 
 // second worker's constructor ("spawn") or postMessage ("post") throws; window.__ndWorkers counts workers made
 // and terminated)
 const fault = new URLSearchParams(location.search).get("fault") ?? undefined;
+// the kernel module: chosen once at load (kernel-module.ts; ?module=simd128 or ?module=fma to compare)
+const moduleChoice = chooseModule((b) => WebAssembly.validate(b), new URLSearchParams(location.search).get("module"));
 const counts = { made: 0, terminated: 0, startups: 0 };
 if (fault) (self as any).__ndWorkers = counts;
 function makeWorker(url: URL): Worker {
@@ -70,7 +73,8 @@ function env() {
     ["crossOriginIsolated", String(self.crossOriginIsolated)],
     ["SharedArrayBuffer", typeof SharedArrayBuffer === "function" ? "available" : "missing"],
     ["logical cores (hardwareConcurrency)", String(hw)],
-    ["backend", "browser WebAssembly (SIMD128, threads over a shared memory)"],
+    ["backend", "browser WebAssembly (threads over a shared memory)"],
+    ["kernel module", `${moduleChoice.file} (${moduleChoice.reason})`],
     ["user agent", navigator.userAgent],
   ];
   $("env").innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</td></tr>`).join("");
@@ -92,7 +96,7 @@ async function startPool(maxT: number): Promise<Pool> {
   counts.startups++;
   const setup: Record<string, number> = {};
   let t = performance.now();
-  const module = await WebAssembly.compileStreaming(fetch(new URL("sagebrush-nd.wasm", location.href)));
+  const module = await WebAssembly.compileStreaming(fetch(new URL(moduleChoice.file, location.href)));
   setup.compileMs = performance.now() - t;
   const memory = new WebAssembly.Memory({ initial: Math.ceil(arenaStart(maxT) / PAGE) + 1, maximum: 65536, shared: true });
   const ctl = BASE, desc = BASE + 64;
