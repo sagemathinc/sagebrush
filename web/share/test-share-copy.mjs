@@ -133,8 +133,9 @@ try {
   // (and runs there in its own folder, /Book, as Jupyter runs a notebook (#634): its data, copied beside it, found by
   // the relative name the book uses)
   await ev(`(() => { const ta = document.querySelector('.cell textarea'); ta.value = ${J("import os\nprint(os.getcwd(), open('data/points.csv').read().strip().replace('\\n', ';'))")}; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
-  await until("(() => { const c = document.querySelector('.cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued'); })()", 90000);
-  const ran = (await ev("document.querySelector('.cell .out').textContent")).trim();
+  // (the run waited for by its own line: the copy shows the output the reader's run in the book left, "x,y;…", until
+  // this run clears it and prints)
+  const ran = await until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '/Book x,y;1,2;3,4'", 90000).then(() => "/Book x,y;1,2;3,4", async () => (await ev("document.querySelector('.cell .out')?.textContent ?? ''")).trim());
   ok(ran === "/Book x,y;1,2;3,4", "…and runs there in its own folder, reading the data copied beside it: " + J(ran));
 
   // ---- 7. a deleted copy is forgotten (B11): the next visit opens the book's version, and the copy's place is cleared
