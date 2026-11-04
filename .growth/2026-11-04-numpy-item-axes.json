@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "ndarray.item as NumPy 2.5.1: per-axis bounds and negative indices, the tuple form, its errors (src/runtime/numpy.ts itemPos). Re-measured with bun 1.4.4 (size-record.sh) on master cf235e65 vs head bc607f69: cli/pyjs.cjs +715, engine/sagebrush-worker.js +580; no other row moves. Markers: exact, except cli/pyjs.cjs 747 (+715 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "ndarray.item as NumPy 2.5.1: per-axis bounds and negative indices, the tuple form, its errors (src/runtime/numpy.ts itemPos). Re-measured with bun 1.4.4 (size-record.sh) on master cf235e65 vs head c348e19d: cli/pyjs.cjs +1227, engine/sagebrush-worker.js +1043; no other row moves. Markers: exact, except cli/pyjs.cjs 1259 (+1227 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/pyjs.cjs": 747,
-  "engine/sagebrush-worker.js": 580
+  "cli/pyjs.cjs": 1259,
+  "engine/sagebrush-worker.js": 1043
  }
 }
