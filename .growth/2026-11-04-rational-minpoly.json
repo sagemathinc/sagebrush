@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Rational.minpoly() and Rational.charpoly() over QQ, with docstring examples (lib/sage_all.py), as Sage 10.9. Re-measured with bun 1.4.4 (size-record.sh) on master 7fb1755f vs head 28175913: cli/lib.gen.js +232, cli/pyjs.cjs +1324, engine/lib/sage.pre +2225, engine/lib/sage.src +768; no other row moves. Markers: exact, except cli/pyjs.cjs 1356 (+1324 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 232,
+  "cli/pyjs.cjs": 1356,
+  "engine/lib/sage.pre": 2225,
+  "engine/lib/sage.src": 768
+ }
+}
