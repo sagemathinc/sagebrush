@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 
 // np.genfromtxt (lib/numpy/__init__.py): numpy-tests/test_genfromtxt.py checks it against NumPy
 // itself; here, what Sagebrush's numpy doesn't have yet is said in words, never a wrong array:
-// structured arrays (names=, dtype=None with columns of different types), masked arrays, text.
+// structured arrays (names=, a structured dtype, dtype=None with columns of different types), masked
+// arrays, text.
 const CLI = __dirname + "/../src/cli.js";
 test("genfromtxt refuses, in words, the arrays Sagebrush's numpy doesn't have", () => {
   const code = [
@@ -17,6 +18,7 @@ test("genfromtxt refuses, in words, the arrays Sagebrush's numpy doesn't have", 
     "    lambda: np.genfromtxt(S('a,2\\nb,4\\n'), delimiter=',', dtype=None),",
     "    lambda: np.genfromtxt(S('1,2\\n'), delimiter=',', dtype=str),",
     "    lambda: np.genfromtxt(S('1,,3\\n'), delimiter=',', usemask=True),",
+    "    lambda: np.genfromtxt(S('1,2\\n'), delimiter=',', dtype=[('a', int), ('b', float)]),",
     "]):",
     "    try:",
     "        f(); print(k, 'no error')",
@@ -31,5 +33,6 @@ test("genfromtxt refuses, in words, the arrays Sagebrush's numpy doesn't have", 
     "3 genfromtxt with dtype=None and text fields: string arrays are not supported by sagebrush's numpy yet",
     "4 string arrays are not supported by sagebrush's numpy yet",
     "5 genfromtxt with usemask=True: masked arrays are not supported by sagebrush's numpy yet",
+    "6 genfromtxt with a structured dtype: structured arrays are not supported by sagebrush's numpy yet",
   ]);
 });

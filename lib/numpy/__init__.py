@@ -3067,11 +3067,22 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
         raise NotImplementedError("genfromtxt with usemask=True: masked arrays are not supported by sagebrush's numpy yet")
     if ndmin not in (0, 1, 2):
         raise ValueError("Illegal value of ndmin keyword: %s" % (ndmin,))
+    if max_rows is not None:
+        if skip_footer:
+            raise ValueError("The keywords 'skip_footer' and 'max_rows' can not be specified at the same time.")
+        if max_rows < 1:
+            raise ValueError("'max_rows' must be at least 1.")
+    # (NumPy skips no lines for a negative count)
+    # (this module's max is numpy's: plain comparisons here)
+    skip_header = skip_header if skip_header > 0 else 0
+    skip_footer = skip_footer if skip_footer > 0 else 0
     if isinstance(fname, (list, tuple)) or (not hasattr(fname, "read") and not isinstance(fname, (str, bytes)) and hasattr(fname, "__iter__")):
         lines = [l.decode() if isinstance(l, bytes) else str(l) for l in fname]
         lines = [l for chunk in lines for l in (chunk.splitlines() or [""])]
     else:
         lines = _read_text(fname).splitlines()
+    if isinstance(dtype, (list, tuple, dict)):
+        raise NotImplementedError("genfromtxt with a structured dtype: structured arrays are not supported by sagebrush's numpy yet")
     if dtype is not None:
         # (str, bytes, object and the like: string arrays, which this numpy doesn't have)
         try:
@@ -3090,15 +3101,32 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             line = line.split(comments, 1)[0]
         if not line.strip():
             continue
-        fields = line.split() if delimiter is None else line.split(delimiter)
+        if delimiter is None:
+            fields = line.split()
+        elif isinstance(delimiter, str):
+            fields = line.split(delimiter)
+        else:
+            # (fixed widths: an int for every field, or one width per field)
+            widths = [delimiter] * (len(line) // delimiter + 1) if isinstance(delimiter, int) else list(delimiter)
+            fields, at = [], 0
+            for w in widths:
+                if at >= len(line):
+                    break
+                fields.append(line[at:at + w])
+                at += w
         rows.append((k + 1, [f.strip() for f in fields]))
+    found = bool(rows)
     if skip_footer > 0:
         rows = rows[:-skip_footer] if skip_footer < len(rows) else []
     if not rows:
-        if skip_footer <= 0 and not lines[skip_header:]:
+        # (no data at all: NumPy's warning; data all in the footer: none)
+        if not found:
             import warnings
             warnings.warn('genfromtxt: Empty input file: "%s"' % (fname,), UserWarning, stacklevel=2)
-        return array([], dtype=float if dtype is None else dtype)
+        a = array([], dtype=float if dtype is None else dtype)
+        if ndmin == 2:
+            a = a.reshape((0, 1))
+        return a.T if unpack else a
     if isinstance(usecols, int):
         usecols = [usecols]
     ncols = len(rows[0][1])
@@ -3124,18 +3152,21 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
         warnings.warn(_ConversionWarning(msg), stacklevel=2)
     cols = list(usecols) if usecols is not None else list(range(ncols))
     width = len(cols)
-    missing = {""}
-    if isinstance(missing_values, str):
-        missing |= set(missing_values.split(","))
-    elif isinstance(missing_values, dict):
-        for v in missing_values.values():
-            missing |= set(v.split(",")) if isinstance(v, str) else set(v)
+    # each column's missing strings: '' and missing_values (a dict: by column, None for all)
+    as_set = lambda v: set(v.split(",")) if isinstance(v, str) else set(v)
+    missings = [{""} for _ in range(width)]
+    if isinstance(missing_values, dict):
+        for c, v in missing_values.items():
+            for j in range(width):
+                if c is None or c == cols[j] or (isinstance(c, int) and c < 0 and c + ncols == cols[j]):
+                    missings[j] |= as_set(v)
     elif missing_values is not None:
-        missing |= set(missing_values)
+        for m in missings:
+            m |= as_set(missing_values)
     # the column types: dtype=None infers one (each column's own would be a structured array)
     if dtype is None:
         def col_kind(j):
-            vals = [r[j] for r in kept if r[j] not in missing]
+            vals = [r[j] for r in kept if r[j] not in missings[j]]
             def ok(conv):
                 try:
                     for v in vals:
@@ -3151,7 +3182,7 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             raise NotImplementedError("genfromtxt with dtype=None and columns of different types: structured arrays are not supported by sagebrush's numpy yet")
         dtype = {"i": int64, "f": float64, "c": complex128}[kinds.pop()]
     kind = _self.dtype(dtype).kind
-    default_fill = -1 if kind in "biu" else complex(float("nan"), 0) if kind == "c" else float("nan")
+    default_fill = False if kind == "b" else -1 if kind in "iu" else complex(float("nan"), 0) if kind == "c" else float("nan")
     fills = [default_fill] * width
     if isinstance(filling_values, dict):
         for c, v in filling_values.items():
@@ -3162,7 +3193,14 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             fills[j] = v
     elif filling_values is not None:
         fills = [filling_values] * width
-    conv = int if kind in "biu" else (lambda t: complex(t.replace("i", "j"))) if kind == "c" else float
+    def str2bool(t):
+        # (NumPy's: TRUE or FALSE, in any case; nothing else is a bool)
+        if t.upper() == "TRUE":
+            return True
+        if t.upper() == "FALSE":
+            return False
+        raise ValueError("Invalid boolean")
+    conv = str2bool if kind == "b" else int if kind in "iu" else (lambda t: complex(t.replace("i", "j"))) if kind == "c" else float
     convs = [conv] * width
     for c, f in (converters or {}).items():
         if c in cols:
@@ -3171,12 +3209,14 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
     for fields in kept:
         row = []
         for j, t in enumerate(fields):
-            if t in missing:
-                row.append(fills[j])
-                continue
+            # (as NumPy's converters: the conversion first, so a missing value that
+            # converts is that value; one that doesn't is filled, and with
+            # loose=False, so is only one of its column's missing values)
             try:
                 row.append(convs[j](t))
             except (ValueError, TypeError):
+                if not loose and t not in missings[j]:
+                    raise ValueError("Cannot convert string '%s'" % t)
                 row.append(fills[j])
         out.append(row)
     a = squeeze(array(out, dtype=dtype))
