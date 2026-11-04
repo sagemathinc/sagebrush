@@ -9696,6 +9696,14 @@
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
  },
+ "web/workspace/checkpoint.ts :: acceptedBatch :: export const SCRATCH_GRAPH = { exactCacheMaxEntries: 1, exactCacheMaxSize: 1, valueCacheMaxEntries: 1, valueCacheMaxSize: 1 } as const; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The checkpoint decisions' patchflow graphs keep no cached values (LRU caches of size 1): a decision holds only its current value, charged as V (map r2 G as amended); nothing is refused or truncated by it."
+ },
  "web/workspace/checkpoint.ts :: itemBytesOf :: const WIDEST = { seq: Number.MAX_SAFE_INTEGER, recv: Number.MAX_SAFE_INTEGER, chain: \"f\".repeat(64) }; #0": {
   "class": "1",
   "disposition": {

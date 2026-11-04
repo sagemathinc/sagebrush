@@ -14,7 +14,7 @@ import { LIMITS } from "../sync-protocol/protocol.ts";
 import { SYNC_DEBT } from "../journal/rows.js";
 import {
   CHECKPOINT_BLOB_MAX, TAIL_ITEM_CAP, TAIL_PATCHES_CAP, REGISTER_ATTEMPTS, LOCAL_ROWS_MAX, LOCAL_BYTES_MAX, Ledger,
-  acceptedBatch, exactCut, makeCheckpoint, checkRecord, checkCheckpoint, reconcile, splitPrefix, prefixCharge, itemBytesOf, utf8Length, sha256Hex,
+  acceptedBatch, exactCut, makeCheckpoint, checkRecord, checkCheckpoint, reconcile, splitPrefix, prefixCharge, itemBytesOf, utf8Length, sha256Hex, scratchGraph,
 } from "./checkpoint.ts";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -33,6 +33,7 @@ const mk = (client, parents, from, to) => ({ time: encodePatchId(++clock, client
 const charge = (patches) => 400 + utf8Length(J(patches));
 const batch = (seq, patches) => acceptedBatch(seq, patches, charge(patches));
 const fullValue = (patches, time) => { const g = new PatchGraph({ codec }); g.add(patches); return g.value(time ? { time } : {}); };
+const hashOf = (v) => new PatchGraph({ codec }).hashOf(v);
 
 // a line A → B → C (one writer), each its own batch, and two concurrent edits after B
 const v0 = docOf([]), v1 = docOf(["x = 1"]), v2 = docOf(["x = 1", "y = 2"]), v3 = docOf(["x = 1", "y = 2", "z = 3"]);
@@ -136,8 +137,8 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const d = { epoch: 1, at_seq: 2, recv_at: 0, chain_at: "0".repeat(64), cut_patch: B.time, sha256: ck.sha256, bytes: ck.bytes };
   const tail = [line[2]];
   const ok = await checkCheckpoint(codec, d, ck.blob, tail);
-  check(ok.ok && canon(ok.graph.value()) === canon(v3), "checkCheckpoint: the record + the tail: a usable base, the whole history's value");
-  check(ok.ok && ok.ledger.peak <= 2 * ok.B && ok.ledger.total() <= ok.B, `checkCheckpoint: peak <= 2B and retained <= B (B ${ok.B}, peak ${ok.ledger?.peak}, retained ${ok.ledger?.total()})`);
+  check(ok.ok && ok.head === hashOf(v3), "checkCheckpoint: the record + the tail: a usable base, the whole history's value (its hash)");
+  check(ok.ok && ok.V === utf8Length(codec.toString(v3)) && ok.ledger.peak === 2 * ok.B + ok.V && ok.ledger.total() === 0, `checkCheckpoint: peak 2B + V (V the value's canonical bytes), nothing held on return (B ${ok.B}, V ${ok.V}, peak ${ok.ledger?.peak}, held ${ok.ledger?.total()})`);
   const no = async (dd, blob, t, why, what, local) => {
     const x = await checkCheckpoint(codec, dd, blob, t, local);
     check(!x.ok && x.why === why && x.ledger.total() === 0, `checkCheckpoint: ${what}: refused (${why}), nothing held after: ` + J({ why: x.why, held: x.ledger.total(), B: x.B }));
@@ -188,12 +189,15 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(two1000.ok || two1000.why !== "bounds", "checkCheckpoint: 500 + 500 across two batches: within the bound");
   // (astra's CK-M3; the grader's T7) a record whose causal fields aren't a list of distinct patch ids is refused as
   // a record, never an exception, and nothing is held after; so is a tail the graph throws on
-  for (const [what, parents] of [["parents 42", 42], ["parents {}", {}], ["a non-string parent", [1]], ["a parent that isn't a patch id", ["x"]], ["a repeated parent", [A.time, A.time]]]) {
-    const bad = new TextEncoder().encode(J({ ...ck.record, parents }));
+  const nine = Array.from({ length: 9 }, (_, i) => encodePatchId(clock - 100 - i, "clientN"));
+  for (const [what, change] of [["parents 42", { parents: 42 }], ["parents {}", { parents: {} }], ["a non-string parent", { parents: [1] }], ["a parent that isn't a patch id", { parents: ["x"] }],
+    ["a repeated parent", { parents: [A.time, A.time] }], ["9 parents", { parents: nine }], ["itself as a parent", { parents: [ck.record.time] }], ["a nested-array parent", { parents: [[A.time]] }],
+    ["a change (patch)", { patch: [] }], ["a mergePatch", { mergePatch: [] }], ["a mergeParent", { mergeParent: A.time }], ["a time that isn't a patch id", { time: "x" }]]) {
+    const bad = new TextEncoder().encode(J({ ...ck.record, ...change }));
     const dd = { ...d, sha256: await sha256Hex(bad), bytes: bad.length };
     let r, threw = null;
     try { r = await checkCheckpoint(codec, dd, bad, tail); } catch (e) { threw = String(e); }
-    check(!threw && r && !r.ok && r.why === "record" && r.ledger.total() === 0, `checkCheckpoint: a record with ${what}: refused (record), nothing held: ` + J(threw ?? { why: r.why, held: r.ledger.total() }));
+    check(!threw && r && !r.ok && r.why === "record" && r.ledger.total() === 0, `checkCheckpoint: a record with ${what} (its hash right): refused (record), nothing held: ` + J(threw ?? { why: r.why, held: r.ledger.total() }));
   }
   const odd = acceptedBatch(3, [{ ...C, parents: 42 }], 1);
   let oddR, oddThrew = null;
@@ -202,11 +206,39 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   // (astra's CK-M2; the grader's T8) the bytes held are counted as taken, the device's own rows included: B = the blob
   // + the tail's charge + the local rows' JSON bytes; a 1 MiB local edit makes B over 1 MiB, the graph's copy is
   // exactly those bytes on return, and the peak is 2B (the incoming copy and the working one)
+  const N0 = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "n0"]));
   const big = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w".repeat(1 << 20)]));
   const bigBytes = Buffer.byteLength(J(big));
   const withBig = await checkCheckpoint(codec, d, ck.blob, tail, [big]);
   const held = ck.blob.length + tail[0].charge + bigBytes;
-  check(withBig.ok && withBig.B === held && withBig.ledger.total() === held && withBig.ledger.peak === 2 * held, "checkCheckpoint: a 1 MiB local edit: B and what is held on return are the record + the tail + its " + bigBytes + " bytes, the peak 2B: " + J({ B: withBig.B, held: withBig.ledger.total(), peak: withBig.ledger.peak, want: held }));
+  check(withBig.ok && withBig.B === held && withBig.ledger.peak === 2 * held + withBig.V && withBig.ledger.total() === 0, "checkCheckpoint: a 1 MiB local edit: B is the record + the tail + its " + bigBytes + " bytes, the peak 2B + V, nothing held on return: " + J({ B: withBig.B, V: withBig.V, peak: withBig.ledger.peak, held: withBig.ledger.total(), want: held }));
+  // (the grader's T13) the local rows are charged in UTF-8 bytes, not UTF-16 units: a non-ASCII edit
+  const wide = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "é€𝄞".repeat(50000)]));
+  const wideBytes = Buffer.byteLength(J(wide));
+  check(wideBytes !== J(wide).length, "(the non-ASCII fixture: its UTF-8 bytes aren't its UTF-16 length)");
+  const withWide = await checkCheckpoint(codec, d, ck.blob, tail, [wide]);
+  check(withWide.ok && withWide.B === ck.blob.length + tail[0].charge + wideBytes, "checkCheckpoint: a non-ASCII local edit is charged its UTF-8 bytes: " + J({ B: withWide.B, want: ck.blob.length + tail[0].charge + wideBytes }));
+  // (the grader's T10) exactly the local bounds are within them
+  const atRows = await checkCheckpoint(codec, d, ck.blob, tail, Array.from({ length: LOCAL_ROWS_MAX }, () => C));
+  check(atRows.ok || atRows.why !== "bounds", `checkCheckpoint: exactly ${LOCAL_ROWS_MAX} local rows: within the bound: ` + J(atRows.ok ? "ok" : atRows.why));
+  const padded = (pad) => ({ ...N0, pad });
+  const base0 = Buffer.byteLength(J(padded("")));
+  const atLocalBytes = padded("p".repeat(LOCAL_BYTES_MAX - base0));
+  check(Buffer.byteLength(J(atLocalBytes)) === LOCAL_BYTES_MAX, "(a local row of exactly LOCAL_BYTES_MAX bytes)");
+  const ab = await checkCheckpoint(codec, d, ck.blob, tail, [atLocalBytes]);
+  check(ab.ok || ab.why !== "bounds", "checkCheckpoint: local rows of exactly LOCAL_BYTES_MAX bytes: within the bound: " + J(ab.ok ? "ok" : ab.why));
+  const ob = await checkCheckpoint(codec, d, ck.blob, tail, [padded("p".repeat(LOCAL_BYTES_MAX - base0 + 1))]);
+  check(!ob.ok && ob.why === "bounds" && ob.ledger.peak === 0, "checkCheckpoint: one byte more: refused (bounds) before any graph");
+  // (the grader's T12, astra's narrow item) a local row that can't be measured (a BigInt): refused (local), never a
+  // rejection, nothing held; and a throw inside the decision (a codec whose merge3 throws): refused, nothing held
+  let bigintR, bigintThrew = null;
+  try { bigintR = await checkCheckpoint(codec, d, ck.blob, tail, [{ ...N0, meta: { big: 1n } }]); } catch (e) { bigintThrew = String(e); }
+  check(!bigintThrew && bigintR && !bigintR.ok && bigintR.why === "local" && bigintR.ledger.total() === 0, "checkCheckpoint: a local row with a BigInt: refused (local), nothing held: " + J(bigintThrew ?? { why: bigintR.why, held: bigintR.ledger.total() }));
+  const throwing = { ...codec, merge3: () => { throw new Error("merge3 fails"); } };
+  const X1 = mk("clientA", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "p"])), Y1 = mk("clientB", [C.time], v3, docOf(["q", "x = 1", "y = 2", "z = 3"]));
+  let thr, thrThrew = null;
+  try { thr = await checkCheckpoint(throwing, d, ck.blob, [line[2], acceptedBatch(4, [X1, Y1], 1)]); } catch (e) { thrThrew = String(e); }
+  check(!thrThrew && thr && !thr.ok && thr.ledger.total() === 0, "checkCheckpoint: a codec that throws during the decision: refused, nothing held: " + J(thrThrew ?? { why: thr.why, held: thr.ledger.total() }));
   check(LOCAL_ROWS_MAX === SYNC_DEBT.docCount && LOCAL_BYTES_MAX === SYNC_DEBT.docBytes, "the local bounds are the journal's per-document debt bounds (SYNC_DEBT)");
   const manyLocal = Array.from({ length: LOCAL_ROWS_MAX + 1 }, () => C);
   const lr = await checkCheckpoint(codec, d, ck.blob, tail, manyLocal);
@@ -216,7 +248,21 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(!lb.ok && lb.why === "bounds" && lb.ledger.peak === 0, "checkCheckpoint: local rows over LOCAL_BYTES_MAX: refused (bounds) before any graph");
   const N = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "mine"]));
   const withLocal = await checkCheckpoint(codec, d, ck.blob, tail, [N]);
-  check(withLocal.ok && canon(withLocal.graph.value()) === canon(fullValue([A, B, C, N])), "checkCheckpoint: the device's own row after the tail: usable, the combined value");
+  check(withLocal.ok && withLocal.head === hashOf(fullValue([A, B, C, N])), "checkCheckpoint: the device's own row after the tail: usable, the combined value");
+}
+
+// ---- the graphs' caches (astra's CK-M2): a decision's graph keeps one computed value, not one per patch
+{
+  const doc1 = (s) => codec.fromString(J({ type: "cell", id: "c", input: s }));
+  let text = "A".repeat(100000), val = doc1(text);
+  const root = { time: encodePatchId(++clock, "clientZ"), parents: [], patch: codec.makePatch(codec.fromString(""), val), userId: 0 };
+  const ps = [];
+  let parent = root.time;
+  for (let i = 0; i < 50; i++) { text += "X"; const next = doc1(text); const p = { time: encodePatchId(++clock, "clientZ"), parents: [parent], patch: codec.makePatch(val, next) }; ps.push(p); parent = p.time; val = next; }
+  const held = (g) => { const u = new Set([...g.exactCache.values(), ...g.exactMergeCache.values(), ...(g.valueCache?.values?.() ?? []), ...g.recentExact.values(), ...g.recentMerged.values()].map((x) => x?.doc ?? x).filter(Boolean)); return u.size; };
+  const scratch = scratchGraph(codec), plain = new PatchGraph({ codec });
+  for (const g of [scratch, plain]) { g.add([root, ...ps]); g.needsMoreHistory(); g.valueUnavailable(); }
+  check(held(scratch) <= 1 && held(plain) === 51, `scratchGraph: after a decision over a 100,000-character value and 50 edits, its caches hold ${held(scratch)} value (patchflow's defaults: ${held(plain)})`);
 }
 
 // ---- reconcile (r9 §6.2): the full identity only
@@ -329,7 +375,7 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
       const inst = await checkCheckpoint(codec, d, ck.blob, batches.slice(at));
       if (inst.ok) {
         installs++;
-        check(canon(inst.graph.value()) === canon(fullValue(all)), `seed ${seed}: installed from the checkpoint at ${at}, the value equals a full-history client's`);
+        check(inst.head === hashOf(fullValue(all)), `seed ${seed}: installed from the checkpoint at ${at}, the value equals a full-history client's`);
       } else check(inst.why === "needs_more_history", `seed ${seed}: an install refused only for needsMoreHistory: ${inst.why}`);
       break;
     }
