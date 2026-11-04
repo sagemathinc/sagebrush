@@ -1053,6 +1053,18 @@ try {
     Object.assign(r5b, { said: await statusIs(/^Your text up to then is in r5b \(mine\)\.tex; you've typed since, so your text stays here$/, 8000), copy: (await textOf("/x/r5b (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% mine\n% newer\n"), bar: await barUp() });
     check(Object.values(r5b).every((v) => v === true), "R5 typing while theirs is read after the copy: the newer text stays here, the bar too", r5b);
 
+    // (daybreak3 LATEX-EXT-SEM-1: a change made while Use theirs reads theirs: looked at after it, so the newer one is
+    // shown, never the older left in place; and one made while Keep mine writes: the bar for it after)
+    const r5c = { bar0: await conflicted("/x/r5c.tex") };
+    await hold("__sbTexTheirsRead");
+    await click(".tex-theirs");
+    r5c.held = await held("__sbTexTheirsRead");
+    await agentWrite("/x/r5c.tex", DOC + "% theirs 2\n");
+    await sleep(400);
+    await release("__sbTexTheirsRead");
+    Object.assign(r5c, { newer: await srcBecomes(DOC + "% theirs 2\n", 5000), bar: !(await barUp()), copy: (await textOf("/x/r5c (mine).tex")) === DOC + "% mine\n" });
+    check(Object.values(r5c).every((v) => v === true), "R5c a change while Use theirs reads: the newer one shown after it, the copy kept", r5c);
+
     // R6: two changes, the first one's read held past the second's: the last one shown, never the first after it;
     // two writers in one change: "elsewhere"
     await opened("/x/r6.tex");
@@ -1066,6 +1078,14 @@ try {
     r6.last = await srcIs(DOC + "% second\n");
     await ev(`(async () => { await ${AG}.write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC + "% a\n")})); await ${W}.write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC + "% b\n")})); return true; })()`);
     Object.assign(r6, { both: await srcBecomes(DOC + "% b\n"), who: await statusIs(/^Updated elsewhere$/, 3000) });
+    // (daybreak2: many writers while a check waits: the label kept is one string, "elsewhere", not one per writer)
+    await hold("__sbTexCheckRead", "before");
+    await agentWrite("/x/r6.tex", DOC + "% c\n");
+    r6.held2 = await held("__sbTexCheckRead");
+    await ev(`(async () => { for (let k = 0; k < 40; k++) await window.__sbTexWs.forAgent("agent:writer-" + k).write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC)} + "% w" + k + "\\n")); return true; })()`);
+    r6.bounded = (await ev(`window.__sbTexActor?.() ?? null`)) === "elsewhere";
+    await release("__sbTexCheckRead");
+    r6.many = await srcBecomes(DOC + "% w39\n", 8000) && (await statusIs(/^Updated elsewhere$/, 3000));
     check(Object.values(r6).every((v) => v === true), "R6 a held earlier read never installs over a later change; two writers at once: \"Updated elsewhere\"", r6);
 
     // T4: another tab, a person there: the same file open in a second page's editor, edited and saved there: followed
@@ -1102,6 +1122,19 @@ try {
       t5.bar = await barShows(); t5.text = (await barText()) === "Another device changed this file while you were editing."; t5.src = await srcIs(DOC + "% mine\n");
     }
     check(Object.values(t5).every((v) => v === true) && Object.keys(t5).length === 6, "T5 another device's change (an op from the server): followed when clean, the bar when not", t5);
+
+    // T5b: its bytes not here yet (a remote entry: readUpTo says "missing", sync-docs): this text kept, said; once
+    // they are (sync-fetch installs them without an op), followed, "Updated by another device"
+    await opened("/x/t5b.tex");
+    await ev(`(() => { const ws = window.__sbTexWs, real = ws.readUpTo; window.__notHere = true; ws.readUpTo = function (p, ...a) { if (window.__notHere && p === "/x/t5b.tex") return Promise.reject(Object.assign(new Error("the contents of " + p + " are not in this browser"), { code: "missing" })); return real.call(this, p, ...a); }; return true; })()`);
+    await fromServer("/x/t5b.tex", DOC + "% synced later\n");
+    const t5b = { waiting: await statusIs(/^This file was changed on another device; its new text is on its way…$/, 5000), kept: await srcIs(DOC) };
+    await sleep(2500);
+    t5b.still = (await srcIs(DOC)) && !(await barUp());
+    await ev(`window.__notHere = false; true`);
+    Object.assign(t5b, { followed: await srcBecomes(DOC + "% synced later\n", 6000), said: await statusIs(/^Updated by another device$/, 3000) });
+    await ev(`delete window.__sbTexWs.readUpTo; true`);
+    check(Object.values(t5b).every((v) => v === true), "T5b another device's change whose bytes aren't here yet: this text kept, said; followed once they are", t5b);
 
     // E1: deleted elsewhere: the text kept, never emptied, said; renamed elsewhere: no reload; another file put at
     // its old path while a change is looked at: never shown here
@@ -1579,6 +1612,86 @@ try {
       `${name}: every \\not slash across its relation (=, \\in, \\subset), not below it: at least half its height inside the relation's`, g.slashes);
     check(g.rlap && g.llap && Math.abs(g.rlap.start) <= 1 && g.rlap.w > 5 && Math.abs(g.rlap.dBottom) <= 2 && Math.abs(g.llap.end) <= 1 && g.llap.w > 5 && Math.abs(g.llap.dBottom) <= 2,
       `${name}: \\rlap starts where it is, \\llap ends where it is, both on their line`, { rlap: g.rlap, llap: g.llap });
+  }
+  // ---- the name at the top (William's M0): it follows a rename elsewhere (the file panel's, the workspace's rename);
+  // a click on it renames the file (a true rename), its results file beside it moved along; Escape keeps the name; a
+  // name taken is said, nothing renamed
+  {
+    const T = `document.querySelector(".tex-head .tex-title")`;
+    await open(await mk("/m0/paper.tex", enc("\\documentclass{article}\n\\begin{document}\nM0 text.\n\\end{document}\n")));
+    await until(`${T}?.textContent === "paper.tex"`, 20000);
+    await ev(`${W}.rename("/m0/paper.tex", "/m0/moved.tex").then(() => 1)`);
+    const followed = await until(`${T}.textContent === "moved.tex" && document.title.startsWith("moved.tex")`, 5000);
+    check(followed, "M0: the name at the top follows a rename elsewhere (the file panel's)", await ev(`[${T}.textContent, document.title]`));
+    await mk("/m0/moved.tex.results.json", enc("{}"));
+    await mk("/m0/taken.tex", enc("x"));
+    const retitle = async (typed, key = "Enter") => {
+      await ev(`(${T}.click(), 1)`);
+      const opened = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
+      if (!opened) return false;
+      await ev(`(() => { const i = document.querySelector(".tex-head .tex-titlein"); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true })); return true; })()`);
+      return opened;
+    };
+    const stat = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
+    // (Escape: nothing renamed)
+    const escOpened = await retitle("other", "Escape");
+    await sleep(500);
+    check(escOpened && (await stat("/m0/moved.tex")) && !(await stat("/m0/other.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a click on the name edits it; Escape keeps it");
+    // (a name taken: said, nothing renamed)
+    await retitle("taken");
+    const saidTaken = await statusIs(/already a "taken\.tex" here/, 5000);
+    check(saidTaken && (await stat("/m0/moved.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a name already taken: said, nothing renamed", await ev(`document.querySelector(".tex-status")?.textContent`));
+    // (renamed: the .tex and its results file, the extension added when typed without it)
+    await retitle("final");
+    const renamed = await until(`${T}.textContent === "final.tex"`, 5000);
+    const files = { tex: await stat("/m0/final.tex"), old: await stat("/m0/moved.tex"), results: await stat("/m0/final.tex.results.json"), oldResults: await stat("/m0/moved.tex.results.json") };
+    check(renamed && files.tex && !files.old && files.results && !files.oldResults && (await ev(`document.title`)).startsWith("final.tex"), "M0: a name typed and Enter: the file renamed (.tex added), its results file moved along", files);
+    // (astra LATEX-RENAME-1: the old name, freed by the rename, reused at once by another document that makes its own
+    //  comments or results file there: never taken along; only the files found before the rename move)
+    const reuse = (made) => ev(`(window.__reuse = 0, window.__sbTexRenamed = async (from) => { window.__reuse++; await ${W}.create(from, { content: new TextEncoder().encode("other") });
+      for (const x of ${JSON.stringify(made)}) await ${W}.create(from + x, { content: new TextEncoder().encode("OTHER") }); }, 1)`);
+    const read = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content)) : null)`);
+    await reuse([".comments.json"]);
+    await retitle("again");
+    await until(`${T}.textContent === "again.tex"`, 5000);
+    const r1 = { hook: await ev(`window.__reuse`), ourResults: await read("/m0/again.tex.results.json"), otherComments: await read("/m0/final.tex.comments.json"), takenComments: await read("/m0/again.tex.comments.json") };
+    check(r1.hook === 1 && r1.ourResults === "{}" && r1.otherComments === "OTHER" && r1.takenComments === null, "M0: another document's comments file made at the freed name stays; only this file's results move", r1);
+    await ev(`${W}.remove("/m0/again.tex.results.json").then(() => 1)`);
+    await reuse([".results.json"]);
+    await retitle("last");
+    await until(`${T}.textContent === "last.tex"`, 5000);
+    const r2 = { hook: await ev(`window.__reuse`), otherResults: await read("/m0/again.tex.results.json"), takenResults: await read("/m0/last.tex.results.json") };
+    check(r2.hook === 1 && r2.otherResults === "OTHER" && r2.takenResults === null, "M0: another document's results file made at the freed name stays where it is", r2);
+    await ev(`(window.__sbTexRenamed = undefined, 1)`);
+    // (daybreak3 M0-SEM-1: renamed elsewhere while the field is open, then Escape: the name it has now is shown)
+    await ev(`(${T}.click(), 1)`);
+    const open1 = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
+    await ev(`${W}.rename("/m0/last.tex", "/m0/elsewhere.tex").then(() => 1)`);
+    await sleep(300);
+    if (open1) await ev(`(document.querySelector(".tex-head .tex-titlein").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    const caught = await until(`${T}?.textContent === "elsewhere.tex" && document.title.startsWith("elsewhere.tex")`, 5000);
+    check(open1 && caught, "M0: renamed elsewhere while the name is being edited, then Escape: the new name shown", await ev(`[${T}?.textContent, document.title]`));
+    // (grader N5: the results file found before the rename, replaced by another one at its path while the .tex is
+    //  renamed: the new one is not this file's, so it stays where it is, said)
+    await mk("/m0/elsewhere.tex.results.json", enc("ours"));
+    await ev(`(window.__sbTexRenamed = async (from) => { await ${W}.remove(from + ".results.json"); await ${W}.create(from + ".results.json", { content: new TextEncoder().encode("REPLACED") }); }, 1)`);
+    await retitle("n5");
+    const n5renamed = await until(`${T}.textContent === "n5.tex"`, 5000);
+    const n5said = await statusIs(/^Renamed; 1 file beside it kept its old name$/, 5000);
+    const n5 = { stayed: await read("/m0/elsewhere.tex.results.json"), taken: await read("/m0/n5.tex.results.json") };
+    await ev(`(window.__sbTexRenamed = undefined, 1)`);
+    check(n5renamed && n5said && n5.stayed === "REPLACED" && n5.taken === null, "M0: a results file replaced at the old path during the rename stays where it is, said", { n5renamed, n5said, n5, status: await ev(`document.querySelector(".tex-status")?.textContent`) });
+  }
+  // (daybreak3 M0-SEM-2, grader REQUIRED 1: a file that can't be saved here, opened as text (mixed line endings, save.ts):
+  //  its name is plain text, no rename offered)
+  {
+    const T = `document.querySelector(".tex-head .tex-title")`;
+    await open(await mk("/m0/mixed.tex", [97, 13, 10, 98, 10, 99, 10]));
+    const asText = await until(`${T}?.textContent === "mixed.tex" && !!document.querySelector(".tex-src")`, 20000);
+    const plain = await ev(`(() => { const t = ${T}; return { role: t.getAttribute("role"), tab: t.tabIndex, tip: t.title, cls: t.className }; })()`);
+    await ev(`(${T}.click(), 1)`); await sleep(400);
+    const noField = await ev(`!document.querySelector(".tex-head .tex-titlein")`);
+    check(asText && plain.role === null && plain.tab === -1 && !/rename/i.test(plain.tip) && !/renamable/.test(plain.cls) && noField, "M0: a file that can't be saved here, opened as text: no rename offered (no button role, no tab stop, no click to rename)", { asText, plain, noField });
   }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the

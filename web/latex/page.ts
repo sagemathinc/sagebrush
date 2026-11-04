@@ -588,7 +588,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   current = { dispose: () => dispose(), dirty: isDirty };
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
-  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) (globalThis as any).__sbTexWs = host.ws;
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 
   // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
   // change made elsewhere since is never written over, the bar below asks
@@ -626,21 +626,22 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // unsaved edits here, the text follows it in place, the cursor and scroll kept; with them, nothing is replaced or
   // written and the bar asks (William, Nov 3: "a critical thing to get right"). One check at a time, each reading
   // the file's bytes, fid and revision together (readUpTo, under the workspace's lock); one asked for meanwhile, or
-  // during a Save or a choice in the bar, runs after it.
+  // during a Save or a choice in the bar (Keep mine, Use theirs), runs after it.
   let checking = false, again = false, acting = false, goneSaid = false, checkTimer: any = null, docPath = where.path;
   let conflict: { fid: string; rev: number; theirs: boolean; by: string } | null = null;
-  // (who changed it, a label only: one actor among this file's ops since the last check, else "elsewhere"; this
-  //  tab's own Save's ops are its own)
-  let actors = new Set<string>();
+  // (who changed it, a label only: the one actor among this file's ops since the last check, "elsewhere" once there
+  //  is a second (one string, however many ops wait); this tab's own Save's ops are its own)
+  let actor: string | null = null;
+  let waits = 0;
   const actorName = (op: any) => { const by = typeof op.by === "string" ? op.by : "";
     return op.origin === "server" ? "another device" : by === "agent:page" ? "an agent in this page" : by.startsWith("agent:") ? by.slice(6).replace(/[-_]+/g, " ").trim() || "an agent" : "another tab"; };
   const unwatchDoc = host.ws.watch((c) => {
     let hit = false;
     for (const op of c.ops ?? []) if (op.fid === host.fid || op.path === docPath || op.to === docPath) {
       hit = true;
-      if (!((saving || acting) && op.by === "person" && op.origin !== "server")) actors.add(actorName(op));
+      if (!((saving || acting) && op.by === "person" && op.origin !== "server")) { const n = actorName(op); actor = actor === null || actor === n ? n : "elsewhere"; }
     }
-    if (hit) { clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
+    if (hit) { waits = 0; clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
   });
   life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
   const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); save.hidden = !ok; };
@@ -667,30 +668,46 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     keepMine.hidden = !saveable; useTheirs.hidden = !c.theirs;
     bar.hidden = false;
   };
+  // (another device's change, its bytes not here yet (readUpTo: "missing"; sync-fetch installs them without an op):
+  //  nothing replaced, this text kept; looked at again every 2 s until they are (for 5 minutes; then at the next
+  //  change), who changed it kept for then)
+  const keepActor = (by: string) => { actor = actor === null || actor === by ? by : "elsewhere"; };
+  const onItsWay = (by: string) => {
+    say("This file was changed on another device; its new text is on its way…");
+    keepActor(by);
+    if (++waits > 150) return;
+    clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 2000);
+  };
   const check = async (): Promise<void> => {
-    if (checking || saving) { again = true; return; }
+    // (one at a time, and none during a Save or a choice in the bar: asked for meanwhile, it runs when they end)
+    if (checking || saving || acting) { again = true; return; }
     checking = true; again = false;
-    const by = actors.size === 1 ? [...actors][0] : "elsewhere"; actors = new Set();
+    // (who: the writers seen up to when the read is done, the read being of their writes)
+    const take = () => { const b = actor ?? "elsewhere"; actor = null; return b; };
     try {
       const at = await host.ws.pathOfFile(host.fid);
       if (!live()) return;
-      if (!at.ok) { if (!goneSaid) say("This file was deleted elsewhere; your text is still here."); goneSaid = true; return; }
+      if (!at.ok) { take(); if (!goneSaid) say("This file was deleted elsewhere; your text is still here."); goneSaid = true; return; }
       goneSaid = false; docPath = at.path;
       const e0 = edits, d0 = docRev;
       // (the test build only: the page test can hold the check here, before its read and after it; elsewhere this folds away)
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("before");
       let r: { entry: Entry; content: Uint8Array };
-      try { r = await host.ws.readUpTo(at.path, EDIT_MAX); } catch (err) { if (live()) say("This file was changed elsewhere and can't be read here now: " + String((err as Error)?.message ?? err).slice(0, 160)); return; }
+      try { r = await host.ws.readUpTo(at.path, EDIT_MAX); } catch (err) {
+        if (!live()) return;
+        if ((err as any)?.code === "missing") { onItsWay(take()); return; }
+        say("This file was changed elsewhere and can't be read here now: " + String((err as Error)?.message ?? err).slice(0, 160)); return;
+      }
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("after");
+      const by = take();
       // (another file at this path now is never this editor's)
       if (!live() || r.entry.fid !== host.fid) return;
       // (a Save or Keep mine done while it read: what it read may be older than that; read again)
-      if (docRev !== d0) { again = true; return; }
+      if (docRev !== d0) { keepActor(by); again = true; return; }
       const rev = r.entry.rev ?? 0;
       if (rev === docRev || rev === conflict?.rev) return;
-      // (another device's change, its bytes not here yet (sync-fetch installs them without an op): nothing shown or
-      //  replaced from the old bytes; looked at again until they are)
-      if (r.entry.remote) { say("This file was changed on another device; its new text is on its way…"); clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 2000); return; }
+      if (r.entry.remote) { onItsWay(by); return; }
+      waits = 0;
       const j = judge(r);
       if (!conflict && edits === e0 && src.value === savedText) {
         // (no unsaved edits, before the read and after it: their text here; one the editor can't show leaves this
