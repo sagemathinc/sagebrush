@@ -3295,15 +3295,19 @@ function cpCut(s: string, n: number): string {
 // (an element as stored: at most n code points, trailing NULs dropped, as
 // NumPy's fixed-width storage reads back)
 const strStore = (s: string, n: number): string => cpCut(s, n).replace(/\0+$/, "");
-const cpKey = (u: number): number => (u >= 0xe000 ? u - 0x800 : u >= 0xd800 ? u + 0x2000 : u);
+// (the code points where the strings first differ: a valid pair is one
+// code point, a lone surrogate itself; from one unit earlier when the common
+// prefix ends in a high surrogate that a low one after it makes a pair in
+// either string)
+const isHigh = (u: number) => u >= 0xd800 && u < 0xdc00, isLow = (u: number) => u >= 0xdc00 && u < 0xe000;
 function cpCompare(a: string, b: string): number {
   if (a === b) return 0;
   const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    const x = a.charCodeAt(i), y = b.charCodeAt(i);
-    if (x !== y) return cpKey(x) < cpKey(y) ? -1 : 1;
-  }
-  return a.length < b.length ? -1 : 1;
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  if (i === n) return a.length < b.length ? -1 : 1;
+  if (i > 0 && isHigh(a.charCodeAt(i - 1)) && (isLow(a.charCodeAt(i)) || isLow(b.charCodeAt(i)))) i--;
+  return a.codePointAt(i)! < b.codePointAt(i)! ? -1 : 1;
 }
 
 // The length of the strings NumPy makes from a dtype's values (astype(str))
