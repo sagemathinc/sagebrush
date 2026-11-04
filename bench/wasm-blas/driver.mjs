@@ -32,6 +32,10 @@ function namesProfile(arg, dir) {
     return n === dir || n === dir + "/" || n.startsWith(dir + "/");
   });
 }
+// Does a /proc/PID/cmdline (arguments separated by NUL) have an argument naming `dir`? The only split is at NUL.
+function cmdlineNamesProfile(cmdline, dir) {
+  return cmdline.split("\0").some((a) => namesProfile(a, dir));
+}
 // SIGKILL every process (but this one and `skip`) that has an argument naming `dir`.
 function killNamingProfile(dir, skip = []) {
   let pids = [];
@@ -40,16 +44,18 @@ function killNamingProfile(dir, skip = []) {
     const pid = Number(p);
     if (pid === process.pid || skip.includes(pid)) continue;
     try {
-      const argv = readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0");
-      if (argv.some((a) => namesProfile(a, dir))) process.kill(pid, "SIGKILL");
+      if (cmdlineNamesProfile(readFileSync(`/proc/${p}/cmdline`, "utf8"), dir)) process.kill(pid, "SIGKILL");
     } catch {}
   }
 }
-if (process.argv[2] === "--kill-naming") {
+//   node driver.mjs --kill-naming DIR SKIP_PID   (the watchdog's scan)
+//   node driver.mjs --classify DIR < CMDLINE      (the same test, pure: prints "names" or "spares", sends no signal)
+if (process.argv[2] === "--kill-naming" || process.argv[2] === "--classify") {
   const [dir, skip] = process.argv.slice(3);
   // (only ever a profile dir this driver makes: an absolute .../sbwr-udd-XXXXXX path)
   if (!/^\/.*\/sbwr-udd-[^/]+$/.test(dir ?? "")) process.exit(2);
-  killNamingProfile(dir, [Number(skip)]);
+  if (process.argv[2] === "--classify") console.log(cmdlineNamesProfile(readFileSync(0, "utf8"), dir) ? "names" : "spares");
+  else killNamingProfile(dir, [Number(skip)]);
   process.exit(0);
 }
 

@@ -41,7 +41,9 @@ Both use one matcher. The watchdog has none of its own; it runs
 argument boundaries, so a newline inside one argument is never a boundary. An
 argument names the dir if it is the dir, `--flag=` the dir, or a path that
 stays inside the dir after `.` and `..` are resolved. `<dir>/../elsewhere` does
-not count.
+not count. `node driver.mjs --classify DIR < CMDLINE` applies the same test to
+a NUL-separated argument list and sends no signal. The test runs one shared
+case list through `--classify` and through `--kill-naming` on real processes.
 
 One case remains: a supervisor that SIGKILLs every process at once, the
 watchdog included. It leaves no process behind, but nothing is left to remove

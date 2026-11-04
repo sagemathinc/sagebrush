@@ -103,24 +103,53 @@ test("wasm-blas driver: the watchdog uses the driver's own matcher (no /proc par
   assert.ok(!dog.includes("/proc") && !dog.includes("cmdline"), "the watchdog reads no cmdline itself");
 });
 
-test("wasm-blas driver: --kill-naming kills exactly the processes with an argument naming the profile", { skip: !supported }, async () => {
-  const udd = mkdtempSync(join(tmpdir(), "sbwr-udd-"));
-  const cases: [string, string, boolean][] = [
-    ["exact", udd, true],
-    ["inside", `${udd}/Crash Reports`, true],
-    ["flag", `--database=${udd}/Crash Reports`, true],
-    ["neighbor", `${udd}-other/file`, false],
-    ["neighbor flag", `--database=${udd}-other`, false],
-    ["newline inside one argument", `--description=looking at a profile\n${udd}/Crash Reports`, false],
-    ["newline, then exactly the dir", `note\n${udd}`, false],
-    ["dot inside", `--database=${udd}/./Crash Reports`, true],
-    ["dotdot out of it", `--database=${udd}/../not-this-run/Crash Reports`, false],
-    ["dotdot to its parent", `${udd}/..`, false],
-    ["dotdot back into it", `${udd}/x/../Crash Reports`, true],
-    ["skipped pid", udd, false],
+// One case list for both checks of the one matcher: the pure classifier (--classify, no signals) and the kill
+// scan the watchdog and the driver run (--kill-naming, on real processes). Each case is the arguments of a
+// process; "names" means some argument names the profile dir. (#645 DRIVER645-PATH-2: a path that leaves the dir
+// through ".." is not inside it.)
+function matcherCases(udd: string): [string, string[], boolean][] {
+  return [
+    ["exact", [udd], true],
+    ["inside", [`${udd}/Crash Reports`], true],
+    ["flag, exact", [`--user-data-dir=${udd}`], true],
+    ["flag, inside", [`--database=${udd}/Crash Reports`], true],
+    ["second argument", ["--x", `${udd}/a`], true],
+    ["dot inside", [`--database=${udd}/./Crash Reports`], true],
+    ["dotdot back into it", [`${udd}/x/../Crash Reports`], true],
+    ["sibling <dir>-x", [`${udd}-x`], false],
+    ["sibling <dir>x", [`${udd}x`], false],
+    ["sibling inside", [`${udd}x/Crash Reports`], false],
+    ["sibling flag", [`--database=${udd}-other`], false],
+    ["newline inside one argument", [`--description=looking at a profile\n${udd}/Crash Reports`], false],
+    ["newline, then exactly the dir", [`note\n${udd}`], false],
+    ["dotdot out of it", [`${udd}/../x`], false],
+    ["flag, dotdot out of it", [`--database=${udd}/../x`], false],
+    ["flag, dotdot to another run", [`--database=${udd}/../not-this-run/Crash Reports`], false],
+    ["dotdot to its parent", [`${udd}/..`], false],
   ];
+}
+
+test("wasm-blas driver: --classify (pure, no signals) on the shared cases", () => {
+  const udd = join(tmpdir(), "sbwr-udd-classify");
+  for (const [name, args, names] of matcherCases(udd)) {
+    const cmdline = ["/usr/bin/some-viewer", ...args].join("\0") + "\0";
+    const r = spawnSync(process.execPath, [DRIVER, "--classify", udd], { input: cmdline, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), names ? "names" : "spares", name);
+  }
+  // (anything but a driver-made profile dir is refused before anything is read)
+  for (const bad of ["/", "/tmp", "relative/sbwr-udd-x", ""]) {
+    assert.equal(spawnSync(process.execPath, [DRIVER, "--classify", bad], { input: "" }).status, 2, `classify ${JSON.stringify(bad)}`);
+    assert.equal(spawnSync(process.execPath, [DRIVER, "--kill-naming", bad]).status, 2, `kill-naming ${JSON.stringify(bad)}`);
+  }
+});
+
+test("wasm-blas driver: --kill-naming kills exactly the processes of the shared cases that name the profile", { skip: !supported }, async () => {
+  const udd = mkdtempSync(join(tmpdir(), "sbwr-udd-"));
+  const cases = matcherCases(udd);
+  cases.push(["skipped pid", [udd], false]);
   // (after "--", so node passes a --flag=... argument through instead of parsing it as its own option)
-  const kids = cases.map(([, arg]) => spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--", arg], { stdio: "ignore" }));
+  const kids = cases.map(([, args]) => spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--", ...args], { stdio: "ignore" }));
   try {
     assert.ok(await until(() => kids.every((k) => alive(k.pid!))), "the victims started");
     const skip = kids[cases.length - 1].pid!;
@@ -128,9 +157,6 @@ test("wasm-blas driver: --kill-naming kills exactly the processes with an argume
     assert.equal(r.status, 0, r.stderr);
     await new Promise((ok) => setTimeout(ok, 300));
     for (const [i, [name, , killed]] of cases.entries()) assert.equal(!alive(kids[i].pid!), killed, `${name}: ${killed ? "killed" : "spared"}`);
-    // (anything but a driver-made profile dir is refused before any signal)
-    assert.equal(spawnSync(process.execPath, [DRIVER, "--kill-naming", "/"]).status, 2);
-    assert.equal(spawnSync(process.execPath, [DRIVER, "--kill-naming", "/tmp"]).status, 2);
   } finally {
     for (const k of kids) k.kill("SIGKILL");
     rmSync(udd, { recursive: true, force: true });
