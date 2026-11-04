@@ -384,6 +384,10 @@ mod tests {
         assert_eq!(run(Kernel::Scalar, &d, &g[..n], n, 1).1.structure, Structure::Diagonal);
         d[0 + (n - 1) * n] = 1e-300;
         assert_eq!(run(Kernel::Scalar, &d, &g[..n], n, 1).1.structure, Structure::Upper);
+        // a lower triangle with one negative entry above the diagonal: not lower (nor upper): general
+        let mut l = transpose(&up, n);
+        l[1 + (n - 1) * n] = -0.25;
+        assert_eq!(run(Kernel::Scalar, &l, &g[..n], n, 1).1.structure, Structure::General);
         // symmetric except the last pair: not a Cholesky candidate
         let mut s = spd(n, 32);
         s[(n - 2) + (n - 1) * n] += 1e-12;
@@ -552,6 +556,39 @@ mod tests {
             let mut q = g.clone();
             q[3] = f64::NAN;
             assert_eq!(solve(k, Mode::Gesv, &mut q, n, n, &mut x, 2, n, &mut ipiv, &mut work).unwrap().status, Status::NonFinite);
+        }
+    }
+
+    /// The magic(8) golden fixture (real MATLAB, /scratch/matlab-speed/oracle/matlab-magic8-2026-11-04.txt, sha256
+    /// 25c3fb5b...; grader's notes, @sagebrush's ruling): A = magic(8), b = ones(8, 1). In MATLAB mode it takes
+    /// the LU path (not symmetric, not triangular: the dispatch the fixture checks), its 8th pivot is exactly 0
+    /// (rcond 0: singular, MATLAB's "Matrix is singular to working precision." is P2c's, from this status), and
+    /// back substitution goes through it: x(1:5) NaN (isnan only: MATLAB's display shows no NaN bits), x(6) =
+    /// +Inf and x(7) = -Inf exactly, x(8) within MATLAB's short format's -0.0312: [-0.03125, -0.03115).
+    #[test]
+    fn magic8_matches_matlab() {
+        // (MATLAB's magic(8), column by column)
+        let a: Vec<f64> = [
+            [64, 9, 17, 40, 32, 41, 49, 8],
+            [2, 55, 47, 26, 34, 23, 15, 58],
+            [3, 54, 46, 27, 35, 22, 14, 59],
+            [61, 12, 20, 37, 29, 44, 52, 5],
+            [60, 13, 21, 36, 28, 45, 53, 4],
+            [6, 51, 43, 30, 38, 19, 11, 62],
+            [7, 50, 42, 31, 39, 18, 10, 63],
+            [57, 16, 24, 33, 25, 48, 56, 1],
+        ]
+        .iter()
+        .flatten()
+        .map(|&v| f64::from(v))
+        .collect();
+        for k in kernels() {
+            let (x, rep, _) = run(k, &a, &[1.0; 8], 8, 1);
+            assert_eq!(rep.structure, Structure::General, "{}: magic(8) is solved by LU", k.name());
+            assert!(matches!(rep.status, Status::Singular(_)) && rep.rcond == 0.0, "{}: {rep:?}", k.name());
+            assert!(x[..5].iter().all(|v| v.is_nan()), "{}: {x:?}", k.name());
+            assert_eq!((x[5], x[6]), (f64::INFINITY, f64::NEG_INFINITY), "{}: {x:?}", k.name());
+            assert!(x[7] >= -0.03125 && x[7] < -0.03115, "{}: x(8) = {}", k.name(), x[7]);
         }
     }
 
