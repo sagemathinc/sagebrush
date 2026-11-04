@@ -9337,7 +9337,7 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
- "src/runtime/numpy.ts :: itemIndex :: if (typeof u === \"bigint\" && (u > I64MAX || u < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+ "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
