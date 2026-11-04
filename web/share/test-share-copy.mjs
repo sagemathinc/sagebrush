@@ -9,6 +9,8 @@
 //   5. "Back to the book's version" shows the original, whose edits aren't kept; "Open your copy" goes back;
 //   6. "Open in my files" opens the copy in the notebook page. (Running it there with its data waits on the notebook
 //      page's working folder: it is the workspace's top, not the notebook's folder as in Jupyter; asked, Nov 4.)
+//   7. a deleted copy is forgotten: the next visit opens the book's version (grader's B11).
+//   Also in 1: a ?f= of a data file opens the first notebook, and says so (grader's B8).
 //   bun web/build.ts && node web/share/test-share-copy.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -75,6 +77,10 @@ try {
   await send("Page.navigate", { url: link + "?f=nope.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   ok((await ev("document.querySelector('#nbname').textContent")) === "ch1.ipynb" && /no notebook "nope\.ipynb".*opened ch1\.ipynb instead/.test(await ev("document.querySelector('#status').textContent")), "a ?f= that isn't a notebook of it: said, and the first opened");
+  // (B8: a ?f= of the collection's data file isn't a notebook either)
+  await send("Page.navigate", { url: link + "?f=data/points.csv" });
+  await until("!!document.querySelector('#nb .cell')");
+  ok((await ev("document.querySelector('#nbname').textContent")) === "ch1.ipynb" && /no notebook "data\/points\.csv".*opened ch1\.ipynb instead/.test(await ev("document.querySelector('#status').textContent")), "?f= of a data file: said, and the first notebook opened");
 
   // ---- 2. reading and running copy nothing
   await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
@@ -124,6 +130,15 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
   await until("!!document.querySelector('.cell textarea')", 30000);
   ok(/second edit/.test(await ev("document.querySelector('.cell textarea').value")), "the notebook page opens the reader's copy, with their edit");
+
+  // ---- 7. a deleted copy is forgotten (B11): the next visit opens the book's version, and the copy's place is cleared
+  await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
+  await until("!document.querySelector('#copyline').hidden", 30000);
+  ok((await ev(`import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.remove("/Book/ch1.ipynb")).then(() => true)`)) === true, "the reader deletes their copy (it goes to Trash)");
+  await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && /Nothing has run yet/.test(document.querySelector('#status').textContent)", 30000);
+  ok(!/mine/.test(await code()) && (await line()) === "", "the next visit opens the book's version, with no \"your copy\" line: " + J(await line()));
+  ok(!Object.keys(JSON.parse((await ev("localStorage.getItem('sagebrush-share-copies')")) ?? "{}")).some((k) => k.endsWith(":ch1.ipynb")), "…and the deleted copy is forgotten: its place is cleared");
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

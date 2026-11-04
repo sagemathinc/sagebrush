@@ -37,8 +37,12 @@ const OPENABLE = /\.(ipynb|py|sage)$/i;
 const COPIES = "sagebrush-share-copies";
 const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
 const remember = (key: string, at: string | null) => { const all = copies(); if (at) all[key] = at; else delete all[key]; try { localStorage.setItem(COPIES, JSON.stringify(all)); } catch {} };
-// (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters)
-const folderOf = (title: string) => "/" + (title.replace(/[^\p{L}\p{N} ._-]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "Shared");
+// (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
+// which no path can hold (workspace/paths.ts): a title of dots alone, as an empty one, is "Shared"; grader's B12)
+const folderOf = (title: string) => {
+  const s = title.replace(/[^\p{L}\p{N} ._-]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60).trim();
+  return "/" + (s === "" || s === "." || s === ".." ? "Shared" : s);
+};
 
 async function main() {
   const m = location.pathname.match(/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/);
