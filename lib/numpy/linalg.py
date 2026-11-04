@@ -270,12 +270,13 @@ def qr(a, mode="reduced"):
 
 
 def pinv(a, rcond=None, hermitian=False, *, rtol=None):
+    a0 = _np.asarray(a)
     a = _float(a)
     if rtol is None:
         rtol = 1e-15 if rcond is None else rcond
     if a.ndim >= 2 and (a.shape[-1] == 0 or a.shape[-2] == 0 or a.size == 0):
         # (no singular values: the pseudoinverse of an m x n empty matrix is n x m, empty, per matrix)
-        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a.dtype)
+        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a0.dtype)
     u, s, vh = svd(a, full_matrices=False)
     cutoff = rtol * _np.max(s, axis=-1, keepdims=True)
     sinv = _np.where(s > cutoff, 1.0 / _np.where(s > cutoff, s, 1.0), 0.0)
@@ -360,7 +361,13 @@ def norm(x, ord=None, axis=None, keepdims=False):
         r = _np.sum(svd(_np.moveaxis(x, axis, (-2, -1)), compute_uv=False), axis=-1)
     elif ord in (2, -2):
         s = svd(_np.moveaxis(x, axis, (-2, -1)), compute_uv=False)
-        r = _np.max(s, axis=-1) if ord == 2 else _np.min(s, axis=-1)
+        if s.shape[-1] == 0:
+            # (no singular values: NumPy's 2-norm is 0 (its maximum starts at 0); the -2 norm, a minimum, has none)
+            if ord == -2:
+                raise ValueError("zero-size array to reduction operation minimum which has no identity")
+            r = _np.zeros(s.shape[:-1]) if s.ndim > 1 else _np.float64(0.0)
+        else:
+            r = _np.max(s, axis=-1) if ord == 2 else _np.min(s, axis=-1)
     elif ord in (1, -1):
         cs = _np.sum(a, axis=r0)
         r = _np.max(cs, axis=r1 - 1 if r1 > r0 else r1) if ord == 1 else _np.min(cs, axis=r1 - 1 if r1 > r0 else r1)
@@ -389,6 +396,8 @@ def matrix_norm(x, /, *, keepdims=False, ord="fro"):
 
 def cond(x, p=None):
     x = _float(x)
+    if x.ndim >= 2 and x.shape[-1] * x.shape[-2] == 0:
+        raise LinAlgError("cond is not defined on empty arrays")
     if p is None or p in (2, -2):
         s = svd(x, compute_uv=False)
         return s[..., 0] / s[..., -1] if p != -2 else s[..., -1] / s[..., 0]

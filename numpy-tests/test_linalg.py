@@ -82,3 +82,17 @@ print("big empty stack", [x.shape for x in np.linalg.svd(Z)], np.linalg.svd(Z, c
 for shp in [(0, 3, 3), (2, 0, 0)]:
     Z = np.zeros(shp)
     print("eig/eigh/slogdet/cholesky stack", shp, [x.shape for x in np.linalg.eig(Z)], [x.dtype.kind for x in np.linalg.eig(Z)], [x.shape for x in np.linalg.eigh(Z)], [x.shape for x in np.linalg.slogdet(Z)], np.linalg.cholesky(Z).shape)
+# empty matrices in norm, cond and pinv's dtype (sage2 on #647: NORM-1, COND-2, PINV-3)
+def err(f):
+    try:
+        r = f()
+        return repr(r) + " " + str(getattr(r, "dtype", ""))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+for shp in [(0, 3), (3, 0), (0, 0), (2, 0, 3)]:
+    Z = np.zeros(shp)
+    ax = (-2, -1)
+    print("norm 2/-2/nuc/fro", shp, err(lambda: np.linalg.norm(Z, 2, axis=ax)), err(lambda: np.linalg.norm(Z, -2, axis=ax)), err(lambda: np.linalg.norm(Z, "nuc", axis=ax)), err(lambda: np.linalg.norm(Z, "fro", axis=ax)))
+    print("cond", shp, err(lambda: np.linalg.cond(Z)), err(lambda: np.linalg.cond(Z, "fro")), err(lambda: np.linalg.cond(Z, -2)))
+for dt in (np.int64, bool, np.float32, np.float64):
+    print("pinv empty dtype", dt.__name__ if hasattr(dt, "__name__") else dt, np.linalg.pinv(np.zeros((0, 3), dtype=dt)).dtype, np.linalg.pinv(np.zeros((2, 2, 0), dtype=dt)).dtype)
