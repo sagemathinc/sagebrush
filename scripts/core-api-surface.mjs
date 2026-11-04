@@ -20,6 +20,13 @@
 // default_since, which keeps the shorter call in the contract, and makes
 // removing that default later an incompatible change).  The work is one CLI run
 // and one diff, however many package sets exist: no package metadata is read.
+//
+// core-api-changes.json: the reviewed incompatible signature changes, each
+// {name, old, new, reason, pr}, old and new as signature() writes them.
+// --update records exactly a listed change (the recorded signature is old,
+// the generated one new) and nothing broader; --check fails on an entry the
+// surface no longer needs (its function's recorded signature isn't new), so
+// entries don't pile up.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +35,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = join(root, "core-api-surface.json");
+const CHANGES = join(root, "core-api-changes.json");
 const LIMITS = { bytes: 2 * 1024 * 1024, entries: 50_000 };
 
 // The public module names (top-level and their public submodules are found by the introspection)
@@ -241,15 +249,71 @@ export function widenParams(where, rp, gp, newLevel) {
   return { params, problems, added };
 }
 
+// A parameter list as one line: (a, b=, /, *c, d=, **e); "opaque" as it is
+export function signature(params) {
+  if (!Array.isArray(params)) return String(params);
+  const out = [];
+  let star = params.some((p) => p.kind === "varargs");
+  params.forEach((p, i) => {
+    if (p.kind === "kwonly" && !star) { out.push("*"); star = true; }
+    out.push((p.kind === "varargs" ? "*" : p.kind === "varkw" ? "**" : "") + p.name + (p.default ? "=" : ""));
+    if (p.kind === "posonly" && params[i + 1]?.kind !== "posonly") out.push("/");
+  });
+  return "(" + out.join(", ") + ")";
+}
+
+// The reviewed changes (core-api-changes.json): their shape, or an error
+export function readChanges(text) {
+  const doc = JSON.parse(text);
+  const list = doc?.changes;
+  if (doc?.format !== "sagebrush-core-api-changes" || !Array.isArray(list)) throw new Error("core-api-changes.json: not {format: 'sagebrush-core-api-changes', changes: [...]}");
+  for (const c of list) {
+    const ok = c && typeof c.name === "string" && typeof c.old === "string" && typeof c.new === "string" && c.old !== c.new && typeof c.reason === "string" && c.reason && Number.isInteger(c.pr);
+    if (!ok) throw new Error(`core-api-changes.json: a bad entry ${JSON.stringify(c).slice(0, 200)}`);
+  }
+  if (new Set(list.map((c) => c.name)).size !== list.length) throw new Error("core-api-changes.json: two entries for one name");
+  return list;
+}
+
+// The recorded entry of a dotted name (module.name, or module.Class.member), or undefined
+function recordedEntry(api, name) {
+  const m = Object.keys(api?.modules ?? {}).filter((k) => name.startsWith(k + ".")).sort((a, b) => b.length - a.length)[0];
+  if (!m) return undefined;
+  let e = { members: api.modules[m].names };
+  for (const part of name.slice(m.length + 1).split(".")) {
+    e = e?.members?.[part];
+    if (!e) return undefined;
+  }
+  return e;
+}
+
+// Entries the recorded surface no longer needs: their function's signature isn't the entry's new one
+export function staleChanges(recorded, changes) {
+  const out = [];
+  for (const c of changes) {
+    const e = recordedEntry(recorded, c.name);
+    const now = e ? signature(e.params) : "(absent)";
+    if (now !== c.new) out.push(`core-api-changes.json: ${c.name} is not needed by the surface (recorded ${now}, the entry's new ${c.new}): remove the entry`);
+  }
+  return out;
+}
+
 // Merge the generated surface into the recorded one: new names, members and
-// parameters get `since = level` (the new level); returns {api, problems}
-export function merge(recorded, gen, newLevel) {
+// parameters get `since = level` (the new level); returns {api, problems}.
+// `changes`: the reviewed incompatible changes, each applied only exactly.
+export function merge(recorded, gen, newLevel, changes = []) {
   const problems = [];
   const out = { format: "sagebrush-core-api", api: recorded?.api ?? 1, level: newLevel, prefixes: gen.prefixes, modules: {} };
   let added = 0;
   const sinceOf = (r, fallback) => (r && typeof r.since === "number" ? r.since : fallback);
   const mergeParams = (where, rp, gp, since) => {
     if (gp === "opaque" || rp === "opaque" || !Array.isArray(rp)) return gp === "opaque" ? "opaque" : gp.map((p) => ({ ...p, since }));
+    // (a reviewed incompatible change: exactly its old signature to exactly its new one)
+    const c = changes.find((x) => x.name === where);
+    if (c && signature(rp) === c.old && signature(gp) === c.new) {
+      added++;
+      return gp.map((p) => ({ ...p, since: newLevel }));
+    }
     // (a compatible widening, or a problem: widenParams above)
     const w = widenParams(where, rp, gp, newLevel);
     problems.push(...w.problems);
@@ -281,6 +345,17 @@ export function merge(recorded, gen, newLevel) {
   return { api: out, problems, added };
 }
 
+// Everything --check reports, for a recorded surface, the generated one, the
+// reviewed changes and src/pkgset.ts's constants (the CLI's --check is this)
+export function checkErrors(recorded, gen, changes, consts, fileBytes) {
+  const { problems, added } = merge(recorded, gen, recorded.level + 1, changes);
+  const errs = [...problems, ...staleChanges(recorded, changes)];
+  if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
+  if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
+  if (fileBytes > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");
+  return errs;
+}
+
 function countEntries(api) {
   let n = 0;
   for (const m of Object.values(api.modules)) for (const e of Object.values(m.names)) n += 1 + Object.keys(e.members ?? {}).length;
@@ -297,9 +372,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const recorded = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : null;
   const consts = pkgsetConstants();
   const gen = generate();
+  const changes = existsSync(CHANGES) ? readChanges(readFileSync(CHANGES, "utf8")) : [];
   if (mode === "--update") {
     const level = recorded ? recorded.level + 1 : 1;
-    const { api, problems, added } = merge(recorded, gen, level);
+    const { api, problems, added } = merge(recorded, gen, level, changes);
     if (problems.length) {
       console.error("not recorded: incompatible changes need CORE_API's major bump or a reviewed core-api-changes.json entry:\n  " + problems.join("\n  "));
       process.exit(1);
@@ -316,11 +392,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (Object.keys(gen.failed).length) console.log("modules that could not be imported (left out): " + Object.keys(gen.failed).join(", "));
   } else if (mode === "--check") {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
-    const { problems, added } = merge(recorded, gen, recorded.level + 1);
-    const errs = [...problems];
-    if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
-    if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
-    if (readFileSync(FILE, "utf8").length > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");
+    const errs = checkErrors(recorded, gen, changes, consts, readFileSync(FILE, "utf8").length);
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
       process.exit(1);

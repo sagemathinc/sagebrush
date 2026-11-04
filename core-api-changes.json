@@ -1,0 +1,12 @@
+{
+ "format": "sagebrush-core-api-changes",
+ "changes": [
+  {
+   "name": "numpy.genfromtxt",
+   "old": "(fname, dtype=, comments=, delimiter=, skiprows=, usecols=, unpack=, ndmin=)",
+   "new": "(fname, dtype=, comments=, delimiter=, skip_header=, skip_footer=, converters=, missing_values=, filling_values=, usecols=, names=, excludelist=, deletechars=, replace_space=, autostrip=, case_sensitive=, defaultfmt=, unpack=, usemask=, loose=, invalid_raise=, max_rows=, encoding=, *, ndmin=, like=)",
+   "reason": "NumPy's own genfromtxt signature (NumPy 2.5). The recorded one was loadtxt's: genfromtxt was an alias of loadtxt, and skiprows was never a genfromtxt parameter of NumPy's.",
+   "pr": 600
+  }
+ ]
+}
