@@ -590,6 +590,22 @@ def _rational_power(b, e):
     return SR(Integer(b.numerator) if b.denominator == 1 else Rational._from_coprime_ints(b.numerator, b.denominator)) ** SR(Rational._from_coprime_ints(p, q))
 
 
+def _poly_var_name(var):
+    """A polynomial variable's name as Sage takes it for a number's charpoly
+    or minpoly: str(var), one name, a letter then letters, digits or _."""
+    name = str(var)
+    if "," in name:
+        # (several names: a multivariate ring, which x - a doesn't map into)
+        raise TypeError("Could not find a mapping of the passed element to this ring.")
+    if not name:
+        raise ValueError("variable name must be nonempty")
+    if not name[0].isalpha():
+        raise ValueError("variable name '%s' does not start with a letter" % name)
+    if not all(c.isalnum() or c == "_" for c in name):
+        raise ValueError("variable name '%s' is not alphanumeric" % name)
+    return name
+
+
 class Rational(_Fraction):
     """An exact rational number, such as ``2/3`` in Sage mode.
 
@@ -884,6 +900,34 @@ class Rational(_Fraction):
             (True, False)
         """
         return self._numerator == 1 and self._denominator == 1
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial over QQ: var - self.
+
+        EXAMPLES::
+
+            sage: QQ(3/2).charpoly()
+            x - 3/2
+            sage: (2/3).charpoly('z')
+            z - 2/3
+            sage: QQ(0).charpoly()
+            x
+        """
+        return polygen(QQ, _poly_var_name(var)) - self
+
+    def minpoly(self, var="x"):
+        """The minimal polynomial over QQ: var - self, in QQ[var].
+
+        EXAMPLES::
+
+            sage: QQ(3/2).minpoly()
+            x - 3/2
+            sage: QQ(3/2).minpoly().parent()
+            Univariate Polynomial Ring in x over Rational Field
+            sage: QQ(-7).minpoly(var='y')
+            y + 7
+        """
+        return self.charpoly(var)
 
     def __mod__(self, n):
         """self % n for an integral n: the residue of numerator *
