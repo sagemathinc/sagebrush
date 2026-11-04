@@ -7,8 +7,8 @@
 //   3. the first edit makes the reader's own copy, in their files (/Book/ch1.ipynb, its data beside it), and says so;
 //   4. later edits are saved to the copy; a reload opens the copy, as left;
 //   5. "Back to the book's version" shows the original, whose edits aren't kept; "Open your copy" goes back;
-//   6. "Open in my files" opens the copy in the notebook page. (Running it there with its data waits on the notebook
-//      page's working folder: it is the workspace's top, not the notebook's folder as in Jupyter; asked, Nov 4.)
+//   6. "Open in my files" opens the copy in the notebook page, and it runs there in its own folder (#634), reading the
+//      data copied beside it.
 //   7. a deleted copy is forgotten: the next visit opens the book's version (grader's B11).
 //   Also in 1: a ?f= of a data file opens the first notebook, and says so (grader's B8).
 //   bun web/build.ts && node web/share/test-share-copy.mjs
@@ -130,6 +130,13 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
   await until("!!document.querySelector('.cell textarea')", 30000);
   ok(/second edit/.test(await ev("document.querySelector('.cell textarea').value")), "the notebook page opens the reader's copy, with their edit");
+  // (and runs there in its own folder, /Book, as Jupyter runs a notebook (#634): its data, copied beside it, found by
+  // the relative name the book uses)
+  await ev(`(() => { const ta = document.querySelector('.cell textarea'); ta.value = ${J("import os\nprint(os.getcwd(), open('data/points.csv').read().strip().replace('\\n', ';'))")}; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true })); return 1; })()`);
+  // (the run waited for by its own line: the copy shows the output the reader's run in the book left, "x,y;…", until
+  // this run clears it and prints)
+  const ran = await until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '/Book x,y;1,2;3,4'", 90000).then(() => "/Book x,y;1,2;3,4", async () => (await ev("document.querySelector('.cell .out')?.textContent ?? ''")).trim());
+  ok(ran === "/Book x,y;1,2;3,4", "…and runs there in its own folder, reading the data copied beside it: " + J(ran));
 
   // ---- 7. a deleted copy is forgotten (B11): the next visit opens the book's version, and the copy's place is cleared
   await send("Page.navigate", { url: link + "?f=ch1.ipynb" });

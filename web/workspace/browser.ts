@@ -51,6 +51,8 @@ export type BrowserHost = {
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
+  /** Share folder… on a folder's ⋯ (book links B2): the page's dialog; without it, not offered */
+  shareFolder?: (e: Entry) => void;
   saveOpen?: () => Promise<void>;
   /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
    * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
@@ -606,6 +608,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
+    if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
     items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);

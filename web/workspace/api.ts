@@ -288,6 +288,16 @@ export const STALE_FAILS_CAP = 1000;
 /** The old copies that cleanups keep leaving (migrator.ts, after a full lap): how many, a few of them, and why. */
 export type StaleStuck = { count: number; paths: { path: string; why: StaleWhy; folder?: string }[]; reasons: Partial<Record<StaleWhy, number>> };
 const STUCK_KEY = "staleStuck";
+/** A folder's share (Share folder, book links B2): the collection it was shared as, or a first upload's attempt
+ * whose share isn't known yet (one of the two, never both), in meta by the folder's fid, which a rename keeps.  Per
+ * browser: not exported or synced; a reset forgets it with the folder (@sagebrush's ruling on B2 design r1, Q1). */
+export type FolderShare = { share_id: string; share_attempt: null } | { share_id: null; share_attempt: string };
+const FOLDER_SHARE = "folder-share:";
+const isFolderShare = (x: any): x is FolderShare => !!x && typeof x === "object" && Object.keys(x).length === 2
+  && ((typeof x.share_id === "string" && /^[\w-]{1,64}$/.test(x.share_id) && x.share_attempt === null)
+    || (x.share_id === null && typeof x.share_attempt === "string" && /^[0-9a-f]{32}$/.test(x.share_attempt)));
+const sameShare = (a: FolderShare | undefined, b: FolderShare | undefined) => a === undefined || b === undefined ? a === b : a.share_id === b.share_id && a.share_attempt === b.share_attempt;
+const fidOk = (fid: unknown): fid is string => typeof fid === "string" && /^[\w-]{1,128}$/.test(fid);
 /** The most a value kept the old way can be (design/capabilities.md §2b, LIMIT-CAP1A-1): the page's
  * writes were bounded by FILE_QUEUE_MAX (256 MiB) and uploads by maxFileBytes (200 MB).  Its size isn't
  * known until it is read, so reading one reserves this × COPIES, exclusively, first. */
@@ -484,6 +494,28 @@ export class Workspace {
   async setStaleStuck(s: StaleStuck | null) {
     await inTx(this.ws, "meta", "readwrite", async (tx) => { if (s && s.count) tx.objectStore("meta").put(s, STUCK_KEY); else tx.objectStore("meta").delete(STUCK_KEY); });
     for (const f of this.stuckSubs) try { f(); } catch (e) { console.warn("workspace onStaleStuck:", e); }
+  }
+  /** A folder's share, by its fid: undefined if it has none; a row that isn't one is refused (an upload must stop,
+   * never take it as none: a second share could be made beside the first). */
+  async folderShare(fid: string): Promise<FolderShare | undefined> {
+    if (!fidOk(fid)) throw new WorkspaceError("invalid", "a folder's id");
+    const v = await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(FOLDER_SHARE + fid)));
+    if (v === undefined || isFolderShare(v)) return v;
+    throw new WorkspaceError("invalid", "this folder's share record couldn't be read");
+  }
+  /** Sets a folder's share to `next` (undefined: none) if it is still `expect`, in one transaction: whether it did.
+   * A row that isn't a share is never replaced. */
+  async setFolderShare(fid: string, expect: FolderShare | undefined, next: FolderShare | undefined): Promise<boolean> {
+    if (!fidOk(fid)) throw new WorkspaceError("invalid", "a folder's id");
+    if ((expect !== undefined && !isFolderShare(expect)) || (next !== undefined && !isFolderShare(next))) throw new WorkspaceError("invalid", "a folder's share is a share id or an attempt");
+    return inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta"), k = FOLDER_SHARE + fid, v = await req(st.get(k));
+      if (v !== undefined && !isFolderShare(v)) return false;
+      if (!sameShare(v, expect)) return false;
+      if (next === undefined) st.delete(k);
+      else st.put({ share_id: next.share_id, share_attempt: next.share_attempt }, k);
+      return true;
+    });
   }
   /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;
    * the mark as written, or undefined if it went) */
