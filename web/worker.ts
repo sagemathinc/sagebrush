@@ -52,7 +52,7 @@ import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
 import { __hooks, load as loadFiles, mount, put as putFile, setWritable } from "./shims/fs";
-import { R } from "../src/compile";
+import { R, onOptionalUse } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
@@ -192,6 +192,8 @@ const loadSet = (S: string) => {
   });
 };
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
+// (the set's first use by an import: the page pins it in the notebook then, web/index.html)
+onOptionalUse((S) => postMessage({ pkgsetUsed: S }));
 
 /** The init message's limits, or the reason they are refused before any
  * parsing (the validator, lib/_limits.py, checks the rest). */

@@ -626,6 +626,16 @@ const optKeys = new Map<string, { id: string; path: string }>(); // mounted file
 const optPre = new Map<string, { module: string; code: string; lineMap: unknown[] }>(); // file + "\0py"/"\0sage"
 const optMounted = new Map<string, string>(); // package id -> its Python root
 const optModules = new WeakMap<object, string>(); // a module object the set's files made -> its package id
+// The set's first use, said once: the first time any of its packages is
+// mounted (an import, not the index's install), for the page to pin the set
+// in the notebook then (web/index.html, plan-modular-packages-r4 §4.4 as
+// amended Nov 4: pinned at first use of the set, to the same S that import used).
+let onUse: ((S: string) => void) | null = null;
+let useSaid = false;
+/** Called once with the set's id, the first time one of its packages is mounted (web/worker.ts). */
+export function onOptionalUse(f: (S: string) => void): void {
+  onUse = f;
+}
 /** This core's build id, as optional sets' precompiled code and costs are keyed (an unbundled build has none: 0s, which no set uses). */
 export function coreBuildId(): string {
   const b = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
@@ -711,6 +721,10 @@ function mountOptional(id: string, name: string): string {
     if (pre !== null) for (const e of pre.entries) optPre.set(join(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
     mountedBases.push(base);
     optMounted.set(dep, join(base, p.root));
+  }
+  if (!useSaid) {
+    useSaid = true;
+    onUse?.(plan.S);
   }
   return optMounted.get(id)!;
 }
