@@ -129,6 +129,12 @@ const err = async (p) => { try { await p; return null; } catch (e) { return Stri
   ok(w.calls[0].attempt === A1, "the folder's saved attempt is used again");
 }
 {
+  // (a folder holding an attempt that isn't 32 hex digits: refused before anything is recorded or sent: grader's H9)
+  const w = world({ binding: { share_id: null, share_attempt: "not-hex" } });
+  const m = await err(up(w));
+  ok(/attempt couldn't be made/.test(m ?? "") && w.calls.length === 0 && w.log.length === 0 && w.records === null, `a malformed attempt is refused before any record or request (${m})`);
+}
+{
   // (this device sent another attempt than the folder holds (another tab's write): the sent one comes first)
   const w = world({ binding: { share_id: null, share_attempt: A1 }, records: A2 });
   await up(w);

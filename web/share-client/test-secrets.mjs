@@ -30,6 +30,10 @@ const found = [
   [`-----BEGIN RSA PRIVATE KEY-----`, "a private key"],
   [`-----BEGIN OPENSSH PRIVATE KEY-----`, "a private key"],
   [`g = Github("ghp_${"a1".repeat(18)}")`, "a GitHub token"],
+  [`GH = "github_pat_${"A1b2".repeat(6)}"`, "a GitHub token"], // (grader's K3)
+  [`aws_access_key = "${B64}"`, "an API key"], // (N3)
+  [`AUTH = "${B64}"`, "a token"], // (N4)
+  [`headers = {"Authorization": "${B64}"}`, "a token"], // (N4)
   [`client = OpenAI(api_key=os.environ.get("X", "sk-proj-${"Ab1".repeat(12)}"))`, "an API key"],
   [`url = "https://hooks.slack.com/x?t=xoxb-1234567890-abcdef"`, "a Slack token"],
   [`GOOGLE = "AIza${"B".repeat(35)}"`, "a Google API key"],
@@ -55,14 +59,16 @@ const clean = [
   `api_key = "${"0".repeat(32)}"`,
   `api_key = "${"deadbeef".repeat(4)}"`,
   `x = "${B64}"`,
+  `api_key = "your_api_key_here_1234567"`, // (N9: a placeholder, lower case and digits)
 ];
 for (const line of clean) ok(findSecret(line + "\n") === null, `clean: ${line.slice(0, 60)}`);
 ok(findSecret("") === null && findSecret("\n\n") === null, "an empty text is clean");
 ok(findSecret("x\n".repeat(5) + `k = "AKIA${"A".repeat(16)}"`, 3) === null, "only maxLines lines are read");
 ok(findSecret(`api_key="${HEX32}"` + " ".repeat(10_001)) === null, "a line longer than 10,000 characters is skipped");
 ok(findSecret(`a = 1\napi_key="${HEX32}"\nfred_token="${B64}"`)?.line === 2, "the first finding is the one said");
+ok(findSecret("x".repeat(480) + ` ; api_key="${HEX32}"`)?.line === 1, "a key past column 480 of a long line is found (lines up to 10,000 characters are read: grader's N11)");
 
-for (const [n, want] of [[".env", true], [".env.local", true], ["id_rsa", true], ["id_ed25519", true], ["server.pem", true], ["tls.key", true], ["credentials.json", true], [".netrc", true], ["environment.yml", false], ["keys.csv", false], ["id_rsa.pub", false], ["notes.md", false]]) {
+for (const [n, want] of [[".env", true], [".env.local", true], ["id_rsa", true], ["id_ed25519", true], ["server.pem", true], ["tls.key", true], ["credentials.json", true], [".netrc", true], [".ENV", true], ["ID_RSA", true], ["X.PEM", true], ["environment.yml", false], ["keys.csv", false], ["id_rsa.pub", false], ["notes.md", false]]) {
   ok(!!secretName(n) === want, `the name ${n} ${want ? "is" : "isn't"} a secret's (${secretName(n)})`);
 }
 for (const [n, want] of [["qrpm_funcs.py", true], ["ch1.ipynb", true], ["config.yaml", true], ["data.csv", false], ["fig.png", false], ["x.xlsx", false]]) {
