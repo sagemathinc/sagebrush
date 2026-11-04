@@ -882,6 +882,12 @@ function makeKernel(owner) {
       // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
       // separate question, not this page's to answer)
       if (!LOCAL) w.postMessage({ fsWritable: owner === null || perms.may(owner, "files") });
+      // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
+      // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one)
+      if (!LOCAL && owner !== null && ws) {
+        const at = await ws.pathOf("notebook", owner).catch(() => undefined);
+        if (at) w.postMessage({ startDir: at.slice(0, at.lastIndexOf("/")) || "/" });
+      }
       // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4; the kernel holds
       // every run until this is done): its pin, or the latest unpinned, pinned at its first use (onMessage's
       // pkgsetUsed); a replayed session's is the one it recorded
