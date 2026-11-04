@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "ndarray.item as NumPy 2.5.1: per-axis bounds and negative indices, the tuple form, its errors (src/runtime/numpy.ts itemPos). Re-measured with bun 1.4.4 (size-record.sh) on master 61857390 vs head 069bc501: cli/pyjs.cjs +1251, engine/sagebrush-worker.js +1040; no other row moves. Markers: exact, except cli/pyjs.cjs 1283 (+1251 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/pyjs.cjs": 1283,
+  "engine/sagebrush-worker.js": 1040
+ }
+}
