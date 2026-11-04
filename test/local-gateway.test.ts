@@ -1759,9 +1759,11 @@ const BUNDLED_PACKAGES: Record<string, { version: string; importers: string[] }>
  * and only while the function's whole source (whitespace runs as one space: fnPin) is the reviewed one, its sha256 here:
  * what the returned require loads (its fixed candidates, all sagebrush-latex.cjs) is part of what is pinned, so any
  * change to the loader fails until it is reviewed and the pin renewed (astra's L41-LAZY-1). The census then follows it
- * into the target, whose closure is checked like the rest; any other createRequire fails. */
+ * into the target, whose closure is checked like the rest; any other createRequire fails.
+ * (Renewed for the relocatable lookup: loadLatex looks first beside the CLI's real entry, the launcher's worker naming
+ * the bundle, then where it looked before; the candidates are still only files named sagebrush-latex.cjs.) */
 const LAZY_REVIEWED: Record<string, { fn: string; target: string; sha256: string }> = {
-  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "509fb7c10875efbd20e842a7d5f1a44291cfbabcd03bb47bd8c6b94c18eef006" },
+  "src/cli.ts": { fn: "loadLatex", target: "src/latex-cli.ts", sha256: "1f552beb751df4236041c510b167762f1646cad48ddb68dfdd849a6bdb720303" },
 };
 /** The lockfile's package entries, parsed exactly (the `packages:` section's `name@version:` keys). */
 function lockEntries(root: string) {

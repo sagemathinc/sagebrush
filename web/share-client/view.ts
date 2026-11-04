@@ -5,7 +5,14 @@
 // each is fetched from the user-content domain, and checked against its
 // SHA-256, the first time the code reads it.  Everything shown here comes
 // from the uploader, so it goes into the page as text, never as markup.
+//
+// A chapter's link (book links, B1): /s/<id>?f=<path> opens that file. The reader's own copy: the first edit copies
+// the notebook, and the collection's data files beside it, into the reader's own files in this browser (no sign-in);
+// every later edit is saved there, and a later visit opens it, with "Back to the book's version".  The copy is made
+// as anything brought in from elsewhere is (its code runs without file changes until the reader allows them).
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
+// (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
+import type { Workspace } from "../workspace/api";
 
 interface File { path: string; sha256: string; size: number }
 interface Shared {
@@ -26,6 +33,16 @@ const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
 const size = (n: number) => (n < 1e3 ? `${n} B` : n < 1e6 ? `${(n / 1e3).toFixed(1)} kB` : n < 1e9 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e9).toFixed(2)} GB`);
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 const OPENABLE = /\.(ipynb|py|sage)$/i;
+// (where each reader's copies are: collection id and file path -> the copy's path in the reader's files)
+const COPIES = "sagebrush-share-copies";
+const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
+const remember = (key: string, at: string | null) => { const all = copies(); if (at) all[key] = at; else delete all[key]; try { localStorage.setItem(COPIES, JSON.stringify(all)); } catch {} };
+// (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
+// which no path can hold (workspace/paths.ts): a title of dots alone, as an empty one, is "Shared"; grader's B12)
+const folderOf = (title: string) => {
+  const s = title.replace(/[^\p{L}\p{N} ._-]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60).trim();
+  return "/" + (s === "" || s === "." || s === ".." ? "Shared" : s);
+};
 
 async function main() {
   const m = location.pathname.match(/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/);
@@ -68,29 +85,127 @@ async function main() {
   });
   let nb: any = null;
   let current: File | null = null;
-
-  async function open(f: File) {
-    $("#status").textContent = `opening ${f.path}…`;
+  // (the reader's own files, opened on the first need; null where this browser can't keep them)
+  let wsP: Promise<Workspace | null> | null = null;
+  const workspace = () => (wsP ??= (import(new URL("/sagebrush-share-copy.js", location.href).href) as Promise<typeof import("./copy")>).then((m) => m.openWorkspace()).catch(() => { wsP = null; return null; }));
+  const keyOf = (f: File) => `${c.id}:${f.path}`;
+  const fetchChecked = async (f: File) => {
     const resp = await fetch(fileUrl(f));
     const bytes = await resp.arrayBuffer();
-    if (!resp.ok || hex(await crypto.subtle.digest("SHA-256", bytes)) !== f.sha256) {
-      $("#status").textContent = `${f.path} could not be loaded`;
-      return;
+    if (!resp.ok || hex(await crypto.subtle.digest("SHA-256", bytes)) !== f.sha256) throw new Error(`${f.path} could not be loaded`);
+    return bytes;
+  };
+  // (the copy: the notebook at <folder>/<its path>, and every data file of the collection beside it, unless the reader
+  // already has one there (theirs is kept); made once, on the first edit)
+  async function makeCopy(f: File, doc: any): Promise<{ ws: Workspace; at: string; rev: number } | null> {
+    const ws = await workspace();
+    if (!ws) return null;
+    const folder = folderOf(c.manifest.title), at = `${folder}/${f.path}`.replace(/\.(py|sage)$/i, ".ipynb");
+    const mk = async (dir: string) => { if (!(await ws.stat(dir))) await ws.mkdir(dir); };
+    const dirs = (q: string) => q.split("/").slice(1, -1).map((_, i, a) => "/" + a.slice(0, i + 1).join("/"));
+    for (const d of dirs(at)) await mk(d);
+    let target = at;
+    for (let n = 2; await ws.stat(target); n++) target = at.replace(/(\.ipynb)$/i, ` (${n})$1`);
+    const { rev: _r, id: _i, ...rest } = doc;
+    await ws.create(target, { content: rest });
+    // (the revision later saves are based on: the one read now, taken only if it holds exactly what this tab wrote;
+    // one another tab wrote meanwhile is a conflict, its contents kept, never written over (astra B1-COPY-1))
+    const made = await ws.read(target);
+    const ours = sameDoc(made.content, rest);
+    for (const d of c.manifest.files) {
+      if (OPENABLE.test(d.path)) continue;
+      const q = `${folder}/${d.path}`;
+      if (await ws.stat(q)) continue;
+      for (const x of dirs(q)) await mk(x);
+      await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
     }
-    let doc;
+    remember(keyOf(f), target);
+    if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
+    return { ws, at: target, rev: made.rev };
+  }
+  // (a notebook as written: all of it, cells with their outputs, its language, its metadata, everything a later save
+  // replaces; key order aside.  Not the store's own envelope, which the workspace sets on every write (the revision,
+  // the journal's marks, and the name, from the path): astra B1-COPY-1)
+  const canon = (v: any): any => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const asWritten = (d: any) => {
+    const { id: _i, rev: _r, updated: _u, baseRev: _b, j: _j, hash: _h, unjournaled: _n, stampOf: _s, name: _m, ...rest } = d ?? {};
+    return JSON.stringify(canon({ ...rest, cells: rest.cells ?? [], mode: rest.mode ?? "python" }));
+  };
+  const sameDoc = (a: any, b: any) => asWritten(a) === asWritten(b);
+  // (a store that keeps the notebook in memory for the page and, once there is a copy, saves every change to it with
+  // its revision: a change made elsewhere (another tab) is a conflict, said, never written over)
+  class CopyStore extends MemoryStore {
+    copy: { ws: Workspace; at: string; rev: number } | null;
+    making: Promise<unknown> | null = null;
+    // (the book's text of every cell: a copy is made by an edit to it, not by a run, which only changes outputs)
+    private text: string;
+    constructor(doc: any, private f: File, copy: { ws: Workspace; at: string; rev: number } | null, private keep: boolean) { super(doc); this.copy = copy; this.text = textOf(doc); }
+    async save(doc: any) {
+      const out = await super.save(doc);
+      if (!this.keep || (out as any).conflict) return out;
+      if (!this.copy && textOf(doc) === this.text) return out;
+      try {
+        if (!this.copy) {
+          this.making ??= makeCopy(this.f, doc).then((c) => { this.copy = c; if (c) yours(this.f, c.at); });
+          await this.making;
+        } else {
+          const { rev: _r, id: _i, ...rest } = doc;
+          this.copy.rev = (await this.copy.ws.write(this.copy.at, rest, { base: this.copy.rev })).rev;
+        }
+      } catch (e: any) {
+        $("#status").textContent = e?.code === "conflict" ? `Your copy was changed in another tab: reload to see it (this tab's change isn't saved).` : `Your copy couldn't be saved: ${String(e?.message ?? e).slice(0, 200)}`;
+      }
+      return out;
+    }
+  }
+  // (what a reader writes: each cell's kind and text, in order; outputs and counts aren't theirs)
+  const textOf = (doc: any) => JSON.stringify((doc?.cells ?? []).map((c: any) => [c.type ?? c.cell_type ?? "", c.code ?? c.source ?? ""]));
+  // (the line over the notebook: whose version this is, and the way to the other)
+  function yours(f: File, at: string) {
+    const line = $("#copyline");
+    line.replaceChildren(el("span", `This is your copy, kept in this browser at ${at}. Your changes are saved there.`), el("span", " "));
+    const back = el("button", "Back to the book's version", { type: "button", class: "link" });
+    back.onclick = () => void open(f, "original");
+    line.append(back);
+    line.hidden = false;
+    // (the copy in the notebook page, as the File menu's Recent opens one: /?nb=<its ref>)
+    void workspace().then((ws) => ws?.stat(at)).then((e) => { if (e?.ref && line.contains(back)) line.append(el("span", " · "), el("a", "Open in my files", { href: `/?nb=${encodeURIComponent(e.ref)}` })); });
+  }
+  function original(f: File, at: string | null) {
+    const line = $("#copyline");
+    if (!at) { line.hidden = true; return; }
+    line.replaceChildren(el("span", "This is the book's version: changes here aren't kept. "));
+    const mine = el("button", "Open your copy", { type: "button", class: "link" });
+    mine.onclick = () => void open(f);
+    line.append(mine);
+    line.hidden = false;
+  }
+
+  async function open(f: File, which: "auto" | "original" = "auto") {
+    $("#status").textContent = `opening ${f.path}…`;
+    let doc, copy: { ws: Workspace; at: string; rev: number } | null = null;
+    const at = copies()[keyOf(f)] ?? null;
     try {
-      doc = fromFile(f.path, new TextDecoder().decode(bytes));
+      if (at && which === "auto") {
+        const ws = await workspace();
+        const r = ws && (await ws.read(at).catch(() => null));
+        if (r && r.content && Array.isArray(r.content.cells)) { doc = r.content; copy = { ws: ws!, at, rev: r.rev }; }
+        else remember(keyOf(f), null); // (the copy is gone: deleted, or another browser)
+      }
+      doc ??= fromFile(f.path, new TextDecoder().decode(await fetchChecked(f)));
     } catch (e) {
       $("#status").textContent = String((e as Error).message ?? e);
       return;
     }
     if (!kernel.worker) kernel.start();
     nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
-    await nb.attach(new MemoryStore(doc));
+    // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
+    await nb.attach(new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)])));
     current = f;
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
-    $("#status").textContent = "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser.";
+    if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
+    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser. Your first change makes it your own copy.";
     for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path);
   }
 
@@ -102,8 +217,12 @@ async function main() {
     a.click();
     URL.revokeObjectURL(a.getAttribute("href")!);
   };
-  const first = c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => OPENABLE.test(f.path));
+  // (?f=<path>: that file, a chapter's own link; else the first notebook)
+  const want = new URLSearchParams(location.search).get("f");
+  const asked = want !== null ? c.manifest.files.find((f) => f.path === want && OPENABLE.test(f.path)) : undefined;
+  const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => OPENABLE.test(f.path));
   if (first) await open(first);
+  if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
   (window as any).shared = { c, kernel, get nb() { return nb; } }; // for tests
 }
 
