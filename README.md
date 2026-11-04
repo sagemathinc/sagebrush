@@ -59,10 +59,10 @@ These define what Sagebrush is.
 ## What works today
 
 **`ap`**: traces of Frobenius a_p of elliptic curves over Q at all primes up
-to a bound. It is an independent Rust implementation that follows the
-genus-1 strategy of Drew Sutherland's smalljac (its C source was read with
-his permission; no smalljac code is copied or shared; see
-`engine/ap/PROVENANCE.md`). Its output matches
+to a bound. It is an independent Rust implementation of standard methods
+(baby-step giant-step and related techniques), following the genus-1
+strategy of Drew Sutherland's smalljac; no smalljac code is copied or
+shared (see `engine/ap/PROVENANCE.md`, which records his permission). Its output matches
 smalljac exactly (every prime to 10^6, checksums to 10^8) and matches Sage
 below 20000. Since it follows smalljac's own method, the agreement with
 smalljac checks the implementation more than the method. On 16 threads it
