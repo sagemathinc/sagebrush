@@ -20,6 +20,22 @@ const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<"
 // (a cheap fingerprint of an included file's text, for noticing that it changed)
 function hash32(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); }
 
+// A result that needs beamer's code (needBeamer: engine/beamer.mjs, the worker's chunk of its own): load() it, then
+// again(), the same text rendered with it. If it can't be loaded, the result without it, saying why at its top (the next
+// render tries again)
+// (load(), once: the same promise for every caller, until it fails, when the next call tries again)
+export function retryable(load) { let p = null; return () => (p ??= load().catch((e) => { p = null; throw e; })); }
+export async function withBeamer(r, load, again) {
+  if (!r.needBeamer) return r;
+  try { await load(); } catch (e) {
+    const why = String((e && e.message) || e).slice(0, 200);
+    r.chunks.unshift('<div class="bounderr">Beamer\'s slides could not be loaded (' + escHtml(why) + "): the preview shows the document without them.</div>");
+    r.chunkPos.unshift(-1); r.problems.push({ kind: "beamer", name: why, at: -1 });
+    return r;
+  }
+  return again();
+}
+
 export class Engine {
   constructor(opts = {}) { this.opts = opts; this.prev = null; this.text = null; this.epoch = 0; this.inputs = null; this.inputsKey = ""; }
   // sage: SageTeX S1's item states from the page's executor ({states}); kept until the next one is given
@@ -74,7 +90,7 @@ export class Engine {
     this.prev = res; this.text = text;
     return {
       chunks: out.chunks, chunkPos: out.chunkPos, sageItems: out.sageItems, sageStates: out.sageStates || [], imageRefs: out.imageRefs || [], inputRefs: [...inputRefs],
-      frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer,
+      frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer, needBeamer: !!out.needBeamer,
       stats: Object.assign({}, out.stats, {
         mode, outcome: res.outcome, expandMs: +(t1 - t0).toFixed(1), renderMs: +(t2 - t1).toFixed(1), units: res.units.length, events: events.length,
         reused: inc ? inc.stats.reusedUnits : 0, reexpanded: inc ? inc.stats.reexpandedUnits : res.units.length, chars: text.length,

@@ -7,8 +7,8 @@
 //   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
 // KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
-import { Engine } from "./engine/pipeline.mjs";
-import { setKatex } from "./engine/render.mjs";
+import { Engine, withBeamer, retryable } from "./engine/pipeline.mjs";
+import { setKatex, installBeamer } from "./engine/render.mjs";
 import { splitChunk, bytes, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
 import { engineInputs, type Known } from "./inputs";
@@ -20,6 +20,9 @@ let eng: any = null;
 // (the page's included files, kept from the last message that had them: inputs.ts)
 let inputs: { docPath: string; known: Map<string, Known>; version: number } | null = null;
 const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.location.href).href).then((m: any) => setKatex(m.renderToString));
+// (beamer's code, engine/beamer.mjs: a chunk of its own beside this worker (same origin, the same dist/ as the worker
+//  itself), fetched when a render first says it needs it; again after a failed fetch)
+const loadBeamer = retryable(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
 
 self.onmessage = async (e: MessageEvent) => {
   const m = e.data || {};
@@ -32,7 +35,9 @@ self.onmessage = async (e: MessageEvent) => {
     else eng.opts = Object.assign({}, eng.opts, { images: m.images || {}, sage });
     if (m.inputs && typeof m.inputs.docPath === "string" && Array.isArray(m.inputs.known)) inputs = { docPath: m.inputs.docPath, known: new Map(m.inputs.known.slice(0, 1024)), version: Number(m.inputs.version) || 0 };
     const ei = inputs ? engineInputs(inputs.docPath, inputs.known) : null;
-    const r = eng.update(String(m.text ?? ""), { cold: !!m.cold, ...(ei ? { inputs: { files: ei.files, resolve: ei.resolve, version: inputs!.version } } : {}) });
+    const text = String(m.text ?? ""), opts = ei ? { inputs: { files: ei.files, resolve: ei.resolve, version: inputs!.version } } : {};
+    // (rendered again with beamer's code: the same text, so not expanded again)
+    const r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));
     // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts)
     const items: { g: number; h: string; b: number }[] = [];
     let total = 0, stopped = false;
