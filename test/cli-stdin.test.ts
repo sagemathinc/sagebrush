@@ -153,6 +153,10 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   assert.match(r.out, /Unrecognized function or variable 'undefined_thing'\.\n>> y = \[1 2 \.\.\.\n/);
   assert.match(r.out, /\ny =\n\n     1     2     3\n\n>> exit\(3\)/);
   assert.doesNotMatch(r.out, /NameError|Traceback/);
-  // (exit and quit, with or without a status or a semicolon, end it)
-  for (const q of ["exit", "quit;", "quit(0)"]) assert.equal(tty(["--matlab"], `disp(1)\n${q}\n`).status, 0, q);
+  // (exit and quit, with or without a status, a semicolon or a comment, end it)
+  for (const q of ["exit", "quit;", "quit(0)", "exit % bye"]) assert.equal(tty(["--matlab"], `disp(1)\n${q}\n`).status, 0, q);
+  // (a function definition at the prompt is refused with MATLAB's command-window error, and the session goes on)
+  const f = tty(["--matlab"], "function y = f(x)\ndisp(7)\nexit\n");
+  assert.equal(f.status, 0, f.out);
+  assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
 });

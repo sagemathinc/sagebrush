@@ -491,9 +491,16 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
             // read-only home: no history
           }
         }
-        // (MATLAB's exit and quit, at the prompt: the session ends, with the status given)
-        const q = mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*$/.exec(src) : null;
+        // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
+        const q = mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src) : null;
         if (q) return finish(Number(q[1] || 0));
+        // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
+        if (mode === "matlab" && /^\s*function\b/.test(src)) {
+          process.stderr.write("Function definitions are not supported in this context. Functions can only be created as local or nested functions in code files.\n");
+          rl.setPrompt(ps1());
+          rl.prompt();
+          return;
+        }
         promptSignals(true);
         let code: number | null = null;
         try {
