@@ -1,0 +1,770 @@
+//! Dense LU with partial pivoting and the triangular solves on it (numerics-core P2b-1, design 2c8e55e8):
+//! LAPACK's dgetrf/dgetrs organization, its updates on the GEMM layer ([`crate::gemm`]).
+//!
+//! All matrices are column-major `&[f64]` / `&mut [f64]` with explicit dimensions and leading dimension (a
+//! submatrix is a view: `ld >= rows`); the public entries check every span before any work. The workspace is
+//! the caller's (the crate has no allocator on wasm32): [`getrf_work_len`], [`getrs_work_len`].
+//!
+//! **The recursive LU** (dgetrf2; Toledo, Gustavson) on an m x n panel, n1 = min(m, n) / 2, n2 = n - n1:
+//! 1. factor the whole tall left panel A[0:m, 0:n1] recursively, pivoting over every one of its m rows;
+//! 2. apply those n1 interchanges to the whole right half A[0:m, n1:n];
+//! 3. A12 := L11^-1 A12 (lower unit [`trsm_lower_unit`]);
+//! 4. A22 := A22 - A21 A12 ([`Kernel::gemm_update`]);
+//! 5. factor A22 recursively; its pivots are offset by n1 into the panel's numbering;
+//! 6. apply A22's interchanges back across the left half's n1 factored columns.
+//!
+//! At or below [`LU_SMALL`] columns the panel is factored unblocked (dgetf2), which is also the reference the
+//! tests hold the pivots to (same idamax rule; the recursive schedule rounds differently, so later pivots can
+//! differ where two candidates are within rounding of each other).
+//!
+//! **Pivots** (LAPACK's idamax): the largest |a| in the column, the first on ties, a NaN never chosen after
+//! the first element (comparisons with NaN are false). An exact zero pivot is not an error: like dgetf2 the
+//! factorization goes on (that column is left unscaled) and the first one is reported.
+
+use crate::gemm::{scratch_len, span, Kernel, Mat};
+
+/// At or below this many columns, a panel is factored unblocked (dgetf2); above it, recursively (dgetrf2).
+pub const LU_SMALL: usize = 32;
+/// At or below this many rows of the triangle, a triangular solve substitutes directly; above it, it recurses.
+pub const TRSM_SMALL: usize = 16;
+
+/// LAPACK's safe minimum (dlamch('S')): below it, a pivot's reciprocal would overflow, so dgetf2 divides.
+const SFMIN: f64 = f64::MIN_POSITIVE;
+
+/// The index of the first element of largest magnitude (BLAS idamax): NaN after the first is never chosen.
+fn idamax(x: &[f64]) -> usize {
+    let mut best = 0;
+    let mut big = x[0].abs();
+    for (i, v) in x.iter().enumerate().skip(1) {
+        if v.abs() > big {
+            best = i;
+            big = v.abs();
+        }
+    }
+    best
+}
+
+/// Swap rows `i` and `p` of the `cols` columns of `a` (leading dimension `lda`).
+fn swap_rows(a: &mut [f64], lda: usize, cols: usize, i: usize, p: usize) {
+    if i != p {
+        for j in 0..cols {
+            a.swap(i + j * lda, p + j * lda);
+        }
+    }
+}
+
+/// Apply interchanges `ipiv[k0..k1]` (row k with row ipiv[k], in order) to `cols` columns (dlaswp): column by
+/// column, so each column's swaps touch contiguous memory; the same result as swapping whole rows in order.
+fn laswp(a: &mut [f64], lda: usize, cols: usize, ipiv: &[usize], k0: usize, k1: usize) {
+    for j in 0..cols {
+        let col = &mut a[j * lda..];
+        for k in k0..k1 {
+            col.swap(k, ipiv[k]);
+        }
+    }
+}
+
+/// Unblocked LU of the m x n panel (dgetf2): `ipiv[k]` is the row interchanged with row k at step k; returns
+/// the first zero pivot's column, if any.
+fn getf2(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
+    let mut info = None;
+    for k in 0..m.min(n) {
+        let p = k + idamax(&a[k + k * lda..m + k * lda]);
+        ipiv[k] = p;
+        if a[p + k * lda] != 0.0 {
+            swap_rows(a, lda, n, k, p);
+            let piv = a[k + k * lda];
+            let col = &mut a[k + 1 + k * lda..m + k * lda];
+            if piv.abs() >= SFMIN {
+                let r = 1.0 / piv;
+                col.iter_mut().for_each(|x| *x *= r);
+            } else {
+                col.iter_mut().for_each(|x| *x /= piv);
+            }
+        } else if info.is_none() {
+            info = Some(k);
+        }
+        // the rank-1 update of the trailing columns (dger, alpha = -1: a column whose y is 0 is skipped)
+        for j in k + 1..n {
+            let t = a[k + j * lda];
+            if t != 0.0 {
+                let (lo, hi) = a.split_at_mut(j * lda);
+                let x = &lo[k + 1 + k * lda..m + k * lda];
+                for (d, &xi) in hi[k + 1..m].iter_mut().zip(x) {
+                    *d -= xi * t;
+                }
+            }
+        }
+    }
+    info
+}
+
+/// The recursive LU of the m x n panel (the module's steps 1-6). `work` holds a GEMM scratch then at least
+/// min(m, n) * n more elements (checked by the public entry).
+#[allow(clippy::too_many_arguments)]
+fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize], work: &mut [f64]) -> Option<usize> {
+    let mn = m.min(n);
+    if n <= LU_SMALL || mn <= 1 {
+        return getf2(a, lda, m, n, ipiv);
+    }
+    let (n1, n2) = (mn / 2, n - mn / 2);
+    let (left, right) = a.split_at_mut(n1 * lda);
+    // 1. the tall left panel
+    let info1 = getrf_rec(kern, left, lda, m, n1, &mut ipiv[..n1], work);
+    // 2. its interchanges across the right half
+    laswp(right, lda, n2, ipiv, 0, n1);
+    // 3. A12 := L11^-1 A12, in place (L11 is in the left half, A12 in the right)
+    let (scratch, rest) = work.split_at_mut(scratch_len());
+    let (w, rest) = rest.split_at_mut(n1 * n2);
+    trsm_lower_unit(kern, &left[..], lda, n1, right, lda, n2, rest, scratch);
+    // 4. A22 := A22 - A21 A12, from a copy of A12 (A12 and A22 share columns: one is read, the other written)
+    for j in 0..n2 {
+        w[j * n1..(j + 1) * n1].copy_from_slice(&right[j * lda..j * lda + n1]);
+    }
+    if m > n1 {
+        let a21 = Mat::new(&left[n1..], m - n1, n1, lda).expect("A21 lies in the left panel");
+        let a12 = Mat::new(w, n1, n2, n1).expect("A12's copy");
+        let ok = kern.gemm_update(&a21, &a12, &mut right[n1..], lda, scratch);
+        debug_assert!(ok);
+    }
+    // 5. A22's LU, its pivots offset into the panel's rows
+    let mut info = info1;
+    if m > n1 {
+        let k2 = mn - n1;
+        let info2 = getrf_rec(kern, &mut right[n1..], lda, m - n1, n2, &mut ipiv[n1..mn], work);
+        for p in &mut ipiv[n1..mn] {
+            *p += n1;
+        }
+        if info.is_none() {
+            info = info2.map(|k| k + n1);
+        }
+        // 6. A22's interchanges back across the left half
+        laswp(left, lda, n1, ipiv, n1, n1 + k2);
+    }
+    info
+}
+
+/// X := L^-1 X for the n x n unit lower triangle of `l` (leading dimension `ldl`) and the n x r matrix X
+/// (`x`, leading dimension `ldx`): top first, then the bottom updated, then the bottom (dtrsm, left, lower,
+/// no transpose, unit). `tmp` holds at least (n / 2) * r elements; `scratch` is a GEMM scratch.
+#[allow(clippy::too_many_arguments)]
+fn trsm_lower_unit(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
+    if n == 0 || r == 0 {
+        return;
+    }
+    if n <= TRSM_SMALL {
+        for j in 0..r {
+            let col = &mut x[j * ldx..j * ldx + n];
+            for k in 0..n {
+                let xk = col[k];
+                if xk != 0.0 {
+                    for i in k + 1..n {
+                        col[i] -= xk * l[i + k * ldl];
+                    }
+                }
+            }
+        }
+        return;
+    }
+    let h = n / 2;
+    trsm_lower_unit(kern, l, ldl, h, x, ldx, r, tmp, scratch);
+    // X2 := X2 - L21 X1 (X1 copied: X1 and X2 share columns)
+    let (t, rest) = tmp.split_at_mut(h * r);
+    for j in 0..r {
+        t[j * h..(j + 1) * h].copy_from_slice(&x[j * ldx..j * ldx + h]);
+    }
+    let l21 = Mat::new(&l[h..], n - h, h, ldl).expect("L21 lies in the triangle");
+    let x1 = Mat::new(t, h, r, h).expect("X1's copy");
+    let ok = kern.gemm_update(&l21, &x1, &mut x[h..], ldx, scratch);
+    debug_assert!(ok);
+    trsm_lower_unit(kern, &l[h + h * ldl..], ldl, n - h, &mut x[h..], ldx, r, rest, scratch);
+}
+
+/// X := U^-1 X for the n x n upper triangle of `u` (non-unit diagonal) and the n x r X: bottom first, then the
+/// top updated, then the top (dtrsm, left, upper, no transpose, non-unit; a zero x_k skips its division, as
+/// the reference BLAS does). `tmp` holds at least (n - n / 2) * r elements.
+#[allow(clippy::too_many_arguments)]
+fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
+    if n == 0 || r == 0 {
+        return;
+    }
+    if n <= TRSM_SMALL {
+        for j in 0..r {
+            let col = &mut x[j * ldx..j * ldx + n];
+            for k in (0..n).rev() {
+                if col[k] != 0.0 {
+                    col[k] /= u[k + k * ldu];
+                    let xk = col[k];
+                    for i in 0..k {
+                        col[i] -= xk * u[i + k * ldu];
+                    }
+                }
+            }
+        }
+        return;
+    }
+    let h = n / 2;
+    // X2 := U22^-1 X2 (the bottom), then X1 := X1 - U12 X2, then X1 := U11^-1 X1
+    trsm_upper(kern, &u[h + h * ldu..], ldu, n - h, &mut x[h..], ldx, r, tmp, scratch);
+    let (t, rest) = tmp.split_at_mut((n - h) * r);
+    for j in 0..r {
+        t[j * (n - h)..(j + 1) * (n - h)].copy_from_slice(&x[h + j * ldx..n + j * ldx]);
+    }
+    let u12 = Mat::new(&u[h * ldu..], h, n - h, ldu).expect("U12 lies in the triangle");
+    let x2 = Mat::new(t, n - h, r, n - h).expect("X2's copy");
+    let ok = kern.gemm_update(&u12, &x2, x, ldx, scratch);
+    debug_assert!(ok);
+    trsm_upper(kern, u, ldu, h, x, ldx, r, rest, scratch);
+}
+
+/// The workspace [`getrf`] needs for an m x n matrix: a GEMM scratch and min(m, n) * n more; `None` if that
+/// overflows usize.
+pub fn getrf_work_len(m: usize, n: usize) -> Option<usize> {
+    m.min(n).checked_mul(n)?.checked_add(scratch_len())
+}
+
+/// The workspace [`getrs`] needs for an n x n factorization and n x r right-hand sides; `None` on overflow.
+pub fn getrs_work_len(n: usize, r: usize) -> Option<usize> {
+    n.checked_mul(r)?.checked_add(scratch_len())
+}
+
+/// Why a factorization or solve was refused (nothing written).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refused {
+    /// a matrix doesn't hold its stated rows, columns and leading dimension (or the span overflows)
+    Layout,
+    /// `ipiv` is shorter than min(m, n)
+    Pivots,
+    /// `work` is shorter than the stated length (or that length overflows)
+    Work,
+    /// the shapes don't agree (A not square for a solve, B's rows not A's)
+    Shape,
+}
+
+/// PA = LU of the m x n `a` (leading dimension `lda`), in place: L's strict lower part (unit diagonal) and U.
+/// `ipiv[k]` (k < min(m, n)) is the row interchanged with row k. Returns the first zero pivot's column (an
+/// exactly singular U; the factorization still completes, as dgetrf's info > 0), or why it was refused.
+pub fn getrf(kern: Kernel, a: &mut [f64], m: usize, n: usize, lda: usize, ipiv: &mut [usize], work: &mut [f64]) -> Result<Option<usize>, Refused> {
+    match span(m, n, lda) {
+        Some(need) if a.len() >= need => {}
+        _ => return Err(Refused::Layout),
+    }
+    if ipiv.len() < m.min(n) {
+        return Err(Refused::Pivots);
+    }
+    match getrf_work_len(m, n) {
+        Some(need) if work.len() >= need => {}
+        _ => return Err(Refused::Work),
+    }
+    if m == 0 || n == 0 {
+        return Ok(None);
+    }
+    Ok(getrf_rec(kern, a, lda, m, n, &mut ipiv[..m.min(n)], work))
+}
+
+/// X = A^-1 B from [`getrf`]'s factors of the n x n A: B (n x r, leading dimension `ldb`) is overwritten by X.
+/// Applies P, then L^-1, then U^-1 (dgetrs). A zero pivot gives the Inf and NaN that division by it gives.
+#[allow(clippy::too_many_arguments)]
+pub fn getrs(kern: Kernel, lu: &[f64], n: usize, lda: usize, ipiv: &[usize], b: &mut [f64], r: usize, ldb: usize, work: &mut [f64]) -> Result<(), Refused> {
+    match (span(n, n, lda), span(n, r, ldb)) {
+        (Some(na), Some(nb)) if lu.len() >= na && b.len() >= nb => {}
+        _ => return Err(Refused::Layout),
+    }
+    if ipiv.len() < n || ipiv[..n].iter().enumerate().any(|(k, &p)| p < k || p >= n) {
+        return Err(Refused::Pivots);
+    }
+    match getrs_work_len(n, r) {
+        Some(need) if work.len() >= need => {}
+        _ => return Err(Refused::Work),
+    }
+    if n == 0 || r == 0 {
+        return Ok(());
+    }
+    laswp(b, ldb, r, ipiv, 0, n);
+    let (scratch, tmp) = work.split_at_mut(scratch_len());
+    trsm_lower_unit(kern, lu, lda, n, b, ldb, r, tmp, scratch);
+    trsm_upper(kern, lu, lda, n, b, ldb, r, tmp, scratch);
+    Ok(())
+}
+
+/// What [`solve`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// solved; U has no zero pivot
+    Solved,
+    /// solved, but U's pivot in this column is exactly zero: X has the Inf and NaN division by it gives
+    /// (MATLAB's "singular to working precision")
+    Singular(usize),
+    /// A or B has an Inf or NaN: nothing computed (P2c refuses such solves before calling)
+    NonFinite,
+}
+
+/// The workspace [`solve`] needs for an n x n A and n x r B; `None` on overflow.
+pub fn solve_work_len(n: usize, r: usize) -> Option<usize> {
+    Some(getrf_work_len(n, n)?.max(getrs_work_len(n, r)?))
+}
+
+/// X = A \ B for the n x n A (leading dimension `lda`; overwritten by its LU factors) and the n x r B
+/// (overwritten by X): one pass checking that A and B are finite, then [`getrf`] and [`getrs`].
+#[allow(clippy::too_many_arguments)]
+pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r: usize, ldb: usize, ipiv: &mut [usize], work: &mut [f64]) -> Result<Status, Refused> {
+    match (span(n, n, lda), span(n, r, ldb)) {
+        (Some(na), Some(nb)) if a.len() >= na && b.len() >= nb => {}
+        _ => return Err(Refused::Layout),
+    }
+    if ipiv.len() < n {
+        return Err(Refused::Pivots);
+    }
+    match solve_work_len(n, r) {
+        Some(need) if work.len() >= need => {}
+        _ => return Err(Refused::Work),
+    }
+    let finite = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).all(|j| m[j * ld..j * ld + rows].iter().all(|x| x.is_finite()));
+    if !finite(a, n, n, lda) || !finite(b, n, r, ldb) {
+        return Ok(Status::NonFinite);
+    }
+    let info = getrf(kern, a, n, n, lda, ipiv, work)?;
+    getrs(kern, a, n, lda, ipiv, b, r, ldb, work)?;
+    Ok(info.map_or(Status::Solved, Status::Singular))
+}
+
+#[cfg(test)]
+mod lapack_fixtures;
+
+#[cfg(test)]
+pub(crate) mod tests {
+    extern crate std;
+    use super::*;
+    use crate::gemm::tests::{fnv, seeded};
+    use std::{vec, vec::Vec};
+
+    const U: f64 = f64::EPSILON / 2.0;
+
+    /// The kernels this build runs: the portable one, the FMA reference, and the native SIMD kernel if present.
+    fn kernels() -> Vec<Kernel> {
+        let mut k = vec![Kernel::Scalar, Kernel::ScalarFma];
+        #[cfg(target_arch = "x86_64")]
+        k.extend(crate::micro::Avx2Fma::detect().map(Kernel::Avx2Fma));
+        #[cfg(target_arch = "aarch64")]
+        k.push(Kernel::Neon);
+        k
+    }
+
+    fn norm_inf(m: &[f64], rows: usize, cols: usize, ld: usize) -> f64 {
+        (0..rows).map(|i| (0..cols).map(|j| m[i + j * ld].abs()).sum::<f64>()).fold(0.0, f64::max)
+    }
+
+    /// Solve A X = B (n x n, n x r) on kernel `k` with leading dimensions lda >= n, ldb >= n; returns X (n x r,
+    /// dense), the status, the pivots and the LU factors (dense).
+    fn run(k: Kernel, a: &[f64], b: &[f64], n: usize, r: usize, lda: usize, ldb: usize) -> (Vec<f64>, Status, Vec<usize>, Vec<f64>) {
+        let mut av = vec![f64::NAN; lda * n.max(1)];
+        let mut bv = vec![f64::NAN; ldb * r.max(1)];
+        for j in 0..n {
+            av[j * lda..j * lda + n].copy_from_slice(&a[j * n..(j + 1) * n]);
+        }
+        for j in 0..r {
+            bv[j * ldb..j * ldb + n].copy_from_slice(&b[j * n..(j + 1) * n]);
+        }
+        let mut ipiv = vec![0; n];
+        let mut work = vec![0.0; solve_work_len(n, r).unwrap()];
+        let st = solve(k, &mut av, n, lda, &mut bv, r, ldb, &mut ipiv, &mut work).unwrap();
+        // (the padding rows below n in each column were never touched)
+        for j in 0..n {
+            assert!(av[j * lda + n..(j + 1) * lda].iter().all(|x| x.is_nan()), "A's padding was written");
+        }
+        for j in 0..r {
+            assert!(bv[j * ldb + n..(j + 1) * ldb].iter().all(|x| x.is_nan()), "B's padding was written");
+        }
+        let x = (0..r).flat_map(|j| bv[j * ldb..j * ldb + n].to_vec()).collect();
+        let lu = (0..n).flat_map(|j| av[j * lda..j * lda + n].to_vec()).collect();
+        (x, st, ipiv, lu)
+    }
+
+    /// The backward error (r4.2 §7): max over columns of ||b - A x||_inf / (||A||_inf ||x||_inf + ||b||_inf).
+    fn eta(a: &[f64], x: &[f64], b: &[f64], n: usize, r: usize) -> f64 {
+        let an = norm_inf(a, n, n, n);
+        (0..r)
+            .map(|j| {
+                let xj = &x[j * n..(j + 1) * n];
+                let bj = &b[j * n..(j + 1) * n];
+                let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max);
+                let d = an * xj.iter().fold(0.0f64, |m, v| m.max(v.abs())) + bj.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+                if d == 0.0 { 0.0 } else { res / d }
+            })
+            .fold(0.0, f64::max)
+    }
+
+    /// ||PA - LU||_inf / (n ||A||_inf), P from the interchanges.
+    fn factor_residual(a: &[f64], lu: &[f64], ipiv: &[usize], n: usize) -> f64 {
+        let mut pa = a.to_vec();
+        for (k, &p) in ipiv.iter().enumerate() {
+            for j in 0..n {
+                pa.swap(k + j * n, p + j * n);
+            }
+        }
+        let mut worst = 0.0f64;
+        for i in 0..n {
+            let mut row = 0.0;
+            for j in 0..n {
+                let mut s = 0.0;
+                for p in 0..=i.min(j) {
+                    let l = if p == i { 1.0 } else { lu[i + p * n] };
+                    s += l * lu[p + j * n];
+                }
+                row += (pa[i + j * n] - s).abs();
+            }
+            worst = worst.max(row);
+        }
+        let an = norm_inf(a, n, n, n);
+        if an == 0.0 { 0.0 } else { worst / (n as f64 * an) }
+    }
+
+    fn random(n: usize, seed: u32) -> Vec<f64> {
+        seeded(n * n, &mut { seed })
+    }
+
+    /// The adversarial set (design §4): well-conditioned, Hilbert, Kahan, graded, badly scaled, near-singular.
+    fn hard_inputs(n: usize) -> Vec<(&'static str, Vec<f64>)> {
+        let mut out = vec![("random", random(n, 7 + n as u32))];
+        out.push(("hilbert", (0..n * n).map(|k| 1.0 / ((k % n + k / n + 1) as f64)).collect()));
+        // Kahan's upper triangle (c = cos 1.2, s = sin 1.2), its rows scaled by s^i
+        let (c, s) = (1.2f64.cos(), 1.2f64.sin());
+        out.push(("kahan", (0..n * n).map(|k| { let (i, j) = (k % n, k / n); if i > j { 0.0 } else if i == j { s.powi(i as i32) } else { -c * s.powi(i as i32) } }).collect()));
+        // graded: entry (i, j) of a random matrix times 10^(±150 (i - j) / n)
+        let g = random(n, 99);
+        out.push(("graded", (0..n * n).map(|k| { let (i, j) = (k % n, k / n); g[k] * 10f64.powf(150.0 * (i as f64 - j as f64) / n.max(1) as f64) }).collect()));
+        // badly scaled rows: row i times 10^(100 sin i)
+        let h = random(n, 5);
+        out.push(("row-scaled", (0..n * n).map(|k| h[k] * 10f64.powf(100.0 * ((k % n) as f64).sin())).collect()));
+        // near-singular: a random matrix whose last column is the first plus u times a random column
+        let mut ns = random(n, 11);
+        if n > 1 {
+            let extra = random(n, 13);
+            for i in 0..n {
+                ns[i + (n - 1) * n] = ns[i] + U * extra[i];
+            }
+        }
+        out.push(("near-singular", ns));
+        out
+    }
+
+    #[test]
+    fn oracle_on_hard_inputs_every_kernel_and_size() {
+        for k in kernels() {
+            for n in [1, 2, 3, 15, 16, 17, LU_SMALL - 1, LU_SMALL, LU_SMALL + 1, 64, 97, 100, 256] {
+                for (name, a) in hard_inputs(n) {
+                    for r in [1, 3] {
+                        let b = seeded(n * r, &mut (n as u32 + r as u32));
+                        let (x, st, ipiv, lu) = run(k, &a, &b, n, r, n + 3, n + 5);
+                        if st != Status::Solved {
+                            continue; // (an exactly singular input: the zero-pivot tests cover it)
+                        }
+                        let e = eta(&a, &x, &b, n, r);
+                        assert!(e <= 10.0 * n as f64 * U, "{} {name} n={n} r={r}: eta {e:e}", k.name());
+                        let f = factor_residual(&a, &lu, &ipiv, n);
+                        assert!(f <= 10.0 * U * n as f64, "{} {name} n={n}: ||PA-LU|| {f:e}", k.name());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn right_hand_side_counts_and_views() {
+        let n = 70;
+        let a = random(n, 3);
+        for k in kernels() {
+            for r in [0, 1, 3, 17] {
+                let b = seeded(n * r, &mut 4);
+                for (lda, ldb) in [(n, n), (n + 1, n), (n, n + 7), (2 * n, 3 * n)] {
+                    let (x, st, _, _) = run(k, &a, &b, n, r, lda, ldb);
+                    assert_eq!(st, Status::Solved);
+                    assert!(r == 0 || eta(&a, &x, &b, n, r) <= 10.0 * n as f64 * U);
+                    // a view gives the same bits as the dense layout
+                    let (x0, _, _, _) = run(k, &a, &b, n, r, n, n);
+                    assert!(x.iter().zip(&x0).all(|(p, q)| p.to_bits() == q.to_bits()), "lda {lda} ldb {ldb} changed the bits");
+                }
+            }
+        }
+    }
+
+    /// The recursive LU's pivots equal unblocked dgetf2's where every pivot choice wins by a clear margin
+    /// (daybreak3 ruling: rounding order may differ, so equality is only claimed above a stated gap).
+    pub(crate) const PIVOT_GAP: f64 = 1e-6;
+
+    /// The smallest relative gap between the chosen pivot and the runner-up, over the steps of an unblocked
+    /// elimination (dgetf2's arithmetic, written out here independently of `getf2`).
+    fn min_pivot_gap(a: &[f64], n: usize) -> f64 {
+        let mut m = a.to_vec();
+        let mut gap = f64::INFINITY;
+        for k in 0..n {
+            let mut col: Vec<(f64, usize)> = (k..n).map(|i| (m[i + k * n].abs(), i)).collect();
+            col.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1)));
+            if col.len() > 1 && col[0].0 > 0.0 {
+                gap = gap.min((col[0].0 - col[1].0) / col[0].0);
+            }
+            let p = col[0].1;
+            for j in 0..n {
+                m.swap(k + j * n, p + j * n);
+            }
+            let piv = m[k + k * n];
+            if piv == 0.0 {
+                continue;
+            }
+            for i in k + 1..n {
+                m[i + k * n] /= piv;
+            }
+            for j in k + 1..n {
+                let t = m[k + j * n];
+                for i in k + 1..n {
+                    m[i + j * n] -= m[i + k * n] * t;
+                }
+            }
+        }
+        gap
+    }
+
+    #[test]
+    fn pivots_equal_unblocked_where_gaps_are_clear() {
+        for n in [40, 64, 97, 150] {
+            for seed in 0..6u32 {
+                let a = random(n, 1000 + seed);
+                let gap = min_pivot_gap(&a, n);
+                if gap < PIVOT_GAP {
+                    continue;
+                }
+                let mut ref_a = a.clone();
+                let mut ref_p = vec![0; n];
+                getf2(&mut ref_a, n, n, n, &mut ref_p);
+                for k in kernels() {
+                    let (_, _, ipiv, _) = run(k, &a, &vec![1.0; n], n, 1, n, n);
+                    assert_eq!(ipiv, ref_p, "{} n={n} seed={seed} (min pivot gap {gap:e})", k.name());
+                }
+            }
+        }
+    }
+
+    /// A fixture's input, rebuilt bit for bit (scripts/gen-nd-lapack-fixtures.py builds the same matrices).
+    #[derive(Clone, Copy)]
+    pub(crate) enum Input {
+        /// MATLAB's magic(n), n odd
+        MagicOdd(usize),
+        /// Sylvester's Hadamard matrix, H(i, j) = (-1)^popcount(i & j)
+        Hadamard(usize),
+        /// integers -4..4 from engine/nd's 32-bit LCG: (s >> 16) % 9 - 4, column-major
+        Ints(usize, u32),
+        /// engine/nd's seeded() uniform values, column-major
+        Uniform(usize, u32),
+        /// explicit, column-major
+        Dense(usize, &'static [f64]),
+    }
+
+    impl Input {
+        fn build(self) -> (usize, Vec<f64>) {
+            match self {
+                Input::MagicOdd(n) => (n, (0..n * n).map(|k| { let (i, j) = (k % n + 1, k / n + 1); (n * ((i + j + n - (n + 3) / 2) % n) + (i + 2 * j - 2) % n + 1) as f64 }).collect()),
+                Input::Hadamard(n) => (n, (0..n * n).map(|k| if ((k % n) & (k / n)).count_ones() % 2 == 0 { 1.0 } else { -1.0 }).collect()),
+                Input::Ints(n, seed) => {
+                    let mut s = seed;
+                    (n, (0..n * n).map(|_| { s = s.wrapping_mul(1103515245).wrapping_add(12345); ((s >> 16) % 9) as f64 - 4.0 }).collect())
+                }
+                Input::Uniform(n, seed) => (n, seeded(n * n, &mut { seed })),
+                Input::Dense(n, v) => (n, v.to_vec()),
+            }
+        }
+    }
+
+    /// The LAPACK fixtures (grader design item 1; @sagebrush's ruling: exact ties, or gaps above PIVOT_GAP):
+    /// every kernel's getrf chooses LAPACK's pivots and reports LAPACK's first zero pivot.
+    #[test]
+    fn pivots_equal_lapack_fixtures() {
+        for &(name, input, ipiv, info, gap, ties) in super::lapack_fixtures::FIXTURES {
+            assert!(gap > PIVOT_GAP || ties > 0 || gap.is_infinite(), "{name}: a fixture must be an exact tie or clear the margin");
+            let (n, a) = input.build();
+            for k in kernels() {
+                let mut f = a.clone();
+                let mut p = vec![0; n];
+                let mut work = vec![0.0; getrf_work_len(n, n).unwrap()];
+                let got = getrf(k, &mut f, n, n, n, &mut p, &mut work).unwrap();
+                assert_eq!(p, ipiv, "{} {name} (n={n}, gap {gap:e}, ties {ties})", k.name());
+                assert_eq!(got, info.checked_sub(1), "{} {name}: first zero pivot", k.name());
+            }
+        }
+        // (the fixtures exercise both paths: some above LU_SMALL, so through the recursion)
+        assert!(super::lapack_fixtures::FIXTURES.iter().any(|f| f.1.build().0 > 2 * LU_SMALL));
+    }
+
+    /// The reference idamax's NaN rule (not a LAPACK fixture: OpenBLAS chooses differently; see the generated file).
+    #[test]
+    fn nan_is_never_chosen_after_the_first() {
+        let mut work = vec![0.0; getrf_work_len(3, 3).unwrap()];
+        let mut a = vec![1.0, f64::NAN, 3.0, 2.0, 1.0, 0.5, 0.5, 2.0, 1.0];
+        let mut p = vec![0; 3];
+        getrf(Kernel::Scalar, &mut a, 3, 3, 3, &mut p, &mut work).unwrap();
+        assert_eq!(p[0], 2, "the 3, not the NaN");
+        let mut a = vec![f64::NAN, 1.0, 3.0, 2.0, 1.0, 0.5, 0.5, 2.0, 1.0];
+        getrf(Kernel::Scalar, &mut a, 3, 3, 3, &mut p, &mut work).unwrap();
+        assert_eq!(p[0], 0, "a NaN first stays (comparisons with it are false)");
+        assert_eq!(idamax(&[f64::NAN, 5.0]), 0);
+        assert_eq!(idamax(&[1.0, f64::NAN, -1.0, 2.0, -2.0]), 3);
+        assert_eq!(idamax(&[-0.0, 0.0]), 0);
+    }
+
+    #[test]
+    fn the_small_threshold_is_where_the_recursion_starts() {
+        // at T and below, getrf is dgetf2 exactly (same bits); above it, the recursion (still within the oracle)
+        for n in [LU_SMALL - 1, LU_SMALL, LU_SMALL + 1] {
+            let a = random(n, 21);
+            let mut g = a.clone();
+            let mut gp = vec![0; n];
+            getf2(&mut g, n, n, n, &mut gp);
+            let mut f = a.clone();
+            let mut fp = vec![0; n];
+            let mut work = vec![0.0; getrf_work_len(n, n).unwrap()];
+            getrf(Kernel::Scalar, &mut f, n, n, n, &mut fp, &mut work).unwrap();
+            let same = f.iter().zip(&g).all(|(x, y)| x.to_bits() == y.to_bits());
+            if n <= LU_SMALL {
+                assert!(same, "n={n} <= LU_SMALL must be the unblocked factorization");
+            } else {
+                assert!(!same, "n={n} > LU_SMALL must take the recursive path (different rounding order)");
+                assert!(factor_residual(&a, &f, &fp, n) <= 10.0 * U * n as f64);
+            }
+        }
+    }
+
+    #[test]
+    fn zero_pivots_first_reported_and_divided_through() {
+        for k in kernels() {
+            // two exactly zero pivots: columns 2 and n - 3 are zero (a zero column stays exactly zero through
+            // every update, so U(2,2) and U(n-3,n-3) are 0); at n = 80 the second is in the recursion's right half
+            for n in [8, 80] {
+                let mut a = random(n, 31);
+                for i in 0..n {
+                    a[i + 2 * n] = 0.0;
+                    a[i + (n - 3) * n] = 0.0;
+                }
+                let b = random(n, 32)[..n].to_vec();
+                let (x, st, _, _) = run(k, &a, &b, n, 1, n, n);
+                match st {
+                    Status::Singular(c) => assert_eq!(c, 2, "{} n={n}: first zero pivot", k.name()),
+                    other => panic!("{} n={n}: {other:?}", k.name()),
+                }
+                assert!(x.iter().any(|v| !v.is_finite()), "division by the zero pivot gives Inf/NaN");
+            }
+        }
+    }
+
+    #[test]
+    fn nonfinite_inputs_compute_nothing() {
+        let n = 5;
+        let a = random(n, 1);
+        for bad in [f64::NAN, f64::INFINITY] {
+            let mut b = random(n, 2)[..n].to_vec();
+            b[3] = bad;
+            let (_, st, _, _) = run(Kernel::Scalar, &a, &b, n, 1, n, n);
+            assert_eq!(st, Status::NonFinite);
+            let mut a2 = a.clone();
+            a2[7] = bad;
+            let (_, st, _, _) = run(Kernel::Scalar, &a2, &random(n, 2)[..n], n, 1, n, n);
+            assert_eq!(st, Status::NonFinite);
+        }
+    }
+
+    /// The reference BLAS's zero skips (dtrsm skips a zero x_k; dger skips a zero y_j), which decide what
+    /// non-finite values do: x - 0 * Inf is NaN, a skipped step leaves x.
+    #[test]
+    fn zero_steps_are_skipped_as_the_reference_blas_does() {
+        let mut work = vec![0.0; solve_work_len(2, 1).unwrap()];
+        // getrs with L(1,0) = Inf and b = [0, 5]: x0 = 0 skips the update, so x1 stays 5 (not 5 - 0 * Inf)
+        let lu = [1.0, f64::INFINITY, 0.0, 1.0];
+        let mut b = [0.0, 5.0];
+        getrs(Kernel::Scalar, &lu, 2, 2, &[0, 1], &mut b, 1, 2, &mut work).unwrap();
+        assert_eq!(b, [0.0, 5.0]);
+        // getrf of [[2, 0], [NaN, 3]]: the multiplier is NaN, but U(0,1) = 0 skips the rank-1 update: U(1,1) = 3
+        let mut a = [2.0, f64::NAN, 0.0, 3.0];
+        let mut p = [0usize; 2];
+        let mut w = vec![0.0; getrf_work_len(2, 2).unwrap()];
+        getrf(Kernel::Scalar, &mut a, 2, 2, 2, &mut p, &mut w).unwrap();
+        assert_eq!(p, [0, 1]);
+        assert!(a[1].is_nan());
+        assert_eq!(a[3], 3.0);
+    }
+
+    #[test]
+    fn exact_cases() {
+        // an integer system with an exact solution, a permutation, the identity
+        let n = 6;
+        let x: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let mut a = vec![0.0; n * n];
+        for i in 0..n {
+            a[i + i * n] = 2.0;
+            if i + 1 < n {
+                a[i + (i + 1) * n] = 1.0;
+                a[i + 1 + i * n] = 1.0;
+            }
+        }
+        let b: Vec<f64> = (0..n).map(|i| (0..n).map(|p| a[i + p * n] * x[p]).sum()).collect();
+        for k in kernels() {
+            let (got, st, _, _) = run(k, &a, &b, n, 1, n, n);
+            assert_eq!(st, Status::Solved);
+            assert!(got.iter().zip(&x).all(|(g, w)| (g - w).abs() <= 8.0 * U * w.abs()), "{}: {got:?}", k.name());
+            let mut p = vec![0.0; n * n];
+            for i in 0..n {
+                p[(n - 1 - i) + i * n] = 1.0;
+            }
+            let (got, _, _, _) = run(k, &p, &x, n, 1, n, n);
+            assert!(got.iter().rev().zip(&x).all(|(g, w)| g == w), "permutation: {got:?}");
+        }
+    }
+
+    /// The per-family bit pins (grader 2): the same seeded 120 x 120 system with 3 right-hand sides solves to
+    /// one set of bits per kernel family. The Wasm SIMD128 module must give SOLVE_FNV (test/nd-wasm.test.ts).
+    pub(crate) const SOLVE_FNV: u64 = 0xe59c250a548b1cd0;
+    pub(crate) const SOLVE_FNV_FMA: u64 = 0x67e31b567579aa60;
+
+    #[test]
+    fn solve_bits_per_family() {
+        let (n, r) = (120, 3);
+        let a = seeded(n * n, &mut 2027);
+        let b = seeded(n * r, &mut 2028);
+        let (x, _, _, _) = run(Kernel::Scalar, &a, &b, n, r, n, n);
+        assert_eq!(fnv(&x), SOLVE_FNV, "no-FMA family: {:#018x}", fnv(&x));
+        let (xf, _, _, _) = run(Kernel::ScalarFma, &a, &b, n, r, n, n);
+        assert_eq!(fnv(&xf), SOLVE_FNV_FMA, "FMA family: {:#018x}", fnv(&xf));
+        #[cfg(target_arch = "x86_64")]
+        if let Some(k) = crate::micro::Avx2Fma::detect() {
+            assert_eq!(fnv(&run(Kernel::Avx2Fma(k), &a, &b, n, r, n, n).0), SOLVE_FNV_FMA, "AVX2+FMA");
+        }
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(fnv(&run(Kernel::Neon, &a, &b, n, r, n, n).0), SOLVE_FNV_FMA, "NEON");
+    }
+
+    #[test]
+    fn refusals_write_nothing() {
+        let n = 10;
+        let mut a = random(n, 1);
+        let a0 = a.clone();
+        let mut b = vec![1.0; n];
+        let mut ipiv = vec![0; n];
+        let need = solve_work_len(n, 1).unwrap();
+        let mut work = vec![0.0; need];
+        let k = Kernel::Scalar;
+        assert_eq!(solve(k, &mut a[..n * n - 1], n, n, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert_eq!(solve(k, &mut a, n, n - 1, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert_eq!(solve(k, &mut a, n, n, &mut b[..n - 1], 1, n, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert_eq!(solve(k, &mut a, n, n, &mut b, 1, n, &mut ipiv[..n - 1], &mut work), Err(Refused::Pivots));
+        assert_eq!(solve(k, &mut a, n, n, &mut b, 1, n, &mut ipiv, &mut work[..need - 1]), Err(Refused::Work));
+        assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert!(a == a0 && b.iter().all(|&x| x == 1.0), "a refused solve wrote");
+        assert!(getrf_work_len(usize::MAX, usize::MAX).is_none() && solve_work_len(usize::MAX / 2, 3).is_none());
+        // getrs refuses pivots out of their range (each ipiv[k] in k..n)
+        let mut bad = vec![0; n];
+        bad[3] = n;
+        assert_eq!(getrs(k, &a, n, n, &bad, &mut b, 1, n, &mut work), Err(Refused::Pivots));
+        bad[3] = 2;
+        assert_eq!(getrs(k, &a, n, n, &bad, &mut b, 1, n, &mut work), Err(Refused::Pivots));
+        assert!(b.iter().all(|&x| x == 1.0));
+        // exactly the needed work is enough
+        assert!(solve(k, &mut a, n, n, &mut b, 1, n, &mut ipiv, &mut work).is_ok());
+    }
+}

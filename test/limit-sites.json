@@ -711,20 +711,35 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/examples/solve_bench.rs :: main :: let an = (0..n).map(|i| (0..n).map(|j| a0[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/examples/solve_bench.rs :: main :: let res = (0..n).map(|i| (b0[i] - (0..n).map(|p| a0[i + p * n] * b[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
  "engine/nd/src/boundary.rs ::  :: pub max_len: u64, #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
  },
- "engine/nd/src/boundary.rs :: check :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+ "engine/nd/src/boundary.rs :: check_solve :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
-  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
  },
  "engine/nd/src/boundary.rs :: region :: span(start, len, l, l.max_len) #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"n overflowing\", 5, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
  },
  "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
   "class": "none",
@@ -756,10 +771,40 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
  },
+ "engine/nd/src/lu.rs :: eta :: .fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: eta :: let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: norm_inf :: (0..rows).map(|i| (0..cols).map(|j| m[i + j * ld].abs()).sum::<f64>()).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrf_work_len(usize::MAX, usize::MAX).is_none() && solve_work_len(usize::MAX / 2, 3).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
  "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_solve :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm solve's boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
  },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",

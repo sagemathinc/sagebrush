@@ -44,6 +44,9 @@ pub enum Kernel {
     Avx2Fma(crate::micro::Avx2Fma),
     #[cfg(target_arch = "aarch64")]
     Neon,
+    /// (tests only: the scalar mul_add kernel, the FMA family's reference)
+    #[cfg(test)]
+    ScalarFma,
 }
 
 impl Kernel {
@@ -76,6 +79,8 @@ impl Kernel {
             Kernel::Avx2Fma(_) => <crate::micro::Avx2Fma as Micro>::NAME,
             #[cfg(target_arch = "aarch64")]
             Kernel::Neon => <crate::micro::Neon as Micro>::NAME,
+            #[cfg(test)]
+            Kernel::ScalarFma => "scalar-fma",
         }
     }
 
@@ -90,6 +95,24 @@ impl Kernel {
             Kernel::Avx2Fma(_) => <crate::micro::Avx2Fma as Micro>::NR,
             #[cfg(target_arch = "aarch64")]
             Kernel::Neon => <crate::micro::Neon as Micro>::NR,
+            #[cfg(test)]
+            Kernel::ScalarFma => 6,
+        }
+    }
+
+    /// [`gemm_update_with`] on this kernel: C := C - A * B.
+    pub fn gemm_update(self, a: &Mat, b: &Mat, c: &mut [f64], ldc: usize, scratch: &mut [f64]) -> bool {
+        match self {
+            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+            Kernel::Scalar => gemm_update_with(&Scalar::<4, 4>, a, b, c, ldc, scratch),
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            Kernel::Simd128 => gemm_update_with(&crate::micro::Simd128, a, b, c, ldc, scratch),
+            #[cfg(target_arch = "x86_64")]
+            Kernel::Avx2Fma(k) => gemm_update_with(&k, a, b, c, ldc, scratch),
+            #[cfg(target_arch = "aarch64")]
+            Kernel::Neon => gemm_update_with(&crate::micro::Neon, a, b, c, ldc, scratch),
+            #[cfg(test)]
+            Kernel::ScalarFma => gemm_update_with(&crate::micro::ScalarFma::<8, 6>, a, b, c, ldc, scratch),
         }
     }
 
@@ -104,6 +127,8 @@ impl Kernel {
             Kernel::Avx2Fma(k) => gemm_cols_with(&k, a, b, c_cols, ldc, j_begin, j_end, scratch),
             #[cfg(target_arch = "aarch64")]
             Kernel::Neon => gemm_cols_with(&crate::micro::Neon, a, b, c_cols, ldc, j_begin, j_end, scratch),
+            #[cfg(test)]
+            Kernel::ScalarFma => gemm_cols_with(&crate::micro::ScalarFma::<8, 6>, a, b, c_cols, ldc, j_begin, j_end, scratch),
         }
     }
 }
@@ -213,6 +238,20 @@ pub fn gemm_cols(a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usiz
 /// every check comes before the first write.
 #[allow(clippy::too_many_arguments)]
 pub fn gemm_cols_with<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usize, j_end: usize, scratch: &mut [f64]) -> bool {
+    blocked(kern, a, b, c_cols, ldc, j_begin, j_end, scratch, false)
+}
+
+/// C := C - A * B (the LU and triangular-solve update; LAPACK's dgemm with alpha = -1, beta = 1) with
+/// microkernel `kern`: `c` is m x n with leading dimension `ldc`, A m x k, B k x n. Each KC block's sum (the
+/// kernel's, in p order) is subtracted from C in block order, so the result has the kernel family's bits.
+/// Errors return `false` without writing anything, as [`gemm_cols_with`].
+pub fn gemm_update_with<K: Micro>(kern: &K, a: &Mat, b: &Mat, c: &mut [f64], ldc: usize, scratch: &mut [f64]) -> bool {
+    blocked(kern, a, b, c, ldc, 0, b.cols, scratch, true)
+}
+
+/// The blocking for both: C's columns j_begin..j_end overwritten with A * B, or (`subtract`) decreased by it.
+#[allow(clippy::too_many_arguments)]
+fn blocked<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usize, j_end: usize, scratch: &mut [f64], subtract: bool) -> bool {
     let (mr, nr) = (K::MR, K::NR);
     // (a kernel's tile must be nonempty and fit the accumulator, checked before anything divides by it)
     if mr == 0 || nr == 0 || mr.checked_mul(nr).is_none_or(|t| t > ACC_LEN) {
@@ -234,9 +273,11 @@ pub fn gemm_cols_with<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], 
     if m == 0 {
         return true;
     }
-    // C := 0, then accumulate each KC block (also covers k == 0: C = 0)
-    for j in 0..ncols {
-        c_cols[j * ldc..j * ldc + m].fill(0.0);
+    // C := 0, then accumulate each KC block (also covers k == 0: C = 0); or, subtracting, C as it is
+    if !subtract {
+        for j in 0..ncols {
+            c_cols[j * ldc..j * ldc + m].fill(0.0);
+        }
     }
     if k == 0 {
         return true;
@@ -267,7 +308,11 @@ pub fn gemm_cols_with<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], 
                             let base = (jc - j_begin + jr + cj) * ldc + ic + ir;
                             let dst = &mut c_cols[base..base + rows];
                             for (r, d) in dst.iter_mut().enumerate() {
-                                *d += acc[cj * mr + r];
+                                if subtract {
+                                    *d -= acc[cj * mr + r];
+                                } else {
+                                    *d += acc[cj * mr + r];
+                                }
                             }
                         }
                         ir += mr;
@@ -339,7 +384,7 @@ pub fn gemm_on(kern: Kernel, a: &Mat, b: &Mat, c: &mut [f64], threads: usize) ->
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn lcg(seed: &mut u64) -> f64 {
