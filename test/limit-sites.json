@@ -9557,6 +9557,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
  },
+ "src/runtime/numpy.ts :: minmax :: if (count === 0) raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: maximum is the reduction's name in NumPy's no-identity ValueError for a max/min over no elements (it replaces the baseline line that raised it only without axis=)"
+ },
  "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
