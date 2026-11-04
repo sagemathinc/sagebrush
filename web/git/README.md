@@ -27,7 +27,8 @@ verified. TimeTravel stays the local insurance; git is what's shared.
 
 ## Try it
 
-1. Build as usual (`bun web/build.ts`, LaTeX on), serve `web/dist`, and open `/git/`.
+1. Build with the LaTeX editor allowed on localhost (`SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts`; a plain build
+   offers it only on sagebrush.space), serve it (`python3 web/serve.py 8765`), and open `http://localhost:8765/git/`.
    - Commit your files once: an agent can only branch from a commit.
 2. Give your agent this checkout's tools: `web/git/mcp.py` runs the installed sagebrush-mcp (for its compiled
    engine) with this checkout's Python MCP layer, so the three git tools appear without building anything:
@@ -48,6 +49,13 @@ verified. TimeTravel stays the local insurance; git is what's shared.
 
 `node /scratch/ux/git-e2e.mjs <port>` drives the whole flow in headless Chromium: commit, branch, edit, commit for
 review, accept 2 of 3 files.
+
+## Pairing follows you between pages
+
+Pair once ("Remember this agent" is ticked by default here). Leaving a page lets go of the agent at once, and the
+next Sagebrush page (board, Git page, LaTeX editor) reconnects with the remembered session; sagebrush-mcp lets a page
+holding that session take over. `node /scratch/ux/pair-nav-e2e.mjs 8766` checks it with the real sagebrush-mcp: pair
+on the board, then the Git page, the LaTeX editor, the board, and Back, each with the agent's calls working.
 
 ## Not yet
 

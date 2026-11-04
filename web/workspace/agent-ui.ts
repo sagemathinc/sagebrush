@@ -84,6 +84,10 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now()); });
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
+  // (PROTOTYPE git-proto: leaving the page lets go of the agent at once, so the next Sagebrush page takes over with the
+  //  remembered session instead of waiting on a page frozen in the back/forward cache; a page shown again reconnects)
+  addEventListener("pagehide", () => pairing?.leave());
+  addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted && (!pairing || pairing.state === "closed")) void reconnect(); });
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
     new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
@@ -128,6 +132,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       write.checked = !!hello.wants.write;
       const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
       const remember = h("input", { type: "checkbox" });
+      remember.checked = true; // (PROTOTYPE git-proto: remembered by default, so moving between pages keeps the agent)
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
       how.onchange = syncRemember;
       syncRemember();

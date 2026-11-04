@@ -257,7 +257,7 @@ export class AgentPairing {
   private async keep() {
     if (!this.grant || !this.pairingId) return;
     // (only a remembered grant outlives the page: "until this page closes" is never kept)
-    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.hello?.session, port: this.port } satisfies Kept);
+    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.sessionSecret, port: this.port } satisfies Kept);
   }
 
   /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
@@ -295,6 +295,9 @@ export class AgentPairing {
    * 1009 too big).  A page's WebSocket may send only 1000 or 3000-4999, with a reason of at most 123 UTF-8 bytes, so
    * the code goes as 4000 + code (1000 stays 1000); if the browser refuses even that, a plain close(), so the socket
    * never stays open. */
+  /** PROTOTYPE git-proto: the page is being left (pagehide): let go of the agent at once, so the next Sagebrush page
+   * can take over with the remembered session; the grant stays remembered. */
+  leave() { if (this.state !== "closed") this.close(1000, "the page was left"); }
   private close(code: number, why: string) {
     this.closeReason ||= why;
     this.grant = null;

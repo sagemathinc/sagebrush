@@ -8,6 +8,7 @@ import { Workspace } from "../workspace/api";
 import { lineDiff } from "../latex/posmap";
 import { texDiff } from "../proposals/texdiff";
 import * as R from "./repo";
+import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 
 declare const __SB_LATEX__: boolean | undefined;
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
@@ -241,6 +242,8 @@ async function main() {
   $("#copyhelp").onclick = async () => { try { await navigator.clipboard.writeText(AGENT_HELP); $("#copyhelp").textContent = "Copied"; } catch { $("#copyhelp").textContent = "Select the text and copy it"; } };
   try { ws = await Workspace.open(); }
   catch (e) { $("#list").textContent = "Your files can't be opened in this browser: " + String((e as Error)?.message ?? e).slice(0, 200); return; }
+  // (the agent follows the person here: a remembered pairing reconnects; the button pairs a new one)
+  mountAgentPairing(ws as any, { button: floatingButton() });
   let t: ReturnType<typeof setTimeout> | undefined;
   const redraw = () => { clearTimeout(t); t = setTimeout(() => { drawList(); drawOne(); }, 400); };
   R.onChange(redraw);

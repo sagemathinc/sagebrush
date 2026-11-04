@@ -1479,6 +1479,8 @@ if (offerNotebook) {
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || pairLink())) mountAgentPairing(ws, { button: floatingButton() });
+// (PROTOTYPE git-proto: a remembered agent follows the person here from another page)
+else if (ws) void ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) mountAgentPairing(ws!, { button: floatingButton() }); }, () => {});
 // ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
 // too, on every host as the terminal is (T358-1); and the terminal's ps and top (web/shell/presence.ts): this tab's board,
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory

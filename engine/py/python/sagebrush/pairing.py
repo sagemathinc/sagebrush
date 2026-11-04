@@ -370,8 +370,11 @@ class Pairing:
             return False
         given, session = params.get("code"), params.get("session")
         secret = None
+        replaced, failed = None, []
         with self.lock:
-            if self.conn is not None:
+            # (PROTOTYPE git-proto: a page holding this pairing's session takes over from the page it replaces, e.g. the
+            #  person moved from the board to an editor; only a fresh code is refused while a page is paired)
+            if self.conn is not None and session is None:
                 refused = "another page is paired with this agent"
             elif (given is None) == (session is None):
                 refused = "hello carries a code or a session, one of them"
@@ -402,6 +405,10 @@ class Pairing:
                 self.session_hash = hashlib.sha256(secret.encode("utf-8")).digest()
                 self.session_tries = 0
             if refused is None:
+                if self.conn is not None and self.conn is not c:
+                    replaced = self.conn
+                    failed = list(self.pending.values())
+                    self.pending.clear()
                 self.conn = c
                 self.generation += 1
                 self.pairings += 1  # (each pairing its own: chat prompts relayed to one are answered by it only)
@@ -411,6 +418,15 @@ class Pairing:
             self._reply_error(c, rid, "refused", refused)
             self._close(c, 1008, refused)
             return False
+        for slot in failed:
+            slot[2] = NotConnected("the paired page was replaced by another page of the person's: try again")
+            slot[0].set()
+        if replaced is not None:
+            self._close(replaced, 1000, "replaced by another page")
+            try:
+                replaced.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         result = {"protocol": PROTOCOL, "agent": self.agent, "wants": {"write": True, "run": False}}
         if secret is not None:
             result["session"] = secret  # (the page keeps it only if the person ticks "Remember this agent")
