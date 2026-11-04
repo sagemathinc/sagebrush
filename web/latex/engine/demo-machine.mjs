@@ -4,7 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
-import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK } from "../core/machine.mjs";
+import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
 
@@ -251,10 +251,25 @@ export class Machine extends CoreMachine {
       const env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
       if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env); return; }
-      if (env === "document") this.mark({ k: "doc" });
+      if (env === "document") { this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls")); }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
       coreBegin.call(this, t);
+      if (env === "document") { this.setS("sb:indoc", 1, true); const h = this.getS("m:sb@bdhook"); if (h) this.pushList(h.body); }
+    });
+    // \AtBeginDocument: its tokens kept, globally, in \sb@bdhook (LaTeX's \@begindocumenthook) and read at \begin{document}
+    // (as doc's \AtBeginDocument{\MakeShortVerb{\|}}: run at once, "|" was \verb in the preamble that follows, #622);
+    // in the document, read at once. The hook is one token list: bounded as one (limits.tokenList), its copy charged and
+    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1): so its
+    // memory is checked first, setS's own 64 bytes included
+    P.prim("AtBeginDocument", function () {
+      const a = this.readArgRaw();
+      if (this.getS("sb:indoc")) { this.pushList(a); return; }
+      const h = this.getS("m:sb@bdhook"), old = h ? h.body : [], n = old.length + a.length;
+      if (n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+      if (this.memBytes + n * 4 + 128 > this.limits.memBytes) throw new BoundError("E-BOUND-MEMORY");
+      this.charge(n); this.reserve(n * 4 + 64);
+      this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: old.concat(a), long: true, prot: false }), true);
     });
     P.prim("end", function (t) {
       const env = this.readArgString();
@@ -267,7 +282,7 @@ export class Machine extends CoreMachine {
     // the document class (the core reads and drops it)
     P.prim("documentclass", function (t) {
       const opt = this.readOptRaw(); const cls = this.readArgString();
-      this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" });
+      this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" }); this.setS("sb:cls", cls, true);
       this.pushArg(cls);
       coreClass.call(this, t);
     });
@@ -345,5 +360,64 @@ export class Machine extends CoreMachine {
       this.charge(Math.ceil((e - f.li) / 8)); f.li = e + 1; f.st = 1;
       this.mark({ k: "verb", text, star });
     });
+    // short verbatim (#622: amsldoc's |\begin{aligned}| opened an environment that took the rest of the document): a
+    // character made active as \verb with itself as the delimiter, by \MakeShortVerb (doc, shortvrb; its * read and shown as \verb, as the preview shows \verb*),
+    // \DefineShortVerb (fancyvrb), or the class at \begin{document} (SHORTVERB_CLASSES), undone by \DeleteShortVerb and
+    // \UndefineShortVerb. Global, as doc's are; "sv:<code>" is 1 while it is, kept with the catcode before ("svcat:<code>", stale once deleted: the next \MakeShortVerb sets it)
+    // and the active character's meaning before (\sb@sv@<char>), both from the first \MakeShortVerb (a second mustn't
+    // keep the short verb as the one to restore), and in "svchars" (for \index below; kept after \DeleteShortVerb, harmless there)
+    const shortVerb = (m, cp) => {
+      const ch = String.fromCodePoint(cp);
+      if (m.getS("sv:" + cp) === undefined) {
+        m.setS("svcat:" + cp, m.cat(cp), true); m.letTo(m.csTok("sb@sv@" + ch), m.csTok("\u0001" + ch), true);
+        m.setS("svchars", (m.getS("svchars") ?? "") + ch, true);
+      }
+      m.setS("sv:" + cp, 1, true); m.setS("cat:" + cp, CAT.ACTIVE, true);
+      m.letTo(m.csTok("\u0001" + ch), m.csTok("sb@shortverb"), true);
+    };
+    const shortVerbArg = (m) => {       // {\|} or \|: the character's code, or null
+      const cs = m.csArg(); if (cs === null) return null;
+      const ch = m.intern.name(cs);
+      if ([...ch].length !== 1) { m.d("E-SHORTVERB-ARG"); return null; }
+      return ch.codePointAt(0);
+    };
+    for (const nm of ["MakeShortVerb", "DefineShortVerb"]) P.prim(nm, function () {
+      if (nm === "MakeShortVerb") { const s = this.skipSpacesRaw(); if (s !== null && s !== mkChar(CAT.OTHER, 42)) this.back(s); }
+      else this.readOptRaw();
+      const cp = shortVerbArg(this); if (cp !== null) shortVerb(this, cp);
+    });
+    for (const nm of ["DeleteShortVerb", "UndefineShortVerb"]) P.prim(nm, function () {
+      const cp = shortVerbArg(this); if (cp === null || this.getS("sv:" + cp) === undefined) return;
+      this.setS("cat:" + cp, this.getS("svcat:" + cp), true); this.setS("sv:" + cp, undefined, true);
+      const ch = String.fromCodePoint(cp); this.letTo(this.csTok("\u0001" + ch), this.csTok("sb@sv@" + ch), true);
+    });
+    const verb = core("verb");
+    P.prim("sb@shortverb", function (t) {
+      const f = this.stack[this.stack.length - 1];
+      // (in the source: \verb, with the reader put back on this character, its delimiter; in an argument, already
+      //  tokens: to the same active character, stopping at a blank line, as \verb's text can't span one, or at the
+      //  list's end: no bound of its own, as a list is at most limits.tokenList long)
+      if (f && f.kind === "file" && f.line !== null) { f.li -= this.intern.name(t).length - 1; return verb.call(this); }
+      const out = [];
+      for (;;) {
+        const u = this.nextRaw();
+        if (u === null || u === t) break;
+        if (isCs(u) && this.intern.name(u) === "par") { this.back(u); break; }
+        out.push(u); this.charge(1);
+      }
+      this.mark({ k: "verb", text: this.toks2str(out) });
+    });
+    // \index and \glossary read their argument with the short verbatim characters as other characters, as LaTeX's
+    // \@sanitize does (makeindex's "|" in \index{x|(}, amsldoc's first index entry, was a \verb to the end of the line
+    // that took the closing brace); then the command and its argument go on as before (render.mjs GOBBLE drops them)
+    for (const nm of ["index", "glossary"]) P.prim(nm, function (t) {
+      const cps = [...(this.getS("svchars") ?? "")].map((c) => c.codePointAt(0));
+      const saved = cps.map((cp) => this.cat(cp)); for (const cp of cps) this.setS("cat:" + cp, CAT.OTHER, true);
+      let arg; try { arg = this.readArgRaw(); } finally { cps.forEach((cp, k) => this.setS("cat:" + cp, saved[k], true)); }
+      this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
+    });
+    // (the classes that make "|" (and l3doc also '"') short verbatim at \begin{document})
+    P.shortVerbAtBegin = (cls) => { for (const ch of SHORTVERB_CLASSES.get(cls) ?? "") shortVerb(this, ch.codePointAt(0)); };
   }
 }
+const SHORTVERB_CLASSES = new Map([["amsldoc", "|"], ["ltxdoc", "|"], ["l3doc", '"|']]);
