@@ -1,0 +1,73 @@
+[
+  {
+    "name": "numpy.str_",
+    "kind": "class",
+    "signature": "(value='')",
+    "summary": "NumPy's string scalar, a str: the element of a string array (dtype '<Un'), with its dtype.",
+    "examples": [
+      {
+        "code": "np.array(['a', 'bc'])[1]",
+        "expected": "np.str_('bc')\n"
+      },
+      {
+        "code": "np.str_('ab') + 'c'",
+        "expected": "'abc'\n"
+      },
+      {
+        "code": "np.str_('12').dtype",
+        "expected": "dtype('<U2')\n"
+      }
+    ],
+    "differs": [
+      "String arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing; other operations on them (np.char, the string ufuncs such as np.add) raise NotImplementedError.",
+      "Sagebrush's strings are UTF-16: a high surrogate followed by a low one is the character they make, which NumPy keeps as two code points; such a string is refused.",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.character",
+    "kind": "class",
+    "signature": "()",
+    "summary": "The abstract base of NumPy's string scalar types: np.str_ (np.bytes_ is not implemented).",
+    "examples": [
+      {
+        "code": "issubclass(np.str_, np.character)",
+        "expected": "True\n"
+      },
+      {
+        "code": "np.issubdtype(np.dtype('U3'), np.character)",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "np.bytes_ and bytes arrays are not implemented.",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.flexible",
+    "kind": "class",
+    "signature": "()",
+    "summary": "The abstract base of NumPy's flexible scalar types, those whose dtype has a length: np.character here.",
+    "examples": [
+      {
+        "code": "issubclass(np.character, np.flexible)",
+        "expected": "True\n"
+      },
+      {
+        "code": "np.issubdtype(np.array(['x']).dtype, np.flexible)",
+        "expected": "True\n"
+      }
+    ],
+    "differs": [
+      "np.void (structured arrays) is not implemented.",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  }
+]
