@@ -243,9 +243,13 @@ const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = ru
 );
 
 // Execute `source` as module `name`, registering it in sys.modules first.
+// (`made`: told the new module object before any of its code runs, so
+// whatever its code does with it, aliases included, even if it then raises,
+// the module is already known as what it is: execFile's optional-set tag)
 let moduleRuns = 0;
-export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
+export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void): any {
   const m = R.newModule(name);
+  made?.(m);
   m.__file__ = filename;
   m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
   if (isPackage) m.__path__ = [dirname(filename)];
@@ -427,14 +431,18 @@ R.loader.load = (name: string) => {
 // optional set (optKeys, by its mounted path, whatever name or sys.path entry
 // found it) is refused before any of it runs while a grading allowance is armed
 // (astra's Q7 residual on #628: its directory on sys.path, a fresh name); else
-// the module made from it is remembered as the set's, by identity, for
-// R.loader.graded's check when an import finds it in sys.modules.
+// the module made from it is remembered as the set's, by identity, as soon as
+// it is made, for R.loader.graded's check when an import finds it in
+// sys.modules under any name.
 function execFile(text: string, file: string, name: string, isPackage: boolean): any {
   const k = optKeys.get(file);
-  if (k !== undefined) gradedFile(k.id, name);
-  const m = execModule(text, file, name, isPackage);
-  if (k !== undefined && m !== null && typeof m === "object") optModules.set(m, k.id);
-  return m;
+  if (k === undefined) return execModule(text, file, name, isPackage);
+  gradedFile(k.id, name);
+  // (tagged as it is made, before its code runs: a module that puts itself in sys.modules under another name and
+  // then raises is still the set's, astra's partial-alias case on #628 r5)
+  return execModule(text, file, name, isPackage, file.endsWith(".sage"), (m) => {
+    if (m !== null && typeof m === "object") optModules.set(m, k.id);
+  });
 }
 // (refuseGraded when a grading allowance is armed: package `id`'s file, asked for as `name`)
 function gradedFile(id: string, name: string): void {

@@ -322,6 +322,19 @@ test("pandas imported before a grading allowance is armed doesn't import after i
   assert.equal(await run(before, s, { armThen: "import hello, json\nprint(hello.GREETING)" }), "1 1\n | hi\n");
 });
 
+test("a module of the set that puts itself in sys.modules under another name and then raises is still the set's: refused under that name once grading is armed (astra's partial-alias case)", async () => {
+  const pd: Pkg = {
+    name: "pandas",
+    modules: ["pandas"],
+    files: { "py/pandas/__init__.py": "import sys\nsys.modules['escaped'] = sys.modules[__name__]\nX = 42\nraise RuntimeError('half made')\n" },
+  };
+  const s = makeSet([pd, hello]);
+  const before = "try:\n    import pandas\nexcept RuntimeError as e:\n    print('raised', e)";
+  // (before arming, the alias is there and imports: the case is real)
+  assert.equal(await run(before + "\nimport escaped\nprint(escaped.X)", s), "raised half made\n42\n");
+  assert.match(await run(before, s, { armThen: "import escaped\nprint(escaped.X)" }), /^raised half made\n \| ImportError: No module named 'escaped' in a graded run: @sagebrush\/pandas@0\.1\.0 is not admitted for grading yet/);
+});
+
 test("pandas's mounted files are refused under a fresh name once a grading allowance is armed, its directory on sys.path: a submodule loaded before and one never loaded, before any of it runs (Q7 residual, astra)", async () => {
   const pd: Pkg = {
     name: "pandas",
