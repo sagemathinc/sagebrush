@@ -846,6 +846,8 @@ class Renderer {
       const m = this.meta, printed = { title: !!m.title, author: !!m.author, institute: !!m.institute, date: m.date === null || !!m.date, thanks: m.thanks.length > 0 };
       for (const f of Object.keys(printed)) if (printed[f]) for (const k of this.metaSage[f]) this.sageShown.add(k);
     }
+    // (and those beamer's furniture shows: engine/beamer.mjs)
+    if (this.furnishShown) this.furnishShown();
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
     if (hidden.length) this.chunkPos.unshift(-1);

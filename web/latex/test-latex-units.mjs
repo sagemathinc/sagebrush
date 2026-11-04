@@ -18,6 +18,7 @@ import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex, render, installBeamer } from "./engine/render.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
+import { itemKey } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -249,6 +250,31 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   // (a template set in the document's body: its argument read, not shown)
   const body = html(deck("\\usetheme{Warsaw}\n", "\\setbeamertemplate{footline}{mine}\n" + one));
   check("beamer-furniture-template-in-body", !body.includes("mine") && !/slide-foot/.test(frameOf(body, 2)), frameOf(body, 2).slice(0, 300));
+  // (SageTeX in the furniture's fields (daybreak3, FURN644-SAGE-1): a field the furniture shows, long or short, is shown,
+  //  not hidden, and its saved result drawn; one the theme doesn't draw stays hidden, as before)
+  const sageDeck = (theme, title) => "\\documentclass{beamer}\n\\usetheme{" + theme + "}\n\\usepackage{sagetex}\n" + title + "\n\\begin{document}\n\\begin{frame}{F}x\\end{frame}\n\\end{document}\n";
+  const sageRun = (src) => { const it = new Engine().update(src).sageItems; return new Engine({ sage: { saved: it.map((x) => ({ key: itemKey(x), s: "ok", latex: "42" })) } }).update(src); };
+  const longF = sageRun(sageDeck("Madrid", "\\title{Long \\sage{6*7}}")), shortF = sageRun(sageDeck("Madrid", "\\title[Short \\sage{6*7}]{Long}")), unused = sageRun(sageDeck("Rochester", "\\title{Long \\sage{6*7}}"));
+  const hiddenNote = (r) => /class="sagestate"><span class="sagechip s-error">\d+ Sage code item/.test(r.chunks.join(""));
+  check("beamer-furniture-sage-shown", !hiddenNote(longF) && !hiddenNote(shortF) && /slide-foot[\s\S]*42/.test(frameOf(longF.chunks.join(""), 1)) && /slide-foot[\s\S]*Short[\s\S]*42/.test(frameOf(shortF.chunks.join(""), 1))
+    && longF.sageItems.every((x) => x.err !== "hidden") && shortF.sageItems.every((x) => x.err !== "hidden") && hiddenNote(unused) && unused.sageItems.every((x) => x.err === "hidden"),
+    { long: [hiddenNote(longF), longF.sageItems.map((x) => x.err)], short: [hiddenNote(shortF), shortF.sageItems.map((x) => x.err)], unused: [hiddenNote(unused), unused.sageItems.map((x) => x.err)] });
+  // (the frame number is beamer's counter, which [noframenumbering] doesn't step (daybreak3, FURN644-FRAME-NO-1): TeX's
+  //  1/2, 1/2, 2/2; a plain frame steps it, unless [noframenumbering] too; data-frame stays the frame's index)
+  const nums = (src) => [...html(src).matchAll(/<span class="fno">([^<]*)<\/span>/g)].map((m) => m[1]);
+  const nf = nums(deck("\\usetheme{Madrid}\n", "\\begin{frame}{A}a\\end{frame}\n\\begin{frame}[noframenumbering]{B}b\\end{frame}\n\\begin{frame}{C}c\\end{frame}\n"));
+  const pf = nums(deck("\\usetheme{Madrid}\n", "\\begin{frame}[plain]{A}a\\end{frame}\n\\begin{frame}[plain,noframenumbering]{B}b\\end{frame}\n\\begin{frame}{C}c\\end{frame}\n"));
+  const ids = html(deck("\\usetheme{Madrid}\n", "\\begin{frame}{A}a\\end{frame}\n\\begin{frame}[noframenumbering]{B}b\\end{frame}\n")).match(/data-frame="\d+"/g);
+  check("beamer-furniture-frame-numbers", nf.join(",") === "1 / 2,1 / 2,2 / 2" && pf.join(",") === "2 / 2" && ids.join(",") === 'data-frame="1",data-frame="2"', { nf, pf, ids });
+  // (the furniture's budget (astra, BEAMER644-FURN-1): exactly FURN_MAX fits, one byte over doesn't; a deck whose full
+  //  headlines would be frames x sections of long names gets the short form, a problem saying so, its HTML bounded)
+  check("beamer-furniture-budget-edge", beamerCode.fitsFurniture(beamerCode.FURN_MAX / 4, 4) && !beamerCode.fitsFurniture(beamerCode.FURN_MAX / 4 + 1, 4) && beamerCode.fitsFurniture(1, beamerCode.FURN_MAX) && !beamerCode.fitsFurniture(1, beamerCode.FURN_MAX + 1));
+  const big = Array.from({ length: 384 }, (_, k) => "\\section{" + ("Section" + k + " ").padEnd(128, "x") + "}\n\\begin{frame}{F" + k + "}b\\end{frame}\n").join("");
+  const bigR = new Engine().update(deck("\\usetheme{Berlin}\n", big)), bigH = bigR.chunks.join(""), small = html(deck("\\usetheme{Berlin}\n"));
+  const f1 = frameOf(bigH, 1).match(/<div class="slide-head[^"]*"><div>([\s\S]*?)<\/div>/)?.[1] ?? "";
+  check("beamer-furniture-budget-short-form", bigR.stats.outcome === "ok" && bigH.length < 3 * 2 ** 20 && (f1.match(/<span/g) || []).length === 1 && /Section0 x+\u2026/.test(f1)
+    && bigR.problems.some((p) => p.kind === "furniture") && !new Engine().update(deck("\\usetheme{Berlin}\n")).problems.some((p) => p.kind === "furniture") && /SecOneShort<\/span> <span>SectionTwo/.test(small),
+    { len: bigH.length, f1: f1.slice(0, 300), problems: bigR.problems.filter((p) => p.kind === "furniture") });
   // (in another class: \usetheme's and \setbeamertemplate's arguments read and dropped, \title[..] as TeX reads it there:
   //  its argument the "[")
   const art = new Engine().update("\\documentclass{article}\n\\usetheme{Madrid}\\setbeamertemplate{footline}{F}\n\\title[S]{T}\n\\begin{document}\n\\maketitle X \\only<2>{Y}\n\\end{document}\n").chunks.join("");
