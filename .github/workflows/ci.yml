@@ -1149,6 +1149,29 @@ jobs:
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
 
+  # (numerics-core P2a, r4.2 §12: no microkernel ships that no CI host has executed. engine/nd's NEON kernel
+  # runs only on aarch64; this job executes its oracle, thread-determinism and bit-family tests on Apple
+  # silicon. engine/nd/src/micro.rs NEON_ENABLED may be turned on only once this job is green on master.)
+  engine-nd-neon:
+    needs: changes
+    if: github.repository == 'sagemathinc/sagebrush' && needs.changes.outputs.engine_smoke == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: engine
+          shared-key: nd-neon
+      - name: "engine/nd on aarch64: the NEON kernel's oracle, thread determinism and FMA-family bits"
+        working-directory: engine
+        run: |
+          uname -m
+          test "$(uname -m)" = arm64
+          cargo test --release -p sagebrush-nd --features parallel -- --nocapture
+
+
   # (the unsafe boundary's compiler sweep, #234 r2 U1: every unsafe site the compiler sees, generated and
   # expanded code included, must lie in a pinned allowed item; its own cache, parallel to engine-rust)
   engine-unsafe-sweep:
