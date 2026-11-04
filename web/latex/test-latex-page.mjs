@@ -1018,6 +1018,19 @@ try {
     await release("__sbTexSaveWrite");
     Object.assign(r4, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4.tex")) === DOC + "% theirs\n" });
     check(Object.values(r4).every((v) => v === true), "R4a the agent's write lands while this Save waits: the Save refused, the bar, nothing written", r4);
+    // (grader X5: no check while this Save waits; the agent's change is looked at only once the Save is done. While
+    //  it is held, the status is still the Save's and no bar is up; then the Save is refused, and the bar shows)
+    await opened("/x/r4d.tex");
+    await typeInto(DOC + "% mine\n");
+    await hold("__sbTexSaveWrite");
+    await ctrlS();
+    const r4d = { held: await held("__sbTexSaveWrite") };
+    await agentWrite("/x/r4d.tex", DOC + "% theirs\n");
+    await sleep(600);
+    Object.assign(r4d, { saving: (await status()) === "saving…", noBar: !(await barUp()) });
+    await release("__sbTexSaveWrite");
+    Object.assign(r4d, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4d.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r4d).every((v) => v === true), "R4d a change arriving while this Save waits is looked at only after it: no bar, the Save's status meanwhile", r4d);
     await opened("/x/r4b.tex");
     await typeInto(DOC + "% mine\n");
     await hold("__sbTexSaveWrite");
