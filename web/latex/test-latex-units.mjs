@@ -1,8 +1,8 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: checks.3 order=106 runner=bun
 // The LaTeX editor's pure parts, without a browser: the bytes <-> text rules (save.ts), the image resolver and sniffer
 // (images.ts), the chunk splitter (split.ts), the highlighter's tokenizer (highlight.ts), the flag (boot.ts) and the
 // request gate (gate.ts); and the renderer's unclosed formulas (engine/render.mjs, KaTeX stubbed).
-//   bun web/latex/test-latex-units.mjs
+//   bun web/latex/test-latex-units.mjs   (in CI since #622: the engine's render checks, short verbatim among them)
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
@@ -184,6 +184,59 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   ];
   for (const [name, body, ok] of half) { const h = doc("\\documentclass{article}\n", body); check(name, ok(h), h.slice(0, 600)); }
   { const h = doc("\\documentclass[a4paper\n\n", "Body survives."); check("half-documentclass-opt", h.includes("Body survives."), h.slice(0, 600)); }
+  // short verbatim (#622): "|" made \verb by \MakeShortVerb or by the class (amsldoc's |\begin{aligned}| opened an
+  // environment that took the rest of the document); \index reads "|" as makeindex's; plain "|" stays a character
+  const V = (s) => '<code class="verb">' + s + "</code>";
+  const shortv = [
+    ["shortverb-class-amsldoc", "\\documentclass{amsldoc}\n", "using |\\!\\begin{aligned}| as before.\n\nAfter para.", (h) => h.includes(V("\\!\\begin{aligned}")) && h.includes("After para.")],
+    ["shortverb-class-ltxdoc", "\\documentclass{ltxdoc}\n", "Text |x y| end.", (h) => h.includes(V("x y")) && h.includes("end.")],
+    ["shortverb-class-l3doc-quote", "\\documentclass{l3doc}\n", 'A "\\cs_new:Npn" b.', (h) => h.includes(V("\\cs_new:Npn")) && h.includes("b.")],
+    ["shortverb-make", "\\documentclass{article}\n\\usepackage{shortvrb}\\MakeShortVerb{\\|}\n", "A |\\begin{x}| b.\n\nNext.", (h) => h.includes(V("\\begin{x}")) && h.includes("Next.")],
+    ["shortverb-make-bare-cs", "\\documentclass{article}\n\\MakeShortVerb\\+\n", "A +\\end{x}+ b.", (h) => h.includes(V("\\end{x}")) && h.includes("b.")],
+    ["shortverb-define-fancyvrb", "\\documentclass{article}\n\\DefineShortVerb[commandchars=\\\\\\{\\}]{\\|}\n", "A |\\x| b.", (h) => h.includes(V("\\x")) && h.includes("b.")],
+    ["shortverb-delete", "\\documentclass{article}\n\\MakeShortVerb{\\|}\n", "A |a| \\DeleteShortVerb{\\|}$|x|$ c.", (h) => h.includes(V("a")) && !h.includes(V("x")) && h.includes("c.")],
+    ["shortverb-undefine", "\\documentclass{article}\n\\def\\p#1|{[#1]}\\DefineShortVerb{\\|}\n", "\\UndefineShortVerb{\\|}A|b| \\p cd|e.", (h) => !h.includes('class="verb"') && h.includes("A|b| [cd]e.")],
+    ["shortverb-unterminated-line", "\\documentclass{ltxdoc}\n", "A |open to the line end\n\nNext para.", (h) => h === doc("\\documentclass{ltxdoc}\n", "A \\verb|open to the line end\n\nNext para.") && h.includes("Next para.")],
+    ["shortverb-in-argument", "\\documentclass{ltxdoc}\n", "\\section{Use |\\foo|}\nText.", (h) => h.includes('class="verb"') && h.includes("\\foo") && h.includes("Text.")],
+    ["shortverb-index-makeindex-bar", "\\documentclass{amsldoc}\n", "One.\\index{amsmath@\\texttt{amsmath} package|(}\n\nTwo |\\foo| x.", (h) => h.includes("One.") && h.includes(V("\\foo")) && h.includes("x.") && !h.includes("package|(")],
+    ["shortverb-make-star", "\\documentclass{article}\n\\MakeShortVerb*{\\|}\n", "A |a b| c.", (h) => h.includes(V("a b")) && h.includes("c.") && !h.includes("*")],
+    ["shortverb-make-twice-delete", "\\documentclass{article}\n\\MakeShortVerb{\\|}\\MakeShortVerb{\\|}\n", "A |a| \\DeleteShortVerb{\\|}b|c|d.", (h) => h.includes(V("a")) && !h.includes(V("c")) && h.includes("b|c|d.")],
+    ["shortverb-arg-not-one-char", "\\documentclass{article}\n\\MakeShortVerb{\\foo}\n", "fine |text| here.", (h) => !h.includes('class="verb"') && h.includes("fine |text| here.")],
+    ["shortverb-delete-restores-catcode", "\\documentclass{article}\n\\catcode`\\!=13 \\def!{BANG}\\DeleteShortVerb{\\!}\n", "x!y \\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}\\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}z!w", (h) => h.includes("xBANGy") && h.includes("zBANGw")],
+    ["shortverb-remake-after-catcode", "\\documentclass{article}\n\\catcode`\\!=13 \\def!{BANG}\n", "\\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}\\catcode`\\!=12 \\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}a!b.", (h) => h.includes("a!b.") && !h.includes("BANG")],
+    ["shortverb-macro-body", "\\documentclass{ltxdoc}\n", "\\newcommand{\\x}{A |q r| B}\\x.", (h) => h.includes(V("q r")) && h.includes("B.")],
+    ["shortverb-macro-body-par", "\\documentclass{ltxdoc}\n", "\\long\\def\\y{|q\\par Z}\\y", (h) => h.includes(V("q")) && h.includes("Z") && !h.includes(V("q Z")) && !h.includes(V("q\\par Z"))],
+    ["atbegindocument-deferred", "\\documentclass{article}\n\\usepackage{doc}\\AtBeginDocument{\\MakeShortVerb{\\|}}\\def\\q{a|b}\n", "\\q{} |x| y.", (h) => h.includes("a|b") && h.includes(V("x")) && h.includes("y.")],
+    ["atbegindocument-in-order", "\\documentclass{article}\n\\AtBeginDocument{Hook1 }\\AtBeginDocument{Hook2 }\n", "Body.", (h) => /Hook1 Hook2 Body\./.test(h)],
+    ["atbegindocument-in-document", "\\documentclass{article}\n", "Before \\AtBeginDocument{Now }after.", (h) => h.includes("Before Now after.")],
+    ["atbegindocument-global-brace", "\\documentclass{article}\n{\\AtBeginDocument{Hook }}\n", "Body.", (h) => h.includes("Hook Body.")],
+    ["atbegindocument-global-begingroup", "\\documentclass{article}\n\\begingroup\\AtBeginDocument{Hook }\\endgroup\n", "Body.", (h) => h.includes("Hook Body.")],
+    ["atbegindocument-grouped-then-ungrouped", "\\documentclass{article}\n{\\AtBeginDocument{Hook1 }}\\AtBeginDocument{Hook2 }\n", "Body.", (h) => h.includes("Hook1 Hook2 Body.")],
+    ["shortverb-make-global", "\\documentclass{article}\n{\\MakeShortVerb{\\|}}\n", "A |\\x| b.", (h) => h.includes(V("\\x")) && h.includes("b.")],
+    ["shortverb-delete-global", "\\documentclass{article}\n\\def\\p#1|{[#1]}\\MakeShortVerb{\\|}\n", "{\\DeleteShortVerb{\\|}}A|b| \\p cd|e.", (h) => !h.includes('class="verb"') && h.includes("A|b| [cd]e.")],
+    ["shortverb-none-plain-bar", "\\documentclass{article}\n", "Plain $|x|$ and a|b.", (h) => !h.includes('class="verb"') && h.includes("a|b.")],
+  ];
+  for (const [name, pre, body, ok] of shortv) { const h = doc(pre, body); check(name, ok(h), h.slice(0, 600)); }
+  // \AtBeginDocument's hook is one token list (#631 LATEX631-HOOK-1): bounded as one, a refusal keeping the hook before;
+  // each append's copy charged as work
+  {
+    const hookRun = (hooks, limits) => coldRun(new Map([["main.tex", "\\documentclass{article}\n" + hooks.map((x) => "\\AtBeginDocument{" + x + "}").join("") + "\n\\begin{document}\nBody.\n\\end{document}\n"]]), "main.tex", { Tmin: 100, limits });
+    const hookLen = (r) => r.m.getS("m:sb@bdhook")?.body.length;
+    const at = hookRun(["abcd", "efgh"], { tokenList: 8 }), over = hookRun(["abcd", "efghi"], { tokenList: 8 });
+    check("atbegindocument-hook-at-bound", at.outcome === "ok" && hookLen(at) === 8, { outcome: at.outcome, len: hookLen(at) });
+    check("atbegindocument-hook-one-over", over.outcome === "E-BOUND-TOKENS" && hookLen(over) === 4, { outcome: over.outcome, len: hookLen(over) });
+    const many = Array.from({ length: 300 }, () => "x"), one = hookRun([many.join("")]), each = hookRun(many);
+    const extra = each.counters.work - one.counters.work;   // (the 300 copies: 1 + 2 + ... + 300, less the one of 300)
+    check("atbegindocument-hook-copies-charged", one.outcome === "ok" && each.outcome === "ok" && extra >= 300 * 301 / 2 - 300, { extra });
+    // (memory: checked before the store, setS's 64 bytes included, so a refusal keeps the hook before; each
+    //  document ends with its last append, so its run's total is exactly what that append needs)
+    const bare = (hooks, limits) => coldRun(new Map([["main.tex", hooks.map((x) => "\\AtBeginDocument{" + x + "}").join("")]]), "main.tex", { Tmin: 100, limits });
+    const memAll = bare(["abcd", "efgh"]).counters.memBytes, memOk = bare(["abcd", "efgh"], { memBytes: memAll }), memShort = bare(["abcd", "efgh"], { memBytes: memAll - 1 });
+    check("atbegindocument-hook-memory-exact", memOk.outcome === "ok" && hookLen(memOk) === 8, { outcome: memOk.outcome, len: hookLen(memOk) });
+    check("atbegindocument-hook-memory-one-short", memShort.outcome === "E-BOUND-MEMORY" && hookLen(memShort) === 4, { outcome: memShort.outcome, len: hookLen(memShort) });
+    const capped = hookRun(many, { safetyWork: one.counters.work + 1000 });
+    check("atbegindocument-hook-work-budget", capped.outcome === "E-BOUND-SAFETY" && hookRun([many.join("")], { safetyWork: one.counters.work + 1000 }).outcome === "ok", { outcome: capped.outcome });
+  }
   // \long commands keep paragraphs (the kernel's \@footnotetext, \@caption, \thanks are \long); a short one with a
   // literal \par is a runaway, as in TeX; a short command that runs away is dropped before any effect
   const longs = [
