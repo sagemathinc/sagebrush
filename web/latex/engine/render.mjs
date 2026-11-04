@@ -188,7 +188,7 @@ const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markb
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
   DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
-  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], savebox: [1, 2], sbox: [0, 2], usebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
+  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
   bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1],
   usetheme: [1, 1], usecolortheme: [1, 1], usefonttheme: [1, 1], useinnertheme: [1, 1], useoutertheme: [1, 1], setbeamertemplate: [0, 2],
@@ -212,6 +212,7 @@ class Renderer {
     // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
     this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
+    this.boxes = new Map();   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox)
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
     this.secnumdepth = 3;
@@ -533,6 +534,7 @@ class Renderer {
       }
       // (beamer: columns side by side, each a minipage of its width)
       case "columns": { const b = flow.open("div", ' class="bcols" style="display:flex;gap:1em;align-items:flex-start"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "lrbox": { const [a, j] = this.arg(n.kids, -1); this.saveBox(a, () => this.inline(n.kids.slice(j + 1), c2)); return; }
       case "column":
       case "minipage": {
         let j = -1; let pos = "c"; let o;
@@ -808,6 +810,10 @@ class Renderer {
   // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
   sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
   /** fn's result, and the SageTeX items it rendered (a title field's) */
+  // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
+  // shown too (a box never used is never shown, as in TeX)
+  boxName(a) { return this.str(a).trim(); }
+  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys }); }
   captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
@@ -919,6 +925,17 @@ const CMDS = {
   ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
+  // saved boxes (astra4's digest, gap 3: they were dropped, silently): \sbox{\name}{text}, \savebox{\name}[width][pos]{text}
+  // (as \makebox), and lrbox (the environments) kept, and \usebox{\name} shows the box; one never saved shows nothing,
+  // as TeX's empty box, and check says so
+  sbox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i), [b, j] = this.arg(nodes, j0); this.saveBox(a, () => this.inline(b, ctx)); return j; },
+  savebox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i); let j = j0; this.saveBox(a, () => { const f = new Flow(true); j = this.makebox(nodes, j0, ctx, f, false); return f.inlineHtml(); }); return j; },
+  usebox: function (nodes, i, ctx, flow) {
+    const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
+    if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
+    for (const k of b.keys) this.sageShown.add(k);
+    flow.html(b.h, ctx.st); return j;
+  },
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
     let j = i, o, pos = "c", h = null, ipos = null;

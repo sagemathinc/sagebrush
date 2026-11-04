@@ -222,6 +222,32 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
 }
 
+// ---- saved boxes (astra4's fidelity digest, gap 3: \sbox, \savebox and \usebox were dropped, with no problem said). The
+//      first is astra4's M14 as is; TeX's text for it: "VisibleText"
+{
+  setKatex((src) => src);
+  const run = (body, pre = "") => new Engine().update("\\documentclass{article}\n" + pre + "\\begin{document}\n" + body + "\n\\end{document}\n");
+  const text = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const m14 = run("\\newsavebox{\\saved}\\sbox{\\saved}{VisibleText}\\usebox{\\saved}");
+  check("savebox-m14", text(m14) === "VisibleText" && !m14.problems.length, [text(m14), m14.problems]);
+  // (each \usebox shows it again; saved in the preamble, shown in the body; nothing where it's saved)
+  const twice = run("A \\usebox{\\bx} B \\usebox{\\bx}", "\\newsavebox{\\bx}\\sbox{\\bx}{\\textbf{Kept}}\n");
+  check("savebox-reused-from-preamble", text(twice) === "A Kept B Kept", text(twice));
+  // (\savebox's width and position as \makebox's; lrbox's body; a box never saved: nothing shown, a problem said)
+  const sb = run("\\newsavebox{\\w}\\savebox{\\w}[3cm][r]{Wide}[\\usebox{\\w}]").chunks.join("");
+  const lr = run("\\newsavebox{\\l}\\begin{lrbox}{\\l}Inside \\emph{it}\\end{lrbox}Out: \\usebox{\\l}");
+  const none = run("X \\usebox{\\nothere} Y");
+  check("savebox-width-lrbox-unsaved", /<span class="mkbox" style="width:[^"]*;text-align:right">Wide<\/span>/.test(sb) && /\[<span class="mkbox"/.test(sb) && text(lr) === "Out: Inside it"
+    && text(none) === "X Y" && none.problems.some((p) => p.kind === "box" && p.name.includes("\\nothere")), [sb.slice(0, 300), text(lr), text(none), none.problems]);
+  // (a minipage, and beamer's column (which shares its code), still show their content: lrbox is a case of its own)
+  const mp = text(run("\\begin{minipage}{3cm}InMini\\end{minipage}"));
+  const col = new Engine().update("\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{F}\\begin{columns}\\begin{column}{0.5\\textwidth}InColumn\\end{column}\\end{columns}\\end{frame}\n\\end{document}\n").chunks.join("");
+  check("savebox-minipage-column-unchanged", mp === "InMini" && /class="minipage[^"]*"[^>]*>[\s\S]*InColumn/.test(col), [mp, col.slice(0, 300)]);
+  // (a box's SageTeX: shown where the box is used, hidden (as before) if it never is)
+  const sageBox = (use) => run("\\newsavebox{\\sb}\\sbox{\\sb}{\\sage{1+1}}" + (use ? "\\usebox{\\sb}" : "Z"), "\\usepackage{sagetex}\n").sageItems.map((x) => x.err ?? "ok");
+  check("savebox-sage", sageBox(true).join() === "ok" && sageBox(false).join() === "hidden", [sageBox(true), sageBox(false)]);
+}
+
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
