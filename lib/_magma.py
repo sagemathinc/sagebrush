@@ -207,6 +207,48 @@ def _report(e, line, col):
         raise SystemExit(1)
 
 
+class _Err(object):
+    """An error caught by try ... catch e (Magma's Err): e`Object is its
+    text ("Runtime error in '/': Division by zero"; error's own object, as
+    a string, for error "..."), e`Position the source line with a caret,
+    e`Type "Err"; printed as Magma prints it, uncaught."""
+
+    def __init__(self, e, pos):
+        self._user = isinstance(e, _UserError)
+        if self._user:
+            self.Object = str(e)
+            self._printed = "Runtime error: %s" % e
+        else:
+            msg = str(e) if isinstance(e, MagmaError) else _unsupported_call(e) or "%s: %s" % (type(e).__name__, e)
+            where = getattr(e, "where", None)
+            # (with the empty line Magma follows most runtime errors with: part of the text)
+            self.Object = "Runtime error%s: %s%s" % (" in " + where if where else "", msg, "\n" if getattr(e, "blank", True) else "")
+            line, col = getattr(e, "pos", None) or pos
+            self._printed = _where(line, col) + self.Object
+        line, col = getattr(e, "pos", None) or pos
+        self.Position = _where(line, col)[1:]
+
+    def _attr(self, name, pos):
+        if name in ("Object", "Position"):
+            return getattr(self, name)
+        if name == "Type":
+            return "Err"
+        if name == "Traceback":
+            raise MagmaError("Attribute 'Traceback' for this object is valid but not assigned", "`", False, pos)
+        raise MagmaError("Attribute '%s' for this object is not valid" % name, "`", False, pos)
+
+
+def _caught(e):
+    """The Err of an error try ... catch e catches; a memory guard's refusal
+    is never caught (it goes on, as a refusal does)."""
+    if isinstance(e, NameError) and not isinstance(e, UnboundLocalError):
+        # (an undeclared identifier: Magma rejects it before running, never a runtime error)
+        raise e
+    if isinstance(e, _memguard.SagebrushMemoryError) or getattr(e, "need_bytes", None) is not None:
+        raise e
+    return _Err(e, (_pos[0], _pos[1]))
+
+
 def _compile_error(line, col, msg):
     """A statement Magma rejects before running it ("User error: ..."):
     reported, and the next statement runs (in a file too); a cell (no
@@ -319,7 +361,38 @@ def _refk(r, k):
 
 def _named(f, name):
     f.__name__ = name
+    # (a user's function or procedure: one may assign a variable passed by
+    # reference that has no value yet, P(~q))
+    f._magma_user = True
     return f
+
+
+class _Missing(object):
+    """A variable with no value passed by reference (P(~q)): a user's
+    procedure may assign it; anything else reads it, as before (Magma's
+    undeclared identifier)."""
+    __slots__ = ("read", "pos")
+
+    def __init__(self, read, pos):
+        self.read = read
+        self.pos = pos
+
+
+def _ref_arg(read, pos=None):
+    """A variable passed by reference (its ~ at pos): its value, or _Missing if it has none."""
+    try:
+        return read()
+    except NameError:
+        return _Missing(read, pos)
+
+
+def _ref_out(read):
+    """A procedure's reference parameter at its return: its value, or _NOVAL
+    if it has none (the caller's variable is then left without one)."""
+    try:
+        return read()
+    except NameError:
+        return _NOVAL
 
 
 class _Undeclared:
@@ -1860,6 +1933,8 @@ def _getattr(x, name, pos=None):
     """x`name (and x``s, with s a string)."""
     if isinstance(x, MRec):
         return x._get(name, pos)
+    if isinstance(x, _Err) and isinstance(name, str):
+        return x._attr(name, pos)
     if not isinstance(name, str):
         raise MagmaError("Bad argument types", "`", True, pos)
     # (never Python's attributes: x`__class__, 5`real)
@@ -2896,6 +2971,9 @@ def _neg(a, pos=None):
 
 
 def _div(a, b, pos=None, op="/"):
+    # (Magma's words, where the operator is: an error try ... catch can catch)
+    if isinstance(a, (int, _Fraction)) and isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and b == 0:
+        raise MagmaError("Division by zero", "'%s'" % op, True, pos)
     if _int(a) and _int(b):
         return _intdiv(a, b)
     if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
@@ -2918,7 +2996,7 @@ def _div(a, b, pos=None, op="/"):
 def _idiv(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero", "'div'")
+            raise MagmaError("Division by zero", "'div'", True, pos)
         return a // b
     _no_rationals("div", a, b, pos)
     _arith("div", (a, b), pos)
@@ -2932,7 +3010,7 @@ def _idiv(a, b, pos=None):
 def _mod(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero", "'mod'")
+            raise MagmaError("Division by zero", "'mod'", True, pos)
         return a % b
     _no_rationals("mod", a, b, pos)
     _arith("mod", (a, b), pos)
@@ -4591,6 +4669,8 @@ def _inline(v, in_tuple=False):
 
 
 def _inline1(v, in_tuple):
+    if isinstance(v, _Err):
+        return v._printed
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, str):
@@ -5382,6 +5462,8 @@ for _c in _CATEGORIES:
 def _type_name(x):
     if isinstance(x, _Cat):
         return "Cat"
+    if isinstance(x, _Err):
+        return "Err"
     if isinstance(x, MRec):
         return "Rec"
     if isinstance(x, MRecFormat):
@@ -6299,6 +6381,13 @@ _REFCALL = [None]
 def _refcall(f, refs, *args, **kw):
     """f(*args) called as a procedure statement, the arguments at refs by
     reference."""
+    if any(isinstance(a, _Missing) for a in args):
+        if not getattr(f, "_magma_user", False):
+            # (an intrinsic: Magma's words, the argument types as it lists them)
+            k = next(j for j, a in enumerate(args) if isinstance(a, _Missing))
+            given = ", ".join(("*nothing" if isinstance(a, _Missing) else (_type_name(a) or _type(a))) + (" ~" if j in refs else "") for j, a in enumerate(args))
+            raise MagmaError("Argument %d has not been initialized\nArgument types given: %s" % (k + 1, given), "'%s'" % getattr(f, "__name__", "?"), True, args[k].pos)
+        args = tuple(_NOVAL if isinstance(a, _Missing) else a for a in args)
     old = _REFCALL[0]
     _REFCALL[0] = (f, tuple(refs))
     try:

@@ -262,7 +262,6 @@ class Parser {
       if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
-      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
       if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
       if (a.v === "case" && b.v === "<") return found("case< ... >");
       if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
@@ -281,6 +280,9 @@ class Parser {
   // inside it is going to; `target`: whether a jump goes to this loop (it
   // then starts with _mlb = None).
   loops: { v: string | null; id: number; mark: number; ind: string; escapes: Set<number>; target: boolean }[] = [];
+  // (each try being parsed: how many loops were open at it; a break or continue
+  // can't leave a try for a loop around it, as Magma rejects it)
+  tries: number[] = [];
   loopIds = 0;
   loop(v: string | null, emitHead: () => void, body: () => void) {
     const L = { v, id: ++this.loopIds, mark: this.out.length, ind: this.ind, escapes: new Set<number>(), target: false };
@@ -311,8 +313,11 @@ class Parser {
   /** break; continue; break x; continue x (x a for loop's variable). */
   jump(word: "break" | "continue") {
     const w = this.next();
+    // (out of a try, to a loop around it: Magma's compile error)
+    const across = (j: number) => this.tries.some((n) => n > j);
     if (this.peek().t !== "id") {
       this.expect(";");
+      if (across(this.loops.length - 1)) this.reject(w, `A '${word}' can only be used inside a loop`);
       this.emit(word);
       return;
     }
@@ -326,6 +331,7 @@ class Parser {
       this.emit(word);
       return;
     }
+    if (across(j)) this.reject(w, `A '${word}' can only be used inside a loop`);
     if (j === this.loops.length - 1) {
       this.emit(word);
       return;
@@ -716,6 +722,7 @@ class Parser {
         case "time": { this.next(); this.emit("_m._time_start()"); this.stmt(); this.emit("_m._time_end()"); return; }
       }
     }
+    if (t.t === "id" && t.v === "try" && !this.boundVar("try")) return this.tryStmt();
     // assignment, op-assignment, procedure call or expression
     const start = this.i;
     const lhs = this.tryLhsList();
@@ -760,6 +767,8 @@ class Parser {
       this.emit(`${tmp} = ${e.code}`);
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
+      // (one a procedure left without a value has none)
+      for (const r of names) if (r.kind === "name") this.emit(`if ${r.py} is _m._NOVAL: del ${r.py}`);
     } else {
       this.emit(`_m._show_values(${this.all(e.code)})`);
     }
@@ -984,6 +993,58 @@ class Parser {
     this.expect(";");
   }
 
+  /**
+   * try S catch e S end try;  e is the catch block's own, as a loop's
+   * variable is its loop's: a private name (an outer e is never touched, and
+   * none is left after it); lib/_magma.py _caught makes it an Err.
+   */
+  tryStmt() {
+    this.next();
+    this.tries.push(this.loops.length);
+    try {
+      this.emit("try:");
+      this.block(() => {
+        while (!(this.peek().t === "id" && this.peek().v === "catch")) {
+          if (this.peek().t === "eof") this.fail("expected 'catch'");
+          // (where each statement starts: e`Position, when the error doesn't say)
+          const st = this.peek();
+          this.emit(`_m._here(${st.line}, ${st.col})`);
+          this.statement(false);
+        }
+      });
+      this.next();
+      const t = this.peek();
+      const alias = { name: pyName(this.ident()), py: "", inRange: false };
+      alias.py = `${alias.name}\u02b9loop${++this.loopVarCount}`;
+      const ev = this.fresh("_me");
+      this.emit(`except Exception as ${ev}:`);
+      this.loopAliases.push(alias);
+      try {
+        this.block(() => {
+          this.declareGlobal(alias.py, t);
+          this.emit(`${alias.py} = _m._caught(${ev})`);
+          this.emit("try:");
+          this.block(() => this.statements(["end"]));
+          this.emit("finally:");
+          this.block(() => {
+            this.emit("try:");
+            this.block(() => this.emit(`del ${alias.py}`));
+            this.emit("except NameError:");
+            this.block(() => this.emit("pass"));
+          });
+        });
+      } finally {
+        this.loopAliases.pop();
+      }
+    } finally {
+      this.tries.pop();
+    }
+    this.expect("end");
+    const et = this.next();
+    if (!(et.t === "id" && et.v === "try")) throw new MagmaSyntaxError("expected 'try' after 'end'", et.line, et.col);
+    this.expect(";");
+  }
+
   whileStmt() {
     this.expect("while");
     const c = this.expr();
@@ -1056,7 +1117,9 @@ class Parser {
   }
 
   procReturn(fn: Fn) {
-    return fn.refs.length === 0 ? "None" : fn.refs.length === 1 ? `_m.Ref1(${fn.refs[0]})` : `_m.RefK([${fn.refs.join(", ")}])`;
+    // (a reference parameter left without a value leaves the caller's variable so)
+    const out = (r: string) => `_m._ref_out(lambda: ${r})`;
+    return fn.refs.length === 0 ? "None" : fn.refs.length === 1 ? `_m.Ref1(${out(fn.refs[0])})` : `_m.RefK([${fn.refs.map(out).join(", ")}])`;
   }
 
   printList(kind: "print" | "vprint") {
@@ -1143,10 +1206,11 @@ class Parser {
     const fn: Fn = { name, refs: p.refs, procedure: kind === "procedure" };
     let lines: string[] = [];
     const u0 = this.uses.length, a0 = this.assigned.length;
-    const saveOut = this.out, saveInd = this.ind, saveLoops = this.loops;
+    const saveOut = this.out, saveInd = this.ind, saveLoops = this.loops, saveTries = this.tries;
     this.out = lines;
     this.ind = "";
     this.loops = [];
+    this.tries = [];
     this.emit("def"); // the signature, once the captures are known
     this.fns.push(fn);
     this.capturing++;
@@ -1158,6 +1222,8 @@ class Parser {
       this.withShadows([...p.py, ...p.optNames], () => this.block(() => {
         // value semantics: arguments are the callee's own copies
         for (const v of p.py) if (!p.refs.includes(v)) this.emit(`${v} = _m._own(${v})`);
+        // (a reference parameter passed without a value has none here)
+        for (const v of p.refs) this.emit(`if ${v} is _m._NOVAL: del ${v}`);
         this.statements(["end"]);
         if (fn.procedure) this.emit(`return ${this.procReturn(fn)}`);
       }));
@@ -1171,6 +1237,7 @@ class Parser {
       this.out = saveOut;
       this.ind = saveInd;
       this.loops = saveLoops;
+      this.tries = saveTries;
     }
     this.expect("end");
     this.expect(kind);
@@ -1381,6 +1448,8 @@ class Parser {
 
   args(close: string): { code: string; refs: Target[]; refPos: number[] } {
     const pos: string[] = [], opts: string[] = [], refs: Target[] = [], refPos: number[] = [];
+    // (the call's "(", just read: where Magma says an argument has no value)
+    const open = this.toks[this.i - 1];
     if (!this.at(close) && !this.at(":")) {
       do {
         if (this.eat("~")) {
@@ -1388,7 +1457,8 @@ class Parser {
           if (!t) this.fail("expected a variable after '~'");
           refs.push(t);
           refPos.push(pos.length);
-          pos.push(t.read);
+          // (a variable with no value yet: a user's procedure may assign it, P(~q))
+          pos.push(t.kind === "name" ? `_m._ref_arg(lambda: ${t.read}, (${open.line}, ${open.col}))` : t.read);
         } else pos.push(this.expr());
       } while (this.eat(","));
     }

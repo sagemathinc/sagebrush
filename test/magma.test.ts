@@ -168,7 +168,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["x := 255; x: Hex;", "x: Hex (a printing level)"],
     ["y := x where x is 10;", "where x is ... (a definition after an expression)"],
     ["x := eval \"1+1\";", "eval"],
-    ["try x := 1; catch e x := 2; end try;", "try ... catch"],
     ["f := function(x, ...) return x; end function;", "... (a function with a variable number of arguments)"],
     ["z := case< 1 | 1: 2, default: 3 >;", "case< ... >"],
     ["G := [1, 2]; i := 2; G.i;", "G.i (a generator by a variable's index)"],

@@ -3107,6 +3107,11 @@
   "owner": "Magma compatibility/rational functions",
   "row": "inv-24"
  },
+ "lib/_magma.py :: _Err.__init__ :: msg = str(e) if isinstance(e, MagmaError) else _unsupported_call(e) or \"%s: %s\" % (type(e).__name__, e) #0": {
+  "class": "none",
+  "owner": "magma (@sagebrush-sage2)",
+  "reason": "a caught error's text (try ... catch e: e`Object), worded as _report words an uncaught one; _unsupported_call only names a missing feature; refuses nothing"
+ },
  "lib/_magma.py :: _FunBudget :: class _FunBudget: #0": {
   "class": "2+3",
   "owner": "Magma compatibility/rational functions",
