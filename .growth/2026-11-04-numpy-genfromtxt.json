@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "np.genfromtxt with missing and invalid fields, as NumPy 2.5.1 (lib/numpy/__init__.py; it was loadtxt). Re-measured with bun 1.4.4 (size-record.sh) on master a2fd6363 vs head 8d39938d: cli/lib.gen.js +3168, cli/pyjs.cjs +3332, engine/lib/sci.pre +43372, engine/lib/sci.src +9545; no other row moves. Markers: exact, except cli/pyjs.cjs 3364 (+3332 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "np.genfromtxt with missing and invalid fields, as NumPy 2.5.1 (lib/numpy/__init__.py; it was loadtxt). Re-measured with bun 1.4.4 (size-record.sh) on master a2fd6363 vs head 64a6c564: cli/lib.gen.js +3944, cli/pyjs.cjs +4076, engine/lib/sci.pre +51782, engine/lib/sci.src +11793; no other row moves. Markers: exact, except cli/pyjs.cjs 4108 (+4076 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 3168,
-  "cli/pyjs.cjs": 3364,
-  "engine/lib/sci.pre": 43372,
-  "engine/lib/sci.src": 9545
+  "cli/lib.gen.js": 3944,
+  "cli/pyjs.cjs": 4108,
+  "engine/lib/sci.pre": 51782,
+  "engine/lib/sci.src": 11793
  }
 }
