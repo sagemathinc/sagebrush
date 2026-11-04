@@ -492,6 +492,23 @@ pub enum Status {
     NonFinite,
 }
 
+/// 0 exactly when every element of `x` is finite (x - x is 0 for each), NaN otherwise; in four partial sums.
+#[inline(always)]
+pub(crate) fn nonfinite(x: &[f64]) -> f64 {
+    let mut s = [0.0f64; 4];
+    let c = x.chunks_exact(4);
+    let r = c.remainder();
+    for v in c {
+        for l in 0..4 {
+            s[l] += v[l] - v[l];
+        }
+    }
+    for (l, v) in r.iter().enumerate() {
+        s[l] += v - v;
+    }
+    (s[0] + s[1]) + (s[2] + s[3])
+}
+
 /// The workspace [`solve`] needs for an n x n A and n x r B; `None` on overflow.
 pub fn solve_work_len(n: usize, r: usize) -> Option<usize> {
     Some(getrf_work_len(n, n)?.max(getrs_work_len(n, r)?))
@@ -516,8 +533,9 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
         // (an empty system: nothing to check, factor or solve; B's columns are empty, whatever ldb says)
         return Ok(Status::Solved);
     }
-    let finite = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).all(|j| m[j * ld..j * ld + rows].iter().all(|x| x.is_finite()));
-    if !finite(a, n, n, lda) || !finite(b, n, r, ldb) {
+    // (branch-free: the sum of x - x over every element is 0 exactly when all are finite)
+    let bad = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).map(|j| nonfinite(&m[j * ld..j * ld + rows])).sum::<f64>();
+    if bad(a, n, n, lda) + bad(b, n, r, ldb) != 0.0 {
         return Ok(Status::NonFinite);
     }
     let info = getrf(kern, a, n, n, lda, ipiv, work)?;

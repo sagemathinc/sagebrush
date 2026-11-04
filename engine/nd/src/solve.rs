@@ -15,7 +15,7 @@
 use crate::chol::{potrf, potrf_work_len, potrs, potrs_work_len};
 use crate::cond::{asum, cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
 use crate::gemm::{scratch_len, span, Kernel};
-use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, trsm_upper, Refused};
+use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, nonfinite, trsm_upper, Refused};
 
 /// Which solve [`solve`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,23 +110,6 @@ pub fn structure(a: &[f64], n: usize, lda: usize) -> Shape {
     sh.finite = bad == 0.0;
     sh.spd_candidate = sh.spd_candidate && symmetric(a, n, lda);
     sh
-}
-
-/// 0 exactly when every element is finite (a - a is 0 for each), NaN otherwise.
-#[inline(always)]
-fn nonfinite(x: &[f64]) -> f64 {
-    let mut s = [0.0f64; 4];
-    let c = x.chunks_exact(4);
-    let r = c.remainder();
-    for v in c {
-        for l in 0..4 {
-            s[l] += v[l] - v[l];
-        }
-    }
-    for (l, v) in r.iter().enumerate() {
-        s[l] += v - v;
-    }
-    (s[0] + s[1]) + (s[2] + s[3])
 }
 
 /// a_ij == a_ji for every i < j, by 16 x 16 tiles (column j's rows against row j's columns within a tile, both
