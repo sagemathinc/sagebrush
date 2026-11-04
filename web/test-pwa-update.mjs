@@ -22,6 +22,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SERVE_OUT_MAX, devtoolsPort, startServe } from "./test-port.mjs";
+import { dispatch } from "./miniflare-dispatch.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const here = new URL(".", import.meta.url).pathname;
@@ -339,7 +340,7 @@ const frontHandler = async (req, res) => {
   }
   if (path.startsWith("/lib/")) {
     if (deployed) {
-      const r = await h.mf.dispatchFetch("https://sagebrush.test" + path, { method: req.method });
+      const r = await dispatch(h.mf, "https://sagebrush.test" + path, { method: req.method });
       seen.r2.push(path + " " + r.status);
       const body = Buffer.from(await r.arrayBuffer());
       res.writeHead(r.status, { ...Object.fromEntries(r.headers), "cross-origin-resource-policy": "cross-origin" });
