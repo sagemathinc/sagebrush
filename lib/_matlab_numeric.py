@@ -991,4 +991,3 @@ def delsq_(nargout, g):
                     cols.append(int(G[a, b]) - 1)
                     vals.append(-1.0)
     return _sp.make(N, N, rows, cols, vals)
-
