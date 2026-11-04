@@ -79,6 +79,9 @@ const fullTierPaths = [
   // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
   // offline pages), the dependency files and the site preview (web-sync.4))
   /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
+  // (the Miniflare dispatch helper: its direct consumers, test-sync and test-share among them, run only in web-sync.1
+  // and web-sync.2)
+  /^web\/miniflare-dispatch\.mjs$/,
   // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
   // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.

@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
@@ -79,16 +80,7 @@ const bucket = await mf.getR2Bucket("SHARE_BUCKET");
 for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort())
   for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
-// (every Miniflare answer's body read at once, before anything else is awaited. Miniflare's fetch wraps undici's body
-// stream in a new Response and drops undici's own Response, whose FinalizationRegistry cancels that shared stream when
-// it is collected; a body read only after a later await could find it "already read" (master 576f0bf6, run
-// 41798910733; reproduced here at S5a about one run in three).  An answer with no body (1xx, 204, 205, 304) as it came)
-const dispatch = async (m, url, init) => {
-  const r = await m.dispatchFetch(url, init);
-  if (r.status < 200 || [204, 205, 304].includes(r.status)) return r;
-  const body = await r.arrayBuffer();
-  return new Response(body, { status: r.status, statusText: r.statusText, headers: r.headers });
-};
+// (each Miniflare answer through web/miniflare-dispatch.mjs: its body read at once, S4d)
 const fetchSite = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 

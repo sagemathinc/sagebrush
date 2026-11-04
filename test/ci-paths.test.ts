@@ -289,6 +289,8 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/pair-link.ts", "web/workspace/agent-grant.ts", "web/workspace/agent-schema.ts",
     // (what makes those bundles: the build and its helpers, and the dependencies)
     "web/build.ts", "web/build-articles.ts", "web/build-package-dir.mjs", "package.json", "pnpm-lock.yaml",
+    // (the Miniflare dispatch helper: its consumers run only in web-sync.1 and web-sync.2)
+    "web/miniflare-dispatch.mjs",
   ]) {
     const o = classify([f]);
     assert.equal(o.full, "true", f);
@@ -299,7 +301,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
   assert.equal(labelled.full, "true");
   assert.equal(labelled.docs_only, "false");
   // the fast tier: other web code, other labels, and the one big page (its author labels a save or Trash change)
-  for (const f of ["web/index.html", "web/workspace/browser.ts", "web/notebook/test-start-all.mjs", "web/board/frame.ts", "web/latex/test-latex-page.mjs", "web/latex/README.md", ".github/workflows/ci.yml"]) {
+  for (const f of ["web/index.html", "web/workspace/browser.ts", "web/notebook/test-start-all.mjs", "web/board/frame.ts", "web/latex/test-latex-page.mjs", "web/latex/README.md", ".github/workflows/ci.yml", "web/miniflare-dispatch.md"]) {
     assert.equal(classify([f]).full, "false", f);
   }
   assert.equal(classify(["web/index.html"], "bug,full-ci-later").full, "false");

@@ -10,6 +10,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DIST = join(here, "..", "dist");
@@ -60,7 +61,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     for await (const c of req) chunks.push(c);
     const headers = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
-    const r = await mf.dispatchFetch(url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
+    const r = await dispatch(mf, url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
     const h = {};
     r.headers.forEach((v, k) => { if (k !== "set-cookie") h[k] = v; });
     const cookies = r.headers.getSetCookie();

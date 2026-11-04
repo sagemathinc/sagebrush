@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
@@ -214,7 +215,7 @@ const mig = join(here, "../share/migrations");
 for (const m of readdirSync(mig).filter((f) => f.endsWith(".sql")).sort())
   for (const s of readFileSync(join(mig, m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
-const fetchAt = (origin, path, init = {}) => mf.dispatchFetch(origin + path, { redirect: "manual", ...init });
+const fetchAt = (origin, path, init = {}) => dispatch(mf, origin + path, { redirect: "manual", ...init });
 async function signIn(account_id, origin = SITE) {
   const r = await fetchAt(origin, "/auth/dev", { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id }) });
   return r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
@@ -562,20 +563,20 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(r.status === 403, "a cross-site GET is refused");
   r = await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: await signIn(B), "sec-fetch-site": "same-origin" } });
   ok(r.status === 404, "another account can't read A's blob by its hash");
-  const f = await mf.dispatchFetch(loc);
+  const f = await dispatch(mf, loc);
   const body = Buffer.from(await f.arrayBuffer());
   ok(f.status === 200 && body.equals(big) && f.headers.get("content-disposition") === "attachment" && f.headers.get("x-content-type-options") === "nosniff" && f.headers.get("access-control-allow-origin") === SITE && /sandbox/.test(f.headers.get("content-security-policy") ?? ""), "the signed URL serves the bytes as an attachment, nosniff, sandboxed, CORS for the site only");
-  const rg = await mf.dispatchFetch(loc, { headers: { range: "bytes=10-19" } });
+  const rg = await dispatch(mf, loc, { headers: { range: "bytes=10-19" } });
   ok(rg.status === 206 && (await rg.arrayBuffer()).byteLength === 10, "a range of a device's URL");
   const u = new URL(loc);
   u.searchParams.set("sig", "0".repeat(64));
-  ok((await mf.dispatchFetch(u)).status === 403, "a forged signature reads nothing");
+  ok((await dispatch(mf, u)).status === 403, "a forged signature reads nothing");
   const key = u.pathname.slice(3);
   const exp = Date.now() - 1000;
   const old = new URL(loc);
   old.searchParams.set("exp", String(exp));
   old.searchParams.set("sig", createHmac("sha256", URL_KEY).update(`p\n${key}\n${exp}`).digest("hex"));
-  ok((await mf.dispatchFetch(old)).status === 403, "an expired URL reads nothing, though signed");
+  ok((await dispatch(mf, old)).status === 403, "an expired URL reads nothing, though signed");
   // the read budget: 60,000 bytes a day of bytes authorized; 6,000 already
   let n = 1;
   while (n < 20 && (await fetchAt(SITE, `/api/sync/v1/blob/${sha(big)}`, { headers: { cookie: sa, "sec-fetch-site": "same-origin" } })).status === 303) n++;
@@ -677,9 +678,9 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(loc.pathname.startsWith("/p/s/"), "(a signed URL for the files tests)");
   await clearOfMinuteEdge();
   const codes = [];
-  for (let i = 0; i < 3; i++) codes.push((await mf.dispatchFetch(`https://tightfiles.test${loc.pathname}${loc.search}`, { headers: { "cf-connecting-ip": "198.51.100.7" } })).status);
+  for (let i = 0; i < 3; i++) codes.push((await dispatch(mf, `https://tightfiles.test${loc.pathname}${loc.search}`, { headers: { "cf-connecting-ip": "198.51.100.7" } })).status);
   ok(codes[2] === 429, "a reused signed URL is limited per IP at the files Worker, before R2: " + codes.join());
-  ok((await mf.dispatchFetch(`https://openfiles.test${loc.pathname}${loc.search}`)).status === 404, "without the per-IP limit bound, the files Worker serves no signed read");
+  ok((await dispatch(mf, `https://openfiles.test${loc.pathname}${loc.search}`)).status === 404, "without the per-IP limit bound, the files Worker serves no signed read");
   // a malformed plan from CoCalc is an outage: the last good limits stay
   fake.limits.set(B, { storage_bytes: 1 << 30, max_file_bytes: 50_000 });
   await new Promise((res) => setTimeout(res, 1200));
@@ -1142,9 +1143,9 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   for (let i = 0; i < 3; i++) pc.push((await fetchAt("https://tight.test", "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.7" }, body: '{"account_id":"x","request_id":"00000000-0000-4000-8000-000000000000"}' })).status);
   ok(pc[2] === 429, "and the purge route, before sync or sharing read the body: " + pc.join());
   const gc = [];
-  for (let i = 0; i < 3; i++) gc.push((await mf.dispatchFetch("https://tight.test/api/admin/sync-purge/00000000-0000-4000-8000-000000000000", { headers: { "cf-connecting-ip": "192.0.2.6" } })).status);
+  for (let i = 0; i < 3; i++) gc.push((await dispatch(mf, "https://tight.test/api/admin/sync-purge/00000000-0000-4000-8000-000000000000", { headers: { "cf-connecting-ip": "192.0.2.6" } })).status);
   ok(gc[2] === 429, "and the purge status too: " + gc.join());
-  r = await mf.dispatchFetch("https://nolimit.test/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  r = await dispatch(mf, "https://nolimit.test/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   ok(r.status === 404, "without the admin limit bound, sync's admin routes are off");
 }
 
