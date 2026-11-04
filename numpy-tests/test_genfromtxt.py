@@ -129,3 +129,17 @@ show(109, lambda: np.genfromtxt(S("#c\n12#x\n34"), delimiter=[1, 1]))
 show(110, lambda: np.genfromtxt(S("123\n"), delimiter=3))
 show(111, lambda: np.genfromtxt(["12", "", "34"], delimiter=[1, 1]))
 show(112, lambda: np.genfromtxt(["12\n", "\n", "34\n"], delimiter=[1, 1]))
+# grader's C1-C4: a skipped empty first line; bytes and non-string missing_values (loose=False:
+# the default fills any unconvertible field anyway); a filling dict for its own column only
+show(113, lambda: np.genfromtxt(["", "1 2"], skip_header=1))
+show(114, lambda: np.genfromtxt(S("1,x\n"), delimiter=",", missing_values=b"x", loose=False))
+show(115, lambda: np.genfromtxt(S("1,True\n"), delimiter=",", missing_values=True, loose=False))
+show(116, lambda: np.genfromtxt(S("1,2\n,\n"), delimiter=",", filling_values={0: 99}))
+# a column name key without names=: NumPy raises too (an AttributeError of its own code; Sagebrush's
+# ValueError in words is pinned in test/numpy-genfromtxt.test.ts), so only that it raises is compared
+for k, kw in enumerate([{"missing_values": {"a": "x"}}, {"filling_values": {"a": 7}}, {"converters": {"a": float}}]):
+    try:
+        np.genfromtxt(S("1,2\n"), delimiter=",", **kw)
+        print("S%d no error" % (117 + k))
+    except Exception:
+        print("S%d raises" % (117 + k))

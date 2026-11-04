@@ -3072,6 +3072,13 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             raise ValueError("The keywords 'skip_footer' and 'max_rows' can not be specified at the same time.")
         if max_rows < 1:
             raise ValueError("'max_rows' must be at least 1.")
+    # (a column name as a dictionary key: NumPy looks it up in names=, which
+    # this numpy doesn't have, so the key is refused in words, never ignored)
+    for opt in (missing_values, filling_values, converters):
+        if isinstance(opt, dict):
+            for c in opt:
+                if isinstance(c, str):
+                    raise ValueError("genfromtxt: column name key %r needs names=" % (c,))
     # (NumPy skips no lines for a negative count)
     # (this module's max is numpy's: plain comparisons here)
     skip_header = skip_header if skip_header > 0 else 0
@@ -3187,8 +3194,6 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
         missing_values = missing_values.decode("latin1")
     if isinstance(missing_values, dict):
         for c, v in missing_values.items():
-            if isinstance(c, str):
-                continue
             vals = {str(x) for x in v} if isinstance(v, (list, tuple)) else {str(v)}
             if c is None:
                 for m in missings:
@@ -3227,11 +3232,10 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
     fills = [None] * width
     if isinstance(filling_values, dict):
         for c, v in filling_values.items():
-            if not isinstance(c, str):
-                j = slot(c)
-                if not -width <= j < width:
-                    raise IndexError("list assignment index out of range")
-                fills[j] = v
+            j = slot(c)
+            if not -width <= j < width:
+                raise IndexError("list assignment index out of range")
+            fills[j] = v
     elif isinstance(filling_values, (list, tuple)):
         for j, v in enumerate(filling_values[:width]):
             fills[j] = v
@@ -3250,8 +3254,6 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
     convs = [conv] * width
     # (a converter's column: through usecols when given, an unselected one unused, as NumPy's)
     for c, f in (converters or {}).items():
-        if isinstance(c, str):
-            continue
         if usecols:
             if c in cols:
                 convs[cols.index(c)] = f
