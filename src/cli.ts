@@ -7,7 +7,7 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
+import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, realpathSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
@@ -539,8 +539,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (argv[0] === "latex" && (["check", "run", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
     const latex = loadLatex();
     if (typeof latex === "string") { process.stderr.write(`sagebrush: ${latex}\n`); process.exitCode = 2; return; }
-    // (cli: the script this process runs, the bundle or the npm launcher, for `latex run`'s Sage session)
-    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: process.argv[1] ? resolve(process.argv[1]) : undefined });
+    // (cli: the file this process runs from, the bundle or the npm launcher, for `latex run`'s Sage session)
+    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: cliEntry() ?? undefined });
     return;
   }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
@@ -819,14 +819,28 @@ else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNoteb
 // (`board run`'s interpreter, src/board-run.ts)
 else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boardRunWorker(workerData.sagebrushBoardRun));
 
+/** The file this CLI runs from, its real path (a symlink such as node_modules/.bin/sagebrush followed): the bundle the
+ * npm launcher loaded in a worker (the launcher says which: a worker's own main module and argv are none of them), or
+ * this process's main module, or its script. Null if there is none. */
+function cliEntry(): string | null {
+  try { return realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1]); } catch { return null; }
+}
+
 /** `sagebrush latex`'s module, sagebrush-latex.cjs (scripts/build-cli.mjs): beside this bundle in the npm package and in
  * build/cli; from a checkout's tsc or bun run, build/cli's. Loaded by its path, so no bundler folds it into this one.
- * Or why there is none. */
+ * Or why there is none.
+ * Looked for first where this process's entry really is (the bundle, or the npm launcher in bin/, beside dist/; a
+ * symlink such as node_modules/.bin/sagebrush followed): Bun's bundle has the build machine's folder as __dirname,
+ * which alone finds the module only on the machine that built it (or a stale build there). */
 function loadLatex(): { latexCommand: (argv: string[], opts?: { cli?: string }) => Promise<number> } | string {
+  // (cliEntry's path, written out here so that the census's pin of this function covers every place it loads from)
+  const dirs: string[] = [];
+  try { const at = dirname(realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1])); dirs.push(at, join(at, "..", "dist")); } catch {}
   const here = typeof __dirname === "string" ? __dirname : ".";
-  const req = createRequire(join(here, "x.js"));
-  for (const p of [join(here, "sagebrush-latex.cjs"), join(here, "..", "build", "cli", "sagebrush-latex.cjs"), join(here, "..", "..", "build", "cli", "sagebrush-latex.cjs")]) {
-    if (existsSync(p)) return req(p);
+  dirs.push(here, join(here, "..", "build", "cli"), join(here, "..", "..", "build", "cli"));
+  for (const d of dirs) {
+    const p = join(d, "sagebrush-latex.cjs");
+    if (existsSync(p)) return createRequire(join(d, "x.js"))(p);
   }
   return "this build of sagebrush has no LaTeX commands (sagebrush-latex.cjs isn't beside it): use the npm package, npx sagebrush latex ...";
 }

@@ -147,7 +147,9 @@ if (!runsProgram(argv)) {
   // (stdout and stderr: true, so that this thread never opens its own
   // process.stdout, which would make the shared descriptor non-blocking: the
   // worker writes to fds 1 and 2 itself, cliWorker in src/cli.ts)
-  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits } } });
+  // (entry: the bundle's path, for the CLI to find the files beside it and to start itself again, `sagebrush latex`:
+  // in this worker, its main module and process.argv are not the bundle's)
+  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } } });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

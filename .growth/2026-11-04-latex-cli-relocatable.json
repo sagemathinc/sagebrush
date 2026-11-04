@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "sagebrush latex finds sagebrush-latex.cjs beside the CLI's real entry, and latex run starts its Sage session from the bundle the npm launcher loaded (#625: cliEntry, loadLatex's entry candidates). Measured by the size gate on head b870ee59 vs its master (run 41884660180): cli/pyjs.cjs +326; no other row moves. Marker: cli/pyjs.cjs 358 (+326 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/pyjs.cjs": 358
+ }
+}
