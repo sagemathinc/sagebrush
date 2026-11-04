@@ -647,7 +647,9 @@ class _FrameILoc(object):
         f = self._pd_obj
         rk, ck = _split(key)
         rows, rs = X.iloc_positions(rk, len(f))
-        cols, cs = X.iloc_positions(ck, len(f._pd_cols), axis=1)
+        # (a column out of bounds says numpy's message only after a scalar row, as pandas: df.iloc[0, 5];
+        # after a slice or a list it is pandas' own: df.iloc[:, 5])
+        cols, cs = X.iloc_positions(ck, len(f._pd_cols), axis=1 if rs else 0)
         return f._pd_select(rows, rs, cols, cs)
 
     def __setitem__(self, key, value):
