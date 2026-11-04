@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "MATLAB's svd, rank, pinv, null and orth refuse NaN and Inf with MATLAB's message (astra3 batch 1 MCF-01): one helper, _svd_finite, in lib/_matlab.py, called from the five functions (orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: daybreak2's SIZE measurement of head dcc90de7 merged onto master 4e43dee0 with bun 1.4.4: matlab.pre +2170, matlab.src +411, lib.gen +224, pyjs +224; each marker is that figure exactly.",
+ "reason": "MATLAB's svd, rank, pinv, null and orth refuse NaN and Inf with MATLAB's message (astra3 batch 1 MCF-01): one helper, _svd_finite, in lib/_matlab.py, called from the five functions (orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: a CI-order size record (scripts/size-measure.mjs --record after pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4) of head dcc90de7 merged onto master 4e43dee0 with bun 1.4.4: matlab.pre +2170, matlab.src +411, lib.gen +224, pyjs +304; each marker is that figure exactly.",
  "bytes": {
   "engine/lib/matlab.pre": 2170,
   "engine/lib/matlab.src": 411,
   "cli/lib.gen.js": 224,
-  "cli/pyjs.cjs": 224
+  "cli/pyjs.cjs": 304
  }
 }
