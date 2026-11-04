@@ -114,12 +114,13 @@ pub fn check(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<Job> {
 }
 
 /// The solve descriptor (`nd_solve`), u32s at `desc` (4-aligned):
-/// [a, b, ipiv, work, report, n, nrhs, lda, ldb, work_len, arena_lo, arena_hi] (byte addresses; A n x n with
-/// leading dimension lda and B n x nrhs with ldb, f64; ipiv n usizes; work work_len f64s; report
-/// [`REPORT_WORDS`] u32s).
-pub const SOLVE_DESC_WORDS: usize = 12;
-/// The solve's report: [status, first zero pivot column, kernel name address, kernel name length].
-pub const REPORT_WORDS: usize = 4;
+/// [a, b, ipiv, work, report, n, nrhs, lda, ldb, work_len, arena_lo, arena_hi, mode] (byte addresses; A n x n
+/// with leading dimension lda and B n x nrhs with ldb, f64; ipiv n usizes; work work_len f64s; report
+/// [`REPORT_WORDS`] u32s; mode 1 gesv, 2 MATLAB ([`crate::solve::Mode`]), any other value refused).
+pub const SOLVE_DESC_WORDS: usize = 13;
+/// The solve's report: [status, first zero diagonal or pivot column, kernel name address, kernel name length,
+/// structure, rcond's f64 bits low word, high word].
+pub const REPORT_WORDS: usize = 7;
 
 /// A solve that passed [`check_solve`]: byte addresses and sizes.
 pub struct SolveJob {
@@ -133,23 +134,29 @@ pub struct SolveJob {
     pub lda: usize,
     pub ldb: usize,
     pub work_len: usize,
+    pub mode: crate::solve::Mode,
 }
 
 /// Every boundary rule for a solve, from the descriptor's address and words. All five regions are written, so
 /// each lies in the arena, aligned to its element, above the floor, within memory and at most `max_len` bytes,
 /// and they are pairwise disjoint; the descriptor lies outside the arena and the caller's frame below it; the
-/// layouts are consistent (lda, ldb >= max(n, 1)), the work is at least `solve_work_len(n, nrhs)`, and every
-/// size is computed without overflow.
+/// layouts are consistent (lda, ldb >= max(n, 1)), the mode is 1 or 2, the work is at least the mode's
+/// `solve_work_len(mode, n, nrhs)`, and every size is computed without overflow.
 pub fn check_solve(desc: u64, d: &[u32; SOLVE_DESC_WORDS], l: &Facts) -> Option<SolveJob> {
     let rd = desc_region_of(desc, SOLVE_DESC_WORDS, l)?;
-    let [a, b, ipiv, work, report, n, nrhs, lda, ldb, work_len, lo, hi] = d.map(u64::from);
+    let [a, b, ipiv, work, report, n, nrhs, lda, ldb, work_len, lo, hi, mode] = d.map(u64::from);
+    let mode = match mode {
+        1 => crate::solve::Mode::Gesv,
+        2 => crate::solve::Mode::Matlab,
+        _ => return None,
+    };
     let us = core::mem::size_of::<usize>() as u64;
     let u = |x: u64| usize::try_from(x).ok();
     let (nu, ru, ldau, ldbu, wu) = (u(n)?, u(nrhs)?, u(lda)?, u(ldb)?, u(work_len)?);
     if [a, b, work].iter().any(|x| x % 8 != 0) || ipiv % us != 0 || report % 4 != 0 {
         return None;
     }
-    let need = crate::lu::solve_work_len(nu, ru)?;
+    let need = crate::solve::solve_work_len(mode, nu, ru)?;
     if wu < need {
         return None;
     }
@@ -170,7 +177,7 @@ pub fn check_solve(desc: u64, d: &[u32; SOLVE_DESC_WORDS], l: &Facts) -> Option<
             return None;
         }
     }
-    Some(SolveJob { a: u(a)?, b: u(b)?, ipiv: u(ipiv)?, work: u(work)?, report: u(report)?, n: nu, nrhs: ru, lda: ldau, ldb: ldbu, work_len: wu })
+    Some(SolveJob { a: u(a)?, b: u(b)?, ipiv: u(ipiv)?, work: u(work)?, report: u(report)?, n: nu, nrhs: ru, lda: ldau, ldb: ldbu, work_len: wu, mode })
 }
 
 #[cfg(test)]
@@ -192,15 +199,15 @@ mod tests {
     /// A good solve layout: n = 10, nrhs = 2, lda = 12, ldb = 11, all in the arena from LO.
     fn good_solve() -> [u32; SOLVE_DESC_WORDS] {
         let (n, r, lda, ldb) = (10u64, 2u64, 12u64, 11u64);
-        let wl = crate::lu::solve_work_len(n as usize, r as usize).unwrap() as u64;
+        let wl = crate::solve::solve_work_len(crate::solve::Mode::Matlab, n as usize, r as usize).unwrap() as u64;
         let us = core::mem::size_of::<usize>() as u64;
         let a = LO;
         let b = a + 8 * (lda * (n - 1) + n);
         let ipiv = (b + 8 * (ldb * (r - 1) + n) + 7) / 8 * 8;
         let work = (ipiv + us * n + 7) / 8 * 8;
         let report = work + 8 * wl;
-        let hi = report + 16;
-        [a, b, ipiv, work, report, n, r, lda, ldb, wl, LO, hi].map(|x| x as u32)
+        let hi = report + 4 * REPORT_WORDS as u64;
+        [a, b, ipiv, work, report, n, r, lda, ldb, wl, LO, hi, 2].map(|x| x as u32)
     }
 
     #[test]
@@ -224,13 +231,29 @@ mod tests {
         refused("ldb < n", 8, 9);
         refused("work one short", 9, g[9] - 1);
         refused("n overflowing", 5, u32::MAX);
+        // (the mode: only 1 (gesv) and 2 (MATLAB); gesv's smaller work is enough for gesv only)
+        refused("mode 0", 12, 0);
+        refused("mode 3", 12, 3);
+        refused("mode u32::MAX", 12, u32::MAX);
+        let gl = crate::solve::solve_work_len(crate::solve::Mode::Gesv, 10, 2).unwrap() as u32;
+        let mut gm = g;
+        gm[12] = 1;
+        gm[9] = gl;
+        assert!(check_solve(DESC, &gm, &L).is_some(), "gesv with gesv's work");
+        gm[9] = gl - 1;
+        assert!(check_solve(DESC, &gm, &L).is_none(), "gesv one short");
+        refused("MATLAB mode with gesv's work", 9, gl);
         // (the arena, the descriptor, the frame)
         refused("report past the arena", 11, g[11] - 8);
-        // (grader T3: each region alone just outside the arena, past its end, everything else as good)
+        // (grader T3: each region alone just outside the arena, past its end, everything else as good; the place
+        // 8-aligned so that only the arena refuses it (#621 G-T3), and the control: the same place with the arena
+        // extended over it is accepted)
         for (i, what) in [(1usize, "B"), (2, "ipiv"), (3, "work")] {
             let mut d = g;
-            d[i] = g[11] + 64;
+            d[i] = (g[11] + 64 + 7) / 8 * 8;
             assert!(check_solve(DESC, &d, &L).is_none(), "{what} outside the arena");
+            d[11] = d[i] + (16 << 20);
+            assert!(check_solve(DESC, &d, &L).is_some(), "{what}: the control, inside the extended arena");
         }
         refused("A before the arena", 10, g[0] + 8);
         assert!(check_solve(g[0] as u64 + 8, &g, &L).is_none(), "the descriptor on A");
@@ -250,7 +273,7 @@ mod tests {
         let mut e = g;
         e[5] = 0;
         e[6] = 0;
-        e[9] = crate::lu::solve_work_len(0, 0).unwrap() as u32;
+        e[9] = crate::solve::solve_work_len(crate::solve::Mode::Matlab, 0, 0).unwrap() as u32;
         assert!(check_solve(DESC, &e, &L).is_some());
     }
 

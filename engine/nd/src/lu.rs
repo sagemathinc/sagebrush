@@ -283,7 +283,8 @@ fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
 /// four: each block's rows by plain substitution, the rows below by one fused update ([`sub4`]). Every element
 /// subtracts x_k * l(i,k) for k in increasing order and skips a zero x_k, as plain substitution does, so the
 /// bits are plain substitution's (the reference BLAS dtrsm's).
-fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
+#[inline(always)]
+pub(crate) fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
     let mut k0 = 0;
     while k0 < n {
         let kend = (k0 + SMALL_NB).min(n);
@@ -318,7 +319,8 @@ fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
 /// One column of X := U^-1 X (non-unit upper) by back substitution, blocked by four from the bottom: each
 /// block's rows by plain substitution (a zero x_k skips its division and update, as dtrsm), the rows above by
 /// one fused update over the block's columns in decreasing order. The bits are plain back substitution's.
-fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
+#[inline(always)]
+pub(crate) fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
     let mut kend = n;
     while kend > 0 {
         let k0 = kend.saturating_sub(SMALL_NB);
@@ -384,7 +386,7 @@ fn trsm_lower_unit(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64],
 /// top updated, then the top (dtrsm, left, upper, no transpose, non-unit; a zero x_k skips its division, as
 /// the reference BLAS does). `tmp` holds at least (n - n / 2) * r elements.
 #[allow(clippy::too_many_arguments)]
-fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
+pub(crate) fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
     if n == 0 || r == 0 {
         return;
     }
@@ -490,6 +492,23 @@ pub enum Status {
     NonFinite,
 }
 
+/// 0 exactly when every element of `x` is finite (x - x is 0 for each), NaN otherwise; in four partial sums.
+#[inline(always)]
+pub(crate) fn nonfinite(x: &[f64]) -> f64 {
+    let mut s = [0.0f64; 4];
+    let c = x.chunks_exact(4);
+    let r = c.remainder();
+    for v in c {
+        for l in 0..4 {
+            s[l] += v[l] - v[l];
+        }
+    }
+    for (l, v) in r.iter().enumerate() {
+        s[l] += v - v;
+    }
+    (s[0] + s[1]) + (s[2] + s[3])
+}
+
 /// The workspace [`solve`] needs for an n x n A and n x r B; `None` on overflow.
 pub fn solve_work_len(n: usize, r: usize) -> Option<usize> {
     Some(getrf_work_len(n, n)?.max(getrs_work_len(n, r)?))
@@ -514,8 +533,9 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
         // (an empty system: nothing to check, factor or solve; B's columns are empty, whatever ldb says)
         return Ok(Status::Solved);
     }
-    let finite = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).all(|j| m[j * ld..j * ld + rows].iter().all(|x| x.is_finite()));
-    if !finite(a, n, n, lda) || !finite(b, n, r, ldb) {
+    // (branch-free: the sum of x - x over every element is 0 exactly when all are finite)
+    let bad = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).map(|j| nonfinite(&m[j * ld..j * ld + rows])).sum::<f64>();
+    if bad(a, n, n, lda) + bad(b, n, r, ldb) != 0.0 {
         return Ok(Status::NonFinite);
     }
     let info = getrf(kern, a, n, n, lda, ipiv, work)?;
