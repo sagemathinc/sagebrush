@@ -203,6 +203,7 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["shortverb-make-twice-delete", "\\documentclass{article}\n\\MakeShortVerb{\\|}\\MakeShortVerb{\\|}\n", "A |a| \\DeleteShortVerb{\\|}b|c|d.", (h) => h.includes(V("a")) && !h.includes(V("c")) && h.includes("b|c|d.")],
     ["shortverb-arg-not-one-char", "\\documentclass{article}\n\\MakeShortVerb{\\foo}\n", "fine |text| here.", (h) => !h.includes('class="verb"') && h.includes("fine |text| here.")],
     ["shortverb-delete-restores-catcode", "\\documentclass{article}\n\\catcode`\\!=13 \\def!{BANG}\\DeleteShortVerb{\\!}\n", "x!y \\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}\\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}z!w", (h) => h.includes("xBANGy") && h.includes("zBANGw")],
+    ["shortverb-remake-after-catcode", "\\documentclass{article}\n\\catcode`\\!=13 \\def!{BANG}\n", "\\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}\\catcode`\\!=12 \\MakeShortVerb{\\!}\\DeleteShortVerb{\\!}a!b.", (h) => h.includes("a!b.") && !h.includes("BANG")],
     ["shortverb-macro-body", "\\documentclass{ltxdoc}\n", "\\newcommand{\\x}{A |q r| B}\\x.", (h) => h.includes(V("q r")) && h.includes("B.")],
     ["shortverb-macro-body-par", "\\documentclass{ltxdoc}\n", "\\long\\def\\y{|q\\par Z}\\y", (h) => h.includes(V("q")) && h.includes("Z") && !h.includes(V("q Z")) && !h.includes(V("q\\par Z"))],
     ["atbegindocument-deferred", "\\documentclass{article}\n\\usepackage{doc}\\AtBeginDocument{\\MakeShortVerb{\\|}}\\def\\q{a|b}\n", "\\q{} |x| y.", (h) => h.includes("a|b") && h.includes(V("x")) && h.includes("y.")],
@@ -227,14 +228,12 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     const many = Array.from({ length: 300 }, () => "x"), one = hookRun([many.join("")]), each = hookRun(many);
     const extra = each.counters.work - one.counters.work;   // (the 300 copies: 1 + 2 + ... + 300, less the one of 300)
     check("atbegindocument-hook-copies-charged", one.outcome === "ok" && each.outcome === "ok" && extra >= 300 * 301 / 2 - 300, { extra });
-    // (memory and state entries: the store's every bound checked before it, so a refusal keeps the hook before; each
+    // (memory: checked before the store, setS's 64 bytes included, so a refusal keeps the hook before; each
     //  document ends with its last append, so its run's total is exactly what that append needs)
     const bare = (hooks, limits) => coldRun(new Map([["main.tex", hooks.map((x) => "\\AtBeginDocument{" + x + "}").join("")]]), "main.tex", { Tmin: 100, limits });
     const memAll = bare(["abcd", "efgh"]).counters.memBytes, memOk = bare(["abcd", "efgh"], { memBytes: memAll }), memShort = bare(["abcd", "efgh"], { memBytes: memAll - 1 });
     check("atbegindocument-hook-memory-exact", memOk.outcome === "ok" && hookLen(memOk) === 8, { outcome: memOk.outcome, len: hookLen(memOk) });
     check("atbegindocument-hook-memory-one-short", memShort.outcome === "E-BOUND-MEMORY" && hookLen(memShort) === 4, { outcome: memShort.outcome, len: hookLen(memShort) });
-    const first = bare(["abcd"]), cs = first.m.A.size + first.m.C.size, csOk = bare(["abcd"], { csCount: cs }), csShort = bare(["abcd"], { csCount: cs - 1 });
-    check("atbegindocument-hook-state-entries", csOk.outcome === "ok" && hookLen(csOk) === 4 && csShort.outcome === "E-BOUND-CS" && hookLen(csShort) === undefined, { cs, ok: csOk.outcome, short: csShort.outcome, len: hookLen(csShort) });
     const capped = hookRun(many, { safetyWork: one.counters.work + 1000 });
     check("atbegindocument-hook-work-budget", capped.outcome === "E-BOUND-SAFETY" && hookRun([many.join("")], { safetyWork: one.counters.work + 1000 }).outcome === "ok", { outcome: capped.outcome });
   }

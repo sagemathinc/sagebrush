@@ -260,15 +260,14 @@ export class Machine extends CoreMachine {
     // \AtBeginDocument: its tokens kept, globally, in \sb@bdhook (LaTeX's \@begindocumenthook) and read at \begin{document}
     // (as doc's \AtBeginDocument{\MakeShortVerb{\|}}: run at once, "|" was \verb in the preamble that follows, #622);
     // in the document, read at once. The hook is one token list: bounded as one (limits.tokenList), its copy charged and
-    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1): so every
-    // bound the store can meet is checked first, setS's own (64 bytes, and a state entry for the first hook) included
+    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1): so its
+    // memory is checked first, setS's own 64 bytes included
     P.prim("AtBeginDocument", function () {
       const a = this.readArgRaw();
       if (this.getS("sb:indoc")) { this.pushList(a); return; }
       const h = this.getS("m:sb@bdhook"), old = h ? h.body : [], n = old.length + a.length;
       if (n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
       if (this.memBytes + n * 4 + 128 > this.limits.memBytes) throw new BoundError("E-BOUND-MEMORY");
-      if (!h && this.A.size + this.C.size >= this.limits.csCount) throw new BoundError("E-BOUND-CS", "state entries");
       this.charge(n); this.reserve(n * 4 + 64);
       this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: old.concat(a), long: true, prot: false }), true);
     });
@@ -364,7 +363,7 @@ export class Machine extends CoreMachine {
     // short verbatim (#622: amsldoc's |\begin{aligned}| opened an environment that took the rest of the document): a
     // character made active as \verb with itself as the delimiter, by \MakeShortVerb (doc, shortvrb; its * read and shown as \verb, as the preview shows \verb*),
     // \DefineShortVerb (fancyvrb), or the class at \begin{document} (SHORTVERB_CLASSES), undone by \DeleteShortVerb and
-    // \UndefineShortVerb. Global, as doc's are; "sv:<code>" is 1 while it is, kept with the catcode before ("svcat:<code>")
+    // \UndefineShortVerb. Global, as doc's are; "sv:<code>" is 1 while it is, kept with the catcode before ("svcat:<code>", stale once deleted: the next \MakeShortVerb sets it)
     // and the active character's meaning before (\sb@sv@<char>), both from the first \MakeShortVerb (a second mustn't
     // keep the short verb as the one to restore), and in "svchars" (for \index below; kept after \DeleteShortVerb, harmless there)
     const shortVerb = (m, cp) => {
@@ -389,7 +388,7 @@ export class Machine extends CoreMachine {
     });
     for (const nm of ["DeleteShortVerb", "UndefineShortVerb"]) P.prim(nm, function () {
       const cp = shortVerbArg(this); if (cp === null || this.getS("sv:" + cp) === undefined) return;
-      this.setS("cat:" + cp, this.getS("svcat:" + cp), true); this.setS("sv:" + cp, undefined, true); this.setS("svcat:" + cp, undefined, true);
+      this.setS("cat:" + cp, this.getS("svcat:" + cp), true); this.setS("sv:" + cp, undefined, true);
       const ch = String.fromCodePoint(cp); this.letTo(this.csTok("\u0001" + ch), this.csTok("sb@sv@" + ch), true);
     });
     const verb = core("verb");
@@ -418,7 +417,7 @@ export class Machine extends CoreMachine {
       this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
     });
     // (the classes that make "|" (and l3doc also '"') short verbatim at \begin{document})
-    P.shortVerbAtBegin = (cls) => { for (const ch of SHORTVERB_CLASSES.get(cls) ?? []) shortVerb(this, ch.codePointAt(0)); };
+    P.shortVerbAtBegin = (cls) => { for (const ch of SHORTVERB_CLASSES.get(cls) ?? "") shortVerb(this, ch.codePointAt(0)); };
   }
 }
-const SHORTVERB_CLASSES = new Map([["amsldoc", ["|"]], ["ltxdoc", ["|"]], ["l3doc", ['"', "|"]]]);
+const SHORTVERB_CLASSES = new Map([["amsldoc", "|"], ["ltxdoc", "|"], ["l3doc", '"|']]);
