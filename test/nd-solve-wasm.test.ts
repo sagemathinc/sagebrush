@@ -16,7 +16,7 @@ const BASE = 8 << 20, STACK = 1 << 20, ARENA = 16 << 20;
 // (engine/nd/src/lu.rs tests::SOLVE_FNV: the seeded 120 x 120 system, 3 right-hand sides, no-FMA family)
 const SOLVE_FNV = 0xd44c10badbe88400n;
 // (engine/nd/src/solve.rs tests::PATHS_FNV: upper, lower and SPD 120 x 120 systems, 3 right-hand sides, X and rcond)
-const PATHS_FNV = 0x206ee2f20728b15fn;
+const PATHS_FNV = 0xb95a3f8a53a7c959n;
 // the report: [status, column, kernel name address, length, structure, rcond low word, rcond high word]
 const REPORT_WORDS = 7;
 

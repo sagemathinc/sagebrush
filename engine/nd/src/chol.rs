@@ -4,8 +4,10 @@
 //! **The recursive Cholesky** (dpotrf2) on the n x n upper triangle, n1 = n / 2, n2 = n - n1:
 //! 1. R11 := chol(A11), recursively; a non-positive pivot stops here (reported);
 //! 2. A12 := R11^-T A12 ([`trsm_upper_t`]: a forward substitution with R11', by rows of R11's columns);
-//! 3. A22 := A22 - A12' A12 (dsyrk's update, on the GEMM layer; it writes A22's strictly lower part too,
-//!    which is never read: only the upper triangle holds R);
+//! 3. A22 := A22 - A12' A12 on A22's upper triangle (dsyrk's update, on the GEMM layer by column blocks of
+//!    [`SYRK_NB`]: rows 0..block end of each; the diagonal blocks' strictly lower parts are written too, never
+//!    read: only the upper triangle holds R. Each element gets the GEMM's order whatever the blocks, so the
+//!    bits are the full product's);
 //! 4. R22 := chol(A22), recursively; its pivot is offset by n1.
 //!
 //! At or below [`POTRF_SMALL`] columns it is factored unblocked (dpotf2): for each column j, r_jj =
@@ -13,11 +15,14 @@
 //! or relied on. The first pivot that is not positive (or is NaN) stops the factorization: it is stored as
 //! computed, and its column is reported (dpotrf's info > 0); the caller falls back to LU.
 
+use crate::cond::dot;
 use crate::gemm::{scratch_len, span, Kernel, Mat};
-use crate::lu::{trsm_upper, Refused, TRSM_SMALL};
+use crate::lu::{trsm_upper, Refused, TRSM_NARROW, TRSM_SMALL};
 
 /// At or below this many columns, the Cholesky factorization is unblocked (dpotf2); above it, recursive.
 pub const POTRF_SMALL: usize = 64;
+/// The column-block width of the A22 update (its upper triangle, block by block).
+const SYRK_NB: usize = 64;
 
 /// The correctly rounded square root (IEEE round to nearest, ties to even), in integer arithmetic, the same
 /// code on every backend (`core` has no f64 sqrt for no_std Wasm): x = m 2^e with m a 53-bit integer and e
@@ -76,18 +81,14 @@ pub(crate) fn sqrt(x: f64) -> f64 {
 }
 
 /// Unblocked Cholesky of the n x n upper triangle (dpotf2, upper): column j's pivot a_jj - (r_.j' r_.j) (the
-/// dot product summed first, k increasing, as ddot then the subtraction), its square root, then row j to the
+/// dot product first, [`dot`]'s order, then the subtraction, as ddot), its square root, then row j to the
 /// right: each a_jc - (r_.j' r_.c) (dgemv 'T', alpha = -1, beta = 1), times 1 / r_jj (dscal). Returns the first
 /// column whose pivot is not positive (stored as computed).
 fn potf2(a: &mut [f64], lda: usize, n: usize) -> Option<usize> {
     for j in 0..n {
         // (column j and those to its right; columns left of j are not needed)
         let tail = &mut a[j * lda..];
-        let mut d = 0.0;
-        for &r in &tail[..j] {
-            d += r * r;
-        }
-        let ajj = tail[j] - d;
+        let ajj = tail[j] - dot(&tail[..j], &tail[..j]);
         if !(ajj > 0.0) {
             tail[j] = ajj;
             return Some(j);
@@ -100,11 +101,7 @@ fn potf2(a: &mut [f64], lda: usize, n: usize) -> Option<usize> {
             let colj = &colj[..j];
             for c in 0..n - j - 1 {
                 let col = &mut rest[c * lda..c * lda + j + 1];
-                let mut s = 0.0;
-                for (x, y) in colj.iter().zip(&col[..j]) {
-                    s += x * y;
-                }
-                col[j] = (col[j] - s) * inv;
+                col[j] = (col[j] - dot(colj, &col[..j])) * inv;
             }
         }
     }
@@ -136,34 +133,38 @@ fn potrf_rec(kern: Kernel, a: &mut [f64], lda: usize, n: usize, work: &mut [f64]
             ac[k + c * n1] = v;
         }
     }
-    let a12t = Mat::new(at, n2, n1, n2).expect("A12' copy");
-    let a12 = Mat::new(ac, n1, n2, n1).expect("A12 copy");
-    let ok = kern.gemm_update(&a12t, &a12, &mut right[n1..], lda, scratch);
-    debug_assert!(ok);
+    let a22 = &mut right[n1..];
+    let mut jb = 0;
+    while jb < n2 {
+        let je = (jb + SYRK_NB).min(n2);
+        // A22[0..je, jb..je] -= A12'[0..je, :] A12[:, jb..je]
+        let a12t = Mat::new(at, je, n1, n2).expect("A12' rows");
+        let a12 = Mat::new(&ac[jb * n1..], n1, je - jb, n1).expect("A12 columns");
+        let ok = kern.gemm_update(&a12t, &a12, &mut a22[jb * lda..], lda, scratch);
+        debug_assert!(ok);
+        jb = je;
+    }
     // 4. R22
     potrf_rec(kern, &mut right[n1..], lda, n2, work).map(|k| k + n1)
 }
 
 /// X := R^-T X for the n x n upper triangle R (non-unit diagonal; leading dimension `ldr`) and the n x r X
 /// (leading dimension `ldx`): a forward substitution with R' (dtrsm, left, upper, transpose, non-unit).
-/// Directly at or below [`TRSM_SMALL`] rows, as the reference dtrsm: x_i := (x_i - r_0i x_0 - r_1i x_1 - ...)
-/// / r_ii, the subtractions in k order, reading column i of R; above, it recurses: X1 := R11^-T X1, then X2 :=
+/// Directly at or below [`TRSM_SMALL`] rows or [`TRSM_NARROW`] right-hand sides: x_i := (x_i - [`dot`](r_.i, x)
+/// over k < i) / r_ii, reading column i of R; otherwise it recurses: X1 := R11^-T X1, then X2 :=
 /// X2 - R12' X1 (on the GEMM layer, from copies), then X2 := R22^-T X2. `tmp` holds at least n * r elements.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn trsm_upper_t(kern: Kernel, r: &[f64], ldr: usize, n: usize, x: &mut [f64], ldx: usize, nr: usize, tmp: &mut [f64], scratch: &mut [f64]) {
     if n == 0 || nr == 0 {
         return;
     }
-    if n <= TRSM_SMALL {
+    if n <= TRSM_SMALL || nr <= TRSM_NARROW {
         for j in 0..nr {
             let col = &mut x[j * ldx..j * ldx + n];
             for i in 0..n {
                 let ri = &r[i * ldr..i * ldr + i + 1];
-                let mut t = col[i];
-                for k in 0..i {
-                    t -= ri[k] * col[k];
-                }
-                col[i] = t / ri[i];
+                let (head, tail) = col.split_at_mut(i);
+                tail[0] = (tail[0] - dot(&ri[..i], head)) / ri[i];
             }
         }
         return;
@@ -370,6 +371,13 @@ pub(crate) mod tests {
             let unblocked = potf2(&mut g, n, n);
             assert!(info.is_some() && info == unblocked, "n={n}: {info:?} vs {unblocked:?}");
         }
+        // a failure in the right half of the top-level split (column 150 of 200: R22's column 50, offset by 100)
+        let n = 200;
+        let mut a = spd(n, 4);
+        a[150 + 150 * n] = -1.0;
+        let (_, info) = factor(Kernel::Scalar, &a, n, n);
+        let mut g = a.clone();
+        assert_eq!((info, potf2(&mut g, n, n)), (Some(150), Some(150)));
         // garbage below the diagonal is never read
         let n = 40;
         let a = spd(n, 5);
@@ -410,7 +418,7 @@ pub(crate) mod tests {
         for n in [1usize, 5, 64, 65, 150] {
             let a = spd(n, 11);
             let (r, _) = factor(Kernel::Scalar, &a, n, n);
-            for nr in [1usize, 3] {
+            for nr in [1usize, 3, 4, 5, 9] {
                 let ldx = n + 2;
                 let x0 = seeded(ldx * nr, &mut 12);
                 let mut x = x0.clone();
@@ -420,15 +428,12 @@ pub(crate) mod tests {
                 let mut y = x0.clone();
                 for j in 0..nr {
                     for i in 0..n {
-                        let mut t = y[i + j * ldx];
-                        for k in 0..i {
-                            t -= r[k + i * n] * y[k + j * ldx];
-                        }
-                        y[i + j * ldx] = t / r[i + i * n];
+                        let s = dot(&r[i * n..i * n + i], &y[j * ldx..j * ldx + i]);
+                        y[i + j * ldx] = (y[i + j * ldx] - s) / r[i + i * n];
                     }
                 }
                 let same = x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits());
-                assert_eq!(same, n <= TRSM_SMALL, "n={n} nr={nr}");
+                assert_eq!(same, n <= TRSM_SMALL || nr <= TRSM_NARROW, "n={n} nr={nr}");
                 // the padding is untouched; the solution agrees within u-scaled bounds
                 for j in 0..nr {
                     assert_eq!(&x[j * ldx + n..(j + 1) * ldx], &x0[j * ldx + n..(j + 1) * ldx]);
@@ -486,21 +491,26 @@ pub(crate) mod tests {
         assert_eq!(potrs(Kernel::Scalar, &[], 0, 1, &mut [], 0, 1, &mut w2), Ok(()));
     }
 
-    /// The per-family bit pins of the Cholesky solve: one seeded 120 x 120 SPD system, 3 right-hand sides.
-    pub(crate) const CHOL_FNV: u64 = 0x010a6d67d546e60b;
-    pub(crate) const CHOL_FNV_FMA: u64 = 0xc7fde5aeda90a0c2;
+    /// The per-family bit pins of the Cholesky solve: seeded 120 x 120 and 131 x 131 SPD systems (131: odd
+    /// splits, 65 + 66 and then 33 + 33, pin where the recursion splits), 3 right-hand sides.
+    pub(crate) const CHOL_FNV: u64 = 0xd82e438477f0a236;
+    pub(crate) const CHOL_FNV_FMA: u64 = 0x5a64157952db4998;
 
     #[test]
     fn cholesky_bits_per_family() {
-        let (n, r) = (120, 3);
-        let a = spd(n, 2029);
-        let b = seeded(n * r, &mut 2030);
+        let r = 3;
         let run = |k: Kernel| {
-            let (f, _) = factor(k, &a, n, n);
-            let mut x = b.clone();
-            let mut work = vec![0.0; potrs_work_len(n, r).unwrap()];
-            potrs(k, &f, n, n, &mut x, r, n, &mut work).unwrap();
-            fnv(&x)
+            let mut all = Vec::new();
+            for n in [120usize, 131] {
+                let a = spd(n, 2029);
+                let b = seeded(n * r, &mut 2030);
+                let (f, _) = factor(k, &a, n, n);
+                let mut x = b.clone();
+                let mut work = vec![0.0; potrs_work_len(n, r).unwrap()];
+                potrs(k, &f, n, n, &mut x, r, n, &mut work).unwrap();
+                all.extend_from_slice(&x);
+            }
+            fnv(&all)
         };
         assert_eq!(run(Kernel::Scalar), CHOL_FNV, "no-FMA family: {:#018x}", run(Kernel::Scalar));
         assert_eq!(run(Kernel::ScalarFma), CHOL_FNV_FMA, "FMA family: {:#018x}", run(Kernel::ScalarFma));

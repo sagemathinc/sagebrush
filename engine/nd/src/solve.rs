@@ -11,7 +11,7 @@
 //!    the factors ([`crate::cond`]) and the structure taken.
 
 use crate::chol::{potrf, potrf_work_len, potrs, potrs_work_len};
-use crate::cond::{cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
+use crate::cond::{asum, cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
 use crate::gemm::{scratch_len, span, Kernel};
 use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, trsm_upper, Refused};
 
@@ -69,38 +69,75 @@ pub struct Shape {
     pub spd_candidate: bool,
 }
 
-/// One pass over the n x n A by columns: finiteness, the 1-norm, the triangles' zeros (-0 counts as zero),
-/// and symmetry (a_ij == a_ji, compared once per pair, until the first difference: from then on only the
-/// Cholesky candidate is off; the other checks go on) with a positive diagonal.
+/// The structure pass over the n x n A, column by column: the 1-norm (each column's |a| sum in [`asum`]'s order),
+/// finiteness (branch-free: the sum of a - a is 0 exactly when every a is finite), the triangles' zeros (-0
+/// counts as zero; each check stops once it has failed), and a positive diagonal; then, only if the diagonal is
+/// positive, symmetry (a_ij == a_ji) by 16 x 16 tiles, stopping at the first difference. The first asymmetry
+/// thus disables only the Cholesky candidate: every other check has already run to the end.
 pub fn structure(a: &[f64], n: usize, lda: usize) -> Shape {
     let mut sh = Shape { finite: true, anorm: 0.0, upper: true, lower: true, spd_candidate: true };
+    let mut bad = 0.0;
     for j in 0..n {
         let col = &a[j * lda..j * lda + n];
-        let mut s = 0.0;
-        for (i, &v) in col.iter().enumerate() {
-            if !v.is_finite() {
-                sh.finite = false;
-            }
-            s += v.abs();
-            if v != 0.0 {
-                if i > j {
-                    sh.upper = false;
-                } else if i < j {
-                    sh.lower = false;
-                }
-            }
-            if sh.spd_candidate && i < j && v != a[j + i * lda] {
-                sh.spd_candidate = false;
-            }
+        let s = asum(col);
+        bad += nonfinite(col);
+        if s > sh.anorm {
+            sh.anorm = s;
+        }
+        if sh.upper && col[j + 1..].iter().any(|&v| v != 0.0) {
+            sh.upper = false;
+        }
+        if sh.lower && col[..j].iter().any(|&v| v != 0.0) {
+            sh.lower = false;
         }
         if !(col[j] > 0.0) {
             sh.spd_candidate = false;
         }
-        if s > sh.anorm {
-            sh.anorm = s;
+    }
+    sh.finite = bad == 0.0;
+    sh.spd_candidate = sh.spd_candidate && symmetric(a, n, lda);
+    sh
+}
+
+/// 0 exactly when every element is finite (a - a is 0 for each), NaN otherwise.
+#[inline(always)]
+fn nonfinite(x: &[f64]) -> f64 {
+    let mut s = [0.0f64; 4];
+    let c = x.chunks_exact(4);
+    let r = c.remainder();
+    for v in c {
+        for l in 0..4 {
+            s[l] += v[l] - v[l];
         }
     }
-    sh
+    for (l, v) in r.iter().enumerate() {
+        s[l] += v - v;
+    }
+    (s[0] + s[1]) + (s[2] + s[3])
+}
+
+/// a_ij == a_ji for every i < j, by 16 x 16 tiles (column j's rows against row j's columns within a tile, both
+/// cache-resident), stopping at the first difference.
+fn symmetric(a: &[f64], n: usize, lda: usize) -> bool {
+    const T: usize = 16;
+    let mut jb = 0;
+    while jb < n {
+        let je = (jb + T).min(n);
+        let mut ib = 0;
+        while ib <= jb {
+            let ie = (ib + T).min(n);
+            for j in jb..je {
+                for i in ib..ie.min(j) {
+                    if a[i + j * lda] != a[j + i * lda] {
+                        return false;
+                    }
+                }
+            }
+            ib += T;
+        }
+        jb = je;
+    }
+    true
 }
 
 /// MATLAB's warning threshold for rcond (eps).
@@ -138,7 +175,7 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
         return Ok(Report { status: Status::Solved, rcond: f64::INFINITY, structure: Structure::General });
     }
     let sh = structure(a, n, lda);
-    if !sh.finite || !(0..r).all(|j| b[j * ldb..j * ldb + n].iter().all(|x| x.is_finite())) {
+    if !sh.finite || (0..r).map(|j| nonfinite(&b[j * ldb..j * ldb + n])).sum::<f64>() != 0.0 {
         return Ok(Report { status: Status::NonFinite, rcond: f64::NAN, structure: Structure::General });
     }
     let (wa, rest) = work.split_at_mut(n * n);
@@ -387,6 +424,18 @@ mod tests {
         }
     }
 
+    /// An estimate that overflows (A graded by 10^+-150 on both sides): rcond is 0 and the solve is Solved,
+    /// not NearlySingular (the Python warning needs 0 < rcond < eps).
+    #[test]
+    fn an_overflowing_estimate_gives_rcond_zero_and_solved() {
+        let n = 8;
+        let g = seeded(n * n, &mut 51);
+        let d: Vec<f64> = (0..n).map(|i| 10f64.powf(-150.0 + 300.0 * i as f64 / (n - 1) as f64)).collect();
+        let a: Vec<f64> = (0..n * n).map(|k| d[k % n] * g[k] * d[k / n]).collect();
+        let (_, rep, _) = run(Kernel::Scalar, &a, &g[..n], n, 1);
+        assert_eq!((rep.structure, rep.status, rep.rcond), (Structure::General, Status::Solved, 0.0), "{rep:?}");
+    }
+
     #[test]
     fn empty_nonfinite_and_refused() {
         let mut work = vec![0.0; solve_work_len(4, 2).unwrap()];
@@ -437,8 +486,8 @@ mod tests {
 
     /// The per-structure bit pins (the triangular and Cholesky paths; the general path is lu's SOLVE_FNV):
     /// seeded 120 x 120 systems, 3 right-hand sides, per kernel family.
-    pub(crate) const PATHS_FNV: u64 = 0x206ee2f20728b15f;
-    pub(crate) const PATHS_FNV_FMA: u64 = 0x1573b36f9c0af4f0;
+    pub(crate) const PATHS_FNV: u64 = 0xb95a3f8a53a7c959;
+    pub(crate) const PATHS_FNV_FMA: u64 = 0x1a90e20c9e1608b5;
 
     pub(crate) fn paths_fnv(k: Kernel) -> u64 {
         let (n, r) = (120, 3);
