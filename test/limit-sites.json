@@ -711,6 +711,16 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/src/wasm.rs :: nd_microkernel :: let n = s.len().min(cap as usize); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "cap is the size of the host's output buffer for the microkernel's static name; the name is truncated to fit and nothing is refused (no user work is limited)"
+ },
+ "engine/nd/src/wasm.rs :: nd_microkernel :: pub unsafe extern \"C\" fn nd_microkernel(out: *mut u8, cap: u32) -> u32 { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "cap is the size of the host's output buffer for the microkernel's static name; the name is truncated to fit and nothing is refused (no user work is limited)"
+ },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
