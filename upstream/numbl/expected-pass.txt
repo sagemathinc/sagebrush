@@ -241,6 +241,7 @@ classes/indexed_assign_class_instance.m
 classes/value_class_mutation.m
 control_flow/break_continue.m
 control_flow/catch_var_disambiguation.m
+control_flow/for_loop_type_change.m
 control_flow/for_loops.m
 control_flow/if_else.m
 control_flow/loop_forward_ref.m
@@ -252,6 +253,7 @@ control_flow/test_for_loop_var_assign.m
 control_flow/test_for_loop_var_value.m
 control_flow/test_if_array_condition.m
 control_flow/try_catch.m
+control_flow/while_loop_type_change.m
 control_flow/while_loops.m
 data_structures/cell_arrays.m
 data_structures/cell_colon_indexing.m
@@ -279,6 +281,7 @@ data_structures/test_cell_tensor_index_member_assign.m
 data_structures/test_cell_variable_index_csl.m
 data_structures/test_cell_vector_assign.m
 data_structures/test_csl_empty_expand.m
+data_structures/test_csl_func_handle_call.m
 data_structures/test_mat2cell.m
 data_structures/test_member_cell_chain_assign.m
 data_structures/test_multi_output_cell_assign.m
@@ -310,9 +313,11 @@ functions/test_arrayfun_cellfun_multi_output.m
 functions/test_empty_output_and_anon_tilde.m
 functions/test_handle_true_false.m
 functions/test_local_shadows_builtin.m
+functions/test_nargout_override_leak.m
 functions/test_starfish_jit.m
 functions/test_user_call_tensor_hot_loop.m
 functions/test_varargin_jit.m
+functions/test_varargout_cell_assign3.m
 functions/tilde_params.m
 functions/unassigned_output.m
 functions/varargs.m
@@ -522,6 +527,7 @@ structs/test_struct_array_grow.m
 structs/test_struct_array_grow_refcount.m
 structs/test_struct_cell_field_index.m
 structs/test_struct_scalar_index.m
+varargout/test_varargout_fixed_outputs.m
 variables/assignment.m
 variables/test_clear.m
 variables/test_exist_var.m

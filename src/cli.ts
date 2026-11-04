@@ -331,9 +331,9 @@ const isMagma = (f: string | null) => magma || (!matlab && f !== null && (/\.(ma
 const isMatlab = (f: string | null) => matlab || (!magma && f !== null && /\.m$/.test(f) && !mFileIsMagma(f));
 
 /** MATLAB source as Python, or null after reporting a syntax error. */
-function matlabSource(src: string, file: string): string | null {
+function matlabSource(src: string, file: string, asFile = false): string | null {
   try {
-    return matlabToPython(src, file);
+    return matlabToPython(src, file, { file: asFile });
   } catch (e) {
     if (!(e instanceof MatlabSyntaxError)) throw e;
     process.stderr.write(matlabSyntaxMessage(e, src, file));
@@ -665,7 +665,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       return;
     }
     if (isMatlab(file)) {
-      const py = matlabSource(readFileSync(file, "utf8"), file);
+      const py = matlabSource(readFileSync(file, "utf8"), file, true);
       if (py !== null) process.stdout.write(py);
       return;
     }
@@ -710,7 +710,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       main = execModuleAsMain(mod!);
     });
   } else if (file !== null && file !== "-" && isMatlab(file)) {
-    const py = matlabSource(readFileSync(file, "utf8"), file);
+    const py = matlabSource(readFileSync(file, "utf8"), file, true);
     code = py === null ? 1 : guarded(() => {
       main = execModule(py, file!, "__main__", false, false);
     });
