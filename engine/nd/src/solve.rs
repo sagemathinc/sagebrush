@@ -1,0 +1,468 @@
+//! `nd::solve`: X = A \ B for a square real A, one call (numerics-core P2b-2, design 2c8e55e8 §2).
+//!
+//! 1. **One pass over A** ([`structure`]): that every entry is finite, the 1-norm, and the structure:
+//!    diagonal, upper or lower triangular, or symmetric with a positive diagonal (a Cholesky candidate).
+//!    The first asymmetry disables only the Cholesky candidate; the other checks run to the end.
+//! 2. **Dispatch** (MATLAB's order): diagonal: each row of B divided by its diagonal element; triangular: the
+//!    triangular solve; symmetric with a positive diagonal: Cholesky ([`crate::chol`]), and if it fails, LU
+//!    on the untouched A; otherwise LU ([`crate::lu`]).
+//! 3. **Report**: the status (solved, nearly singular: 0 < rcond < eps, singular: an exactly zero diagonal or
+//!    pivot, with X holding what division by it gives; or not computed: an Inf or NaN in A or B), rcond from
+//!    the factors ([`crate::cond`]) and the structure taken.
+
+use crate::chol::{potrf, potrf_work_len, potrs, potrs_work_len};
+use crate::cond::{cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
+use crate::gemm::{scratch_len, span, Kernel};
+use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, trsm_upper, Refused};
+
+/// The structure [`solve`] found and solved by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Structure {
+    /// LU with partial pivoting
+    General,
+    /// division by the diagonal
+    Diagonal,
+    /// upper triangular: back substitution
+    Upper,
+    /// lower triangular: forward substitution
+    Lower,
+    /// symmetric with a positive diagonal, positive definite: Cholesky
+    Spd,
+    /// symmetric with a positive diagonal but not positive definite: Cholesky failed, then LU
+    SpdFallback,
+}
+
+/// What [`solve`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// solved; rcond is 0 or at least eps
+    Solved,
+    /// solved, but 0 < rcond < eps (MATLAB's "close to singular or badly scaled" warning)
+    NearlySingular,
+    /// an exactly zero diagonal element (diagonal, triangular) or LU pivot, the first in this column: X holds
+    /// the Inf and NaN division by it gives (MATLAB's "singular to working precision"); rcond is 0
+    Singular(usize),
+    /// A or B has an Inf or NaN: nothing computed (rcond NaN)
+    NonFinite,
+}
+
+/// [`solve`]'s result.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Report {
+    pub status: Status,
+    /// the 1-norm reciprocal condition estimate (Inf for n = 0)
+    pub rcond: f64,
+    pub structure: Structure,
+}
+
+/// What one pass over A found ([`structure`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    pub finite: bool,
+    /// ||A||_1, the largest column sum of |a|
+    pub anorm: f64,
+    /// no nonzero below the diagonal
+    pub upper: bool,
+    /// no nonzero above the diagonal
+    pub lower: bool,
+    /// symmetric with every diagonal element positive
+    pub spd_candidate: bool,
+}
+
+/// One pass over the n x n A by columns: finiteness, the 1-norm, the triangles' zeros (-0 counts as zero),
+/// and symmetry (a_ij == a_ji, compared once per pair, until the first difference: from then on only the
+/// Cholesky candidate is off; the other checks go on) with a positive diagonal.
+pub fn structure(a: &[f64], n: usize, lda: usize) -> Shape {
+    let mut sh = Shape { finite: true, anorm: 0.0, upper: true, lower: true, spd_candidate: true };
+    for j in 0..n {
+        let col = &a[j * lda..j * lda + n];
+        let mut s = 0.0;
+        for (i, &v) in col.iter().enumerate() {
+            if !v.is_finite() {
+                sh.finite = false;
+            }
+            s += v.abs();
+            if v != 0.0 {
+                if i > j {
+                    sh.upper = false;
+                } else if i < j {
+                    sh.lower = false;
+                }
+            }
+            if sh.spd_candidate && i < j && v != a[j + i * lda] {
+                sh.spd_candidate = false;
+            }
+        }
+        if !(col[j] > 0.0) {
+            sh.spd_candidate = false;
+        }
+        if s > sh.anorm {
+            sh.anorm = s;
+        }
+    }
+    sh
+}
+
+/// MATLAB's warning threshold for rcond (eps).
+const EPS: f64 = f64::EPSILON;
+
+/// The workspace [`solve`] needs for an n x n A and n x r B: n * n for the Cholesky factor (A stays untouched
+/// for the LU fallback), then the most any path needs; `None` on overflow.
+pub fn solve_work_len(n: usize, r: usize) -> Option<usize> {
+    let inner = [getrf_work_len(n, n)?, getrs_work_len(n, r)?, potrf_work_len(n)?, potrs_work_len(n, r)?, cond_work_len(n)?];
+    n.checked_mul(n)?.checked_add(inner.into_iter().max()?)
+}
+
+/// The first zero on A's diagonal.
+fn zero_diagonal(a: &[f64], n: usize, lda: usize) -> Option<usize> {
+    (0..n).find(|&i| a[i + i * lda] == 0.0)
+}
+
+/// X = A \ B for the n x n A (leading dimension `lda`) and the n x r B (overwritten by X), as the module
+/// describes. A is overwritten by its LU factors on the LU paths and left as it was on the others; `ipiv`
+/// holds n pivots on the LU paths; `work` holds [`solve_work_len`] elements.
+#[allow(clippy::too_many_arguments)]
+pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r: usize, ldb: usize, ipiv: &mut [usize], work: &mut [f64]) -> Result<Report, Refused> {
+    match (span(n, n, lda), span(n, r, ldb)) {
+        (Some(na), Some(nb)) if a.len() >= na && b.len() >= nb => {}
+        _ => return Err(Refused::Layout),
+    }
+    if ipiv.len() < n {
+        return Err(Refused::Pivots);
+    }
+    match solve_work_len(n, r) {
+        Some(need) if work.len() >= need => {}
+        _ => return Err(Refused::Work),
+    }
+    if n == 0 {
+        return Ok(Report { status: Status::Solved, rcond: f64::INFINITY, structure: Structure::General });
+    }
+    let sh = structure(a, n, lda);
+    if !sh.finite || !(0..r).all(|j| b[j * ldb..j * ldb + n].iter().all(|x| x.is_finite())) {
+        return Ok(Report { status: Status::NonFinite, rcond: f64::NAN, structure: Structure::General });
+    }
+    let (wa, rest) = work.split_at_mut(n * n);
+    let (structure, singular, rcond) = if sh.upper && sh.lower {
+        // diagonal: each row divided by its element (0 / 0 is NaN here, as in MATLAB)
+        for j in 0..r {
+            for i in 0..n {
+                b[i + j * ldb] /= a[i + i * lda];
+            }
+        }
+        let z = zero_diagonal(a, n, lda);
+        (Structure::Diagonal, z, if z.is_some() { 0.0 } else { diagcon(a, n, lda, sh.anorm) })
+    } else if sh.upper || sh.lower {
+        let z = zero_diagonal(a, n, lda);
+        if sh.upper {
+            let (scratch, tmp) = rest.split_at_mut(scratch_len());
+            trsm_upper(kern, a, lda, n, b, ldb, r, tmp, scratch);
+        } else {
+            for j in 0..r {
+                lower_col(a, lda, n, &mut b[j * ldb..j * ldb + n]);
+            }
+        }
+        let rc = if z.is_some() { 0.0 } else { trcon(a, n, lda, sh.upper, sh.anorm, rest) };
+        (if sh.upper { Structure::Upper } else { Structure::Lower }, z, rc)
+    } else {
+        let mut chol = false;
+        if sh.spd_candidate {
+            for j in 0..n {
+                wa[j * n..(j + 1) * n].copy_from_slice(&a[j * lda..j * lda + n]);
+            }
+            if potrf(kern, wa, n, n, rest)?.is_none() {
+                potrs(kern, wa, n, n, b, r, ldb, rest)?;
+                chol = true;
+            }
+        }
+        if chol {
+            (Structure::Spd, None, pocon(wa, n, n, sh.anorm, rest))
+        } else {
+            let info = getrf(kern, a, n, n, lda, ipiv, rest)?;
+            getrs(kern, a, n, lda, ipiv, b, r, ldb, rest)?;
+            let rc = if info.is_some() { 0.0 } else { gecon(a, n, lda, sh.anorm, rest) };
+            (if sh.spd_candidate { Structure::SpdFallback } else { Structure::General }, info, rc)
+        }
+    };
+    let status = match singular {
+        Some(k) => Status::Singular(k),
+        None if rcond > 0.0 && rcond < EPS => Status::NearlySingular,
+        None => Status::Solved,
+    };
+    Ok(Report { status, rcond, structure })
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use crate::chol::tests::spd;
+    use crate::gemm::tests::{fnv, seeded};
+    use std::{vec, vec::Vec};
+
+    const U: f64 = f64::EPSILON / 2.0;
+
+    fn kernels() -> Vec<Kernel> {
+        crate::chol::tests::kernels()
+    }
+
+    /// solve with fresh buffers; returns (X, report, A after)
+    fn run(k: Kernel, a: &[f64], b: &[f64], n: usize, r: usize) -> (Vec<f64>, Report, Vec<f64>) {
+        let mut a2 = a.to_vec();
+        let mut x = b.to_vec();
+        let mut ipiv = vec![0; n];
+        let mut work = vec![0.0; solve_work_len(n, r).unwrap()];
+        let rep = solve(k, &mut a2, n, n.max(1), &mut x, r, n.max(1), &mut ipiv, &mut work).unwrap();
+        (x, rep, a2)
+    }
+
+    fn eta(a: &[f64], x: &[f64], b: &[f64], n: usize) -> f64 {
+        let an = (0..n).map(|i| (0..n).map(|p| a[i + p * n].abs()).sum::<f64>()).fold(0.0, f64::max);
+        let res = (0..n).map(|i| (b[i] - (0..n).map(|p| a[i + p * n] * x[p]).sum::<f64>()).abs()).fold(0.0, f64::max);
+        let xn = x[..n].iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let bn = b[..n].iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        res / (an * xn + bn)
+    }
+
+    fn upper_of(a: &[f64], n: usize) -> Vec<f64> {
+        let mut u = a.to_vec();
+        for j in 0..n {
+            for i in j + 1..n {
+                u[i + j * n] = 0.0;
+            }
+            u[j + j * n] += 4.0;
+        }
+        u
+    }
+
+    fn transpose(a: &[f64], n: usize) -> Vec<f64> {
+        (0..n * n).map(|k| a[k / n + (k % n) * n]).collect()
+    }
+
+    /// Every structure is taken by its path and solves within the oracle, for every kernel and through each
+    /// path's recursion; the structure and status reported.
+    #[test]
+    fn each_structure_takes_its_path_within_the_oracle() {
+        for k in kernels() {
+            for n in [1usize, 2, 17, 65, 130] {
+                let g = seeded(n * n, &mut (n as u32 + 100));
+                let b = seeded(n * 3, &mut 7);
+                let up = upper_of(&g, n);
+                let mut dg = vec![0.0; n * n];
+                for i in 0..n {
+                    dg[i + i * n] = 1.0 + i as f64;
+                }
+                let cases: Vec<(Vec<f64>, Structure)> = vec![
+                    (dg, Structure::Diagonal),
+                    (up.clone(), if n == 1 { Structure::Diagonal } else { Structure::Upper }),
+                    (transpose(&up, n), if n == 1 { Structure::Diagonal } else { Structure::Lower }),
+                    (spd(n, 9), if n == 1 { Structure::Diagonal } else { Structure::Spd }),
+                    (g.clone(), if n == 1 { Structure::Diagonal } else { Structure::General }),
+                ];
+                for (a, want) in cases {
+                    let (x, rep, _) = run(k, &a, &b, n, 3);
+                    assert_eq!(rep.structure, want, "{} n={n}", k.name());
+                    assert!(matches!(rep.status, Status::Solved | Status::NearlySingular), "{} n={n} {want:?}: {rep:?}", k.name());
+                    for j in 0..3 {
+                        let e = eta(&a, &x[j * n..(j + 1) * n], &b[j * n..(j + 1) * n], n);
+                        assert!(e <= 10.0 * n as f64 * U, "{} n={n} {want:?}: eta {e:e}", k.name());
+                    }
+                    assert!(rep.rcond > 0.0 && rep.rcond <= 1.0, "{want:?}: rcond {}", rep.rcond);
+                }
+            }
+        }
+    }
+
+    /// Symmetric with a positive diagonal but indefinite: Cholesky fails and LU on the untouched A solves it.
+    #[test]
+    fn an_indefinite_candidate_falls_back_to_lu() {
+        for n in [2usize, 40, 150] {
+            // (diagonal 1/2, off-diagonal 1 + 0.1 s_ij symmetric: eigenvalues near -1/2 and n - 1/2: indefinite)
+            let s = seeded(n * n, &mut 13);
+            let mut a = vec![0.0; n * n];
+            for j in 0..n {
+                for i in 0..n {
+                    a[i + j * n] = if i == j { 0.5 } else { 1.0 + 0.1 * s[i.min(j) + i.max(j) * n] };
+                }
+            }
+            let b = seeded(n, &mut 14);
+            let (x, rep, _) = run(Kernel::Scalar, &a, &b, n, 1);
+            assert_eq!(rep.structure, Structure::SpdFallback, "n={n}");
+            assert!(eta(&a, &x, &b, n) <= 10.0 * n as f64 * U);
+            // the same as LU alone, bit for bit (the fallback starts from A as it was)
+            let mut a2 = a.clone();
+            let mut y = b.clone();
+            let mut ipiv = vec![0; n];
+            let mut work = vec![0.0; crate::lu::solve_work_len(n, 1).unwrap()];
+            crate::lu::solve(Kernel::Scalar, &mut a2, n, n, &mut y, 1, n, &mut ipiv, &mut work).unwrap();
+            assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()));
+        }
+    }
+
+    /// Near misses of each structure take the next path (grader: structure near-misses).
+    #[test]
+    fn structure_near_misses() {
+        let n = 6;
+        let g = seeded(n * n, &mut 31);
+        let up = upper_of(&g, n);
+        // one tiny entry below the diagonal, at the last row: not upper, not lower: general
+        let mut a = up.clone();
+        a[(n - 1) + 0 * n] = 1e-300;
+        assert_eq!(structure(&a, n, n).upper, false);
+        assert_eq!(run(Kernel::Scalar, &a, &g[..n], n, 1).1.structure, Structure::General);
+        // -0 below the diagonal is a zero: still upper
+        let mut a = up.clone();
+        a[(n - 1) + 0 * n] = -0.0;
+        assert_eq!(run(Kernel::Scalar, &a, &g[..n], n, 1).1.structure, Structure::Upper);
+        // diagonal except one entry above: upper; -0 off the diagonal: still diagonal
+        let mut d = vec![0.0; n * n];
+        for i in 0..n {
+            d[i + i * n] = 2.0;
+        }
+        d[0 + (n - 1) * n] = -0.0;
+        assert_eq!(run(Kernel::Scalar, &d, &g[..n], n, 1).1.structure, Structure::Diagonal);
+        d[0 + (n - 1) * n] = 1e-300;
+        assert_eq!(run(Kernel::Scalar, &d, &g[..n], n, 1).1.structure, Structure::Upper);
+        // symmetric except the last pair: not a Cholesky candidate
+        let mut s = spd(n, 32);
+        s[(n - 2) + (n - 1) * n] += 1e-12;
+        assert!(!structure(&s, n, n).spd_candidate);
+        assert_eq!(run(Kernel::Scalar, &s, &g[..n], n, 1).1.structure, Structure::General);
+        // symmetric with one non-positive diagonal entry (the last; or a -0): not a candidate
+        let mut s = spd(n, 33);
+        s[(n - 1) + (n - 1) * n] = -1.0;
+        assert_eq!(run(Kernel::Scalar, &s, &g[..n], n, 1).1.structure, Structure::General);
+        s[(n - 1) + (n - 1) * n] = -0.0;
+        assert!(!structure(&s, n, n).spd_candidate);
+        // the first asymmetry stops only the symmetry check: an Inf after it is still found, the norm still
+        // counts every column, and a nonzero below the diagonal after it is still seen
+        let mut t = up.clone();
+        t[(n - 1) + (n - 1) * n] = f64::INFINITY;
+        assert!(!structure(&t, n, n).finite);
+        let mut t = up.clone();
+        t[n - 1] = 0.5; // (row n-1, column 0: after the asymmetry at (0, 1))
+        let sh = structure(&t, n, n);
+        assert!(!sh.upper && !sh.lower && !sh.spd_candidate);
+        let want = (0..n).map(|j| (0..n).map(|i| t[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max);
+        assert_eq!(sh.anorm, want);
+    }
+
+    /// Singular structures: X has division's Inf and NaN, the first zero is reported, rcond is 0.
+    #[test]
+    fn singular_structures() {
+        // diagonal: [1 0; 0 0] \ [1; 1] is [1; Inf]; \ [1; 0] is [1; NaN] (MATLAB's mldivide page)
+        let a = [1.0, 0.0, 0.0, 0.0];
+        let (x, rep, _) = run(Kernel::Scalar, &a, &[1.0, 1.0], 2, 1);
+        assert_eq!((x[0], x[1], rep.status, rep.rcond, rep.structure), (1.0, f64::INFINITY, Status::Singular(1), 0.0, Structure::Diagonal));
+        let (x, _, _) = run(Kernel::Scalar, &a, &[1.0, 0.0], 2, 1);
+        assert!(x[0] == 1.0 && x[1].is_nan());
+        // upper with a zero diagonal: Singular at its first zero, rcond 0
+        let u = [1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0];
+        let (_, rep, _) = run(Kernel::Scalar, &u, &[1.0, 1.0, 1.0], 3, 1);
+        assert_eq!((rep.status, rep.rcond, rep.structure), (Status::Singular(1), 0.0, Structure::Upper));
+        let (_, rep, _) = run(Kernel::Scalar, &transpose(&u, 3), &[1.0, 1.0, 1.0], 3, 1);
+        assert_eq!((rep.status, rep.structure), (Status::Singular(1), Structure::Lower));
+        // general with a zero pivot
+        // (rows (1 2 3), (2 4 6), (0 1 5): the second is twice the first)
+        let g = [1.0, 2.0, 0.0, 2.0, 4.0, 1.0, 3.0, 6.0, 5.0];
+        let (_, rep, _) = run(Kernel::Scalar, &g, &[1.0, 1.0, 1.0], 3, 1);
+        assert!(matches!(rep.status, Status::Singular(_)) && rep.rcond == 0.0 && rep.structure == Structure::General, "{rep:?}");
+    }
+
+    /// The nearly-singular decision on each path, flipping across a constructed pair: rcond = d / 3-ish just
+    /// below and above eps (general: [1 1; 1/2 1/2 + d]; upper: [1 1; 0 d]; diagonal: diag(1, d)).
+    #[test]
+    fn nearly_singular_on_each_path() {
+        let eps = f64::EPSILON;
+        for (scale, below) in [(0.9, true), (1.1, false)] {
+            let d = 3.0 * eps * scale;
+            let (_, rep, _) = run(Kernel::Scalar, &[1.0, 0.5, 1.0, 0.5 + d], &[1.0, 1.0], 2, 1);
+            assert_eq!((rep.structure, rep.status == Status::NearlySingular), (Structure::General, below), "{rep:?}");
+            let d = 2.0 * eps * scale; // (upper [1 1; 0 d]: ||A||_1 = 1 + d, ||A^-1||_1 = 2 / d)
+            let (_, rep, _) = run(Kernel::Scalar, &[1.0, 0.0, 1.0, d], &[1.0, 1.0], 2, 1);
+            assert_eq!((rep.structure, rep.status == Status::NearlySingular), (Structure::Upper, below), "{rep:?}");
+            let d = eps * scale;
+            let (_, rep, _) = run(Kernel::Scalar, &[1.0, 0.0, 0.0, d], &[1.0, 1.0], 2, 1);
+            assert_eq!((rep.structure, rep.status == Status::NearlySingular), (Structure::Diagonal, below), "{rep:?}");
+            assert!((rep.rcond - d).abs() <= 2.0 * eps * d, "diagonal rcond is (1 / max |1/d_i|) / max |d_i|: {rep:?}");
+        }
+    }
+
+    #[test]
+    fn empty_nonfinite_and_refused() {
+        let mut work = vec![0.0; solve_work_len(4, 2).unwrap()];
+        let rep = solve(Kernel::Scalar, &mut [], 0, 1, &mut [], 0, 1, &mut [], &mut work).unwrap();
+        assert_eq!((rep.status, rep.rcond), (Status::Solved, f64::INFINITY));
+        // an Inf or NaN anywhere in A or B: nothing computed, A and B as they were
+        let a0 = seeded(16, &mut 41);
+        for (ai, bi, v) in [(Some(5), None, f64::NAN), (None, Some(7), f64::INFINITY), (Some(15), None, f64::NEG_INFINITY)] {
+            let mut a = a0.clone();
+            let mut b = seeded(8, &mut 42);
+            if let Some(i) = ai {
+                a[i] = v;
+            }
+            if let Some(i) = bi {
+                b[i] = v;
+            }
+            let (a1, b1) = (a.clone(), b.clone());
+            let mut ipiv = vec![0; 4];
+            let rep = solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work).unwrap();
+            assert!(rep.status == Status::NonFinite && rep.rcond.is_nan());
+            assert!(a.iter().zip(&a1).chain(b.iter().zip(&b1)).all(|(p, q)| p.to_bits() == q.to_bits()));
+        }
+        // refusals write nothing
+        let mut a = a0.clone();
+        let mut b = vec![1.0; 8];
+        let mut ipiv = vec![0; 4];
+        let need = solve_work_len(4, 2).unwrap();
+        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work[..need - 1]), Err(Refused::Work));
+        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b[..7], 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert_eq!(solve(Kernel::Scalar, &mut a[..15], 4, 4, &mut b, 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
+        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv[..3], &mut work), Err(Refused::Pivots));
+        assert!(a == a0 && b.iter().all(|&v| v == 1.0));
+        assert!(solve_work_len(usize::MAX, 1).is_none() && solve_work_len(1 << 33, 1).is_none() && solve_work_len(4, usize::MAX).is_none());
+        // exactly enough work, with padded leading dimensions
+        let (n, r, lda, ldb) = (5usize, 2usize, 7usize, 6usize);
+        let mut a = vec![0.0; lda * n];
+        let g = spd(n, 43);
+        for j in 0..n {
+            a[j * lda..j * lda + n].copy_from_slice(&g[j * n..(j + 1) * n]);
+        }
+        let mut b = vec![9.0; ldb * r];
+        let mut w = vec![0.0; solve_work_len(n, r).unwrap()];
+        let mut p = vec![0; n];
+        let rep = solve(Kernel::Scalar, &mut a, n, lda, &mut b, r, ldb, &mut p, &mut w).unwrap();
+        assert_eq!(rep.structure, Structure::Spd);
+        assert!(b[n..ldb].iter().all(|&v| v == 9.0), "B's padding untouched");
+    }
+
+    /// The per-structure bit pins (the triangular and Cholesky paths; the general path is lu's SOLVE_FNV):
+    /// seeded 120 x 120 systems, 3 right-hand sides, per kernel family.
+    pub(crate) const PATHS_FNV: u64 = 0x206ee2f20728b15f;
+    pub(crate) const PATHS_FNV_FMA: u64 = 0x1573b36f9c0af4f0;
+
+    pub(crate) fn paths_fnv(k: Kernel) -> u64 {
+        let (n, r) = (120, 3);
+        let g = seeded(n * n, &mut 2031);
+        let b = seeded(n * r, &mut 2032);
+        let up = upper_of(&g, n);
+        let mut all = Vec::new();
+        for a in [up.clone(), transpose(&up, n), spd(n, 2033)] {
+            let (x, rep, _) = run(k, &a, &b, n, r);
+            all.extend_from_slice(&x);
+            all.push(rep.rcond);
+        }
+        fnv(&all)
+    }
+
+    #[test]
+    fn path_bits_per_family() {
+        assert_eq!(paths_fnv(Kernel::Scalar), PATHS_FNV, "no-FMA family: {:#018x}", paths_fnv(Kernel::Scalar));
+        assert_eq!(paths_fnv(Kernel::ScalarFma), PATHS_FNV_FMA, "FMA family: {:#018x}", paths_fnv(Kernel::ScalarFma));
+        #[cfg(target_arch = "x86_64")]
+        if let Some(k) = crate::micro::Avx2Fma::detect() {
+            assert_eq!(paths_fnv(Kernel::Avx2Fma(k)), PATHS_FNV_FMA, "AVX2+FMA");
+        }
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(paths_fnv(Kernel::Neon), PATHS_FNV_FMA, "NEON");
+    }
+}

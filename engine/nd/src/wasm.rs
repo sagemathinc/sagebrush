@@ -92,11 +92,15 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
     gemm_cols(&am, &bm, cv, j.m.max(1), j0, j1, sv) as u32
 }
 
-/// X = A \\ B on one thread (numerics-core P2b-1: [`crate::lu::solve`], partial-pivoting LU): A is overwritten
-/// by its factors, B by X, ipiv and work are used, and the report is written as [status, first zero pivot
-/// column, kernel name address, kernel name length], status 1 solved, 2 solved with an exactly zero pivot
-/// (Inf/NaN in X), 3 not computed (A or B has an Inf or NaN). Returns 1, or 0 if the job was refused,
-/// having written nothing.
+/// X = A \\ B on one thread (numerics-core P2b-2: [`crate::solve::solve`]: the structure pass, then the
+/// diagonal, triangular, Cholesky or LU path, and rcond from the factors): A is overwritten by its LU factors
+/// on the LU paths, B by X, ipiv and work are used, and the report is written as [status, first zero diagonal
+/// element or pivot's column, kernel name address, kernel name length, structure, rcond's f64 bits (low word,
+/// high word)]: status 1 solved, 2 solved with an exactly zero diagonal element or pivot (Inf/NaN in X; rcond
+/// 0), 3 not computed (A or B has an Inf or NaN; rcond NaN), 4 solved but nearly singular (0 < rcond < eps);
+/// structure 0 general (LU), 1 diagonal, 2 upper triangular, 3 lower triangular, 4 symmetric positive definite
+/// (Cholesky), 5 symmetric with a positive diagonal but not positive definite (Cholesky failed, then LU).
+/// Returns 1, or 0 if the job was refused, having written nothing.
 ///
 /// Checked here, before any pointer is read or slice made ([`check_solve`]): the descriptor is 4-aligned and
 /// in the host's part; each of the five regions (A, B, ipiv, work, report) is aligned, nonzero, at or above
@@ -136,13 +140,24 @@ pub unsafe extern "C" fn nd_solve(desc: u32) -> u32 {
     let ipiv: &mut [usize] = if j.n == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.ipiv), j.n) };
     let work: &mut [f64] = if j.work_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.work), j.work_len) };
     let report: &mut [u32] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.report), REPORT_WORDS);
-    let Ok(status) = crate::lu::solve(kern, a, j.n, j.lda, b, j.nrhs, j.ldb, ipiv, work) else { return 0 };
-    let (code, col) = match status {
-        crate::lu::Status::Solved => (1, 0),
-        crate::lu::Status::Singular(c) => (2, c as u32),
-        crate::lu::Status::NonFinite => (3, 0),
+    let Ok(rep) = crate::solve::solve(kern, a, j.n, j.lda, b, j.nrhs, j.ldb, ipiv, work) else { return 0 };
+    use crate::solve::{Status, Structure};
+    let (code, col) = match rep.status {
+        Status::Solved => (1, 0),
+        Status::Singular(c) => (2, c as u32),
+        Status::NonFinite => (3, 0),
+        Status::NearlySingular => (4, 0),
     };
-    report.copy_from_slice(&[code, col, kern.name().as_ptr() as usize as u32, kern.name().len() as u32]);
+    let shape = match rep.structure {
+        Structure::General => 0,
+        Structure::Diagonal => 1,
+        Structure::Upper => 2,
+        Structure::Lower => 3,
+        Structure::Spd => 4,
+        Structure::SpdFallback => 5,
+    };
+    let bits = rep.rcond.to_bits();
+    report.copy_from_slice(&[code, col, kern.name().as_ptr() as usize as u32, kern.name().len() as u32, shape, bits as u32, (bits >> 32) as u32]);
     1
 }
 

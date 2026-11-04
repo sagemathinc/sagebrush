@@ -283,7 +283,7 @@ fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
 /// four: each block's rows by plain substitution, the rows below by one fused update ([`sub4`]). Every element
 /// subtracts x_k * l(i,k) for k in increasing order and skips a zero x_k, as plain substitution does, so the
 /// bits are plain substitution's (the reference BLAS dtrsm's).
-fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
+pub(crate) fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
     let mut k0 = 0;
     while k0 < n {
         let kend = (k0 + SMALL_NB).min(n);
@@ -318,7 +318,7 @@ fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
 /// One column of X := U^-1 X (non-unit upper) by back substitution, blocked by four from the bottom: each
 /// block's rows by plain substitution (a zero x_k skips its division and update, as dtrsm), the rows above by
 /// one fused update over the block's columns in decreasing order. The bits are plain back substitution's.
-fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
+pub(crate) fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
     let mut kend = n;
     while kend > 0 {
         let k0 = kend.saturating_sub(SMALL_NB);
@@ -384,7 +384,7 @@ fn trsm_lower_unit(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64],
 /// top updated, then the top (dtrsm, left, upper, no transpose, non-unit; a zero x_k skips its division, as
 /// the reference BLAS does). `tmp` holds at least (n - n / 2) * r elements.
 #[allow(clippy::too_many_arguments)]
-fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
+pub(crate) fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize, tmp: &mut [f64], scratch: &mut [f64]) {
     if n == 0 || r == 0 {
         return;
     }

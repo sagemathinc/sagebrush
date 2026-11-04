@@ -3,17 +3,22 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// The committed numerics-core module's solve entry, nd_solve (engine/nd; numerics-core P2b-1): X = A \ B on one
-// thread by partial-pivoting LU, exactly as shipped. Its bits are the native scalar kernel family's
-// (engine/nd/src/lu.rs SOLVE_FNV); its status codes; and every boundary refusal (each pair of the five regions
-// overlapping, alignment, the work's length, the descriptor and the caller's stack placement), each leaving
-// memory untouched.
+// The committed numerics-core module's solve entry, nd_solve (engine/nd; numerics-core P2b-2): X = A \ B on one
+// thread, exactly as shipped: the structure pass, then the diagonal, triangular, Cholesky or LU path, and rcond
+// from the factors. Its bits are the native scalar kernel family's (engine/nd/src/lu.rs SOLVE_FNV for LU,
+// solve.rs PATHS_FNV for the triangular and Cholesky paths, X and rcond); its status and structure codes; and
+// every boundary refusal (each pair of the five regions overlapping, alignment, the work's length, the
+// descriptor and the caller's stack placement), each leaving memory untouched.
 const root = join(__dirname, "..", "..");
 const bytes = readFileSync(join(root, "wasm", "sagebrush-nd.wasm"));
 const PAGE = 65536;
 const BASE = 8 << 20, STACK = 1 << 20, ARENA = 16 << 20;
 // (engine/nd/src/lu.rs tests::SOLVE_FNV: the seeded 120 x 120 system, 3 right-hand sides, no-FMA family)
 const SOLVE_FNV = 0xd44c10badbe88400n;
+// (engine/nd/src/solve.rs tests::PATHS_FNV: upper, lower and SPD 120 x 120 systems, 3 right-hand sides, X and rcond)
+const PATHS_FNV = 0x206ee2f20728b15fn;
+// the report: [status, column, kernel name address, length, structure, rcond low word, rcond high word]
+const REPORT_WORDS = 7;
 
 type Exports = { __stack_pointer: WebAssembly.Global; nd_solve(desc: number): number; nd_info(what: number): number };
 
@@ -23,8 +28,10 @@ function instance(pages: number) {
   return { memory, ex };
 }
 const SCRATCH_LEN = instance(256).ex.nd_info(0);
-// engine/nd/src/lu.rs solve_work_len(n, r) = max(n * n, n * r) + scratch_len
-const workLen = (n: number, r: number) => Math.max(n * n, n * r) + SCRATCH_LEN;
+// engine/nd/src/solve.rs solve_work_len(n, r) = n * n + max(getrf n * n, getrs n * r, potrf n * n, potrs n * n + 2 n r,
+// 2 n) (+ scratch_len) = 2 n^2 + 2 n r + scratch_len
+const workLen = (n: number, r: number) => 2 * n * n + 2 * n * r + SCRATCH_LEN;
+const rcondAt = (u32: Uint32Array, report: number) => new Float64Array(new Uint32Array([u32[report / 4 + 5], u32[report / 4 + 6]]).buffer)[0];
 
 function seeded(count: number, state: { s: number }): Float64Array {
   const out = new Float64Array(count);
@@ -47,7 +54,7 @@ function layout(n: number, r: number, lda = n, ldb = n, slack = 0) {
   const ipiv = b + 8 * (ldb * Math.max(r - 1, 0) + n) + 8;
   const work = Math.ceil((ipiv + 4 * n + 8) / 8) * 8;
   const report = work + 8 * workLen(n, r);
-  const hi = report + 16 + slack;
+  const hi = report + 4 * REPORT_WORDS + slack;
   const words = [a, b, ipiv, work, report, n, r, lda, ldb, workLen(n, r), ARENA, hi];
   return { a, b, ipiv, work, report, hi, words, n, r, lda, ldb };
 }
@@ -62,8 +69,11 @@ test("nd_solve: the seeded 120 x 120 system with 3 right-hand sides gives the na
   f64.set(B, L.b / 8);
   u32.set(L.words, BASE / 4);
   assert.equal(ex.nd_solve(BASE), 1);
-  const rep = u32.slice(L.report / 4, L.report / 4 + 4);
+  const rep = u32.slice(L.report / 4, L.report / 4 + REPORT_WORDS);
   assert.equal(rep[0], 1, "status: solved");
+  assert.equal(rep[4], 0, "structure: general (LU)");
+  const rc = rcondAt(u32, L.report);
+  assert.ok(rc > 0 && rc <= 1, `rcond ${rc}`);
   assert.equal(new TextDecoder().decode(u8.slice(rep[2], rep[2] + rep[3])), "wasm-simd128-4x4");
   const X = f64.slice(L.b / 8, L.b / 8 + n * r);
   assert.equal(fnv(X), SOLVE_FNV, `X's bits: 0x${fnv(X).toString(16)}`);
@@ -118,6 +128,60 @@ test("nd_solve: leading dimensions above n give the same bits; a zero pivot repo
   }
 });
 
+test("nd_solve: the triangular and Cholesky paths give the native scalar family's bits and rcond; each structure and status code", () => {
+  const [n, r] = [120, 3];
+  const L = layout(n, r);
+  const { memory, ex } = instance(Math.ceil(L.hi / PAGE) + 1);
+  const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer);
+  const run = (A: Float64Array, B: Float64Array, nn = n, rr = r) => {
+    const M = nn === n && rr === r ? L : layout(nn, rr);
+    f64.set(A, M.a / 8);
+    f64.set(B, M.b / 8);
+    u32.set(M.words, BASE / 4);
+    assert.equal(ex.nd_solve(BASE), 1);
+    return { x: f64.slice(M.b / 8, M.b / 8 + nn * rr), status: u32[M.report / 4], structure: u32[M.report / 4 + 4], rcond: rcondAt(u32, M.report) };
+  };
+  // (solve.rs tests: upper_of, transpose and chol.rs spd, in the same arithmetic order)
+  const g = seeded(n * n, { s: 2031 }), B = seeded(n * r, { s: 2032 });
+  const up = g.slice();
+  for (let j = 0; j < n; j++) {
+    for (let i = j + 1; i < n; i++) up[i + j * n] = 0;
+    up[j + j * n] += 4;
+  }
+  const low = new Float64Array(n * n).map((_, k) => up[Math.floor(k / n) + (k % n) * n]);
+  const m = seeded(n * n, { s: 2034 }), spd = new Float64Array(n * n);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let k = 0; k < n; k++) s += m[k + i * n] * m[k + j * n];
+      spd[i + j * n] = s + (i === j ? n : 0);
+    }
+  }
+  const all: number[] = [];
+  for (const [A, code] of [[up, 2], [low, 3], [spd, 4]] as const) {
+    const o = run(A, B);
+    assert.equal(o.structure, code, "structure code");
+    assert.equal(o.status, 1);
+    all.push(...o.x, o.rcond);
+  }
+  const h = fnv(Float64Array.from(all));
+  assert.equal(h, PATHS_FNV, `X and rcond bits: 0x${h.toString(16)}`);
+  // diagonal (1), and its singular case: [1 0; 0 0] \ [1; 1] = [1; Inf], status 2 at column 1, rcond 0
+  let o = run(Float64Array.from([1, 0, 0, 0]), Float64Array.from([1, 1]), 2, 1);
+  assert.deepEqual([o.structure, o.status, o.x[0], o.x[1], o.rcond], [1, 2, 1, Infinity, 0]);
+  // symmetric with a positive diagonal but indefinite: Cholesky fails, LU (5)
+  o = run(Float64Array.from([1, 2, 2, 1]), Float64Array.from([1, 1]), 2, 1);
+  assert.deepEqual([o.structure, o.status], [5, 1]);
+  // nearly singular (4): [1 1; 1/2 1/2 + d], rcond about d / 3 just below eps
+  const d = 0.5 + 3 * 2.220446049250313e-16 * 0.9 - 0.5;
+  o = run(Float64Array.from([1, 0.5, 1, 0.5 + d]), Float64Array.from([1, 1]), 2, 1);
+  assert.deepEqual([o.structure, o.status], [0, 4]);
+  assert.ok(o.rcond > 0 && o.rcond < 2.220446049250313e-16, `rcond ${o.rcond}`);
+  // not computed (3): rcond NaN
+  o = run(Float64Array.from([1, 0, 0, Number.NaN]), Float64Array.from([1, 1]), 2, 1);
+  assert.ok(o.status === 3 && Number.isNaN(o.rcond));
+});
+
 test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand sides and dense or padded ldb (astra ND-S1, grader T1)", () => {
   const { memory, ex } = instance(Math.ceil((ARENA + (4 << 20)) / PAGE) + 1);
   const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
@@ -126,10 +190,10 @@ test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand
     for (const r of [0, 1, 3, 17]) {
       for (const ldb of [Math.max(n, 1), n + 4]) {
         const bspan = n === 0 || r === 0 ? 0 : ldb * (r - 1) + n;
-        const a = ARENA, b = ARENA + 64, ipiv = b + 8 * bspan + 64, work = Math.ceil((ipiv + 64) / 8) * 8, report = work + 8 * workLen(n, r), hi = report + 16 + 64;
+        const a = ARENA, b = ARENA + 64, ipiv = b + 8 * bspan + 64, work = Math.ceil((ipiv + 64) / 8) * 8, report = work + 8 * workLen(n, r), hi = report + 4 * REPORT_WORDS + 64;
         f64.fill(6, b / 8, b / 8 + bspan);
         if (n === 1) f64[a / 8] = 2;
-        u32.fill(0xdead, report / 4, report / 4 + 4);
+        u32.fill(0xdead, report / 4, report / 4 + REPORT_WORDS);
         const words = [a, b, ipiv, work, report, n, r, Math.max(n, 1), ldb, workLen(n, r), ARENA, hi];
         // (refused first: the work one element short; nothing written)
         u32.set(words.map((x, i) => (i === 9 ? x - 1 : x)), BASE / 4);
@@ -141,7 +205,7 @@ test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand
         assert.equal(ex.nd_solve(BASE), 1, `n=${n} r=${r} ldb=${ldb}`);
         assert.equal(u32[report / 4], 1, "status: solved");
         if (n === 0) {
-          assert.ok(u8.subarray(floor, hi).every((x, i) => x === before[i] || (floor + i >= report && floor + i < report + 16)), "n = 0 wrote outside the report");
+          assert.ok(u8.subarray(floor, hi).every((x, i) => x === before[i] || (floor + i >= report && floor + i < report + 4 * REPORT_WORDS)), "n = 0 wrote outside the report");
         } else {
           for (let j = 0; j < r; j++) {
             assert.equal(f64[b / 8 + j * ldb], 3, "x = b / a");
@@ -162,7 +226,7 @@ test("nd_solve refuses every bad layout before writing anything: each region pai
   const floor = ex.nd_info(1);
   f64.set(seeded(n * n, { s: 1 }), L.a / 8);
   f64.set(seeded(n * r, { s: 2 }), L.b / 8);
-  u32.fill(0xdead, L.report / 4, L.report / 4 + 4);
+  u32.fill(0xdead, L.report / 4, L.report / 4 + REPORT_WORDS);
   const put = (at: number, d: number[]) => u8.set(new Uint8Array(new Uint32Array(d.map((x) => x >>> 0)).buffer), at);
   const refused = (name: string, d: number[], descAt = BASE, frame?: [number, number]) => {
     put(descAt, d);

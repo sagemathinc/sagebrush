@@ -118,8 +118,9 @@ pub fn check(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<Job> {
 /// leading dimension lda and B n x nrhs with ldb, f64; ipiv n usizes; work work_len f64s; report
 /// [`REPORT_WORDS`] u32s).
 pub const SOLVE_DESC_WORDS: usize = 12;
-/// The solve's report: [status, first zero pivot column, kernel name address, kernel name length].
-pub const REPORT_WORDS: usize = 4;
+/// The solve's report: [status, first zero diagonal or pivot column, kernel name address, kernel name length,
+/// structure, rcond's f64 bits low word, high word].
+pub const REPORT_WORDS: usize = 7;
 
 /// A solve that passed [`check_solve`]: byte addresses and sizes.
 pub struct SolveJob {
@@ -149,7 +150,7 @@ pub fn check_solve(desc: u64, d: &[u32; SOLVE_DESC_WORDS], l: &Facts) -> Option<
     if [a, b, work].iter().any(|x| x % 8 != 0) || ipiv % us != 0 || report % 4 != 0 {
         return None;
     }
-    let need = crate::lu::solve_work_len(nu, ru)?;
+    let need = crate::solve::solve_work_len(nu, ru)?;
     if wu < need {
         return None;
     }
@@ -192,14 +193,14 @@ mod tests {
     /// A good solve layout: n = 10, nrhs = 2, lda = 12, ldb = 11, all in the arena from LO.
     fn good_solve() -> [u32; SOLVE_DESC_WORDS] {
         let (n, r, lda, ldb) = (10u64, 2u64, 12u64, 11u64);
-        let wl = crate::lu::solve_work_len(n as usize, r as usize).unwrap() as u64;
+        let wl = crate::solve::solve_work_len(n as usize, r as usize).unwrap() as u64;
         let us = core::mem::size_of::<usize>() as u64;
         let a = LO;
         let b = a + 8 * (lda * (n - 1) + n);
         let ipiv = (b + 8 * (ldb * (r - 1) + n) + 7) / 8 * 8;
         let work = (ipiv + us * n + 7) / 8 * 8;
         let report = work + 8 * wl;
-        let hi = report + 16;
+        let hi = report + 4 * REPORT_WORDS as u64;
         [a, b, ipiv, work, report, n, r, lda, ldb, wl, LO, hi].map(|x| x as u32)
     }
 
@@ -250,7 +251,7 @@ mod tests {
         let mut e = g;
         e[5] = 0;
         e[6] = 0;
-        e[9] = crate::lu::solve_work_len(0, 0).unwrap() as u32;
+        e[9] = crate::solve::solve_work_len(0, 0).unwrap() as u32;
         assert!(check_solve(DESC, &e, &L).is_some());
     }
 
