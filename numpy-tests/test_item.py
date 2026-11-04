@@ -21,3 +21,18 @@ for f in [lambda: np.array([[1, 2], [3, 4]]).T.item(0, 1), lambda: np.array([[1,
         print(repr(f()))
     except Exception as e:
         print(type(e).__name__, e)
+# (a 1-D array's a.item(i): its own axis, negative and out of range, and indices that aren't ints)
+b = np.array([10, 20, 30])
+for c in [(0,), (2,), (-1,), (-3,), (3,), (-4,), (1.0,), (1.5,), (True,), (np.int64(1),), (2 ** 70,), ((1,),), (1, 0)]:
+    try:
+        print("1-D", c, repr(b.item(*c)))
+    except Exception as e:
+        print("1-D", c, type(e).__name__, e)
+print(repr(b[::-1].item(0)), repr(b[1:].item(-1)), repr(np.arange(10)[::3].item(2)))
+# (a non-square array: each index bounded by its own axis)
+r = np.arange(12).reshape(3, 4)
+for c in [(2, 3), (0, 3), (3, 0), (2, -4), (-3, 3), (1, 4), (11,), (-12,), (12,)]:
+    try:
+        print("3x4", c, repr(r.item(*c)))
+    except Exception as e:
+        print("3x4", c, type(e).__name__, e)
