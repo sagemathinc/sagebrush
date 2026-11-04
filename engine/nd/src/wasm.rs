@@ -5,9 +5,10 @@
 //!
 //! The boundary is checked before any pointer is read or slice made ([`crate::boundary`], safe code: the
 //! memory model, what is enforced and what the host must guarantee). A job that fails a check returns 0
-//! having written nothing. `nd_gemm_part` is the only export that writes memory.
+//! having written nothing. `nd_gemm_part` and `nd_solve` (single-threaded, numerics-core P2b-1) are the only
+//! exports that write memory.
 
-use crate::boundary::{check, desc_region, Facts, DESC_WORDS};
+use crate::boundary::{check, check_solve, desc_region, desc_region_of, Facts, DESC_WORDS, REPORT_WORDS, SOLVE_DESC_WORDS};
 use crate::gemm::{gemm_cols, partition, scratch_len, Kernel, Mat};
 use core::arch::wasm32::memory_size;
 use core::ptr::{addr_of, with_exposed_provenance, with_exposed_provenance_mut};
@@ -89,6 +90,60 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
     let sv: &mut [f64] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.s0 + id * j.sstride), scratch_len());
     let (Some(am), Some(bm)) = (Mat::new(av, j.m, j.k, j.m.max(1)), Mat::new(bv, j.k, j.n, j.k.max(1))) else { return 0 };
     gemm_cols(&am, &bm, cv, j.m.max(1), j0, j1, sv) as u32
+}
+
+/// X = A \\ B on one thread (numerics-core P2b-1: [`crate::lu::solve`], partial-pivoting LU): A is overwritten
+/// by its factors, B by X, ipiv and work are used, and the report is written as [status, first zero pivot
+/// column, kernel name address, kernel name length], status 1 solved, 2 solved with an exactly zero pivot
+/// (Inf/NaN in X), 3 not computed (A or B has an Inf or NaN). Returns 1, or 0 if the job was refused,
+/// having written nothing.
+///
+/// Checked here, before any pointer is read or slice made ([`check_solve`]): the descriptor is 4-aligned and
+/// in the host's part; each of the five regions (A, B, ipiv, work, report) is aligned, nonzero, at or above
+/// `__heap_base`, within memory and at most `isize::MAX` bytes, lies in the arena, and overlaps none of the
+/// others; the descriptor lies outside the arena and this thread's frame below it; lda, ldb >= max(n, 1);
+/// work holds `solve_work_len(n, nrhs)`; every size is computed without overflow.
+///
+/// # Safety
+/// Host preconditions (the trusted host's contract for a solve; not checkable here): the caller's whole stack
+/// is disjoint from module-owned memory, the descriptor and the arena; A, B, ipiv, work and the report are
+/// this call's alone until it returns: no host, other job, thread or allocator reads, writes or reuses them
+/// meanwhile; and nothing writes the descriptor during the call.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub unsafe extern "C" fn nd_solve(desc: u32) -> u32 {
+    let probe = 0u8;
+    let facts = Facts {
+        mem: memory_bytes(),
+        floor: addr_of!(__heap_base) as usize as u64,
+        max_len: isize::MAX as u64,
+        frame: core::hint::black_box(addr_of!(probe)) as usize as u64,
+    };
+    if desc_region_of(u64::from(desc), SOLVE_DESC_WORDS, &facts).is_none() {
+        return 0;
+    }
+    // SAFETY: the descriptor's words lie in the host's part of memory, 4-aligned (checked above)
+    let d = with_exposed_provenance::<[u32; SOLVE_DESC_WORDS]>(desc as usize).read();
+    let Some(j) = check_solve(u64::from(desc), &d, &facts) else { return 0 };
+    let kern = Kernel::selected();
+    // SAFETY: each region was checked to be aligned, nonzero, in the host's part, within memory, at most
+    // isize::MAX bytes, in the arena and disjoint from the others and from the descriptor; an empty region is
+    // the empty slice (no address used)
+    let a_len = crate::gemm::span(j.n, j.n, j.lda).unwrap_or(0);
+    let b_len = crate::gemm::span(j.n, j.nrhs, j.ldb).unwrap_or(0);
+    let a: &mut [f64] = if a_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.a), a_len) };
+    let b: &mut [f64] = if b_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.b), b_len) };
+    let ipiv: &mut [usize] = if j.n == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.ipiv), j.n) };
+    let work: &mut [f64] = if j.work_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.work), j.work_len) };
+    let report: &mut [u32] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.report), REPORT_WORDS);
+    let Ok(status) = crate::lu::solve(kern, a, j.n, j.lda, b, j.nrhs, j.ldb, ipiv, work) else { return 0 };
+    let (code, col) = match status {
+        crate::lu::Status::Solved => (1, 0),
+        crate::lu::Status::Singular(c) => (2, c as u32),
+        crate::lu::Status::NonFinite => (3, 0),
+    };
+    report.copy_from_slice(&[code, col, kern.name().as_ptr() as usize as u32, kern.name().len() as u32]);
+    1
 }
 
 #[panic_handler]
