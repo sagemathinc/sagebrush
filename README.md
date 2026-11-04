@@ -1,5 +1,7 @@
 # Sagebrush
 
+*What Sagebrush is, in one page: [PRODUCT.md](PRODUCT.md) (Sagebrush Space, the Sagebrush app and the Sagebrush engine).*
+
 Fast, certified, parallel engines for research mathematics, written in Rust
 and usable from Python and JavaScript.
 
