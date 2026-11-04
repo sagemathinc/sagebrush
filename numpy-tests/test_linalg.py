@@ -57,3 +57,11 @@ for _s in [1e-320, 1e308]:
     _x = np.linalg.lstsq(_a, np.array([0.0, _s]), rcond=None)
     print(round(float(abs(_r[0, 0]) / _s), 3), round(float(np.linalg.svd(_a, compute_uv=False)[0] / _s), 3), round(float(_x[0][0]), 12), _x[2], int(np.linalg.matrix_rank(_a)), round(float(np.linalg.cond(_a)), 12))
 print(np.round(np.abs(np.linalg.qr(np.array([[1e-320], [1e-320]]))[0]), 6).tolist())
+# empty matrices: no singular values; U and V^T the identity of their full sizes, or empty when reduced
+for shp in [(0, 0), (0, 3), (2, 0)]:
+    Z = np.zeros(shp)
+    u, s, vh = np.linalg.svd(Z)
+    print("svd empty", shp, u.shape, s.shape, vh.shape, u.tolist(), vh.tolist())
+    u, s, vh = np.linalg.svd(Z, full_matrices=False)
+    print("svd empty econ", shp, u.shape, s.shape, vh.shape)
+    print("svdvals/pinv/rank empty", shp, np.linalg.svd(Z, compute_uv=False).shape, np.linalg.pinv(Z).shape, int(np.linalg.matrix_rank(Z)))

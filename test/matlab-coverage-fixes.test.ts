@@ -375,3 +375,22 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
     "127 0",
   ]);
 });
+
+test("svd, pinv and rank of an empty matrix: MATLAB's shapes, not an internal error (astra3 batch 1: MCF-02)", () => {
+  // svd of an m x n empty matrix has no singular values: s is 0x1; [U,S,V] gives U m x m and V n x n identities and
+  // S m x n ("econ": m x 0, 0 x 0, n x 0); pinv is n x m; rank is 0.
+  const out = lines(run([
+    "fprintf('%s %s\\n', mat2str(size(svd([]))), mat2str(size(svd(zeros(0, 3)))));",
+    "[U, S, V] = svd(zeros(2, 0)); fprintf('%s %s %s %s\\n', mat2str(size(U)), mat2str(size(S)), mat2str(size(V)), mat2str(U));",
+    "[U, S, V] = svd(zeros(0, 3)); fprintf('%s %s %s %s\\n', mat2str(size(U)), mat2str(size(S)), mat2str(size(V)), mat2str(V));",
+    "[U, S, V] = svd(zeros(2, 0), 'econ'); fprintf('%s %s %s\\n', mat2str(size(U)), mat2str(size(S)), mat2str(size(V)));",
+    "fprintf('%s %s %d %d\\n', mat2str(size(pinv([]))), mat2str(size(pinv(zeros(0, 3)))), rank([]), rank(zeros(0, 3)));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "[0 1] [0 1]",
+    "[2 2] [2 0] [0 0] [1 0;0 1]",
+    "[0 0] [0 3] [3 3] [1 0 0;0 1 0;0 0 1]",
+    "[2 0] [0 0] [0 0]",
+    "[0 0] [3 0] 0 0",
+  ]);
+});
