@@ -804,11 +804,15 @@ let kernel = null, journal = null; // the current notebook's
 // then rechecks the owner and the winning pin; a failed save rejects, and is
 // never taken as success because the metadata holds the pin.)
 let latestPkgset; // undefined: not asked yet; else a promise of the id or null
+// (the notebook being attached to `nb`, and when it is: its interpreter starts before its document is there,
+// openNotebook's useKernel, so what reads its metadata waits for it first, never the previous document's)
+let attaching = { id: null, done: Promise.resolve() };
 async function notebookPkgset(owner) {
   const shown = () => {
     if (current.id !== owner) throw new Error("its notebook was left before its package set was pinned");
   };
   for (let round = 0; round < 4; round++) {
+    if (attaching.id === owner) await attaching.done;
     shown();
     const pin = nb.meta.pkgset;
     if (pin !== undefined) {
@@ -842,6 +846,7 @@ async function notebookPkgset(owner) {
 // (WorkerKernel.holdMessages).  The notebook left meanwhile: nothing is pinned
 // into another; its next start resolves again.
 async function pinUsedPkgset(owner, S) {
+  if (attaching.id === owner) await attaching.done;
   if (current.id !== owner) return;
   const pin = nb.meta.pkgset;
   if (pin === undefined) nb.setMeta({ pkgset: S });
@@ -893,7 +898,7 @@ function makeKernel(owner) {
       // pkgsetUsed); a replayed session's is the one it recorded
       const replayed = j?.replayPkgset();
       const S = replayed !== undefined ? replayed : owner !== null ? await notebookPkgset(owner) : null;
-      if (S && replayed === undefined && owner !== null && nb.meta.pkgset === undefined) unpinned.set(w, S);
+      if (S && replayed === undefined && owner !== null && current.id === owner && nb.meta.pkgset === undefined) unpinned.set(w, S);
       if (S) w.postMessage({ pkgset: S });
       j?.pkgsetSent(S);
       const old = await j?.replayFiles();
@@ -1754,7 +1759,9 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   filesShown();
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
-  const doc = await nb.attach(store);
+  const attachP = nb.attach(store);
+  attaching = { id, done: attachP.then(() => {}, () => {}) };
+  const doc = await attachP;
   attachSeq++;
   if (arrivalWait && arrivalWait.id !== id) {
     if (statusEl.textContent === arrivalWait.said) statusEl.textContent = "";

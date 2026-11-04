@@ -288,6 +288,30 @@ const fetched = (s, S) => s.asked.includes(`/pkgset/${S}.json`);
   } finally { await c.close(); await s.stop(); }
 }
 
+// 7. a new notebook opened after a pinned one: its interpreter starts before its document is attached, and
+// its start never takes the previous document's pin; its own first import pins it (each of several in turn)
+{
+  const s = await site(), c = await chromium();
+  try {
+    s.setAuto(S1);
+    const t = await c.tab();
+    await t.open(s.url + "?runner=0");
+    const pinned = [];
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) {
+        const before = await t.ev("localStorage.getItem('sagebrush-current')");
+        await t.ev("document.querySelector('#filemenu [data-f=new]').click()");
+        await t.until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(before)}`, 10000);
+        await t.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      }
+      const k = await t.startRun(HELLO);
+      await t.done(k);
+      pinned.push((await t.ev("sagebrush.notebook.meta.pkgset")) === S1);
+    }
+    ok(pinned.every(Boolean), `each new notebook is pinned by its own first import (${JSON.stringify(pinned)})`);
+  } finally { await c.close(); await s.stop(); }
+}
+
 rmSync(setDir, { recursive: true, force: true });
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
