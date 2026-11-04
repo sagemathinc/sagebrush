@@ -121,32 +121,35 @@ export async function browser({ cdpMs = CDP_MS } = {}) {
   const requests = []; // every Network.requestWillBeSent, in every session: {sessionId, url}
   const listeners = []; // (method, params, sessionId) => void
   // What a call left unanswered says about the browser (grader's flake log: runner-broker P1's Network.setCookie, no
-  // answer within 30 s, twice under load, Nov 4): the target list, whether the same session still answers, whether
-  // the browser itself does, and the sessions; each step bounded, nothing retried, and the call still fails
+  // answer within 30 s, twice under load, Nov 4): the target list, whether the same session still answers (and which
+  // context did: Window, a worker's scope), whether the browser itself does, and the sessions; each step bounded,
+  // nothing retried, and the call still fails
   async function diagnose(sessionId) {
     const step = async (what, f) => { try { return `${what}: ${await f()}`; } catch (e) { return `${what}: ${String(e?.message ?? e).slice(0, 160)}`; } };
     const json = async (path) => (await fetch(`http://127.0.0.1:${cdpPort}${path}`, { signal: AbortSignal.timeout(5000) })).json();
     const lines = [
       await step("targets (/json)", async () => JSON.stringify((await json("/json")).map((t) => [t.type, String(t.url).slice(0, 60)])).slice(0, 600)),
-      await step("the same session, Runtime.evaluate(1)", async () => {
+      await step("the same session, Runtime.evaluate", async () => {
         const id = ++n;
         try {
-          const r = await within(5000, "Runtime.evaluate(1)", new Promise((res) => { waiting.set(id, res); ws.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression: "1", returnByValue: true }, ...(sessionId ? { sessionId } : {}) })); }));
+          const r = await within(5000, "its probe", new Promise((res) => { waiting.set(id, res); ws.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression: "globalThis.constructor.name", returnByValue: true }, ...(sessionId ? { sessionId } : {}) })); }));
           return r.error ? `error ${JSON.stringify(r.error).slice(0, 120)}` : `answered (${r.result?.value})`;
         } finally {
           waiting.delete(id);
         }
       }),
-      await step("the browser, Browser.getVersion", async () => {
-        const bws = new WebSocket((await json("/json/version")).webSocketDebuggerUrl);
+      // (one deadline for the whole step: the endpoint's address, its WebSocket and the call)
+      await step("the browser, Browser.getVersion", () => within(5000, "its probe", (async () => {
+        let bws = null;
         try {
-          await within(5000, "its WebSocket", new Promise((r, j) => { bws.onopen = r; bws.onerror = () => j(new Error("its WebSocket failed")); }));
-          const r = await within(5000, "Browser.getVersion", new Promise((res) => { bws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id === 1) res(m); }; bws.send(JSON.stringify({ id: 1, method: "Browser.getVersion" })); }));
+          bws = new WebSocket((await (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).json()).webSocketDebuggerUrl);
+          await new Promise((r, j) => { bws.onopen = r; bws.onerror = () => j(new Error("its WebSocket failed")); });
+          const r = await new Promise((res) => { bws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id === 1) res(m); }; bws.send(JSON.stringify({ id: 1, method: "Browser.getVersion" })); });
           return r.result ? `answered (${r.result.product})` : `error ${JSON.stringify(r.error).slice(0, 120)}`;
         } finally {
-          bws.close();
+          bws?.close();
         }
-      }),
+      })())),
       `sessions: ${attached.size} attached, ${[...attached.values()].filter((t) => t.detached).length} detached; ${waiting.size} other calls unanswered`,
     ];
     return lines.join("; ");
@@ -181,6 +184,8 @@ export async function browser({ cdpMs = CDP_MS } = {}) {
   let scriptId = null;
   return {
     send, ev, attached, requests, listeners,
+    // (the Chromium this harness started: tests only, to stall it (web/test-broker-lib-diag.mjs))
+    pid: chrome.pid,
     // (the recorder for every page from now on: replaces the one before)
     async record(g14 = false) {
       if (scriptId) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: scriptId });
