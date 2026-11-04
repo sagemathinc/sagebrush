@@ -11,5 +11,6 @@
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
   "swRaw": 219600,
-  "swGzip": 54011
+  "swGzip": 54103,
+  "transition": "TRANSITION: web/sw.js source and sw.js raw are unchanged; Q7 changes the core build id, rotating about 70 generated 16-hex chunk names and moving normalized gzip-9 by 28 B through hash entropy. swGzip 54,103 is the exact landing value 54,039 plus 64 B tight headroom. Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
 }
