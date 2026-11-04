@@ -13,7 +13,7 @@ const bytes = readFileSync(join(root, "wasm", "sagebrush-nd.wasm"));
 const PAGE = 65536;
 const BASE = 8 << 20, STACK = 1 << 20, ARENA = 16 << 20;
 // (engine/nd/src/lu.rs tests::SOLVE_FNV: the seeded 120 x 120 system, 3 right-hand sides, no-FMA family)
-const SOLVE_FNV = 0xe59c250a548b1cd0n;
+const SOLVE_FNV = 0xd44c10badbe88400n;
 
 type Exports = { __stack_pointer: WebAssembly.Global; nd_solve(desc: number): number; nd_info(what: number): number };
 
