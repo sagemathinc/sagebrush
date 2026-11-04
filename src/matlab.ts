@@ -17,6 +17,7 @@
 // of the workspace, so it is looked up when it runs.  See design/matlab.md.
 
 import { inBlockComment } from "./m-file";
+import { checkPageOrder, PageOrderError, MATLAB_DYNAMIC_NAMES, type PageOrder } from "./page-order";
 
 export class MatlabSyntaxError extends Error {
   /** atEnd: the input ended where more was needed (an open block, bracket or continuation) */
@@ -970,12 +971,40 @@ class Emitter {
   // (whether the program can clear a variable as it runs: only then do top-level reads
   // check that the variable still exists, so other programs' reads stay plain names)
   mayClear = false;
+  // Page-order scoping (src/page-order.ts): the cell's variables NAME are TO
+  // here, at the top level (a function's workspace and an anonymous function's
+  // parameters are their own); with `before`, a cell that may read the name
+  // before it surely sets it starts TO as a copy of BEFORE (needsInit)
+  pageOrder = new Map<string, { to: string; mode: "definition" | "all"; before: string; seenDef: boolean; needsInit: boolean }>();
+  private depth = 0;
+  // (a script-level return seen: what follows it may not run, so no later definition is sure, MATPO-SEM-2)
+  private mayReturn = false;
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
   }
 
   emit(line: string) { this.out.push(this.ind + line); }
+
+  /** a variable's Python name here: page-order scoping's at the top level */
+  v(name: string, scope: Scope): string {
+    if (scope.fn || scope.anon || this.fnNames.has(name)) return pyName(name);
+    return this.pageOrder.get(name)?.to ?? pyName(name);
+  }
+  // (page order: a top-level read of the name, or a definition: a plain one at
+  // the top level, not in a block, is sure to happen before what follows it)
+  private poRead(name: string, scope: Scope) {
+    if (scope.fn || scope.anon) return;
+    const r = this.pageOrder.get(name);
+    if (r && r.mode === "definition" && !r.seenDef) r.needsInit = true;
+  }
+  private poDef(name: string, scope: Scope, plain: boolean) {
+    if (scope.fn || scope.anon) return;
+    const r = this.pageOrder.get(name);
+    if (!r || r.mode !== "definition" || r.seenDef) return;
+    if (plain && this.depth === 1 && !this.mayReturn) r.seenDef = true;
+    else r.needsInit = true;
+  }
   indent(f: () => void) {
     const saved = this.ind;
     this.ind += "    ";
@@ -1002,7 +1031,16 @@ class Emitter {
     this.indent(() => {
       for (const f of this.funcs) this.funcDef(f);
       const scope: Scope = { fn: null, vars: new Set(), globals: new Set(), persistents: new Set() };
+      const prologueAt = this.out.length;
       this.stmts(stmts, scope);
+      // (page order: the earlier value, where the cell may read it first)
+      const pro: string[] = [];
+      for (const [name, r] of this.pageOrder) {
+        if (r.mode !== "definition" || !r.needsInit) continue;
+        const b = r.before === name ? pyName(name) : r.before;
+        pro.push(`${this.ind}if ${JSON.stringify(b)} in globals(): ${r.to} = _m.cp(${b})`);
+      }
+      this.out.splice(prologueAt, 0, ...pro);
       // (the figures the program drew)
       this.emit("_m.end_program()");
     });
@@ -1122,7 +1160,12 @@ class Emitter {
 
   // -------- statements
   stmts(list: Stmt[], scope: Scope) {
-    for (const s of list) this.stmt(s, scope);
+    this.depth++;
+    try {
+      for (const s of list) this.stmt(s, scope);
+    } finally {
+      this.depth--;
+    }
   }
 
   stmt(s: Stmt, scope: Scope) {
@@ -1150,7 +1193,9 @@ class Emitter {
         const it = this.iterable(s.e, scope);
         for (const n of assigned(s.body)) scope.vars.add(n);
         scope.vars.add(v);
-        this.emit(`for ${pyName(v)} in ${it}:`);
+        // (page order: the loop may not run, so not a sure definition)
+        this.poDef(v, scope, false);
+        this.emit(`for ${this.v(v, scope)} in ${it}:`);
         this.indent(() => {
           this.afterAssign(v, scope);
           this.stmts(s.body, scope);
@@ -1187,7 +1232,8 @@ class Emitter {
         this.indent(() => {
           if (s.id) {
             scope.vars.add(s.id);
-            this.emit(`${pyName(s.id)} = _m.caught(_e)`);
+            this.poDef(s.id, scope, false);
+            this.emit(`${this.v(s.id, scope)} = _m.caught(_e)`);
             this.afterAssign(s.id, scope);
           } else this.emit("_m.caught(_e)");
           this.stmts(s.handler, scope);
@@ -1198,13 +1244,16 @@ class Emitter {
       case "continue": this.emit("continue"); return;
       case "return":
         if (scope.fn) this.emit(`return ${this.retExpr(scope.fn)}`);
-        else this.emit("raise _m.ScriptReturn()");
+        else {
+          this.mayReturn = true;
+          this.emit("raise _m.ScriptReturn()");
+        }
         return;
       case "global":
         for (const n of s.names) {
           scope.vars.add(n);
           scope.globals.add(n);
-          this.emit(`${pyName(n)} = _m.global_get(${JSON.stringify(n)})`);
+          this.emit(`${this.v(n, scope)} = _m.global_get(${JSON.stringify(n)})`);
         }
         return;
       case "persistent":
@@ -1219,7 +1268,7 @@ class Emitter {
 
   /** after a variable changes: globals and persistents are written back */
   afterAssign(name: string, scope: Scope) {
-    if (scope.globals.has(name)) this.emit(`_m.global_set(${JSON.stringify(name)}, ${pyName(name)})`);
+    if (scope.globals.has(name)) this.emit(`_m.global_set(${JSON.stringify(name)}, ${this.v(name, scope)})`);
     if (scope.persistents.has(name)) this.emit(`_m.persistent_set(${JSON.stringify(scope.fn?.name ?? "")}, ${JSON.stringify(name)}, ${pyName(name)})`);
   }
 
@@ -1295,7 +1344,7 @@ class Emitter {
       const lv = s.lhs[0]!;
       const rhs = this.valueExpr(s.rhs, scope);
       this.store(lv, rhs, scope);
-      if (s.print) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
+      if (s.print) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${this.v(lv.name, scope)})`);
       return;
     }
     // [S.a] = ...: a field of a struct array, a variable already defined, takes one output per
@@ -1337,14 +1386,16 @@ class Emitter {
     let off = "0";
     s.lhs.forEach((lv, k) => {
       if (lv && csField(lv) && csBrace(lv)) {
-        this.emit(`${pyName(lv.name)} = _m.set_brace_cs(${this.varRead(lv.name, scope)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
+        this.poDef(lv.name, scope, false);
+        this.emit(`${this.v(lv.name, scope)} = _m.set_brace_cs(${this.varRead(lv.name, scope)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
       } else if (lv && csField(lv)) {
         const f = (lv.path[lv.path.length - 1] as Extract<Expr, { k: "field" }>).name;
-        this.emit(`${pyName(lv.name)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
+        this.poDef(lv.name, scope, false);
+        this.emit(`${this.v(lv.name, scope)} = _m.set_field_cs(${this.varRead(lv.name, scope)}, ${JSON.stringify(f)}, ${t}[${off}:${off} + ${counts[k]}], ${subs[k]}, ${poss[k]})`);
       } else if (lv) this.store(lv, `${t}[${off}]`, scope);
       off = counts[k] === "1" ? (off === "0" ? "1" : `${off} + 1`) : `${off} + ${counts[k]}`;
     });
-    if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
+    if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${this.v(lv.name, scope)})`);
   }
 
   /** an assignment's right side: a fresh value (a variable's is copied) */
@@ -1357,13 +1408,16 @@ class Emitter {
   }
 
   store(lv: LValue, value: string, scope: Scope) {
-    const name = pyName(lv.name);
+    const name = this.v(lv.name, scope);
     if (!lv.path.length) {
+      this.poDef(lv.name, scope, true);
       this.emit(`${name} = ${value}`);
       scope.vars.add(lv.name);
       this.afterAssign(lv.name, scope);
       return;
     }
+    // (x(i) = v reads x first)
+    this.poRead(lv.name, scope);
     const base = scope.globals.has(lv.name) ? this.varRead(lv.name, scope)
       : scope.fn || scope.persistents.has(lv.name) ? name : `(${name} if ${JSON.stringify(name)} in globals() else None)`;
     // x(i) = v and x(i, j) = v: the common cases, without the path
@@ -1443,14 +1497,16 @@ class Emitter {
    * registry at that point, since any call (even earlier in the same
    * expression) may have changed it, as MATLAB's global page says */
   varRead(name: string, scope: Scope): string {
-    return scope.globals.has(name) ? `_m.global_get(${JSON.stringify(name)})` : pyName(name);
+    this.poRead(name, scope);
+    return scope.globals.has(name) ? `_m.global_get(${JSON.stringify(name)})` : this.v(name, scope);
   }
 
   /** a name that is not a known variable: the value it names when the code runs */
   lookup(name: string, scope: Scope): string {
     if (this.fnNames.has(name)) return pyName(name);
     if (scope.fn) return `_m.fn(${JSON.stringify(name)})`;
-    const py = pyName(name);
+    this.poRead(name, scope);
+    const py = this.v(name, scope);
     return `(${py} if ${JSON.stringify(py)} in globals() else _m.fn(${JSON.stringify(name)}))`;
   }
 
@@ -1465,7 +1521,8 @@ class Emitter {
           // (at the top level, a variable that clear removed: the function of that name
           // again, as MATLAB's, so upper = 7; clear; upper('abc') works)
           if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.fnNames.has(e.name)) {
-            const py = pyName(e.name);
+            this.poRead(e.name, scope);
+            const py = this.v(e.name, scope);
             return `(${py} if ${JSON.stringify(py)} in globals() else _m.val(_m.fn(${JSON.stringify(e.name)})))`;
           }
           return this.varRead(e.name, scope);
@@ -1666,7 +1723,8 @@ class Emitter {
         inner.vars.add(n);
       } else if (!scope.fn && !this.fnNames.has(n)) {
         // (at the top level: a workspace variable now, else a function)
-        captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${JSON.stringify(pyName(n))} in globals() else _m.NOVAR)`);
+        this.poRead(n, scope);
+        captured.push(`${pyName(n)}=(_m.cp(${this.v(n, scope)}) if ${JSON.stringify(this.v(n, scope))} in globals() else _m.NOVAR)`);
         inner.vars.add(n);
         inner.caps!.add(n);
       }
@@ -1752,10 +1810,29 @@ export function unparse(e: Expr, prec = 0): string {
  * cells, and an error is reported (MATLAB's message on stderr) without ending
  * the session; `_matlab.cell_failed()` then says the cell failed.
  */
-export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean } = {}): string {
+/** The functions a MATLAB cell defines, as the translator parses them (src/rename.ts: page order); null if it doesn't parse. */
+export function matlabFunctionNames(src: string): string[] | null {
+  try {
+    const p = new Parser(lex(src));
+    p.program();
+    return p.functions.map((f) => f.name);
+  } catch (e) {
+    if (e instanceof MatlabSyntaxError) return null;
+    throw e;
+  }
+}
+
+export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean; pageOrder?: PageOrder } = {}): string {
+  const po = checkPageOrder(opts.pageOrder);
+  if (po.size && !opts.cell) throw new PageOrderError("not a notebook cell");
+  if (po.size && MATLAB_DYNAMIC_NAMES.test(src)) throw new PageOrderError("the cell names variables at run time");
   const p = new Parser(lex(src));
   const stmts = p.program();
-  return new Emitter(p.functions, filename, !!opts.cell).program(stmts, src);
+  // (a function the cell defines is bound by its own name: page order renames variables only, MATPO-SEM-1)
+  if (p.functions.some((f) => po.has(f.name))) throw new PageOrderError("the cell defines a function of that name");
+  const em = new Emitter(p.functions, filename, !!opts.cell);
+  for (const [name, d] of po) em.pageOrder.set(name, { ...d, seenDef: false, needsInit: false });
+  return em.program(stmts, src);
 }
 
 /** A function file (found on the path) as Python defining its functions. */

@@ -20,7 +20,7 @@ import { BlockEditor } from "../board/blocks.ts";
 import { loadRemotePicture, safeHtml } from "../safe-html.ts";
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { cellId } from "./ipynb.js";
-import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
+import { Reactive, SCOPE_SEP, pageOrderMapsFor } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 export const GRAPH = "application/vnd.sagebrush.graph+json";
@@ -1009,7 +1009,7 @@ export function createNotebook(root, opts = {}) {
         // (Magma: a cell's page-order map goes beside its code to the translation, the analyzer's and the
         // interpreter's; only an interpreter here that takes it: a remote one doesn't yet, so its cells keep
         // their multiple-definition errors, src/notebook-reactive.ts pageOrderMaps)
-        pageOrderMaps: k.pageOrderMaps === true && !k.remote,
+        pageOrderMaps: pageOrderMapsFor(k),
         analyze(code, pageOrder) {
           const key = mode + "\0" + code + (pageOrder ? "\0" + JSON.stringify(pageOrder) : "");
           if (!analyses.has(key)) {

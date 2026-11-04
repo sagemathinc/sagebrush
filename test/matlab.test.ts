@@ -254,7 +254,9 @@ test("reactive notebook: a MATLAB cell's definitions and references (src/dataflo
   assert.deepEqual(names("f(y)\n3 + 4\nans"), [[], ["f", "y"]]);
   assert.deepEqual(names("for k = 1:n\n  s = s + k;\nend"), [["k", "s"], ["n", "s"]]);
   assert.throws(() => analyzeCell("x = [1 2", "c", { mode: "matlab" }), MatlabSyntaxError);
+  // (page order: only the renamer's own names, beside the code with an inert comment; test/matlab-page-order.test.ts)
   assert.equal(renameInCell("x = 1", "x", "x_2", { mode: "matlab" }), null);
+  assert.equal(renameInCell("x = 1", "x", "x\u02b92", { mode: "matlab" }), "x = 1\n% sagebrush page-order: x x\u02b92 all");
   assert.equal(forwardRefers("x = 1", "x", "matlab"), false);
 });
 
