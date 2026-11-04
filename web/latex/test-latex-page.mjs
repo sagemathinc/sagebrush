@@ -1376,11 +1376,11 @@ try {
   {
     const T = `document.querySelector(".tex-head .tex-title")`;
     await open(await mk("/m0/mixed.tex", [97, 13, 10, 98, 10, 99, 10]));
-    await until(`${T}?.textContent === "mixed.tex" && !!document.querySelector(".tex-src")`, 20000);
+    const asText = await until(`${T}?.textContent === "mixed.tex" && !!document.querySelector(".tex-src")`, 20000);
     const plain = await ev(`(() => { const t = ${T}; return { role: t.getAttribute("role"), tab: t.tabIndex, tip: t.title, cls: t.className }; })()`);
     await ev(`(${T}.click(), 1)`); await sleep(400);
     const noField = await ev(`!document.querySelector(".tex-head .tex-titlein")`);
-    check(plain.role === null && plain.tab === -1 && !/rename/i.test(plain.tip) && !/renamable/.test(plain.cls) && noField, "M0: a file that can't be saved here: no rename offered (no button role, no tab stop, no click to rename)", { plain, noField });
+    check(asText && plain.role === null && plain.tab === -1 && !/rename/i.test(plain.tip) && !/renamable/.test(plain.cls) && noField, "M0: a file that can't be saved here, opened as text: no rename offered (no button role, no tab stop, no click to rename)", { asText, plain, noField });
   }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
