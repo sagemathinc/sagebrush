@@ -14,9 +14,10 @@ import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
 import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
-import { Engine } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render } from "./engine/render.mjs";
+import { setKatex, render, installBeamer } from "./engine/render.mjs";
+import * as beamerCode from "./engine/beamer.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -152,6 +153,49 @@ check("hl-mathenv", run("\\begin{align}", "N").end === "E:align" && run("\\end{a
 }
 // (a blank line ends inline and display math, as in TeX; not a math environment, not verbatim)
 check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end === "N" && run("", "E:align").end === "E:align" && run("", "V:verbatim").end === "V:verbatim" && run("% c", "M").end === "M", null);
+
+// ---- beamer's code, a chunk of its own (engine/beamer.mjs; first here, as installing it is for the process): until it is
+//      installed, a document that needs it (the class beamer, or an overlay command in any class) says so and renders
+//      without it; installed, the same text renders its frames and steps, without being expanded again
+{
+  setKatex((src) => src);
+  const beamerDoc = "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{T}\nA \\pause B\n\\end{frame}\n\\end{document}\n";
+  const e = new Engine(), before = e.update(beamerDoc);
+  const overlay = new Engine().update("\\documentclass{article}\n\\begin{document}\nX \\only<2>{Y}\n\\end{document}\n");
+  const plain = new Engine().update("\\documentclass{article}\n\\begin{document}\nX \\alert{Y}\n\\end{document}\n");
+  // (a beamer document's frame environment, \frame{} and blocks, before the chunk: rendered as unknown ones, no error)
+  const early = new Engine().update("\\documentclass{beamer}\n\\begin{document}\n\\frame{F}\n\\begin{frame}G\\end{frame}\n\\begin{block}{T}H\\end{block}\n\\end{document}\n");
+  const eh = early.chunks.join("");
+  check("beamer-chunk-before-install", early.needBeamer && early.stats.outcome === "ok" && ["F", "G", "H"].every((x) => eh.includes(x)) && !eh.includes('class="slide') && !eh.includes("bblock"), eh.slice(0, 400));
+  check("beamer-chunk-needed", before.needBeamer && !before.chunks.join("").includes('class="slide') && overlay.needBeamer && !plain.needBeamer, { before: before.needBeamer, overlay: overlay.needBeamer, plain: plain.needBeamer });
+  // (needed however the overlay command or the class is reached: from a macro, from an \input file, the class with options)
+  const needs = (doc, ei) => new Engine().update(doc, ei ? { inputs: { files: ei.files, resolve: ei.resolve, version: 1 } } : {}).needBeamer;
+  const art = (body) => "\\documentclass{article}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  const viaInput = (await import("./inputs.ts")).engineInputs("/b/doc.tex", new Map([["/b/part.tex", { text: "P \\uncover<2>{Q}\n" }]]));
+  const ways = { macro: needs(art("\\newcommand{\\later}[1]{\\pause #1}\\later{Z}")), input: needs(art("\\input{part}"), viaInput),
+    options: needs("\\documentclass[handout,aspectratio=169,11pt]{beamer}\n\\begin{document}\nX\n\\end{document}\n"), preamble: needs("\\documentclass{article}\n\\only<1>{}\n\\begin{document}\nX\n\\end{document}\n"),
+    each: ["only", "uncover", "visible", "invisible", "pause", "onslide", "alt"].every((c) => needs(art("\\" + c + "<2>{A}{B}"))) };
+  check("beamer-chunk-needed-every-way", Object.values(ways).every(Boolean), ways);
+  // (a chunk that can't be loaded: the render without it, saying why; one that can: the render again)
+  const failed = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("HTTP 404")), () => null);
+  check("beamer-chunk-load-failed", failed.chunks[0].includes("could not be loaded (HTTP 404); reload the page to try again.") && failed.problems.some((p) => p.kind === "beamer" && p.name === "HTTP 404")
+    && failed.chunkPos[0] === -1 && failed.chunkPos.length === failed.chunks.length, { first: failed.chunks[0], pos: failed.chunkPos.length, chunks: failed.chunks.length });
+  // (the reason is the error's text: escaped in the notice, and cut at 200 characters)
+  const tagged = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("<b>x</b>")), () => null);
+  const long = await withBeamer(new Engine().update(beamerDoc), () => Promise.reject(new Error("y".repeat(300))), () => null);
+  const longWhy = long.problems.find((p) => p.kind === "beamer")?.name;
+  check("beamer-chunk-load-failed-why", tagged.chunks[0].includes("(&lt;b&gt;x&lt;/b&gt;)") && !tagged.chunks[0].includes("<b>x") && longWhy === "y".repeat(200) && long.chunks[0].includes("(" + "y".repeat(200) + ")"), { tagged: tagged.chunks[0], longWhy: longWhy?.length });
+  let again = 0, plainLoads = 0; const ok = await withBeamer(new Engine().update(beamerDoc), async () => {}, () => (again++, "again")), none = await withBeamer(plain, async () => { plainLoads++; }, () => "again");
+  check("beamer-chunk-loaded-renders-again", ok === "again" && again === 1 && none === plain && plainLoads === 0, { ok, again, plainLoads });
+  // (the worker's fetch, once(): one load for every caller, a failed one too; each later render says reload)
+  let loads = 0; const fail = once(() => (++loads, Promise.reject(new Error("x")))), good = once(() => (++loads, Promise.resolve("m")));
+  const r1 = await fail().catch((e) => e.message), r2 = await fail().catch((e) => e.message), r3 = await good(), r4 = await good();
+  const again1 = await withBeamer(new Engine().update(beamerDoc), fail, () => null);
+  check("beamer-chunk-once", r1 === "x" && r2 === "x" && r3 === "m" && r4 === "m" && loads === 2 && again1.chunks[0].includes("(x); reload the page to try again."), { r1, r2, r3, r4, loads });
+  installBeamer(beamerCode);
+  const after = e.update(beamerDoc);
+  check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
+}
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
