@@ -24,7 +24,8 @@ try {
   const err = await fails(b.ev("new Promise(() => {})"));
   let took = Date.now() - t0;
   ok(err !== null && /^CDP Runtime\.evaluate: no answer within 1\.5 s \[/.test(err), `a call with no answer still fails, naming its method: ${String(err).slice(0, 80)}`);
-  ok(/targets \(\/json\): \[\["page","about:blank"\]\]/.test(err ?? ""), "…with the target list");
+  // (the page among them; a browser may list others too, as Google Chrome lists an extension's background page)
+  ok(/targets \(\/json\): \[.*\["page","about:blank"\]/.test(err ?? ""), "…with the target list (the page among them)");
   ok(/the same session, Runtime\.evaluate: answered \(Window\)/.test(err ?? ""), "…whether the same session still answers, and which context did (here the page: Window)");
   ok(/the browser, Browser\.getVersion: answered \(\w*Chrom/.test(err ?? ""), "…whether the browser itself does");
   ok(/; sessions: 0 attached, 0 detached; 0 other calls unanswered\]$/.test(err ?? ""), "…and the sessions and other calls, counted (none)");
