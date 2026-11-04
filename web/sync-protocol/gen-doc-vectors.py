@@ -538,6 +538,8 @@ def main():
             {"for": "snapshot", "when": "a first checkpoint from a verified cursor: cut_patch and chain", "message": {**snap, "cut_patch": pid, "chain": hexs("c")}, "ok": {**snap, "cut_patch": pid, "chain": hexs("c")}},
             {"for": "snapshot", "when": "chain without cut_patch", "message": {**snap, "chain": hexs("c")}, "refused": "invalid"},
             {"for": "snapshot", "when": "cut_patch not a patch id", "message": {**snap, "cut_patch": "x"}, "refused": "invalid"},
+            {"for": "snapshot", "when": "cut_patch with a 10-character time part", "message": {**snap, "cut_patch": "000000000a_client"}, "refused": "invalid"},
+            {"for": "snapshot", "when": "cut_patch with a 65-character client", "message": {**snap, "cut_patch": "0000000000a_" + "c" * 65}, "refused": "invalid"},
             {"for": "snapshot", "when": "chain not 64 lowercase hex", "message": {**snap, "cut_patch": pid, "chain": hexs("C")}, "refused": "invalid"},
             {"for": "pull", "when": "start at the newest checkpoint", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 0, "start": "snapshot"}, "ok": {"start": "snapshot"}},
             {"for": "pull", "when": "asking for a token", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 3, "token": None}, "ok": {"token": None}},

@@ -1309,6 +1309,34 @@
    },
    {
     "for": "snapshot",
+    "when": "cut_patch with a 10-character time part",
+    "message": {
+     "t": "snapshot",
+     "req": 7,
+     "doc": "0123456789ab",
+     "at_seq": 12,
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "bytes": 100,
+     "cut_patch": "000000000a_client"
+    },
+    "refused": "invalid"
+   },
+   {
+    "for": "snapshot",
+    "when": "cut_patch with a 65-character client",
+    "message": {
+     "t": "snapshot",
+     "req": 7,
+     "doc": "0123456789ab",
+     "at_seq": 12,
+     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "bytes": 100,
+     "cut_patch": "0000000000a_ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "refused": "invalid"
+   },
+   {
+    "for": "snapshot",
     "when": "chain not 64 lowercase hex",
     "message": {
      "t": "snapshot",

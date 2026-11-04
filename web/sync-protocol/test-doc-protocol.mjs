@@ -531,7 +531,7 @@ throwsCode(() => P.jcs("é".repeat(10), 21), "limit", "jcs: two-byte characters 
   const J = JSON.stringify;
   const C = V.checkpoint ?? {};
   const sorted = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v);
-  check(Array.isArray(C.requests) && C.requests.length === 12 && Array.isArray(C.refusals) && C.refusals.length === 12 && Array.isArray(C.answers) && C.answers.length === 4 && Array.isArray(C.old_front) && C.old_front.length === 3, "the checkpoint vectors: 12 requests, 12 refusals, 4 answers, 3 old-front exchanges");
+  check(Array.isArray(C.requests) && C.requests.length === 14 && Array.isArray(C.refusals) && C.refusals.length === 12 && Array.isArray(C.answers) && C.answers.length === 4 && Array.isArray(C.old_front) && C.old_front.length === 3, "the checkpoint vectors: 14 requests, 12 refusals, 4 answers, 3 old-front exchanges");
   // (requests: each as checkSnapshot / checkPullStart says, its result exactly the vector's, or refused with its code)
   const run = (r) => {
     if (r.for === "snapshot") return P.checkSnapshot(r.message);
