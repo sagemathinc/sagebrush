@@ -260,12 +260,15 @@ export class Machine extends CoreMachine {
     // \AtBeginDocument: its tokens kept, globally, in \sb@bdhook (LaTeX's \@begindocumenthook) and read at \begin{document}
     // (as doc's \AtBeginDocument{\MakeShortVerb{\|}}: run at once, "|" was \verb in the preamble that follows, #622);
     // in the document, read at once. The hook is one token list: bounded as one (limits.tokenList), its copy charged and
-    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1)
+    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1): so every
+    // bound the store can meet is checked first, setS's own (64 bytes, and a state entry for the first hook) included
     P.prim("AtBeginDocument", function () {
       const a = this.readArgRaw();
       if (this.getS("sb:indoc")) { this.pushList(a); return; }
       const h = this.getS("m:sb@bdhook"), old = h ? h.body : [], n = old.length + a.length;
       if (n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+      if (this.memBytes + n * 4 + 128 > this.limits.memBytes) throw new BoundError("E-BOUND-MEMORY");
+      if (!h && this.A.size + this.C.size >= this.limits.csCount) throw new BoundError("E-BOUND-CS", "state entries");
       this.charge(n); this.reserve(n * 4 + 64);
       this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: old.concat(a), long: true, prot: false }), true);
     });
