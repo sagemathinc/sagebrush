@@ -1,0 +1,5 @@
+corpus-cache/
+results/*/*.pdf
+results/*/*.html
+results/*/*.preview.txt
+results/*/*.check.json

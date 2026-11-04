@@ -1,0 +1,444 @@
+{
+  "_": "The benchmark's documents. Each is fetched from commit-pinned URLs and checked against its sha256, or generated (gen), or one of web/latex/examples.ts (example): run.mjs's source() says the forms. engine: the latexmk rule of the oracle. edit: the one-character edit timed after the first build, an x inserted right after the first occurrence of `after`. LICENSES.md has each document's license.",
+  "docs": [
+    {
+      "id": "C0",
+      "name": "cjk",
+      "file": "cjk.tex",
+      "gen": "cjk",
+      "engine": "xelatex",
+      "edit": {
+        "after": "\\begin{document}\n"
+      },
+      "oracle_runs": 1,
+      "note": "1500 lines of 100 \"中文字体\" each (1.95 MB), one paragraph: web/latex/test-latex-page.mjs's fixture, in ctexart so that TeX can typeset it. TeX runs out of main memory on it (8 minutes on VM2), so the oracle runs once"
+    },
+    {
+      "id": "C0p",
+      "name": "cjk-paragraphs",
+      "file": "cjk-paragraphs.tex",
+      "gen": "cjk-paragraphs",
+      "engine": "xelatex",
+      "edit": {
+        "after": "\\begin{document}\n"
+      },
+      "note": "C0's lines as 1500 paragraphs (a blank line between them): the form TeX can typeset"
+    },
+    {
+      "id": "C2",
+      "name": "amsldoc",
+      "file": "amsldoc.tex",
+      "url": "https://raw.githubusercontent.com/latex3/latex2e/db6df6380f8660758d26b9666d0e70600a3d7be9/required/amsmath/amsldoc.tex",
+      "sha256": "c842a86ff194288d430697d7f501fcfece2da263ff9b66c8d32c752a8724e142",
+      "engine": "pdf",
+      "edit": {
+        "after": "To place an"
+      },
+      "note": "the amsmath user's guide (44 pages)"
+    },
+    {
+      "id": "C3",
+      "name": "beamer-talk",
+      "file": "beamerexample-conference-talk.tex",
+      "url": "https://raw.githubusercontent.com/josephwright/beamer/e9e99b8fdc3084d9f118a761264be37184899e4b/doc/examples/a-conference-talk/beamerexample-conference-talk.tex",
+      "sha256": "858a5607467a926ce619965d9db966fd640316f00a6b588562972fedc0899fa2",
+      "engine": "pdf",
+      "edit": {
+        "after": "This makes the"
+      },
+      "transcode": "latin1",
+      "note": "beamer's own conference-talk example (TikZ, overlays). Its source is latin1, which the editor does not open (web/latex/save.ts: only UTF-8 is text), so every part runs on it as UTF-8"
+    },
+    {
+      "id": "C1",
+      "name": "arxiv-singular-moduli",
+      "main": "main.tex",
+      "archive": {
+        "url": "https://arxiv.org/e-print/2503.19686v2",
+        "sha256": "36815127f851a66b6ec1a40108e5dd126a2213fe23b7234cd58412fd06afbd96"
+      },
+      "engine": "pdf",
+      "edit": {
+        "after": "This completes the proof of"
+      },
+      "note": "G. Fowler and E. Tron, Distinct differences of singular moduli, arXiv:2503.19686v2 (CC BY 4.0): a 25-page amsart paper, its sources as arXiv has them"
+    },
+    {
+      "id": "C4",
+      "name": "lshort",
+      "main": "lshort.tex",
+      "files": [
+        {
+          "path": "appendix.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/appendix.tex",
+          "sha256": "5e32136959f738672e97e94d2aa12f9f76110b9c75b91c8a7bdedb1c803a7f14"
+        },
+        {
+          "path": "biblio.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/biblio.tex",
+          "sha256": "2d16d6b2b9538be973a165f534f1052b0b632ea1ed800e868c4d3ebcb23bda8f"
+        },
+        {
+          "path": "contrib.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/contrib.tex",
+          "sha256": "6862421c78c7c936200cf2c9c99e988c5f6c56ef456ce89e66064530b50eb114"
+        },
+        {
+          "path": "custom.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/custom.tex",
+          "sha256": "b40c5e24eb0c5528192624aa2dec7c664a20424f31d0e44b8bbca9eac701179d"
+        },
+        {
+          "path": "fancyhea.sty",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/fancyhea.sty",
+          "sha256": "0de5eb1d0289bdc50e33742611090630be7224460409f2309cbb12f931b50599"
+        },
+        {
+          "path": "graphic.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/graphic.tex",
+          "sha256": "bcdcf1b9f92ad3705109cee9612d7a3200aa0ca9fbb3f10d85d7ad5a8d77f1f6"
+        },
+        {
+          "path": "lshort-a5.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-a5.tex",
+          "sha256": "f306ef6638f993c9582d709433bb282ba1ef7527982250990367c50090f8539a"
+        },
+        {
+          "path": "lshort-base.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-base.tex",
+          "sha256": "ffbe01ec5a641497d5b4d117c6449e75f52d81a36f5b447068a4e65a1f88e4ae"
+        },
+        {
+          "path": "lshort-body.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-body.tex",
+          "sha256": "9013cc76b78cfd2e6188a18aa7958db3d03709c844138c58c1f036ccab82fbc3"
+        },
+        {
+          "path": "lshort-letter.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-letter.tex",
+          "sha256": "02dcfb747e970cc3cb0b4ba797d1fdb1b35bf61aa75b06753dbca78af5d2f647"
+        },
+        {
+          "path": "lshort-screen.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-screen.tex",
+          "sha256": "2fe1a8c20cedadfa8eb98cf79fc99b94950f18396f6c4a01f09496e8634d670d"
+        },
+        {
+          "path": "lshort-title.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort-title.tex",
+          "sha256": "d40cc6edea65da6de58a3f0400e1acd796d63393b7d17a89d91c9a3cd5cbf157"
+        },
+        {
+          "path": "lshort.ist",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort.ist",
+          "sha256": "d2bfed93f13a2262b358504bb931c5a2b09a72cadc266913a18b781676247014"
+        },
+        {
+          "path": "lshort.sty",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort.sty",
+          "sha256": "905ec42f2bb6c5d7c78e0684bdc300f74ebdf9314744513877db9bbf6d79aee0"
+        },
+        {
+          "path": "lshort.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lshort.tex",
+          "sha256": "5f677273ab1de870cf4e6f3bc6e23663a8e6035e8cf973ed1fa5e078223f1fa2"
+        },
+        {
+          "path": "lssym.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/lssym.tex",
+          "sha256": "97c2797c18f8d0dae6e0e2e113867b7d99388ad2a16cc7f05189c5dc8b66b513"
+        },
+        {
+          "path": "math.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/math.tex",
+          "sha256": "af554b7ba3b79fe6955f00dbb50ec38adfcab51fe77309f7ab1dc455696805d5"
+        },
+        {
+          "path": "mylayout.sty",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/mylayout.sty",
+          "sha256": "5332626419277e1ead643e3b0ea338e62b1c0e717f75ad3b501b6fcfb2f88e14"
+        },
+        {
+          "path": "overview.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/overview.tex",
+          "sha256": "fa9203bc9cf51826fa59512b019b9cc605a24446c289f1c49409a833cfba6243"
+        },
+        {
+          "path": "preamble.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/preamble.tex",
+          "sha256": "1adcb113c822974c4a0d2e05e6d209078ca81a7ebfa5cbf561890cc78374315b"
+        },
+        {
+          "path": "spec.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/spec.tex",
+          "sha256": "60eb6ac17d622148a01fd569f6adccd8fe75f290cf95a98acc99e8a3ffa85a2e"
+        },
+        {
+          "path": "things.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/things.tex",
+          "sha256": "23a41c7053409aafbf1107228baddbfbe5b3da4f7069b80d41c629955bd03051"
+        },
+        {
+          "path": "title.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/title.tex",
+          "sha256": "3eb40cb975fe8a17f4d048343fea92e5cd757af6dfb58d1e0862a7011694717a"
+        },
+        {
+          "path": "typeset.tex",
+          "url": "https://raw.githubusercontent.com/oetiker/lshort/0008af1aebd8662ab726acc753ffc770e8665c12/book/src/typeset.tex",
+          "sha256": "fc176edb3c354dedd2b1ee30e0ce407bdda7e9d8eaa253515e7ec338d928b810"
+        }
+      ],
+      "engine": "pdf",
+      "oracle": {
+        "args": [
+          "-f"
+        ]
+      },
+      "edit": {
+        "file": "things.tex",
+        "after": "The input for"
+      },
+      "note": "The Not So Short Introduction to LaTeX, v5.0.6 (oetiker/lshort tag v5.0.6, book/src): a book of \\include'd chapters. Today's babel raises errors on it, so latexmk runs with -f (the errors are recorded); its master now needs LuaLaTeX, biber and minted's executable. The edit is in a chapter file"
+    },
+    {
+      "id": "C5",
+      "name": "sagetex-example",
+      "file": "example.tex",
+      "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/example.tex",
+      "sha256": "c37ec3435c189a7f5198c7ac7b416421e56b43ab0b9b101fa3acaef79457fae6",
+      "engine": "pdf",
+      "oracle": {
+        "cycle": "sagetex"
+      },
+      "run": true,
+      "edit": {
+        "after": "Code block which uses"
+      },
+      "note": "SageTeX's own example.tex. The oracle's cycle is latex, sage, latex where Sage is installed; the browser also times Run. sagetex.sty and sagetex.py are made from sagetex's own .ins and .dtx at that commit, as Sage's install makes them (untimed)",
+      "files": [
+        {
+          "path": "sagetex.ins",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/sagetex.ins",
+          "sha256": "6b0beb84cb4de19c08dba0f23ecc9ebea91feae9333a924ac82a75dbd71656a8"
+        },
+        {
+          "path": "sagetex.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/sagetex.dtx",
+          "sha256": "38e02e8fc19afa44d849d24dfc2b0c06f12cfb21ed2e79cc7d8d9ba8859160dd"
+        },
+        {
+          "path": "py-and-sty.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/py-and-sty.dtx",
+          "sha256": "8bf1b0fadbc4ef711875efdaee6976cad1376adb50d40e0c29e5b7824574793a"
+        },
+        {
+          "path": "remote-sagetex.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/remote-sagetex.dtx",
+          "sha256": "b73c2346b606699cec545e144a812ad28a7516a0415094a7941312b932982659"
+        },
+        {
+          "path": "scripts.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/scripts.dtx",
+          "sha256": "b02f73746b13cc01e680d0ba7dab617ab509a76f43a0cc890a60548deceb38ca"
+        }
+      ],
+      "prepare": [
+        [
+          "latex",
+          "-interaction=nonstopmode",
+          "sagetex.ins"
+        ]
+      ]
+    },
+    {
+      "id": "C5b",
+      "name": "pythontex-gallery",
+      "file": "pythontex_gallery.tex",
+      "url": "https://raw.githubusercontent.com/gpoore/pythontex/78c98144145150b6884e3e68159fa8b95bc53c1d/pythontex_gallery/pythontex_gallery.tex",
+      "sha256": "2714f1cc86322a5225c11de29cbb660f4c84db64d9bd90ec239fd0cd644b053b",
+      "engine": "pdf",
+      "oracle": {
+        "cycle": "pythontex"
+      },
+      "edit": {
+        "after": "This can be simple."
+      },
+      "note": "PythonTeX's gallery: latex, pythontex, latex"
+    },
+    {
+      "id": "C6",
+      "name": "pgfplots-2dplots",
+      "main": "pgfplots-80c5c7cf40257258bd03c69a77cd46adbf05e028/doc/latex/pgfplots/sb-bench-2dplots.tex",
+      "archive": {
+        "url": "https://codeload.github.com/pgf-tikz/pgfplots/tar.gz/80c5c7cf40257258bd03c69a77cd46adbf05e028",
+        "sha256": "a8b9460c206c0cddf769172adbd548ef4bf84c6bd72fc91f24cce861c2e23c59"
+      },
+      "wrap": {
+        "path": "pgfplots-80c5c7cf40257258bd03c69a77cd46adbf05e028/doc/latex/pgfplots/sb-bench-2dplots.tex",
+        "from": "pgfplots-80c5c7cf40257258bd03c69a77cd46adbf05e028/doc/latex/pgfplots/pgfplots.tex",
+        "until": "\\begin{document}",
+        "prepend": "\\def\\pgfplotsclickabledisabled{1}\n",
+        "append": "\\input{pgfplots.reference.2dplots.tex}\n\\end{document}\n"
+      },
+      "write": {
+        "pgfplots-80c5c7cf40257258bd03c69a77cd46adbf05e028/doc/latex/pgfplots/figures/expensiveexamples/.keep": ""
+      },
+      "engine": "pdf",
+      "oracle": {
+        "args": [
+          "-shell-escape"
+        ],
+        "env": {
+          "TEXINPUTS": ".:$DIR/pgfplots-80c5c7cf40257258bd03c69a77cd46adbf05e028/tex//:"
+        }
+      },
+      "upload": "main-dir",
+      "edit": {
+        "after": "\\begin{document}\n"
+      },
+      "note": "An excerpt of the pgfplots manual: its own preamble (clickable off) and the chapter on 2D plots (166 code examples), with the repository's pgfplots (TEXINPUTS) and its externalized figures (-shell-escape), as the manual is built"
+    },
+    {
+      "id": "C7a",
+      "name": "example-article",
+      "example": "article",
+      "engine": "pdf",
+      "edit": {
+        "after": "Which integers"
+      },
+      "note": "web/latex/examples.ts's article example (MIT)"
+    },
+    {
+      "id": "C7b",
+      "name": "example-beamer",
+      "example": "beamer",
+      "engine": "pdf",
+      "edit": {
+        "after": "Left: words"
+      },
+      "note": "web/latex/examples.ts's beamer example (MIT)"
+    },
+    {
+      "id": "C7c",
+      "name": "example-sagetex",
+      "example": "sagetex",
+      "engine": "pdf",
+      "edit": {
+        "after": "The 10th prime"
+      },
+      "note": "web/latex/examples.ts's sagetex example (MIT). sagetex.sty and sagetex.py are made from sagetex's own .ins and .dtx at that commit, as Sage's install makes them (untimed)",
+      "oracle": {
+        "cycle": "sagetex"
+      },
+      "run": true,
+      "files": [
+        {
+          "path": "sagetex.ins",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/sagetex.ins",
+          "sha256": "6b0beb84cb4de19c08dba0f23ecc9ebea91feae9333a924ac82a75dbd71656a8"
+        },
+        {
+          "path": "sagetex.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/sagetex.dtx",
+          "sha256": "38e02e8fc19afa44d849d24dfc2b0c06f12cfb21ed2e79cc7d8d9ba8859160dd"
+        },
+        {
+          "path": "py-and-sty.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/py-and-sty.dtx",
+          "sha256": "8bf1b0fadbc4ef711875efdaee6976cad1376adb50d40e0c29e5b7824574793a"
+        },
+        {
+          "path": "remote-sagetex.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/remote-sagetex.dtx",
+          "sha256": "b73c2346b606699cec545e144a812ad28a7516a0415094a7941312b932982659"
+        },
+        {
+          "path": "scripts.dtx",
+          "url": "https://raw.githubusercontent.com/sagemath/sagetex/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/scripts.dtx",
+          "sha256": "b02f73746b13cc01e680d0ba7dab617ab509a76f43a0cc890a60548deceb38ca"
+        }
+      ],
+      "prepare": [
+        [
+          "latex",
+          "-interaction=nonstopmode",
+          "sagetex.ins"
+        ]
+      ]
+    },
+    {
+      "id": "C7d",
+      "name": "example-pythontex",
+      "example": "pythontex",
+      "engine": "pdf",
+      "edit": {
+        "after": "Ten factorial"
+      },
+      "note": "web/latex/examples.ts's pythontex example (MIT)",
+      "oracle": {
+        "cycle": "pythontex"
+      }
+    },
+    {
+      "id": "C7e",
+      "name": "example-matlab",
+      "example": "matlab",
+      "engine": "pdf",
+      "edit": {
+        "after": "For this"
+      },
+      "note": "web/latex/examples.ts's matlab example (MIT)"
+    },
+    {
+      "id": "C7f",
+      "name": "example-figure",
+      "example": "figure",
+      "engine": "pdf",
+      "edit": {
+        "after": "As Figure"
+      },
+      "note": "web/latex/examples.ts's figure example (MIT)"
+    },
+    {
+      "id": "C7g",
+      "name": "example-cv",
+      "example": "cv",
+      "engine": "pdf",
+      "edit": {
+        "after": "Mathematician"
+      },
+      "note": "web/latex/examples.ts's cv example (MIT)"
+    },
+    {
+      "id": "C7h",
+      "name": "example-tikz",
+      "example": "tikz",
+      "engine": "pdf",
+      "edit": {
+        "after": "A full LaTeX run"
+      },
+      "note": "web/latex/examples.ts's tikz example (MIT)"
+    },
+    {
+      "id": "C7i",
+      "name": "example-bibliography",
+      "example": "bibliography",
+      "engine": "pdf",
+      "edit": {
+        "after": "Modular forms are"
+      },
+      "note": "web/latex/examples.ts's bibliography example (MIT)"
+    },
+    {
+      "id": "C7j",
+      "name": "example-homework",
+      "example": "homework",
+      "engine": "pdf",
+      "edit": {
+        "after": "Name:"
+      },
+      "note": "web/latex/examples.ts's homework example (MIT)"
+    }
+  ]
+}
