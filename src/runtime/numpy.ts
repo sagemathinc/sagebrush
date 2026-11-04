@@ -1149,6 +1149,42 @@ function intIndex(k: any, n: number, axis: number): number {
   return i;
 }
 
+// ndarray.item's element, its position in a.data, as NumPy's: no index (a
+// size-1 array), one flat C-order index, or one index an axis (or their
+// tuple), each made non-negative and bounded by its own axis, with NumPy's
+// errors
+function itemPos(a: { shape: number[]; strides: number[]; offset: number; size: number }, idx: any[]): number {
+  if (idx.length === 1 && Array.isArray(idx[0]) && (idx[0] as any).$t) idx = idx[0].slice();
+  const nd = a.shape.length;
+  if (idx.length === 0) {
+    if (a.size !== 1) raise(T.ValueError, "can only convert an array of size 1 to a Python scalar");
+    return a.offset;
+  }
+  if (idx.length === 1) {
+    let i = intNum(idx[0]);
+    const n = a.size;
+    if (i < -n || i >= n) raise(T.IndexError, `index ${i} is out of bounds for size ${n}`);
+    if (i < 0) i += n;
+    let p = a.offset;
+    for (let d = nd - 1; d >= 0; d--) {
+      const k = i % a.shape[d];
+      p += k * a.strides[d];
+      i = (i - k) / a.shape[d];
+    }
+    return p;
+  }
+  if (idx.length !== nd) raise(T.ValueError, "incorrect number of indices for array");
+  let p = a.offset;
+  for (let d = 0; d < nd; d++) {
+    let i = intNum(idx[d]);
+    const n = a.shape[d];
+    if (i < -n || i >= n) raise(T.IndexError, `index ${i} is out of bounds for axis ${d} with size ${n}`);
+    if (i < 0) i += n;
+    p += i * a.strides[d];
+  }
+  return p;
+}
+
 function getitem(a: NDArray, key: any): any {
   // a[i] on a 1-D array
   if (typeof key === "number" && a.ndim === 1 && Number.isInteger(key)) {
@@ -3368,14 +3404,7 @@ newBuiltinModule("_numpy", (m) => {
   M("__array__", (a: NDArray) => a);
   M("copy", (a: NDArray) => copy(a));
   M("tolist", (a: NDArray) => tolist(a));
-  M("item", (a: NDArray, ...idx: any[]) => {
-    if (idx.length === 0) return scalarOf(a);
-    const c = ascontig(a);
-    let i = intNum(idx.length === 1 ? idx[0] : 0);
-    if (idx.length > 1) i = idx.reduce((acc: number, v: any, d: number) => acc * a.shape[d] + intNum(v), 0);
-    if (i < 0) i += a.size;
-    return pyPlain(a.dt, c.data, i);
-  });
+  M("item", (a: NDArray, ...idx: any[]) => pyPlain(a.dt, a.data, itemPos(a, idx)));
   M("reshape", (a: NDArray, ...s: any[]) => reshape(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
   M("ravel", (a: NDArray) => ravel(a));
   M("flatten", (a: NDArray) => copy(ravel(a)));
