@@ -791,6 +791,11 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
  },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrs_work_len(1, usize::MAX).is_none() && getrs_work_len(usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
  "engine/nd/src/lu.rs :: refusals_write_nothing :: assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout)); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",

@@ -226,6 +226,12 @@ mod tests {
         refused("n overflowing", 5, u32::MAX);
         // (the arena, the descriptor, the frame)
         refused("report past the arena", 11, g[11] - 8);
+        // (grader T3: each region alone just outside the arena, past its end, everything else as good)
+        for (i, what) in [(1usize, "B"), (2, "ipiv"), (3, "work")] {
+            let mut d = g;
+            d[i] = g[11] + 64;
+            assert!(check_solve(DESC, &d, &L).is_none(), "{what} outside the arena");
+        }
         refused("A before the arena", 10, g[0] + 8);
         assert!(check_solve(g[0] as u64 + 8, &g, &L).is_none(), "the descriptor on A");
         assert!(check_solve(DESC, &g, &Facts { frame: LO + 64, ..L }).is_none(), "the frame in the arena");

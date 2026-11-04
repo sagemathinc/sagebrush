@@ -466,7 +466,7 @@ pub(crate) mod tests {
                         let e = eta(&a, &x, &b, n, r);
                         assert!(e <= 10.0 * n as f64 * U, "{} {name} n={n} r={r}: eta {e:e}", k.name());
                         let f = factor_residual(&a, &lu, &ipiv, n);
-                        assert!(f <= 10.0 * U * n as f64, "{} {name} n={n}: ||PA-LU|| {f:e}", k.name());
+                        assert!(f <= 10.0 * U, "{} {name} n={n}: ||PA-LU|| / (n ||A||) = {f:e}", k.name());
                     }
                 }
             }
@@ -631,7 +631,7 @@ pub(crate) mod tests {
                 assert!(same, "n={n} <= LU_SMALL must be the unblocked factorization");
             } else {
                 assert!(!same, "n={n} > LU_SMALL must take the recursive path (different rounding order)");
-                assert!(factor_residual(&a, &f, &fp, n) <= 10.0 * U * n as f64);
+                assert!(factor_residual(&a, &f, &fp, n) <= 10.0 * U);
             }
         }
     }
@@ -658,21 +658,85 @@ pub(crate) mod tests {
         }
     }
 
-    /// An empty system (n = 0) with any number of right-hand sides and any (padded) ldb is solved, writing
-    /// nothing (astra ND-S1: the finite check sliced B's later columns, which are empty when n = 0).
+    /// The smallest systems, n = 0 and n = 1, with 0, 1, 3 and 17 right-hand sides and dense or padded ldb:
+    /// solved (n = 0 writes nothing; astra ND-S1: the finite check once sliced B's empty later columns), and a
+    /// refused call (work one short) writes nothing (grader T1).
     #[test]
-    fn empty_systems_are_solved_without_writing() {
-        for r in [0, 1, 3, 17] {
-            for ldb in [1, 5] {
-                let mut a: Vec<f64> = vec![];
-                let mut b = vec![7.0; 4];
-                let mut ipiv: Vec<usize> = vec![];
-                let mut work = vec![0.0; solve_work_len(0, r).unwrap()];
-                assert_eq!(solve(Kernel::Scalar, &mut a, 0, 1, &mut b, r, ldb, &mut ipiv, &mut work), Ok(Status::Solved), "r={r} ldb={ldb}");
-                assert!(b.iter().all(|&x| x == 7.0));
-                let mut w2 = vec![0.0; getrs_work_len(0, r).unwrap()];
-                assert_eq!(getrs(Kernel::Scalar, &a, 0, 1, &ipiv, &mut b, r, ldb, &mut w2), Ok(()));
+    fn smallest_systems_every_rhs_count_and_ldb() {
+        for n in [0usize, 1] {
+            for r in [0, 1, 3, 17] {
+                for ldb in [n.max(1), n + 4] {
+                    let mut a = vec![2.0; n * n];
+                    let blen = crate::gemm::span(n, r, ldb).unwrap();
+                    let mut b = vec![6.0; blen + 2];
+                    let mut ipiv = vec![9usize; n];
+                    let need = solve_work_len(n, r).unwrap();
+                    let mut work = vec![0.0; need];
+                    let (a0, b0) = (a.clone(), b.clone());
+                    assert_eq!(solve(Kernel::Scalar, &mut a, n, n.max(1), &mut b, r, ldb, &mut ipiv, &mut work[..need - 1]), Err(Refused::Work), "n={n} r={r} ldb={ldb}");
+                    assert!(a == a0 && b == b0, "a refused call wrote");
+                    assert_eq!(solve(Kernel::Scalar, &mut a, n, n.max(1), &mut b, r, ldb, &mut ipiv, &mut work), Ok(Status::Solved), "n={n} r={r} ldb={ldb}");
+                    if n == 0 {
+                        assert!(b == b0, "n = 0 wrote B");
+                    } else {
+                        // x = b / 2 in each column; the padding and the tail untouched
+                        for j in 0..r {
+                            assert_eq!(b[j * ldb], 3.0);
+                            assert!(b[j * ldb + 1..(j * ldb + ldb).min(blen)].iter().all(|&x| x == 6.0));
+                        }
+                        assert!(b[blen..].iter().all(|&x| x == 6.0));
+                    }
+                }
             }
+        }
+    }
+
+    /// The subnormal pivot (grader T6): below SFMIN its reciprocal would overflow, so dgetf2 divides. The pivot
+    /// 2^-1044 and the entry below it 2^-1045 are exact subnormals: their quotient is exactly 0.5, where the
+    /// reciprocal (2^1044, Inf in f64) times the entry would give Inf.
+    #[test]
+    fn a_subnormal_pivot_is_divided_by() {
+        let piv = f64::MIN_POSITIVE / 4194304.0; // 2^-1022 / 2^22 = 2^-1044, exactly
+        let mut a = [piv, piv / 2.0, 1.0, 3.0];
+        let mut p = [0usize; 2];
+        let mut w = vec![0.0; getrf_work_len(2, 2).unwrap()];
+        getrf(Kernel::Scalar, &mut a, 2, 2, 2, &mut p, &mut w).unwrap();
+        assert!(piv < SFMIN && (1.0 / piv).is_infinite());
+        assert_eq!(p, [0, 1]);
+        assert_eq!(a[1], 0.5);
+    }
+
+    /// The triangular solve's threshold (grader advisory): at TRSM_SMALL it substitutes directly (the plain
+    /// substitution's bits); just above, it recurses (a GEMM update: other bits, the same solution within u).
+    #[test]
+    fn the_trsm_threshold_is_where_its_recursion_starts() {
+        for n in [TRSM_SMALL, TRSM_SMALL + 1] {
+            let r = 8;
+            let mut l = seeded(n * n, &mut 3);
+            for k in 0..n {
+                l[k + k * n] = 1.0;
+                for i in 0..k {
+                    l[i + k * n] = 0.0;
+                }
+            }
+            let x0 = seeded(n * r, &mut 4);
+            let mut x = x0.clone();
+            let mut tmp = vec![0.0; n * r];
+            let mut scratch = vec![0.0; scratch_len()];
+            trsm_lower_unit(Kernel::Scalar, &l, n, n, &mut x, n, r, &mut tmp, &mut scratch);
+            let mut y = x0.clone();
+            for j in 0..r {
+                for k in 0..n {
+                    let yk = y[k + j * n];
+                    if yk != 0.0 {
+                        for i in k + 1..n {
+                            y[i + j * n] -= yk * l[i + k * n];
+                        }
+                    }
+                }
+            }
+            let same = x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits());
+            assert_eq!(same, n <= TRSM_SMALL, "n={n}");
         }
     }
 
@@ -779,6 +843,18 @@ pub(crate) mod tests {
         assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout));
         assert!(a == a0 && b.iter().all(|&x| x == 1.0), "a refused solve wrote");
         assert!(getrf_work_len(usize::MAX, usize::MAX).is_none() && solve_work_len(usize::MAX / 2, 3).is_none());
+        // (grader T4: getrs's own sizing overflows to None, not a wrapped short length)
+        assert!(getrs_work_len(1, usize::MAX).is_none() && getrs_work_len(usize::MAX, 2).is_none());
+        // (grader T5: B long enough for n x r but not for its padded ldb: refused before A is touched)
+        let (n2, r2, ldb2) = (4usize, 3usize, 6usize);
+        let mut a2 = random(n2, 8);
+        let a20 = a2.clone();
+        let mut b2 = vec![1.0; crate::gemm::span(n2, r2, ldb2).unwrap() - 1];
+        let mut w2 = vec![0.0; solve_work_len(n2, r2).unwrap()];
+        let mut p2 = vec![0; n2];
+        assert!(b2.len() >= n2 * r2);
+        assert_eq!(solve(k, &mut a2, n2, n2, &mut b2, r2, ldb2, &mut p2, &mut w2), Err(Refused::Layout));
+        assert!(a2 == a20 && b2.iter().all(|&x| x == 1.0));
         // getrs refuses pivots out of their range (each ipiv[k] in k..n)
         let mut bad = vec![0; n];
         bad[3] = n;

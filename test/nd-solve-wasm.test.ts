@@ -118,21 +118,37 @@ test("nd_solve: leading dimensions above n give the same bits; a zero pivot repo
   }
 });
 
-test("nd_solve: an empty system (n = 0) with 0, 1, 3 or 17 right-hand sides and a padded ldb is solved, writing only the report (astra ND-S1)", () => {
+test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand sides and dense or padded ldb (astra ND-S1, grader T1)", () => {
   const { memory, ex } = instance(Math.ceil((ARENA + (4 << 20)) / PAGE) + 1);
-  const u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
+  const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
   const floor = ex.nd_info(1);
-  for (const r of [0, 1, 3, 17]) {
-    for (const ldb of [1, 5]) {
-      // (A and B empty: placed at distinct, aligned addresses; the work holds solve_work_len(0, r))
-      const a = ARENA, b = ARENA + 64, ipiv = ARENA + 128, work = ARENA + 192, report = work + 8 * workLen(0, r), hi = report + 16 + 64;
-      u32.fill(0xdead, report / 4, report / 4 + 4);
-      u32.set([a, b, ipiv, work, report, 0, r, 1, ldb, workLen(0, r), ARENA, hi], BASE / 4);
-      const before = u8.slice(floor, hi);
-      assert.equal(ex.nd_solve(BASE), 1, `r=${r} ldb=${ldb}`);
-      assert.equal(u32[report / 4], 1, "status: solved");
-      const now = u8.subarray(floor, hi);
-      assert.ok(now.every((x, i) => x === before[i] || (floor + i >= report && floor + i < report + 16)), `r=${r} ldb=${ldb}: wrote outside the report`);
+  for (const n of [0, 1]) {
+    for (const r of [0, 1, 3, 17]) {
+      for (const ldb of [Math.max(n, 1), n + 4]) {
+        const bspan = n === 0 || r === 0 ? 0 : ldb * (r - 1) + n;
+        const a = ARENA, b = ARENA + 64, ipiv = b + 8 * bspan + 64, work = Math.ceil((ipiv + 64) / 8) * 8, report = work + 8 * workLen(n, r), hi = report + 16 + 64;
+        f64.fill(6, b / 8, b / 8 + bspan);
+        if (n === 1) f64[a / 8] = 2;
+        u32.fill(0xdead, report / 4, report / 4 + 4);
+        const words = [a, b, ipiv, work, report, n, r, Math.max(n, 1), ldb, workLen(n, r), ARENA, hi];
+        // (refused first: the work one element short; nothing written)
+        u32.set(words.map((x, i) => (i === 9 ? x - 1 : x)), BASE / 4);
+        let before = u8.slice(floor, hi);
+        assert.equal(ex.nd_solve(BASE), 0, `n=${n} r=${r} ldb=${ldb}: short work not refused`);
+        assert.ok(u8.subarray(floor, hi).every((x, i) => x === before[i]), "a refused call wrote");
+        u32.set(words, BASE / 4);
+        before = u8.slice(floor, hi);
+        assert.equal(ex.nd_solve(BASE), 1, `n=${n} r=${r} ldb=${ldb}`);
+        assert.equal(u32[report / 4], 1, "status: solved");
+        if (n === 0) {
+          assert.ok(u8.subarray(floor, hi).every((x, i) => x === before[i] || (floor + i >= report && floor + i < report + 16)), "n = 0 wrote outside the report");
+        } else {
+          for (let j = 0; j < r; j++) {
+            assert.equal(f64[b / 8 + j * ldb], 3, "x = b / a");
+            for (let i = 1; i < ldb && j * ldb + i < bspan; i++) assert.equal(f64[b / 8 + j * ldb + i], 6, "padding written");
+          }
+        }
+      }
     }
   }
 });
@@ -175,6 +191,8 @@ test("nd_solve refuses every bad layout before writing anything: each region pai
   refused("a region below the floor", with_(4, 64));
   // (the arena, the descriptor, the caller's stack)
   refused("the report outside the arena", with_(11, g[4] + 8));
+  // (grader T3: B, ipiv or work alone outside the arena, past its end)
+  for (const [i, what] of [[1, "B"], [2, "ipiv"], [3, "work"]] as const) refused(`${what} outside the arena`, with_(i, L.hi + 64));
   refused("the descriptor in the arena", g, L.hi - 64);
   refused("a misaligned descriptor", g, BASE + 1024 + 2);
   const sp = ex.__stack_pointer.value;
