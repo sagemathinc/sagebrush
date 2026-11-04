@@ -293,3 +293,28 @@ test("nd_solve refuses every bad layout before writing anything: each region pai
   assert.equal(ex.nd_solve(BASE), 1);
   assert.equal(u32[L.report / 4], 1);
 });
+
+// The sign of a zero sum on the Wasm SIMD128 kernel (grader's #630 follow-up; engine/nd/src/lu.rs
+// tests::signed_zero_system, where every native kernel, the FMA reference ScalarFma included, factors it to itself):
+// n = 128, so getrf's GEMM update A22 := A22 - A21 A12 runs with A21 = +0 against a negative A12 (every product -0).
+// A correct sum is +0, which leaves A22's -0s as they are; a kernel whose sums start at -0 turns them to +0.
+test("nd_solve (gesv): the signed-zero system factors to A's own bits, its -0s included (the GEMM update's zero sums are +0)", () => {
+  const [n, h] = [128, 64];
+  const A = new Float64Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    A[i + j * n] = j < h ? Number(i === j) : i < h ? -(1 + ((i * 7 + j * 3) % 5)) : i === j ? 4 : (i + j) % 3 === 0 ? -0 : 0;
+  }
+  const L = layout(n, 1, n, n, 0, GESV);
+  const { memory, ex } = instance(Math.ceil(L.hi / PAGE) + 1);
+  const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer);
+  f64.set(A, L.a / 8);
+  f64.fill(1, L.b / 8, L.b / 8 + n);
+  u32.set(L.words, BASE / 4);
+  assert.equal(ex.nd_solve(BASE), 1);
+  assert.equal(u32[L.report / 4], 1, "status: solved");
+  const lu = f64.slice(L.a / 8, L.a / 8 + n * n);
+  const negZeros = A.filter((x) => Object.is(x, -0)).length;
+  assert.ok(negZeros > 1000);
+  const differ = [...lu.keys()].filter((i) => !Object.is(lu[i], A[i]));
+  assert.deepEqual(differ.slice(0, 5), [], `${differ.length} factor elements differ from A's bits (first at ${differ[0]}: ${lu[differ[0]]} vs ${A[differ[0]]})`);
+});

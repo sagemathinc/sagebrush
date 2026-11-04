@@ -173,7 +173,7 @@ impl<'a> Mat<'a> {
     pub fn ld(&self) -> usize {
         self.ld
     }
-    #[inline]
+    #[cfg(test)]
     fn at(&self, i: usize, j: usize) -> f64 {
         self.data[i + j * self.ld]
     }
@@ -193,35 +193,42 @@ pub fn partition(n: usize, threads: usize, id: usize, nr: usize) -> (usize, usiz
     (id.saturating_mul(per).min(n), id.saturating_add(1).saturating_mul(per).min(n))
 }
 
-/// Pack rows i0..i0+mc, columns p0..p0+kc of A into `mr`-row panels (zero-padded to a multiple of mr).
-fn pack_a(a: &Mat, i0: usize, mc: usize, p0: usize, kc: usize, mr: usize, out: &mut [f64]) {
-    let mut o = 0;
-    let mut i = 0;
-    while i < mc {
-        let rows = mr.min(mc - i);
-        for p in 0..kc {
-            for r in 0..mr {
-                out[o] = if r < rows { a.at(i0 + i + r, p0 + p) } else { 0.0 };
-                o += 1;
+/// Pack rows i0..i0+mc, columns p0..p0+kc of A into `K::MR`-row panels (zero-padded to a multiple of MR): a
+/// whole panel by copying MR contiguous elements per column (a fixed-length copy: MR is the kernel's constant),
+/// the last, partial one element by element.
+fn pack_a<K: Micro>(a: &Mat, i0: usize, mc: usize, p0: usize, kc: usize, out: &mut [f64]) {
+    let mr = K::MR;
+    for (q, panel) in out[..mc.div_ceil(mr) * mr * kc].chunks_exact_mut(mr * kc).enumerate() {
+        let (i, rows) = (q * mr, mr.min(mc - q * mr));
+        for (p, o) in panel.chunks_exact_mut(mr).enumerate() {
+            let col = &a.data[i0 + i + (p0 + p) * a.ld..];
+            if rows == mr {
+                o.copy_from_slice(&col[..mr]);
+            } else {
+                for (r, v) in o.iter_mut().enumerate() {
+                    *v = if r < rows { col[r] } else { 0.0 };
+                }
             }
         }
-        i += mr;
     }
 }
 
-/// Pack rows p0..p0+kc, columns j0..j0+nc of B into `nr`-column panels (zero-padded to a multiple of nr).
-fn pack_b(b: &Mat, p0: usize, kc: usize, j0: usize, nc: usize, nr: usize, out: &mut [f64]) {
-    let mut o = 0;
-    let mut j = 0;
-    while j < nc {
-        let cols = nr.min(nc - j);
-        for p in 0..kc {
-            for c in 0..nr {
-                out[o] = if c < cols { b.at(p0 + p, j0 + j + c) } else { 0.0 };
-                o += 1;
+/// Pack rows p0..p0+kc, columns j0..j0+nc of B into `K::NR`-column panels (zero-padded to a multiple of NR):
+/// each of a panel's columns read once, contiguously, into every NR-th element.
+fn pack_b<K: Micro>(b: &Mat, p0: usize, kc: usize, j0: usize, nc: usize, out: &mut [f64]) {
+    let nr = K::NR;
+    for (q, panel) in out[..nc.div_ceil(nr) * nr * kc].chunks_exact_mut(nr * kc).enumerate() {
+        let (j, cols) = (q * nr, nr.min(nc - q * nr));
+        for c in 0..nr {
+            if c < cols {
+                let col = &b.data[p0 + (j0 + j + c) * b.ld..][..kc];
+                for (o, &v) in panel.chunks_exact_mut(nr).zip(col) {
+                    o[c] = v;
+                }
+            } else {
+                panel.chunks_exact_mut(nr).for_each(|o| o[c] = 0.0);
             }
         }
-        j += nr;
     }
 }
 
@@ -290,11 +297,11 @@ fn blocked<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize,
         let mut pc = 0;
         while pc < k {
             let kc = KC.min(k - pc);
-            pack_b(b, pc, kc, jc, nc, nr, sb);
+            pack_b::<K>(b, pc, kc, jc, nc, sb);
             let mut ic = 0;
             while ic < m {
                 let mc = mcb.min(m - ic);
-                pack_a(a, ic, mc, pc, kc, mr, sa);
+                pack_a::<K>(a, ic, mc, pc, kc, sa);
                 let mut jr = 0;
                 while jr < nc {
                     let cols = nr.min(nc - jr);
@@ -304,15 +311,14 @@ fn blocked<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize,
                         let rows = mr.min(mc - ir);
                         let ap = &sa[(ir / mr) * kc * mr..];
                         kern.tile(kc, ap, bp, &mut acc);
-                        for cj in 0..cols {
+                        for (cj, t) in acc[..mr * cols].chunks_exact(mr).enumerate() {
                             let base = (jc - j_begin + jr + cj) * ldc + ic + ir;
-                            let dst = &mut c_cols[base..base + rows];
-                            for (r, d) in dst.iter_mut().enumerate() {
-                                if subtract {
-                                    *d -= acc[cj * mr + r];
-                                } else {
-                                    *d += acc[cj * mr + r];
-                                }
+                            // (a whole tile column: a fixed length, MR being the kernel's constant)
+                            let (dst, t) = if rows == mr { (&mut c_cols[base..base + mr], t) } else { (&mut c_cols[base..base + rows], &t[..rows]) };
+                            if subtract {
+                                dst.iter_mut().zip(t).for_each(|(d, x)| *d -= x);
+                            } else {
+                                dst.iter_mut().zip(t).for_each(|(d, x)| *d += x);
                             }
                         }
                         ir += mr;
