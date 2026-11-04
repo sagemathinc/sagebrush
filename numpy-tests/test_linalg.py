@@ -76,3 +76,9 @@ for shp in [(2, 0, 3), (2, 2, 0), (0, 2, 3), (0, 0, 0)]:
 for shp in [(0, 2, 2), (3, 0, 0)]:
     Z = np.zeros(shp)
     print("square stack", shp, np.linalg.det(Z).shape, np.linalg.inv(Z).shape, [x.shape for x in np.linalg.qr(np.zeros(shp))])
+# a large empty stack: shapes only, no work or memory proportional to the matrix size (daybreak3 on #647 r2)
+Z = np.zeros((0, 10000, 10000))
+print("big empty stack", [x.shape for x in np.linalg.svd(Z)], np.linalg.svd(Z, compute_uv=False).shape, np.linalg.det(Z).shape, np.linalg.inv(Z).shape, [x.shape for x in np.linalg.qr(Z)], np.linalg.pinv(Z).shape, np.linalg.matrix_rank(Z).shape)
+for shp in [(0, 3, 3), (2, 0, 0)]:
+    Z = np.zeros(shp)
+    print("eig/eigh/slogdet/cholesky stack", shp, [x.shape for x in np.linalg.eig(Z)], [x.dtype.kind for x in np.linalg.eig(Z)], [x.shape for x in np.linalg.eigh(Z)], [x.shape for x in np.linalg.slogdet(Z)], np.linalg.cholesky(Z).shape)
