@@ -1,0 +1,10 @@
+== no-raw-script
+False
+== escaped-script
+True
+== escaped-value
+True
+== escaped-apostrophe
+True
+== escaped-index
+(True, True)

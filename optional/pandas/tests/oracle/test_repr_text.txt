@@ -1,0 +1,102 @@
+python 3.14.9 x86_64 glibc
+package numpy 2.5.1
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== s.long
+'\n0      0\n1      1\n2      2\n3      3\n4      4\n      ..\n95    95\n96    96\n97    97\n98    98\n99    99\nLength: 100, dtype: int64'
+== s.floats-name
+'\n0     0.000000\n1     0.142857\n2     0.285714\n3     0.428571\n4     0.571429\n        ...   \n65    9.285714\n66    9.428571\n67    9.571429\n68    9.714286\n69    9.857143\nName: x, Length: 70, dtype: float64'
+== s.small
+'\n0    1.000000e-08\n1    1.000000e+00\n2    2.500000e+00\ndtype: float64'
+== s.large
+'\n0    10000000.0\n1           1.0\n2           2.5\ndtype: float64'
+== s.too-long
+'\n0    1.234568e+08\n1    1.000000e+00\ndtype: float64'
+== s.special
+'\n0    inf\n1   -inf\n2    NaN\n3    0.0\n4   -0.0\ndtype: float64'
+== s.neg-zero
+'\n0   -0.0\n1    1.5\ndtype: float64'
+== s.whole-floats
+'\n0    1.0\n1    2.0\n2    3.0\ndtype: float64'
+== s.strings
+'\n0                                                    a\n1                                                bb\\tc\n2    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...\n3                                                  NaN\ndtype: str'
+== s.objects
+"\n0           1\n1           a\n2        None\n3         2.5\n4        True\n5      [1, 2]\n6    {'k': 1}\n7        (1,)\ndtype: object"
+== s.named-index
+'\nidx\nr    10\ns    20\nName: 3.5, dtype: int64'
+== s.bools
+'\n0     True\n1    False\n2     True\ndtype: bool'
+== s.empty-str
+'\nSeries([], dtype: str)'
+== s.empty-named
+'\nSeries([], Name: e, dtype: float64)'
+== s.str-of
+'0    1\n1    2\ndtype: int64'
+== s.one-of-61
+'\n0      0\n1      1\n2      2\n3      3\n4      4\n      ..\n56    56\n57    57\n58    58\n59    59\n60    60\nLength: 61, dtype: int64'
+== s.exactly-60
+'\n57    57\n58    58\n59    59\ndtype: int64'
+== s.float-index
+'\n0.50    1\n1.25    2\ndtype: int64'
+== s.unicode
+'\nü     é\nx    日本\ndtype: str'
+== df.long
+'\n     a     b    c\n0    0   0.0   s0\n1    1   0.5   s1\n2    2   1.0   s2\n3    3   1.5   s3\n4    4   2.0   s4\n..  ..   ...  ...\n95  95  47.5  s95\n96  96  48.0  s96\n97  97  48.5  s97\n98  98  49.0  s98\n99  99  49.5  s99\n\n[100 rows x 3 columns]'
+== df.head
+'\n   a    b   c\n0  0  0.0  s0\n1  1  0.5  s1\n2  2  1.0  s2\n3  3  1.5  s3\n4  4  2.0  s4'
+== df.wide
+'\n   column_00  column_01  column_02  ...  column_27  column_28  column_29\n0        0.0        1.0        2.0  ...       27.0       28.0       29.0\n1        0.0        2.5        5.0  ...       67.5       70.0       72.5\n2        0.0      100.0      200.0  ...     2700.0     2800.0     2900.0\n\n[3 rows x 30 columns]'
+== df.wide-ints
+'\n    0    1    2    3    4    5    6   ...   23   24   25   26   27   28   29\n0    0    1    2    3    4    5    6  ...   23   24   25   26   27   28   29\n1   30   31   32   33   34   35   36  ...   53   54   55   56   57   58   59\n2   60   61   62   63   64   65   66  ...   83   84   85   86   87   88   89\n3   90   91   92   93   94   95   96  ...  113  114  115  116  117  118  119\n4  120  121  122  123  124  125  126  ...  143  144  145  146  147  148  149\n5  150  151  152  153  154  155  156  ...  173  174  175  176  177  178  179\n6  180  181  182  183  184  185  186  ...  203  204  205  206  207  208  209\n7  210  211  212  213  214  215  216  ...  233  234  235  236  237  238  239\n8  240  241  242  243  244  245  246  ...  263  264  265  266  267  268  269\n9  270  271  272  273  274  275  276  ...  293  294  295  296  297  298  299\n\n[10 rows x 30 columns]'
+== df.wide-long
+'\n      0     1     2     3     4     5   ...    24    25    26    27    28    29\n0      0     1     2     3     4     5  ...    24    25    26    27    28    29\n1     30    31    32    33    34    35  ...    54    55    56    57    58    59\n2     60    61    62    63    64    65  ...    84    85    86    87    88    89\n3     90    91    92    93    94    95  ...   114   115   116   117   118   119\n4    120   121   122   123   124   125  ...   144   145   146   147   148   149\n..   ...   ...   ...   ...   ...   ...  ...   ...   ...   ...   ...   ...   ...\n95  2850  2851  2852  2853  2854  2855  ...  2874  2875  2876  2877  2878  2879\n96  2880  2881  2882  2883  2884  2885  ...  2904  2905  2906  2907  2908  2909\n97  2910  2911  2912  2913  2914  2915  ...  2934  2935  2936  2937  2938  2939\n98  2940  2941  2942  2943  2944  2945  ...  2964  2965  2966  2967  2968  2969\n99  2970  2971  2972  2973  2974  2975  ...  2994  2995  2996  2997  2998  2999\n\n[100 rows x 30 columns]'
+== df.named-index
+'\n       x    y\nkey          \na    1.5  NaN\nb    NaN    q'
+== df.empty
+'\nEmpty DataFrame\nColumns: []\nIndex: []'
+== df.empty-columns
+'\nEmpty DataFrame\nColumns: [a, b]\nIndex: []'
+== df.empty-rows
+'\nEmpty DataFrame\nColumns: [a]\nIndex: []'
+== df.long-string
+'\n                                                long\n0  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...\n1                                                  z'
+== df.mixed-labels
+'\n   1  2.5  s\n0  1    2  3'
+== df.big-floats
+'\n            v\n0   1500000.0\n1   1500001.5\n2   1500003.0\n3   1500004.5\n4   1500006.0\n..        ...\n65  1500097.5\n66  1500099.0\n67  1500100.5\n68  1500102.0\n69  1500103.5\n\n[70 rows x 1 columns]'
+== df.str
+'   a\n0  1'
+== df.to_string
+'   a\n0  1\n1  2'
+== df.bool-object
+'\n      b  i\n0  True  1\n1  None  2'
+== df.dtypes
+'\na      int64\nb    float64\nc        str\ndtype: object'
+== index.long
+"\nIndex([  0,   1,   2,   3,   4,   5,   6,   7,   8,   9,\n       ...\n       190, 191, 192, 193, 194, 195, 196, 197, 198, 199],\n      dtype='int64', length=200)"
+== index.strs
+"\nIndex(['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10',\n       'x11', 'x12', 'x13', 'x14', 'x15', 'x16', 'x17', 'x18', 'x19', 'x20',\n       'x21', 'x22', 'x23', 'x24', 'x25', 'x26', 'x27', 'x28', 'x29'],\n      dtype='str')"
+== index.named
+"\nIndex(['a', 'b'], dtype='str', name='nm')"
+== index.range
+"\nRangeIndex(start=0, stop=10, step=2, name='r')"
+== index.nan
+"\nIndex([1.5, nan], dtype='float64')"
+== index.mixed
+"\nIndex([1, 'a'], dtype='object')"
+== index.empty
+"\nIndex([], dtype='object')"
+== index.columns
+"\nIndex(['column_00', 'column_01', 'column_02', 'column_03', 'column_04',\n       'column_05', 'column_06', 'column_07', 'column_08', 'column_09',\n       'column_10', 'column_11', 'column_12', 'column_13', 'column_14',\n       'column_15', 'column_16', 'column_17', 'column_18', 'column_19',\n       'column_20', 'column_21', 'column_22', 'column_23', 'column_24',\n       'column_25', 'column_26', 'column_27', 'column_28', 'column_29'],\n      dtype='str')"
