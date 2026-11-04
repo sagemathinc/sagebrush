@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "QRPM 1b, pandas on demand for notebooks. (1) No grading context admits pandas: pkgset.ts gradingExcluded, refused by graderAdmission and, while grading is armed, at import (compile.ts mountOptional; a module already loaded too, modules.ts loader.graded, Q7). (2) The runner's fetch broker (runner-worker.js) fetches the pinned index by exact URL, checks its SHA-256 against the pin, then only the chunks it pins, on one checked-index path with the zone data. Before this the runner refused every package set. (3) sw.js forwards the broker's omit/no-referrer on package fetches (G5, G8). (4) An index not fetched (offline) is asked for again at the next run, quietly (SetUnfetched). The pandas set is a site file, in no core artifact. Measured (bun 1.4.4, size-measure.mjs --record) on a probe merge onto master 4ad208a9: worker +888, notebook +413 (ceiling 237,346), pyjs.cjs +1508; no other row moves. Markers: about 30 B margin.",
+ "reason": "QRPM 1b, pandas on demand for notebooks. (1) No grading context admits pandas: pkgset.ts gradingExcluded, refused by graderAdmission and, while grading is armed, at import (compile.ts mountOptional and execFile, before any optional-set file runs; a module already loaded too, modules.ts loader.graded, Q7). (2) The runner's fetch broker (runner-worker.js) fetches the pinned index by exact URL, checks its SHA-256 against the pin, then only the chunks it pins, on one checked-index path with the zone data. Before this the runner refused every package set. (3) sw.js forwards the broker's omit/no-referrer on package fetches (G5, G8). (4) An index not fetched (offline) is asked for again at the next run, quietly (SetUnfetched). The pandas set is a site file, in no core artifact. Measured (bun 1.4.4, size-measure.mjs --record) on a probe merge onto master d2b62604: worker +967, notebook +413 (ceiling 237,346), pyjs.cjs +1858; no other row moves. Markers: about 30 B margin.",
  "bytes": {
-  "cli/pyjs.cjs": 1540,
+  "cli/pyjs.cjs": 1890,
   "engine/sagebrush-notebook.js": 440,
-  "engine/sagebrush-worker.js": 920
+  "engine/sagebrush-worker.js": 1000
  }
 }
