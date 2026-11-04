@@ -756,7 +756,7 @@ fn lower_unit_quads(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, 
                 let ts = [fused(cs[0]), fused(cs[1]), fused(cs[2]), fused(cs[3])];
                 if let [Some(t0), Some(t1), Some(t2), Some(t3)] = ts {
                     let [a, b, c, d] = &mut cs;
-                    sub4x4([&mut a[kend..n], &mut b[kend..n], &mut c[kend..n], &mut d[kend..n]], ls, [t0, t1, t2, t3]);
+                    sub4x4(&mut a[kend..n], &mut b[kend..n], &mut c[kend..n], &mut d[kend..n], ls, [t0, t1, t2, t3]);
                 } else {
                     for (col, t) in cs.iter_mut().zip(ts) {
                         if let Some(t) = t {
@@ -785,8 +785,7 @@ fn lower_unit_quads(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, 
 /// c := c - l0 t0 - l1 t1 - l2 t2 - l3 t3 with its own t, element by element and in that order.
 #[cfg(any(test, target_arch = "wasm32"))]
 #[inline(always)]
-fn sub4x4(cs: [&mut [f64]; 4], l: [&[f64]; 4], ts: [[f64; 4]; 4]) {
-    let [a, b, c, d] = cs;
+fn sub4x4(a: &mut [f64], b: &mut [f64], c: &mut [f64], d: &mut [f64], l: [&[f64]; 4], ts: [[f64; 4]; 4]) {
     let n = a.len();
     let (b, c, d) = (&mut b[..n], &mut c[..n], &mut d[..n]);
     let (l0, l1, l2, l3) = (&l[0][..n], &l[1][..n], &l[2][..n], &l[3][..n]);
