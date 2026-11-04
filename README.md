@@ -25,9 +25,10 @@ These define what Sagebrush is.
    Python, JavaScript, Sage and Magma are thin interfaces over it.
 2. **Permissive licenses.** Sagebrush is MIT OR Apache-2.0, so anyone,
    and any agent, can use it, embed it or ship it, with no conditions on
-   the code it ends up in. Serious research mathematics software has so far
-   been either GPL (PARI, Sage, FLINT) or closed (Magma, Mathematica).
-   Sagebrush is deliberately neither, and deliberately not Sage: it is a
+   the code it ends up in. Much of the research mathematics software in wide
+   use is GPL (PARI, Sage, FLINT) or closed (Magma, Mathematica), though there
+   are permissive exceptions (SymPy, SymEngine, FriCAS).
+   Sagebrush is deliberately neither GPL nor closed, and not Sage: it is a
    component meant to be usable anywhere. No GPL code is linked into an
    engine. GPL systems are used only from the outside, as oracles in tests
    and as benchmarks. They are never dependencies, and never sources to
