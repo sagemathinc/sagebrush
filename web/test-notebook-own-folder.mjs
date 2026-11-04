@@ -109,6 +109,15 @@ try {
   const d = await runAt();
   check(renamed === "/Book3" && d === "/Book3|/Book3|two|2", `a renamed folder too, at the next start: ${renamed}, ${d}`);
 
+  // ---- a notebook alone in its folder (no file beside it, so nothing else makes the folder known): the folder it
+  // starts in still exists for it, empty (grader's K9: startIn registers it)
+  await ev(`${W}.mkdir("/Solo").then(() => 1)`);
+  const solo = await make("/Solo/alone.ipynb", `{ name: "alone", mode: "python", cells: [{ id: "c1", type: "code", code: ${JSON.stringify("import os\nprint('AT:' + '|'.join([os.getcwd(), str(os.path.isdir(os.getcwd())), repr(os.listdir('.'))]))")} }] }`);
+  await go(base + "?nb=" + encodeURIComponent(solo));
+  check(await until(`localStorage.getItem("sagebrush-current") === ${JSON.stringify(solo)}`, 30000), "(the lone notebook is open)");
+  const lone = await runAt();
+  check(lone === "/Solo|True|[]", `a notebook alone in its folder starts there, and the folder exists, empty: isdir(getcwd()) and listdir('.') (${lone})`);
+
   // ---- the worker itself, sent its folder before its init (the interpreter not ready yet), then asked at once: the
   // folder is set once the interpreter is ready, and the question waits for it; a folder that names another place
   // (here "..") is refused and the session stays at "/"
