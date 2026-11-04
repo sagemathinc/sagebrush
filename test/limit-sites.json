@@ -9680,6 +9680,22 @@
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
  },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_BYTES_MAX = 16 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_ROWS_MAX = 10000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
  "web/workspace/checkpoint.ts :: itemBytesOf :: const WIDEST = { seq: Number.MAX_SAFE_INTEGER, recv: Number.MAX_SAFE_INTEGER, chain: \"f\".repeat(64) }; #0": {
   "class": "1",
   "disposition": {
@@ -9696,13 +9712,21 @@
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
  },
- "web/workspace/checkpoint.ts :: no :: if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || tail.length > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP) return no(\"bounds\"); #0": {
+ "web/workspace/checkpoint.ts :: no :: if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || patches > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP || local.length > LOCAL_ROWS_MAX) return no(\"bounds\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
-  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: no :: if (localTotal > LOCAL_BYTES_MAX) return no(\"bounds\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

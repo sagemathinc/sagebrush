@@ -20,6 +20,10 @@ export const TAIL_ITEM_CAP = (4 << 20) - (8 << 10);
  * module's type-checked import closure stays its own) */
 /** A checkpoint blob's bytes at most (r9 §6.4's CANDIDATE_RESERVE: the server reserves no more for one) */
 export const CHECKPOINT_BLOB_MAX = 32 << 20;
+/** The device's own rows an install takes into its combined graph at most (the journal's per-document debt bounds,
+ * journal/rows.js SYNC_DEBT: 10,000 rows, 16 MiB; a test pins them to it) */
+export const LOCAL_ROWS_MAX = 10000;
+export const LOCAL_BYTES_MAX = 16 << 20;
 /** Identical registration requests at most, before the outcome is UNKNOWN (r9 §6.2) */
 export const REGISTER_ATTEMPTS = 3;
 
@@ -81,13 +85,20 @@ export function exactCut(
 
 // ---- the record and its hash
 
+/** patchflow's PatchId (protocol.ts PATCH_ID): 11 base-36 characters of time, "_", the client's id */
+const PATCH_ID = /^[0-9a-z]{11}_[0-9A-Za-z_-]{1,64}$/;
 /** A checkpoint record: patchflow's snapshot of the value at cut_patch, its causal fields (time, parents) kept */
 export type CheckpointRecord = Patch & { isSnapshot: true; snapshot: string; hash: string };
 /** Whether `record` is a snapshot whose hash is exactly a fresh hash of its own value (map r2 C): a string of the
  * codec's format AND equal to it.  A missing hash, another format, another value or text that doesn't decode: false. */
 export function checkRecord(codec: DocCodec, record: unknown): record is CheckpointRecord {
   const r = record as Partial<CheckpointRecord> | null;
-  if (!r || typeof r !== "object" || r.isSnapshot !== true || typeof r.snapshot !== "string" || typeof r.time !== "string") return false;
+  if (!r || typeof r !== "object" || r.isSnapshot !== true || typeof r.snapshot !== "string" || !PATCH_ID.test(String(r.time))) return false;
+  // (its causal fields, exactly: parents a list of distinct patch ids, none the record itself; no change carried (the
+  // value replaces it), so patchflow's own add() takes it as a snapshot and nothing else)
+  const parents = (r as { parents?: unknown }).parents;
+  if (!Array.isArray(parents) || parents.length > 8 || !parents.every((x) => PATCH_ID.test(String(x)) && typeof x === "string") || new Set(parents).size !== parents.length || parents.includes(r.time)) return false;
+  if ("patch" in r || "mergePatch" in r || "mergeParent" in r) return false;
   if (typeof r.hash !== "string") return false;
   let actual: string;
   try {
@@ -132,14 +143,20 @@ export class Ledger {
   total() { let n = 0; for (const v of this.held.values()) n += v; return n; }
 }
 export type InstallWhy = "bounds" | "digest" | "record" | "cut" | "tail" | "needs_more_history";
+/** A patch's canonical decoded charge: its JSON's UTF-8 bytes (what the graph holds of it, logically) */
+const patchBytes = (p: Patch) => utf8Length(JSON.stringify(p));
 /**
- * Whether a checkpoint blob and the verified tail after it make a usable base (§8): bounded first (count and bytes,
- * before anything is decoded or built); the blob's sha256 and bytes the descriptor's; the record a snapshot at exactly
- * cut_patch with its exact hash; the tail contiguous from at_seq + 1; and the graph of the record and the tail able to
- * give an exact value (needsMoreHistory and valueUnavailable false).  `local` is what this device already has of the
- * document (its accepted rows and its own unsent ones), added last, so the value checked is the one the device would
- * show (astra: the actual combined graph).  B = the blob's bytes + the tail's charge; the ledger shows peak <= 2B and,
- * on return, only the incoming copies held (<= B).
+ * Whether a checkpoint blob and the verified tail after it make a usable base (§8).
+ * - Bounded first, before anything is decoded or built: the blob's bytes the descriptor's and <= its maximum; the
+ *   tail's PATCHES (summed over its batches, as the server's cap counts them) and charge within the cap; the device's
+ *   own rows within the journal's debt bounds.
+ * - Then: the blob's sha256; the record a snapshot whose causal shape is exact and whose hash is exactly its value's,
+ *   at exactly cut_patch; the tail contiguous from at_seq + 1.
+ * - Then the combined graph (the record, the tail, and `local`: this device's own rows, astra) must give an exact value
+ *   (needsMoreHistory and valueUnavailable false).  Anything the graph throws on is a refusal, never an exception.
+ * The bytes held (map r2 G), counted as they are taken: B = the blob + the tail's charge + the local rows' bytes; the
+ * incoming copy is B, and the one working copy (the decoded record, then the graph) grows by what is added to it, to
+ * at most B.  The module itself refuses past peak 2B; a refusal holds nothing on return, a success only the graph (B).
  */
 export async function checkCheckpoint(
   codec: DocCodec,
@@ -149,33 +166,45 @@ export async function checkCheckpoint(
   local: readonly Patch[] = [],
   ledger = new Ledger(),
 ): Promise<{ ok: true; record: CheckpointRecord; graph: PatchGraph; ledger: Ledger; B: number } | { ok: false; why: InstallWhy; ledger: Ledger; B: number }> {
-  const charge = tail.reduce((n, b) => n + b.charge, 0);
-  const B = blob.length + charge;
-  // (two copies at most: the incoming bytes (B), and one working copy, the decoded record and then the graph built
-  // from it, which grows to the record + the tail (<= B))
-  const no = (why: InstallWhy) => { ledger.drop("work"); return { ok: false as const, why, ledger, B }; };
-  if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || tail.length > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP) return no("bounds");
+  const patches = tail.reduce((n, b) => n + b.patches.length, 0), charge = tail.reduce((n, b) => n + b.charge, 0);
+  let B = blob.length + charge;
+  const no = (why: InstallWhy) => { ledger.drop("work"); ledger.drop("incoming"); return { ok: false as const, why, ledger, B }; };
+  if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || patches > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP || local.length > LOCAL_ROWS_MAX) return no("bounds");
+  const localBytes = local.map(patchBytes), localTotal = localBytes.reduce((n, x) => n + x, 0);
+  if (localTotal > LOCAL_BYTES_MAX) return no("bounds");
+  B += localTotal;
   ledger.set("incoming", B);
-  if ((await sha256Hex(blob)) !== d.sha256) return no("digest");
-  let record: unknown;
+  let work = 0;
+  const grow = (bytes: number) => { work += bytes; ledger.set("work", work); };
   try {
-    record = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(blob));
+    if ((await sha256Hex(blob)) !== d.sha256) return no("digest");
+    let record: unknown;
+    try {
+      record = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(blob));
+    } catch {
+      return no("record");
+    }
+    grow(blob.length);
+    if (!checkRecord(codec, record)) return no("record");
+    if (record.time !== d.cut_patch) return no("cut");
+    if (tail.some((b, i) => b.seq !== d.at_seq + 1 + i)) return no("tail");
+    const graph = new PatchGraph({ codec });
+    graph.add([record]);
+    try {
+      for (const b of tail) { graph.add([...b.patches]); grow(b.charge); }
+      for (let i = 0; i < local.length; i++) { graph.add([local[i]]); grow(localBytes[i]); }
+    } catch {
+      return no("tail");
+    }
+    if (graph.needsMoreHistory() || graph.valueUnavailable()) return no("needs_more_history");
+    if (ledger.peak > 2 * B || work > B) return no("bounds");
+    // (the graph goes to the caller: the incoming copy is what it no longer needs, so what is held on return is <= B)
+    ledger.drop("incoming");
+    return { ok: true, record, graph, ledger, B };
   } catch {
+    // (anything else thrown (the codec, the hash): a refusal, nothing held)
     return no("record");
   }
-  ledger.set("work", blob.length);
-  if (!checkRecord(codec, record)) return no("record");
-  if (record.time !== d.cut_patch) return no("cut");
-  if (tail.some((b, i) => b.seq !== d.at_seq + 1 + i)) return no("tail");
-  const graph = new PatchGraph({ codec });
-  graph.add([record]);
-  ledger.set("work", B);
-  for (const b of tail) graph.add([...b.patches]);
-  if (local.length) graph.add([...local]);
-  if (graph.needsMoreHistory() || graph.valueUnavailable()) return no("needs_more_history");
-  // (the graph goes to the caller: the incoming copy is what it no longer needs, so what is held on return is <= B)
-  ledger.drop("incoming");
-  return { ok: true, record, graph, ledger, B };
 }
 
 // ---- reconciliation (r9 §6.2)

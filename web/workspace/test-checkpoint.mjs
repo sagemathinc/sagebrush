@@ -11,8 +11,9 @@ import { join } from "node:path";
 import { PatchGraph, encodePatchId } from "patchflow";
 import { notebookCodec as codec } from "../notebook/history.js";
 import { LIMITS } from "../sync-protocol/protocol.ts";
+import { SYNC_DEBT } from "../journal/rows.js";
 import {
-  CHECKPOINT_BLOB_MAX, TAIL_ITEM_CAP, TAIL_PATCHES_CAP, REGISTER_ATTEMPTS, Ledger,
+  CHECKPOINT_BLOB_MAX, TAIL_ITEM_CAP, TAIL_PATCHES_CAP, REGISTER_ATTEMPTS, LOCAL_ROWS_MAX, LOCAL_BYTES_MAX, Ledger,
   acceptedBatch, exactCut, makeCheckpoint, checkRecord, checkCheckpoint, reconcile, splitPrefix, prefixCharge, itemBytesOf, utf8Length, sha256Hex,
 } from "./checkpoint.ts";
 
@@ -139,7 +140,7 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(ok.ok && ok.ledger.peak <= 2 * ok.B && ok.ledger.total() <= ok.B, `checkCheckpoint: peak <= 2B and retained <= B (B ${ok.B}, peak ${ok.ledger?.peak}, retained ${ok.ledger?.total()})`);
   const no = async (dd, blob, t, why, what, local) => {
     const x = await checkCheckpoint(codec, dd, blob, t, local);
-    check(!x.ok && x.why === why && x.ledger.total() <= x.B, `checkCheckpoint: ${what}: refused (${why}), retained <= B: ` + J({ why: x.why, held: x.ledger.total(), B: x.B }));
+    check(!x.ok && x.why === why && x.ledger.total() === 0, `checkCheckpoint: ${what}: refused (${why}), nothing held after: ` + J({ why: x.why, held: x.ledger.total(), B: x.B }));
     return x;
   };
   const b1 = await no({ ...d, bytes: d.bytes + 1 }, ck.blob, tail, "bounds", "bytes not the descriptor's");
@@ -173,6 +174,46 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   // the actual combined graph (astra): the device's own rows are part of what is checked
   const O = mk("clientD", [A.time], v1, docOf(["mine", "x = 1"]));
   await no(d, ck.blob, tail, "needs_more_history", "the device's own pre-cut row in the combined graph", [O]);
+  // (astra's CK-M1) the tail's bound counts PATCHES (the server's unit), not batches: 1000 patches in one batch are
+  // within it, 1001 aren't (a batch may hold 2000), refused before any graph; the same split across two batches
+  const chainOf = (n, from, client) => { const out = []; let prev = from; for (let i = 0; i < n; i++) { const p = { time: encodePatchId(++clock, client), parents: [prev], patch: codec.makePatch(v3, v3), userId: 0, wall: clock }; out.push(p); prev = p.time; } return out; };
+  const k1000 = chainOf(1000, C.time, "clientK"), k1001 = chainOf(1001, C.time, "clientL");
+  const one1000 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1000.slice(1)], 1)]);
+  check(one1000.ok || one1000.why !== "bounds", "checkCheckpoint: 1000 patches in ONE tail batch: within the bound: " + J(one1000.ok ? "ok" : one1000.why));
+  const one1001 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1001.slice(1)], 1)]);
+  check(!one1001.ok && one1001.why === "bounds" && one1001.ledger.peak === 0, "checkCheckpoint: 1001 patches in ONE tail batch: refused (bounds) before any graph");
+  const two1001 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1001.slice(1, 500)], 1), acceptedBatch(4, k1001.slice(500), 1)]);
+  check(!two1001.ok && two1001.why === "bounds" && two1001.ledger.peak === 0, "checkCheckpoint: 500 + 501 patches across two batches: refused (bounds) before any graph");
+  const two1000 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1000.slice(1, 500)], 1), acceptedBatch(4, k1000.slice(500), 1)]);
+  check(two1000.ok || two1000.why !== "bounds", "checkCheckpoint: 500 + 500 across two batches: within the bound");
+  // (astra's CK-M3; the grader's T7) a record whose causal fields aren't a list of distinct patch ids is refused as
+  // a record, never an exception, and nothing is held after; so is a tail the graph throws on
+  for (const [what, parents] of [["parents 42", 42], ["parents {}", {}], ["a non-string parent", [1]], ["a parent that isn't a patch id", ["x"]], ["a repeated parent", [A.time, A.time]]]) {
+    const bad = new TextEncoder().encode(J({ ...ck.record, parents }));
+    const dd = { ...d, sha256: await sha256Hex(bad), bytes: bad.length };
+    let r, threw = null;
+    try { r = await checkCheckpoint(codec, dd, bad, tail); } catch (e) { threw = String(e); }
+    check(!threw && r && !r.ok && r.why === "record" && r.ledger.total() === 0, `checkCheckpoint: a record with ${what}: refused (record), nothing held: ` + J(threw ?? { why: r.why, held: r.ledger.total() }));
+  }
+  const odd = acceptedBatch(3, [{ ...C, parents: 42 }], 1);
+  let oddR, oddThrew = null;
+  try { oddR = await checkCheckpoint(codec, d, ck.blob, [odd]); } catch (e) { oddThrew = String(e); }
+  check(!oddThrew && oddR && !oddR.ok && oddR.why === "tail" && oddR.ledger.total() === 0, "checkCheckpoint: a tail patch the graph throws on: refused (tail), nothing held: " + J(oddThrew ?? { why: oddR.why, held: oddR.ledger.total() }));
+  // (astra's CK-M2; the grader's T8) the bytes held are counted as taken, the device's own rows included: B = the blob
+  // + the tail's charge + the local rows' JSON bytes; a 1 MiB local edit makes B over 1 MiB, the graph's copy is
+  // exactly those bytes on return, and the peak is 2B (the incoming copy and the working one)
+  const big = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w".repeat(1 << 20)]));
+  const bigBytes = Buffer.byteLength(J(big));
+  const withBig = await checkCheckpoint(codec, d, ck.blob, tail, [big]);
+  const held = ck.blob.length + tail[0].charge + bigBytes;
+  check(withBig.ok && withBig.B === held && withBig.ledger.total() === held && withBig.ledger.peak === 2 * held, "checkCheckpoint: a 1 MiB local edit: B and what is held on return are the record + the tail + its " + bigBytes + " bytes, the peak 2B: " + J({ B: withBig.B, held: withBig.ledger.total(), peak: withBig.ledger.peak, want: held }));
+  check(LOCAL_ROWS_MAX === SYNC_DEBT.docCount && LOCAL_BYTES_MAX === SYNC_DEBT.docBytes, "the local bounds are the journal's per-document debt bounds (SYNC_DEBT)");
+  const manyLocal = Array.from({ length: LOCAL_ROWS_MAX + 1 }, () => C);
+  const lr = await checkCheckpoint(codec, d, ck.blob, tail, manyLocal);
+  check(!lr.ok && lr.why === "bounds" && lr.ledger.peak === 0, `checkCheckpoint: ${LOCAL_ROWS_MAX + 1} local rows: refused (bounds) before any graph`);
+  const hugeLocal = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w".repeat(LOCAL_BYTES_MAX)]));
+  const lb = await checkCheckpoint(codec, d, ck.blob, tail, [hugeLocal]);
+  check(!lb.ok && lb.why === "bounds" && lb.ledger.peak === 0, "checkCheckpoint: local rows over LOCAL_BYTES_MAX: refused (bounds) before any graph");
   const N = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "mine"]));
   const withLocal = await checkCheckpoint(codec, d, ck.blob, tail, [N]);
   check(withLocal.ok && canon(withLocal.graph.value()) === canon(fullValue([A, B, C, N])), "checkCheckpoint: the device's own row after the tail: usable, the combined value");
