@@ -96,3 +96,7 @@ for shp in [(0, 3), (3, 0), (0, 0), (2, 0, 3)]:
     print("cond", shp, err(lambda: np.linalg.cond(Z)), err(lambda: np.linalg.cond(Z, "fro")), err(lambda: np.linalg.cond(Z, -2)))
 for dt in (np.int64, bool, np.float32, np.float64):
     print("pinv empty dtype", dt.__name__ if hasattr(dt, "__name__") else dt, np.linalg.pinv(np.zeros((0, 3), dtype=dt)).dtype, np.linalg.pinv(np.zeros((2, 2, 0), dtype=dt)).dtype)
+# pinv's dtype on an empty stack of nonempty matrices: float64, as NumPy's ordinary path (sage2/daybreak3 PINV-3b)
+for dt in (np.int64, bool):
+    Z = np.zeros((0, 2, 2), dtype=dt)
+    print("pinv empty stack dtype", np.linalg.pinv(Z).dtype, np.linalg.pinv(Z, rcond=1e-10).dtype, np.linalg.pinv(Z, hermitian=True).dtype, np.linalg.pinv(np.zeros((0, 0, 0), dtype=dt)).dtype, np.linalg.pinv(Z).shape)

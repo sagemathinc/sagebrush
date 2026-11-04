@@ -276,7 +276,10 @@ def pinv(a, rcond=None, hermitian=False, *, rtol=None):
         rtol = 1e-15 if rcond is None else rcond
     if a.ndim >= 2 and (a.shape[-1] == 0 or a.shape[-2] == 0 or a.size == 0):
         # (no singular values: the pseudoinverse of an m x n empty matrix is n x m, empty, per matrix)
-        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a0.dtype)
+        # (the input's dtype only when the matrices themselves are empty, as NumPy's: an empty stack of
+        # nonempty matrices takes NumPy's ordinary path, and comes back float64)
+        keep = a.shape[-1] * a.shape[-2] == 0
+        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a0.dtype if keep else _np.float64)
     u, s, vh = svd(a, full_matrices=False)
     cutoff = rtol * _np.max(s, axis=-1, keepdims=True)
     sinv = _np.where(s > cutoff, 1.0 / _np.where(s > cutoff, s, 1.0), 0.0)
