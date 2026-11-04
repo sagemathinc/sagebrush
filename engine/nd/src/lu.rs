@@ -283,6 +283,7 @@ fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
 /// four: each block's rows by plain substitution, the rows below by one fused update ([`sub4`]). Every element
 /// subtracts x_k * l(i,k) for k in increasing order and skips a zero x_k, as plain substitution does, so the
 /// bits are plain substitution's (the reference BLAS dtrsm's).
+#[inline(always)]
 pub(crate) fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
     let mut k0 = 0;
     while k0 < n {
@@ -318,6 +319,7 @@ pub(crate) fn lower_unit_col(l: &[f64], ldl: usize, n: usize, col: &mut [f64]) {
 /// One column of X := U^-1 X (non-unit upper) by back substitution, blocked by four from the bottom: each
 /// block's rows by plain substitution (a zero x_k skips its division and update, as dtrsm), the rows above by
 /// one fused update over the block's columns in decreasing order. The bits are plain back substitution's.
+#[inline(always)]
 pub(crate) fn upper_col(u: &[f64], ldu: usize, n: usize, col: &mut [f64]) {
     let mut kend = n;
     while kend > 0 {
