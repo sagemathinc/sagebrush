@@ -803,24 +803,65 @@ def _is_blank_row(r):
 
 # --- read_csv --------------------------------------------------------------
 
-def _mangle(labels):
-    out = []
-    seen = {}
-    for i, lab in enumerate(labels):
-        if lab == "" or lab is None:
-            lab = "Unnamed: %d" % i
-        if lab in seen:
-            k = seen[lab]
-            new = "%s.%d" % (lab, k)
-            while new in seen:
-                k += 1
-                new = "%s.%d" % (lab, k)
-            seen[lab] = k + 1
-            seen[new] = 1
-            lab = new
-        else:
-            seen[lab] = 1
-        out.append(lab)
+def _digits(k):
+    # (len(str(k)) for k >= 0, without making the string)
+    n = 1
+    while k >= 10:
+        k //= 10
+        n += 1
+    return n
+
+
+def _mangle(labels, budget):
+    """The header's labels, an empty one named 'Unnamed: i' and a repeated
+    one 'x.1', 'x.2', ... as pandas does.  Every growth is preflighted
+    (daybreak3's #626 finding): the output list's slots first, then each new
+    label string before it is made and each entry of the names seen before
+    it is added; a refusal returns everything charged here.  The seen names'
+    entries are returned at the end, the output's stay (the labels are kept)."""
+    charged = 0
+    seen_charge = 0
+    try:
+        c = _list_charge(len(labels))
+        budget.charge(c, "the column labels")
+        charged += c
+        out = []
+        seen = {}
+        for i, lab in enumerate(labels):
+            if lab == "" or lab is None:
+                c = _string_charge(9 + _digits(i))
+                budget.charge(c, "a column label")
+                charged += c
+                lab = "Unnamed: %d" % i
+            if lab in seen:
+                k = seen[lab]
+                while True:
+                    c = _string_charge(len(lab) + 1 + _digits(k))
+                    budget.charge(c, "a column label")
+                    charged += c
+                    new = "%s.%d" % (lab, k)
+                    if new not in seen:
+                        break
+                    # (a name already taken: dropped)
+                    budget.release(c)
+                    charged -= c
+                    k += 1
+                budget.charge(_RAW_ENTRY, "the column labels")
+                charged += _RAW_ENTRY
+                seen_charge += _RAW_ENTRY
+                seen[lab] = k + 1
+                seen[new] = 1
+                lab = new
+            else:
+                budget.charge(_RAW_ENTRY, "the column labels")
+                charged += _RAW_ENTRY
+                seen_charge += _RAW_ENTRY
+                seen[lab] = 1
+            out.append(lab)
+    except BaseException:
+        budget.release(charged)
+        raise
+    budget.release(seen_charge)
     return out
 
 
@@ -896,10 +937,13 @@ def _range_or_index(col, name):
     """The index from an index_col column: a RangeIndex for at least two
     evenly spaced int64 labels (pandas' maybe_sequence_to_range)."""
     if col.dtype == "int64" and len(col) >= 2:
-        v = col._pd_values.tolist()
-        step = v[1] - v[0]
-        if step != 0 and all(v[i + 1] - v[i] == step for i in range(len(v) - 1)):
-            return RangeIndex(v[0], v[-1] + step, step, name=name)
+        # (read in place, one label at a time: no uncharged copy of the
+        # column; astra's PD626-3)
+        v = col._pd_values
+        n = len(v)
+        step = int(v[1]) - int(v[0])
+        if step != 0 and all(int(v[i + 1]) - int(v[i]) == step for i in range(n - 1)):
+            return RangeIndex(int(v[0]), int(v[n - 1]) + step, step, name=name)
     index = Index(None, name=name)
     index._pd_col = col
     return index
@@ -981,7 +1025,7 @@ def _parse_rows(reader, header, names, index_col, usecols, na, dtype, nrows, ski
             if header and seen:
                 raise ParserError("Passed header=%d but only %d lines in file" % (header, seen))
             raise EmptyDataError("No columns to parse from file")
-        labels = list(names) if names is not None else _mangle(list(hdr))
+        labels = list(names) if names is not None else _mangle(hdr, budget)
     else:
         first, fline = src.next_row()
         if first is None:

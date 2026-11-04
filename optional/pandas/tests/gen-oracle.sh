@@ -8,8 +8,10 @@
 # It refuses (exit 1, nothing written) unless the oracle reports exactly the pinned
 # environment, tests/oracle-env.txt: the Python build, the packages, pyarrow's absence,
 # future.infer_string and the str dtype's storage, and the display options' defaults.
-# Then, for each test_*.py compared with the oracle (not test_unsupported.py nor
-# test_repr_escape.py, whose .out are Sagebrush's), it writes tests/oracle/<test>.txt:
+# Then, for each test_*.py compared with the oracle (not those listed in
+# tests/sagebrush-only.txt, whose .out are Sagebrush's: the oracle can't run them, or
+# has nothing to say; test_known.py checks the list against the files), it writes
+# tests/oracle/<test>.txt:
 # the environment header, a line "--", then the program's stdout; and tests/<test>.out,
 # that stdout alone, which `optional-packages.mjs test` compares with Sagebrush's.
 # The venv only runs these programs (black box, plan-pandas-m1-r1 §5.1).
@@ -44,10 +46,15 @@ if ! cmp -s "$ENV_NOW" "$HERE/oracle-env.txt"; then
   diff "$HERE/oracle-env.txt" "$ENV_NOW" >&2 || true
   exit 1
 fi
-mkdir -p "$HERE/oracle"
 cd "$HERE"
+# (the list, validated before anything is written: each line one existing test file)
+ONLY=$(grep -v '^#' sagebrush-only.txt)
+for t in $ONLY; do
+  [ -f "$t" ] && [[ "$t" =~ ^test_[a-z0-9_]+\.py$ ]] || { echo "gen-oracle: sagebrush-only.txt names $t, not a test file here; nothing written" >&2; exit 1; }
+done
+mkdir -p "$HERE/oracle"
 for t in test_*.py; do
-  case "$t" in test_unsupported.py|test_repr_escape.py) continue ;; esac
+  if grep -qx "$t" <<< "$ONLY"; then continue; fi
   out=$(mktemp)
   # (COLUMNS/LINES unset: shutil.get_terminal_size() is then 80 x 24 off a terminal)
   env -u COLUMNS -u LINES PYTHONHASHSEED=0 "$PY" -I -c "import sys; sys.path.insert(0, '.'); sys.argv = ['$t']; exec(compile(open('$t').read(), '$t', 'exec'))" > "$out"

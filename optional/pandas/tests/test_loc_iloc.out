@@ -145,3 +145,57 @@ d  3
 Empty DataFrame
 Columns: [v]
 Index: []
+== lbl.dec-both-missing
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-start-missing
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-stop-missing
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-start-above
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-stop-below
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-none-between
+
+Series([], dtype: int64)
+== lbl.dec-wrong-way
+
+Series([], dtype: int64)
+== lbl.dec-open-start
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-open-stop
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-dup-missing
+
+4    2
+4    3
+dtype: int64
+== lbl.dec-dup-present
+
+4    2
+4    3
+2    4
+dtype: int64
+== lbl.unsorted-missing
+!! KeyError: 'Cannot get left slice bound for non-monotonic index with a missing label 5. Either sort the index or specify an existing label.'

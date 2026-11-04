@@ -192,3 +192,23 @@ b  2
 c  3
 == df.column-name
 'y'
+== idx.reversed
+[30, 20, 10]
+== idx.reversed-str
+['c', 'b', 'a']
+== idx.reversed-from
+[20, 10]
+== idx.reversed-step2
+[50, 30, 10]
+== idx.reversed-to
+[30, 20]
+== idx.reversed-empty
+[]
+== idx.reversed-singleton
+[7]
+== idx.range-reversed
+[2, 1, 0]
+== idx.columns-reversed
+['a']
+== idx.columns-reversed-2
+['b', 'a']

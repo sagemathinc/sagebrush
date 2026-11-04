@@ -81,6 +81,11 @@ class Index(object):
     def __getitem__(self, i):
         if isinstance(i, slice):
             start, stop, step = i.indices(len(self))
+            # (indices' stop is -1 for a negative step that runs past
+            # position 0: "before the start", which Python slicing would read
+            # as the last position again)
+            if stop < 0:
+                stop = None
             return Index(self._pd_column().slice(start, stop, step), name=self._pd_name)
         if isinstance(i, int):
             n = len(self)
@@ -97,8 +102,13 @@ class Index(object):
             b = self._pd_budget
             m = {}
             charged = 0
+            # (the labels read one at a time from the column's own storage:
+            # no full copy of them before the first charge; astra's PD626-3)
+            vals = self._pd_column()._pd_values
+            is_list = isinstance(vals, list)
             try:
-                for i, v in enumerate(self.tolist()):
+                for i in range(len(vals)):
+                    v = vals[i] if is_list else vals[i].item()
                     key = _key(v)
                     old = m.get(key)
                     if old is None:

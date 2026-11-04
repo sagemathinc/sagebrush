@@ -27,3 +27,17 @@ case("count", lambda: (len(div), len(raised)))
 case("missing", lambda: sorted(set(raised) - {d["case"] for d in div}))
 case("extra", lambda: sorted({d["case"] for d in div} - set(raised)))
 case("message", lambda: [d["case"] for d in div if raised.get(d["case"], d["message"]) != d["message"]])
+
+# the oracle's coverage (astra's PD626-4): every test_*.py is either listed in
+# sagebrush-only.txt (its .out is Sagebrush's, and gen-oracle.sh skips it) or
+# has the oracle's output in oracle/, never both and never neither; and the
+# list names only test files that exist
+import os
+only = [l.strip() for l in open("sagebrush-only.txt") if l.strip() and not l.startswith("#")]
+tests = sorted(f for f in os.listdir(".") if f.startswith("test_") and f.endswith(".py"))
+oracle = sorted(f[:-4] + ".py" for f in os.listdir("oracle") if f.endswith(".txt"))
+case("sagebrush-only", lambda: sorted(only))
+case("sagebrush-only-unknown", lambda: sorted(set(only) - set(tests)))
+case("oracle-and-sagebrush-only", lambda: sorted(set(only) & set(oracle)))
+case("neither", lambda: sorted(set(tests) - set(only) - set(oracle)))
+case("oracle-without-test", lambda: sorted(set(oracle) - set(tests)))

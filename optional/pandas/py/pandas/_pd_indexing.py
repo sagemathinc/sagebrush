@@ -136,17 +136,25 @@ def _slice_bound(index, label, side):
         return p[0] if side == "left" else p[-1] + 1
     if p is not None:
         return p if side == "left" else p + 1
-    # (a missing label: by sorted position on a monotonic index, else KeyError)
+    # (a missing label: by sorted position on a monotonic index, increasing
+    # or decreasing, else KeyError)
     vals = index.tolist()
     try:
         increasing = all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1))
+        decreasing = not increasing and all(vals[i] >= vals[i + 1] for i in range(len(vals) - 1))
     except TypeError:
-        increasing = False
-    if not increasing:
+        increasing = decreasing = False
+    if not increasing and not decreasing:
         raise KeyError("Cannot get %s slice bound for non-monotonic index with a missing label %r. "
                        "Either sort the index or specify an existing label." % (side, label))
     try:
-        return bisect.bisect_left(vals, label) if side == "left" else bisect.bisect_right(vals, label)
+        if increasing:
+            return bisect.bisect_left(vals, label) if side == "left" else bisect.bisect_right(vals, label)
+        # (decreasing: the start is the first label below `label`, the end
+        # is after the last label above it, as pandas' searchsorted on the
+        # reversed index gives)
+        up = vals[::-1]
+        return len(vals) - (bisect.bisect_right(up, label) if side == "left" else bisect.bisect_left(up, label))
     except TypeError:
         raise TypeError("cannot do slice indexing on %s with these indexers [%s] of type %s"
                         % (type(index).__name__, label, type(label).__name__)) from None

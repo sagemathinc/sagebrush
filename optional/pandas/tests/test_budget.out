@@ -17,9 +17,9 @@
 == late-widening.cap+1
 "read_csv: the decoded-memory budget would be exceeded by widening a column to str (843080 B more, 7545592 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
 == many-labels.cap
-(1709, ((0, 1709), ['object']))
+(1702, ((0, 1702), ['object']))
 == many-labels.cap+1
-"read_csv: the decoded-memory budget would be exceeded by a column (1352 B more, 8388560 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+"read_csv: the decoded-memory budget would be exceeded by a column (1352 B more, 8387828 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
 == read-then-map.cap
 (3628, (2, 1))
 == read-then-map.cap+1
