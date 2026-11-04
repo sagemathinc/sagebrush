@@ -44,6 +44,10 @@ export const VERBS = {
   restore: { description: "An entry in Trash put back where it was (or beside what took its place).", params: obj({ path }, ["path"]) },
   history: { description: "A data file's kept versions, in the order kept.", params: obj({ path, cursor: { type: "string" } }, ["path"]) },
   version: { description: "The bytes of one of a data file's versions (an index into history).", params: obj({ path, index: { type: "integer", minimum: 0 } }, ["path", "index"]) },
+  // (PROTOTYPE, branch git-proto: an agent's own git branch and worktree, web/git/agent.ts)
+  git_branch: { description: "Start your own git branch agent/<name> from main's last commit; its worktree is the folder /Branches/<name>/ (main's committed files). Work and verify only there.", params: obj({ name: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,39}$" } }, ["name"]) },
+  git_commit: { description: "Commit your worktree /Branches/<name>/ on agent/<name>. With review: true, ask the person to review it (they accept or reject on the Git page). Commit only what you have verified.", params: obj({ name: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,39}$" }, message: { type: "string", minLength: 1, maxLength: 10000 }, review: { type: "boolean" } }, ["name", "message"]) },
+  git_status: { description: "Where your branch stands: open, review, accepted or rejected, the person's note, and whether main moved on since it began. Without name, every branch.", params: obj({ name: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,39}$" } }, []) },
 } as const;
 
 /** schema.json: the verbs, their parameters' JSON Schemas, and the limits. */

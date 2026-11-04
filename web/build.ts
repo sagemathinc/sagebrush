@@ -4,7 +4,7 @@
 // web/shims, the Python library is fetched in chunks (lib/), and the
 // Unicode name table is left out.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
+import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { previewHost } from "./latex/preview-host.mjs";
@@ -622,6 +622,17 @@ rmSync(join(here, "dist", "proposals"), { recursive: true, force: true });
     process.exit(1);
   }
   copyFileSync(join(here, "proposals", "index.html"), join(here, "dist", "proposals", "index.html"));
+}
+// the git PROTOTYPE (web/git, branch git-proto only): commit main, agents' branches, review, accept/reject
+rmSync(join(here, "dist", "git"), { recursive: true, force: true });
+{
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "git", "page.ts"), join(here, "git", "agent.ts")], outdir: join(here, "dist", "git"), naming: "[name].js", target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+  copyFileSync(join(here, "git", "index.html"), join(here, "dist", "git", "index.html"));
+  renameSync(join(here, "dist", "git", "page.js"), join(here, "dist", "git", "git.js"));
 }
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });

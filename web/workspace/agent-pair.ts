@@ -471,6 +471,12 @@ export class AgentPairing {
         return from + page.length < all.length ? { versions: page, more: true, cursor: String(from + page.length) } : { versions: page };
       }
       case "version": return { content: contentOut("file", await v.version(p.path, p.index), `${p.path} version ${p.index}`) };
+      // (PROTOTYPE git-proto: web/git/agent.ts, loaded only when an agent first uses git)
+      case "git_branch": case "git_commit": case "git_status": {
+        const { gitVerb } = await import(/* @vite-ignore */ new URL("/git/agent.js", location.origin).href);
+        const r = await gitVerb(verb, p, v, this.hello?.agent?.name ?? this.grant?.agent ?? "an agent");
+        return verb === "git_status" ? r : changed(r);
+      }
     }
     throw new AgentError("invalid", `not a verb: ${verb}`);
   }

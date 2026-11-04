@@ -28,8 +28,8 @@ export type Grant = {
   lastUsed: number;
 };
 
-const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version"]);
-const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore"]);
+const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version", "workspace.git_status"]);
+const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore", "workspace.git_branch", "workspace.git_commit"]);
 
 /** A path as normPath makes it, or null if it isn't one. */
 export function norm(p: unknown): string | null {
@@ -119,6 +119,11 @@ export async function authorize(method: string, params: any, g: Grant | null, no
       if (!inGrant(parentOf(from), folders)) return `restoring ${JSON.stringify(from)} would put it in ${JSON.stringify(parentOf(from))}, outside the folders this agent may change`;
       outArg.expect = e;
       return null;
+    }
+    case "workspace.git_branch": case "workspace.git_commit": case "workspace.git_status": {
+      // (PROTOTYPE git-proto: an agent's branch is its worktree folder)
+      const p = norm(params.name ? `/Branches/${params.name}` : "/Branches");
+      return inGrant(p, folders) ? null : out(p);
     }
     default: {
       // stat, read, history, version, write, create, mkdir: one path

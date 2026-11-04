@@ -380,6 +380,64 @@
         ],
         "additionalProperties": false
       }
+    },
+    "workspace.git_branch": {
+      "description": "Start your own git branch agent/<name> from main's last commit; its worktree is the folder /Branches/<name>/ (main's committed files). Work and verify only there.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.git_commit": {
+      "description": "Commit your worktree /Branches/<name>/ on agent/<name>. With review: true, ask the person to review it (they accept or reject on the Git page). Commit only what you have verified.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "review": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.git_status": {
+      "description": "Where your branch stands: open, review, accepted or rejected, the person's note, and whether main moved on since it began. Without name, every branch.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
     }
   }
 }
