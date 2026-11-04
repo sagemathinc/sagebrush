@@ -29,7 +29,15 @@ verified. TimeTravel stays the local insurance; git is what's shared.
 
 1. Build as usual (`bun web/build.ts`, LaTeX on), serve `web/dist`, and open `/git/`.
    - Commit your files once: an agent can only branch from a commit.
-2. Run sagebrush-mcp from this checkout, so it has the three new tools, and pair your agent on `/board/`.
+2. Give your agent this checkout's tools: `web/git/mcp.py` runs the installed sagebrush-mcp (for its compiled
+   engine) with this checkout's Python MCP layer, so the three git tools appear without building anything:
+
+   ```
+   claude mcp add sagebrush-git --env SAGEBRUSH_MCP_DEV_ORIGIN=http://localhost:8765 \
+     -- <the python that has sagebrush-mcp> <checkout>/web/git/mcp.py
+   ```
+
+   Then pair your agent on `http://localhost:8765/board/`.
 3. Paste the agent text under "For your agent" on the Git page (or just ask the agent to work on its own branch).
 4. The agent then:
    - branches;
