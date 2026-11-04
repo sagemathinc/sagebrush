@@ -869,6 +869,7 @@ def test_pair_link():
     # (the link's code and port pair, as the page would)
     c = Client(port)
     assert c.status == 101 and "result" in c.hello(q["pair"][0]), "the link's code didn't pair"
+    assert p.link() is None  # (its code is used: the link goes with it; grader's P4)
     c.close()
     p.close()
     # (no live code, no link: an expired one isn't handed out)
