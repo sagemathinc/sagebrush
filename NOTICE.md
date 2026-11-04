@@ -646,12 +646,15 @@ from Tavmjong Bah. For further information, contact: tavmjong @ free
 . fr.
 ```
 
-### smalljac (used with the author's permission)
+### smalljac (its method, used with the author's permission)
 
-The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
-Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
-gave explicit permission for this port to be licensed however Sagebrush
-chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
+The a_p engine (`engine/ap`) is a from-scratch Rust implementation of the
+published genus-1 strategy of Andrew V. Sutherland's smalljac (with Kiran
+Kedlaya). No smalljac source was translated or copied: what it takes from
+smalljac is the method, and smalljac 4.1.3 was used only as a binary oracle
+and benchmark. On 2026-10-02 Andrew Sutherland gave explicit permission for
+this implementation to be licensed however Sagebrush chooses; see
+[engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
 ### PSAGE (used with the author's permission)
 

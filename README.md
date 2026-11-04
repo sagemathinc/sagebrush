@@ -31,8 +31,9 @@ These define what Sagebrush is.
    and as benchmarks. They are never dependencies, and never sources to
    port. Algorithms are implemented clean-room from the literature or with
    the copyright owner's permission. An independent implementation has
-   mathematical value of its own: when it agrees with PARI, that is
-   evidence about both.
+   mathematical value of its own: when it agrees with PARI, that is strong
+   evidence about both, though not a guarantee, since the two can still
+   share an algorithm, an assumption or reference data.
 3. **Portable and lightweight.** Pure Rust, with no C libraries (no GMP,
    FLINT or PARI) and no build system beyond `cargo`. So every engine also
    compiles to WebAssembly and runs wherever WebAssembly runs: in the
@@ -55,9 +56,12 @@ These define what Sagebrush is.
 ## What works today
 
 **`ap`**: traces of Frobenius a_p of elliptic curves over Q at all primes up
-to a bound. It is a from-scratch Rust port of the genus-1 strategy of Drew
-Sutherland's smalljac. Its output matches smalljac exactly (every prime to
-10^6, checksums to 10^8) and matches Sage below 20000. On 16 threads it
+to a bound. It is a from-scratch Rust implementation of the published
+genus-1 strategy of Drew Sutherland's smalljac (no smalljac source was
+translated or copied; see `engine/ap/PROVENANCE.md`). Its output matches
+smalljac exactly (every prime to 10^6, checksums to 10^8) and matches Sage
+below 20000. Since it follows smalljac's own method, the agreement with
+smalljac checks the implementation more than the method. On 16 threads it
 beats smalljac's own 16-process mode at 10^7; on one core it is
 1.2-1.6x slower. See [results/ap.md](results/ap.md): measured once there;
 `sagebrush bench ap` reruns Sagebrush's side (11a to 10^8 in 65 s on one
@@ -658,9 +662,9 @@ Copyright (c) 2026 SageMath, Inc. Licensed under either of the
 at your option.
 
 A few parts derive from other permissively licensed projects (CPython,
-NumPy, Arm Optimized Routines, fdlibm) or were ported with the author's
-permission (smalljac); [NOTICE.md](NOTICE.md) lists them with their
-notices.
+NumPy, Arm Optimized Routines, fdlibm) or implement another project's
+method with its author's permission (smalljac's, written from scratch);
+[NOTICE.md](NOTICE.md) lists them with their notices.
 
 ### What each download contains, and under which licenses
 
