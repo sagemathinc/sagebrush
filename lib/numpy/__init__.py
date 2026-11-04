@@ -1267,18 +1267,37 @@ def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out)
 
 
+def _minmax(a, axis, keepdims, initial, mask, is_max):
+    # NumPy's maximum/minimum reduction: initial (in a's dtype, converted as NumPy converts it) takes part, and is
+    # the result of a reduction over no elements, which without it has no identity; a where mask needs it
+    a = asarray(a)
+    op = maximum if is_max else minimum
+    if mask is not True and initial is None:
+        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                         "specify 'initial'" % op.__name__)
+    if initial is None:
+        return (_np.amax if is_max else _np.amin)(a, axis, keepdims)
+    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s)
+    if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
+        raise ValueError("setting an array element with a sequence.")
+    ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype)
+    if mask is not True:
+        a = _np.where3(mask, a, ini)  # (an element masked out counts as initial)
+    if _count(a, axis) == 0:
+        shape = asarray(_np.sum(a, axis, keepdims)).shape  # (the result's shape, the axes checked)
+        r = full(shape, ini, dtype=a.dtype)
+    else:
+        r = op((_np.amax if is_max else _np.amin)(a, axis, keepdims), ini)
+    r = asarray(r)
+    return r[()] if r.ndim == 0 else r
+
+
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    r = _np.amax(asarray(a), axis, keepdims)
-    if initial is not None:
-        r = maximum(r, initial)
-    return _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, True), out)
 
 
 def amin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    r = _np.amin(asarray(a), axis, keepdims)
-    if initial is not None:
-        r = minimum(r, initial)
-    return _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, False), out)
 
 
 max = amax
@@ -1342,12 +1361,16 @@ def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
     return prod(_nanfill(a, 1), axis, dtype, out, keepdims)
 
 
-def nanmax(a, axis=None, out=None, keepdims=False):
-    return amax(_nanfill(a, -inf), axis, out, keepdims)
+def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    if initial is None and _count(asarray(a), axis) == 0:
+        raise ValueError("zero-size array to reduction operation fmax which has no identity")  # (NumPy's: fmax)
+    return amax(_nanfill(a, -inf), axis, out, keepdims, initial, where)
 
 
-def nanmin(a, axis=None, out=None, keepdims=False):
-    return amin(_nanfill(a, inf), axis, out, keepdims)
+def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    if initial is None and _count(asarray(a), axis) == 0:
+        raise ValueError("zero-size array to reduction operation fmin which has no identity")  # (NumPy's: fmin)
+    return amin(_nanfill(a, inf), axis, out, keepdims, initial, where)
 
 
 def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
@@ -2785,11 +2808,11 @@ def _m_argmin(self, axis=None, out=None, *, keepdims=False):
 
 
 def _m_max(self, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return amax(self, axis, out, keepdims, initial)
+    return amax(self, axis, out, keepdims, initial, where)
 
 
 def _m_min(self, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return amin(self, axis, out, keepdims, initial)
+    return amin(self, axis, out, keepdims, initial, where)
 
 
 def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):

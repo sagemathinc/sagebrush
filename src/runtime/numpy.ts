@@ -2167,7 +2167,11 @@ function combineComplex(r: any, i: any, dt: DType): any {
 }
 
 function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean): any {
-  if (a.size === 0 && (axis === null || axis === undefined)) raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
+  // (no identity: NumPy refuses any reduction over no elements, even one whose result is empty too, as
+  // max(zeros((0, 0)), axis=0); initial= is lib/numpy's amax)
+  const axes = axesArg(axis, a.ndim);
+  const count = axes === null ? a.size : prod([...new Set(axes)].map((i) => a.shape[i]));
+  if (count === 0) raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
   const fold = isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
   return finish(reduceAxes(a, axesArg(axis, a.ndim), keepdims, a.dt, isMax ? -Infinity : Infinity, fold), axis, keepdims);
 }
