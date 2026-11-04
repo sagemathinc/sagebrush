@@ -524,6 +524,18 @@ const C1 = "clientA1", C2 = "clientB1";
   check(shapeMismatch(eb, by("batch", "another epoch")) === null, "answers: a batch for another epoch, as the vector: " + (shapeMismatch(eb, by("batch", "another epoch")) ?? J(eb)));
   check(shapeMismatch(ep, by("pull", "another epoch")) === null, "answers: a pull for another epoch, as the vector: " + (shapeMismatch(ep, by("pull", "another epoch")) ?? J(ep)));
   check(shapeMismatch(ec, by("doc_claim", "another epoch")) === null, "answers: a claim for another epoch, as the vector: " + (shapeMismatch(ec, by("doc_claim", "another epoch")) ?? J(ec)));
+  // (checkpoints, BH-0 r9: this server takes none, as a deployment whose snapshot switch is off: pull's start and token
+  // are refused as the vector's unavailable {why: snapshots_off}; a malformed one is invalid; a pull without them is
+  // the page above)
+  const off = (JSON.parse(readFileSync(new URL("./doc-vectors.json", import.meta.url), "utf8")).checkpoint?.refusals ?? []).find((r) => r.for === "pull")?.error;
+  for (const extra of [{ start: "snapshot" }, { token: null }, { token: "1.2." + "d".repeat(64) }]) {
+    const r = await s9.ask({ t: "pull", doc: D9, epoch: 1, after: 0, ...extra });
+    check(r?.t === "error" && r.code === off?.code && r.detail?.why === off?.detail?.why, "checkpoint: pull " + J(extra) + " on a server that takes none: unavailable {why: snapshots_off}: " + J(r));
+  }
+  for (const extra of [{ start: "head" }, { start: "snapshot", upto: 1 }, { token: "x" }]) {
+    const r = await s9.ask({ t: "pull", doc: D9, epoch: 1, after: 0, ...extra });
+    check(r?.t === "error" && r.code === "invalid", "checkpoint: pull " + J(extra) + ": invalid: " + J(r));
+  }
   s9.s.close();
 }
 

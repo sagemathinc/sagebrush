@@ -30,7 +30,7 @@ import {
   has, isDevice, isDocId, isHash, isNat, isSha, parseMessage, releaseRefusal, sha256Hex, toB64, type Batch, type Env, type Floors, type Head,
   type Op, type Release,
 } from "./protocol.ts";
-import { batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkUpto, hex } from "./doc-protocol.ts";
+import { PULL_FIELDS, batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkPullStart, checkUpto, hex } from "./doc-protocol.ts";
 
 /** The cookie a test session rides on: the same name as the site's, so a test front can pass it along. */
 export const SESSION_COOKIE = "__Host-sb_session";
@@ -419,10 +419,13 @@ export class ReferenceServer {
       this.answer(ws, "batch", req, { t: "ack", req, batch: out });
       if (out.new > 0) this.changed(a, ws, b.doc, out.head, ws.device);
     } else if (t === "pull") {
-      const o = fields(m, ["t", "req", "owner", "doc", "epoch", "after", "upto", "limit"], "pull");
+      const o = fields(m, PULL_FIELDS, "pull");
       if (!isDocId(o.doc) || !isNat(o.epoch) || !isNat(o.after) || (has(o, "limit") && !isNat(o.limit))) throw new SyncError("invalid", "pull");
       this.owner(a, o.owner);
       const upto = attemptDoc(() => checkUpto(o, o.after as number));
+      // (checkpoints (BH-0 r9 §5.3, §8): this server takes none, as a deployment whose snapshot switch is off)
+      const ps = attemptDoc(() => checkPullStart(o, o.after as number));
+      if (ps.start !== undefined || ps.token !== undefined) throw new SyncError("unavailable", "snapshots aren't taken on this deployment yet", { why: "snapshots_off" });
       this.answer(ws, "pull", req, { t: "batches", req, owner: a.hash, doc: o.doc, ...this.pull(a, o.doc, o.epoch, o.after, upto, o.limit as number | undefined) });
     } else if (t === "clear") {
       fields(m, ["t", "req", "owner", "doc", "expect_head", "root", "fgen"], "clear");
