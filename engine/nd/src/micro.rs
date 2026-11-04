@@ -145,6 +145,31 @@ fn avx2_fma_tile(_detected: Avx2Fma, a: &[f64], b: &[f64], acc: &mut [f64; ACC_L
     unsafe { avx2_fma_8x6(a, b, acc) }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl Avx2Fma {
+    /// `f()` compiled for AVX2 (four f64 lanes; P2b-1n stage 1: [`crate::lu`]'s small-n loops). Only AVX2 is
+    /// enabled, not FMA, and Rust never contracts a multiply and an add, so `f` does the same operations in the
+    /// same order as in the baseline build: the same bits.
+    #[inline]
+    #[allow(unsafe_code)]
+    pub(crate) fn avx2<R>(self, f: impl FnOnce() -> R) -> R {
+        // SAFETY: an Avx2Fma exists only if detect() found AVX2 and FMA on this CPU (its field is private)
+        unsafe { with_avx2(f) }
+    }
+}
+
+/// Calls `f` inside a function compiled with AVX2 enabled, so that `f`'s inlined body is compiled for it too.
+///
+/// # Safety
+/// The CPU must support AVX2 (the caller holds an [`Avx2Fma`]).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+#[allow(unsafe_code)]
+unsafe fn with_avx2<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 /// The 8 x 6 AVX2+FMA tile over whole panels `a` (kc x 8) and `b` (kc x 6) (their lengths are the caller's
 /// slicing; chunks_exact keeps every load in bounds).
 ///
@@ -173,16 +198,16 @@ unsafe fn avx2_fma_8x6(a: &[f64], b: &[f64], acc: &mut [f64; ACC_LEN]) {
 /// The NEON kernel (aarch64), 8 x 6: 4 q-registers of A, the tile in 24 accumulators, each B value
 /// broadcast by lane. Its bits are [`ScalarFma`]'s. NEON is mandatory on aarch64, so no detection.
 ///
-/// **Not selected** ([`NEON_ENABLED`] is false) until a CI host executes its oracle and determinism suite
-/// (r4.2 §12); its tests run wherever aarch64 code runs (the Mac lane), and it is compiled on every aarch64
-/// build so it can't rot.
+/// **Selected** on aarch64 ([`NEON_ENABLED`]): CI's engine-nd-neon job (macos-15, Apple silicon) executes its
+/// oracle, thread-determinism and bit-family suite (r4.2 §12), green on master 3890aae2 (run 41877477454);
+/// William, Nov 4 2026: "own NEON" (Mac native uses this kernel; Accelerate is a benchmark only).
 #[cfg(target_arch = "aarch64")]
 #[derive(Clone, Copy)]
 pub struct Neon;
 
 /// Whether dispatch may select [`Neon`] (r4.2 §12: no microkernel ships that no CI host has executed).
 #[cfg(target_arch = "aarch64")]
-pub const NEON_ENABLED: bool = false;
+pub const NEON_ENABLED: bool = true;
 
 #[cfg(target_arch = "aarch64")]
 impl Micro for Neon {
