@@ -90,10 +90,13 @@ export function install(proto, CMDS, deps) {
       if (w === "s" ? hl !== "sb" || tpl["sidebar left"] : w === "h" ? !hl || hl === "sb" || tpl.headline : !(tpl.footline ? /number/.test(tpl.footline) : fl)) return "";
       const fr = this.bfr[n - 1];
       // (a footline of [frame number]: TeX's "n/N", beamer's counter; of [page number]: the page among all of them, each
-      //  overlay step a page, as the PDF's (the frame's first))
+      //  overlay step a page, as the PDF's: on a frame of several steps, one number for each, an overlay of that step, so
+      //  Present and each step's picture show its own (daybreak3, PAGE644-OVERLAY-1); the pages counted once a render)
       if (w === "f" && tpl.footline) {
-        const F = this.frameList, steps = (k) => F[k].steps || 1, page = F.slice(0, n - 1).reduce((t, x, k) => t + steps(k), 1), pages = F.reduce((t, x, k) => t + steps(k), 0);
-        return '<div class="slide-foot"><div class="fno">' + (/frame/.test(tpl.footline) ? fr.num + "/" + (this.bnum ?? 0) : page + "/" + pages) + "</div></div>";
+        if (/frame/.test(tpl.footline)) return '<div class="slide-foot"><div class="fno">' + fr.num + "/" + (this.bnum ?? 0) + "</div></div>";
+        const P = (this.bpages ??= this.frameList.reduce((a, x) => (a.start.push(a.total + 1), a.total += x.steps || 1, a), { start: [], total: 0 }));
+        const k0 = P.start[n - 1], st = this.frameList[n - 1].steps || 1;
+        return '<div class="slide-foot"><div class="fno">' + (st === 1 ? k0 + "/" + P.total : Array.from({ length: st }, (_, q) => '<span class="ov" data-ov="' + (q + 1) + '" data-ovm="only">' + (k0 + q) + "/" + P.total + "</span>").join(" ")) + "</div></div>";
       }
       const z = this.bz === undefined ? (this.bz = this.furnBudget()) : this.bz, S = this.bsec ?? [], cur = S[fr.s];
       // (in the short form: names and fields as their text, cut to z characters)

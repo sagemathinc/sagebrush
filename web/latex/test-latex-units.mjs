@@ -322,8 +322,17 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   //  frame; [page number] each overlay step a page: "1/4", "2/4", "4/4" for frames of 1, 2 and 1 steps)
   const fnums = (src) => [...html(src).matchAll(/<div class="fno">([^<]*)<\/div>/g)].map((m) => m[1]).join(",");
   const fno = fnums(deck("\\setbeamertemplate{footline}[frame number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b\\end{frame}\n"));
-  const pno = fnums(deck("\\setbeamertemplate{footline}[page number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b \\pause c\\end{frame}\n\\begin{frame}{C}d\\end{frame}\n"));
-  check("beamer-furniture-number-templates", fno === "0/1,1/1" && pno === "1/4,2/4,4/4", { fno, pno });
+  // ([page number] on a frame of 2 steps: "2/4" on step 1 and "3/4" on step 2, each an overlay of its step, as Present
+  //  and each step's picture show them (daybreak3, PAGE644-OVERLAY-1))
+  const pnoH = html(deck("\\setbeamertemplate{footline}[page number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b \\pause c\\end{frame}\n\\begin{frame}{C}d\\end{frame}\n"));
+  const pno = [...pnoH.matchAll(/<div class="fno">([\s\S]*?)<\/div>/g)].map((m) => m[1]).join(",");
+  check("beamer-furniture-number-templates", fno === "0/1,1/1" && pno === '1/4,<span class="ov" data-ov="1" data-ovm="only">2/4</span> <span class="ov" data-ov="2" data-ovm="only">3/4</span>,4/4', { fno, pno });
+  // (the pages counted once a render, not once a frame (astra): 10,000 frames of [page number] take about as long as of
+  //  [frame number]; counted per frame they took about 3 times as long)
+  const tenKFrames = "\\begin{frame}{F}b\\end{frame}\n".repeat(10000), timeOf = (tpl) => { const t0 = performance.now(); new Engine().update(deck("\\setbeamertemplate{footline}[" + tpl + "]\n", tenKFrames)); return performance.now() - t0; };
+  timeOf("frame number");
+  const msFrame = timeOf("frame number"), msPage = timeOf("page number");
+  check("beamer-furniture-page-numbers-linear", msPage < 1.6 * msFrame + 100, { frameMs: Math.round(msFrame), pageMs: Math.round(msPage) });
   // (the short form's cut text is escaped (grader F8: a field over the cut, decoded to measure it, is never HTML again)
   //  and cut to exactly 80 characters, the last "\u2026" (F10))
   const evil = "\\title{<img src=x onerror=alert(1)> \\& " + "B".repeat(100) + "}\\author{" + "C".repeat(100) + "}\n";
