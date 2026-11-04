@@ -8,6 +8,7 @@ Each script checks itself (`assert(...)`, then `disp('SUCCESS')`). The `%!numbl:
 - **`numbl_test_scripts/`:** numbl's tree, with each script's helper files (local functions, `@class/` and `+package/` directories, the `builtins/test_unzip_fixture.zip` fixture) where they were.
 - **`scripts.txt`:** every vendored test script (953), found by numbl's own rule: a `.m` file containing `SUCCESS`, outside `@class/`, `+package/` and `wasm/` directories.
 - **`expected-pass.txt`:** the scripts of `scripts.txt` that pass in Sagebrush's MATLAB mode today (the ratchet's baseline).
+- **`not-matlab.txt`:** the scripts of `scripts.txt` that the ratchet runs but never pins (see "Not MATLAB" below).
 
 Left out, each for one reason:
 
@@ -23,6 +24,14 @@ Left out, each for one reason:
 
 The corpus was assessed before it was vendored (Nov 4, 2026): in a sample of 30, 13 scripts probe real MATLAB semantics, 11 are ordinary and 5 are trivial; 25 say they were verified against MATLAB R2025b. Where a script and MATLAB's documentation disagree, the documentation wins (e.g. `reduction/test_diff_scalar_shape.m`'s comment says 0×1 and its assert says 0×0).
 
+## Not MATLAB
+These are vendored and run unchanged, but they are not held against Sagebrush: `not-matlab.txt` lists them, and the ratchet refuses them in `expected-pass.txt`. Sagebrush passing or failing one is not a MATLAB-compatibility result.
+
+| script | why |
+|---|---|
+| `functions/test_ans.m`, `control_flow/for_loop_nested_funcall.m`, `control_flow/test_elseif_char_condition.m`, `functions/test_no_output_function.m`, `indexing/cell_member_chain_assign.m` | **Not valid MATLAB.** Each puts its local functions first and its script code after them. A file whose first code is `function` is a function file, and in a script MATLAB requires the local functions at the end ("Add Functions to Scripts"). Sagebrush runs them anyway (a leniency) and Octave rejects them; neither result says anything about MATLAB. |
+| `arithmetic/test_power_inf_exponent.m` | **Asserts against MATLAB's documentation.** It asserts `1 .^ Inf` and `1 ^ Inf` are NaN. MathWorks' `power` page ("IEEE Compliance") lists the only cases where MATLAB departs from IEEE-754, `power(1,NaN)` and `power(NaN,0)` (both NaN); `1^Inf` isn't one, so it is IEEE's 1, as in Sagebrush and Octave. |
+
 ## The ratchet
 `python3 scripts/numbl-ratchet.py` (after `pnpm run build && node scripts/build-cli.mjs`) runs every script of `scripts.txt` through the CLI's MATLAB mode. Each script runs in a copy of this tree, from its own directory, with a throwaway TMPDIR and HOME and a 60 s timeout.
 - **Pass rule:** the script's last non-empty output line is exactly `SUCCESS` (numbl's rule), after setting aside the CLI's figure epilogue (the lines it prints for open figures after a script ends).
@@ -30,7 +39,8 @@ The corpus was assessed before it was vendored (Nov 4, 2026): in a sample of 30,
   - a script of `expected-pass.txt` fails (a regression);
   - a script of `scripts.txt` gets no result (dropped from the run);
   - numbl's discovery rule finds a different set than `scripts.txt` (a script lost or added);
-  - or `expected-pass.txt` names a script outside `scripts.txt`.
+  - `expected-pass.txt` names a script outside `scripts.txt`;
+  - or `not-matlab.txt` names a script outside `scripts.txt`, or one that `expected-pass.txt` pins.
 - **A newly passing script** is printed as `NEW PASS`: add it to `expected-pass.txt` (`--write-expected` rewrites the list from a run; use it after a reviewed fix, never to hide a regression).
 - **Where it runs:** on CI's full tier only: master pushes, the nightly schedule and a dispatch. Its hook is `scripts/test-numbl-corpus.mjs` (`// ci: web-runner-sync`, a full-tier-only job), never a pull request's fast tier. A pull request's node tests run `test/numbl-ratchet.test.ts`: it keeps the hook in that job and runs the ratchet's own tests (`scripts/test-numbl-ratchet.py`, with a fake CLI, no corpus run).
 

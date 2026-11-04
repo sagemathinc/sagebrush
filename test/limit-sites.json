@@ -4170,6 +4170,11 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
+ "lib/_sage_ec_rr.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5087,10 +5092,10 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet #0": {
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet #0": {
   "class": "coverage",
   "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "base_extend of a curve over QQ to a ring other than QQ, ZZ, GF(p), Zmod(p): not available yet (Sage has them)"
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
   "class": "coverage",
@@ -9337,10 +9342,30 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
+ },
  "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"set_printoptions\", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
@@ -9351,6 +9376,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: strRefuse :: return raise(T.NotImplementedError, \"this operation on string arrays is not supported by sagebrush's numpy yet (string arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "NumPy shim",
+  "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
