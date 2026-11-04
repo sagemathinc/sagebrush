@@ -8,6 +8,7 @@
    "interrupt",
    "modsym",
    "mpoly",
+   "nd",
    "poly",
    "raster"
   ],
@@ -324,6 +325,24 @@
    "item": "impl<'a, F : Fn ( u64) -> u64 + Sync> DenseJob<'a, F> > fn run_with",
    "hash": "a6f37fec84df5806997a27c6f49028b1e6f280ae964bd43ba6cd7fdc5aa6bf03",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/nd/src/wasm.rs",
+   "item": "fn nd_gemm_scratch_len",
+   "hash": "deb4dd8bdcf1d0c377ae5d8501ce8a93afd8f8de4d988d38d29e4c629def70e7",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. Its only unsafe part is no_mangle: an exported symbol (the nd_ prefix keeps it unique in this module); it returns a constant. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/nd/src/wasm.rs",
+   "item": "fn nd_gemm_part",
+   "hash": "c6366b4dd44c7c0942d7def459f6c11ec6ba5b08980719241f7d023e3ba895e3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. It turns host addresses into slices for one thread's share of a GEMM: A and B read-only, its own columns of C and its own scratch (disjoint per thread by the partition, a function of n and threads only; the host contract is stated on the function). Alignment and thread ids are checked first; shapes are checked by Mat::new and gemm_cols before any write, and a refusal writes nothing. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/nd/src/wasm.rs",
+   "item": "fn nd_microkernel",
+   "hash": "43c9ea3dc7242f848f14479d4c962eb308c9e3e0b383c45075c0200daf751e76",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. It copies the microkernel's static name into a host buffer of `cap` bytes (at most cap written); no_mangle as above. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/poly/src/lib.rs",

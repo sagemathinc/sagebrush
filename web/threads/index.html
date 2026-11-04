@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sagebrush: multithreaded linear algebra in a browser tab (preview)</title>
+<meta name="description" content="A dense matrix product computed by Sagebrush's Rust kernel in WebAssembly, on one and on several threads of this browser tab, with the speedup and a correctness check.">
+<style>
+  :root { --ink: #1f2421; --muted: #5d655f; --line: #d9dbd3; --bg: #fbfaf7; --accent: #4a6b49; --ok: #2f7d3a; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 22px 0 6px; }
+  p.lead { color: var(--muted); margin: 0 0 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  select, button { font: inherit; padding: 5px 8px; border-radius: 5px; border: 1px solid var(--line); background: #fff; }
+  button#run { background: var(--accent); color: #fff; border-color: var(--accent); padding: 6px 18px; font-weight: 600; cursor: pointer; }
+  button#run:disabled { opacity: .55; cursor: default; }
+  #status { margin: 14px 0; font-weight: 600; }
+  table { border-collapse: collapse; font-size: 14px; }
+  table.t td, table.t th { border: 1px solid var(--line); padding: 5px 10px; text-align: right; }
+  table.t th { background: #f1f1ec; }
+  #env th { text-align: left; padding: 3px 12px 3px 0; color: var(--muted); font-weight: 500; vertical-align: top; }
+  #env td { padding: 3px 0; word-break: break-word; }
+  code { font-size: 13px; }
+  .note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Multithreaded linear algebra in a browser tab</h1>
+  <p class="lead">A dense matrix product <i>C</i> = <i>A</i>·<i>B</i> (double precision, column-major), computed by Sagebrush's Rust kernel compiled to WebAssembly, first on one thread and then on several threads of this tab. A correctness check runs first; timings are shown only if it passes.</p>
+  <div class="controls">
+    <label>Matrix size n
+      <select id="n"><option value="500">500</option><option value="1000" selected>1000</option><option value="1500">1500</option><option value="2000">2000</option></select>
+    </label>
+    <label>Up to threads
+      <select id="maxT"></select>
+    </label>
+    <label>Timed runs per thread count
+      <select id="reps"><option value="5">5</option><option value="11" selected>11</option><option value="21">21</option></select>
+    </label>
+    <button id="run" type="button">Run</button>
+  </div>
+  <div id="status" role="status" aria-live="polite">Press Run.</div>
+  <div id="out"></div>
+  <h2>This browser</h2>
+  <table id="env"></table>
+  <p class="note">Preview of the numerics core (design note r4.2, milestone M0). Every thread count uses the same seeded matrices and the same kernel; each thread computes its own block of columns of <i>C</i>, so every entry is summed in the same order and the result is bit-identical for any thread count.</p>
+</main>
+<script type="module" src="threads.js"></script>
+</body>
+</html>
