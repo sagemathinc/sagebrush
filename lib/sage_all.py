@@ -885,6 +885,34 @@ class Rational(_Fraction):
         """
         return self._numerator == 1 and self._denominator == 1
 
+    def charpoly(self, var="x"):
+        """The characteristic polynomial over QQ: var - self.
+
+        EXAMPLES::
+
+            sage: QQ(3/2).charpoly()
+            x - 3/2
+            sage: (2/3).charpoly('z')
+            z - 2/3
+            sage: QQ(0).charpoly()
+            x
+        """
+        return polygen(QQ, var) - self
+
+    def minpoly(self, var="x"):
+        """The minimal polynomial over QQ: var - self, in QQ[var].
+
+        EXAMPLES::
+
+            sage: QQ(3/2).minpoly()
+            x - 3/2
+            sage: QQ(3/2).minpoly().parent()
+            Univariate Polynomial Ring in x over Rational Field
+            sage: QQ(-7).minpoly(var='y')
+            y + 7
+        """
+        return self.charpoly(var)
+
     def __mod__(self, n):
         """self % n for an integral n: the residue of numerator *
         denominator^-1 modulo n, an integer with the sign of n (as Python's %
