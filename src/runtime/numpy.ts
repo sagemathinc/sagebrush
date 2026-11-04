@@ -1154,10 +1154,13 @@ function intIndex(k: any, n: number, axis: number): number {
 // none; one past int64 overflows; the error names the axis (axis null: a
 // flat index into an array of more than one dimension)
 function itemIndex(v: any, n: number, axis: number | null): number {
-  const u = Obj.unbox(v);
-  if (typeof u === "boolean" || typeDtypes.get(Obj.typeOf(v)) === D.bool) raise(T.TypeError, "an integer is required");
-  const x = O.index(v);
-  if (typeof x === "bigint" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, "Python int too large to convert to C long");
+  let x: number | bigint = v;
+  // (a plain int, the common index, as it is)
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    if (typeof Obj.unbox(v) === "boolean" || typeDtypes.get(Obj.typeOf(v)) === D.bool) raise(T.TypeError, "an integer is required");
+    x = O.index(v);
+    if (typeof x === "bigint" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, "Python int too large to convert to C long");
+  }
   const i = Number(x);
   if (i < -n || i >= n) raise(T.IndexError, `index ${x} is out of bounds for ${axis === null ? "" : `axis ${axis} with `}size ${n}`);
   return i < 0 ? i + n : i;
