@@ -1062,16 +1062,14 @@ class Server:
                                 on_notify=self.chat.on_page)
         st = self.link.status()
         if st["paired"]:
-            result = dict(code=None, port=st["port"], expires_in_seconds=None, paired=True, granted=st["granted"], grant=st["grant"], page=st["page"])
+            result = dict(code=None, port=st["port"], link=None, expires_in_seconds=None, paired=True, granted=st["granted"], grant=st["grant"], page=st["page"])
             text = "A Sagebrush page is paired%s." % (" and has granted access" if st["granted"] else "; the person has not granted access yet")
         else:
             port, code = self.link.start()
-            result = dict(code=code, port=port, expires_in_seconds=CODE_SECONDS, paired=False, granted=False, grant=None, page=None,
-                          last_refused=st["last_refused"])
-            text = ("Ask the person to open Sagebrush (Chrome or Firefox), connect it to an agent there (%s), and enter this code "
-                    "within 5 minutes: %s (port %d). They then choose what you may do in their workspace. If their page "
-                    "can't connect, call workspace_connect again: it says why the last connection was refused."
-                    % (WS.WHERE_TO_CONNECT, code, port))
+            link = self.link.link()
+            result = dict(code=code, port=port, link=link, expires_in_seconds=CODE_SECONDS, paired=False, granted=False, grant=None,
+                          page=None, last_refused=st["last_refused"])
+            text = WS.connect_text(link, code, port)
             if st["last_refused"]:
                 text += " The last page that tried to connect was refused: %s." % st["last_refused"]
             print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)

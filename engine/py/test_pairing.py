@@ -806,6 +806,96 @@ def test_origin_refused_close():
         p.close()
 
 
+def _parse_with_pair_link_ts(url):
+    """What web/workspace/pair-link.ts reads from a page opened at `url`, run by node (which strips the module's
+    types): {link: pairLink(), left: the address bar after it took the code out}.  None when there is no node new
+    enough here; CI (engine-cpython sets up node) always has one."""
+    import shutil
+    import subprocess
+    import tempfile
+    node = shutil.which("node")
+    root = os.path.dirname(os.path.dirname(HERE))
+    module = os.path.join(root, "web", "workspace", "pair-link.ts")
+    if not node or not os.path.exists(module):
+        assert not os.environ.get("CI"), "CI must run pair-link.ts (node %r, %s)" % (node, module)
+        return None
+    script = (
+        "const u = new URL(%s); let left = null;\n"
+        "globalThis.location = { search: u.search, pathname: u.pathname, hash: u.hash };\n"
+        "globalThis.history = { state: null, replaceState(_s, _t, url) { left = url; } };\n"
+        "const m = await import(%s);\n"
+        "console.log(JSON.stringify({ link: m.pairLink(), left }));\n"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        # (a byte-identical copy as .mts: node then loads it as an ES module whatever package.json says)
+        copy = os.path.join(d, "pair-link.mts")
+        shutil.copyfile(module, copy)
+        script = script % (json.dumps(url), json.dumps("file://" + copy))
+        f = os.path.join(d, "probe.mjs")
+        with open(f, "w") as fh:
+            fh.write(script)
+        r = subprocess.run([node, "--experimental-strip-types", "--no-warnings", f], capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "strip-types" in r.stderr:  # (a node too old to strip types)
+        assert not os.environ.get("CI"), r.stderr
+        return None
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_pair_link():
+    """workspace_connect's one-click link: <site>/board/?pair=CODE&port=PORT, the board page being one that reads it
+    (web/workspace/pair-link.ts).  It round-trips through that parser, its port is this listener's (it pairs), it
+    holds nothing but the one-time code, it goes once the code does, and the DEV opt-in moves it to that site."""
+    import contextlib
+    import io
+    import urllib.parse
+    with contextlib.redirect_stderr(io.StringIO()):
+        p, port, code = new()
+    link = p.link()
+    assert link == "https://sagebrush.space/board/?pair=%s&port=%d" % (code, port), link
+    assert port == p.sock.getsockname()[1]
+    u = urllib.parse.urlsplit(link)
+    q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True)
+    assert (u.scheme, u.netloc, u.path, u.fragment) == ("https", "sagebrush.space", P.LINK_PATH, "")
+    assert q == {"pair": [code], "port": [str(port)]}, q  # (nothing else: no session secret, no grant, no name)
+    # (the page's own parser reads exactly that, and takes both out of the address bar)
+    got = _parse_with_pair_link_ts(link)
+    if got is not None:
+        assert got == {"link": {"code": code, "port": str(port)}, "left": P.LINK_PATH}, got
+        kept = _parse_with_pair_link_ts(link + "&agents=1#x")
+        assert kept == {"link": {"code": code, "port": str(port)}, "left": P.LINK_PATH + "?agents=1#x"}, kept
+    else:
+        print("  (pair-link.ts not run: no node that strips types here)")
+    # (the link's code and port pair, as the page would)
+    c = Client(port)
+    assert c.status == 101 and "result" in c.hello(q["pair"][0]), "the link's code didn't pair"
+    c.close()
+    p.close()
+    # (no live code, no link: an expired one isn't handed out)
+    t = [0.0]
+    with contextlib.redirect_stderr(io.StringIO()):
+        p = P.Pairing({"name": "t"}, now=lambda: t[0])
+    assert p.link() is None
+    port, code = p.start()
+    assert p.link().endswith("pair=%s&port=%d" % (code, port))
+    t[0] = P.CODE_SECONDS + 1
+    assert p.link() is None
+    p.close()
+    # (the DEV opt-in: the link opens the site it allowed)
+    for dev in (P.DEV_SITE_ORIGIN, "http://localhost:5173"):
+        os.environ[P.DEV_ORIGIN_ENV] = dev
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                p, port, code = new()
+            assert p.link() == "%s/board/?pair=%s&port=%d" % (dev, code, port), p.link()
+            p.close()
+        finally:
+            del os.environ[P.DEV_ORIGIN_ENV]
+    # (the tool text: the link first, the code and port by hand after it, one line)
+    text = WS.connect_text("https://sagebrush.space/board/?pair=ABC&port=7", "ABC", 7)
+    assert text.index("https://sagebrush.space/board/?pair=ABC&port=7") < text.index("Or by hand: code ABC, port 7") and "\n" not in text
+
+
 def test_where_to_connect_text():
     """What the agent tells the person names the real places to connect,
     never the "Chat, Connect an agent" that no page has."""
@@ -816,7 +906,7 @@ def test_where_to_connect_text():
         with open(os.path.join(here, "python", "sagebrush", name), encoding="utf8") as f:
             src = f.read()
         assert "Chat, Connect an agent" not in src and "(Connect an agent)" not in src, name
-        assert "WHERE_TO_CONNECT" in src, name
+        assert "WHERE_TO_CONNECT" in src or "connect_text" in src, name  # (mcp_server says it through WS.connect_text)
     connect = [t for t in WS.tools() if t["name"] == "workspace_connect"][0]
     assert where in connect["description"], connect["description"]
 
