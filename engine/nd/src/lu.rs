@@ -1149,6 +1149,21 @@ pub(crate) mod tests {
                         x0[n - 1 + j * n] = 0.0;
                     }
                 }
+                // (grader Q8: rows 5 and 8 of U zero to the right of their diagonals, which are 0 and -1.5, and
+                // x_5 = x_8 = +0 in every column: both stay +0, and back substitution must skip their divisions, in
+                // pairs as single; a division would give 0 / 0 = NaN and +0 / -1.5 = -0)
+                for k in 6..n {
+                    u[5 + k * n] = 0.0;
+                }
+                for k in 9..n {
+                    u[8 + k * n] = 0.0;
+                }
+                u[5 + 5 * n] = 0.0;
+                u[8 + 8 * n] = -1.5;
+                for j in 0..r {
+                    x0[5 + j * n] = 0.0;
+                    x0[8 + j * n] = 0.0;
+                }
             }
             let (x, y) = trsm_both(&l, &u, n, &x0, r);
             assert!(same_bits(&x, &plain_lower(&l, n, &x0, r)), "lower n={n} r={r}");
