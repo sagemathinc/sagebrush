@@ -5,9 +5,10 @@
 //! later, each enabled only once a CI host executes it (r4.2 §12).
 //!
 //! Determinism (r4.2 §7): every element of a product is summed in the same order (k in blocks of
-//! [`gemm::KC`], in order; within a block p = 0, 1, ...; then added into C) whatever the thread count and
-//! the column partition, and every microkernel performs the same multiplies and adds per element (no fused
-//! multiply-add), so the result is bit-identical across thread counts and across these microkernels.
+//! [`gemm::KC`], in order; within a block p = 0, 1, ...; then added into C) whatever the thread count, the
+//! column partition and the tile shape. Kernels without FMA give the bits of the portable scalar kernel;
+//! kernels with a fused multiply-add give the bits of the scalar `mul_add` kernel ([`micro`]). So a result is
+//! bit-identical across thread counts on one backend and kernel.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 pub mod boundary;

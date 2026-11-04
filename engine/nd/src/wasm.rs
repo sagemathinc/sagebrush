@@ -8,7 +8,7 @@
 //! having written nothing. `nd_gemm_part` is the only export that writes memory.
 
 use crate::boundary::{check, desc_region, Facts, DESC_WORDS};
-use crate::gemm::{gemm_cols, partition, scratch_len, Mat};
+use crate::gemm::{gemm_cols, partition, scratch_len, Kernel, Mat};
 use core::arch::wasm32::memory_size;
 use core::ptr::{addr_of, with_exposed_provenance, with_exposed_provenance_mut};
 
@@ -32,8 +32,8 @@ pub extern "C" fn nd_info(what: u32) -> u32 {
     match what {
         0 => scratch_len() as u32,
         1 => addr_of!(__heap_base) as usize as u32, // (its address only: safe)
-        2 => crate::micro::name().as_ptr() as usize as u32,
-        3 => crate::micro::name().len() as u32,
+        2 => Kernel::selected().name().as_ptr() as usize as u32,
+        3 => Kernel::selected().name().len() as u32,
         _ => 0,
     }
 }
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
     if id >= j.threads {
         return 1;
     }
-    let (j0, j1) = partition(j.n, j.threads, id);
+    let (j0, j1) = partition(j.n, j.threads, id, Kernel::selected().nr());
     // SAFETY: every nonempty region was checked to lie in the host's part of memory, nonzero, 8-aligned and at
     // most isize::MAX bytes, and the written ones (this thread's columns of C, its scratch) to lie in the
     // arena, disjoint from A, B and the descriptor; an empty region is the empty slice (no address used)
