@@ -319,6 +319,10 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
         Some(need) if work.len() >= need => {}
         _ => return Err(Refused::Work),
     }
+    if n == 0 {
+        // (an empty system: nothing to check, factor or solve; B's columns are empty, whatever ldb says)
+        return Ok(Status::Solved);
+    }
     let finite = |m: &[f64], rows: usize, cols: usize, ld: usize| (0..cols).all(|j| m[j * ld..j * ld + rows].iter().all(|x| x.is_finite()));
     if !finite(a, n, n, lda) || !finite(b, n, r, ldb) {
         return Ok(Status::NonFinite);
@@ -650,6 +654,24 @@ pub(crate) mod tests {
                     other => panic!("{} n={n}: {other:?}", k.name()),
                 }
                 assert!(x.iter().any(|v| !v.is_finite()), "division by the zero pivot gives Inf/NaN");
+            }
+        }
+    }
+
+    /// An empty system (n = 0) with any number of right-hand sides and any (padded) ldb is solved, writing
+    /// nothing (astra ND-S1: the finite check sliced B's later columns, which are empty when n = 0).
+    #[test]
+    fn empty_systems_are_solved_without_writing() {
+        for r in [0, 1, 3, 17] {
+            for ldb in [1, 5] {
+                let mut a: Vec<f64> = vec![];
+                let mut b = vec![7.0; 4];
+                let mut ipiv: Vec<usize> = vec![];
+                let mut work = vec![0.0; solve_work_len(0, r).unwrap()];
+                assert_eq!(solve(Kernel::Scalar, &mut a, 0, 1, &mut b, r, ldb, &mut ipiv, &mut work), Ok(Status::Solved), "r={r} ldb={ldb}");
+                assert!(b.iter().all(|&x| x == 7.0));
+                let mut w2 = vec![0.0; getrs_work_len(0, r).unwrap()];
+                assert_eq!(getrs(Kernel::Scalar, &a, 0, 1, &ipiv, &mut b, r, ldb, &mut w2), Ok(()));
             }
         }
     }

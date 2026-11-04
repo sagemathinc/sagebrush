@@ -118,6 +118,25 @@ test("nd_solve: leading dimensions above n give the same bits; a zero pivot repo
   }
 });
 
+test("nd_solve: an empty system (n = 0) with 0, 1, 3 or 17 right-hand sides and a padded ldb is solved, writing only the report (astra ND-S1)", () => {
+  const { memory, ex } = instance(Math.ceil((ARENA + (4 << 20)) / PAGE) + 1);
+  const u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
+  const floor = ex.nd_info(1);
+  for (const r of [0, 1, 3, 17]) {
+    for (const ldb of [1, 5]) {
+      // (A and B empty: placed at distinct, aligned addresses; the work holds solve_work_len(0, r))
+      const a = ARENA, b = ARENA + 64, ipiv = ARENA + 128, work = ARENA + 192, report = work + 8 * workLen(0, r), hi = report + 16 + 64;
+      u32.fill(0xdead, report / 4, report / 4 + 4);
+      u32.set([a, b, ipiv, work, report, 0, r, 1, ldb, workLen(0, r), ARENA, hi], BASE / 4);
+      const before = u8.slice(floor, hi);
+      assert.equal(ex.nd_solve(BASE), 1, `r=${r} ldb=${ldb}`);
+      assert.equal(u32[report / 4], 1, "status: solved");
+      const now = u8.subarray(floor, hi);
+      assert.ok(now.every((x, i) => x === before[i] || (floor + i >= report && floor + i < report + 16)), `r=${r} ldb=${ldb}: wrote outside the report`);
+    }
+  }
+});
+
 test("nd_solve refuses every bad layout before writing anything: each region pair, alignment, the work's length, the descriptor and the stack", () => {
   const [n, r] = [12, 2];
   const L = layout(n, r, n, n, 2 * STACK);
