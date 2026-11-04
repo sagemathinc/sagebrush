@@ -20,7 +20,12 @@ export const LATEX_LAZY = {
 //  priority; the group is fetched only when a .tex is opened, so the first page load is unaffected): each PR reports
 //  its delta, and what can be a lazy chunk of its own stays out of the group; was 192 / 64
 //  (2026-10-29, the ten examples and the embeddable editor), 180 / 60 before)
-export const LATEX_CAPS = { raw: 232 * 1024, gzip: 78 * 1024 };
+// (235 KiB / 79.5 KiB: @sagebrush's ruling with daybreak2's raw number, Nov 4, under William's of 1:47 PM PST ("raise
+//  limits to support functionality... under control, justified, and iterative"), for the LaTeX fidelity queue: #641
+//  (beamer's early fetch), #644 (beamer's furniture), and astra4's silent gaps, saved boxes, counters and references
+//  (cleveref's formatting kept here, as current papers use it): about 239.3K / 80,623 after all five, about 1.3K / 785 B
+//  left. The next time the group nears its cap, the answer is a lazy split, not another raise)
+export const LATEX_CAPS = { raw: 235 * 1024, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
