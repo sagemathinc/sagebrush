@@ -187,10 +187,10 @@ def loc_positions(index, key):
 
 
 def getitem_slice_positions(index, key):
-    """Series[a:b] and DataFrame[a:b]: positional for ints (and None),
-    unless the index is float64; by label otherwise."""
+    """Series[a:b] and DataFrame[a:b]: positional for ints (and None), a
+    float64 index too (pandas 3); by label otherwise."""
     parts = [x for x in (key.start, key.stop, key.step) if x is not None]
-    if all(_is_int(x) for x in parts) and str(index.dtype) != "float64":
+    if all(_is_int(x) for x in parts):
         return list(range(*key.indices(len(index))))
     return label_slice_positions(index, key)
 

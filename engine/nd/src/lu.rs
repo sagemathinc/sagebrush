@@ -138,7 +138,7 @@ fn sub4x2(c: &mut [f64], d: &mut [f64], l: [&[f64]; 4], t: [f64; 4], u: [f64; 4]
 /// rows below by one fused update (`sub4`), two columns at a time. Every element receives the same
 /// subtractions in the same order as in [`getf2`], and a zero multiplier skips its step as dger does (a column
 /// with one falls back to the step-by-step update), so the result is bit-identical to [`getf2`]'s.
-fn getf2b(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
+#[cfg_attr(target_arch = "x86_64", inline(always))] fn getf2b(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
     let mn = m.min(n);
     let mut info = None;
     let mut k0 = 0;
@@ -240,7 +240,7 @@ fn getf2b(a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> 
 fn getrf_rec(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize], work: &mut [f64]) -> Option<usize> {
     let mn = m.min(n);
     if n <= LU_SMALL || mn <= 1 {
-        return if n <= GETF2_TINY { getf2(a, lda, m, n, ipiv) } else { getf2b(a, lda, m, n, ipiv) };
+        return if n <= GETF2_TINY { getf2(a, lda, m, n, ipiv) } else { getf2b_on(kern, a, lda, m, n, ipiv) };
     }
     let (n1, n2) = (mn / 2, n - mn / 2);
     let (left, right) = a.split_at_mut(n1 * lda);
@@ -363,7 +363,7 @@ fn trsm_lower_unit(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64],
         return;
     }
     if n <= TRSM_SMALL || r <= TRSM_NARROW {
-        for j in lower_unit_pairs(l, ldl, n, x, ldx, r)..r {
+        for j in lower_unit_pairs(kern, l, ldl, n, x, ldx, r)..r {
             lower_unit_col(l, ldl, n, &mut x[j * ldx..j * ldx + n]);
         }
         return;
@@ -391,7 +391,7 @@ pub(crate) fn trsm_upper(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut 
         return;
     }
     if n <= TRSM_SMALL || r <= TRSM_NARROW {
-        for j in upper_pairs(u, ldu, n, x, ldx, r)..r {
+        for j in upper_pairs(kern, u, ldu, n, x, ldx, r)..r {
             upper_col(u, ldu, n, &mut x[j * ldx..j * ldx + n]);
         }
         return;
@@ -548,9 +548,27 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
 /// else each column's own update as in [`lower_unit_col`]. Each column's bits are [`lower_unit_col`]'s; the
 /// saving is in L loads, which matters natively at n = 256 (where the GEMM outruns these loops). Wasm keeps
 /// the single-column loop (bound for #620; its stub below does no columns). Returns the number of columns
-/// done (r rounded down to even).
+/// done (r rounded down to even). On an AVX2 CPU ([`Kernel::Avx2Fma`]) it does all r columns, compiled for
+/// AVX2 (stage 1, P2b-1n), and returns r.
 #[cfg(not(target_arch = "wasm32"))]
-fn lower_unit_pairs(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+fn lower_unit_pairs(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    if let Kernel::Avx2Fma(k) = kern {
+        return k.avx2(|| {
+            for j in lower_unit_pairs2(l, ldl, n, x, ldx, r)..r {
+                lower_unit_col(l, ldl, n, &mut x[j * ldx..j * ldx + n]);
+            }
+            r
+        });
+    }
+    let _ = kern;
+    lower_unit_pairs2(l, ldl, n, x, ldx, r)
+}
+
+/// [`lower_unit_pairs`]'s pairs.
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+fn lower_unit_pairs2(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
     let mut j = 0;
     while j + 1 < r {
         let (c, d) = x[j * ldx..].split_at_mut(ldx);
@@ -602,9 +620,27 @@ fn lower_unit_pairs(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, 
 }
 
 /// Native only: [`upper_col`] on pairs of right-hand sides ([`sub4x2`] when both columns take the fused
-/// update); each column's bits are [`upper_col`]'s. Returns the number of columns done.
+/// update); each column's bits are [`upper_col`]'s. Returns the number of columns done (all r, compiled for
+/// AVX2, on an AVX2 CPU: as [`lower_unit_pairs`]).
 #[cfg(not(target_arch = "wasm32"))]
-fn upper_pairs(u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+fn upper_pairs(kern: Kernel, u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    if let Kernel::Avx2Fma(k) = kern {
+        return k.avx2(|| {
+            for j in upper_pairs2(u, ldu, n, x, ldx, r)..r {
+                upper_col(u, ldu, n, &mut x[j * ldx..j * ldx + n]);
+            }
+            r
+        });
+    }
+    let _ = kern;
+    upper_pairs2(u, ldu, n, x, ldx, r)
+}
+
+/// [`upper_pairs`]'s pairs.
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+fn upper_pairs2(u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
     let mut j = 0;
     while j + 1 < r {
         let (c, d) = x[j * ldx..].split_at_mut(ldx);
@@ -663,15 +699,27 @@ fn upper_pairs(u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: us
 /// Wasm: no pairs (the direct solves stay single-column there; see the native [`lower_unit_pairs`]).
 #[cfg(target_arch = "wasm32")]
 #[inline(always)]
-fn lower_unit_pairs(_: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
+fn lower_unit_pairs(_: Kernel, _: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
     0
 }
 
 /// Wasm: no pairs (see the native [`upper_pairs`]).
 #[cfg(target_arch = "wasm32")]
 #[inline(always)]
-fn upper_pairs(_: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
+fn upper_pairs(_: Kernel, _: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
     0
+}
+
+/// [`getf2b`] on `kern`'s CPU: compiled for AVX2 when `kern` holds detect()'s proof ([`Kernel::Avx2Fma`];
+/// stage 1, P2b-1n), else as built. The same bits either way ([`crate::micro::Avx2Fma::avx2`]).
+#[inline(always)]
+fn getf2b_on(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: &mut [usize]) -> Option<usize> {
+    #[cfg(target_arch = "x86_64")]
+    if let Kernel::Avx2Fma(k) = kern {
+        return k.avx2(|| getf2b(a, lda, m, n, ipiv));
+    }
+    let _ = kern;
+    getf2b(a, lda, m, n, ipiv)
 }
 
 #[cfg(test)]
@@ -1460,5 +1508,44 @@ pub(crate) mod tests {
         assert!(b.iter().all(|&x| x == 1.0));
         // exactly the needed work is enough
         assert!(solve(k, &mut a, n, n, &mut b, 1, n, &mut ipiv, &mut work).is_ok());
+    }
+
+    /// Stage 1 (P2b-1n): the small-n loops compiled for AVX2 (getf2b, and the direct triangular solves for every
+    /// right-hand side, pairs and the odd one) give the baseline build's bits. At n <= 64 nothing reaches the
+    /// GEMM, so the AVX2 kernel's results are the portable kernel's bit for bit; above it the GEMM is the FMA
+    /// family's, so they are ScalarFma's (whose loops are the baseline build). Dense inputs, and inputs with
+    /// exact zeros (the skipped steps and the step-by-step fallbacks); one to five right-hand sides, a padded ldb.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn the_avx2_leaves_give_the_baseline_bits() {
+        let Some(k) = crate::micro::Avx2Fma::detect() else { return };
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<u64>>();
+        for n in [33, 47, 64, 65, 100, 131, 200] {
+            for sparse in [false, true] {
+                let mut a = random(n, n as u32);
+                if sparse {
+                    // (every third element zero, the diagonal kept: zero multipliers and zero x_k)
+                    for (i, v) in a.iter_mut().enumerate() {
+                        if i % 3 == 0 && i % (n + 1) != 0 {
+                            *v = 0.0;
+                        }
+                    }
+                }
+                for r in 1..=5 {
+                    let ldb = n + 3;
+                    let mut b = seeded(n * r, &mut (7 + r as u32));
+                    if sparse {
+                        b.iter_mut().skip(1).step_by(4).for_each(|v| *v = 0.0);
+                    }
+                    let base = if n <= LU_SMALL { Kernel::Scalar } else { Kernel::ScalarFma };
+                    let (x0, s0, p0, f0) = run(base, &a, &b, n, r, n, ldb);
+                    let (x1, s1, p1, f1) = run(Kernel::Avx2Fma(k), &a, &b, n, r, n, ldb);
+                    let what = format!("n={n} r={r} sparse={sparse} vs {}", base.name());
+                    assert_eq!((s1, p1), (s0, p0), "{what}");
+                    assert_eq!(bits(&f1), bits(&f0), "{what}: the factors");
+                    assert_eq!(bits(&x1), bits(&x0), "{what}: X");
+                }
+            }
+        }
     }
 }

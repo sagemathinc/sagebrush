@@ -51,8 +51,8 @@ pub enum Kernel {
 
 impl Kernel {
     /// The fastest kernel this build and CPU may use: on Wasm, the module's own (one SIMD level per module);
-    /// natively, AVX2+FMA if the CPU has it, else the portable one. (NEON is compiled but not selected until
-    /// a CI host executes it: micro::NEON_ENABLED.) Natively the CPU check runs once and is cached.
+    /// natively, AVX2+FMA if the CPU has it, else the portable one; on aarch64, NEON (part of every aarch64
+    /// target; micro::NEON_ENABLED, CI-executed). Natively the CPU check runs once and is cached.
     pub fn selected() -> Kernel {
         #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
         return Kernel::Simd128;
@@ -623,7 +623,7 @@ pub(crate) mod tests {
         #[cfg(target_arch = "x86_64")]
         assert_eq!(k.name(), if crate::micro::Avx2Fma::detect().is_some() { "avx2-fma-8x6" } else { "scalar" });
         #[cfg(target_arch = "aarch64")]
-        assert_eq!(k.name(), "scalar", "NEON must not be selected until a CI host runs it");
+        assert_eq!(k.name(), "neon-fma-8x6", "aarch64 selects NEON (engine-nd-neon executes it in CI)");
         assert!(k.nr() > 0);
     }
 
@@ -683,5 +683,56 @@ pub(crate) mod tests {
         assert!(!gemm(&a, &b, &mut c, 1));
         assert!(Mat::new(&v, 4, 5, 4).is_none());
         assert!(Mat::new(&v, 4, 4, 3).is_none());
+    }
+
+    /// The sign of a zero sum (grader's #629 follow-up, mutant N6: a kernel whose accumulators start at -0
+    /// instead of +0). Under round-to-nearest -0 + x = x for every x other than -0, so the start value shows
+    /// only when every product in an element's sum is -0: here +0 against negatives and -0 against positives,
+    /// whole tiles and edges, k across a KC block. A correct kernel's sum is +0 (+0 + -0 = +0; fma likewise).
+    /// - Overwrite (C = A B): C starts at +0, so C is +0 whatever the kernel's sign (unobservable there).
+    /// - Update (C := C - A B, LU's): C - (+0) keeps C's sign, so a C of -0 stays -0; a -0 sum turns it to +0.
+    /// Every kernel this build has gives ScalarFma's bits (the reference), and those are pinned: +0, and C unchanged.
+    #[test]
+    fn a_sum_of_negative_zero_products_is_positive_zero_on_every_kernel() {
+        let mut kernels = vec![Kernel::Scalar, Kernel::ScalarFma];
+        #[cfg(target_arch = "x86_64")]
+        kernels.extend(crate::micro::Avx2Fma::detect().map(Kernel::Avx2Fma));
+        #[cfg(target_arch = "aarch64")]
+        kernels.push(Kernel::Neon);
+        for &(m, n, k) in &[(1, 1, 1), (8, 6, 3), (4, 4, 2), (13, 7, 5), (97, 13, KC + 3), (5, 4, 0)] {
+            for (za, sb) in [(0.0, -1.0), (-0.0, 1.0)] {
+                let av = vec![za; m * k];
+                let bv: Vec<f64> = (0..k * n).map(|i| sb * (0.75 + i as f64)).collect();
+                let a = Mat::new(&av, m, k, m).unwrap();
+                let b = Mat::new(&bv, k, n, k.max(1)).unwrap();
+                // C at -0, +0 and both (alternating), as LU's update sees it
+                let starts: [Vec<f64>; 3] = [vec![-0.0; m * n], vec![0.0; m * n], (0..m * n).map(|i| if i % 3 == 0 { -0.0 } else { 0.0 }).collect()];
+                let run = |kern: Kernel| {
+                    let mut s = vec![0.0; scratch_len()];
+                    let mut out = Vec::new();
+                    let mut c = vec![f64::NAN; m * n];
+                    assert!(kern.gemm_cols(&a, &b, &mut c, m, 0, n, &mut s));
+                    out.push(c);
+                    for c0 in &starts {
+                        let mut c = c0.clone();
+                        assert!(kern.gemm_update(&a, &b, &mut c, m, &mut s));
+                        out.push(c);
+                    }
+                    out
+                };
+                let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<u64>>();
+                let reference = run(Kernel::ScalarFma);
+                // the reference itself: C = A B is +0; C - A B is C, sign included
+                assert_eq!(bits(&reference[0]), vec![0u64; m * n], "{m}x{n}x{k}: C = A B");
+                for (c0, c) in starts.iter().zip(&reference[1..]) {
+                    assert_eq!(bits(c), bits(c0), "{m}x{n}x{k}: C - A B");
+                }
+                for &kern in &kernels {
+                    for (r, c) in reference.iter().zip(run(kern)) {
+                        assert_eq!(bits(&c), bits(r), "{} {m}x{n}x{k} A = {za:?}: not the reference's bits", kern.name());
+                    }
+                }
+            }
+        }
     }
 }
