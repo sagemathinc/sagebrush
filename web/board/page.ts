@@ -1159,12 +1159,13 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
-        // (listed from another device, its content not here yet (sync brings it): nothing to show or write; said, with
-        // the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
+        // (listed from another device, its content not here: boards' contents don't sync (board/journal.ts sync.on false),
+        // so it won't arrive, and the page says so, not that it's on its way (William's M9 (g)); nothing to show or
+        // write; said, with the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
         const entry = path ? await ws.stat(path).catch(() => undefined) : undefined;
         if (path && entry?.remote) {
-          const why = "**This board's content isn't in this browser yet.** It's in your files from another device, and it appears here once sync brings it; until then it can't be shown or changed here.";
-          blockBoard(new Error(`${path}'s content isn't in this browser yet`), why, "This board's content isn't in this browser yet.");
+          const why = "**This board was made on another device.** Boards don't sync yet, so its content isn't in this browser and it can't be opened here. Open it on the device that made it.";
+          blockBoard(new Error(`${path}'s content isn't in this browser: boards don't sync yet`), why, "This board was made on another device. Boards don't sync yet.");
           return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
         }
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
