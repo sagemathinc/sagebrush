@@ -40,7 +40,12 @@ export function compare(a, b) {
 export function htmlText(html) {
   const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   return html.replace(/<(style|script|head)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (e, n) => n[0] === "#" ? String.fromCodePoint(n[1] === "x" || n[1] === "X" ? parseInt(n.slice(2), 16) : +n.slice(1)) : named[n.toLowerCase()] ?? e);
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (e, n) => {
+      if (n[0] !== "#") return named[n.toLowerCase()] ?? e;
+      // (a code point past Unicode's, which fromCodePoint refuses, stays as written)
+      const c = n[1] === "x" || n[1] === "X" ? parseInt(n.slice(2), 16) : +n.slice(1);
+      return c <= 0x10ffff ? String.fromCodePoint(c) : e;
+    });
 }
 
 /** The fidelity table of DIR's documents, as Markdown. */
@@ -95,6 +100,14 @@ export function selfTest() {
   ck("compare: both empty", empty.recall === 0 && empty.precision === 0 && empty.dice === 0, empty);
   const h = htmlText('<html><head><title>T</title></head><style>.x{}</style><p>A&amp;B &lt;c&gt; &#233;t&#xE9;</p><script>s()</script></html>');
   ck("htmlText: style, script, head dropped, entities decoded", h.replace(/\s+/g, " ").trim() === "A&B <c> été", h);
+  // (grader's #635 cases: tags and &nbsp; separate words; an uppercase &#X; and one past Unicode don't stop the table;
+  //  only letters join across a line-end hyphen; the missing list is the 12 most missing)
+  const cells = htmlText("<td>a1</td><td>b2</td>x&nbsp;y &#XE9; &#99999999;");
+  ck("htmlText: tags and &nbsp; separate words, &#X; and an out-of-range entity", eq(t(cells), { a1: 1, b2: 1, 99999999: 1 }) && cells.includes("x y") && cells.includes("é") && cells.includes("&#99999999;"), cells);
+  ck("htmlText: U+10FFFF decoded, U+110000 kept as written", htmlText("&#x10FFFF;|&#1114111;|&#x110000;|&#1114112;") === "\u{10FFFF}|\u{10FFFF}|&#x110000;|&#1114112;", htmlText("&#x10FFFF;|&#1114111;|&#x110000;|&#1114112;"));
+  ck("tokens: digits not joined across a line-end hyphen", eq(t("2-\n3"), { 2: 1, 3: 1 }), t("2-\n3"));
+  const many = compare(tokens(Array.from({ length: 13 }, (_, k) => "w" + String(k).padStart(2, "0") + " ").join("").repeat(2) + "w12"), tokens(""));
+  ck("compare: the 12 most missing", many.missing.length === 12 && eq(many.missing[0], ["w12", 3]), many.missing);
   return bad;
 }
 
