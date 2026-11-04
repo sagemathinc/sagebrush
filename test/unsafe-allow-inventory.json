@@ -8,6 +8,7 @@
    "interrupt",
    "modsym",
    "mpoly",
+   "nd",
    "poly",
    "raster"
   ],
@@ -324,6 +325,18 @@
    "item": "impl<'a, F : Fn ( u64) -> u64 + Sync> DenseJob<'a, F> > fn run_with",
    "hash": "a6f37fec84df5806997a27c6f49028b1e6f280ae964bd43ba6cd7fdc5aa6bf03",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/nd/src/wasm.rs",
+   "item": "fn nd_info",
+   "hash": "dc2853db398d0db02d0a67b949b1da481d0e744a77cd733764518034e36c5144",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. Its only unsafe part is no_mangle: an exported symbol (the nd_ prefix keeps it unique in this module). It writes nothing and reads no memory: it returns a constant (the scratch length), the address of the linker symbol __heap_base (taken, never read), or the address and length of the microkernel's static name (the host reads those bytes itself). It replaces r2's nd_microkernel, which wrote the name into a host buffer and could be aimed at the module's own statics (astra ND-M1). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/nd/src/wasm.rs",
+   "item": "fn nd_gemm_part",
+   "hash": "f8a3c727f3cc59bda85d08f56c25e355e48c68f92939d015dbc6daac26107d07",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. The only export that writes memory. Dynamically checked in safe code (engine/nd/src/boundary.rs check, native-tested with wasm32's limits) before any pointer is read or slice made: the descriptor is 4-aligned and in the host's part of memory; every nonempty region (descriptor, A, B, C, scratch) starts at or above __heap_base (so never at 0 and never on the module's statics or linker stack), is aligned, ends within memory.size and is at most isize::MAX bytes, all in 64-bit checked arithmetic; C and the scratch lie in the job's writable arena, which the descriptor lies outside; C and the scratch overlap neither A, B nor each other; the stride holds scratch_len; the calling thread's frame lies below the arena. Pointers are made with with_exposed_provenance(_mut) from the checked absolute addresses (the host's part of linear memory is foreign memory, as across FFI), never by offsetting a null pointer; empty regions become empty slices. A refused job returns 0 having written nothing. Trusted-host preconditions (stated on the function in this wording, asserted by the page's layout): All participant stacks are pairwise disjoint and disjoint from module-owned memory, descriptor/control, A/B, and the writable arena; the host and other jobs leave all job ranges untouched until join, apart from each participant owning only its assigned C columns and scratch slot. Each thread of a job gets the same descriptor and a distinct id, so its columns of C (partition) and its scratch slot are its own; each call checks that its own current frame lies below the arena. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/poly/src/lib.rs",

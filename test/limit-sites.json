@@ -711,6 +711,51 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/src/boundary.rs ::  :: pub max_len: u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: check :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: region :: span(start, len, l, l.max_len) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, 2, usize::MAX, usize::MAX / 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, usize::MAX, 2, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(span(1, usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: for &(n, t, id) in &[(usize::MAX, 3, 2), (usize::MAX, usize::MAX, usize::MAX - 1), (10, 4, 4), (10, 4, 99)] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"

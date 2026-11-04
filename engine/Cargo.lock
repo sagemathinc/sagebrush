@@ -668,6 +668,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-nd"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-par",
+]
+
+[[package]]
 name = "sagebrush-node"
 version = "0.1.0"
 dependencies = [
