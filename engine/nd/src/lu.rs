@@ -549,13 +549,13 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
 /// saving is in L loads, which matters natively at n = 256 (where the GEMM outruns these loops). Wasm keeps
 /// the single-column loop (bound for #620; its stub below does no columns). Returns the number of columns
 /// done (r rounded down to even). On an AVX2 CPU ([`Kernel::Avx2Fma`]) it does all r columns, compiled for
-/// AVX2 (stage 1, P2b-1n), and returns r.
+/// AVX2 (stage 1, P2b-1n), four at a time first ([`lower_unit_quads`], as on Wasm), and returns r.
 #[cfg(not(target_arch = "wasm32"))]
 fn lower_unit_pairs(kern: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
     #[cfg(target_arch = "x86_64")]
     if let Kernel::Avx2Fma(k) = kern {
         return k.avx2(|| {
-            for j in lower_unit_pairs2(l, ldl, n, x, ldx, r)..r {
+            for j in { let q = lower_unit_quads(l, ldl, n, x, ldx, r); if q < r { q + lower_unit_pairs2(l, ldl, n, &mut x[q * ldx..], ldx, r - q) } else { q } }..r {
                 lower_unit_col(l, ldl, n, &mut x[j * ldx..j * ldx + n]);
             }
             r
@@ -722,11 +722,11 @@ fn getf2b_on(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
     getf2b(a, lda, m, n, ipiv)
 }
 
-/// Wasm (and tests): [`lower_unit_col`] on columns j..j+4 of X for each group of four right-hand sides, the rows
+/// Wasm, x86-64 in the AVX2 wrapper, tests: [`lower_unit_col`] on columns j..j+4 of X for each group of four right-hand sides, the rows
 /// below a block by one [`sub4x4`] (the four L columns loaded once for all four) when all four take the fused
 /// update, else each column's own update as in [`lower_unit_col`]. Each column's bits are [`lower_unit_col`]'s.
 /// Returns the number of columns done (r rounded down to a multiple of four).
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, target_arch = "wasm32", target_arch = "x86_64"))] #[cfg_attr(target_arch = "x86_64", inline(always))]
 fn lower_unit_quads(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
     let mut j = 0;
     while j + 3 < r {
@@ -783,7 +783,7 @@ fn lower_unit_quads(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, 
 
 /// [`sub4`] on four columns at once (the four L columns loaded once for all four): column c gets
 /// c := c - l0 t0 - l1 t1 - l2 t2 - l3 t3 with its own t, element by element and in that order.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, target_arch = "wasm32", target_arch = "x86_64"))]
 #[inline(always)]
 fn sub4x4(a: &mut [f64], b: &mut [f64], c: &mut [f64], d: &mut [f64], l: [&[f64]; 4], ts: [[f64; 4]; 4]) {
     let n = a.len();
@@ -1591,7 +1591,8 @@ pub(crate) mod tests {
     /// right-hand side, pairs and the odd one) give the baseline build's bits. At n <= 64 nothing reaches the
     /// GEMM, so the AVX2 kernel's results are the portable kernel's bit for bit; above it the GEMM is the FMA
     /// family's, so they are ScalarFma's (whose loops are the baseline build). Dense inputs, and inputs with
-    /// exact zeros (the skipped steps and the step-by-step fallbacks); one to five right-hand sides, a padded ldb.
+    /// exact zeros (the skipped steps and the step-by-step fallbacks); one to nine right-hand sides (groups of four, then
+    /// pairs, then one: getrs's direct solve on the AVX2 path), a padded ldb.
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn the_avx2_leaves_give_the_baseline_bits() {
@@ -1608,7 +1609,7 @@ pub(crate) mod tests {
                         }
                     }
                 }
-                for r in 1..=5 {
+                for r in 1..=9 {
                     let ldb = n + 3;
                     let mut b = seeded(n * r, &mut (7 + r as u32));
                     if sparse {
