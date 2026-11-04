@@ -726,6 +726,11 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
  },
+ "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd test: a deliberately invalid kernel tile (MR near usize::MAX) that the blocking layer must refuse; refuses no user work"
+ },
  "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
