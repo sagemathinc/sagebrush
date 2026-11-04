@@ -2076,14 +2076,26 @@ class EllipticCurve_rational_field:
             (1 : -1 : 1)
             sage: E.lift_x(1, all=True)
             [(1 : -1 : 1), (1 : 0 : 1)]
+
+        A real x (a float or an element of RR) gives the points over RR, as in
+        Sage::
+
+            sage: EllipticCurve([-1, 0]).lift_x(-0.5)
+            (-0.500000000000000 : -0.612372435695794 : 1.00000000000000)
+            sage: EllipticCurve([-1, 0]).lift_x(-1/2)
+            Traceback (most recent call last):
+            ...
+            ValueError: No point with x-coordinate -1/2 on Elliptic Curve defined by y^2 = x^3 - x over Rational Field
         """
+        if isinstance(x, float):
+            return self.base_extend(_RR()).lift_x(x, all=all)
         import _sage_ec as _ec
         xf = _qfrac(x)
         pts = [EllipticCurvePoint(self, P) for P in _ec.lift_x(self._a, xf)]
         if all:
             return pts
         if not pts:
-            raise ValueError("no point with x-coordinate %s on %r" % (x, self))
+            raise ValueError("No point with x-coordinate %s on %r" % (x, self))
         return pts[0]
 
     def torsion_points(self):
@@ -2733,14 +2745,20 @@ class EllipticCurve_rational_field:
             Traceback (most recent call last):
             ...
             ArithmeticError: y^2 + y = x^3 + 36*x defines a singular curve
-            sage: E.base_extend(RR)  # sagebrush only
+            sage: E.base_extend(RR)
+            Elliptic Curve defined by y^2 + 1.00000000000000*y = x^3 - 1.00000000000000*x over Real Field with 53 bits of precision
+            sage: E.base_extend(CC)  # sagebrush only
             Traceback (most recent call last):
             ...
-            NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet
+            NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet
         """
         from _sage_poly import QQ, ZZ
         if R is QQ or R is ZZ:
             return EllipticCurve_rational_field(list(self._a))
+        if _is_RR(R):
+            # (the curves over RR: a module of their own, loaded on first use)
+            import _sage_ec_rr
+            return _sage_ec_rr.EllipticCurve_real_field(self._a)
         import _sage_ec_ff
         if not _sage_ec_ff._is_modp_ring(R):
             raise NotImplementedError("elliptic curves over %s are not available in Sagebrush yet" % (R,))
@@ -3502,6 +3520,15 @@ class EllipticCurvePoint:
         from sage_all import RR
         m = self._E.minimal_model()
         return RR(_ec.canonical_height(m._a, m._to_min(self), self._E._bad()))
+
+
+def _RR():
+    from _sage_lang import _RealField
+    return _RealField()
+
+
+def _is_RR(R):
+    return type(R).__name__ == "_RealField"
 
 
 def EllipticCurve(x, y=None):
