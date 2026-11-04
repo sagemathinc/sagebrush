@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Curves over RR: EllipticCurve_real_field and its points (lib/_sage_ec_rr.py, loaded on first use; hooks in lib/_sage_modular.py): base_extend(RR), lift_x over RR (and lift_x of a float on a curve over QQ), Sage's group law, xy, plot, with docstring examples. No new chunk. Measured with bun 1.4.4 (size-record.sh) on #488's head 22476fe8 (this PR is stacked on it) vs this PR's head 7c5c4d3e (daybreak3's B1 fix included): cli/lib.gen.js +3100, cli/pyjs.cjs +3756, engine/lib/sage-more.src +10646, engine/lib/sage.pre +3166, engine/lib/sage.src +1087, engine/sagebrush-worker.js +29; no other row moves.",
+ "reason": "Curves over RR: EllipticCurve_real_field and its points (lib/_sage_ec_rr.py, loaded on first use; hooks in lib/_sage_modular.py): base_extend(RR), lift_x over RR (and lift_x of a float on a curve over QQ), Sage's group law, xy, plot, with docstring examples. No new chunk. Re-measured with bun 1.4.4 (size-record.sh) on master a2fd6363 vs head 5cd64345: cli/lib.gen.js +3180, cli/pyjs.cjs +4012, engine/lib/sage-more.src +10646, engine/lib/sage.pre +3166, engine/lib/sage.src +1087, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 4044 (+4012 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 3100,
-  "cli/pyjs.cjs": 3756,
+  "cli/lib.gen.js": 3180,
+  "cli/pyjs.cjs": 4044,
   "engine/lib/sage-more.src": 10646,
   "engine/lib/sage.pre": 3166,
   "engine/lib/sage.src": 1087,
