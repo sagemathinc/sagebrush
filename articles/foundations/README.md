@@ -17,7 +17,10 @@ used as yardsticks only.
 These layers are why Sagebrush shares no code with other systems, not even
 GMP or FLINT, which almost every other system builds on. When Sagebrush
 agrees with Magma, PARI or Sage on a computation, that is agreement between
-independent implementations. See [what is shared](/articles/#independent).
+independent implementations: it rules out shared implementation bugs, but
+shared algorithms, assumptions or reference data can still produce
+correlated mistakes, so it is strong evidence rather than a guarantee. See
+[what is shared](/articles/#independent).
 
 ## Is it fast enough to choose?
 
