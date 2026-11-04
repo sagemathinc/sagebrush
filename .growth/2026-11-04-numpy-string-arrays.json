@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "numpy string arrays (dtype '<Un'), v1: creation, astype, shape and indexing, comparisons, sort/argsort/unique/where/isin, full and *_like, printing, as NumPy 2.5.1; every other operation refused (src/runtime/numpy.ts StrArray, lib/numpy np.str_). Re-measured with bun 1.4.4 (size-record.sh) on master 61857390 vs head 9e3f7cb8: cli/lib.gen.js +824, cli/pyjs.cjs +15440, engine/lib/sci.pre +9906, engine/lib/sci.src +2139, engine/sagebrush-worker.js +11221; no other row moves. Markers: exact, except cli/pyjs.cjs 15472 (+15440 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "numpy string arrays (dtype '<Un'), v1: creation, astype, shape and indexing, comparisons, sort/argsort/unique/where/isin, full and *_like, printing, as NumPy 2.5.1; every other operation refused (src/runtime/numpy.ts StrArray, lib/numpy np.str_). Re-measured with bun 1.4.4 (size-record.sh) on master 61857390 vs head c53f158b: cli/lib.gen.js +824, cli/pyjs.cjs +15591, engine/lib/sci.pre +9906, engine/lib/sci.src +2139, engine/sagebrush-worker.js +11323; no other row moves. Markers: exact, except cli/pyjs.cjs 15623 (+15591 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
   "cli/lib.gen.js": 824,
-  "cli/pyjs.cjs": 15472,
+  "cli/pyjs.cjs": 15623,
   "engine/lib/sci.pre": 9906,
   "engine/lib/sci.src": 2139,
-  "engine/sagebrush-worker.js": 11221
+  "engine/sagebrush-worker.js": 11323
  }
 }
