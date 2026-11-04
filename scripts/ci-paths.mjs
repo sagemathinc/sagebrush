@@ -149,7 +149,7 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/,
 ];
 // The CPython package's inputs: what its wheel builds (engine/, and a root
 // Cargo manifest if one is ever added), what it ships (lib/, through
