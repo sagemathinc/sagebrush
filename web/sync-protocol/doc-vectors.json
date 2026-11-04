@@ -1739,6 +1739,106 @@
     }
    }
   ],
+  "charges": [
+   {
+    "when": "one patch, the first batch (no chain)",
+    "fields": {
+     "seq": 1,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddd",
+     "recv": 1730000000000,
+     "chain": null
+    },
+    "envs_bytes": 62,
+    "body_length": 10,
+    "charge": 256
+   },
+   {
+    "when": "one patch, chained",
+    "fields": {
+     "seq": 2,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddd",
+     "recv": 1730000000001,
+     "chain": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "envs_bytes": 83,
+    "body_length": 20,
+    "charge": 351
+   },
+   {
+    "when": "three patches, a body not a multiple of 3",
+    "fields": {
+     "seq": 17,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddd",
+     "recv": 1730000000002,
+     "chain": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "envs_bytes": 188,
+    "body_length": 121,
+    "charge": 593
+   },
+   {
+    "when": "a grant writer",
+    "fields": {
+     "seq": 18,
+     "author": "person",
+     "writer": "grant:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     "device": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+     "recv": 1730000000003,
+     "chain": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "envs_bytes": 62,
+    "body_length": 3,
+    "charge": 337
+   },
+   {
+    "when": "the widest seq and recv (16 digits)",
+    "fields": {
+     "seq": 9007199254740991,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "recv": 9007199254740991,
+     "chain": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "envs_bytes": 63,
+    "body_length": 1,
+    "charge": 389
+   },
+   {
+    "when": "blobs and eight parents",
+    "fields": {
+     "seq": 19,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddd",
+     "recv": 1730000000004,
+     "chain": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "envs_bytes": 375,
+    "body_length": 0,
+    "charge": 616
+   },
+   {
+    "when": "an empty body",
+    "fields": {
+     "seq": 20,
+     "author": "person",
+     "writer": "session:dddddddddddddddddddddddddddddddd",
+     "device": "dddddddddddddddddddddddddddddddd",
+     "recv": 1730000000005,
+     "chain": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "envs_bytes": 65,
+    "body_length": 0,
+    "charge": 306
+   }
+  ],
   "old_front": [
    {
     "for": "snapshot",

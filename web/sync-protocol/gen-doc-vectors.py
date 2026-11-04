@@ -344,6 +344,31 @@ def refused(f, *a):
     raise AssertionError("not refused: " + repr(a))
 
 
+def charge_vectors():
+    import base64
+    def env(i, parents=(), blobs=None):
+        e = {"cseq": i, "id": "%011d_client%s" % (i, "W" * (i % 5)), "parents": list(parents), "size": 10 * i}
+        if blobs:
+            e["blobs"] = blobs
+        return e
+    cases = [
+        ("one patch, the first batch (no chain)", {"seq": 1, "author": "person", "writer": "session:" + "d" * 32, "device": "d" * 32, "recv": 1730000000000, "chain": None}, [env(1)], 10),
+        ("one patch, chained", {"seq": 2, "author": "person", "writer": "session:" + "d" * 32, "device": "d" * 32, "recv": 1730000000001, "chain": "a" * 64}, [env(2, ["%011d_client" % 1])], 20),
+        ("three patches, a body not a multiple of 3", {"seq": 17, "author": "person", "writer": "session:" + "d" * 32, "device": "d" * 32, "recv": 1730000000002, "chain": "b" * 64}, [env(3), env(4), env(5)], 121),
+        ("a grant writer", {"seq": 18, "author": "person", "writer": "grant:" + "e" * 32, "device": "f" * 64, "recv": 1730000000003, "chain": "c" * 64}, [env(6)], 3),
+        ("the widest seq and recv (16 digits)", {"seq": 9007199254740991, "author": "person", "writer": "session:" + "d" * 64, "device": "d" * 64, "recv": 9007199254740991, "chain": "f" * 64}, [env(7)], 1),
+        ("blobs and eight parents", {"seq": 19, "author": "person", "writer": "session:" + "d" * 32, "device": "d" * 32, "recv": 1730000000004, "chain": "d" * 64}, [env(8, ["%011d_client" % k for k in range(8)], ["9" * 64, "8" * 64])], 0),
+        ("an empty body", {"seq": 20, "author": "person", "writer": "session:" + "d" * 32, "device": "d" * 32, "recv": 1730000000005, "chain": "e" * 64}, [env(9)], 0),
+    ]
+    out = []
+    for when, f, envs, body in cases:
+        item = {"seq": f["seq"], "author": f["author"], "writer": f["writer"], "device": f["device"], "recv": f["recv"], "chain": f["chain"], "patches": envs, "body": base64.b64encode(b"x" * body).decode()}
+        whole = len(json.dumps(item, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        envs_bytes = len(json.dumps(envs, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        out.append({"when": when, "fields": f, "envs_bytes": envs_bytes, "body_length": body, "charge": whole})
+    return out
+
+
 def main():
     v = {"comment": "made by gen-doc-vectors.py; do not edit by hand", "version": 1}
     v["sha256"] = [{"hex_in": b.hex(), "out": sha(b).hex()} for b in [b"", b"abc", b"a" * 55, b"a" * 56, b"a" * 64, bytes(range(256)) * 5]]
@@ -572,6 +597,10 @@ def main():
             {"for": "pull", "when": "start: no checkpoint yet", "shape": {**page, "checkpoint": "null", "token": "string"}},
             {"for": "pull", "when": "a page, a token asked for", "shape": {**page, "token": "string"}},
         ],
+        # (charged bytes, r9 §3: a batch's charge is the UTF-8 length of the PullItem the server serves for it.  Each
+        # vector is a real item measured whole here; the server's itemBytesOf (cloud tail.ts) and the client's
+        # (web/workspace/checkpoint.ts) compute it from its parts, without building it: fields, envs_bytes, body_length)
+        "charges": charge_vectors(),
         # (the old front's exchange: a message without any checkpoint field is checked as before, its result byte for
         # byte the old one (no new key, not even an absent one); and a pull without start or token checks to nothing)
         # (the old result's key order: t, req, at_seq, sha256, bytes, then doc and owner, as checkSnapshot has always built it)
