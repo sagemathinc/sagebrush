@@ -648,10 +648,13 @@ from Tavmjong Bah. For further information, contact: tavmjong @ free
 
 ### smalljac (used with the author's permission)
 
-The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
-Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
-gave explicit permission for this port to be licensed however Sagebrush
-chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
+The a_p engine (`engine/ap`) is an independent Rust implementation of
+standard methods (baby-step giant-step and related techniques), following
+the genus-1 strategy of Andrew V. Sutherland's smalljac (with Kiran
+Kedlaya). On 2026-10-02 Andrew Sutherland gave permission to read
+smalljac's source and port it under any license Sagebrush chooses. No
+smalljac code is copied or shared, and smalljac 4.1.3 was run as an oracle;
+see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
 ### PSAGE (used with the author's permission)
 
@@ -732,6 +735,10 @@ https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10
 ## Used only by tests and benchmarks (not distributed in any package)
 
 - `upstream/micropython/`: MicroPython's test suite (MIT; its `LICENSE`).
+- `upstream/numbl/`: the MATLAB test scripts of numbl (Flatiron Institute),
+  `numbl_test_scripts/` at commit e2396e2f, unchanged, minus the scripts listed
+  in its `README.md` (Apache-2.0; its `LICENSE`; numbl has no NOTICE file).
+  Run only by `scripts/numbl-ratchet.py`, on CI's full tier.
 - `conformance/upstream/`: the test suites of CPython, PyPy, GraalPy,
   IronPython and RustPython, each under its own license (the `LICENSE` file
   in its directory).

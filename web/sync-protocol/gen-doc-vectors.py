@@ -520,6 +520,67 @@ def main():
         {"for": "pull", "when": "another epoch than the document's (its history was cleared)", "shape": refusal_shape("epoch", {"message": "string", "epoch": "number", "head": head})},
         {"for": "doc_claim", "when": "another epoch than the document's", "shape": refusal_shape("stale_epoch", {"message": "string", "epoch": "number", "head": head})},
     ]
+    # (checkpoints, BH-0 server design r9 (83f3dd5a; astra's and daybreak2's DESIGN CLEAR): what a client of the
+    # checkpoint protocol may send, the refusals and the answers it reads, and the old front's exchange, which stays
+    # byte for byte what it was.  Under their own key, so the five snapshot refusals and six answers above, which the
+    # cloud's 2b-7 tests match exactly, are unchanged)
+    pid = "0000000000a_client"
+    hexs = lambda c: c * 64
+    item = {"seq": "number", "author": "string", "writer": "string", "device": "string", "recv": "number", "chain": "string|null", "patches": "array", "body": "string"}
+    page = {"t": "=batches", "req": "number", "owner": "string", "doc": "string", "epoch": "number", "head": chained, "items": [item], "more": "boolean"}
+    descriptor = {"epoch": "number", "at_seq": "number", "recv_at": "number", "chain_at": "string", "cut_patch": "string", "sha256": "string", "bytes": "number"}
+    kept = [{"at_seq": 1500, "sha256": hexs("a"), "bytes": 4096}]
+    snap = {"t": "snapshot", "req": 7, "doc": "0123456789ab", "at_seq": 12, "sha256": hexs("b"), "bytes": 100}
+    v["checkpoint"] = {
+        # (requests: each `ok` is checkSnapshot's / checkPullStart's result, as JSON; each refused one, its error's code)
+        "requests": [
+            {"for": "snapshot", "when": "a checkpoint: cut_patch", "message": {**snap, "cut_patch": pid}, "ok": {**snap, "cut_patch": pid}},
+            {"for": "snapshot", "when": "a first checkpoint from a verified cursor: cut_patch and chain", "message": {**snap, "cut_patch": pid, "chain": hexs("c")}, "ok": {**snap, "cut_patch": pid, "chain": hexs("c")}},
+            {"for": "snapshot", "when": "chain without cut_patch", "message": {**snap, "chain": hexs("c")}, "refused": "invalid"},
+            {"for": "snapshot", "when": "cut_patch not a patch id", "message": {**snap, "cut_patch": "x"}, "refused": "invalid"},
+            {"for": "snapshot", "when": "cut_patch with a 10-character time part", "message": {**snap, "cut_patch": "000000000a_client"}, "refused": "invalid"},
+            {"for": "snapshot", "when": "cut_patch with a 65-character client", "message": {**snap, "cut_patch": "0000000000a_" + "c" * 65}, "refused": "invalid"},
+            {"for": "snapshot", "when": "chain not 64 lowercase hex", "message": {**snap, "cut_patch": pid, "chain": hexs("C")}, "refused": "invalid"},
+            {"for": "pull", "when": "start at the newest checkpoint", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 0, "start": "snapshot"}, "ok": {"start": "snapshot"}},
+            {"for": "pull", "when": "asking for a token", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 3, "token": None}, "ok": {"token": None}},
+            {"for": "pull", "when": "presenting a token", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 3, "token": "2.1730000000000." + hexs("d")}, "ok": {"token": "2.1730000000000." + hexs("d")}},
+            {"for": "pull", "when": "start other than snapshot", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 0, "start": "head"}, "refused": "invalid"},
+            {"for": "pull", "when": "start after 0", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 5, "start": "snapshot"}, "refused": "invalid"},
+            {"for": "pull", "when": "start with upto", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 0, "upto": 4, "start": "snapshot"}, "refused": "invalid"},
+            {"for": "pull", "when": "a token that isn't one", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 0, "token": "01.2." + hexs("d")}, "refused": "invalid"},
+        ],
+        # (the refusals: existing codes only (INV-A7): busy is transient on every front; invalid, conflict and limit are
+        # for checkpoint registrations, which only a checkpointing client sends)
+        "refusals": [
+            {"for": "batch", "when": "it would take the tail past a cap, with room left", "error": {"code": "busy", "detail": {"checkpoint": "split", "room_patches": 200, "room_bytes": 1048576, "tail_patches": 800, "tail_bytes": 3137536}}, "again": "a part that fits both rooms"},
+            {"for": "batch", "when": "the tail is at a cap", "error": {"code": "busy", "detail": {"checkpoint": "required", "room_patches": 0, "room_bytes": 4096, "tail_patches": 1000, "tail_bytes": 4182016}}, "again": "after a checkpoint"},
+            {"for": "batch", "when": "the document's tail isn't counted", "error": {"code": "busy", "detail": {"checkpoint": "required", "room_patches": 0, "room_bytes": 0}}, "again": "after the owner's checkpoint at the head"},
+            {"for": "pull", "when": "start or token on a deployment whose snapshot switch is off", "error": {"code": "unavailable", "detail": {"why": "snapshots_off"}}, "again": "never in this session"},
+            {"for": "checkpoint", "when": "this connection wasn't served through at_seq", "error": {"code": "invalid", "detail": {"why": "not_materialized", "served_through": 11}}, "again": "after pulling through at_seq"},
+            {"for": "checkpoint", "when": "cut_patch isn't the last patch of batch at_seq", "error": {"code": "invalid", "detail": {"why": "cut"}}, "again": "never for this cut"},
+            {"for": "checkpoint", "when": "a document's first checkpoint not at its head", "error": {"code": "invalid", "detail": {"why": "not_head", "head_seq": 40}}, "again": "at the head"},
+            {"for": "checkpoint", "when": "the tail after at_seq is past a cap", "error": {"code": "limit", "detail": {"limit": "residual", "max_patches": 1000, "max_bytes": 4186112}}, "again": "nearer the head"},
+            {"for": "checkpoint", "when": "another sha256 or byte count at an at_seq already taken", "error": {"code": "conflict", "detail": {"kept": kept}}, "again": "never at that at_seq"},
+            {"for": "checkpoint", "when": "an at_seq at or before the epoch's latest checkpoint", "error": {"code": "conflict", "detail": {"latest_at_seq": 1500, "kept": kept}}, "again": "only past latest_at_seq"},
+            {"for": "checkpoint", "when": "the store's releases haven't drained", "error": {"code": "busy", "detail": {"why": "checkpoint_store_draining", "retry_after": 1000}}, "again": "after retry_after"},
+            {"for": "checkpoint", "when": "another candidate holds the document's one slot", "error": {"code": "busy", "detail": {"why": "checkpoint_staging", "retry_after": 1000}}, "again": "after retry_after"},
+        ],
+        # (the answers' shapes, as above's: each only to a request that asks for it)
+        "answers": [
+            {"for": "batch", "when": "a new patch stored, a checkpoint due", "shape": {"t": "=ack", "req": "number", "batch": {"seq": "number", "new": "number", "resent": {"*": "number"}, "head": chained, "checkpoint": {"due": "boolean", "tail_patches": "number", "tail_bytes": "number"}}}},
+            {"for": "pull", "when": "start: the newest checkpoint and the tail after it", "shape": {**page, "checkpoint": descriptor, "token": "string"}},
+            {"for": "pull", "when": "start: no checkpoint yet", "shape": {**page, "checkpoint": "null", "token": "string"}},
+            {"for": "pull", "when": "a page, a token asked for", "shape": {**page, "token": "string"}},
+        ],
+        # (the old front's exchange: a message without any checkpoint field is checked as before, its result byte for
+        # byte the old one (no new key, not even an absent one); and a pull without start or token checks to nothing)
+        # (the old result's key order: t, req, at_seq, sha256, bytes, then doc and owner, as checkSnapshot has always built it)
+        "old_front": [
+            {"for": "snapshot", "message": snap, "ok": json.dumps({k: snap[k] for k in ["t", "req", "at_seq", "sha256", "bytes", "doc"]}, separators=(",", ":"))},
+            {"for": "snapshot", "message": {**snap, "owner": hexs("e")}, "ok": json.dumps({**{k: snap[k] for k in ["t", "req", "at_seq", "sha256", "bytes", "doc"]}, "owner": hexs("e")}, separators=(",", ":"))},
+            {"for": "pull", "message": {"t": "pull", "req": 8, "doc": "0123456789ab", "epoch": 1, "after": 3, "limit": 100}, "ok": "{}"},
+        ],
+    }
     json.dump(v, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
 

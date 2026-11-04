@@ -6,6 +6,7 @@
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
@@ -471,6 +472,32 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   eng.update(doc, { inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
   const r2 = eng.update(doc, { inputs: { files: ei2.files, resolve: ei2.resolve, version: 2 } });
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
+}
+
+// ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
+{
+  const at = (t) => [t.replace("|", ""), t.indexOf("|")];
+  const ac = (t) => autoClose(...at(t));
+  check("envclose-basic", ac("\\begin{itemize}|\n") === "\n\\end{itemize}", ac("\\begin{itemize}|\n"));
+  check("envclose-indent-starred", ac("x\n  \\begin{align*}|") === "\n  \\end{align*}", ac("x\n  \\begin{align*}|"));
+  check("envclose-trailing-blank-ok", ac("\\begin{enumerate}|   \nmore") === "\n\\end{enumerate}", null);
+  check("envclose-not-before-text", ac("\\begin{itemize}|x") === null, null);
+  check("envclose-not-a-comment", ac("% \\begin{itemize}|") === null && ac("a % b \\begin{x}|") === null, null);
+  check("envclose-escaped-percent-is-not-a-comment", ac("50\\% \\begin{x}|") === "\n\\end{x}", ac("50\\% \\begin{x}|"));
+  check("envclose-not-after-a-line-break", ac("a\\\\begin{x}|") === null && ac("\\\\\\begin{x}|") === "\n\\end{x}", [ac("a\\\\begin{x}|"), ac("\\\\\\begin{x}|")]);
+  check("envclose-not-in-verbatim", ac("\\begin{verbatim}\n\\begin{x}|\n\\end{verbatim}") === null && ac("\\begin{sageblock}\n\\begin{x}|") === null, null);
+  check("envclose-after-a-closed-verbatim", ac("\\begin{verbatim}\nv\n\\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
+  check("envclose-existing-close-kept", ac("\\begin{x}|\n\n  \\end{x}") === null && ac("\\begin{x}|\n\\end{y}") === "\n\\end{x}", null);
+  check("envclose-names-as-latex", ac("\\begin{foo2}|") === "\n\\end{foo2}" && ac("\\begin{foo-bar}|") === "\n\\end{foo-bar}" && ac("\\begin{foo:bar*}|") === "\n\\end{foo:bar*}" && ac("\\begin{a b}|") === null, [ac("\\begin{foo2}|"), ac("\\begin{foo-bar}|")]);
+  check("envclose-commented-literal-is-text", ac("% \\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("a % b \\begin{lstlisting}\n\\begin{x}|") === "\n\\end{x}", ac("% \\begin{verbatim}\n\\begin{x}|"));
+  check("envclose-escaped-literal-is-text", ac("\\\\begin{verbatim}\n\\begin{x}|") === "\n\\end{x}" && ac("\\\\\\begin{verbatim}\n\\begin{x}|") === null, [ac("\\\\begin{verbatim}\n\\begin{x}|"), ac("\\\\\\begin{verbatim}\n\\begin{x}|")]);
+  // (DB3-P1A-2b: a % after an even run of backslashes starts a comment, after an odd run it is text: 0..5)
+  {
+    const got = [0, 1, 2, 3, 4, 5].map((k) => ac("\\".repeat(k) + "% \\begin{verbatim}\n\\begin{x}|"));
+    check("envclose-comment-backslash-parity", JSON.stringify(got) === JSON.stringify(["\n\\end{x}", null, "\n\\end{x}", null, "\n\\end{x}", null]), got);
+  }
+  check("envclose-percent-inside-verbatim-is-text", ac("\\begin{verbatim}\n% \\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
+  check("envclose-only-on-brace", autoClose("\\begin{x", 8) === null && ac("\\begin{x}{cc}|") === null && ac("\\end{x}|") === null, null);
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
