@@ -696,11 +696,11 @@ fn upper_pairs2(u: &[f64], ldu: usize, n: usize, x: &mut [f64], ldx: usize, r: u
     j
 }
 
-/// Wasm: no pairs (the direct solves stay single-column there; see the native [`lower_unit_pairs`]).
+/// Wasm: four columns at a time ([`lower_unit_quads`]); the rest (r mod 4) one by one, as before.
 #[cfg(target_arch = "wasm32")]
 #[inline(always)]
-fn lower_unit_pairs(_: Kernel, _: &[f64], _: usize, _: usize, _: &mut [f64], _: usize, _: usize) -> usize {
-    0
+fn lower_unit_pairs(_: Kernel, l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    lower_unit_quads(l, ldl, n, x, ldx, r)
 }
 
 /// Wasm: no pairs (see the native [`upper_pairs`]).
@@ -720,6 +720,84 @@ fn getf2b_on(kern: Kernel, a: &mut [f64], lda: usize, m: usize, n: usize, ipiv: 
     }
     let _ = kern;
     getf2b(a, lda, m, n, ipiv)
+}
+
+/// Wasm (and tests): [`lower_unit_col`] on columns j..j+4 of X for each group of four right-hand sides, the rows
+/// below a block by one [`sub4x4`] (the four L columns loaded once for all four) when all four take the fused
+/// update, else each column's own update as in [`lower_unit_col`]. Each column's bits are [`lower_unit_col`]'s.
+/// Returns the number of columns done (r rounded down to a multiple of four).
+#[cfg(any(test, target_arch = "wasm32"))]
+fn lower_unit_quads(l: &[f64], ldl: usize, n: usize, x: &mut [f64], ldx: usize, r: usize) -> usize {
+    let mut j = 0;
+    while j + 3 < r {
+        let (c0, rest) = x[j * ldx..].split_at_mut(ldx);
+        let (c1, rest) = rest.split_at_mut(ldx);
+        let (c2, rest) = rest.split_at_mut(ldx);
+        let mut cs: [&mut [f64]; 4] = [&mut c0[..n], &mut c1[..n], &mut c2[..n], &mut rest[..n]];
+        let mut k0 = 0;
+        while k0 < n {
+            let kend = (k0 + SMALL_NB).min(n);
+            for col in cs.iter_mut() {
+                for q in k0..kend {
+                    let t = col[q];
+                    if t != 0.0 {
+                        for i in q + 1..kend {
+                            col[i] -= t * l[i + q * ldl];
+                        }
+                    }
+                }
+            }
+            if kend < n {
+                let fused = |col: &[f64]| {
+                    let t: [f64; 4] = core::array::from_fn(|q| if k0 + q < kend { col[k0 + q] } else { 0.0 });
+                    (kend - k0 == SMALL_NB && t.iter().all(|&x| x != 0.0)).then_some(t)
+                };
+                let ls: [&[f64]; 4] = core::array::from_fn(|q| if k0 + q < kend { &l[(k0 + q) * ldl + kend..(k0 + q) * ldl + n] } else { &[] });
+                let ts = [fused(cs[0]), fused(cs[1]), fused(cs[2]), fused(cs[3])];
+                if let [Some(t0), Some(t1), Some(t2), Some(t3)] = ts {
+                    let [a, b, c, d] = &mut cs;
+                    sub4x4([&mut a[kend..n], &mut b[kend..n], &mut c[kend..n], &mut d[kend..n]], ls, [t0, t1, t2, t3]);
+                } else {
+                    for (col, t) in cs.iter_mut().zip(ts) {
+                        if let Some(t) = t {
+                            sub4(&mut col[kend..n], ls, t);
+                        } else {
+                            for q in k0..kend {
+                                let t = col[q];
+                                if t != 0.0 {
+                                    for (e, &v) in col[kend..n].iter_mut().zip(&l[q * ldl + kend..q * ldl + n]) {
+                                        *e -= t * v;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            k0 = kend;
+        }
+        j += 4;
+    }
+    j
+}
+
+/// [`sub4`] on four columns at once (the four L columns loaded once for all four): column c gets
+/// c := c - l0 t0 - l1 t1 - l2 t2 - l3 t3 with its own t, element by element and in that order.
+#[cfg(any(test, target_arch = "wasm32"))]
+#[inline(always)]
+fn sub4x4(cs: [&mut [f64]; 4], l: [&[f64]; 4], ts: [[f64; 4]; 4]) {
+    let [a, b, c, d] = cs;
+    let n = a.len();
+    let (b, c, d) = (&mut b[..n], &mut c[..n], &mut d[..n]);
+    let (l0, l1, l2, l3) = (&l[0][..n], &l[1][..n], &l[2][..n], &l[3][..n]);
+    let [t0, t1, t2, t3] = ts;
+    for i in 0..n {
+        let (x0, x1, x2, x3) = (l0[i], l1[i], l2[i], l3[i]);
+        a[i] = (((a[i] - x0 * t0[0]) - x1 * t0[1]) - x2 * t0[2]) - x3 * t0[3];
+        b[i] = (((b[i] - x0 * t1[0]) - x1 * t1[1]) - x2 * t1[2]) - x3 * t1[3];
+        c[i] = (((c[i] - x0 * t2[0]) - x1 * t2[1]) - x2 * t2[2]) - x3 * t2[3];
+        d[i] = (((d[i] - x0 * t3[0]) - x1 * t3[1]) - x2 * t3[2]) - x3 * t3[3];
+    }
 }
 
 #[cfg(test)]
@@ -1581,6 +1659,52 @@ pub(crate) mod tests {
             assert!(ipiv.iter().enumerate().all(|(i, &p)| p == i), "{}: no interchanges", k.name());
             assert!(lu.iter().zip(&a).all(|(f, a)| f.to_bits() == a.to_bits()), "{}: the factors are not A's bits", k.name());
             assert!(x.iter().all(|v| v.is_finite()));
+        }
+    }
+
+    /// The Wasm direct-solve leaf, four right-hand sides at a time (lower_unit_quads, compiled natively for this
+    /// test): every column's bits are lower_unit_col's, for r = 1..9 (whole groups, and the rest left to the
+    /// caller), triangles below, at and above the fused-block size, a padded ldx, and columns whose multipliers
+    /// are zero (one column, two, or all four in a block: the step-by-step fallback).
+    #[test]
+    fn four_column_direct_solves_keep_each_columns_bits() {
+        for n in [1, 3, 4, 5, 8, 17, 37, 64] {
+            let (l, _) = triangles(n, 40 + n as u32);
+            for r in 1..=9 {
+                for zeros in [0usize, 1, 2, 3] {
+                    // (with every x_0 zero, an Inf under it in L: skipping the step keeps x, fusing it gives NaN)
+                    let mut l = l.clone();
+                    if zeros == 3 && n > 6 {
+                        l[6] = f64::INFINITY;
+                    }
+                    let ldx = n + 2;
+                    let mut x0 = vec![f64::NAN; ldx * r];
+                    for j in 0..r {
+                        for (i, v) in seeded(n, &mut (7 * j as u32 + n as u32)).into_iter().enumerate() {
+                            // (zero multipliers, which nothing above can change: 1, column 1's first two blocks; 2, also
+                            // column 3's first block; 3, every column's x_0, so no column fuses its first block)
+                            let zero = match zeros {
+                                1 => j == 1 && i < 8,
+                                2 => (j == 1 && i < 8) || (j == 3 && i < 4),
+                                3 => i == 0,
+                                _ => false,
+                            };
+                            x0[j * ldx + i] = if zero { 0.0 } else { v };
+                        }
+                    }
+                    let mut quads = x0.clone();
+                    let done = lower_unit_quads(&l, n, n, &mut quads, ldx, r);
+                    assert_eq!(done, r / 4 * 4, "n={n} r={r}");
+                    for j in done..r {
+                        lower_unit_col(&l, n, n, &mut quads[j * ldx..j * ldx + n]);
+                    }
+                    let mut cols = x0.clone();
+                    for j in 0..r {
+                        lower_unit_col(&l, n, n, &mut cols[j * ldx..j * ldx + n]);
+                    }
+                    assert!(same_bits(&quads, &cols), "n={n} r={r} zeros={zeros}: not lower_unit_col's bits");
+                }
+            }
         }
     }
 }
