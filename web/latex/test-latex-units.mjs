@@ -208,9 +208,28 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["atbegindocument-deferred", "\\documentclass{article}\n\\usepackage{doc}\\AtBeginDocument{\\MakeShortVerb{\\|}}\\def\\q{a|b}\n", "\\q{} |x| y.", (h) => h.includes("a|b") && h.includes(V("x")) && h.includes("y.")],
     ["atbegindocument-in-order", "\\documentclass{article}\n\\AtBeginDocument{Hook1 }\\AtBeginDocument{Hook2 }\n", "Body.", (h) => /Hook1 Hook2 Body\./.test(h)],
     ["atbegindocument-in-document", "\\documentclass{article}\n", "Before \\AtBeginDocument{Now }after.", (h) => h.includes("Before Now after.")],
+    ["atbegindocument-global-brace", "\\documentclass{article}\n{\\AtBeginDocument{Hook }}\n", "Body.", (h) => h.includes("Hook Body.")],
+    ["atbegindocument-global-begingroup", "\\documentclass{article}\n\\begingroup\\AtBeginDocument{Hook }\\endgroup\n", "Body.", (h) => h.includes("Hook Body.")],
+    ["atbegindocument-grouped-then-ungrouped", "\\documentclass{article}\n{\\AtBeginDocument{Hook1 }}\\AtBeginDocument{Hook2 }\n", "Body.", (h) => h.includes("Hook1 Hook2 Body.")],
+    ["shortverb-make-global", "\\documentclass{article}\n{\\MakeShortVerb{\\|}}\n", "A |\\x| b.", (h) => h.includes(V("\\x")) && h.includes("b.")],
+    ["shortverb-delete-global", "\\documentclass{article}\n\\def\\p#1|{[#1]}\\MakeShortVerb{\\|}\n", "{\\DeleteShortVerb{\\|}}A|b| \\p cd|e.", (h) => !h.includes('class="verb"') && h.includes("A|b| [cd]e.")],
     ["shortverb-none-plain-bar", "\\documentclass{article}\n", "Plain $|x|$ and a|b.", (h) => !h.includes('class="verb"') && h.includes("a|b.")],
   ];
   for (const [name, pre, body, ok] of shortv) { const h = doc(pre, body); check(name, ok(h), h.slice(0, 600)); }
+  // \AtBeginDocument's hook is one token list (#631 LATEX631-HOOK-1): bounded as one, a refusal keeping the hook before;
+  // each append's copy charged as work
+  {
+    const hookRun = (hooks, limits) => coldRun(new Map([["main.tex", "\\documentclass{article}\n" + hooks.map((x) => "\\AtBeginDocument{" + x + "}").join("") + "\n\\begin{document}\nBody.\n\\end{document}\n"]]), "main.tex", { Tmin: 100, limits });
+    const hookLen = (r) => r.m.getS("m:sb@bdhook")?.body.length;
+    const at = hookRun(["abcd", "efgh"], { tokenList: 8 }), over = hookRun(["abcd", "efghi"], { tokenList: 8 });
+    check("atbegindocument-hook-at-bound", at.outcome === "ok" && hookLen(at) === 8, { outcome: at.outcome, len: hookLen(at) });
+    check("atbegindocument-hook-one-over", over.outcome === "E-BOUND-TOKENS" && hookLen(over) === 4, { outcome: over.outcome, len: hookLen(over) });
+    const many = Array.from({ length: 300 }, () => "x"), one = hookRun([many.join("")]), each = hookRun(many);
+    const extra = each.counters.work - one.counters.work;   // (the 300 copies: 1 + 2 + ... + 300, less the one of 300)
+    check("atbegindocument-hook-copies-charged", one.outcome === "ok" && each.outcome === "ok" && extra >= 300 * 301 / 2 - 300, { extra });
+    const capped = hookRun(many, { safetyWork: one.counters.work + 1000 });
+    check("atbegindocument-hook-work-budget", capped.outcome === "E-BOUND-SAFETY" && hookRun([many.join("")], { safetyWork: one.counters.work + 1000 }).outcome === "ok", { outcome: capped.outcome });
+  }
   // \long commands keep paragraphs (the kernel's \@footnotetext, \@caption, \thanks are \long); a short one with a
   // literal \par is a runaway, as in TeX; a short command that runs away is dropped before any effect
   const longs = [

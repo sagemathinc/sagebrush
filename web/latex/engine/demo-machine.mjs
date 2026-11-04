@@ -259,12 +259,15 @@ export class Machine extends CoreMachine {
     });
     // \AtBeginDocument: its tokens kept, globally, in \sb@bdhook (LaTeX's \@begindocumenthook) and read at \begin{document}
     // (as doc's \AtBeginDocument{\MakeShortVerb{\|}}: run at once, "|" was \verb in the preamble that follows, #622);
-    // in the document, read at once
+    // in the document, read at once. The hook is one token list: bounded as one (limits.tokenList), its copy charged and
+    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1)
     P.prim("AtBeginDocument", function () {
       const a = this.readArgRaw();
       if (this.getS("sb:indoc")) { this.pushList(a); return; }
-      const h = this.getS("m:sb@bdhook");
-      this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: [...(h ? h.body : []), ...a], long: true, prot: false }), true);
+      const h = this.getS("m:sb@bdhook"), old = h ? h.body : [], n = old.length + a.length;
+      if (n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+      this.charge(n); this.reserve(n * 4 + 64);
+      this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: old.concat(a), long: true, prot: false }), true);
     });
     P.prim("end", function (t) {
       const env = this.readArgString();
