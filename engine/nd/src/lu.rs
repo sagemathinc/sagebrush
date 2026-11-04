@@ -1548,4 +1548,39 @@ pub(crate) mod tests {
             }
         }
     }
+
+    /// The signed-zero system (grader's #630 follow-up; shared with test/nd-solve-wasm.test.ts): n = 128, so
+    /// getrf's one GEMM update A22 := A22 - A21 A12 runs with A21 = +0 against a negative A12, every product -0.
+    /// A11 = I, A21 = +0, A12 < 0, A22 = 4 I with off-diagonal zeros of both signs. Every step is exact and every
+    /// zero multiplier skips its update, so the factors are A itself, bit for bit, -0s included: a kernel whose
+    /// sums start at -0 (mutant N6) turns A22's -0s into +0s.
+    pub(crate) fn signed_zero_system() -> Vec<f64> {
+        let (n, h) = (128usize, 64usize);
+        let mut a = vec![0.0; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                a[i + j * n] = match (i < h, j < h) {
+                    (_, true) => f64::from(u8::from(i == j)),
+                    (true, false) => -(1.0 + ((i * 7 + j * 3) % 5) as f64),
+                    (false, false) if i == j => 4.0,
+                    (false, false) => if (i + j) % 3 == 0 { -0.0 } else { 0.0 },
+                };
+            }
+        }
+        a
+    }
+
+    #[test]
+    fn the_signed_zero_system_factors_to_itself_on_every_kernel() {
+        let a = signed_zero_system();
+        let n = 128;
+        assert!(a.iter().filter(|x| **x == 0.0 && x.is_sign_negative()).count() > 1000);
+        for k in kernels() {
+            let (x, st, ipiv, lu) = run(k, &a, &vec![1.0; n], n, 1, n, n);
+            assert_eq!(st, Status::Solved);
+            assert!(ipiv.iter().enumerate().all(|(i, &p)| p == i), "{}: no interchanges", k.name());
+            assert!(lu.iter().zip(&a).all(|(f, a)| f.to_bits() == a.to_bits()), "{}: the factors are not A's bits", k.name());
+            assert!(x.iter().all(|v| v.is_finite()));
+        }
+    }
 }
