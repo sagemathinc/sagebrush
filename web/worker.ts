@@ -182,9 +182,6 @@ onOfflineMissing((m) => postMessage({ offlineMissing: m }));
 // is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
 // can't be used is said once, and imports from it then fail saying why.
 let pkgsetReady: Promise<void> = Promise.resolve();
-// The notebook's own folder ({startDir}, sent at the start): what the session is asked waits for it to be the working
-// folder and sys.path[0].
-let placed: Promise<void> = Promise.resolve();
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
 
 /** The init message's limits, or the reason they are refused before any
@@ -244,14 +241,13 @@ self.onmessage = async (ev: MessageEvent) => {
   }
   if (m.startDir !== undefined) {
     // (the notebook's own folder: the working folder and sys.path[0], as Jupyter runs a notebook (Nov 4 ruling), so it
-    // opens and imports what is beside it; set once the interpreter is ready, before any run of the session)
+    // opens and imports what is beside it; set as it arrives: the page sends it in onStart, which every run and
+    // question waits for (web/notebook/worker-kernel.js), and it holds even sent before the init)
     const d = startDirOf(m.startDir);
     if (d === null) return;
-    placed = session.ready.then(() => {
-      startIn(d);
-      const sys = R.importModule("sys");
-      if (sys.path[0] !== d) sys.path.unshift(d);
-    }, () => {});
+    startIn(d);
+    const sys = R.importModule("sys");
+    if (sys.path[0] !== d) sys.path.unshift(d);
     return;
   }
   if (m.files) return loadFiles(m.files);
@@ -279,8 +275,6 @@ self.onmessage = async (ev: MessageEvent) => {
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }
-  // (a run, and a question of the session (importInfo: where it resolves files and imports), as of its own folder)
-  await placed;
   try {
     await session.handle(m);
   } catch (e) {

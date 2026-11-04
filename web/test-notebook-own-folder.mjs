@@ -4,6 +4,9 @@
 //   - a notebook in a folder starts there: os.getcwd() is its folder and sys.path[0] too, so it reads a neighbouring
 //     data file by its relative name and imports a neighbouring .py module;
 //   - a top-level notebook's working folder is "/", as before, and a relative read finds the file beside it there;
+//     its sys.path[0] is now "/" too (it was the runtime's library, /$pyjs/lib), so it imports a module beside it;
+//   - the worker itself, sent its folder before its init, answers its first question from that folder; a folder
+//     named with ".." is refused and the session stays at "/";
 //   - the session's own answer of where it resolves files and imports (importInfo, the file-dependency check's), asked
 //     at once after a start, before any run, is that folder;
 //   - a rename or a move takes effect at the next start: the running interpreter keeps the folder it started in (it
@@ -105,6 +108,22 @@ try {
   await restart();
   const d = await runAt();
   check(renamed === "/Book3" && d === "/Book3|/Book3|two|2", `a renamed folder too, at the next start: ${renamed}, ${d}`);
+
+  // ---- the worker itself, sent its folder before its init (the interpreter not ready yet), then asked at once: the
+  // folder is set once the interpreter is ready, and the question waits for it; a folder that names another place
+  // (here "..") is refused and the session stays at "/"
+  const raw = (dir) => ev(`new Promise((res) => {
+    const w = new Worker("sagebrush-worker.js", { type: "module" });
+    const t = setTimeout(() => { w.terminate(); res("(no answer)"); }, 60000);
+    w.onmessage = (e) => { if (e.data?.id === 1 && "cwd" in e.data) { clearTimeout(t); w.terminate(); res(JSON.stringify([e.data.cwd, e.data.path?.[0]])); } };
+    w.postMessage({ startDir: ${JSON.stringify(dir)} });
+    w.postMessage({ init: { limits: null } });
+    w.postMessage({ id: 1, importInfo: true, mode: "python" });
+  })`);
+  const early = await raw("/Early/sub");
+  check(early === JSON.stringify(["/Early/sub", "/Early/sub"]), `a worker sent its folder before it is ready: cwd and sys.path[0] are that folder at the first question (${early})`);
+  const refused = await raw("/Book/..");
+  check(JSON.parse(refused)[0] === "/" && JSON.parse(refused)[1] !== "/Book/..", `a folder named with ".." is refused: the session stays at "/" (${refused})`);
 
   // ---- a top-level notebook: "/" as before
   await go(base + "?nb=" + encodeURIComponent(top));
