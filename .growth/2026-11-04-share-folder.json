@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Share folder… (book links B2): a folder's ⋯ in Files offers it (web/workspace/browser.ts), the page hosts its dialog (web/index.html openFolderShare: the workspace, this device's upload records, the folder's share record), and the workspace keeps a folder's share by its fid (web/workspace/api.ts folderShare/setFolderShare). The dialog itself, the secret check and the upload's logic are a lazy chunk, sagebrush-share-folder.js (15.3 KB, 6.3 KB gzip), loaded only when chosen. The notebook page grows +2229 B (+611 B gzip). Measured with bun 1.4.4 on a merge of the head onto master 57a7f5b1: cli/pyjs.cjs +3460 (the embedded page); no other row moves. Marker: +32 B of margin.",
+ "bytes": {
+  "cli/pyjs.cjs": 3492
+ }
+}
