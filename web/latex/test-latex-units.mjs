@@ -482,6 +482,28 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("ctr-footnote-not-a-number", notNumT === "A 1 B 1 X" && notNum.problems.filter((p) => p.kind === "footnote" && /\\footnote\[2a\]: not a number/.test(p.name)).length === 1, [notNumT, notNum.problems]);
 }
 
+// ---- references (astra4's fidelity digest, gap 2: \\nameref gave a number, \\cref{a,b} and a \\label after \\section* gave ??,
+//      silently). astra4's M07..M09, then two documents' every reference against TeX Live 2025's text for them (hyperref,
+//      cleveref with its defaults; pdftotext, 2026-11-04)
+{
+  setKatex((src) => src);
+  const text = (src) => new Engine().update(src).chunks.join("").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const art = (body, pre = "") => "\\documentclass{article}\n" + pre + "\\begin{document}\n" + body + "\n\\end{document}\n";
+  const spaced = (src) => new Engine().update(src).chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const m07 = spaced(art("\\section{HeadingText}\\label{s}\\nameref{s}")), m08 = spaced(art("\\section{Alpha}\\label{a}\\section{Beta}\\label{b}\\cref{a,b}")), m09 = spaced(art("\\section{Alpha}\\section*{Beta}\\label{b}\\ref{b}"));
+  check("ref-m07-m08-m09", m07 === "1 HeadingText HeadingText" && m08 === "1 Alpha 2 Beta sections 1 and 2" && m09 === "1 Alpha Beta 1", [m07, m08, m09]);
+  const tex = { // (each document, then TeX's text from its "A[" on)
+    c: ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{Alpha}\\label{s1}\n\\begin{equation}x\\label{e1}\\end{equation}\n\\begin{equation}y\\label{e2}\\end{equation}\n\\begin{figure}\\caption{Cap}\\label{f1}\\end{figure}\n\\section{Beta}\\label{s2}\n\\section{Gamma}\\label{s3}\n\\section*{Starred}\\label{st}\n\\subsection{Sub}\\label{ss}\nA[\\cref{s1}] B[\\cref{e1}] C[\\cref{f1}] D[\\cref{s1,s2}] E[\\cref{s1,s2,s3}] F[\\cref{e1,e2}] G[\\cref{s1,f1}] H[\\Cref{e1}] I[\\Cref{s1,s3}] J[\\cref{ss}] K[\\nameref{st}] L[\\ref{st}] M[\\nameref{e1}] N[\\nameref{f1}] O[\\cref{s3,s1}] P[\\cref{s1,nokey}]\n\\end{document}\n", "A[section 1] B[eq. (1)] C[fig. 1] D[sections 1 and 2] E[sections 1 to 3] F[eqs. (1) and (2)] G[section 1 and fig. 1] H[Equation (1)] I[Sections 1 and 3] J[section 3.1] K[Starred] L[3] M[Alpha] N[Cap] O[sections 1 and 3] P[section 1 and ??]"],
+    d: ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{Alpha}\\label{s1}\n\\begin{equation}x\\label{e1}\\end{equation}\n\\begin{equation}y\\label{e2}\\end{equation}\n\\begin{equation}z\\label{e3}\\end{equation}\n\\begin{table}\\caption{T}\\label{t1}\\end{table}\n\\begin{figure}\\caption{Cap}\\label{f1}\\end{figure}\n\\section{Beta}\\label{s2}\n\\begin{enumerate}\\item a\\label{i1}\\item b\\label{i2}\\end{enumerate}\nA[\\Cref{s1,f1}] B[\\cref{e1,e2,e3}] C[\\cref{t1}] D[\\cref{s1,e2,s2}] E[\\cref{i1,i2}] F[\\Cref{t1,f1,s2}] G[\\cref{nokey}] H[\\cref{e3,e1}]\n\\end{document}\n", "A[Section 1 and fig. 1] B[eqs. (1) to (3)] C[table 1] D[sections 1 and 2 and eq. (2)] E[items 1 and 2] F[Table 1, fig. 1, and section 2] G[??] H[eqs. (1) and (3)]"],
+  };
+  tex.e = ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{S1}\\label{s1}\\subsection{A}\\subsection{B}\\label{ss12}\\subsubsection{C}\\paragraph{D}\\label{p}\n\\section{S2}\\label{s2}\\subsection{E}\\subsection{F}\\subsection{G}\\label{ss23}\\subsection{H}\\label{ss24}\n\\section{S3}\\label{s3}\\section{S4}\\section{S5}\\label{s5}\nA[\\cref{s1,s3,s5}] B[\\cref{nokey,nokey2}] C[\\ref{p}] D[\\cref{ss12,ss23,ss24}] E[$\\cref{zz}$]\n\\end{document}\n", "A[sections 1, 3 and 5] B[????] C[1.2.1] D[sections 1.2, 2.3 and 2.4] E[??]"];
+  // (and a \\ref's link goes to the numbered heading it names, not to a starred one after it)
+  const link = new Engine().update(art("\\section{Alpha}\\section*{Beta}\\label{b}\\ref{b}")).chunks.join("");
+  check("ref-starred-link", /<h2 id="(sec-\d+)">[\s\S]*<a class="ref" href="#\1">1<\/a>/.test(link), link.slice(0, 400));
+  // (a reference in math: KaTeX stubbed, so its source, \\text{..})
+  for (const [k, [src, want]] of Object.entries(tex)) { const t = text(src).replace(/\\text\{([^}]*)\}/g, "$1"); check("ref-as-tex-" + k, t.slice(t.indexOf("A[")) === want, t.slice(t.indexOf("A["))); }
+}
+
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");

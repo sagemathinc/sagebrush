@@ -192,6 +192,10 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
 export const BOX_MAX = 1 << 20, BOX_KEY = 16;
 export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
 export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
+// (cleveref's names, singular and plural, and \Cref's for its abbreviated ones)
+const CREF = { section: ["section", "sections"], subsection: ["section", "sections"], subsubsection: ["section", "sections"], chapter: ["chapter", "chapters"],
+  equation: ["eq.", "eqs."], figure: ["fig.", "figs."], table: ["table", "tables"], item: ["item", "items"], footnote: ["footnote", "footnotes"] };
+const CREF_CAP = { "eq.": "Equation", "eqs.": "Equations", "fig.": "Figure", "figs.": "Figures" };
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
@@ -228,7 +232,8 @@ class Renderer {
   }
   nid(p) { return p + "-" + (++this.idn); }
   setTarget(text, id, kind) { this.target = { text: String(text), id, kind }; }
-  label(key) { if (!this.labels.has(key)) this.labels.set(key, Object.assign({}, this.target)); }
+  // (a label: the current target, and the current label name, \nameref's: the last section's or caption's title)
+  label(key) { if (!this.labels.has(key)) this.labels.set(key, Object.assign({ name: this.labelName ?? "" }, this.target)); }
   refPh(n) { this.refs.push(n); return "\u0001R" + (this.refs.length - 1) + "\u0002"; }
   unk(name, flow, st) {
     if (BEAMER_CMDS.has(name)) this.needBeamer = true;
@@ -488,8 +493,11 @@ class Renderer {
     }
     if (n.cmd === "chapter" && this.book) this.flushFootnotes(flow);
     const id = this.nid("sec");
-    this.setTarget(num, id, n.cmd);
+    // (only a numbered heading is a label's target: a \label after a starred one, or one past secnumdepth, is the last
+    //  numbered one's, as in TeX)
+    if (num) this.setTarget(num, id, n.cmd);
     const title = this.inline(n.kids, ctx);
+    this.labelName = title;
     // (an unstarred part says "Part" with its numeral, which TeX leaves empty at 0 or less)
     if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (!n.star ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
     else if (n.cmd === "chapter") flow.block('<h1 class="chapter" id="' + id + '">' + (num ? '<div class="chapnum">' + (this.appendix ? "Appendix " : "Chapter ") + esc(num) + "</div>" : "") + title + "</h1>");
@@ -523,7 +531,9 @@ class Renderer {
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
-    flow.block('<div class="caption" id="' + id + '"><span class="capnum">' + (fl === "table" ? "Table " : "Figure ") + esc(num) + ":</span> " + this.inline(n.kids, ctx) + "</div>");
+    const text = this.inline(n.kids, ctx);
+    this.labelName = text;
+    flow.block('<div class="caption" id="' + id + '"><span class="capnum">' + (fl === "table" ? "Table " : "Figure ") + esc(num) + ":</span> " + text + "</div>");
   }
 
   // ---- environments
@@ -813,18 +823,50 @@ class Renderer {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
       return "[" + parts.join(", ") + (r.opt ? ", " + esc(r.opt) : "") + "]";
     }
+    if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
     const L = this.labels.get(r.key);
     if (!L) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
+    // (\nameref: the title the label was under, a section's or a caption's)
+    if (r.cmd === "nameref") return plain ? L.name.replace(/<[^>]*>/g, "") : L.id ? '<a class="ref" href="#' + L.id + '">' + L.name + "</a>" : L.name;
     let txt = L.text || "??";
     if (r.cmd === "eqref") txt = "(" + txt + ")";
     if (r.cmd === "pageref") txt = "↑";
-    if (r.cmd === "cref" || r.cmd === "Cref" || r.cmd === "autoref") {
+    if (r.cmd === "autoref") {
       const nm = { section: "Section", subsection: "Section", subsubsection: "Section", chapter: "Chapter", equation: "Equation", figure: "Figure", table: "Table", item: "Item", footnote: "Footnote" }[L.kind]
         || (this.thms[L.kind] ? this.thms[L.kind].title : "");
       txt = (nm ? (r.cmd === "cref" ? nm.toLowerCase() : nm) + " " : "") + txt;
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // cleveref's \cref and \Cref, with its defaults (TeX Live's; astra4's digest, gap 2): each kind named ("section 1",
+  // "eq. (1)", "fig. 1"), the keys of one kind together, the kinds in the order they first come, each kind's sorted,
+  // runs of three or more as "a to c"; "and" between two, commas and a last "and" between more (between kinds, ", and");
+  // \Cref names the first kind capitalized; keys with no label, "??" each
+  cref(r, plain) {
+    const groups = new Map();
+    for (const key of r.key.split(",").map((k) => k.trim()).filter(Boolean)) {
+      const L = this.labels.get(key), kind = L ? L.kind : "\u0000";
+      if (!groups.has(kind)) groups.set(kind, []);
+      groups.get(kind).push(L ?? { missing: key });
+    }
+    const num = (L) => String(L.text).split(".").map(Number);
+    const cmp = (a, b) => { const x = num(a), y = num(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? -1) !== (y[i] ?? -1)) return (x[i] ?? -1) - (y[i] ?? -1); return 0; };
+    const next = (a, b) => { const x = num(a), y = num(b); return x.length === y.length && x.slice(0, -1).join() === y.slice(0, -1).join() && y.at(-1) === x.at(-1) + 1; };
+    const and = (xs, oxford) => xs.length < 3 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + (oxford ? ", and " : " and ") + xs.at(-1);
+    const parts = [...groups].map(([kind, Ls], g) => {
+      // (keys with no label: "??" each, together, as cleveref prints them: "????" for two)
+      if (kind === "\u0000") return Ls.map((x) => plain ? "??" : '<span class="missing" title="' + esc(x.missing) + '">??</span>').join("");
+      Ls.sort(cmp);
+      const show = (L) => { const t = kind === "equation" ? "(" + L.text + ")" : L.text; return plain ? t : L.id ? '<a class="ref" href="#' + L.id + '">' + esc(t) + "</a>" : esc(t); };
+      const items = [];
+      for (let i = 0; i < Ls.length; ) { let j = i; while (j + 1 < Ls.length && next(Ls[j], Ls[j + 1])) j++; if (j - i >= 2) items.push(show(Ls[i]) + " to " + show(Ls[j])); else for (let k = i; k <= j; k++) items.push(show(Ls[k])); i = j + 1; }
+      const th = this.thms[kind]?.title.toLowerCase(), nm = CREF[kind] ?? (th ? [th, th + "s"] : null);
+      let name = nm ? nm[Ls.length > 1 ? 1 : 0] : "";
+      if (name && r.cmd === "Cref" && g === 0) name = CREF_CAP[name] ?? name[0].toUpperCase() + name.slice(1);
+      return (name ? name + " " : "") + and(items, false);
+    });
+    return and(parts, true);
   }
   tocHtml() {
     if (!this.toc.length) return "";
