@@ -104,6 +104,10 @@ async function main() {
     for (let n = 2; await ws.stat(target); n++) target = at.replace(/(\.ipynb)$/i, ` (${n})$1`);
     const { rev: _r, id: _i, ...rest } = doc;
     await ws.create(target, { content: rest });
+    // (the revision later saves are based on: the one read now, taken only if it holds exactly what this tab wrote;
+    // one another tab wrote meanwhile is a conflict, its contents kept, never written over (astra B1-COPY-1))
+    const made = await ws.read(target);
+    const ours = sameDoc(made.content, rest);
     for (const d of c.manifest.files) {
       if (OPENABLE.test(d.path)) continue;
       const q = `${folder}/${d.path}`;
@@ -112,8 +116,12 @@ async function main() {
       await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
     }
     remember(keyOf(f), target);
-    return { ws, at: target, rev: (await ws.read(target)).rev };
+    if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
+    return { ws, at: target, rev: made.rev };
   }
+  // (a notebook as written: its cells, outputs included, and its language; key order aside)
+  const canon = (v: any): any => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const sameDoc = (a: any, b: any) => JSON.stringify(canon([a?.cells ?? [], a?.mode ?? "python"])) === JSON.stringify(canon([b?.cells ?? [], b?.mode ?? "python"]));
   // (a store that keeps the notebook in memory for the page and, once there is a copy, saves every change to it with
   // its revision: a change made elsewhere (another tab) is a conflict, said, never written over)
   class CopyStore extends MemoryStore {
