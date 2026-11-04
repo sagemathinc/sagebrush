@@ -33,7 +33,7 @@ verified. TimeTravel stays the local insurance; git is what's shared.
    engine) with this checkout's Python MCP layer, so the three git tools appear without building anything:
 
    ```
-   claude mcp add --env SAGEBRUSH_MCP_DEV_ORIGIN=http://localhost:8765 sagebrush-git \
+   claude mcp add sagebrush-git -e SAGEBRUSH_MCP_DEV_ORIGIN=http://localhost:8765 \
      -- <the python that has sagebrush-mcp> <checkout>/web/git/mcp.py
    ```
 
