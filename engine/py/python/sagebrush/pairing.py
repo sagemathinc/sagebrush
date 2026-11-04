@@ -52,6 +52,7 @@ import struct
 import sys
 import threading
 import time
+import urllib.parse
 
 from sagebrush.workspace_tools import LIMITS, NotConnected, PageError, loads_strict, strict_json
 
@@ -68,6 +69,9 @@ DEV_SITE_ORIGIN = "https://dev.sagebrush.space"
 PREVIEW_ORIGIN = r"https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sagebrush\.cloud"
 PROTOCOL = 1
 ORIGINS = ("https://sagebrush.space",)
+#: where a pairing link opens: a page that reads ?pair=CODE&port=N on every build (web/workspace/pair-link.ts, read by
+#: web/board/page.ts; the notebook page at / doesn't read it)
+LINK_PATH = "/board/"
 #: refused handshakes said on stderr, at most this many (then one line saying the rest aren't)
 MAX_REFUSALS_SAID = 20
 #: Sagebrush's own sites (sagebrush.space, sagebrush.cloud and their subdomains, https): an origin among them that
@@ -111,6 +115,12 @@ def _said(value, most=100):
     return r if len(r) <= most else r[:most] + "..."
 
 
+def pair_link(origin, code, port):
+    """<origin>/board/?pair=CODE&port=PORT: what pair-link.ts reads (both values URL-encoded, though a code is
+    base32 and a port digits, so neither changes)."""
+    return "%s%s?%s" % (origin, LINK_PATH, urllib.parse.urlencode({"pair": code, "port": str(int(port))}))
+
+
 class Pairing:
     """Listen for one page.  start() returns (port, code); the code goes to
     the person (through the agent, which shows it, and stderr), who enters
@@ -129,6 +139,8 @@ class Pairing:
             # (whoever runs this server set it: said where they will see it)
             sys.stderr.write("sagebrush-mcp: also accepting pages from %s (%s)\n" % (dev, DEV_ORIGIN_ENV))
         self.origins = tuple(origins)
+        # (the site a pairing link opens: the one SAGEBRUSH_MCP_DEV_ORIGIN opted in, else the first allowed)
+        self.link_origin = dev or self.origins[0]
         self.on_notify = on_notify or (lambda method, params: None)
         self.now = now
         self.lock = threading.Lock()
@@ -167,6 +179,15 @@ class Pairing:
             self.code_until = self.now() + CODE_SECONDS
             self.tries = 0
             return self.port, self.code
+
+    def link(self):
+        """The one-click pairing link for the code start() gave, or None when there is no live code:
+        <site>/board/?pair=CODE&port=PORT, which the page reads once and takes out of its address bar
+        (web/workspace/pair-link.ts).  It holds nothing but the one-time code and this listener's port."""
+        with self.lock:
+            if self.code is None or self.port is None or self.now() >= self.code_until:
+                return None
+            return pair_link(self.link_origin, self.code, self.port)
 
     def status(self):
         with self.lock:
