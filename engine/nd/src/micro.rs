@@ -145,6 +145,31 @@ fn avx2_fma_tile(_detected: Avx2Fma, a: &[f64], b: &[f64], acc: &mut [f64; ACC_L
     unsafe { avx2_fma_8x6(a, b, acc) }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl Avx2Fma {
+    /// `f()` compiled for AVX2 (four f64 lanes; P2b-1n stage 1: [`crate::lu`]'s small-n loops). Only AVX2 is
+    /// enabled, not FMA, and Rust never contracts a multiply and an add, so `f` does the same operations in the
+    /// same order as in the baseline build: the same bits.
+    #[inline]
+    #[allow(unsafe_code)]
+    pub(crate) fn avx2<R>(self, f: impl FnOnce() -> R) -> R {
+        // SAFETY: an Avx2Fma exists only if detect() found AVX2 and FMA on this CPU (its field is private)
+        unsafe { with_avx2(f) }
+    }
+}
+
+/// Calls `f` inside a function compiled with AVX2 enabled, so that `f`'s inlined body is compiled for it too.
+///
+/// # Safety
+/// The CPU must support AVX2 (the caller holds an [`Avx2Fma`]).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+#[allow(unsafe_code)]
+unsafe fn with_avx2<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 /// The 8 x 6 AVX2+FMA tile over whole panels `a` (kc x 8) and `b` (kc x 6) (their lengths are the caller's
 /// slicing; chunks_exact keeps every load in bounds).
 ///
