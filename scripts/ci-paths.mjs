@@ -79,11 +79,14 @@ const fullTierPaths = [
   // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
   // offline pages), the dependency files and the site preview (web-sync.4))
   /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
-  // (the LaTeX group's absolute ceiling, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
   // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
   // That suite checks every input of the two bundles is matched here)
   /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
+  // pairing's modules (its doc-protocol.ts is above, with sync))
+  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs)\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)

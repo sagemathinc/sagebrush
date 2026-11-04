@@ -284,6 +284,9 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
     "web/latex/page.ts", "web/latex/engine/render.mjs", "web/latex/core/machine.mjs", "web/workspace/paths.ts", "scripts/latex-group.mjs",
+    // (the lazy chunks' inputs outside web/latex: the agent pairing's modules)
+    "web/workspace/agent-ui.ts", "web/workspace/agent-pair.ts", "web/workspace/verbs.ts", "web/workspace/notebook-edit.ts",
+    "web/workspace/pair-link.ts", "web/workspace/agent-grant.ts", "web/workspace/agent-schema.ts",
     // (what makes those bundles: the build and its helpers, and the dependencies)
     "web/build.ts", "web/build-articles.ts", "web/build-package-dir.mjs", "package.json", "pnpm-lock.yaml",
   ]) {

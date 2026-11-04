@@ -22,6 +22,36 @@ export const LATEX_LAZY = {
 export const LATEX_CAPS = { raw: 232 * 1024, gzip: 78 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
+// Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
+export const LATEX_LAZY_CAPS = {
+  // (@sagebrush, 2026-10-29: comments in a lazy chunk of their own, so a document without comments never pays for them)
+  COMMENTS: { label: "the LaTeX comments' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+  // (a document's live comments: comments-doc.ts and the format's core, comments-core.mjs, fetched only when a .tex has
+  //  a comments file or someone comments in it. 16 KiB gzip, was 14: @sagebrush's ruling, Oct 31, for the shared pass
+  //  in the comments' core, measured 35,707 / 14,289 at master 7ff6d103 -> 39,564 / 15,774 at its head; it holds only
+  //  with the pass's measured benefit on VM3)
+  COMMENTS_DOC: { label: "the LaTeX document comments' chunk", raw: 40 * 1024, gzip: 16 * 1024 },
+  // (the agent pairing: web/workspace/agent-ui.ts, the shared module, through web/latex/agent.ts, fetched only to connect
+  //  an agent (the Agent button, a ?pair= link, a remembered one). 44 KiB / 15.5 KiB: @sagebrush ruling 2026-11-04: A12 +
+  //  A14 pairing growth (30.3K -> 43.6K); split notebook-edit and reload/restore behind options with the git-proto
+  //  pairing work, then return to 40/14)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 44 * 1024, gzip: 15.5 * 1024 },
+  // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+  // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
+  PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+};
+
+/** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
+export function latexLazy(files) {
+  return Object.entries(LATEX_LAZY_CAPS).map(([key, cap]) => {
+    const name = LATEX_LAZY[key], p = files.get(name);
+    if (!p) return { key, name, label: cap.label, cap, present: false, ok: false };
+    const b = readFileSync(p), raw = b.length, gzip = gz(b);
+    return { key, name, label: cap.label, cap, present: true, raw, gzip, ok: raw <= cap.raw && gzip <= cap.gzip };
+  });
+}
+
 /** The group of `files` (a DEV tree's files: its path under web/, as "dist/...", to the file on disk), measured. */
 export function latexGroup(files) {
   const lazy = new Set(Object.values(LATEX_LAZY));
