@@ -1184,15 +1184,36 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await putAll([...saved.filter(keep), ...P8]);
       await reload();
       await only(P8);
+      // (the page writes after its reload, at a time of its own: with no last document to open, it opens and saves its
+      // Welcome notebook (index.html's openHostMade), sometimes after any one only() (master a2fd6363's red, the grader's
+      // repro on #601: /Welcome.ipynb, 13 bytes).  So each P-8 export is checked for entries the test didn't put there
+      // (in its archive, or, for a refused one, in the workspace as it ran) and, with any, named and made again after
+      // only(), at most 3 times; the verdicts are the clean attempt's)
+      const mineP = new Set(P8.map((e) => e.path));
+      const strayKeys = async () => (await idb("sagebrush-workspace", "entries", `(s) => s.getAllKeys()`)).filter((q) => !mineP.has(q) && !keep({ path: q }));
+      const strayed = [];
+      const exportClean = async (file, extra, control = false) => {
+        for (let i = 0; i < 3; i++) {
+          await hooks(extra);
+          await only(P8);
+          // (the control, its first attempt only: a late write as the page's, AFTER only() and before the export)
+          if (control && i === 0) await putAll([...(await idb("sagebrush-workspace", "entries", `(s) => s.getAll()`)), folder("/late00000001", 999)]);
+          const r = await exportOnce(join(out, file));
+          const strays = r.stopped ? await strayKeys() : (inspect(join(out, file)).entries ?? []).map((e) => e.path).filter((q) => !mineP.has(q) && !keep({ path: q }));
+          if (!strays.length) return r;
+          strayed.push(...strays);
+          console.log(`(P-8: ${file}, attempt ${i + 1}: entries the page wrote after only(), named, taken out, exported again: ${JSON.stringify(strays).slice(0, 300)})`);
+        }
+        return null;
+      };
       // (the test's sum against the export's own accounting: its plan's three bounds and its records, with OPFS)
-      await hooks(`onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`);
-      const pre = await exportOnce(join(out, "p8pre.zip"));
+      const pre = await exportClean("p8pre.zip", `onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`, true);
+      check(!!pre && strayed.includes("/late00000001"), "P-8: the control's late write (after only(), before the export) was seen as a stray, and the export made again without it: " + JSON.stringify(strayed).slice(0, 300));
       const parts = await ev(`window.__plan`);
       const mine = [46 + 12 + 13 + P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
-      check(!pre.stopped && JSON.stringify([...parts, pre.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
+      check(!!pre && !pre.stopped && JSON.stringify([...parts, pre?.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre?.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
       for (const [label, cap, ok] of [["at the threshold", need - 1, false], ["one byte below it", need, true]]) {
-        await hooks(`noOpfs: true, caps: { spoolBlob: ${cap} }`);
-        const p = await exportOnce(join(out, "p8.zip"));
+        const p = (await exportClean("p8.zip", `noOpfs: true, caps: { spoolBlob: ${cap} }`)) ?? { stopped: "the page kept writing entries of its own" };
         if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
         else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
       }

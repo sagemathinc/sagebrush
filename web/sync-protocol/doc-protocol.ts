@@ -540,7 +540,7 @@ const U32 = 0xffffffff;
  * than the document's is refused (stale_epoch) and changes nothing, so a delayed one can't land in a later epoch. */
 export interface DocClaim { t: "doc_claim"; req: number; doc: string; epoch: number; client: string; owner?: string }
 export interface DocFence { t: "doc_fence"; req: number; doc: string; epoch: number; clients: { client: string; target: number }[]; owner?: string }
-export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string }
+export interface Snapshot { t: "snapshot"; req: number; doc: string; at_seq: number; sha256: string; bytes: number; owner?: string; cut_patch?: string; chain?: string }
 export interface Progress { t: "progress"; claims: Uint8Array }
 
 /**
@@ -601,14 +601,49 @@ export function checkUpto(o: Record<string, unknown>, after: number): number | u
   if (!isNat(o.upto) || (o.upto as number) < after) throw invalid("pull: upto is at least `after`");
   return o.upto as number;
 }
-/** §5.2: `snapshot{owner?, doc, at_seq, sha256, bytes}` on the account socket, `snapshot{at_seq, sha256, bytes}` on a document socket. */
+/**
+ * §5.2: `snapshot{owner?, doc, at_seq, sha256, bytes}` on the account socket, `snapshot{at_seq, sha256, bytes}` on a
+ * document socket.  A checkpoint (BH-0 server design r9 §5, 83f3dd5a) also names `cut_patch`, the patch id its value
+ * is at: the last envelope of batch `at_seq`; and, for a document's first checkpoint from a device's own verified
+ * cursor (r9 §8.1), `chain`, that cursor's chain at `at_seq` (64 lowercase hex).  `chain` only with `cut_patch`.
+ * A message without them is checked, and returned, exactly as before (the old front's exchange, byte for byte).
+ */
 export function checkSnapshot(v: unknown, via: Via = ACCOUNT): Snapshot {
-  const d = docFields(v, ["t", "req", "at_seq", "sha256", "bytes"], via, "snapshot"), o = d.o;
+  const d = docFields(v, ["t", "req", "at_seq", "sha256", "bytes", "cut_patch", "chain"], via, "snapshot"), o = d.o;
   if (o.t !== "snapshot" || !isNat(o.req) || !isNat(o.at_seq) || o.at_seq < 1 || !isSha(o.sha256) || !isNat(o.bytes))
     throw invalid("snapshot: t, req, at_seq, sha256 and bytes");
   if (o.bytes > DOC_LIMITS.snapshotBytes) throw tooBig("snapshot_bytes", DOC_LIMITS.snapshotBytes, "snapshot: at most 32 MiB");
-  return withDoc({ t: "snapshot" as const, req: o.req, at_seq: o.at_seq, sha256: o.sha256, bytes: o.bytes }, d);
+  if (has(o, "cut_patch") && !isPatchId(o.cut_patch)) throw invalid("snapshot: cut_patch is a patch id");
+  if (has(o, "chain") && (!has(o, "cut_patch") || !isSha(o.chain))) throw invalid("snapshot: chain is 64 lowercase hex, with cut_patch");
+  const out = { t: "snapshot" as const, req: o.req, at_seq: o.at_seq, sha256: o.sha256, bytes: o.bytes };
+  return withDoc({ ...out, ...(has(o, "cut_patch") ? { cut_patch: o.cut_patch as string } : {}), ...(has(o, "chain") ? { chain: o.chain as string } : {}) }, d);
 }
+/** patchflow's PatchId, as protocol.ts's isPatchId: 11 base-36 characters of time, "_", the client's id */
+const isPatchId = (s: unknown): s is string => typeof s === "string" && /^[0-9a-z]{11}_[0-9A-Za-z_-]{1,64}$/.test(s);
+/**
+ * A pull's checkpoint fields (BH-0 r9 §5.3, §8), each optional; a pull with neither is exactly as before:
+ * - `start: "snapshot"`: the newest checkpoint and the tail after it (`after` 0, no `upto`), one answer;
+ * - `token`: the device's served-coverage token from an earlier answer (a string), or null to ask for one.
+ * The answer carries `checkpoint` (start) and `token` (either) only when asked: an old front never sees them.
+ */
+export interface PullStart { start?: "snapshot"; token?: string | null }
+/** A served-coverage token (r9 §5.3): key generation, issue time (ms), and the HMAC, as `<gen>.<issued>.<hex>` */
+export const isCoverageToken = (s: unknown): s is string => typeof s === "string" && /^(0|[1-9][0-9]{0,15})\.(0|[1-9][0-9]{0,15})\.[0-9a-f]{64}$/.test(s);
+export function checkPullStart(o: Record<string, unknown>, after: number): PullStart {
+  const out: PullStart = {};
+  if (has(o, "start")) {
+    if (o.start !== "snapshot") throw invalid("pull: start is \"snapshot\"");
+    if (after !== 0 || has(o, "upto")) throw invalid("pull: start with after 0 and no upto");
+    out.start = "snapshot";
+  }
+  if (has(o, "token")) {
+    if (o.token !== null && !isCoverageToken(o.token)) throw invalid("pull: token is a coverage token, or null");
+    out.token = o.token as string | null;
+  }
+  return out;
+}
+/** pull's fields, as the servers accept them: the old ones and the checkpoint's (r9) */
+export const PULL_FIELDS = ["t", "req", "owner", "doc", "epoch", "after", "upto", "limit", "start", "token"] as const;
 export function checkProgress(v: unknown): Progress {
   const o = fields(v, ["t", "claims"], "progress");
   if (o.t !== "progress" || typeof o.claims !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(o.claims)) throw invalid("progress: claims are 32 bytes, base64");
