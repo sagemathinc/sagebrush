@@ -7,7 +7,7 @@
 //   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
 // KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
-import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { setKatex, installBeamer } from "./engine/render.mjs";
 import { splitChunk, bytes, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
@@ -28,7 +28,9 @@ self.onmessage = async (e: MessageEvent) => {
   const m = e.data || {};
   const echo = { doc: m.doc, rev: m.rev };
   try {
-    await ready;
+    // (a document that declares beamer: its chunk fetched with KaTeX's, before the first render, so that render is the
+    //  only one; a failed fetch is withBeamer's below, the notice)
+    await Promise.all([ready, declaresBeamer(String(m.text ?? "")) && loadBeamer().catch(() => {})]);
     // (saved results only of this wrapper: sagetex.mjs's WRAPPER_VERSION is part of every item's key too)
     const sage = m.sage && m.sage.wrapper === WRAPPER_VERSION && Array.isArray(m.sage.saved) ? { saved: m.sage.saved.slice(0, 1000) } : undefined;
     if (!eng || m.reset) eng = new Engine({ images: m.images || {}, sage });

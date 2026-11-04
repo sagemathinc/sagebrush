@@ -23,6 +23,9 @@ function hash32(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h 
 // A result that needs beamer's code (needBeamer: engine/beamer.mjs, the worker's chunk of its own): load() it, then
 // again(), the same text rendered with it. If it can't be loaded, the result without it, saying why at its top and that
 // a reload tries again (a browser keeps a module that failed to load as failed: astra, #637)
+// (a source that declares the class beamer, on a line of its own text before any %: the worker fetches beamer's chunk
+//  with its first render, not after it; needBeamer stays for the rest, an overlay command, a class in an \input file)
+export const declaresBeamer = (text) => /^[^%\n]*\\documentclass\s*(\[[^\]]*\])?\s*\{beamer\}/m.test(text);
 // (load(), once: the same promise for every caller, a failed one too)
 export function once(load) { let p = null; return () => (p ??= load()); }
 export async function withBeamer(r, load, again) {

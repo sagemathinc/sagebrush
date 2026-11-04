@@ -14,7 +14,7 @@ import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
 import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
-import { Engine, withBeamer, once } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
 import { setKatex, render, installBeamer } from "./engine/render.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
@@ -192,6 +192,11 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const r1 = await fail().catch((e) => e.message), r2 = await fail().catch((e) => e.message), r3 = await good(), r4 = await good();
   const again1 = await withBeamer(new Engine().update(beamerDoc), fail, () => null);
   check("beamer-chunk-once", r1 === "x" && r2 === "x" && r3 === "m" && r4 === "m" && loads === 2 && again1.chunks[0].includes("(x); reload the page to try again."), { r1, r2, r3, r4, loads });
+  // (the worker's early fetch: a source that declares beamer, with options, spaces or after other lines; not one in a
+  //  comment, another class, or beamer only mentioned)
+  const decl = ["\\documentclass{beamer}", "x\n  \\documentclass[handout, 11pt] {beamer}\n", "\\documentclass [t]{beamer}"].map(declaresBeamer);
+  const notDecl = ["% \\documentclass{beamer}", "\\documentclass{article}\n\\usepackage{beamerarticle}", "\\documentclass{beamerposter}", "beamer", "x % y \\documentclass{beamer}"].map(declaresBeamer);
+  check("beamer-chunk-declared", decl.every(Boolean) && !notDecl.some(Boolean), { decl, notDecl });
   installBeamer(beamerCode);
   const after = e.update(beamerDoc);
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
