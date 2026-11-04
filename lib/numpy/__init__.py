@@ -3076,11 +3076,21 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
     # (this module's max is numpy's: plain comparisons here)
     skip_header = skip_header if skip_header > 0 else 0
     skip_footer = skip_footer if skip_footer > 0 else 0
-    if isinstance(fname, (list, tuple)) or (not hasattr(fname, "read") and not isinstance(fname, (str, bytes)) and hasattr(fname, "__iter__")):
-        lines = [l.decode() if isinstance(l, bytes) else str(l) for l in fname]
-        lines = [l for chunk in lines for l in (chunk.splitlines() or [""])]
+    listed = isinstance(fname, (list, tuple)) or (not hasattr(fname, "read") and not isinstance(fname, (str, bytes)) and hasattr(fname, "__iter__"))
+    if listed:
+        chunks = [l.decode() if isinstance(l, bytes) else str(l) for l in fname]
     else:
-        lines = _read_text(fname).splitlines()
+        chunks = [_read_text(fname)]
+    # the lines, and whether each ended with a newline
+    lines, nl = [], []
+    for chunk in chunks:
+        keep = chunk.splitlines(True)
+        for p, q in zip(chunk.splitlines(), keep):
+            lines.append(p)
+            nl.append(len(q) > len(p))
+        if not keep and listed:
+            lines.append("")
+            nl.append(False)
     if isinstance(dtype, (list, tuple, dict)):
         raise NotImplementedError("genfromtxt with a structured dtype: structured arrays are not supported by sagebrush's numpy yet")
     if dtype is not None:
@@ -3091,29 +3101,43 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             kind = "U"
         if kind not in "biufc":
             raise NotImplementedError("string arrays are not supported by sagebrush's numpy yet")
+    # the splitting, as NumPy's LineSplitter: a string (empty: whitespace),
+    # widths (a list: one per field; an int: every field; 0: whitespace)
+    if delimiter is not None and not isinstance(delimiter, str) and not hasattr(delimiter, "__iter__"):
+        delimiter = int(delimiter) or None
+    if isinstance(delimiter, str):
+        delimiter = delimiter or None
+    slices = None
+    if delimiter is not None and not isinstance(delimiter, (str, int)):
+        slices, at = [], 0
+        for w in delimiter:
+            slices.append((at, at + w))
+            at += w
     # the data rows: (line number, fields), after the header, comments and blank lines
     rows = []
     for k in range(skip_header, len(lines)):
         if max_rows is not None and len(rows) >= max_rows:
             break
         line = lines[k]
+        cut = False
         if comments:
-            line = line.split(comments, 1)[0]
-        if not line.strip():
-            continue
-        if delimiter is None:
-            fields = line.split()
-        elif isinstance(delimiter, str):
+            parts = line.split(comments, 1)
+            cut = len(parts) > 1
+            line = parts[0]
+        if delimiter is None or isinstance(delimiter, str):
+            if not line.strip():
+                continue
             fields = line.split(delimiter)
+        elif slices is None:
+            fields = [line[i:i + delimiter] for i in range(0, len(line), delimiter)]
         else:
-            # (fixed widths: an int for every field, or one width per field)
-            widths = [delimiter] * (len(line) // delimiter + 1) if isinstance(delimiter, int) else list(delimiter)
-            fields, at = [], 0
-            for w in widths:
-                if at >= len(line):
-                    break
-                fields.append(line[at:at + w])
-                at += w
+            # (a blank line is a row of missing fields, as NumPy's, whose
+            # line keeps its newline: only a comment's or a bare one is nothing)
+            if not line and (cut or not nl[k]):
+                continue
+            fields = [line[a:b] for a, b in slices]
+        if not fields:
+            continue
         rows.append((k + 1, [f.strip() for f in fields]))
     found = bool(rows)
     if skip_footer > 0:
@@ -3150,19 +3174,36 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
             raise ValueError(msg)
         import warnings
         warnings.warn(_ConversionWarning(msg), stacklevel=2)
-    cols = list(usecols) if usecols is not None else list(range(ncols))
+    # (usecols as NumPy normalizes it: a negative column counted from the end of the first row)
+    cols = [c + ncols if c < 0 else c for c in usecols] if usecols is not None else list(range(ncols))
     width = len(cols)
-    # each column's missing strings: '' and missing_values (a dict: by column, None for all)
-    as_set = lambda v: set(v.split(",")) if isinstance(v, str) else set(v)
+    # a dictionary key's slot, as NumPy's: a column usecols selects is its
+    # position there; any other key is a position itself (negative from the end)
+    slot = lambda c: cols.index(c) if c in cols else c
+    # each column's missing strings: '' and missing_values (a dict: by column,
+    # None for all; a list or tuple: one per column; a string: split at commas)
     missings = [{""} for _ in range(width)]
+    if isinstance(missing_values, bytes):
+        missing_values = missing_values.decode("latin1")
     if isinstance(missing_values, dict):
         for c, v in missing_values.items():
-            for j in range(width):
-                if c is None or c == cols[j] or (isinstance(c, int) and c < 0 and c + ncols == cols[j]):
-                    missings[j] |= as_set(v)
-    elif missing_values is not None:
+            if isinstance(c, str):
+                continue
+            vals = {str(x) for x in v} if isinstance(v, (list, tuple)) else {str(v)}
+            if c is None:
+                for m in missings:
+                    m |= vals
+            else:
+                missings[slot(c)] |= vals
+    elif isinstance(missing_values, (list, tuple)):
+        for m, v in zip(missings, missing_values):
+            m.add(str(v))
+    elif isinstance(missing_values, str):
         for m in missings:
-            m |= as_set(missing_values)
+            m |= set(missing_values.split(","))
+    elif missing_values:
+        for m in missings:
+            m.add(str(missing_values))
     # the column types: dtype=None infers one (each column's own would be a structured array)
     if dtype is None:
         def col_kind(j):
@@ -3183,16 +3224,21 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
         dtype = {"i": int64, "f": float64, "c": complex128}[kinds.pop()]
     kind = _self.dtype(dtype).kind
     default_fill = False if kind == "b" else -1 if kind in "iu" else complex(float("nan"), 0) if kind == "c" else float("nan")
-    fills = [default_fill] * width
+    fills = [None] * width
     if isinstance(filling_values, dict):
         for c, v in filling_values.items():
-            if c in cols:
-                fills[cols.index(c)] = v
+            if not isinstance(c, str):
+                j = slot(c)
+                if not -width <= j < width:
+                    raise IndexError("list assignment index out of range")
+                fills[j] = v
     elif isinstance(filling_values, (list, tuple)):
         for j, v in enumerate(filling_values[:width]):
             fills[j] = v
     elif filling_values is not None:
         fills = [filling_values] * width
+    # (None: the dtype's own default, as NumPy's)
+    fills = [default_fill if f is None else f for f in fills]
     def str2bool(t):
         # (NumPy's: TRUE or FALSE, in any case; nothing else is a bool)
         if t.upper() == "TRUE":
@@ -3202,9 +3248,15 @@ def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, 
         raise ValueError("Invalid boolean")
     conv = str2bool if kind == "b" else int if kind in "iu" else (lambda t: complex(t.replace("i", "j"))) if kind == "c" else float
     convs = [conv] * width
+    # (a converter's column: through usecols when given, an unselected one unused, as NumPy's)
     for c, f in (converters or {}).items():
-        if c in cols:
-            convs[cols.index(c)] = f
+        if isinstance(c, str):
+            continue
+        if usecols:
+            if c in cols:
+                convs[cols.index(c)] = f
+        else:
+            convs[c] = f
     out = []
     for fields in kept:
         row = []

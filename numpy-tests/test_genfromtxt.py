@@ -96,3 +96,36 @@ show(64, lambda: np.genfromtxt(S("NA,NA\n"), delimiter=",", missing_values={None
 show(65, lambda: np.genfromtxt(S("NA,-\n"), delimiter=",", missing_values={1: ["-"], -2: "NA"}, loose=False))
 for k, mv in enumerate([{1: "2"}, {1: ["2"]}, ["2"], {None: ["2"]}, {1: "x,2"}]):
     show(66 + k, lambda: np.genfromtxt(S("1,2\n"), delimiter=",", missing_values=mv))
+# a dictionary key's column, as NumPy's: through usecols (normalized), else a
+# position in the selected columns (daybreak3's case: S71)
+show(71, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", usecols=-1, missing_values={1: "NA"}, loose=False))
+c5 = lambda s: 5.0
+for k, (uc, key) in enumerate([(None, -1), (1, -1), (-1, 1), (-1, -1), ((0, -1), 1), ((0, -1), -1)]):
+    show(72 + 3 * k, lambda: np.genfromtxt(S("1,x\n"), delimiter=",", usecols=uc, converters={key: c5}))
+    show(73 + 3 * k, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", usecols=uc, missing_values="NA", filling_values={key: 7}))
+    show(74 + 3 * k, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", usecols=uc, missing_values={key: "NA"}, loose=False))
+show(90, lambda: np.genfromtxt(S("NA,1\n"), delimiter=",", usecols=(1, 0), missing_values={-1: "NA"}, loose=False))
+show(91, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", usecols=(1, 0), missing_values={-1: "NA"}, loose=False))
+show(92, lambda: np.genfromtxt(S("NA,1\n"), delimiter=",", usecols=(1, 0), missing_values="NA", filling_values={-1: 7}))
+show(93, lambda: np.genfromtxt(S("1,x\n"), delimiter=",", converters={5: c5}))
+show(94, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", missing_values="NA", filling_values={5: 7}))
+# a dictionary's string is one missing string; a list gives one per column
+show(95, lambda: np.genfromtxt(S("a,b\n"), delimiter=",", missing_values={0: "a,b", 1: "b"}, loose=False))
+show(96, lambda: np.genfromtxt(S("a,b\n"), delimiter=",", missing_values=["a", "b"], loose=False))
+show(97, lambda: np.genfromtxt(S("b,a\n"), delimiter=",", missing_values=["a", "b"], loose=False))
+show(98, lambda: np.genfromtxt(S("1,NA\n"), delimiter=",", missing_values="NA", filling_values=[None, 3]))
+# delimiter 0 or '' (whitespace), a negative width, widths past the line, blank lines with widths
+show(99, lambda: np.genfromtxt(S("123\n"), delimiter=0))
+show(100, lambda: np.genfromtxt(S("1 2 3\n4 5 6\n"), delimiter=0))
+show(101, lambda: np.genfromtxt(S("1 2\n"), delimiter=""))
+show(102, lambda: np.genfromtxt(S("123\n"), delimiter=-1))
+show(103, lambda: np.genfromtxt(S("12\n34\n"), delimiter=[1, 1, 5]))
+show(104, lambda: np.genfromtxt(S("123\n"), delimiter=[2, 0, 1]))
+show(105, lambda: np.genfromtxt(S("12\n\n34\n"), delimiter=[1, 1]))
+show(106, lambda: np.genfromtxt(S("12\n  \n34\n"), delimiter=[1, 1]))
+show(107, lambda: np.genfromtxt(S("12\n\n34\n"), delimiter=1))
+show(108, lambda: np.genfromtxt(S("12\n  \n34\n"), delimiter=1))
+show(109, lambda: np.genfromtxt(S("#c\n12#x\n34"), delimiter=[1, 1]))
+show(110, lambda: np.genfromtxt(S("123\n"), delimiter=3))
+show(111, lambda: np.genfromtxt(["12", "", "34"], delimiter=[1, 1]))
+show(112, lambda: np.genfromtxt(["12\n", "\n", "34\n"], delimiter=[1, 1]))
