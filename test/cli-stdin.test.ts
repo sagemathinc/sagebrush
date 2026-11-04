@@ -89,6 +89,9 @@ test("a function file run as the program calls its function with no arguments, a
     // (a script, and a script with local functions at its end, run as before)
     const sc = put("sc.m", "disp(twice(4))\nfunction y = twice(x)\n  y = 2 * x;\nend\n");
     ok([sc], "     8\n");
+    // (no function, nothing to call: an empty file and a comment-only one run as empty programs)
+    ok([put("empty.m", "")], "");
+    ok([put("comments.m", "% only a comment\n%{\nand a block one\n%}\n")], "");
     // (--emit shows the call; MATLAB on stdin is a program, not a file, so only functions there still run nothing)
     assert.match(run(["--emit", ff], "").stdout, /_m\.call\(ff, \[\], 0\)/);
     ok(["--matlab"], "", "function f()\ndisp(1)\nend\n");
