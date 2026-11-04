@@ -215,6 +215,17 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const wl = new Work();
   await checkCheckpoint(codec, d, ck.blob, tail, [big], wl);
   check(wl.work === held && wl.maxHeld >= 2 * held, "checkCheckpoint: …its working copy grew by every row it added, the local edit's included, to exactly B (" + held + "): " + J({ work: wl.work, maxHeld: wl.maxHeld }));
+  // (the grader's C5-C11) the decoded values are measured after EACH public call: on a decision accepted, exactly
+  // once after the record's add, once after each tail batch's and each local row's, and once after needsMoreHistory,
+  // valueUnavailable, value and hashOf (1 + |tail| + |local| + 4), each add's after its working-copy charge; the
+  // record counted last
+  class Trace extends Ledger { constructor() { super(); this.seq = []; } set(n, b) { this.seq.push(n); super.set(n, b); } }
+  const tail2 = [line[2], acceptedBatch(4, [mk("clientS", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "s"]))], 1)];
+  const loc2 = [N0, mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "n1"]))];
+  const tr = new Trace();
+  const trR = await checkCheckpoint(codec, d, ck.blob, tail2, loc2, tr);
+  const want = ["incoming", "work", "values", ...[...tail2, ...loc2].flatMap(() => ["work", "values"]), "values", "values", "values", "values", "record"];
+  check(trR.ok && J(tr.seq) === J(want) && tr.seq.filter((n) => n === "values").length === 1 + tail2.length + loc2.length + 4, "checkCheckpoint: the values measured after each public call, in order (" + (1 + tail2.length + loc2.length + 4) + "): " + J({ ok: trR.ok || trR.why, seq: tr.seq }));
   // (the grader's T13) the local rows are charged in UTF-8 bytes, not UTF-16 units: a non-ASCII edit
   const wide = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "é€𝄞".repeat(50000)]));
   const wideBytes = Buffer.byteLength(J(wide));
@@ -267,7 +278,9 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
     const d = { epoch: 1, at_seq: 1, recv_at: 0, chain_at: "0".repeat(64), cut_patch: root.time, sha256: ck.sha256, bytes: ck.bytes };
     const ps = kids(root);
     const l = new Measured();
-    const r = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(2, ps, chargeOf(ps))], local, l);
+    // (a fixture that throws, or a refused decision, fails the checks below as assertions, not as a crash)
+    let r;
+    try { r = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(2, ps, chargeOf(ps))], local, l); } catch (e) { r = { ok: false, why: "threw: " + String(e), ledger: l, B: NaN }; }
     return { r, l, ck, ps, root };
   };
   // (astra's chain: a 100,000-character value and 50 one-character edits)
@@ -277,9 +290,8 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(c.r.ok && c.l.values <= RETAINED_MAX_B * c.r.B && c.l.values > 0, `checkCheckpoint (the grader's Z7: its own graph): astra's chain, 50 edits on 100,000 characters: accepted, the values it held between calls ${c.l.values} B <= ${RETAINED_MAX_B}B (B ${c.r.B})`);
   // (the same graph built as checkCheckpoint's would have been with patchflow's default caches: what it would have held)
   const plain = new PatchGraph({ codec });
-  plain.add([c.r.record, ...c.ps]);
-  plain.needsMoreHistory(); plain.valueUnavailable(); plain.value();
-  check(heldValues(codec, plain).count >= 50 && heldValues(codec, plain).bytes > RETAINED_MAX_B * c.r.B, "(with patchflow's default caches the same work holds " + heldValues(codec, plain).count + " values, past the cap: so the cap above sees checkCheckpoint's own graph)");
+  if (c.r.ok) { plain.add([c.r.record, ...c.ps]); plain.needsMoreHistory(); plain.valueUnavailable(); plain.value(); }
+  check(c.r.ok && heldValues(codec, plain).count >= 50 && heldValues(codec, plain).bytes > RETAINED_MAX_B * c.r.B, "(with patchflow's default caches the same work holds " + heldValues(codec, plain).count + " values, past the cap: so the cap above sees checkCheckpoint's own graph)");
   // exactCut's own graph (the grader's Z8): after its decision, one value held, not one per edit
   const prefix = [acceptedBatch(1, [c.root], 1), acceptedBatch(2, c.ps, 1)];
   const ec = exactCut(codec, prefix, 2, c.ps.at(-1).time);
