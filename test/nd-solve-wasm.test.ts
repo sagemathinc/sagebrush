@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // The committed numerics-core module's solve entry, nd_solve (engine/nd; numerics-core P2b-2): X = A \ B on one
-// thread, exactly as shipped: the structure pass, then the diagonal, triangular, Cholesky or LU path, and rcond
-// from the factors. Its bits are the native scalar kernel family's (engine/nd/src/lu.rs SOLVE_FNV for LU,
+// thread, exactly as shipped, in its two modes (descriptor word 12): 1 gesv, LU whatever A is and no estimate
+// (NumPy's solve); 2 MATLAB, the structure pass, then the diagonal, triangular, Cholesky or LU path, and rcond
+// from the factors (mldivide); any other mode is refused. Its bits are the native scalar kernel family's (engine/nd/src/lu.rs SOLVE_FNV for LU,
 // solve.rs PATHS_FNV for the triangular and Cholesky paths, X and rcond); its status and structure codes; and
 // every boundary refusal (each pair of the five regions overlapping, alignment, the work's length, the
 // descriptor and the caller's stack placement), each leaving memory untouched.
@@ -28,9 +29,11 @@ function instance(pages: number) {
   return { memory, ex };
 }
 const SCRATCH_LEN = instance(256).ex.nd_info(0);
-// engine/nd/src/solve.rs solve_work_len(n, r) = n * n + max(getrf n * n, getrs n * r, potrf n * n, potrs n * n + 2 n r,
-// 2 n) (+ scratch_len) = 2 n^2 + 2 n r + scratch_len
-const workLen = (n: number, r: number) => 2 * n * n + 2 * n * r + SCRATCH_LEN;
+// engine/nd/src/solve.rs solve_work_len(mode, n, r): gesv (1) lu::solve_work_len = max(n * n, n * r) + scratch_len;
+// MATLAB (2) n * n + max(getrf n * n, getrs n * r, potrf n * n, potrs n * n + 2 n r, 2 n) (+ scratch_len)
+// = 2 n^2 + 2 n r + scratch_len
+const GESV = 1, MATLAB = 2;
+const workLen = (n: number, r: number, mode = MATLAB) => (mode === GESV ? Math.max(n * n, n * r) : 2 * n * n + 2 * n * r) + SCRATCH_LEN;
 const rcondAt = (u32: Uint32Array, report: number) => new Float64Array(new Uint32Array([u32[report / 4 + 5], u32[report / 4 + 6]]).buffer)[0];
 
 function seeded(count: number, state: { s: number }): Float64Array {
@@ -49,19 +52,19 @@ function fnv(c: Float64Array): bigint {
 }
 
 // a solve's layout in the arena: A (lda), B (ldb), ipiv (4-byte usizes on wasm32), work, report; slack after
-function layout(n: number, r: number, lda = n, ldb = n, slack = 0) {
+function layout(n: number, r: number, lda = n, ldb = n, slack = 0, mode = MATLAB) {
   const a = ARENA, b = a + 8 * (lda * Math.max(n - 1, 0) + n) + 8;
   const ipiv = b + 8 * (ldb * Math.max(r - 1, 0) + n) + 8;
   const work = Math.ceil((ipiv + 4 * n + 8) / 8) * 8;
-  const report = work + 8 * workLen(n, r);
+  const report = work + 8 * workLen(n, r, mode);
   const hi = report + 4 * REPORT_WORDS + slack;
-  const words = [a, b, ipiv, work, report, n, r, lda, ldb, workLen(n, r), ARENA, hi];
-  return { a, b, ipiv, work, report, hi, words, n, r, lda, ldb };
+  const words = [a, b, ipiv, work, report, n, r, lda, ldb, workLen(n, r, mode), ARENA, hi, mode];
+  return { a, b, ipiv, work, report, hi, words, n, r, lda, ldb, mode };
 }
 
-test("nd_solve: the seeded 120 x 120 system with 3 right-hand sides gives the native scalar family's bits, solved", () => {
+for (const mode of [GESV, MATLAB]) test(`nd_solve (mode ${mode}): the seeded 120 x 120 system with 3 right-hand sides gives the native scalar family's bits, solved`, () => {
   const [n, r] = [120, 3];
-  const L = layout(n, r);
+  const L = layout(n, r, n, n, 0, mode);
   const { memory, ex } = instance(Math.ceil(L.hi / PAGE) + 1);
   const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
   const A = seeded(n * n, { s: 2027 }), B = seeded(n * r, { s: 2028 });
@@ -73,7 +76,8 @@ test("nd_solve: the seeded 120 x 120 system with 3 right-hand sides gives the na
   assert.equal(rep[0], 1, "status: solved");
   assert.equal(rep[4], 0, "structure: general (LU)");
   const rc = rcondAt(u32, L.report);
-  assert.ok(rc > 0 && rc <= 1, `rcond ${rc}`);
+  if (mode === GESV) assert.ok(Number.isNaN(rc), "gesv: no estimate");
+  else assert.ok(rc > 0 && rc <= 1, `rcond ${rc}`);
   assert.equal(new TextDecoder().decode(u8.slice(rep[2], rep[2] + rep[3])), "wasm-simd128-4x4");
   const X = f64.slice(L.b / 8, L.b / 8 + n * r);
   assert.equal(fnv(X), SOLVE_FNV, `X's bits: 0x${fnv(X).toString(16)}`);
@@ -92,9 +96,9 @@ test("nd_solve: the seeded 120 x 120 system with 3 right-hand sides gives the na
   }
 });
 
-test("nd_solve: leading dimensions above n give the same bits; a zero pivot reports its column; an Inf or NaN computes nothing", () => {
+for (const mode of [GESV, MATLAB]) test(`nd_solve (mode ${mode}): leading dimensions above n give the same bits; a zero pivot reports its column; an Inf or NaN computes nothing`, () => {
   const [n, r] = [40, 2];
-  const dense = layout(n, r), view = layout(n, r, n + 3, n + 5);
+  const dense = layout(n, r, n, n, 0, mode), view = layout(n, r, n + 3, n + 5, 0, mode);
   const { memory, ex } = instance(Math.ceil(Math.max(dense.hi, view.hi) / PAGE) + 1);
   const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer);
   const A = seeded(n * n, { s: 5 }), B = seeded(n * r, { s: 6 });
@@ -166,6 +170,16 @@ test("nd_solve: the triangular and Cholesky paths give the native scalar family'
   }
   const h = fnv(Float64Array.from(all));
   assert.equal(h, PATHS_FNV, `X and rcond bits: 0x${h.toString(16)}`);
+  // gesv mode on the same structured matrices: LU (structure 0), no estimate
+  for (const A of [up, low, spd]) {
+    const G = layout(n, r, n, n, 0, GESV);
+    f64.set(A, G.a / 8);
+    f64.set(B, G.b / 8);
+    u32.set(G.words, BASE / 4);
+    assert.equal(ex.nd_solve(BASE), 1);
+    assert.deepEqual([u32[G.report / 4], u32[G.report / 4 + 4]], [1, 0]);
+    assert.ok(Number.isNaN(rcondAt(u32, G.report)));
+  }
   // diagonal (1), and its singular case: [1 0; 0 0] \ [1; 1] = [1; Inf], status 2 at column 1, rcond 0
   let o = run(Float64Array.from([1, 0, 0, 0]), Float64Array.from([1, 1]), 2, 1);
   assert.deepEqual([o.structure, o.status, o.x[0], o.x[1], o.rcond], [1, 2, 1, Infinity, 0]);
@@ -182,7 +196,7 @@ test("nd_solve: the triangular and Cholesky paths give the native scalar family'
   assert.ok(o.status === 3 && Number.isNaN(o.rcond));
 });
 
-test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand sides and dense or padded ldb (astra ND-S1, grader T1)", () => {
+for (const mode of [GESV, MATLAB]) test(`nd_solve (mode ${mode}): the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand sides and dense or padded ldb (astra ND-S1, grader T1)`, () => {
   const { memory, ex } = instance(Math.ceil((ARENA + (4 << 20)) / PAGE) + 1);
   const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
   const floor = ex.nd_info(1);
@@ -190,11 +204,11 @@ test("nd_solve: the smallest systems, n = 0 and 1, with 0, 1, 3 or 17 right-hand
     for (const r of [0, 1, 3, 17]) {
       for (const ldb of [Math.max(n, 1), n + 4]) {
         const bspan = n === 0 || r === 0 ? 0 : ldb * (r - 1) + n;
-        const a = ARENA, b = ARENA + 64, ipiv = b + 8 * bspan + 64, work = Math.ceil((ipiv + 64) / 8) * 8, report = work + 8 * workLen(n, r), hi = report + 4 * REPORT_WORDS + 64;
+        const a = ARENA, b = ARENA + 64, ipiv = b + 8 * bspan + 64, work = Math.ceil((ipiv + 64) / 8) * 8, report = work + 8 * workLen(n, r, mode), hi = report + 4 * REPORT_WORDS + 64;
         f64.fill(6, b / 8, b / 8 + bspan);
         if (n === 1) f64[a / 8] = 2;
         u32.fill(0xdead, report / 4, report / 4 + REPORT_WORDS);
-        const words = [a, b, ipiv, work, report, n, r, Math.max(n, 1), ldb, workLen(n, r), ARENA, hi];
+        const words = [a, b, ipiv, work, report, n, r, Math.max(n, 1), ldb, workLen(n, r, mode), ARENA, hi, mode];
         // (refused first: the work one element short; nothing written)
         u32.set(words.map((x, i) => (i === 9 ? x - 1 : x)), BASE / 4);
         let before = u8.slice(floor, hi);
@@ -253,6 +267,11 @@ test("nd_solve refuses every bad layout before writing anything: each region pai
   refused("n overflowing", with_(5, 0xffffffff));
   refused("a region at 0", with_(4, 0));
   refused("a region below the floor", with_(4, 64));
+  // (the mode word: only 1 and 2; MATLAB mode with gesv's smaller work)
+  refused("mode 0", with_(12, 0));
+  refused("mode 3", with_(12, 3));
+  refused("mode 0xffffffff", with_(12, 0xffffffff));
+  refused("MATLAB mode with gesv's work", with_(9, workLen(n, r, GESV)));
   // (the arena, the descriptor, the caller's stack)
   refused("the report outside the arena", with_(11, g[4] + 8));
   // (grader T3: B, ipiv or work alone outside the arena, past its end)

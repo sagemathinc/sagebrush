@@ -3,9 +3,11 @@
 //! buffers is outside the timed interval), the first call reported apart, then R warm samples; median, p95,
 //! best, all samples, and the oracle (eta) first. A is general (seeded), spd (M'M + n I) or upper (seeded,
 //! zero below the diagonal, diagonal + 4).
-//!   cargo run --release -p sagebrush-nd --example solve_bench -- 16,64,256,1000 1 21 [selected|scalar] [general|spd|upper]
+//! The mode is gesv (LU whatever A is, no estimate; the targets bind on it) or matlab (the structure pass, the
+//! dispatch, rcond).
+//!   cargo run --release -p sagebrush-nd --example solve_bench -- 16,64,256,1000 1 21 [selected|scalar] [general|spd|upper] [gesv|matlab]
 use sagebrush_nd::gemm::Kernel;
-use sagebrush_nd::solve::{solve, solve_work_len};
+use sagebrush_nd::solve::{solve, solve_work_len, Mode};
 use std::time::Instant;
 
 fn main() {
@@ -15,6 +17,7 @@ fn main() {
     let reps: usize = args.get(3).map_or(21, |s| s.parse().unwrap());
     let kern = if args.get(4).map(String::as_str) == Some("scalar") { Kernel::Scalar } else { Kernel::selected() };
     let kind = args.get(5).map_or("general", |s| s.as_str());
+    let mode = if args.get(6).map(String::as_str) == Some("matlab") { Mode::Matlab } else { Mode::Gesv };
     for &n in &sizes {
         let mut s = 777u32 + n as u32;
         let mut rnd = || {
@@ -42,8 +45,8 @@ fn main() {
         }
         let (mut a, mut b) = (a0.clone(), b0.clone());
         let mut ipiv = vec![0usize; n];
-        let mut work = vec![0.0; solve_work_len(n, r).unwrap()];
-        let mut once = |a: &mut [f64], b: &mut [f64]| solve(kern, a, n, n, b, r, n, &mut ipiv, &mut work).unwrap();
+        let mut work = vec![0.0; solve_work_len(mode, n, r).unwrap()];
+        let mut once = |a: &mut [f64], b: &mut [f64]| solve(kern, mode, a, n, n, b, r, n, &mut ipiv, &mut work).unwrap();
         let t0 = Instant::now();
         let rep = once(&mut a, &mut b);
         let first = t0.elapsed().as_secs_f64() * 1e3;
@@ -68,7 +71,7 @@ fn main() {
         let p95 = times[(((reps as f64) * 0.95).ceil() as usize).clamp(1, reps) - 1];
         let gf = (2.0 / 3.0 * (n as f64).powi(3) + 2.0 * (n as f64).powi(2) * r as f64) / (med * 1e6);
         println!(
-            "{{\"kernel\":\"{}\",\"kind\":\"{kind}\",\"structure\":\"{:?}\",\"rcond\":{:e},\"n\":{n},\"nrhs\":{r},\"eta\":{eta:e},\"first_ms\":{first:.4},\"median_ms\":{med:.4},\"p95_ms\":{p95:.4},\"best_ms\":{:.4},\"gflops\":{gf:.2},\"samples_ms\":{:?}}}",
+            "{{\"kernel\":\"{}\",\"kind\":\"{kind}\",\"mode\":\"{mode:?}\",\"structure\":\"{:?}\",\"rcond\":{:e},\"n\":{n},\"nrhs\":{r},\"eta\":{eta:e},\"first_ms\":{first:.4},\"median_ms\":{med:.4},\"p95_ms\":{p95:.4},\"best_ms\":{:.4},\"gflops\":{gf:.2},\"samples_ms\":{:?}}}",
             kern.name(),
             rep.structure,
             rep.rcond,

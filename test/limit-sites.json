@@ -736,6 +736,11 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
  },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"mode u32::MAX\", 12, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
  "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"n overflowing\", 5, u32::MAX); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
@@ -876,7 +881,7 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
  },
- "engine/nd/src/solve.rs :: empty_nonfinite_and_refused :: assert!(solve_work_len(usize::MAX, 1).is_none() && solve_work_len(1 << 33, 1).is_none() && solve_work_len(4, usize::MAX).is_none()); #0": {
+ "engine/nd/src/solve.rs :: empty_nonfinite_and_refused :: assert!(solve_work_len(mode, usize::MAX, 1).is_none() && solve_work_len(mode, 1 << 33, 1).is_none() && solve_work_len(mode, 4, usize::MAX).is_none()); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"

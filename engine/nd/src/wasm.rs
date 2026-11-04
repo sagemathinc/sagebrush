@@ -92,8 +92,9 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
     gemm_cols(&am, &bm, cv, j.m.max(1), j0, j1, sv) as u32
 }
 
-/// X = A \\ B on one thread (numerics-core P2b-2: [`crate::solve::solve`]: the structure pass, then the
-/// diagonal, triangular, Cholesky or LU path, and rcond from the factors): A is overwritten by its LU factors
+/// X = A \\ B on one thread (numerics-core P2b-2: [`crate::solve::solve`] in the descriptor's mode: gesv, LU
+/// whatever A is, no estimate (rcond NaN), as NumPy's solve; or MATLAB, the structure pass, then the diagonal,
+/// triangular, Cholesky or LU path, and rcond from the factors, as mldivide): A is overwritten by its LU factors
 /// on the LU paths, B by X, ipiv and work are used, and the report is written as [status, first zero diagonal
 /// element or pivot's column, kernel name address, kernel name length, structure, rcond's f64 bits (low word,
 /// high word)]: status 1 solved, 2 solved with an exactly zero diagonal element or pivot (Inf/NaN in X; rcond
@@ -105,8 +106,9 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
 /// Checked here, before any pointer is read or slice made ([`check_solve`]): the descriptor is 4-aligned and
 /// in the host's part; each of the five regions (A, B, ipiv, work, report) is aligned, nonzero, at or above
 /// `__heap_base`, within memory and at most `isize::MAX` bytes, lies in the arena, and overlaps none of the
-/// others; the descriptor lies outside the arena and this thread's frame below it; lda, ldb >= max(n, 1);
-/// work holds `solve_work_len(n, nrhs)`; every size is computed without overflow.
+/// others; the descriptor lies outside the arena and this thread's frame below it; lda, ldb >= max(n, 1); the
+/// mode word is 1 or 2; work holds the mode's `solve_work_len(mode, n, nrhs)`; every size is computed without
+/// overflow.
 ///
 /// # Safety
 /// Host preconditions (the trusted host's contract for a solve; not checkable here): the caller's whole stack
@@ -140,7 +142,7 @@ pub unsafe extern "C" fn nd_solve(desc: u32) -> u32 {
     let ipiv: &mut [usize] = if j.n == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.ipiv), j.n) };
     let work: &mut [f64] = if j.work_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.work), j.work_len) };
     let report: &mut [u32] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.report), REPORT_WORDS);
-    let Ok(rep) = crate::solve::solve(kern, a, j.n, j.lda, b, j.nrhs, j.ldb, ipiv, work) else { return 0 };
+    let Ok(rep) = crate::solve::solve(kern, j.mode, a, j.n, j.lda, b, j.nrhs, j.ldb, ipiv, work) else { return 0 };
     use crate::solve::{Status, Structure};
     let (code, col) = match rep.status {
         Status::Solved => (1, 0),

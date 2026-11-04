@@ -1,4 +1,6 @@
-//! `nd::solve`: X = A \ B for a square real A, one call (numerics-core P2b-2, design 2c8e55e8 §2).
+//! `nd::solve`: X = A \ B for a square real A, one call (numerics-core P2b-2, design 2c8e55e8 §2), in one of two
+//! modes ([`Mode`], @sagebrush's ruling: fidelity first): **gesv** is LAPACK's dgesv as NumPy's `solve` calls
+//! it: LU with partial pivoting whatever A is, no condition estimate; **MATLAB** is mldivide's: the steps below.
 //!
 //! 1. **One pass over A** ([`structure`]): that every entry is finite, the 1-norm, and the structure:
 //!    diagonal, upper or lower triangular, or symmetric with a positive diagonal (a Cholesky candidate).
@@ -14,6 +16,16 @@ use crate::chol::{potrf, potrf_work_len, potrs, potrs_work_len};
 use crate::cond::{asum, cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
 use crate::gemm::{scratch_len, span, Kernel};
 use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, trsm_upper, Refused};
+
+/// Which solve [`solve`] does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// LAPACK's dgesv (NumPy's `solve`): the finiteness check, then LU with partial pivoting whatever A's
+    /// structure ([`crate::lu::solve`], bit for bit); no condition estimate (rcond NaN), structure General
+    Gesv,
+    /// MATLAB's mldivide: the structure pass, the dispatch and rcond from the factors
+    Matlab,
+}
 
 /// The structure [`solve`] found and solved by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +62,8 @@ pub enum Status {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Report {
     pub status: Status,
-    /// the 1-norm reciprocal condition estimate (Inf for n = 0)
+    /// the 1-norm reciprocal condition estimate (MATLAB mode; Inf for n = 0); NaN when not estimated (gesv
+    /// mode, or nothing computed)
     pub rcond: f64,
     pub structure: Structure,
 }
@@ -143,9 +156,13 @@ fn symmetric(a: &[f64], n: usize, lda: usize) -> bool {
 /// MATLAB's warning threshold for rcond (eps).
 const EPS: f64 = f64::EPSILON;
 
-/// The workspace [`solve`] needs for an n x n A and n x r B: n * n for the Cholesky factor (A stays untouched
-/// for the LU fallback), then the most any path needs; `None` on overflow.
-pub fn solve_work_len(n: usize, r: usize) -> Option<usize> {
+/// The workspace [`solve`] needs for an n x n A and n x r B in `mode`: gesv's is [`crate::lu::solve_work_len`];
+/// MATLAB's is n * n for the Cholesky factor (A stays untouched for the LU fallback), then the most any path
+/// needs; `None` on overflow.
+pub fn solve_work_len(mode: Mode, n: usize, r: usize) -> Option<usize> {
+    if mode == Mode::Gesv {
+        return crate::lu::solve_work_len(n, r);
+    }
     let inner = [getrf_work_len(n, n)?, getrs_work_len(n, r)?, potrf_work_len(n)?, potrs_work_len(n, r)?, cond_work_len(n)?];
     n.checked_mul(n)?.checked_add(inner.into_iter().max()?)
 }
@@ -155,11 +172,19 @@ fn zero_diagonal(a: &[f64], n: usize, lda: usize) -> Option<usize> {
     (0..n).find(|&i| a[i + i * lda] == 0.0)
 }
 
-/// X = A \ B for the n x n A (leading dimension `lda`) and the n x r B (overwritten by X), as the module
-/// describes. A is overwritten by its LU factors on the LU paths and left as it was on the others; `ipiv`
-/// holds n pivots on the LU paths; `work` holds [`solve_work_len`] elements.
+/// X = A \ B for the n x n A (leading dimension `lda`) and the n x r B (overwritten by X), in `mode`, as the
+/// module describes. A is overwritten by its LU factors on the LU paths and left as it was on the others;
+/// `ipiv` holds n pivots on the LU paths; `work` holds [`solve_work_len`] elements for the mode.
 #[allow(clippy::too_many_arguments)]
-pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r: usize, ldb: usize, ipiv: &mut [usize], work: &mut [f64]) -> Result<Report, Refused> {
+pub fn solve(kern: Kernel, mode: Mode, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r: usize, ldb: usize, ipiv: &mut [usize], work: &mut [f64]) -> Result<Report, Refused> {
+    if mode == Mode::Gesv {
+        let status = match crate::lu::solve(kern, a, n, lda, b, r, ldb, ipiv, work)? {
+            crate::lu::Status::Solved => Status::Solved,
+            crate::lu::Status::Singular(k) => Status::Singular(k),
+            crate::lu::Status::NonFinite => Status::NonFinite,
+        };
+        return Ok(Report { status, rcond: f64::NAN, structure: Structure::General });
+    }
     match (span(n, n, lda), span(n, r, ldb)) {
         (Some(na), Some(nb)) if a.len() >= na && b.len() >= nb => {}
         _ => return Err(Refused::Layout),
@@ -167,7 +192,7 @@ pub fn solve(kern: Kernel, a: &mut [f64], n: usize, lda: usize, b: &mut [f64], r
     if ipiv.len() < n {
         return Err(Refused::Pivots);
     }
-    match solve_work_len(n, r) {
+    match solve_work_len(mode, n, r) {
         Some(need) if work.len() >= need => {}
         _ => return Err(Refused::Work),
     }
@@ -247,8 +272,8 @@ mod tests {
         let mut a2 = a.to_vec();
         let mut x = b.to_vec();
         let mut ipiv = vec![0; n];
-        let mut work = vec![0.0; solve_work_len(n, r).unwrap()];
-        let rep = solve(k, &mut a2, n, n.max(1), &mut x, r, n.max(1), &mut ipiv, &mut work).unwrap();
+        let mut work = vec![0.0; solve_work_len(Mode::Matlab, n, r).unwrap()];
+        let rep = solve(k, Mode::Matlab, &mut a2, n, n.max(1), &mut x, r, n.max(1), &mut ipiv, &mut work).unwrap();
         (x, rep, a2)
     }
 
@@ -438,8 +463,8 @@ mod tests {
 
     #[test]
     fn empty_nonfinite_and_refused() {
-        let mut work = vec![0.0; solve_work_len(4, 2).unwrap()];
-        let rep = solve(Kernel::Scalar, &mut [], 0, 1, &mut [], 0, 1, &mut [], &mut work).unwrap();
+        let mut work = vec![0.0; solve_work_len(Mode::Matlab, 4, 2).unwrap()];
+        let rep = solve(Kernel::Scalar, Mode::Matlab, &mut [], 0, 1, &mut [], 0, 1, &mut [], &mut work).unwrap();
         assert_eq!((rep.status, rep.rcond), (Status::Solved, f64::INFINITY));
         // an Inf or NaN anywhere in A or B: nothing computed, A and B as they were
         let a0 = seeded(16, &mut 41);
@@ -454,7 +479,7 @@ mod tests {
             }
             let (a1, b1) = (a.clone(), b.clone());
             let mut ipiv = vec![0; 4];
-            let rep = solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work).unwrap();
+            let rep = solve(Kernel::Scalar, Mode::Matlab, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work).unwrap();
             assert!(rep.status == Status::NonFinite && rep.rcond.is_nan());
             assert!(a.iter().zip(&a1).chain(b.iter().zip(&b1)).all(|(p, q)| p.to_bits() == q.to_bits()));
         }
@@ -462,13 +487,24 @@ mod tests {
         let mut a = a0.clone();
         let mut b = vec![1.0; 8];
         let mut ipiv = vec![0; 4];
-        let need = solve_work_len(4, 2).unwrap();
-        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work[..need - 1]), Err(Refused::Work));
-        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b[..7], 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
-        assert_eq!(solve(Kernel::Scalar, &mut a[..15], 4, 4, &mut b, 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
-        assert_eq!(solve(Kernel::Scalar, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv[..3], &mut work), Err(Refused::Pivots));
+        let need = solve_work_len(Mode::Matlab, 4, 2).unwrap();
+        let k = Kernel::Scalar;
+        for mode in [Mode::Matlab, Mode::Gesv] {
+            let need = solve_work_len(mode, 4, 2).unwrap();
+            assert_eq!(solve(k, mode, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work[..need - 1]), Err(Refused::Work));
+            assert_eq!(solve(k, mode, &mut a, 4, 4, &mut b[..7], 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
+            assert_eq!(solve(k, mode, &mut a[..15], 4, 4, &mut b, 2, 4, &mut ipiv, &mut work), Err(Refused::Layout));
+            assert_eq!(solve(k, mode, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv[..3], &mut work), Err(Refused::Pivots));
+        }
         assert!(a == a0 && b.iter().all(|&v| v == 1.0));
-        assert!(solve_work_len(usize::MAX, 1).is_none() && solve_work_len(1 << 33, 1).is_none() && solve_work_len(4, usize::MAX).is_none());
+        // (gesv's work is LU's, smaller than MATLAB mode's: enough for one, refused by the other)
+        let g = solve_work_len(Mode::Gesv, 4, 2).unwrap();
+        assert!(g < need);
+        assert_eq!(solve(k, Mode::Matlab, &mut a, 4, 4, &mut b, 2, 4, &mut ipiv, &mut work[..g]), Err(Refused::Work));
+        assert!(a == a0 && b.iter().all(|&v| v == 1.0));
+        for mode in [Mode::Matlab, Mode::Gesv] {
+            assert!(solve_work_len(mode, usize::MAX, 1).is_none() && solve_work_len(mode, 1 << 33, 1).is_none() && solve_work_len(mode, 4, usize::MAX).is_none());
+        }
         // exactly enough work, with padded leading dimensions
         let (n, r, lda, ldb) = (5usize, 2usize, 7usize, 6usize);
         let mut a = vec![0.0; lda * n];
@@ -477,11 +513,46 @@ mod tests {
             a[j * lda..j * lda + n].copy_from_slice(&g[j * n..(j + 1) * n]);
         }
         let mut b = vec![9.0; ldb * r];
-        let mut w = vec![0.0; solve_work_len(n, r).unwrap()];
+        let mut w = vec![0.0; solve_work_len(Mode::Matlab, n, r).unwrap()];
         let mut p = vec![0; n];
-        let rep = solve(Kernel::Scalar, &mut a, n, lda, &mut b, r, ldb, &mut p, &mut w).unwrap();
+        let rep = solve(Kernel::Scalar, Mode::Matlab, &mut a, n, lda, &mut b, r, ldb, &mut p, &mut w).unwrap();
         assert_eq!(rep.structure, Structure::Spd);
         assert!(b[n..ldb].iter().all(|&v| v == 9.0), "B's padding untouched");
+    }
+
+    /// gesv mode is LU whatever A is, bit for bit lu::solve's (SOLVE_FNV's family), with no estimate: on the
+    /// structured matrices too (a triangular or SPD A is solved by LU there, as NumPy's solve does).
+    #[test]
+    fn gesv_mode_is_lu_whatever_the_structure() {
+        for k in kernels() {
+            let n = 70;
+            let g = seeded(n * n, &mut 61);
+            let b = seeded(n * 2, &mut 62);
+            let up = upper_of(&g, n);
+            for a in [g.clone(), up.clone(), transpose(&up, n), spd(n, 63)] {
+                let mut a1 = a.clone();
+                let mut x = b.clone();
+                let mut ipiv = vec![0; n];
+                let mut work = vec![0.0; solve_work_len(Mode::Gesv, n, 2).unwrap()];
+                let rep = solve(k, Mode::Gesv, &mut a1, n, n, &mut x, 2, n, &mut ipiv, &mut work).unwrap();
+                assert!(rep.status == Status::Solved && rep.structure == Structure::General && rep.rcond.is_nan(), "{rep:?}");
+                let mut a2 = a.clone();
+                let mut y = b.clone();
+                let mut w2 = vec![0.0; crate::lu::solve_work_len(n, 2).unwrap()];
+                crate::lu::solve(k, &mut a2, n, n, &mut y, 2, n, &mut ipiv, &mut w2).unwrap();
+                assert!(x.iter().zip(&y).chain(a1.iter().zip(&a2)).all(|(p, q)| p.to_bits() == q.to_bits()), "{}", k.name());
+            }
+            // a zero pivot and a non-finite input, reported as lu::solve does
+            let mut z = g.clone();
+            z[7 * n..8 * n].fill(0.0);
+            let mut x = b.clone();
+            let mut ipiv = vec![0; n];
+            let mut work = vec![0.0; solve_work_len(Mode::Gesv, n, 2).unwrap()];
+            assert_eq!(solve(k, Mode::Gesv, &mut z, n, n, &mut x, 2, n, &mut ipiv, &mut work).unwrap().status, Status::Singular(7));
+            let mut q = g.clone();
+            q[3] = f64::NAN;
+            assert_eq!(solve(k, Mode::Gesv, &mut q, n, n, &mut x, 2, n, &mut ipiv, &mut work).unwrap().status, Status::NonFinite);
+        }
     }
 
     /// The per-structure bit pins (the triangular and Cholesky paths; the general path is lu's SOLVE_FNV):
