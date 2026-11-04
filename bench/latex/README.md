@@ -80,7 +80,8 @@ files that fidelity uses (not tracked). It downloads the documents into
 
 Other settings:
 
-- `CLI=`, `WEB_DIST=`: other builds.
+- `CLI=`, `WEB_DIST=`: other builds (`WEB_DIST` a `web/dist`, served by the
+  `web/serve.py` beside it).
 - `SAGEBRUSH_REV=`: the commit the builds are of, when they were copied to a
   machine without the repository.
 - `BENCH_VERBOSE=1`: each browser step, timed.

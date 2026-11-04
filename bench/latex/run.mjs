@@ -160,7 +160,10 @@ let serveBase = null;
 async function serve() {
   if (serveBase) return serveBase;
   if (!existsSync(join(DIST, "sagebrush-latex.js"))) fail(`no ${DIST}/sagebrush-latex.js: build web/dist first (README.md)`);
-  const server = spawn("python3", [join(root, "web", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env } });
+  // (serve.py serves the dist beside it: WEB_DIST's own web/serve.py, so that WEB_DIST is the build the page loads)
+  const servepy = join(DIST, "..", "serve.py");
+  if (!existsSync(servepy)) fail(`no ${servepy}: WEB_DIST must be a web/dist with web/serve.py beside it`);
+  const server = spawn("python3", [servepy, "0"], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env } });
   process.on("exit", () => server.kill());
   const port = await new Promise((res, rej) => { let acc = ""; server.stdout.on("data", (b) => { acc += b; const m = /(\d{2,5})/.exec(acc); if (m) res(+m[1]); }); setTimeout(() => rej(new Error("no server port")), 15000); });
   return (serveBase = `http://127.0.0.1:${port}/`);
