@@ -13,3 +13,10 @@ show(6, lambda: QQ(0).charpoly())
 show(7, lambda: (2/3).charpoly('z'))
 show(8, lambda: QQ(5).minpoly()(5))
 show(9, lambda: QQ(-1/3).minpoly().roots())
+# the variable's name, as Sage checks it (RATPOLY-ENG-1)
+q = QQ(3/2)
+for k, v in enumerate(['a b', '', 'x,y', 1, None, '1x', 'x_1', 'y2', '_t', 'x y']):
+    show(10 + k, lambda: q.minpoly(v))
+for k, v in enumerate(['a b', '', 'x,y', 1, None]):
+    show(30 + k, lambda: q.charpoly(v))
+show(40, lambda: q.minpoly(None).parent())

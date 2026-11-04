@@ -7,3 +7,19 @@ S06 x
 S07 z - 2/3
 S08 0
 S09 [(-1/3, 1)]
+S10 ERR ValueError: variable name 'a b' is not alphanumeric
+S11 ERR ValueError: variable name must be nonempty
+S12 ERR TypeError: Could not find a mapping of the passed element to this ring.
+S13 ERR ValueError: variable name '1' does not start with a letter
+S14 None - 3/2
+S15 ERR ValueError: variable name '1x' does not start with a letter
+S16 x_1 - 3/2
+S17 y2 - 3/2
+S18 ERR ValueError: variable name '_t' does not start with a letter
+S19 ERR ValueError: variable name 'x y' is not alphanumeric
+S30 ERR ValueError: variable name 'a b' is not alphanumeric
+S31 ERR ValueError: variable name must be nonempty
+S32 ERR TypeError: Could not find a mapping of the passed element to this ring.
+S33 ERR ValueError: variable name '1' does not start with a letter
+S34 None - 3/2
+S40 Univariate Polynomial Ring in None over Rational Field
