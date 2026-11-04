@@ -1,7 +1,8 @@
 // The LaTeX editor page (DEV only, behind the flag: plan sbspace r5 + r6b). The page index.html hands itself to
 // mount() for /?tex=<fid>. It binds to the file's fid (Workspace.pathOfFile), reads the whole file (at most 4 MiB),
 // shows the source on the left and the live preview on the right, and saves only when asked (Ctrl/Cmd+S or Save),
-// last write wins (r6b E5), with the kept minimums of save.ts. The preview comes from a module Worker
+// only over the revision its text came from (a change made elsewhere is followed, or asked about), with the kept
+// minimums of save.ts. The preview comes from a module Worker
 // (dist/sagebrush-latex-worker.js), whose replies are taken only for the request's own document/revision (gate.ts),
 // patched under a per-frame budget, a split chunk's pieces replaced as one unit (staged hidden, then swapped).
 // SECURITY: file names, paths and messages reach the page through textContent; preview HTML is the renderer's (its
@@ -235,7 +236,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const preview = el("div", "page tex-preview");
   right.appendChild(preview);
   main.append(left, right);
-  page.append(banner, head, main);
+  // (the bar for a change made elsewhere while this text had unsaved edits: one at a time, below)
+  const bar = el("div", "tex-conflict"); bar.hidden = true; bar.setAttribute("role", "alert");
+  const barText = el("span", "tex-conflict-t");
+  const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
+  bar.append(barText, useTheirs, keepMine);
+  page.append(banner, head, bar, main);
   banner.textContent = BANNER;
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
@@ -324,10 +330,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); banner.textContent = BANNER_NO_SAVE(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
-  const whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
+  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
   if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); save.hidden = true; }
-  const eol = opened.eol;
+  let eol = opened.eol;
   let savedText = opened.text;
+  // (the revision savedText was read or saved as, the Save's base; and the person's edits, counted: an await that
+  //  saw the text clean knows whether it still is)
+  let docRev = read.entry.rev ?? 0, edits = 0;
 
   // ---- the editor and its preview (editor.ts); the images, the saving and the controls are this page's
   const images: Record<string, string | { why: string }> = {};
@@ -410,7 +419,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
-    onEdit: () => { showDirty(); if (!saving) say(""); },
+    onEdit: () => { edits++; showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
@@ -533,7 +542,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   // ---- editing
   const isDirty = () => src.value !== savedText;
-  function showDirty() { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving; }
+  function showDirty() { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving || acting; }
   src.addEventListener("keydown", (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); void doSave(); }
   });
@@ -578,14 +587,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   current = { dispose: () => dispose(), dirty: isDirty };
+  // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) (globalThis as any).__sbTexWs = host.ws;
 
-  // ---- saving (r6b E5): the opened file only, last write wins
+  // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
+  // change made elsewhere since is never written over, the bar below asks
   let saving = false;
   async function doSave() {
     if (!saveable) { say("This file can't be saved here: " + whyNot + "."); return; }
-    if (saving) { say("saving…"); return; }
+    if (saving || acting) { say("saving…"); return; }
     if (!isDirty()) { say("No changes to save"); return; }
-    const text = src.value;
+    const text = src.value, base = docRev;
     // (the comments' anchors with this text, taken now: before anything waits, an edit can't move them in between)
     const snap = cm?.snapshot();
     const bytes = encodeText(text, eol);
@@ -593,20 +605,164 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     saving = true; showDirty(); say("saving…");
     try {
       const at = await host.ws.pathOfFile(host.fid);
-      if (!at.ok) { say("Not saved: this file isn't here any more"); return; }
+      if (!at.ok) { say("Not saved: this file isn't here any more"); goneSaid = true; return; }
       if (at.entry.remote) { say("Not saved: this file is in the cloud"); return; }
       // (the test build only: the page test can hold the .tex's write here; elsewhere this folds away)
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexSaveWrite?.();
-      await host.ws.write(at.path, bytes, { fid: host.fid });
-      savedText = text;
+      const w = await host.ws.write(at.path, bytes, { fid: host.fid, base });
+      savedText = text; docRev = w.rev;
       void cm?.saved(snap);
       if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
       say("Saved");
     } catch (err) {
       // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
-      say((err as any)?.code === "conflict" ? "Not saved: another file is at this path now" : "Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
-    } finally { saving = false; showDirty(); }
+      const other = (err as any)?.code === "conflict" && /another file/.test(String((err as Error)?.message));
+      if ((err as any)?.code === "conflict" && !other) { say("Not saved: this file was changed elsewhere"); again = true; }
+      else say(other ? "Not saved: another file is at this path now" : "Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { saving = false; showDirty(); if (again && live()) void check(); }
   }
+
+  // ---- a change to this file made elsewhere (an agent through sagebrush-mcp, another tab, another device): with no
+  // unsaved edits here, the text follows it in place, the cursor and scroll kept; with them, nothing is replaced or
+  // written and the bar asks (William, Nov 3: "a critical thing to get right"). One check at a time, each reading
+  // the file's bytes, fid and revision together (readUpTo, under the workspace's lock); one asked for meanwhile, or
+  // during a Save or a choice in the bar, runs after it.
+  let checking = false, again = false, acting = false, goneSaid = false, checkTimer: any = null, docPath = where.path;
+  let conflict: { fid: string; rev: number; theirs: boolean; by: string } | null = null;
+  // (who changed it, a label only: one actor among this file's ops since the last check, else "elsewhere"; this
+  //  tab's own Save's ops are its own)
+  let actors = new Set<string>();
+  const actorName = (op: any) => { const by = typeof op.by === "string" ? op.by : "";
+    return op.origin === "server" ? "another device" : by === "agent:page" ? "an agent in this page" : by.startsWith("agent:") ? by.slice(6).replace(/[-_]+/g, " ").trim() || "an agent" : "another tab"; };
+  const unwatchDoc = host.ws.watch((c) => {
+    let hit = false;
+    for (const op of c.ops ?? []) if (op.fid === host.fid || op.path === docPath || op.to === docPath) {
+      hit = true;
+      if (!((saving || acting) && op.by === "person" && op.origin !== "server")) actors.add(actorName(op));
+    }
+    if (hit) { clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
+  });
+  life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
+  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); save.hidden = !ok; };
+  // (a coherent read's saveability, as at opening: whole, text, written back exactly, not in the cloud)
+  const judge = (r: { entry: Entry; content: Uint8Array }) => {
+    const o = openBytes(r.content);
+    if (o.kind !== "text") return { o, ok: false, why: o.why };
+    const ok = o.saveable && r.content.length === (r.entry.size ?? -1) && !r.entry.remote;
+    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud: open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
+  };
+  // (their text in the editor, as the text saved: the selection and scroll kept, clamped to its length)
+  const install = (text: string, rev: number, nextEol: "\n" | "\r\n", ok: boolean, why: string) => {
+    const a = src.selectionStart, b = src.selectionEnd, d = src.selectionDirection, top = src.scrollTop, lft = src.scrollLeft;
+    E.setText(text);
+    src.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length), d);
+    src.scrollTop = top; src.scrollLeft = lft;
+    savedText = text; docRev = rev; eol = nextEol; setSaveable(ok, why);
+    conflict = null; bar.hidden = true; showDirty();
+  };
+  const showBar = (c: NonNullable<typeof conflict>) => {
+    conflict = c;
+    barText.textContent = c.by === "elsewhere" ? "This file was changed elsewhere while you were editing." : c.by[0].toUpperCase() + c.by.slice(1) + " changed this file while you were editing.";
+    // (Keep mine only where this text can be saved; Use theirs only where theirs is text)
+    keepMine.hidden = !saveable; useTheirs.hidden = !c.theirs;
+    bar.hidden = false;
+  };
+  const check = async (): Promise<void> => {
+    if (checking || saving) { again = true; return; }
+    checking = true; again = false;
+    const by = actors.size === 1 ? [...actors][0] : "elsewhere"; actors = new Set();
+    try {
+      const at = await host.ws.pathOfFile(host.fid);
+      if (!live()) return;
+      if (!at.ok) { if (!goneSaid) say("This file was deleted elsewhere; your text is still here."); goneSaid = true; return; }
+      goneSaid = false; docPath = at.path;
+      const e0 = edits, d0 = docRev;
+      // (the test build only: the page test can hold the check here, before its read and after it; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("before");
+      let r: { entry: Entry; content: Uint8Array };
+      try { r = await host.ws.readUpTo(at.path, EDIT_MAX); } catch (err) { if (live()) say("This file was changed elsewhere and can't be read here now: " + String((err as Error)?.message ?? err).slice(0, 160)); return; }
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("after");
+      // (another file at this path now is never this editor's)
+      if (!live() || r.entry.fid !== host.fid) return;
+      // (a Save or Keep mine done while it read: what it read may be older than that; read again)
+      if (docRev !== d0) { again = true; return; }
+      const rev = r.entry.rev ?? 0;
+      if (rev === docRev || rev === conflict?.rev) return;
+      // (another device's change, its bytes not here yet (sync-fetch installs them without an op): nothing shown or
+      //  replaced from the old bytes; looked at again until they are)
+      if (r.entry.remote) { say("This file was changed on another device; its new text is on its way…"); clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 2000); return; }
+      const j = judge(r);
+      if (!conflict && edits === e0 && src.value === savedText) {
+        // (no unsaved edits, before the read and after it: their text here; one the editor can't show leaves this
+        //  text, and Save off)
+        if (j.o.kind !== "text") { setSaveable(false, j.why); say(`${by === "elsewhere" ? "This file was changed elsewhere" : by[0].toUpperCase() + by.slice(1) + " changed this file"} into one the editor can't show: ${j.why}`); return; }
+        const same = j.o.text === src.value;
+        install(j.o.text, rev, j.o.eol, j.ok, j.why);
+        if (!same) say(by === "elsewhere" ? "Updated elsewhere" : "Updated by " + by);
+        return;
+      }
+      showBar({ fid: r.entry.fid!, rev, theirs: j.o.kind === "text", by });
+    } finally { checking = false; if (again && live()) void check(); }
+  };
+  const barBusy = (b: boolean) => { acting = b; keepMine.disabled = useTheirs.disabled = b; showDirty(); };
+  // Keep mine: this text, written over exactly the revision the bar shows (its fid and rev, taken at the click);
+  // a later change makes it a conflict again, nothing written, the bar shown for that one
+  keepMine.onclick = async () => {
+    const c = conflict;
+    if (!c || acting || saving || !saveable) return;
+    const t = src.value, snap = cm?.snapshot(), bytes = encodeText(t, eol);
+    barBusy(true); say("saving…");
+    try {
+      const at = await host.ws.pathOfFile(c.fid);
+      if (!at.ok) { if (live()) say("Not saved: this file isn't here any more"); return; }
+      // (the test build only: the page test can hold this write; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexKeepWrite?.();
+      const w = await host.ws.write(at.path, bytes, { fid: c.fid, base: c.rev });
+      if (!live()) return;
+      savedText = t; docRev = w.rev; void cm?.saved(snap);
+      if (conflict === c) { conflict = null; bar.hidden = true; }
+      say("Saved: yours kept, theirs is in TimeTravel");
+    } catch (err) {
+      if (!live()) return;
+      if ((err as any)?.code === "conflict") { say("Not saved: it was changed again; choose again"); again = true; }
+      else say("Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { if (live()) { barBusy(false); if (again) void check(); } }
+  };
+  // Use theirs: this text first kept as a new file beside it, "name (mine).tex" (else "(mine 2)", … "(mine 20)",
+  // made, never written over); only then, and only if nothing was typed meanwhile, their text read and put here
+  useTheirs.onclick = async () => {
+    if (!conflict || acting || saving) return;
+    const t = src.value, e0 = edits;
+    barBusy(true); say("keeping your text as a copy…");
+    let made = "";
+    try {
+      const at = await host.ws.pathOfFile(host.fid);
+      if (!at.ok) { if (live()) say("Not done: this file isn't here any more; your text is still here"); return; }
+      const dir = parentOf(at.path), stem = nameOf(at.path).replace(/\.tex$/i, "");
+      // (an unsaveable file's copy has LF line endings, so it can be saved)
+      const bytes = encodeText(t, saveable ? eol : "\n");
+      for (let k = 1; k <= 20 && !made; k++) {
+        const p = (dir === "/" ? "/" : dir + "/") + `${stem} (mine${k > 1 ? " " + k : ""}).tex`;
+        // (the test build only: the page test can hold or fail this create; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCopyCreate?.(p);
+        try { await host.ws.createByPerson(p, { content: bytes }); made = p; } catch (err) { if ((err as any)?.code !== "exists") throw err; }
+      }
+      if (!live()) return;
+      if (!made) { say(`Not done: ${stem} (mine).tex to (mine 20) are all taken; your text is still here`); return; }
+      const kept = nameOf(made);
+      const r = await host.ws.readUpTo(at.path, EDIT_MAX);
+      // (the test build only: the page test can hold this read; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexTheirsRead?.();
+      if (!live()) return;
+      const j = judge(r);
+      if (edits !== e0 || src.value !== t) { say(`Your text up to then is in ${kept}; you've typed since, so your text stays here`); return; }
+      if (r.entry.fid !== host.fid || j.o.kind !== "text" || r.entry.remote) { say(`Your text is in ${kept}; theirs can't be shown here now, so your text stays here too`); return; }
+      install(j.o.text, r.entry.rev ?? 0, j.o.eol, j.ok, j.why);
+      say(`Your text is in ${kept}`);
+    } catch (err) {
+      if (live()) say((made ? `Your text is in ${nameOf(made)}, but theirs couldn't be read: ` : "Not done: your text couldn't be kept as a copy (it is still here): ") + String((err as Error)?.message ?? err).slice(0, 160));
+    } finally { if (live()) { barBusy(false); if (again) void check(); } }
+  };
 
   // ---- source and preview in sync (editor.ts): Follow (remembered, on by default) and Show
   const showFollow = () => followBtn.setAttribute("aria-pressed", String(E.following()));
