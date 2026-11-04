@@ -8,10 +8,11 @@
 // - makeCheckpoint / checkRecord: the blob, a patchflow snapshot record at cut_patch whose `hash` is checked against a
 //   fresh hash of its own value (patchflow 0.16 trusts a record with no hash, or one of an unfamiliar format: map r2 C).
 // - checkCheckpoint: an install's checks (§8) on the blob and the tail after it, bounded before any graph is built,
-//   with the bytes it holds counted (map r2 G: peak <= 2B, retained <= B).
+//   with what it holds between calls counted and capped (map r2 G as amended for 0b-2a; allocation inside a patchflow
+//   call is not bounded here: the TRANSIENT-BUDGET gate).
 // - reconcile (§6.2), splitPrefix (§7): the outcome of a registration from the server's answer; a batch cut to fit the
 //   rooms a `busy {checkpoint: "split"}` names.
-import { PatchGraph, sameHashFormat, type DocCodec, type Patch } from "patchflow";
+import { PatchGraph, sameHashFormat, type DocCodec, type Document, type Patch } from "patchflow";
 
 /** Patches in a tail at most, and its charged bytes at most (r9 §0, §3; the server's TAIL_PATCHES_CAP, TAIL_ITEM_CAP) */
 export const TAIL_PATCHES_CAP = 1000;
@@ -50,12 +51,51 @@ export function acceptedBatch(seq: number, patches: readonly Patch[], charge: nu
 
 // ---- the graphs this module builds: patchflow's own value caches off (astra's CK-M2)
 
-/** patchflow 0.16 keeps, per graph, LRU caches of computed values (by default up to 2,000 and 100 values, 10 MB each)
- * besides its last few requested ones.  The graphs here are built for one decision, so their caches are sized to keep
- * nothing (an LRU of size 1 stores no document larger than one unit); what a graph still holds after a decision is
- * its current value, which `test-checkpoint.mjs` pins on astra's fixture (one value held, not 51) */
+/** patchflow 0.16 keeps, per graph, LRU caches of computed values (by default up to 2,000 and 100 values, 10 MB each).
+ * The graphs here are built for one decision, so those caches are sized to keep nothing (an LRU of size 1 stores no
+ * document larger than one unit).  patchflow's other value stores (its recent and pinned values, its merge results,
+ * its checkpoints) aren't configurable: what they hold between calls is measured (heldValues) and capped. */
 export const SCRATCH_GRAPH = { exactCacheMaxEntries: 1, exactCacheMaxSize: 1, valueCacheMaxEntries: 1, valueCacheMaxSize: 1 } as const;
+/** Every graph this module builds (one place, so the tests' per-call witnesses pin them all) */
 export const scratchGraph = (codec: DocCodec) => new PatchGraph({ codec, ...SCRATCH_GRAPH });
+/** A value's hash as patchflow's graph computes it (codec.hash, the Doc's own hash, or the hash of its text) */
+export const hashValue = (codec: DocCodec, doc: Document) => scratchGraph(codec).hashOf(doc);
+/** patchflow 0.16's value stores on a graph: those always present, and those present only during a call (pinned) or
+ * once a checkpoint was taken.  Read by heldValues, which refuses (throws) on a graph without the first set: a patchflow
+ * whose stores are others is not measured, so not trusted. */
+const STORES_ALWAYS = ["recentExact", "recentMerged", "exactCache", "exactMergeCache", "mergeCache", "valueCache", "legacyCheckpoints"] as const;
+const STORES_SOMETIMES = ["pinnedExact", "pinnedMerged"] as const;
+/**
+ * The decoded values a graph holds between calls (at quiescence): every Doc in patchflow 0.16's value stores (above, and
+ * recentCheckpoint), each counted once, at its canonical UTF-8 bytes (`codec.toString`).  `sizes` remembers what was
+ * measured, so a decision measures each Doc once.  This is NOT what a call allocates while it runs.
+ */
+export function heldValues(codec: DocCodec, graph: PatchGraph, sizes: WeakMap<object, number> = new WeakMap()): { count: number; bytes: number } {
+  const g = graph as unknown as Record<string, unknown>;
+  const docs = new Set<object>();
+  const take = (v: unknown) => {
+    const d = v && typeof v === "object" && "doc" in v ? (v as { doc: unknown }).doc : v;
+    if (d === undefined || d === null) return;
+    if (typeof d !== "object") throw new Error("checkpoint: a value store holds something that isn't a document");
+    docs.add(d);
+  };
+  const store = (name: string, required: boolean) => {
+    const s = g[name] as { values?: () => Iterable<unknown> } | undefined;
+    if (s === undefined || s === null) { if (required) throw new Error(`checkpoint: patchflow's ${name} isn't there`); return; }
+    if (typeof s.values !== "function") throw new Error(`checkpoint: patchflow's ${name} isn't a store`);
+    for (const v of s.values()) take(v);
+  };
+  for (const name of STORES_ALWAYS) store(name, true);
+  for (const name of STORES_SOMETIMES) store(name, false);
+  take(g.recentCheckpoint);
+  let bytes = 0;
+  for (const d of docs) {
+    let n = sizes.get(d);
+    if (n === undefined) { n = utf8Length(codec.toString(d as Document)); sizes.set(d, n); }
+    bytes += n;
+  }
+  return { count: docs.size, bytes };
+}
 
 // ---- the exact cut (r9 §5.2)
 
@@ -111,7 +151,7 @@ export function checkRecord(codec: DocCodec, record: unknown): record is Checkpo
   if (typeof r.hash !== "string") return false;
   let actual: string;
   try {
-    actual = scratchGraph(codec).hashOf(codec.fromString(r.snapshot));
+    actual = hashValue(codec, codec.fromString(r.snapshot));
   } catch {
     return false;
   }
@@ -142,22 +182,25 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 /** A checkpoint descriptor, as `pull {start: "snapshot"}` gives it (r9 §5.1) */
 export interface Descriptor { epoch: number; at_seq: number; recv_at: number; chain_at: string; cut_patch: string; sha256: string; bytes: number }
-/** The bytes an install holds, counted by owner (map r2 G): each copy it has is set, by name, to the bytes it holds
- * now (a copy that grows is set again, not added to), and dropped when it is let go */
+/** The bytes a decision holds between calls, counted by owner (map r2 G as amended for 0b-2a): each owner is set, by
+ * name, to the bytes it holds now, and dropped when it is let go.  `maxHeld` is the most held at any of those points;
+ * it says nothing about what a call allocates while it runs. */
 export class Ledger {
   private held = new Map<string, number>();
-  peak = 0;
-  set(name: string, bytes: number) { this.held.set(name, bytes); this.peak = Math.max(this.peak, this.total()); }
+  maxHeld = 0;
+  set(name: string, bytes: number) { this.held.set(name, bytes); this.maxHeld = Math.max(this.maxHeld, this.total()); }
   drop(name: string) { this.held.delete(name); }
   total() { let n = 0; for (const v of this.held.values()) n += v; return n; }
 }
 export type InstallWhy = "bounds" | "local" | "digest" | "record" | "cut" | "tail" | "needs_more_history";
 /** A patch's canonical decoded charge: its JSON's UTF-8 bytes (what the graph holds of it, logically) */
 const patchBytes = (p: Patch) => utf8Length(JSON.stringify(p));
+/** The decoded values a decision's graph may hold between calls, at most, as a multiple of B */
+export const RETAINED_MAX_B = 2;
 /**
- * Whether a checkpoint blob and the verified tail after it make a usable base (§8).  A decision only: the graph it is
- * made on is released before it returns (the install, 0b-2c, writes the record and the tail and opens the document as
- * any open does).
+ * Whether a checkpoint blob and the verified tail after it make a usable base (§8).  A decision: the graph it is made
+ * on is released before it returns; the decoded record is its one output, owned by the caller from then on (the
+ * install, 0b-2c, writes it and the tail's rows and opens the document).
  * - Bounded first, before anything is decoded or built: the blob's bytes the descriptor's and <= its maximum; the
  *   tail's PATCHES (summed over its batches, as the server's cap counts them) and charge within the cap; the device's
  *   own rows within the journal's debt bounds (a row that can't be measured: refused, `local`).
@@ -165,11 +208,13 @@ const patchBytes = (p: Patch) => utf8Length(JSON.stringify(p));
  *   at exactly cut_patch; the tail contiguous from at_seq + 1.
  * - Then the combined graph (the record, the tail, and `local`: this device's own rows, astra) must give an exact value
  *   (needsMoreHistory and valueUnavailable false).  Anything thrown is a refusal, never an exception.
- * The bytes held (map r2 G, as amended): B = the blob + the tail's charge + the local rows' bytes; the incoming copy is
- * B; the one working copy (the decoded record, then the graph's patches) grows by what is added, to at most B; and the
- * graph's computed values, its caches off (SCRATCH_GRAPH), are its current value, V bytes (its canonical text; V <= B:
- * a value is the snapshot plus what the patches carry).  So peak <= 2B + V <= 3B, which the module itself checks; on
- * return nothing is held.  `head` is the hash of the value the device would show (for the caller and the tests).
+ * What is held, between calls (map r2 G as amended for 0b-2a, astra's DESIGN OK 56082e29): B = the blob + the tail's
+ * charge + the local rows' bytes, the incoming copy; the working copy (the decoded record, then the graph's patches as
+ * added); and the decoded values the graph holds, measured after EACH call (heldValues), refused (`bounds`) past
+ * RETAINED_MAX_B x B.  On return: the record (its blob bytes), nothing else.
+ * Allocation inside a patchflow call is NOT bounded by this checker: its temporaries, pinned and computed values and
+ * merge work while the call runs are not measured.  That bound (TRANSIENT-BUDGET) is an open gate on the first PR that
+ * imports or installs this module.
  */
 export async function checkCheckpoint(
   codec: DocCodec,
@@ -178,9 +223,9 @@ export async function checkCheckpoint(
   tail: readonly AcceptedBatch[],
   local: readonly Patch[] = [],
   ledger = new Ledger(),
-): Promise<{ ok: true; record: CheckpointRecord; head: string; ledger: Ledger; B: number; V: number } | { ok: false; why: InstallWhy; ledger: Ledger; B: number }> {
-  let B = 0, V = 0;
-  const no = (why: InstallWhy) => { ledger.drop("work"); ledger.drop("values"); ledger.drop("incoming"); return { ok: false as const, why, ledger, B }; };
+): Promise<{ ok: true; record: CheckpointRecord; head: string; ledger: Ledger; B: number } | { ok: false; why: InstallWhy; ledger: Ledger; B: number }> {
+  let B = 0;
+  const no = (why: InstallWhy) => { ledger.drop("work"); ledger.drop("values"); ledger.drop("incoming"); ledger.drop("record"); return { ok: false as const, why, ledger, B }; };
   try {
     const patches = tail.reduce((n, b) => n + b.patches.length, 0), charge = tail.reduce((n, b) => n + b.charge, 0);
     B = blob.length + charge;
@@ -208,27 +253,36 @@ export async function checkCheckpoint(
     if (!checkRecord(codec, record)) return no("record");
     if (record.time !== d.cut_patch) return no("cut");
     if (tail.some((b, i) => b.seq !== d.at_seq + 1 + i)) return no("tail");
-    const graph = scratchGraph(codec);
+    const graph = scratchGraph(codec), sizes = new WeakMap<object, number>();
+    // (after each call: what the graph holds of decoded values, measured and capped)
+    const settle = () => { const v = heldValues(codec, graph, sizes).bytes; ledger.set("values", v); return v <= RETAINED_MAX_B * B; };
     graph.add([record]);
+    if (!settle()) return no("bounds");
     try {
-      for (const b of tail) { graph.add([...b.patches]); grow(b.charge); }
-      for (let i = 0; i < local.length; i++) { graph.add([local[i]]); grow(localBytes[i]); }
+      for (const b of tail) { graph.add([...b.patches]); grow(b.charge); if (!settle()) return no("bounds"); }
+      for (let i = 0; i < local.length; i++) { graph.add([local[i]]); grow(localBytes[i]); if (!settle()) return no("bounds"); }
     } catch {
       return no("tail");
     }
-    if (graph.needsMoreHistory() || graph.valueUnavailable()) return no("needs_more_history");
+    const nmh = graph.needsMoreHistory();
+    if (!settle()) return no("bounds");
+    if (nmh) return no("needs_more_history");
+    const vu = graph.valueUnavailable();
+    if (!settle()) return no("bounds");
+    if (vu) return no("needs_more_history");
     const value = graph.value();
-    V = utf8Length(codec.toString(value));
-    ledger.set("values", V);
+    if (!settle()) return no("bounds");
     const head = graph.hashOf(value);
-    if (ledger.peak > 2 * B + V || work > B) return no("bounds");
-    // (the decision made: the graph, its value and the working copy are let go, and the incoming copy is the caller's)
+    if (!settle()) return no("bounds");
+    // (the decision made: the graph, its values and the working copy are let go; the incoming copy is the caller's;
+    // the decoded record is the output, now the caller's, counted as held)
     ledger.drop("work");
     ledger.drop("values");
     ledger.drop("incoming");
-    return { ok: true, record, head, ledger, B, V };
+    ledger.set("record", blob.length);
+    return { ok: true, record, head, ledger, B };
   } catch {
-    // (anything else thrown (the codec, the hash): a refusal, nothing held)
+    // (anything else thrown (the codec, the hash, an unmeasurable store): a refusal, nothing held)
     return no("record");
   }
 }

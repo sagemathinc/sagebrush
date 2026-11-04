@@ -9736,6 +9736,32 @@
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
  },
+ "web/workspace/checkpoint.ts :: patchBytes :: export const RETAINED_MAX_B = 2; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: settle :: const settle = () => { const v = heldValues(codec, graph, sizes).bytes; ledger.set(\"values\", v); return v <= RETAINED_MAX_B * B; }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: maxHeld = 0; #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: set(name: string, bytes: number) { this.held.set(name, bytes); this.maxHeld = Math.max(this.maxHeld, this.total()); } #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
+ },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",
   "owner": "sync client"

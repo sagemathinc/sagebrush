@@ -9,12 +9,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { PatchGraph, encodePatchId } from "patchflow";
-import { notebookCodec as codec } from "../notebook/history.js";
+import { notebookCodec as codec, createImmerDbCodec, SCHEMA } from "../notebook/history.js";
 import { LIMITS } from "../sync-protocol/protocol.ts";
 import { SYNC_DEBT } from "../journal/rows.js";
 import {
   CHECKPOINT_BLOB_MAX, TAIL_ITEM_CAP, TAIL_PATCHES_CAP, REGISTER_ATTEMPTS, LOCAL_ROWS_MAX, LOCAL_BYTES_MAX, Ledger,
-  acceptedBatch, exactCut, makeCheckpoint, checkRecord, checkCheckpoint, reconcile, splitPrefix, prefixCharge, itemBytesOf, utf8Length, sha256Hex, scratchGraph,
+  acceptedBatch, exactCut, makeCheckpoint, checkRecord, checkCheckpoint, reconcile, splitPrefix, prefixCharge, itemBytesOf, utf8Length, sha256Hex, scratchGraph, heldValues, RETAINED_MAX_B,
 } from "./checkpoint.ts";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -138,22 +138,22 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const tail = [line[2]];
   const ok = await checkCheckpoint(codec, d, ck.blob, tail);
   check(ok.ok && ok.head === hashOf(v3), "checkCheckpoint: the record + the tail: a usable base, the whole history's value (its hash)");
-  check(ok.ok && ok.V === utf8Length(codec.toString(v3)) && ok.ledger.peak === 2 * ok.B + ok.V && ok.ledger.total() === 0, `checkCheckpoint: peak 2B + V (V the value's canonical bytes), nothing held on return (B ${ok.B}, V ${ok.V}, peak ${ok.ledger?.peak}, held ${ok.ledger?.total()})`);
+  check(ok.ok && ok.ledger.total() === ck.blob.length, `checkCheckpoint: on return the decoded record is the caller's and counted (its blob's ${ck.blob.length} bytes), nothing else held: ${ok.ledger?.total()}`);
   const no = async (dd, blob, t, why, what, local) => {
     const x = await checkCheckpoint(codec, dd, blob, t, local);
     check(!x.ok && x.why === why && x.ledger.total() === 0, `checkCheckpoint: ${what}: refused (${why}), nothing held after: ` + J({ why: x.why, held: x.ledger.total(), B: x.B }));
     return x;
   };
   const b1 = await no({ ...d, bytes: d.bytes + 1 }, ck.blob, tail, "bounds", "bytes not the descriptor's");
-  check(b1.ledger.peak === 0, "checkCheckpoint: (a bounds refusal holds nothing: refused before anything is decoded)");
+  check(b1.ledger.maxHeld === 0, "checkCheckpoint: (a bounds refusal holds nothing: refused before anything is decoded)");
   const many = Array.from({ length: TAIL_PATCHES_CAP + 1 }, (_, i) => acceptedBatch(3 + i, [C], 1));
   const b2 = await no(d, ck.blob, many, "bounds", `${TAIL_PATCHES_CAP + 1} tail batches`);
-  check(b2.ledger.peak === 0, "checkCheckpoint: (count + 1: refused before any graph)");
+  check(b2.ledger.maxHeld === 0, "checkCheckpoint: (count + 1: refused before any graph)");
   const atCount = Array.from({ length: TAIL_PATCHES_CAP }, (_, i) => acceptedBatch(3 + i, [C], 1));
   const ac = await checkCheckpoint(codec, d, ck.blob, atCount);
   check(ac.ok || ac.why !== "bounds", `checkCheckpoint: exactly ${TAIL_PATCHES_CAP} tail batches: within the bound (not "bounds")`);
   const b3 = await no(d, ck.blob, [acceptedBatch(3, [C], TAIL_ITEM_CAP + 1)], "bounds", "the tail's charge one byte over TAIL_ITEM_CAP");
-  check(b3.ledger.peak === 0, "checkCheckpoint: (bytes + 1: refused before any graph)");
+  check(b3.ledger.maxHeld === 0, "checkCheckpoint: (bytes + 1: refused before any graph)");
   const atBytes = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C], TAIL_ITEM_CAP)]);
   check(atBytes.ok, "checkCheckpoint: the tail's charge exactly TAIL_ITEM_CAP: within the bound");
   await no({ ...d, sha256: "0".repeat(64) }, ck.blob, tail, "digest", "another sha256");
@@ -168,7 +168,6 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const L = mk("clientC", [A.time], v1, docOf(["x = 1", "late"]));
   const lateTail = [line[2], batch(4, [L])];
   const late = await no(d, ck.blob, lateTail, "needs_more_history", "a late pre-cut patch in the tail");
-  check(late.ledger.peak <= 2 * late.B, "checkCheckpoint: (the late pre-cut refusal: peak <= 2B)");
   const probe = new PatchGraph({ codec });
   probe.add([ck.record, C, L]);
   check(probe.needsMoreHistory() === true, "(the late pre-cut fixture: patchflow says needsMoreHistory)");
@@ -182,9 +181,9 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const one1000 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1000.slice(1)], 1)]);
   check(one1000.ok || one1000.why !== "bounds", "checkCheckpoint: 1000 patches in ONE tail batch: within the bound: " + J(one1000.ok ? "ok" : one1000.why));
   const one1001 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1001.slice(1)], 1)]);
-  check(!one1001.ok && one1001.why === "bounds" && one1001.ledger.peak === 0, "checkCheckpoint: 1001 patches in ONE tail batch: refused (bounds) before any graph");
+  check(!one1001.ok && one1001.why === "bounds" && one1001.ledger.maxHeld === 0, "checkCheckpoint: 1001 patches in ONE tail batch: refused (bounds) before any graph");
   const two1001 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1001.slice(1, 500)], 1), acceptedBatch(4, k1001.slice(500), 1)]);
-  check(!two1001.ok && two1001.why === "bounds" && two1001.ledger.peak === 0, "checkCheckpoint: 500 + 501 patches across two batches: refused (bounds) before any graph");
+  check(!two1001.ok && two1001.why === "bounds" && two1001.ledger.maxHeld === 0, "checkCheckpoint: 500 + 501 patches across two batches: refused (bounds) before any graph");
   const two1000 = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(3, [C, ...k1000.slice(1, 500)], 1), acceptedBatch(4, k1000.slice(500), 1)]);
   check(two1000.ok || two1000.why !== "bounds", "checkCheckpoint: 500 + 500 across two batches: within the bound");
   // (astra's CK-M3; the grader's T7) a record whose causal fields aren't a list of distinct patch ids is refused as
@@ -205,13 +204,17 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(!oddThrew && oddR && !oddR.ok && oddR.why === "tail" && oddR.ledger.total() === 0, "checkCheckpoint: a tail patch the graph throws on: refused (tail), nothing held: " + J(oddThrew ?? { why: oddR.why, held: oddR.ledger.total() }));
   // (astra's CK-M2; the grader's T8) the bytes held are counted as taken, the device's own rows included: B = the blob
   // + the tail's charge + the local rows' JSON bytes; a 1 MiB local edit makes B over 1 MiB, the graph's copy is
-  // exactly those bytes on return, and the peak is 2B (the incoming copy and the working one)
+  // exactly those bytes
   const N0 = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "n0"]));
   const big = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w".repeat(1 << 20)]));
   const bigBytes = Buffer.byteLength(J(big));
   const withBig = await checkCheckpoint(codec, d, ck.blob, tail, [big]);
   const held = ck.blob.length + tail[0].charge + bigBytes;
-  check(withBig.ok && withBig.B === held && withBig.ledger.peak === 2 * held + withBig.V && withBig.ledger.total() === 0, "checkCheckpoint: a 1 MiB local edit: B is the record + the tail + its " + bigBytes + " bytes, the peak 2B + V, nothing held on return: " + J({ B: withBig.B, V: withBig.V, peak: withBig.ledger.peak, held: withBig.ledger.total(), want: held }));
+  check(withBig.ok && withBig.B === held && withBig.ledger.total() === ck.blob.length, "checkCheckpoint: a 1 MiB local edit: B is the record + the tail + its " + bigBytes + " bytes; on return only the record is held: " + J({ B: withBig.B, held: withBig.ledger.total(), want: held }));
+  class Work extends Ledger { constructor() { super(); this.work = 0; } set(n, b) { if (n === "work") this.work = Math.max(this.work, b); super.set(n, b); } }
+  const wl = new Work();
+  await checkCheckpoint(codec, d, ck.blob, tail, [big], wl);
+  check(wl.work === held && wl.maxHeld >= 2 * held, "checkCheckpoint: …its working copy grew by every row it added, the local edit's included, to exactly B (" + held + "): " + J({ work: wl.work, maxHeld: wl.maxHeld }));
   // (the grader's T13) the local rows are charged in UTF-8 bytes, not UTF-16 units: a non-ASCII edit
   const wide = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "é€𝄞".repeat(50000)]));
   const wideBytes = Buffer.byteLength(J(wide));
@@ -228,7 +231,7 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   const ab = await checkCheckpoint(codec, d, ck.blob, tail, [atLocalBytes]);
   check(ab.ok || ab.why !== "bounds", "checkCheckpoint: local rows of exactly LOCAL_BYTES_MAX bytes: within the bound: " + J(ab.ok ? "ok" : ab.why));
   const ob = await checkCheckpoint(codec, d, ck.blob, tail, [padded("p".repeat(LOCAL_BYTES_MAX - base0 + 1))]);
-  check(!ob.ok && ob.why === "bounds" && ob.ledger.peak === 0, "checkCheckpoint: one byte more: refused (bounds) before any graph");
+  check(!ob.ok && ob.why === "bounds" && ob.ledger.maxHeld === 0, "checkCheckpoint: one byte more: refused (bounds) before any graph");
   // (the grader's T12, astra's narrow item) a local row that can't be measured (a BigInt): refused (local), never a
   // rejection, nothing held; and a throw inside the decision (a codec whose merge3 throws): refused, nothing held
   let bigintR, bigintThrew = null;
@@ -242,27 +245,96 @@ const line = [batch(1, [A]), batch(2, [B]), batch(3, [C])];
   check(LOCAL_ROWS_MAX === SYNC_DEBT.docCount && LOCAL_BYTES_MAX === SYNC_DEBT.docBytes, "the local bounds are the journal's per-document debt bounds (SYNC_DEBT)");
   const manyLocal = Array.from({ length: LOCAL_ROWS_MAX + 1 }, () => C);
   const lr = await checkCheckpoint(codec, d, ck.blob, tail, manyLocal);
-  check(!lr.ok && lr.why === "bounds" && lr.ledger.peak === 0, `checkCheckpoint: ${LOCAL_ROWS_MAX + 1} local rows: refused (bounds) before any graph`);
+  check(!lr.ok && lr.why === "bounds" && lr.ledger.maxHeld === 0, `checkCheckpoint: ${LOCAL_ROWS_MAX + 1} local rows: refused (bounds) before any graph`);
   const hugeLocal = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "w".repeat(LOCAL_BYTES_MAX)]));
   const lb = await checkCheckpoint(codec, d, ck.blob, tail, [hugeLocal]);
-  check(!lb.ok && lb.why === "bounds" && lb.ledger.peak === 0, "checkCheckpoint: local rows over LOCAL_BYTES_MAX: refused (bounds) before any graph");
+  check(!lb.ok && lb.why === "bounds" && lb.ledger.maxHeld === 0, "checkCheckpoint: local rows over LOCAL_BYTES_MAX: refused (bounds) before any graph");
   const N = mk("clientD", [C.time], v3, docOf(["x = 1", "y = 2", "z = 3", "mine"]));
   const withLocal = await checkCheckpoint(codec, d, ck.blob, tail, [N]);
   check(withLocal.ok && withLocal.head === hashOf(fullValue([A, B, C, N])), "checkCheckpoint: the device's own row after the tail: usable, the combined value");
 }
 
-// ---- the graphs' caches (astra's CK-M2): a decision's graph keeps one computed value, not one per patch
+// ---- what a decision's graph holds between calls (map r2 G as amended for 0b-2a, astra's DESIGN OK 56082e29): measured
+// after each public call, capped at RETAINED_MAX_B x B.  Not what a call allocates while it runs (TRANSIENT-BUDGET).
 {
   const doc1 = (s) => codec.fromString(J({ type: "cell", id: "c", input: s }));
-  let text = "A".repeat(100000), val = doc1(text);
-  const root = { time: encodePatchId(++clock, "clientZ"), parents: [], patch: codec.makePatch(codec.fromString(""), val), userId: 0 };
-  const ps = [];
-  let parent = root.time;
-  for (let i = 0; i < 50; i++) { text += "X"; const next = doc1(text); const p = { time: encodePatchId(++clock, "clientZ"), parents: [parent], patch: codec.makePatch(val, next) }; ps.push(p); parent = p.time; val = next; }
-  const held = (g) => { const u = new Set([...g.exactCache.values(), ...g.exactMergeCache.values(), ...(g.valueCache?.values?.() ?? []), ...g.recentExact.values(), ...g.recentMerged.values()].map((x) => x?.doc ?? x).filter(Boolean)); return u.size; };
-  const scratch = scratchGraph(codec), plain = new PatchGraph({ codec });
-  for (const g of [scratch, plain]) { g.add([root, ...ps]); g.needsMoreHistory(); g.valueUnavailable(); }
-  check(held(scratch) <= 1 && held(plain) === 51, `scratchGraph: after a decision over a 100,000-character value and 50 edits, its caches hold ${held(scratch)} value (patchflow's defaults: ${held(plain)})`);
+  const cells = (xs) => codec.fromString(xs.map((s, i) => J({ type: "cell", id: "c" + i, input: s })).join("\n"));
+  // records the largest value-holding measured at a call's end
+  class Measured extends Ledger { constructor() { super(); this.values = 0; } set(n, b) { if (n === "values") this.values = Math.max(this.values, b); super.set(n, b); } }
+  const install = async (rootV, kids, chargeOf = (ps) => charge(ps), local = []) => {
+    const root = { time: encodePatchId(++clock, "clientZ"), parents: [], patch: codec.makePatch(codec.fromString(""), rootV), userId: 0 };
+    const ck = await makeCheckpoint(codec, exactCut(codec, [acceptedBatch(1, [root], 1)], 1, root.time).graph, root.time);
+    const d = { epoch: 1, at_seq: 1, recv_at: 0, chain_at: "0".repeat(64), cut_patch: root.time, sha256: ck.sha256, bytes: ck.bytes };
+    const ps = kids(root);
+    const l = new Measured();
+    const r = await checkCheckpoint(codec, d, ck.blob, [acceptedBatch(2, ps, chargeOf(ps))], local, l);
+    return { r, l, ck, ps, root };
+  };
+  // (astra's chain: a 100,000-character value and 50 one-character edits)
+  let text = "A".repeat(100000);
+  const chain = (root) => { const out = []; let parent = root.time, val = doc1(text), t2 = text; for (let i = 0; i < 50; i++) { t2 += "X"; const next = doc1(t2); const p = { time: encodePatchId(++clock, "clientZ"), parents: [parent], patch: codec.makePatch(val, next) }; out.push(p); parent = p.time; val = next; } return out; };
+  const c = await install(doc1(text), chain);
+  check(c.r.ok && c.l.values <= RETAINED_MAX_B * c.r.B && c.l.values > 0, `checkCheckpoint (the grader's Z7: its own graph): astra's chain, 50 edits on 100,000 characters: accepted, the values it held between calls ${c.l.values} B <= ${RETAINED_MAX_B}B (B ${c.r.B})`);
+  // (the same graph built as checkCheckpoint's would have been with patchflow's default caches: what it would have held)
+  const plain = new PatchGraph({ codec });
+  plain.add([c.r.record, ...c.ps]);
+  plain.needsMoreHistory(); plain.valueUnavailable(); plain.value();
+  check(heldValues(codec, plain).count >= 50 && heldValues(codec, plain).bytes > RETAINED_MAX_B * c.r.B, "(with patchflow's default caches the same work holds " + heldValues(codec, plain).count + " values, past the cap: so the cap above sees checkCheckpoint's own graph)");
+  // exactCut's own graph (the grader's Z8): after its decision, one value held, not one per edit
+  const prefix = [acceptedBatch(1, [c.root], 1), acceptedBatch(2, c.ps, 1)];
+  const ec = exactCut(codec, prefix, 2, c.ps.at(-1).time);
+  check(ec.ok && heldValues(codec, ec.graph).count <= 1, "exactCut (the grader's Z8: its own graph): after its decision over the chain, values held: " + (ec.ok ? heldValues(codec, ec.graph).count : ec.why));
+  // the grader's Z6c: the valueCache is one of the stores; patchflow fills it on its apply-all path (a codec without
+  // merge3: the notebook codec's own base, history.js createImmerDbCodec(SCHEMA)), one value per version; the scratch
+  // graphs keep none, patchflow's defaults keep them
+  const applyAll = createImmerDbCodec(SCHEMA);
+  const sv = scratchGraph(applyAll), dv = new PatchGraph({ codec: applyAll });
+  for (const g of [sv, dv]) { g.add([c.root, ...c.ps]); for (const p of c.ps.slice(0, 10)) g.version(p.time); g.value(); }
+  check(sv.valueCache.size === 0 && dv.valueCache.size >= 10, `scratchGraph: patchflow's valueCache after 10 versions: ${sv.valueCache.size} (its defaults: ${dv.valueCache.size})`);
+  // (astra's eight concurrent heads, children of the cut: their merge holds many values between calls) refused, nothing held
+  const heads = (root) => Array.from({ length: 8 }, (_, i) => ({ time: encodePatchId(++clock, "clientH" + i), parents: [root.time], patch: codec.makePatch(doc1(text), doc1(text + "h" + i)) }));
+  const h8 = await install(doc1(text), heads);
+  check(!h8.r.ok && h8.r.why === "bounds" && h8.r.ledger.total() === 0 && h8.l.values > RETAINED_MAX_B * h8.r.B, `checkCheckpoint: astra's eight concurrent heads (quiescent holding ${h8.l.values} B > ${RETAINED_MAX_B}B, B ${h8.r.B}): refused (bounds), nothing held`);
+  // a merge of two heads whose holding is between B and 2B: accepted
+  const two = (root) => [0, 1].map((i) => ({ time: encodePatchId(++clock, "clientT" + i), parents: [root.time], patch: codec.makePatch(cells(["s".repeat(10)]), cells(["s".repeat(10), (i ? "b" : "a").repeat(30000)])) }));
+  const m2 = await install(cells(["s".repeat(10)]), two);
+  check(m2.r.ok && m2.l.values > m2.r.B && m2.l.values <= RETAINED_MAX_B * m2.r.B && m2.r.ledger.total() === m2.ck.blob.length, `checkCheckpoint: a two-head merge holding between B and 2B (${m2.l.values} B, B ${m2.r.B}): accepted, the record counted on return`);
+  // the cap exactly: a chain whose holding is one value, the tail's declared charge chosen so 2B equals it; and one less
+  const exact = async (minus) => {
+    for (let n = 1000; n < 1004; n++) {
+      const kid = (root) => [{ time: encodePatchId(++clock, "clientE"), parents: [root.time], patch: codec.makePatch(doc1("e"), doc1("e" + "x".repeat(n))) }];
+      const probe = await install(doc1("e"), kid, () => 1 << 20);
+      if (!probe.r.ok || probe.l.values % 2) continue;
+      const chargeAt = probe.l.values / 2 - probe.ck.blob.length;
+      return install(doc1("e"), kid, () => chargeAt - minus);
+    }
+    return null;
+  };
+  const atCap = await exact(0), underCap = await exact(1);
+  check(atCap && atCap.r.ok && atCap.l.values === RETAINED_MAX_B * atCap.r.B, "checkCheckpoint: values held exactly RETAINED_MAX_B x B: accepted: " + J(atCap && { ok: atCap.r.ok, values: atCap.l.values, B: atCap.r.B }));
+  check(underCap && !underCap.r.ok && underCap.r.why === "bounds" && underCap.r.ledger.total() === 0, "checkCheckpoint: B one byte smaller (the same values now past the cap): refused (bounds), nothing held");
+  // the grader's Z11: the values are charged in UTF-8 bytes
+  const wide = cells(["é€𝄞".repeat(20000)]);
+  const g = scratchGraph(codec);
+  const wroot = { time: encodePatchId(++clock, "clientW"), parents: [], patch: codec.makePatch(codec.fromString(""), wide), userId: 0 };
+  g.add([wroot]); g.value();
+  const hv = heldValues(codec, g);
+  check(hv.count === 1 && hv.bytes === Buffer.byteLength(codec.toString(wide)) && hv.bytes !== codec.toString(wide).length, `heldValues: a non-ASCII value is charged its UTF-8 bytes (${hv.bytes}), not its UTF-16 length`);
+  // the reader fails closed: a graph without one of patchflow 0.16's stores, or a store holding something not a document
+  let missing = null, odd = null;
+  try { heldValues(codec, { ...g, recentMerged: undefined, recentExact: g.recentExact, exactCache: g.exactCache, exactMergeCache: g.exactMergeCache, mergeCache: g.mergeCache, valueCache: g.valueCache, legacyCheckpoints: g.legacyCheckpoints }); } catch (e) { missing = String(e); }
+  try { heldValues(codec, Object.assign(Object.create(Object.getPrototypeOf(g)), g, { recentExact: new Map([["x", 42]]) })); } catch (e) { odd = String(e); }
+  check(missing && /recentMerged/.test(missing) && odd && /isn't a document/.test(odd), "heldValues: a missing store, or a value that isn't a document: refused (it throws): " + J({ missing, odd }));
+  // every store is read: a graph shaped as patchflow 0.16's, one Doc in exactly one store (as each holds it: the Doc,
+  // {doc}, or {key, doc, last}), is counted, store by store
+  const one = cells(["store"]), oneBytes = Buffer.byteLength(codec.toString(one));
+  const empty = () => ({ recentExact: new Map(), recentMerged: new Map(), exactCache: new Map(), exactMergeCache: new Map(), mergeCache: new Map(), valueCache: new Map(), legacyCheckpoints: new Map(), pinnedExact: undefined, pinnedMerged: undefined, recentCheckpoint: undefined });
+  for (const [store, value] of [["recentExact", one], ["recentMerged", one], ["exactCache", { doc: one }], ["exactMergeCache", { doc: one }], ["mergeCache", one], ["valueCache", { doc: one, count: 1 }], ["legacyCheckpoints", { doc: one, last: 1 }], ["pinnedExact", one], ["pinnedMerged", one], ["recentCheckpoint", { key: "k", doc: one, last: 1 }]]) {
+    const fake = empty();
+    fake[store] = store === "recentCheckpoint" ? value : new Map([["k", value]]);
+    const r = heldValues(codec, fake);
+    check(r.count === 1 && r.bytes === oneBytes, `heldValues: a Doc held in ${store} is counted: ${J(r)}`);
+  }
 }
 
 // ---- reconcile (r9 §6.2): the full identity only
