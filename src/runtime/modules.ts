@@ -128,8 +128,8 @@ export function importModule(name: string): any {
   if (existing !== undefined) {
     if (existing === null) halted(name);
     // (an import while a grading allowance is armed: a module already loaded is checked too, not only one
-    // being loaded; a plain read of bit 3, as consumeCtrlC's poll; daybreak3's Q7 ruling on #628)
-    if (INTR[0] & INTR_GRADING) loader.graded(name, existing);
+    // being loaded; bit 3 read as src/compile.ts reads it, not an interrupt poll; daybreak3's Q7 ruling on #628)
+    if (Atomics.load(INTR, 0) & INTR_GRADING) loader.graded(name, existing);
     return existing;
   }
   const dot = name.lastIndexOf(".");
