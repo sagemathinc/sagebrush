@@ -119,9 +119,15 @@ async function main() {
     if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
     return { ws, at: target, rev: made.rev };
   }
-  // (a notebook as written: its cells, outputs included, and its language; key order aside)
+  // (a notebook as written: all of it, cells with their outputs, its language, its metadata, everything a later save
+  // replaces; key order aside.  Not the store's own envelope, which the workspace sets on every write (the revision,
+  // the journal's marks, and the name, from the path): astra B1-COPY-1)
   const canon = (v: any): any => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
-  const sameDoc = (a: any, b: any) => JSON.stringify(canon([a?.cells ?? [], a?.mode ?? "python"])) === JSON.stringify(canon([b?.cells ?? [], b?.mode ?? "python"]));
+  const asWritten = (d: any) => {
+    const { id: _i, rev: _r, updated: _u, baseRev: _b, j: _j, hash: _h, unjournaled: _n, stampOf: _s, name: _m, ...rest } = d ?? {};
+    return JSON.stringify(canon({ ...rest, cells: rest.cells ?? [], mode: rest.mode ?? "python" }));
+  };
+  const sameDoc = (a: any, b: any) => asWritten(a) === asWritten(b);
   // (a store that keeps the notebook in memory for the page and, once there is a copy, saves every change to it with
   // its revision: a change made elsewhere (another tab) is a conflict, said, never written over)
   class CopyStore extends MemoryStore {
