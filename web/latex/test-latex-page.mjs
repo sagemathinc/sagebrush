@@ -1367,6 +1367,25 @@ try {
     const PROG = D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0);
     await setAt(PROG, at0 + "\\begin{itemize}".length);
     check((await st()).v === PROG, "P1a: a programmatic change of the text (setText) closes nothing");
+    // (grader #583 E8: a name with a space is no environment's: no close)
+    await none(D0, at0, "\\begin{a b", "for \\begin{a b} (a space in the name)");
+    // (E10: a % inside verbatim is text, so its \end{verbatim} still ends it: a later \begin{x} closes)
+    {
+      const T = D0.slice(0, at0) + "\\begin{verbatim}\n% \\end{verbatim}\n" + D0.slice(at0), o = at0 + "\\begin{verbatim}\n% \\end{verbatim}\n".length;
+      await setAt(T, o); await typed("\\begin{x"); await keyChar("}");
+      check((await st()).v === T.slice(0, o) + "\\begin{x}\n\\end{x}" + T.slice(o), "P1a: after \\begin{verbatim}, a % line and \\end{verbatim}, \\begin{x} still closes");
+    }
+    // (G5: a "}" pasted, not typed: no close)
+    {
+      const T = D0.slice(0, at0) + "\\begin{itemize" + D0.slice(at0), o = at0 + "\\begin{itemize".length;
+      await setAt(T, o);
+      await ev(`(() => { const s = document.querySelector(".tex-src"); s.setRangeText("}", ${o}, ${o}, "end"); s.dispatchEvent(new InputEvent("input", { inputType: "insertFromPaste", data: "}", bubbles: true })); return true; })()`);
+      await sleep(100);
+      check((await st()).v === D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0), "P1a: a pasted } closes nothing");
+    }
+    // (G6: the whole \begin{itemize} inserted at once, not its "}" typed: no close)
+    await setAt(D0, at0); await typed("\\begin{itemize}"); await sleep(100);
+    check((await st()).v === D0.slice(0, at0) + "\\begin{itemize}" + D0.slice(at0), "P1a: \\begin{itemize} inserted whole (not its } typed) closes nothing");
   }
   // ---- Run (#561, William: "I really hope sagetex exists tomorrow"): the SageTeX code run in Sage, in page order, in the
   // runner, on the person's click only; its results written beside the .tex and shown. In the toolbar, right after the
