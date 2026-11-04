@@ -11,6 +11,7 @@ for (const [v, want] of [
   ["", null], ["Book", null], ["./Book", null], ["/Book/", null], ["//Book", null], ["/Book//x", null],
   ["/..", null], ["/Book/..", null], ["/Book/../..", null], ["/./Book", null], ["/Book/.", null],
   ["/$pyjs", null], ["/$pyjs/lib", null], ["/$x", null], ["/Book\u0000x", null], ["/Book\nx", null],
+  ["/Book\u001fx", null], ["/Book\u007fx", null], ["/Book~x", "/Book~x"], ["/Café", "/Café"], ["/Book\u0080x", "/Book\u0080x"],
   ["/" + "a".repeat(1024), null], [42, null], [null, null], [["/Book"], null], [{ toString: () => "/Book" }, null],
 ]) ok(startDirOf(v) === want, `${JSON.stringify(typeof v === "string" ? v.slice(0, 40) : String(v))} -> ${JSON.stringify(want)}`);
 console.log(failures ? `${failures} failed` : "all passed");
