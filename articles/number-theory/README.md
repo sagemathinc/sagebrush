@@ -52,8 +52,9 @@ article says so.
   evidence from two independent implementations (not a guarantee: shared
   algorithms, assumptions or reference data can still produce correlated
   mistakes). See [what is shared](/articles/#independent).
-- **Clean-room.** Papers and books only. PARI, Sage, Magma and GAP were
-  used as binary oracles and benchmarks; their sources were not read.
+- **Clean-room.** Papers and books, with one exception (smalljac, below).
+  PARI, Sage, Magma and GAP were used as binary oracles and benchmarks;
+  their sources were not read.
   The a_p engine is an independent Rust implementation that follows
   smalljac's genus-1 strategy: the smalljac C source was read with Andrew
   Sutherland's permission, no smalljac code is copied or shared, and
