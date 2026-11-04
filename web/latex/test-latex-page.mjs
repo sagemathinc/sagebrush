@@ -1360,12 +1360,23 @@ try {
     if (open1) await ev(`(document.querySelector(".tex-head .tex-titlein").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
     const caught = await until(`${T}?.textContent === "elsewhere.tex" && document.title.startsWith("elsewhere.tex")`, 5000);
     check(open1 && caught, "M0: renamed elsewhere while the name is being edited, then Escape: the new name shown", await ev(`[${T}?.textContent, document.title]`));
+    // (grader N5: the results file found before the rename, replaced by another one at its path while the .tex is
+    //  renamed: the new one is not this file's, so it stays where it is, said)
+    await mk("/m0/elsewhere.tex.results.json", enc("ours"));
+    await ev(`(window.__sbTexRenamed = async (from) => { await ${W}.remove(from + ".results.json"); await ${W}.create(from + ".results.json", { content: new TextEncoder().encode("REPLACED") }); }, 1)`);
+    await retitle("n5");
+    const n5renamed = await until(`${T}.textContent === "n5.tex"`, 5000);
+    const n5said = await statusIs(/^Renamed; 1 file beside it kept its old name$/, 5000);
+    const n5 = { stayed: await read("/m0/elsewhere.tex.results.json"), taken: await read("/m0/n5.tex.results.json") };
+    await ev(`(window.__sbTexRenamed = undefined, 1)`);
+    check(n5renamed && n5said && n5.stayed === "REPLACED" && n5.taken === null, "M0: a results file replaced at the old path during the rename stays where it is, said", { n5renamed, n5said, n5, status: await ev(`document.querySelector(".tex-status")?.textContent`) });
   }
-  // (daybreak3 M0-SEM-2: a file that can't be saved here (a NUL in it): its name is plain text, no rename offered)
+  // (daybreak3 M0-SEM-2, grader REQUIRED 1: a file that can't be saved here, opened as text (mixed line endings, save.ts):
+  //  its name is plain text, no rename offered)
   {
     const T = `document.querySelector(".tex-head .tex-title")`;
-    await open(await mk("/m0/nul.tex", [65, 0, 66, 10]));
-    await until(`${T}?.textContent === "nul.tex"`, 20000);
+    await open(await mk("/m0/mixed.tex", [97, 13, 10, 98, 10, 99, 10]));
+    await until(`${T}?.textContent === "mixed.tex" && !!document.querySelector(".tex-src")`, 20000);
     const plain = await ev(`(() => { const t = ${T}; return { role: t.getAttribute("role"), tab: t.tabIndex, tip: t.title, cls: t.className }; })()`);
     await ev(`(${T}.click(), 1)`); await sleep(400);
     const noField = await ev(`!document.querySelector(".tex-head .tex-titlein")`);
