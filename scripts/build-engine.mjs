@@ -20,4 +20,4 @@ new WebAssembly.Module(readFileSync(src)); // validate
 installWasm(src, join(root, "wasm", "sagebrush-engine.wasm"));
 console.log(`engine: ${readFileSync(src).length} bytes`);
 // (and the numerics core's module, numerics-core r4.2: check-fresh-wasm.mjs then holds both to their sources)
-for (const [f, n] of Object.entries(buildNd(join(target, "nd")))) console.log(`${f}: ${n} bytes`);
+console.log(`nd: ${buildNd(join(target, "nd"))} bytes`);

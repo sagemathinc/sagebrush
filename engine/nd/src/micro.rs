@@ -2,12 +2,12 @@
 //! values), for one KC block (r4.2 §12: one blocking layer, a tuned microkernel per target).
 //!
 //! Determinism (r4.2 §7). Every kernel computes each element of its tile as `t = 0; for p in order:
-//! t = t + a_p * b_p` (or, in an FMA kernel, `t = fma(a_p, b_p, t)`), and the blocking layer adds each KC
-//! block's `t` into C in order. That order doesn't depend on the tile shape, so:
+//! t = t + a_p * b_p` (or, in an FMA kernel, `t = fma(a_p, b_p, t)`, correctly rounded once), and the blocking
+//! layer adds each KC block's `t` into C in order. That order doesn't depend on the tile shape, so:
 //! - every kernel without FMA ([`Scalar`], the Wasm SIMD128 one) gives the same bits, whatever its tile;
-//! - every kernel with a fused multiply-add ([`ScalarFma`], AVX2+FMA, NEON) gives the same bits as each other;
-//! - the Wasm relaxed-SIMD kernel uses `f64x2.relaxed_madd`, which an engine may fuse or not: its bits equal
-//!   one family or the other, fixed per engine (per backend, r4.2 §7), never a third result.
+//! - every kernel with a fused multiply-add ([`ScalarFma`], AVX2+FMA, NEON) gives the same bits as each other.
+//! (WebAssembly's relaxed-SIMD madd is not used: its spec lets an engine fuse or not on each call, so no
+//! bit-reproducible result could be claimed for it. #615 ruling, Nov 4.)
 
 /// The length of the accumulator handed to [`Micro::tile`]: room for the largest tile any kernel uses (MR * NR).
 pub const ACC_LEN: usize = 64;
@@ -97,39 +97,6 @@ impl Micro for Simd128 {
                 let bj = f64x2_splat(bp[j]);
                 for h in 0..2 {
                     c[j * 2 + h] = f64x2_add(c[j * 2 + h], f64x2_mul(av[h], bj));
-                }
-            }
-        }
-        for (k, v) in c.iter().enumerate() {
-            acc[2 * k] = f64x2_extract_lane::<0>(*v);
-            acc[2 * k + 1] = f64x2_extract_lane::<1>(*v);
-        }
-    }
-}
-
-/// The WebAssembly relaxed-SIMD kernel, 4 x 4, `f64x2.relaxed_madd` (fused on engines with FMA hardware):
-/// built into its own module (scripts/build-nd.mjs), loaded where the engine validates relaxed SIMD.
-/// (4 x 4 measured best under V8 with and without FMA: larger tiles spill its 16 vector registers.)
-#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-#[derive(Clone, Copy)]
-pub struct RelaxedFma;
-
-#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-impl Micro for RelaxedFma {
-    const MR: usize = 4;
-    const NR: usize = 4;
-    const NAME: &'static str = "wasm-relaxed-fma-4x4";
-    #[inline]
-    fn tile(&self, kc: usize, a: &[f64], b: &[f64], acc: &mut [f64; ACC_LEN]) {
-        use core::arch::wasm32::*;
-        let (a, b) = (&a[..kc * 4], &b[..kc * 4]);
-        let mut c = [f64x2_splat(0.0); 8];
-        for (ap, bp) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
-            let av = [f64x2(ap[0], ap[1]), f64x2(ap[2], ap[3])];
-            for j in 0..4 {
-                let bj = f64x2_splat(bp[j]);
-                for h in 0..2 {
-                    c[j * 2 + h] = f64x2_relaxed_madd(av[h], bj, c[j * 2 + h]);
                 }
             }
         }

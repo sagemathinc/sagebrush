@@ -614,7 +614,7 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_AGENTS === "1") 
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
-// threads of the tab, through engine/nd's WebAssembly modules (wasm/sagebrush-nd.wasm, and wasm/sagebrush-nd-fma.wasm where relaxed SIMD validates). Flagged like the questions
+// threads of the tab, through engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm). Flagged like the questions
 // preview: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_THREADS=1
 rmSync(join(here, "dist", "threads"), { recursive: true, force: true });
 if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_THREADS === "1") {
@@ -627,7 +627,7 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_THREADS === "1")
     }
   }
   copyFileSync(join(here, "threads", "index.html"), join(here, "dist", "threads", "index.html"));
-  for (const f of ["sagebrush-nd.wasm", "sagebrush-nd-fma.wasm"]) copyFileSync(join(here, "..", "wasm", f), join(here, "dist", "threads", f));
+  copyFileSync(join(here, "..", "wasm", "sagebrush-nd.wasm"), join(here, "dist", "threads", "sagebrush-nd.wasm"));
 }
 if (hasSite) mkdirSync(join(siteDir, "public", "embed"), { recursive: true });
 if (hasSite) mkdirSync(join(siteDir, "public", "runner"), { recursive: true });

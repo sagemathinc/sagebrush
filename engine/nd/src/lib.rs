@@ -7,9 +7,8 @@
 //! Determinism (r4.2 §7): every element of a product is summed in the same order (k in blocks of
 //! [`gemm::KC`], in order; within a block p = 0, 1, ...; then added into C) whatever the thread count, the
 //! column partition and the tile shape. Kernels without FMA give the bits of the portable scalar kernel;
-//! kernels with a fused multiply-add give the bits of the scalar `mul_add` kernel; the Wasm relaxed-SIMD
-//! kernel gives one or the other, fixed per engine ([`micro`]). So a result is bit-identical across thread
-//! counts on one backend and kernel.
+//! kernels with a fused multiply-add give the bits of the scalar `mul_add` kernel ([`micro`]). So a result is
+//! bit-identical across thread counts on one backend and kernel.
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 pub mod boundary;

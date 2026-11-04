@@ -38,10 +38,8 @@ pub enum Kernel {
     /// the portable kernel (no FMA), 4 x 4 (not in a SIMD Wasm module, which never selects it)
     #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     Scalar,
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128", not(target_feature = "relaxed-simd")))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     Simd128,
-    #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-    RelaxedFma,
     #[cfg(target_arch = "x86_64")]
     Avx2Fma(crate::micro::Avx2Fma),
     #[cfg(target_arch = "aarch64")]
@@ -53,9 +51,7 @@ impl Kernel {
     /// natively, AVX2+FMA if the CPU has it, else the portable one. (NEON is compiled but not selected until
     /// a CI host executes it: micro::NEON_ENABLED.) Natively the CPU check runs once and is cached.
     pub fn selected() -> Kernel {
-        #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-        return Kernel::RelaxedFma;
-        #[cfg(all(target_arch = "wasm32", target_feature = "simd128", not(target_feature = "relaxed-simd")))]
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
         return Kernel::Simd128;
         #[cfg(target_arch = "x86_64")]
         {
@@ -74,10 +70,8 @@ impl Kernel {
         match self {
             #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
             Kernel::Scalar => <Scalar<4, 4> as Micro>::NAME,
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128", not(target_feature = "relaxed-simd")))]
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             Kernel::Simd128 => <crate::micro::Simd128 as Micro>::NAME,
-            #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-            Kernel::RelaxedFma => <crate::micro::RelaxedFma as Micro>::NAME,
             #[cfg(target_arch = "x86_64")]
             Kernel::Avx2Fma(_) => <crate::micro::Avx2Fma as Micro>::NAME,
             #[cfg(target_arch = "aarch64")]
@@ -90,10 +84,8 @@ impl Kernel {
         match self {
             #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
             Kernel::Scalar => 4,
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128", not(target_feature = "relaxed-simd")))]
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             Kernel::Simd128 => <crate::micro::Simd128 as Micro>::NR,
-            #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-            Kernel::RelaxedFma => <crate::micro::RelaxedFma as Micro>::NR,
             #[cfg(target_arch = "x86_64")]
             Kernel::Avx2Fma(_) => <crate::micro::Avx2Fma as Micro>::NR,
             #[cfg(target_arch = "aarch64")]
@@ -106,10 +98,8 @@ impl Kernel {
         match self {
             #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
             Kernel::Scalar => gemm_cols_with(&Scalar::<4, 4>, a, b, c_cols, ldc, j_begin, j_end, scratch),
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128", not(target_feature = "relaxed-simd")))]
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             Kernel::Simd128 => gemm_cols_with(&crate::micro::Simd128, a, b, c_cols, ldc, j_begin, j_end, scratch),
-            #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
-            Kernel::RelaxedFma => gemm_cols_with(&crate::micro::RelaxedFma, a, b, c_cols, ldc, j_begin, j_end, scratch),
             #[cfg(target_arch = "x86_64")]
             Kernel::Avx2Fma(k) => gemm_cols_with(&k, a, b, c_cols, ldc, j_begin, j_end, scratch),
             #[cfg(target_arch = "aarch64")]
@@ -224,8 +214,12 @@ pub fn gemm_cols(a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usiz
 #[allow(clippy::too_many_arguments)]
 pub fn gemm_cols_with<K: Micro>(kern: &K, a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usize, j_end: usize, scratch: &mut [f64]) -> bool {
     let (mr, nr) = (K::MR, K::NR);
+    // (a kernel's tile must be nonempty and fit the accumulator, checked before anything divides by it)
+    if mr == 0 || nr == 0 || mr.checked_mul(nr).is_none_or(|t| t > ACC_LEN) {
+        return false;
+    }
     let (mcb, ncb) = (mc_of(mr), nc_of(nr));
-    if mr == 0 || nr == 0 || mr * nr > ACC_LEN || mcb == 0 || ncb == 0 {
+    if mcb == 0 || ncb == 0 {
         return false;
     }
     let (m, k) = (a.rows, a.cols);
@@ -460,8 +454,7 @@ mod tests {
     }
 
     /// The FMA family's pin: C for the same seeded 97 x 257 x 513 product from every kernel with a fused
-    /// multiply-add (scalar `mul_add`, AVX2+FMA, NEON; and the Wasm relaxed-SIMD kernel on an engine that
-    /// fuses). Differs from [`CROSS_KERNEL_FNV`] only by fusing.
+    /// multiply-add (scalar `mul_add`, AVX2+FMA, NEON). Differs from [`CROSS_KERNEL_FNV`] only by fusing.
     pub(crate) const CROSS_KERNEL_FNV_FMA: u64 = 0x46f387dbd0333294;
 
     #[test]
@@ -513,6 +506,61 @@ mod tests {
         assert!(!gemm_cols_with(&crate::micro::Scalar::<16, 8>, &a, &a, &mut c, 8, 0, 8, &mut s));
         assert!(c.iter().all(|&x| x == 7.0));
         assert!(gemm_cols_with(&crate::micro::Scalar::<8, 8>, &a, &a, &mut c, 8, 0, 8, &mut s));
+        // (a zero-sized tile, and one whose MR * NR overflows: refused, not a division by zero or a wrap)
+        c.fill(7.0);
+        assert!(!gemm_cols_with(&crate::micro::Scalar::<0, 4>, &a, &a, &mut c, 8, 0, 8, &mut s));
+        assert!(!gemm_cols_with(&crate::micro::Scalar::<4, 0>, &a, &a, &mut c, 8, 0, 8, &mut s));
+        assert!(!gemm_cols_with(&Huge, &a, &a, &mut c, 8, 0, 8, &mut s));
+        assert!(c.iter().all(|&x| x == 7.0));
+    }
+
+    /// A (safe, invalid) kernel whose MR * NR overflows usize.
+    #[derive(Clone, Copy)]
+    struct Huge;
+    impl crate::micro::Micro for Huge {
+        const MR: usize = usize::MAX / 2;
+        const NR: usize = 3;
+        const NAME: &'static str = "huge";
+        fn tile(&self, _: usize, _: &[f64], _: &[f64], _: &mut [f64; crate::micro::ACC_LEN]) {
+            unreachable!("never called: refused first")
+        }
+    }
+
+    /// Each kernel's recorded width is its tile's NR, and the partition deals whole NR blocks (grader E1).
+    #[test]
+    fn partition_is_in_whole_tiles_of_the_kernel() {
+        assert_eq!(Kernel::Scalar.nr(), <Scalar<4, 4> as crate::micro::Micro>::NR);
+        #[cfg(target_arch = "x86_64")]
+        if let Some(k) = crate::micro::Avx2Fma::detect() {
+            assert_eq!(Kernel::Avx2Fma(k).nr(), 6);
+        }
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(Kernel::Neon.nr(), 6);
+        for nr in [4, 6] {
+            for n in [0, 1, 5, 6, 7, 12, 13, 100, 1000] {
+                for t in 1..9 {
+                    for id in 0..t {
+                        let (j0, j1) = partition(n, t, id, nr);
+                        assert!(j0 == n || j0 % nr == 0, "n={n} t={t} id={id} nr={nr}: starts at {j0}");
+                        assert!(j1 == n || j1 % nr == 0, "n={n} t={t} id={id} nr={nr}: ends at {j1}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// On CI's x86-64 runners the AVX2+FMA kernel must actually run (grader E2): a runner without it would
+    /// otherwise pass every AVX2 assertion by skipping it. (GitHub Actions sets GITHUB_ACTIONS=true itself;
+    /// SAGEBRUSH_REQUIRE_AVX2=1 asks for the same anywhere.)
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn avx2_runs_where_required() {
+        extern crate std;
+        let required = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") || std::env::var("SAGEBRUSH_REQUIRE_AVX2").as_deref() == Ok("1");
+        if required {
+            assert!(crate::micro::Avx2Fma::detect().is_some(), "this x86-64 host lacks AVX2+FMA, so the AVX2 kernel's tests would be skipped");
+            assert_eq!(Kernel::selected().name(), "avx2-fma-8x6");
+        }
     }
 
     #[test]

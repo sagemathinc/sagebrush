@@ -4,10 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
-// The committed numerics-core modules (engine/nd; numerics-core r4.2, M0 and P2a), each exactly as shipped:
-// wasm/sagebrush-nd.wasm (SIMD128, mul then add) and wasm/sagebrush-nd-fma.wasm (relaxed-SIMD madd). For each: its GEMM against a plain product on an edge shape, its threads' shares (1, 3 and 8), the bits it
-// must share with a native kernel family (engine/nd's pins: the SIMD128 module has the scalar kernel's bits; the
-// relaxed one, the scalar kernel's or the scalar mul_add kernel's, whichever this engine's madd gives), and
+// The committed numerics-core module (engine/nd; numerics-core r4.2, M0 and P2a), exactly as shipped:
+// wasm/sagebrush-nd.wasm (SIMD128, mul then add): its GEMM against a plain product on an edge shape, its threads' shares (1, 3 and 8), the bits it
+// must share with the native kernels without FMA (engine/nd's CROSS_KERNEL_FNV), and
 // every boundary refusal of its entry point, each leaving memory untouched (E1/ND-M1: the host's part above
 // __heap_base, the descriptor outside the writable arena, C and the scratch inside it, stacks below it). (That the committed module is what
 // scripts/build-nd.mjs makes from engine/nd is the engine-wasm job's check-fresh-wasm.mjs: build-engine.mjs
@@ -17,26 +16,10 @@ const PAGE = 65536;
 // the memory map (engine/nd/src/boundary.rs): the module's own data and stack below its floor; the descriptor at
 // BASE; thread stacks (1 MiB each) from STACKS; the writable arena from ARENA
 const BASE = 8 << 20, STACKS = BASE + PAGE, STACK = 1 << 20, ARENA = 16 << 20;
-// (engine/nd/src/gemm.rs CROSS_KERNEL_FNV and CROSS_KERNEL_FNV_FMA: the kernels without and with fused madd)
+// (engine/nd/src/gemm.rs CROSS_KERNEL_FNV: the kernels without FMA, the SIMD128 one among them)
 const CROSS_KERNEL_FNV = 0x364c3cb66df0cabbn;
-const CROSS_KERNEL_FNV_FMA = 0x46f387dbd0333294n;
-// Whether this engine fuses f64x2.relaxed_madd: V8 (Node) lowers it to a fused multiply-add on arm64 and on
-// x64 CPUs with FMA3, and otherwise to mul then add. Where it fuses, the relaxed module must give the FMA
-// family's bits (so a kernel that silently stopped using madd fails here, not only in a timing).
-const engineFuses = (() => {
-  if (process.arch === "arm64") return true;
-  if (process.arch !== "x64" || process.platform !== "linux") return undefined; // (unknown: either family)
-  return / fma( |$)/m.test(readFileSync("/proc/cpuinfo", "utf8").split("\n").find((l) => l.startsWith("flags")) ?? "");
-})();
-// the modules: file, the microkernel each must report, and the bits it may give here
-const MODULES = [
-  { file: "sagebrush-nd.wasm", kernel: "wasm-simd128-4x4", pins: [CROSS_KERNEL_FNV] },
-  {
-    file: "sagebrush-nd-fma.wasm",
-    kernel: "wasm-relaxed-fma-4x4",
-    pins: engineFuses === undefined ? [CROSS_KERNEL_FNV, CROSS_KERNEL_FNV_FMA] : [engineFuses ? CROSS_KERNEL_FNV_FMA : CROSS_KERNEL_FNV],
-  },
-];
+// the module: file, the microkernel it must report, and its bits (a list, so more modules can be added)
+const MODULES = [{ file: "sagebrush-nd.wasm", kernel: "wasm-simd128-4x4", pins: [CROSS_KERNEL_FNV] }];
 
 type Exports = { __stack_pointer: WebAssembly.Global; nd_gemm_part(desc: number, id: number): number; nd_info(what: number): number };
 
