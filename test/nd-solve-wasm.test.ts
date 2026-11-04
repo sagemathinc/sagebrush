@@ -234,7 +234,7 @@ for (const mode of [GESV, MATLAB]) test(`nd_solve (mode ${mode}): the smallest s
 test("nd_solve refuses every bad layout before writing anything: each region pair, alignment, the work's length, the descriptor and the stack", () => {
   const [n, r] = [12, 2];
   const L = layout(n, r, n, n, 2 * STACK);
-  const pages = Math.ceil(L.hi / PAGE) + 1;
+  const pages = Math.ceil(L.hi / PAGE) + 1 + 300;
   const { memory, ex } = instance(pages);
   const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
   const floor = ex.nd_info(1);
@@ -274,8 +274,14 @@ test("nd_solve refuses every bad layout before writing anything: each region pai
   refused("MATLAB mode with gesv's work", with_(9, workLen(n, r, GESV)));
   // (the arena, the descriptor, the caller's stack)
   refused("the report outside the arena", with_(11, g[4] + 8));
-  // (grader T3: B, ipiv or work alone outside the arena, past its end)
-  for (const [i, what] of [[1, "B"], [2, "ipiv"], [3, "work"]] as const) refused(`${what} outside the arena`, with_(i, L.hi + 64));
+  // (grader T3: B, ipiv or work alone outside the arena, past its end, at an 8-aligned place so that only the arena
+  // refuses it (#621 G-T3); the control: the same place with the arena extended over it runs)
+  const out8 = Math.ceil((L.hi + 64) / 8) * 8;
+  for (const [i, what] of [[1, "B"], [2, "ipiv"], [3, "work"]] as const) {
+    refused(`${what} outside the arena`, with_(i, out8));
+    put(BASE, g.map((x, j) => (j === i ? out8 : j === 11 ? out8 + (16 << 20) : x)));
+    assert.equal(ex.nd_solve(BASE), 1, `${what}: the control, inside the extended arena`);
+  }
   refused("the descriptor in the arena", g, L.hi - 64);
   refused("a misaligned descriptor", g, BASE + 1024 + 2);
   const sp = ex.__stack_pointer.value;

@@ -392,6 +392,12 @@ mod tests {
         assert_eq!(est_direct(&m, 2), 2.0 * 7.0 / 6.0, "a tie stops the iteration");
         let m = [1.0, -1.0, 0.0, 3.0, 0.0, -1.0, -3.0, -2.0, 0.0];
         assert_eq!(est_direct(&m, 3), 5.0, "the first estimate from 1/n");
+        // (grader G11: the iteration limit, pinned at 5: on M = [0 -1 1 3; 4 -3 1 3; 2 -4 -4 0; -3 0 0 1] (row sums
+        // nonzero) the 5th estimate, 9, is the answer; stopping after the 4th would give 8;
+        // proto/lacn2-witness-itmax.py)
+        let m = [0.0, 4.0, 2.0, -3.0, -1.0, -3.0, -4.0, 0.0, 1.0, 1.0, -4.0, 0.0, 3.0, 3.0, 0.0, 1.0];
+        assert_eq!(ITMAX, 5);
+        assert_eq!(est_direct(&m, 4), 9.0, "the fifth estimate");
     }
 
     /// gecon applies B = U^-1 L^-1 and B' = L^-T U^-T: the same estimate (within rounding) as the estimator run

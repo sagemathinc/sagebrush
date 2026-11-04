@@ -245,11 +245,15 @@ mod tests {
         refused("MATLAB mode with gesv's work", 9, gl);
         // (the arena, the descriptor, the frame)
         refused("report past the arena", 11, g[11] - 8);
-        // (grader T3: each region alone just outside the arena, past its end, everything else as good)
+        // (grader T3: each region alone just outside the arena, past its end, everything else as good; the place
+        // 8-aligned so that only the arena refuses it (#621 G-T3), and the control: the same place with the arena
+        // extended over it is accepted)
         for (i, what) in [(1usize, "B"), (2, "ipiv"), (3, "work")] {
             let mut d = g;
-            d[i] = g[11] + 64;
+            d[i] = (g[11] + 64 + 7) / 8 * 8;
             assert!(check_solve(DESC, &d, &L).is_none(), "{what} outside the arena");
+            d[11] = d[i] + (16 << 20);
+            assert!(check_solve(DESC, &d, &L).is_some(), "{what}: the control, inside the extended arena");
         }
         refused("A before the arena", 10, g[0] + 8);
         assert!(check_solve(g[0] as u64 + 8, &g, &L).is_none(), "the descriptor on A");

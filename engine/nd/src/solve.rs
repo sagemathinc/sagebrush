@@ -448,6 +448,14 @@ mod tests {
         assert_eq!((rep.structure, rep.status, rep.rcond), (Structure::General, Status::Solved, 0.0), "{rep:?}");
     }
 
+    /// rcond exactly eps is not "nearly singular" (0 < rcond < eps, strictly; grader G2): diag(1, eps) has
+    /// ||A^-1||_1 = 1/eps = 2^52 exactly, so rcond = 2^-52 = eps exactly.
+    #[test]
+    fn rcond_exactly_eps_is_solved() {
+        let (_, rep, _) = run(Kernel::Scalar, &[1.0, 0.0, 0.0, f64::EPSILON], &[1.0, 1.0], 2, 1);
+        assert_eq!((rep.structure, rep.status, rep.rcond), (Structure::Diagonal, Status::Solved, f64::EPSILON), "{rep:?}");
+    }
+
     #[test]
     fn empty_nonfinite_and_refused() {
         let mut work = vec![0.0; solve_work_len(Mode::Matlab, 4, 2).unwrap()];

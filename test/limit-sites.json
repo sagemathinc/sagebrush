@@ -821,6 +821,11 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
  },
+ "engine/nd/src/cond.rs :: the_tie_and_the_starting_vector :: assert_eq!(ITMAX, 5); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
  "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
