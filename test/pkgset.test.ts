@@ -242,7 +242,7 @@ test("no grading context admits pandas yet: graderAdmission refuses it, itself o
 
 // A fresh runtime with set `s` installed (chunks served from memory, counting
 // fetches); the output of `code`, or the exception's last line
-function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string, Uint8Array> }, opts: { build?: string; second?: { S: string; index: Uint8Array }; grading?: boolean } = {}): Promise<string> {
+function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string, Uint8Array> }, opts: { build?: string; second?: { S: string; index: Uint8Array }; grading?: boolean; armThen?: string } = {}): Promise<string> {
   const w = new Worker(
     `
     const { parentPort, workerData } = require("node:worker_threads");
@@ -265,15 +265,23 @@ function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string
       if (workerData.grading) Atomics.or(require(workerData.dist + "/src/runtime/interrupt.js").INTR, 0, 8);
       const path = c.R.importModule("sys").path;
       path.push(c.libDir());
-      const code = "import io as _io, sys as _sys\\n_buf = _sys.stdout = _io.StringIO()\\n" + workerData.code + "\\n_out = _buf.getvalue()\\n";
-      try {
-        parentPort.postMessage(c.execModule(code, "<test>", "__main__")._out);
-      } catch (e) {
-        parentPort.postMessage(c.R.formatException(e).trim().split("\\n").pop());
+      const once = (src) => {
+        try {
+          return c.execModule("import io as _io, sys as _sys\\n_buf = _sys.stdout = _io.StringIO()\\n" + src + "\\n_out = _buf.getvalue()\\n", "<test>", "__main__")._out;
+        } catch (e) {
+          return c.R.formatException(e).trim().split("\\n").pop();
+        }
+      };
+      let out = once(workerData.code);
+      // (armThen: the allowance armed after the code ran, in the same runtime, then this code; the outputs joined by a bar)
+      if (workerData.armThen !== undefined) {
+        Atomics.or(require(workerData.dist + "/src/runtime/interrupt.js").INTR, 0, 8);
+        out += " | " + once(workerData.armThen);
       }
+      parentPort.postMessage(out);
     });
     `,
-    { eval: true, workerData: { dist: DIST, code, S: s.S, index: s.index, chunks: [...s.chunks], build: opts.build, second: opts.second, grading: !!opts.grading } },
+    { eval: true, workerData: { dist: DIST, code, S: s.S, index: s.index, chunks: [...s.chunks], build: opts.build, second: opts.second, grading: !!opts.grading, armThen: opts.armThen } },
   );
   return new Promise((resolve, reject) => {
     w.once("message", (m) => (w.terminate(), resolve(m)));
@@ -297,6 +305,21 @@ test("while a grading allowance is armed, pandas doesn't import, itself or throu
   assert.match(await run("import uses", s, { grading: true }), refused);
   assert.match(await run("from pandas import X", s, { grading: true }), refused);
   assert.equal(await run("import hello\nprint(hello.GREETING)", s, { grading: true }), "hi\n");
+});
+
+test("pandas imported before a grading allowance is armed doesn't import after it: by its name, a submodule, a package that requires it, or another name for the same module (Q7)", async () => {
+  const pd: Pkg = { name: "pandas", modules: ["pandas", "pandas.sub"], files: { "py/pandas/__init__.py": "X = 1\n", "py/pandas/sub.py": "Y = 2\n" } };
+  const uses: Pkg = { name: "uses", modules: ["uses"], files: { "py/uses.py": "import pandas\nZ = pandas.X\n" }, requires: ["@sagebrush/pandas@0.1.0"] };
+  const s = makeSet([pd, uses, hello]);
+  const before = "import pandas, pandas.sub, uses, hello, sys\nsys.modules['alias'] = pandas\nprint(pandas.X, uses.Z)";
+  const refused = (name: string) => new RegExp(`^1 1\\n \\| ImportError: No module named '${name.replace(".", "\\.")}' in a graded run: @sagebrush/pandas@0\\.1\\.0 is not admitted for grading yet`);
+  assert.match(await run(before, s, { armThen: "import pandas" }), refused("pandas"));
+  assert.match(await run(before, s, { armThen: "import pandas.sub" }), refused("pandas.sub"));
+  assert.match(await run(before, s, { armThen: "from pandas import X" }), refused("pandas"));
+  assert.match(await run(before, s, { armThen: "import uses" }), refused("uses"));
+  assert.match(await run(before, s, { armThen: "import alias" }), refused("alias"));
+  // (the controls: another package of the set and a library module, both loaded before, still import)
+  assert.equal(await run(before, s, { armThen: "import hello, json\nprint(hello.GREETING)" }), "1 1\n | hi\n");
 });
 
 test("dependencies mount first; a module the set doesn't have is not found", async () => {

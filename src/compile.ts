@@ -414,14 +414,30 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   for (const d of dirs) {
     const pkg = join(d, leaf, "__init__.py");
-    if (fileExists(pkg)) return execModule(fileRead(pkg), pkg, name, true);
+    if (fileExists(pkg)) return optTagged(execModule(fileRead(pkg), pkg, name, true), pkg);
     const file = join(d, leaf + ".py");
-    if (fileExists(file)) return execModule(fileRead(file), file, name);
+    if (fileExists(file)) return optTagged(execModule(fileRead(file), file, name), file);
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  return found === null ? null : execModule(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  return found === null ? null : optTagged(execModule(found[0], found[1], name, found[1].endsWith("/__init__.py")), found[1]);
+};
+// A module made from one of the optional set's mounted files (found by name or,
+// a submodule, through its package's __path__) is remembered as the set's, by
+// identity: R.loader.graded checks it when an import finds it in sys.modules.
+function optTagged(m: any, file: string): any {
+  const k = optKeys.get(file);
+  if (k !== undefined && m !== null && typeof m === "object") optModules.set(m, k.id);
+  return m;
+}
+// A module of the optional set that sys.modules already holds, imported again
+// while a grading allowance is armed: refused as a first import is
+// (mountOptional), whatever name it is imported by (daybreak3's Q7 ruling on #628).
+R.loader.graded = (name: string, m: any) => {
+  if (m === null || typeof m !== "object") return;
+  const id = optModules.get(m);
+  if (id !== undefined) refuseGraded(id, name);
 };
 
 // Packages (packages/<name>/sagebrush.json; scripts/packages.mjs): modules
@@ -594,6 +610,7 @@ let optional: { plan: SetPlan; fetch: ChunkFetch } | null = null;
 const optKeys = new Map<string, { id: string; path: string }>(); // mounted file -> its package and path in it
 const optPre = new Map<string, { module: string; code: string; lineMap: unknown[] }>(); // file + "\0py"/"\0sage"
 const optMounted = new Map<string, string>(); // package id -> its Python root
+const optModules = new WeakMap<object, string>(); // a module object the set's files made -> its package id
 /** This core's build id, as optional sets' precompiled code and costs are keyed (an unbundled build has none: 0s, which no set uses). */
 export function coreBuildId(): string {
   const b = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
@@ -637,20 +654,24 @@ export function optionalModuleNames(): string[] {
 export function packageSetId(): string | null {
   return optional === null ? null : optional.plan.S;
 }
+// An ImportError for `name` if package `id` or any of its dependencies is one
+// no grade may use yet (src/pkgset.ts gradingExcluded); the caller has seen
+// that a grading allowance is armed.
+function refuseGraded(id: string, name: string): void {
+  for (const dep of optional!.plan.closure.get(id)!) {
+    const why = gradingExcluded(dep);
+    if (why === null) continue;
+    const err = (R.T as any).ImportError(`No module named '${name}' in a graded run: ${dep} is ${why}`);
+    err.name = name;
+    throw err;
+  }
+}
 // Mount package `id` and its dependencies (each once): all of a package's
 // chunks are fetched and checked before any of it is mounted.
 function mountOptional(id: string, name: string): string {
   const { plan, fetch } = optional!;
   // (a package no grade may use yet, while a grading allowance is armed: refused, mounted or not; src/pkgset.ts)
-  if (Atomics.load(INTR, 0) & INTR_GRADING) {
-    for (const dep of plan.closure.get(id)!) {
-      const why = gradingExcluded(dep);
-      if (why === null) continue;
-      const err = (R.T as any).ImportError(`No module named '${name}' in a graded run: ${dep} is ${why}`);
-      err.name = name;
-      throw err;
-    }
-  }
+  if (Atomics.load(INTR, 0) & INTR_GRADING) refuseGraded(id, name);
   const done = optMounted.get(id);
   if (done !== undefined) return done;
   for (const dep of plan.closure.get(id)!) {

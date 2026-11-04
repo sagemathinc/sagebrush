@@ -29,21 +29,24 @@ const ok = (c, msg) => {
 };
 
 let poison = false;
-let unfetched = false; // (the sets' indexes: 503, as offline; /refetch ends it)
+let indexMode = "ok"; // (the sets' indexes: "503", as offline; "over", past PKGSET_LIMITS.indexBytes; "wrong", bytes
+// that aren't the pinned id's; /refetch makes them "ok" again)
 let indexAsked = 0;
 const types = { ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".wasm": "application/wasm", ".html": "text/html" };
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/test.html") return res.writeHead(200, { "Content-Type": "text/html" }).end("<!doctype html><title>pkgset</title>");
-  if (url.pathname === "/refetch") return (unfetched = false), res.writeHead(204).end();
+  if (url.pathname === "/refetch") return (indexMode = "ok"), res.writeHead(204).end();
   const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(url.pathname);
   if (m && m[1] === "pkgset") indexAsked++;
-  if (m && m[1] === "pkgset" && unfetched) return res.writeHead(503).end();
+  if (m && m[1] === "pkgset" && indexMode === "503") return res.writeHead(503).end();
+  if (m && m[1] === "pkgset" && indexMode === "over") return res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(Buffer.alloc(262145, 32));
   if (m) {
     const f = join(setDir, m[1], m[2] + ".json");
     if (!existsSync(f)) return res.writeHead(404).end();
     let b = readFileSync(f);
     if (poison && m[1] === "pkg") b = Buffer.from(b.toString("utf8").replace("hello, ", "HACKED "));
+    if (indexMode === "wrong" && m[1] === "pkgset") b = Buffer.concat([b, Buffer.from(" ")]);
     const r = /^bytes=0-(\d+)$/.exec(req.headers.range ?? "");
     if (r && Number(r[1]) + 1 < b.length) return res.writeHead(206, { "Content-Type": "application/json", "Cache-Control": "no-store", "Content-Range": `bytes 0-${r[1]}/${b.length}` }).end(b.subarray(0, Number(r[1]) + 1));
     return res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(b);
@@ -119,24 +122,32 @@ try {
   const d = await run("not-a-set", "print(1)");
   ok(d.out === "1\n" && /64 lowercase hex/.test(d.note), `a pin that isn't a set id is refused; the interpreter still runs (${JSON.stringify(d)})`);
   // an index that can't be fetched now (offline, say): nothing said, the run runs; the next run asks for it
-  // again and, once it comes, imports from the set
-  unfetched = true;
-  indexAsked = 0;
-  const u = await ev(`new Promise((resolve) => {
-    const w = new Worker("sagebrush-worker.js", { type: "module" });
-    w.postMessage({ init: { limits: null } });
-    let out = "", note = "";
-    w.onmessage = (e) => {
-      const m = e.data;
-      if (m.ready) { w.postMessage({ pkgset: ${JSON.stringify(S)} }); w.postMessage({ id: 1, code: "print(1)" }); }
-      if (m.pkgsetError) note = m.pkgsetError;
-      if (m.stream) out += m.text;
-      if (m.id === 1 && m.done) fetch("/refetch").then(() => w.postMessage({ id: 2, code: ${JSON.stringify("import hello\nprint(hello.greet())")} }));
-      if (m.id === 2 && m.done) { w.terminate(); resolve({ out, error: !!m.error, note }); }
-    };
-    setTimeout(() => resolve({ out, timeout: true, note }), 60000);
-  })`);
-  ok(u.out === "1\nhello, world\n" && !u.error && u.note === "" && indexAsked === 2, `an index not fetched (503) is not said; the next run fetches it and imports (${JSON.stringify({ ...u, indexAsked })})`);
+  // again and, once it comes, imports from the set.  An index that came and was refused (over its bound, or not
+  // the pinned id's bytes) is final: said once, never asked for again, even once the right one is there (Q21)
+  const twoRuns = (mode) => {
+    indexMode = mode;
+    indexAsked = 0;
+    return ev(`new Promise((resolve) => {
+      const w = new Worker("sagebrush-worker.js", { type: "module" });
+      w.postMessage({ init: { limits: null } });
+      let out = "", notes = [];
+      w.onmessage = (e) => {
+        const m = e.data;
+        if (m.ready) { w.postMessage({ pkgset: ${JSON.stringify(S)} }); w.postMessage({ id: 1, code: "print(1)" }); }
+        if (m.pkgsetError) notes.push(m.pkgsetError);
+        if (m.stream) out += m.text;
+        if (m.id === 1 && m.done) fetch("/refetch").then(() => w.postMessage({ id: 2, code: ${JSON.stringify("try:\n    import hello\n    print(hello.greet())\nexcept ImportError:\n    print('no hello')")} }));
+        if (m.id === 2 && m.done) { w.terminate(); resolve({ out, error: !!m.error, notes }); }
+      };
+      setTimeout(() => resolve({ out, timeout: true, notes }), 60000);
+    })`);
+  };
+  const u = await twoRuns("503");
+  ok(u.out === "1\nhello, world\n" && !u.error && u.notes.length === 0 && indexAsked === 2, `an index not fetched (503) is not said; the next run fetches it and imports (${JSON.stringify({ ...u, indexAsked })})`);
+  const o = await twoRuns("over");
+  ok(o.out === "1\nno hello\n" && !o.error && o.notes.length === 1 && /over 262144 bytes/.test(o.notes[0]) && indexAsked === 1, `an index over its bound is said once and not asked for again (${JSON.stringify({ ...o, indexAsked })})`);
+  const x = await twoRuns("wrong");
+  ok(x.out === "1\nno hello\n" && !x.error && x.notes.length === 1 && indexAsked === 1, `an index whose bytes aren't the pinned id's is said once and not asked for again (${JSON.stringify({ ...x, indexAsked })})`);
 
   // the service worker (web/sw.js, SEC-PKG-1): the set's files are kept in
   // its own cache, by content; a kept copy is served only if its bytes still
