@@ -80,6 +80,49 @@ class number(generic):
     __slots__ = ()
 
 
+class flexible(generic):
+    __slots__ = ()
+
+
+class character(flexible):
+    __slots__ = ()
+
+
+class str_(str, character):
+    """NumPy's string scalar, a string array's element: a str."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "np.str_(%s)" % str.__repr__(self)
+
+    def __str__(self):
+        return str.__str__(self)
+
+    # (int, float and complex of the text, as of a str, with NumPy's messages,
+    # which name the np.str_)
+    def __int__(self):
+        try:
+            return int(str.__str__(self))
+        except ValueError:
+            raise ValueError("invalid literal for int() with base 10: %r" % (self,)) from None
+
+    def __float__(self):
+        try:
+            return float(str.__str__(self))
+        except ValueError:
+            raise ValueError("could not convert string to float: %r" % (self,)) from None
+
+    def __complex__(self):
+        return complex(str.__str__(self))
+
+    @property
+    def dtype(self):
+        return dtype("U%d" % len(self))
+
+    def item(self):
+        return str.__str__(self)
+
+
 class integer(number):
     __slots__ = ()
 
@@ -303,6 +346,7 @@ for _name, _cls in (("float64", float64), ("float32", float32), ("complex128", c
                     ("uint8", uint8), ("uint16", uint16), ("uint32", uint32), ("uint64", uint64)):
     _np.register_scalar(_name, _cls)
 _np.register_scalar("complex64", complex64)
+_np.register_str(str_)
 
 
 
@@ -407,7 +451,7 @@ class iinfo:
 
 def issubdtype(arg1, arg2):
     kinds = {number: "biufc", integer: "iu", signedinteger: "i", unsignedinteger: "u", inexact: "fc",
-             floating: "f", complexfloating: "c", generic: "biufc", bool_: "b"}
+             floating: "f", complexfloating: "c", generic: "biufcU", bool_: "b", flexible: "U", character: "U", str_: "U"}
     k = dtype(arg1).kind
     if arg2 in kinds:
         return k in kinds[arg2]
@@ -456,6 +500,16 @@ def _asfarray(a, dtype="float64"):
 
 
 _np_dtype = dtype
+
+
+def _floats(x):
+    """asarray(x, float64) of data a function computes with in floats; a
+    string array refused there, as NumPy has no loop for its strings (it
+    converts them only when asked: astype, or array with a dtype)."""
+    a = asarray(x)
+    if a.dtype.kind == "U":
+        _np.str_refuse()
+    return asarray(a, float64)
 asfarray = _removed_alias(_asfarray, "asfarray", "np.asarray(a, dtype=float)")
 
 
@@ -978,7 +1032,7 @@ acosh, asinh, atanh = arccosh, arcsinh, arctanh
 
 
 def float_power(x, y):
-    return power(asarray(x, float64), y)
+    return power(_floats(x), y)
 
 
 def conjugate(x):
@@ -1084,6 +1138,8 @@ def clip(a, a_min=None, a_max=None, out=None, **kw):
     if a_max is None and "max" in kw:
         a_max = kw["max"]
     r = asarray(a)
+    if r.dtype.kind == "U":
+        _np.str_refuse()
     if a_min is not None:
         r = maximum(r, a_min)
     if a_max is not None:
@@ -1111,12 +1167,12 @@ def isneginf(x):
 
 
 def heaviside(x1, x2):
-    x1 = asarray(x1, float64)
+    x1 = _floats(x1)
     return where(x1 < 0, 0.0, where(x1 > 0, 1.0, x2))
 
 
 def sinc(x):
-    x = asarray(x, float64)
+    x = _floats(x)
     y = pi * where(x == 0, 1.0e-20, x)
     return sin(y) / y
 
@@ -1340,11 +1396,13 @@ def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
 
 def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
     a = asarray(a)
+    if a.dtype.kind == "U":
+        _np.str_refuse()
     if axis is None:
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
-    qs = asarray(q, float64)
+    qs = _floats(q)
     vals = []
     for qq in qs.ravel().tolist():
         if not (0 <= qq <= 1):
@@ -1357,10 +1415,10 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         lo = int(_math.floor(virtual))
         hi = _builtins.min(lo + 1, n - 1)
         if method == "midpoint":
-            vals.append((asarray(s[..., lo], float64) + s[..., hi]) / 2)
+            vals.append((_floats(s[..., lo]) + s[..., hi]) / 2)
             continue
         t = virtual - lo
-        av, bv = asarray(s[..., lo], float64), asarray(s[..., hi], float64)
+        av, bv = _floats(s[..., lo]), _floats(s[..., hi])
         diff_b_a = bv - av
         vals.append(where(t >= 0.5, bv - diff_b_a * (1 - t), av + diff_b_a * t))  # NumPy's _lerp
     res = array(vals) if qs.ndim else asarray(vals[0])
@@ -1372,7 +1430,7 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
 
 
 def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
-    return quantile(a, asarray(q, float64) / 100, axis=axis, method=method, keepdims=keepdims)
+    return quantile(a, _floats(q) / 100, axis=axis, method=method, keepdims=keepdims)
 
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
@@ -1392,11 +1450,11 @@ def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None):
-    X = atleast_2d(asarray(m, float64))
+    X = atleast_2d(_floats(m))
     if not rowvar and X.shape[0] != 1:
         X = X.T
     if y is not None:
-        y = atleast_2d(asarray(y, float64))
+        y = atleast_2d(_floats(y))
         if not rowvar and y.shape[0] != 1:
             y = y.T
         X = concatenate((X, y), axis=0)
@@ -1508,7 +1566,8 @@ def atleast_3d(*arys):
 
 
 def concatenate(arrays, axis=0, out=None, dtype=None):
-    r = _np.concatenate([asarray(a) for a in arrays], axis)
+    # (each as given: a Python number stays one, which doesn't promote with strings)
+    r = _np.concatenate(list(arrays), axis)
     if dtype is not None:
         r = r.astype(dtype)
     return _out(r, out)
@@ -1587,10 +1646,14 @@ def vsplit(ary, n):
 
 def take(a, indices, axis=None):
     a = asarray(a)
+    ind = asarray(indices)
+    # (a scalar index takes one element, a scalar or a smaller array, as NumPy's)
+    if ind.ndim == 0 and ind.dtype.kind in "iu":
+        ind = ind.item()
     if axis is None:
-        return a.ravel()[asarray(indices)]
+        return a.ravel()[ind]
     idx = [slice(None)] * a.ndim
-    idx[axis] = asarray(indices)
+    idx[axis] = ind
     return a[tuple(idx)]
 
 
@@ -1783,7 +1846,11 @@ def lexsort(keys, axis=-1):
 
 def searchsorted(a, v, side="left", sorter=None):
     import bisect
-    a = asarray(a).tolist()
+    a = asarray(a)
+    # (a sorted 1-D array, as NumPy's; any other depth refused in its words)
+    if a.ndim != 1:
+        raise ValueError("object of too small depth for desired array" if a.ndim == 0 else "object too deep for desired array")
+    a = a.tolist()
     if sorter is not None:
         a = [a[i] for i in asarray(sorter).tolist()]
     f = bisect.bisect_left if side == "left" else bisect.bisect_right
@@ -1841,7 +1908,7 @@ def intersect1d(a, b, assume_unique=False):
 
 
 def union1d(a, b):
-    return unique(concatenate([asarray(a).ravel(), asarray(b).ravel()]))
+    return unique(concatenate((a, b), axis=None))
 
 
 def setdiff1d(a, b, assume_unique=False):
@@ -1879,7 +1946,7 @@ def ediff1d(ary, to_end=None, to_begin=None):
 
 
 def gradient(f, *varargs, axis=None, edge_order=1):
-    f = asarray(f, float64)
+    f = _floats(f)
     axes = list(range(f.ndim)) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     # (NumPy's rule: no spacing, one scalar for every axis, or one per
     # axis; any other count is a TypeError, not a truncated zip)
@@ -1900,7 +1967,7 @@ def gradient(f, *varargs, axis=None, edge_order=1):
     # NumPy's; evenly spaced coordinates are a scalar spacing, CORR-CDE-1)
     steps = []
     for ax, h in zip(axes, spacing):
-        hv = asarray(h, float64)
+        hv = _floats(h)
         if hv.ndim == 0:
             steps.append(float(hv))
             continue
@@ -1977,11 +2044,11 @@ def cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def interp(x, xp, fp, left=None, right=None, period=None):
     import bisect
-    xp_l = asarray(xp, float64).tolist()
+    xp_l = _floats(xp).tolist()
     fp_a = asarray(fp)
     cplx = fp_a.dtype.kind == "c"
     fp_l = fp_a.tolist()
-    xs = asarray(x, float64)
+    xs = _floats(x)
     if period is not None:
         # (NumPy's: x and xp taken modulo the period, xp sorted, and one
         # period's continuation each side; left and right are not used)
@@ -1998,7 +2065,7 @@ def interp(x, xp, fp, left=None, right=None, period=None):
         pairs = sorted(zip([v % period for v in xp_l], fp_l), key=lambda t: t[0])
         xp_l = [pairs[-1][0] - period] + [p[0] for p in pairs] + [pairs[0][0] + period]
         fp_l = [pairs[-1][1]] + [p[1] for p in pairs] + [pairs[0][1]]
-        xs = asarray(xs % period, float64)
+        xs = _floats(xs % period)
         left = right = None
     lo_v = fp_l[0] if left is None else left
     hi_v = fp_l[-1] if right is None else right
@@ -2060,7 +2127,7 @@ def histogram(a, bins=10, range=None, density=None, weights=None):
             lo, hi = lo - 0.5, hi + 0.5
         edges = linspace(lo, hi, bins + 1)
     else:
-        edges = asarray(bins, float64)
+        edges = _floats(bins)
     nb = edges.size - 1
     if isinstance(bins, int) and weights is None:
         hist = _np.hist_uniform(a, edges[0], edges[-1], nb, edges)
@@ -2345,17 +2412,17 @@ _FLOATMODES = ("fixed", "unique", "maxprec", "maxprec_equal")
 
 def _formatter_functions(formatter):
     """formatter's functions for the kinds Sagebrush's arrays have: (bool,
-    int, float, complex), by NumPy's precedence ('all', then the *_kind
+    int, float, complex, str), by NumPy's precedence ('all', then the *_kind
     groups, then the type's own key); keys for other kinds do nothing, as in
     NumPy."""
-    out = {"bool": None, "int": None, "float": None, "complexfloat": None}
+    out = {"bool": None, "int": None, "float": None, "complexfloat": None, "numpystr": None}
     if not formatter:
         return out
     f = {k: v for k, v in formatter.items() if v is not None}
     if "all" in f:
         for k in out:
             out[k] = f["all"]
-    for group, keys in (("int_kind", ["int"]), ("float_kind", ["float"]), ("complex_kind", ["complexfloat"])):
+    for group, keys in (("int_kind", ["int"]), ("float_kind", ["float"]), ("complex_kind", ["complexfloat"]), ("str_kind", ["numpystr"])):
         if group in f:
             for k in keys:
                 out[k] = f[group]
@@ -2375,7 +2442,7 @@ def _push_printoptions():
         p = 2 ** 63 if p >= 2 ** 63 else 2 ** 31
     _np.set_printoptions(p, o["threshold"], o["edgeitems"], o["linewidth"], o["suppress"], o["sign"],
                          o["floatmode"], o["nanstr"], o["infstr"], fs["bool"], fs["int"], fs["float"],
-                         fs["complexfloat"], o["override_repr"])
+                         fs["complexfloat"], fs["numpystr"], o["override_repr"])
 
 
 def _checked_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None,
@@ -2641,6 +2708,8 @@ def nextafter(x1, x2, out=None, **kw):
     NumPy 2's dtype (float32 for float32 with a Python float, for instance)."""
     if kw:
         raise NotImplementedError("nextafter: %s are not implemented in Sagebrush" % ", ".join(sorted(kw)))
+    if asarray(x1).dtype.kind == "U" or asarray(x2).dtype.kind == "U":
+        _np.str_refuse()
     dt = _nextafter_dtype(x1, x2)
     # a weak Python int goes straight to the loop's type (70000 with an int16)
     a, b = (asarray(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
@@ -3039,10 +3108,12 @@ from numpy import linalg, random, fft, testing  # noqa: E402
 # ------------------------------------------------------------------ polynomials (numpy/lib/_polynomial_impl.py)
 
 def sort_complex(a):
+    # (NumPy's: sorted along the last axis in its own dtype, then complex)
     b = array(a, copy=True)
-    vals = b.ravel().tolist()
-    vals.sort(key=lambda z: (z.real, z.imag) if isinstance(z, complex) else (z, 0))
-    return array(vals, dtype=complex128)
+    b.sort()
+    if b.dtype.kind == "c":
+        return b
+    return b.astype(complex64 if b.dtype.char in "bhBH" else complex128)
 
 
 def vander(x, N=None, increasing=False):
@@ -3073,15 +3144,15 @@ def polyval(p, x):
 
 
 def polyfit(x, y, deg, rcond=None, full=False, w=None, cov=False):
-    x = asarray(x, float64)
-    y = asarray(y, float64)
+    x = _floats(x)
+    y = _floats(y)
     order = int(deg) + 1
     if rcond is None:
         rcond = len(x) * finfo(float64).eps
     lhs = vander(x, order)
     rhs = y
     if w is not None:
-        w = asarray(w, float64)
+        w = _floats(w)
         lhs = lhs * w[:, None]
         rhs = rhs * w if rhs.ndim == 1 else rhs * w[:, None]
     scale = sqrt((lhs * lhs).sum(axis=0))
@@ -3138,7 +3209,7 @@ def polymul(a1, a2):
 
 
 def polydiv(u, v):
-    u, v = atleast_1d(asarray(u, float64)), atleast_1d(asarray(v, float64))
+    u, v = atleast_1d(_floats(u)), atleast_1d(_floats(v))
     m, n = len(u) - 1, len(v) - 1
     scale = 1.0 / v[0]
     q = zeros(_builtins.max(m - n + 1, 1), float64)
@@ -3161,7 +3232,7 @@ def polyder(p, m=1):
 
 
 def polyint(p, m=1, k=None):
-    p = asarray(p, float64)
+    p = _floats(p)
     k = [0] * m if k is None else (list(k) if isinstance(k, (list, tuple)) else [k] * m)
     for i in range(m):
         n = len(p)
