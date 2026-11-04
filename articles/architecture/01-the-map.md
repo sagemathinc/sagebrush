@@ -263,6 +263,6 @@ Source: [`test/limit_sites.py, lines 1–12`](https://github.com/sagemathinc/sag
 
 Sage, Magma, PARI and FLINT are used only from the outside, as black boxes: byte-for-byte output tests (`sage-tests/`, `magma-tests/`, doctests run in Sage), oracles and benchmarks. Their code is never read, translated or copied. smalljac is an oracle too; the a_p engine follows its strategy, written from scratch with its author's permission (`engine/ap/PROVENANCE.md`).
 
-When Sagebrush and another system compute the same class group or newform and agree, the answers come from independent implementations. That agreement is evidence about both.
+When Sagebrush and another system compute the same class group or newform and agree, the answers come from independent implementations. That agreement is strong evidence about both, not a guarantee: independence rules out shared implementation bugs, but shared algorithms, assumptions or reference data can still produce correlated mistakes.
 
 Source: [`CONTRIBUTING.md, lines 10–21`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/CONTRIBUTING.md?plain=1#L10-L21)
