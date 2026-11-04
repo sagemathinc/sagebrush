@@ -1186,12 +1186,25 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       await only(P8);
       // (the test's sum against the export's own accounting: its plan's three bounds and its records, with OPFS)
       await hooks(`onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`);
+      // (the page can still write after its reload (a seeded example, a restore the truncation runs above left in
+      // flight): taken out again right before each P-8 export, so the export walks exactly P8 (master a2fd6363's red:
+      // one 13-byte file more than the test put there))
+      // (the control: a late write as the page's, a 13-byte entry put in after the reload's only(); this only() takes it out)
+      await putAll([...(await idb("sagebrush-workspace", "entries", `(s) => s.getAll()`)), folder("/late00000001", 999)]);
+      await only(P8);
       const pre = await exportOnce(join(out, "p8pre.zip"));
+      // (an entry in the archive that the test didn't put there is named, so a race that slips past only() says what it was)
+      if (!pre.stopped) {
+        const z = inspect(join(out, "p8pre.zip")), mineP = new Set(P8.map((e) => e.path));
+        const strays = (z.entries ?? []).map((e) => e.path).filter((q) => !mineP.has(q) && !keep({ path: q }));
+        check(strays.length === 0, "P-8: the export walks exactly the test's entries, none the page added late: " + JSON.stringify(strays).slice(0, 300));
+      }
       const parts = await ev(`window.__plan`);
       const mine = [46 + 12 + 13 + P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
       check(!pre.stopped && JSON.stringify([...parts, pre.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
       for (const [label, cap, ok] of [["at the threshold", need - 1, false], ["one byte below it", need, true]]) {
         await hooks(`noOpfs: true, caps: { spoolBlob: ${cap} }`);
+        await only(P8);
         const p = await exportOnce(join(out, "p8.zip"));
         if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
         else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
