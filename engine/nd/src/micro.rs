@@ -173,16 +173,16 @@ unsafe fn avx2_fma_8x6(a: &[f64], b: &[f64], acc: &mut [f64; ACC_LEN]) {
 /// The NEON kernel (aarch64), 8 x 6: 4 q-registers of A, the tile in 24 accumulators, each B value
 /// broadcast by lane. Its bits are [`ScalarFma`]'s. NEON is mandatory on aarch64, so no detection.
 ///
-/// **Not selected** ([`NEON_ENABLED`] is false) until a CI host executes its oracle and determinism suite
-/// (r4.2 §12); its tests run wherever aarch64 code runs (the Mac lane), and it is compiled on every aarch64
-/// build so it can't rot.
+/// **Selected** on aarch64 ([`NEON_ENABLED`]): CI's engine-nd-neon job (macos-15, Apple silicon) executes its
+/// oracle, thread-determinism and bit-family suite (r4.2 §12), green on master 3890aae2 (run 41877477454);
+/// William, Nov 4 2026: "own NEON" (Mac native uses this kernel; Accelerate is a benchmark only).
 #[cfg(target_arch = "aarch64")]
 #[derive(Clone, Copy)]
 pub struct Neon;
 
 /// Whether dispatch may select [`Neon`] (r4.2 §12: no microkernel ships that no CI host has executed).
 #[cfg(target_arch = "aarch64")]
-pub const NEON_ENABLED: bool = false;
+pub const NEON_ENABLED: bool = true;
 
 #[cfg(target_arch = "aarch64")]
 impl Micro for Neon {
