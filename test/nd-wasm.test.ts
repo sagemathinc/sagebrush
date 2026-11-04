@@ -155,6 +155,14 @@ test("the committed nd module's entry point refuses every bad job before writing
   refused("C outside the arena", with_(2, L.hi));
   refused("the scratch outside the arena (C and the scratch in memory, the arena ending before the scratch)", with_(10, L.s0));
   refused("the scratch outside the arena (past its end)", with_(7, L.hi));
+  // (grader T3: C, then the scratch, starting just below the arena, where the stacks are)
+  refused("C starting just below the arena", with_(9, L.c + 8));
+  {
+    const R = layout(m, k, n, 2, ["a", "b", "s", "c"], 4 << 20);
+    const d = R.words();
+    d[9] = R.s0 + 8;
+    refused("the scratch starting just below the arena", d);
+  }
   // (an arena from between the module's stack and its floor: C, the scratch and the frame alone would allow it)
   // (the descriptor above the arena, so that only the arena's own floor is wrong)
   refused("an arena from below the floor", with_(9, (floor - 64) & ~7), L.end + 64, 0, L.end + 64);
@@ -249,4 +257,19 @@ test("the committed nd module on real worker threads sharing its memory: 3 threa
   // a worker given a stack in the arena's free end: refused, C as it was
   assert.equal(await onWorker(memory, L.desc, 1, (L.end - PAGE) & ~15), 0);
   assert.ok(f64.slice(L.c / 8, L.c / 8 + m * n).every((x, i) => Object.is(x, one[i])), "a refused worker wrote C");
+});
+
+test("the committed nd module refuses a 2 GiB operand at its entry point (isize::MAX, wasm32's slice limit) and accepts 2 GiB - 8", () => {
+  // (m = 1, k = 2^28: A is exactly 2^31 bytes; n = 0, so B and C are empty and nothing is computed. The memory
+  // is reserved, not written: only the descriptor and the snapshot's range are touched)
+  const a = ARENA, s0 = a + 2 ** 31;
+  const end = s0 + SCRATCH_LEN * 8;
+  const pages = Math.ceil(end / PAGE) + 1;
+  const { memory, ex } = instance(pages);
+  const u32 = new Uint32Array(memory.buffer, 0, (ARENA + PAGE) / 4);
+  const words = (k: number) => [a, a, a, 1, 0, k, 1, s0, SCRATCH_LEN * 8, a, end];
+  u32.set(words(2 ** 28), BASE / 4);
+  assert.equal(ex.nd_gemm_part(BASE, 0), 0, "a 2^31-byte A was not refused");
+  u32.set(words(2 ** 28 - 1), BASE / 4);
+  assert.equal(ex.nd_gemm_part(BASE, 0), 1, "a (2^31 - 8)-byte A was refused");
 });

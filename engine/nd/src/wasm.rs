@@ -49,15 +49,15 @@ pub extern "C" fn nd_info(what: u32) -> u32 {
 /// host's part of linear memory is foreign to Rust, like memory handed over by FFI).
 ///
 /// # Safety
-/// Host preconditions (the trusted host's contract; not checkable here, since each call sees only its own frame):
-/// - every participating thread's whole stack lies below the arena, and the participants' stacks are mutually
-///   disjoint and disjoint from the module's own memory (below `__heap_base`), the descriptor, A, B, C and the
-///   scratch (each call checks only that its current frame is below the arena);
-/// - nothing other than the job's own calls (not the host, not another job or thread) writes the descriptor, A,
-///   B, C or the scratch until every participant has returned; within the job, each call writes only its own
-///   columns of C and its own scratch area, and nothing writes the descriptor, A or B;
-/// - every thread of the job is called with the same descriptor and a distinct `id` (so the threads' columns
-///   of C and scratch areas, disjoint by construction, belong to one thread each).
+/// Host preconditions (the trusted host's contract; not checkable here, since each call sees only its own frame,
+/// which it checks lies below the arena), in the reviewed wording:
+///
+/// All participant stacks are pairwise disjoint and disjoint from module-owned memory, descriptor/control, A/B,
+/// and the writable arena; the host and other jobs leave all job ranges untouched until join, apart from each
+/// participant owning only its assigned C columns and scratch slot.
+///
+/// And every thread of the job is called with the same descriptor and a distinct `id` (so the threads' columns
+/// of C and scratch areas, disjoint by construction, belong to one thread each).
 #[no_mangle]
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {

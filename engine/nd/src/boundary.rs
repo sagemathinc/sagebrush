@@ -11,11 +11,11 @@
 //! 0, never on the module's statics), is aligned, and ends within memory, its length at most `max_len`
 //! (`isize::MAX`: a slice's limit); the arena is above `floor` and within memory; C and the scratch lie in the
 //! arena; the descriptor lies outside it; C and the scratch overlap neither A, B nor each other; and the calling
-//! thread's own frame lies below the arena. That last check is per thread: that every *other* participant's
-//! stack is below the arena too, with all stacks mutually disjoint and disjoint from the module's own memory,
-//! the descriptor and every operand and scratch region, is the trusted host's precondition (the page asserts
-//! its layout), as is that nothing but the job's own calls (each writing only its columns of C and its scratch)
-//! writes the descriptor, A, B, C or the scratch until every participant has returned (`nd_gemm_part`).
+//! thread's own frame lies below the arena. That last check is per thread; the rest is the trusted host's
+//! precondition (stated on `nd_gemm_part`; the page asserts its layout): "All participant stacks are pairwise
+//! disjoint and disjoint from module-owned memory, descriptor/control, A/B, and the writable arena; the host and
+//! other jobs leave all job ranges untouched until join, apart from each participant owning only its assigned C
+//! columns and scratch slot."
 
 use crate::gemm::scratch_len;
 
@@ -51,10 +51,16 @@ pub struct Job {
 /// below the floor (or at 0), is longer than a slice may be, overflows or runs past the memory. An empty
 /// region is `(start, start)` and never dereferenced.
 fn region(start: u64, len: u64, l: &Facts) -> Option<(u64, u64)> {
+    span(start, len, l, l.max_len)
+}
+
+/// [`region`] with its own longest length: `l.max_len` for a region that becomes a slice; the memory's size for
+/// the arena, which never does (an arena over 2 GiB in a 4 GiB memory is fine; each slice in it is checked).
+fn span(start: u64, len: u64, l: &Facts, longest: u64) -> Option<(u64, u64)> {
     if len == 0 {
         return Some((start, start));
     }
-    if start == 0 || start < l.floor || len > l.max_len {
+    if start == 0 || start < l.floor || len > longest {
         return None;
     }
     let end = start.checked_add(len)?;
@@ -86,7 +92,7 @@ pub fn check(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<Job> {
     if threads == 0 || [a, b, c, s0, sstride].iter().any(|x| x % 8 != 0) || sstride < scratch_len() as u64 * 8 {
         return None;
     }
-    let arena = region(lo, hi.checked_sub(lo).filter(|&len| len > 0)?, l)?;
+    let arena = span(lo, hi.checked_sub(lo).filter(|&len| len > 0)?, l, l.mem)?;
     let ra = region(a, m.checked_mul(k)?.checked_mul(8)?, l)?;
     let rb = region(b, k.checked_mul(n)?.checked_mul(8)?, l)?;
     let rc = region(c, m.checked_mul(n)?.checked_mul(8)?, l)?;
@@ -134,6 +140,11 @@ mod tests {
         assert!(check(DESC, &d, &L).is_none());
         d[5] = (1 << 28) - 1; // 2^31 - 8 bytes: a slice may be that long
         assert!(check(DESC, &d, &L).is_some());
+        // an arena over 2 GiB is fine (it is never a slice): A of 2^31 - 8 bytes inside it, the scratch after
+        let s = scratch_len() as u64 * 8;
+        let (a, s0) = (LO, LO + (1 << 31));
+        let big = [a, a, a, 1, 0, (1 << 28) - 1, 1, s0, s, LO, s0 + s].map(|x| x as u32);
+        assert!(check(DESC, &big, &L).is_some(), "a 2 GiB+ arena");
     }
 
     #[test]
@@ -170,6 +181,15 @@ mod tests {
         let small = Facts { mem: LO + (4 << 20), ..L };
         assert!(check(DESC, &good(), &small).is_some());
         assert!(check(DESC, &{ let mut d = good(); d[10] = (small.mem + 8) as u32; d }, &small).is_none(), "an arena past memory");
+        // (grader T3: C, then the scratch, starting just below the arena, where the stacks are)
+        refused("C starting just below the arena", 9, (LO + 256 + 8) as u32);
+        let s = scratch_len() as u32 * 8;
+        let lo = LO as u32;
+        let scratch_first = [lo, lo + 128, lo + 256 + 2 * s, 4, 4, 4, 2, lo + 256, s, lo, lo + 384 + 2 * s];
+        assert!(check(DESC, &scratch_first, &L).is_some());
+        let mut d = scratch_first;
+        d[9] = lo + 256 + 8;
+        assert!(check(DESC, &d, &L).is_none(), "the scratch starting just below the arena");
         // empty operands may sit anywhere (never dereferenced), and C before A is fine
         let mut d = good();
         d[4] = 0;

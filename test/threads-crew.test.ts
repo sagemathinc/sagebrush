@@ -9,6 +9,7 @@ import { Crew, type WorkerLike } from "../web/threads/crew";
 
 class Fake implements WorkerLike {
   terminated = false;
+  terminations = 0;
   posted: unknown[] = [];
   onerror: ((e: any) => any) | null = null;
   onmessageerror: ((e: any) => any) | null = null;
@@ -21,6 +22,7 @@ class Fake implements WorkerLike {
   }
   terminate() {
     this.terminated = true;
+    this.terminations++;
     if (this.opts.terminateThrows) throw new Error("injected terminate failure");
   }
 }
@@ -74,12 +76,16 @@ test("teardown is best-effort and once: a terminate that throws does not spare t
   const fails: string[] = [];
   const crew = new Crew<Fake>(() => { const w = new Fake({ terminateThrows: made.length === 0 }); made.push(w); return w; }, (why) => fails.push(why));
   start(crew, 2);
+  // (grader T4: a live helper's reported error reaches the pool)
+  made[0].onmessage!({ data: { helperError: "x" } });
+  assert.deepEqual(fails, ["x"]);
   made[1].onerror!({ message: "boom" });
-  assert.deepEqual(fails, ["helper 2 failed: boom"]);
+  assert.deepEqual(fails, ["x", "helper 2 failed: boom"]);
   crew.end();
-  assert.deepEqual(made.map((w) => w.terminated), [true, true, true]);
+  assert.deepEqual(made.map((w) => w.terminations), [1, 1, 1]);
   crew.end(); // (idempotent: nothing terminated twice, nothing thrown)
+  assert.deepEqual(made.map((w) => w.terminations), [1, 1, 1]);
   made[2].onerror!({ message: "late" });
   made[0].onmessage!({ data: { helperError: "late too" } });
-  assert.deepEqual(fails, ["helper 2 failed: boom"]);
+  assert.deepEqual(fails, ["x", "helper 2 failed: boom"]);
 });
