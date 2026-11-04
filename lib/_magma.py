@@ -2972,7 +2972,8 @@ def _neg(a, pos=None):
 
 def _div(a, b, pos=None, op="/"):
     # (Magma's words, where the operator is: an error try ... catch can catch)
-    if isinstance(a, (int, _Fraction)) and isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and b == 0:
+    # (not a Boolean, which Python counts as an int: Magma's Bad argument types for it, MAGMA-GAPS-SEM-1)
+    if isinstance(a, (int, _Fraction)) and isinstance(b, (int, _Fraction)) and not isinstance(a, bool) and not isinstance(b, bool) and b == 0:
         raise MagmaError("Division by zero", "'%s'" % op, True, pos)
     if _int(a) and _int(b):
         return _intdiv(a, b)

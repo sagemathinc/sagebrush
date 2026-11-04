@@ -37,3 +37,8 @@ procedure T(~a, ~b)
 end procedure;
 T(~m1, ~m2);
 print m1, m2;
+print true / 0;
+print 1 / false;
+print false / 0;
+print true div 0;
+print 7 mod 0;
