@@ -12,28 +12,61 @@
 // Chrome's crash handlers (chrome_crashpad_handler) daemonize into sessions of their own, out of G's reach. Every
 // process of this Chrome carries the profile dir, a fresh mkdtemp path unique to this run, in its arguments, so
 // both the watchdog and the driver also SIGKILL exactly the processes whose arguments name that dir (never by a
-// program name or a pattern).
+// program name or a pattern). Both use the one matcher below: the watchdog runs this file as
+//   node driver.mjs --kill-naming DIR SKIP_PID
+// which reads each /proc/PID/cmdline split at its NUL argument boundaries (a newline inside one argument is part
+// of that argument, never a boundary: astra, #645 DRIVER645-ARGV-1).
 import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Does one argument name the profile dir: the dir itself, a path inside it, or --flag= either? "Inside" is
+// lexical containment after resolving "." and ".." (posix.normalize), so <dir>/../elsewhere is not inside
+// (astra, #645 DRIVER645-PATH-2).
+function namesProfile(arg, dir) {
+  return [arg, arg.replace(/^-[^=]*=/, "")].some((a) => {
+    if (a !== dir && !a.startsWith(dir + "/")) return false;
+    const n = posix.normalize(a);
+    return n === dir || n === dir + "/" || n.startsWith(dir + "/");
+  });
+}
+// SIGKILL every process (but this one and `skip`) that has an argument naming `dir`.
+function killNamingProfile(dir, skip = []) {
+  let pids = [];
+  try { pids = readdirSync("/proc").filter((p) => /^\d+$/.test(p)); } catch { return; }
+  for (const p of pids) {
+    const pid = Number(p);
+    if (pid === process.pid || skip.includes(pid)) continue;
+    try {
+      const argv = readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0");
+      if (argv.some((a) => namesProfile(a, dir))) process.kill(pid, "SIGKILL");
+    } catch {}
+  }
+}
+if (process.argv[2] === "--kill-naming") {
+  const [dir, skip] = process.argv.slice(3);
+  // (only ever a profile dir this driver makes: an absolute .../sbwr-udd-XXXXXX path)
+  if (!/^\/.*\/sbwr-udd-[^/]+$/.test(dir ?? "")) process.exit(2);
+  killNamingProfile(dir, [Number(skip)]);
+  process.exit(0);
+}
 
 const [url, out, tArg = "600"] = process.argv.slice(2);
 const CHROME = process.env.SBWR_CHROME ?? ["/usr/bin/google-chrome", "/usr/bin/chromium"].find(existsSync) ?? "google-chrome";
 const udd = mkdtempSync(join(tmpdir(), "sbwr-udd-"));
 const launchedAt = Date.now();
 const WATCHDOG = [
-  'D=$1; U=$2; shift 2',
+  'D=$1; U=$2; N=$3; S=$4; shift 4',
   '"$@" & C=$!',
   'while kill -0 "$D" 2>/dev/null && kill -0 "$C" 2>/dev/null; do sleep 0.2; done',
   'for i in 1 2 3 4 5; do P=$(pgrep -g $$ | grep -vx $$); [ -z "$P" ] && break; kill -KILL $P 2>/dev/null; sleep 0.1; done',
-  // (an argument naming the profile dir: "$U", a path inside it, or --flag= either; the watchdog's own arguments
-  // name it too, so it skips itself)
-  'named() { tr "\\0" "\\n" < "$1" 2>/dev/null | while IFS= read -r a; do case "$a" in "$U"|"$U"/*|-*="$U"|-*="$U"/*) echo y; break;; esac; done; }',
-  'for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = $$ ] && continue; [ -n "$(named $d/cmdline)" ] && kill -KILL $p 2>/dev/null; done',
+  // (the watchdog's own arguments name the profile dir too, so it passes its pid to be skipped)
+  '"$N" "$S" --kill-naming "$U" $$',
   'rm -rf -- "$U"',
 ].join("\n");
-const chrome = spawn("sh", ["-c", WATCHDOG, "sh", String(process.pid), udd, CHROME,
+const chrome = spawn("sh", ["-c", WATCHDOG, "sh", String(process.pid), udd, process.execPath, fileURLToPath(import.meta.url), CHROME,
   "--headless=new", `--user-data-dir=${udd}`, "--remote-debugging-port=0", "--no-first-run",
   "--no-default-browser-check", "--disable-extensions",
   "--disable-sync", "--disable-default-apps", "--mute-audio",
@@ -41,23 +74,12 @@ const chrome = spawn("sh", ["-c", WATCHDOG, "sh", String(process.pid), udd, CHRO
   // 25 s in FIRST_PARTY_SETS_METADATA for component data that never comes; net-log, Nov 4)
   "--no-proxy-server", ...(process.env.SBWR_NETLOG ? [`--log-net-log=${process.env.SBWR_NETLOG}`] : []), ...(process.env.SBWR_FEAT ? [`--disable-features=${process.env.SBWR_FEAT}`] : []), "about:blank"], { detached: true, stdio: "ignore" });
 // the watchdog is G's leader: -chrome.pid is all of G (watchdog, Chrome and every Chrome child)
-// (the same test as the watchdog's: the argument is the profile dir, a path inside it, or --flag= either)
-const namesProfile = (arg) => [arg, arg.replace(/^-[^=]*=/, "")].some((a) => a === udd || a.startsWith(udd + "/"));
-function killNamingProfile() {
-  let pids = [];
-  try { pids = readdirSync("/proc").filter((p) => /^\d+$/.test(p) && Number(p) !== process.pid); } catch { return; }
-  for (const p of pids) {
-    try {
-      if (readFileSync(`/proc/${p}/cmdline`, "utf8").split("\0").some(namesProfile)) process.kill(Number(p), "SIGKILL");
-    } catch {}
-  }
-}
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return;
   cleaned = true;
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
-  killNamingProfile();
+  killNamingProfile(udd);
   // (synchronous, so signal handlers get it too: give the killed processes 300 ms to be gone, then remove the
   // profile; once before as well, in case the wait is cut short)
   try { rmSync(udd, { recursive: true, force: true }); } catch {}

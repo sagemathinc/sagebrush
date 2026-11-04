@@ -35,6 +35,14 @@ path unique to the run, and every process of that Chrome names it in its
 arguments. So the watchdog and the driver also SIGKILL exactly the processes
 whose arguments name that dir, never by a program name or a pattern.
 
+Both use one matcher. The watchdog has none of its own; it runs
+`node driver.mjs --kill-naming DIR SKIP_PID`, which refuses anything but a
+`sbwr-udd-` dir. The matcher splits each `/proc/PID/cmdline` at its NUL
+argument boundaries, so a newline inside one argument is never a boundary. An
+argument names the dir if it is the dir, `--flag=` the dir, or a path that
+stays inside the dir after `.` and `..` are resolved. `<dir>/../elsewhere` does
+not count.
+
 One case remains: a supervisor that SIGKILLs every process at once, the
 watchdog included. It leaves no process behind, but nothing is left to remove
 the profile dir.

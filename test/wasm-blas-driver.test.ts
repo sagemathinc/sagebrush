@@ -92,3 +92,47 @@ test("wasm-blas driver: SIGKILL of the driver (no handler runs) leaves no Chrome
 test("wasm-blas driver: SIGKILL of the driver's process group leaves no Chrome and no profile", { skip: !supported }, async () => {
   assert.equal((await run("group SIGKILL")).exit, "SIGKILL");
 });
+
+// The watchdog has no matcher of its own: it runs the driver's --kill-naming mode, so the watchdog and the driver
+// share one matcher, which splits /proc/PID/cmdline at NUL argument boundaries only. (#645 DRIVER645-ARGV-1: a
+// shell matcher that turned NULs into newlines took a newline inside one unrelated argument for a boundary.)
+test("wasm-blas driver: the watchdog uses the driver's own matcher (no /proc parsing in the shell)", () => {
+  const src = readFileSync(DRIVER, "utf8");
+  const dog = src.slice(src.indexOf("const WATCHDOG = ["), src.indexOf('].join("\\n");'));
+  assert.ok(dog.length > 0 && dog.includes("--kill-naming"), "the watchdog calls --kill-naming");
+  assert.ok(!dog.includes("/proc") && !dog.includes("cmdline"), "the watchdog reads no cmdline itself");
+});
+
+test("wasm-blas driver: --kill-naming kills exactly the processes with an argument naming the profile", { skip: !supported }, async () => {
+  const udd = mkdtempSync(join(tmpdir(), "sbwr-udd-"));
+  const cases: [string, string, boolean][] = [
+    ["exact", udd, true],
+    ["inside", `${udd}/Crash Reports`, true],
+    ["flag", `--database=${udd}/Crash Reports`, true],
+    ["neighbor", `${udd}-other/file`, false],
+    ["neighbor flag", `--database=${udd}-other`, false],
+    ["newline inside one argument", `--description=looking at a profile\n${udd}/Crash Reports`, false],
+    ["newline, then exactly the dir", `note\n${udd}`, false],
+    ["dot inside", `--database=${udd}/./Crash Reports`, true],
+    ["dotdot out of it", `--database=${udd}/../not-this-run/Crash Reports`, false],
+    ["dotdot to its parent", `${udd}/..`, false],
+    ["dotdot back into it", `${udd}/x/../Crash Reports`, true],
+    ["skipped pid", udd, false],
+  ];
+  // (after "--", so node passes a --flag=... argument through instead of parsing it as its own option)
+  const kids = cases.map(([, arg]) => spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", "--", arg], { stdio: "ignore" }));
+  try {
+    assert.ok(await until(() => kids.every((k) => alive(k.pid!))), "the victims started");
+    const skip = kids[cases.length - 1].pid!;
+    const r = spawnSync(process.execPath, [DRIVER, "--kill-naming", udd, String(skip)], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    await new Promise((ok) => setTimeout(ok, 300));
+    for (const [i, [name, , killed]] of cases.entries()) assert.equal(!alive(kids[i].pid!), killed, `${name}: ${killed ? "killed" : "spared"}`);
+    // (anything but a driver-made profile dir is refused before any signal)
+    assert.equal(spawnSync(process.execPath, [DRIVER, "--kill-naming", "/"]).status, 2);
+    assert.equal(spawnSync(process.execPath, [DRIVER, "--kill-naming", "/tmp"]).status, 2);
+  } finally {
+    for (const k of kids) k.kill("SIGKILL");
+    rmSync(udd, { recursive: true, force: true });
+  }
+});
