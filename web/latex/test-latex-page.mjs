@@ -995,6 +995,17 @@ try {
     await release("__sbTexCheckRead");
     Object.assign(r3t, { bar: await barShows(), src: await srcIs(DOC + "% typed\n"), file: (await textOf("/x/r3.tex")) === DOC + "% theirs\n" });
     check(Object.values(r3t).every((v) => v === true), "R3 a keystroke while the change is read: kept, the bar shown, nothing replaced", r3t);
+    // (grader X6: a keystroke undone while the read is held, the text back to the saved one: still an edit made
+    //  during the read, so the bar, never their text put over a person typing)
+    await opened("/x/r3b.tex");
+    await hold("__sbTexCheckRead", "after");
+    await agentWrite("/x/r3b.tex", DOC + "% theirs\n");
+    const r3b = { held: await held("__sbTexCheckRead") };
+    await typeInto(DOC + "x"); await typeInto(DOC);
+    await release("__sbTexCheckRead");
+    Object.assign(r3b, { bar: await barShows(), src: await srcIs(DOC), file: (await textOf("/x/r3b.tex")) === DOC + "% theirs\n" });
+    await sleep(300); r3b.notInstalled = await srcIs(DOC);
+    check(Object.values(r3b).every((v) => v === true), "R3b a keystroke typed and undone while the change is read: the bar, nothing replaced", r3b);
 
     // R4: this Save and the agent's write: (a) the agent's lands while the Save waits: refused, the bar; (b) typing
     // while a Save waits stays unsaved after it; a Save, then the agent's write: followed, said
@@ -1135,6 +1146,18 @@ try {
     Object.assign(t5b, { followed: await srcBecomes(DOC + "% synced later\n", 6000), said: await statusIs(/^Updated by another device$/, 3000) });
     await ev(`delete window.__sbTexWs.readUpTo; true`);
     check(Object.values(t5b).every((v) => v === true), "T5b another device's change whose bytes aren't here yet: this text kept, said; followed once they are", t5b);
+    // T5c (grader X21): a read that succeeds while the entry is still remote (its bytes on their way): this text
+    // kept, said, nothing shown from that read; followed once the entry is local
+    await opened("/x/t5c.tex");
+    await ev(`(() => { const ws = window.__sbTexWs, real = ws.readUpTo; window.__remote = true; ws.readUpTo = async function (p, ...a) { const r = await real.call(this, p, ...a); return window.__remote && p === "/x/t5c.tex" ? { ...r, entry: { ...r.entry, remote: true } } : r; }; return true; })()`);
+    await fromServer("/x/t5c.tex", DOC + "% synced remote\n");
+    const t5c = { waiting: await statusIs(/^This file was changed on another device; its new text is on its way…$/, 5000), kept: await srcIs(DOC) };
+    await sleep(2500);
+    t5c.still = (await srcIs(DOC)) && !(await barUp());
+    await ev(`window.__remote = false; true`);
+    Object.assign(t5c, { followed: await srcBecomes(DOC + "% synced remote\n", 6000), said: await statusIs(/^Updated by another device$/, 3000), save: await page(`!P.querySelector(".tex-save").hidden`) });
+    await ev(`delete window.__sbTexWs.readUpTo; true`);
+    check(Object.values(t5c).every((v) => v === true), "T5c a remote entry read while its bytes are on their way: this text kept, said; followed (and saveable) once local", t5c);
 
     // E1: deleted elsewhere: the text kept, never emptied, said; renamed elsewhere: no reload; another file put at
     // its old path while a change is looked at: never shown here
