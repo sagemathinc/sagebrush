@@ -51,7 +51,8 @@ declare const __SB_RASTER_HASH__: string;
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
-import { __hooks, load as loadFiles, mount, put as putFile, setWritable } from "./shims/fs";
+import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
+import { startDirOf } from "./start-dir";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
@@ -181,6 +182,8 @@ onOfflineMissing((m) => postMessage({ offlineMissing: m }));
 // is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
 // can't be used is said once, and imports from it then fail saying why.
 let pkgsetReady: Promise<void> = Promise.resolve();
+// The notebook's own folder ({startDir}, sent at the start): runs wait for it to be the working folder and sys.path[0].
+let placed: Promise<void> = Promise.resolve();
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
 
 /** The init message's limits, or the reason they are refused before any
@@ -238,6 +241,18 @@ self.onmessage = async (ev: MessageEvent) => {
     if (writableWord) Atomics.store(writableWord, 0, m.fsWritable ? 1 : 0);
     return;
   }
+  if (m.startDir !== undefined) {
+    // (the notebook's own folder: the working folder and sys.path[0], as Jupyter runs a notebook (Nov 4 ruling), so it
+    // opens and imports what is beside it; set once the interpreter is ready, before any run of the session)
+    const d = startDirOf(m.startDir);
+    if (d === null) return;
+    placed = session.ready.then(() => {
+      startIn(d);
+      const sys = R.importModule("sys");
+      if (sys.path[0] !== d) sys.path.unshift(d);
+    }, () => {});
+    return;
+  }
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data, typeof m.tok === "string" ? m.tok : undefined);
   if (m.mount) return mount(m.mount);
@@ -260,6 +275,7 @@ self.onmessage = async (ev: MessageEvent) => {
     } else p.catch(() => {});
   }
   if (m.code !== undefined) {
+    await placed;
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }

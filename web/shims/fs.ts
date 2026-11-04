@@ -114,6 +114,15 @@ function ensureDirs(p: string) {
   for (let d = parent(p); !dirs.has(d); d = parent(d)) dirs.set(d, Date.now());
 }
 
+/** The interpreter starts in `d` (a notebook's own folder, as Jupyter runs a notebook: the Nov 4 ruling): it and the
+ * folders above it are known here, without a change to the person's files, and relative paths resolve against it.
+ * `d` is the worker's checked absolute path (web/worker.ts startDirOf). */
+export function startIn(d: string) {
+  ensureDirs(d + "/.");
+  dirs.set(d, dirs.get(d) ?? Date.now());
+  cwd = d;
+}
+
 // The page's files (path -> bytes, and a version's token if not one the session
 // starts with), as a worker starts: no change hooks.
 export function load(entries: [string, Uint8Array, string?][]) {
