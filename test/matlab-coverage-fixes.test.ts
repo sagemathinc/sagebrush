@@ -408,3 +408,11 @@ test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart:
     "Not enough input arguments.",
   ]);
 });
+
+test("tril, triu, diag and sortrows refuse a 3-D array: 'Arguments must be 2-D.' (grader's C9 on #646)", () => {
+  const out = lines(run([
+    "c = {@() tril(ones(2, 2, 2)), @() triu(ones(2, 2, 2)), @() diag(ones(2, 2, 2)), @() sortrows(ones(2, 2, 2))};",
+    "for k = 1:numel(c), try, y = c{k}(); disp('no error'), catch e, disp(e.message); end, end",
+  ].join("\n")));
+  assert.deepEqual(out, Array(4).fill("Arguments must be 2-D."));
+});
