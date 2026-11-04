@@ -183,6 +183,9 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
   ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
+// (saved boxes: their copies' HTML, all \usebox's together, at most BOX_MAX characters)
+export const BOX_MAX = 1 << 20;
+export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
@@ -212,7 +215,7 @@ class Renderer {
     // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
     this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
-    this.boxes = new Map();   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox)
+    this.boxes = new Map(); this.boxUsed = 0;   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox, BOX_MAX for the copies)
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
     this.secnumdepth = 3;
@@ -933,7 +936,13 @@ const CMDS = {
   usebox: function (nodes, i, ctx, flow) {
     const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
     if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
-    for (const k of b.keys) this.sageShown.add(k);
+    // (every copy within one budget, BOX_MAX, checked before it's made: a box copied into a box, again and again, would
+    //  double each time (astra, BOX653-EXPAND-1); past it, left out, said once)
+    if (!fitsBoxes(this.boxUsed, b.h.length)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
+    this.boxUsed += b.h.length;
+    // (its SageTeX seen as where it's used is: shown in the body, held in a field or another box until those are, never
+    //  in the preamble (daybreak3, BOX653-SAGE-CAPTURE-1))
+    for (const k of b.keys) this.sageSeen(k);
     flow.html(b.h, ctx.st); return j;
   },
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),

@@ -16,7 +16,7 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, fitsBoxes } from "./engine/render.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
 const results = [];
@@ -246,6 +246,27 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   // (a box's SageTeX: shown where the box is used, hidden (as before) if it never is)
   const sageBox = (use) => run("\\newsavebox{\\sb}\\sbox{\\sb}{\\sage{1+1}}" + (use ? "\\usebox{\\sb}" : "Z"), "\\usepackage{sagetex}\n").sageItems.map((x) => x.err ?? "ok");
   check("savebox-sage", sageBox(true).join() === "ok" && sageBox(false).join() === "hidden", [sageBox(true), sageBox(false)]);
+  // (a box's SageTeX is shown only where the box is: not by a \usebox inside a box never used, nor in a title never
+  //  printed, nor in the preamble (daybreak3 BOX653-SAGE-CAPTURE-1, astra BOX653-HIDDEN-2); controls: used in the body,
+  //  in a printed title)
+  const sageOf = (pre, body) => run(body, "\\usepackage{sagetex}\n\\newsavebox{\\a}\\newsavebox{\\b}\\sbox{\\a}{\\sage{1+1}}\n" + pre).sageItems.map((x) => x.err ?? "ok").join();
+  const capture = { nested: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}Z"), nestedUsed: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}\\usebox{\\b}"),
+    title: sageOf("\\title{\\usebox{\\a}}\n", "Z"), titlePrinted: sageOf("\\title{\\usebox{\\a}}\n", "\\maketitle Z"), preamble: sageOf("\\usebox{\\a}\n", "Z") };
+  // (a box saved again holds its new content, as in TeX, and the old content's SageTeX isn't shown by its use (grader
+  //  X7); the name as written, spaces around it aside (X3))
+  const redef = run("\\newsavebox{\\s}\\sbox{\\s}{\\sage{1+1}A}\\sbox{\\s}{B}\\usebox{\\s}", "\\usepackage{sagetex}\n");
+  const trim = text(run("\\newsavebox{\\saved}\\sbox{\\saved}{T}\\usebox{ \\saved }"));
+  const body = (r) => r.chunks.filter((c) => !c.includes('class="sagestate"')).join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("savebox-redefined-and-trimmed", body(redef) === "B" && redef.sageItems.map((x) => x.err).join() === "hidden" && trim === "T", [body(redef), redef.sageItems.map((x) => x.err), trim]);
+  check("savebox-sage-where-shown", capture.nested === "hidden" && capture.nestedUsed === "ok" && capture.title === "hidden" && capture.titlePrinted === "ok" && capture.preamble === "hidden", capture);
+  // (the copies' budget (astra BOX653-EXPAND-1): exactly BOX_MAX fits, one over doesn't; a box doubled into itself 12
+  //  times (16.8M characters before) stops within it, said once; repeated uses count too)
+  check("savebox-budget-edge", fitsBoxes(BOX_MAX - 10, 10) && !fitsBoxes(BOX_MAX - 10, 11) && fitsBoxes(0, BOX_MAX) && !fitsBoxes(0, BOX_MAX + 1));
+  const dbl = run("\\newsavebox{\\s}\\sbox{\\s}{" + "x".repeat(4096) + "}" + "\\sbox{\\s}{\\usebox{\\s}\\usebox{\\s}}".repeat(12) + "\\usebox{\\s}");
+  const many = run("\\newsavebox{\\s}\\sbox{\\s}{" + "y".repeat(4096) + "}" + "\\usebox{\\s} ".repeat(300) + "End.");
+  const dblH = dbl.chunks.join(""), manyH = many.chunks.join(""), over = (r) => r.problems.filter((p) => p.kind === "box" && /over the budget/.test(p.name)).length;
+  check("savebox-budget-copies", dbl.stats.outcome === "ok" && dblH.length < 2 * 2 ** 20 && over(dbl) === 1 && manyH.length < 2 * 2 ** 20 && over(many) === 1 && manyH.includes("End.") && (manyH.match(/y{4096}/g) || []).length === Math.floor(BOX_MAX / 4096),
+    { dbl: dblH.length, many: manyH.length, copies: (manyH.match(/y{4096}/g) || []).length, overs: [over(dbl), over(many)] });
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
