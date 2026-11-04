@@ -43,12 +43,11 @@ export function install(proto, CMDS, deps) {
       // (its number as the furniture shows it: beamer's frame counter, which [noframenumbering] doesn't step (daybreak3,
       //  FURN644-FRAME-NO-1); the frame's index, data-frame, stays the DOM's)
       const num = /\bnoframenumbering\b/.test(fopts) ? this.bnum ?? 0 : (this.bnum = (this.bnum ?? 0) + 1);
-      (this.bfr ??= [])[n - 1] = { s: S.length - 1, u: S.length ? S[S.length - 1].subs.length - 1 : -1, num };
-      if (!plain) this.bfurn = true;
+      (this.bfr ??= [])[n - 1] = { s: S.length - 1, u: S.length ? S[S.length - 1].subs.length - 1 : -1, num, plain };
       const va = /(^|,)\s*t\s*(,|$)/.test(fopts) ? " va-t" : /(^|,)\s*b\s*(,|$)/.test(fopts) ? " va-b" : "";
       const side = !plain && this.bth?.[0] === "sb" && !this.btpl?.["sidebar left"];
-      const b = flow.open("section", ' class="slide' + va + (side ? " sbar" : "") + '" data-frame="' + n + '" id="frame-' + n + '" style="' + slideStyle(this.clsOpt) + '"', (plain ? "" : "\u0001Bs" + n + "\u0002\u0001Bh" + n + "\u0002") + head);
-      if (!plain) b.tail = "\u0001Bf" + n + "\u0002";
+      const b = flow.open("section", ' class="slide' + va + (side ? " sbar" : "") + '" data-frame="' + n + '" id="frame-' + n + '" style="' + slideStyle(this.clsOpt) + '"', "\u0001Bs" + n + "\u0002\u0001Bh" + n + "\u0002" + head);
+      b.tail = "\u0001Bf" + n + "\u0002";   // (filled from furnishShown's, none for a plain frame)
       const inner = flow.open("div", ' class="slide-body"');
       // (the frame's overlays: its specs' and pauses' highest step, and beamer's beamerpauses counter less one (plus), which
       //  + advances and uses and \pause advances: what follows a \pause is shown from plus + 1 on)
@@ -84,16 +83,17 @@ export function install(proto, CMDS, deps) {
     // the furniture of frame n: its sidebar (w "s"), headline ("h") or footline ("f"), as the theme draws it (THEMES),
     // from the short title, author, institute and date, the sections and the frame's number; none where the document
     // sets that template itself (a footline of [frame number] or [page number]: the number). Nothing is built for a part
-    // the theme doesn't draw; over the budget (furnBudget), a short form
-    furnish(w, n) {
+    // the theme doesn't draw; over the budget (furnBudget), a short form. used gets the fields it shows whole (their
+    // SageTeX shown); a field cut in the short form is its text only
+    furnishPart(w, n, used) {
       const [hl, fl] = this.bth ?? [], tpl = this.btpl ?? {};
       if (w === "s" ? hl !== "sb" || tpl["sidebar left"] : w === "h" ? !hl || hl === "sb" || tpl.headline : !(tpl.footline ? /number/.test(tpl.footline) : fl)) return "";
       const fr = this.bfr[n - 1];
       if (w === "f" && tpl.footline) return '<div class="slide-foot"><div class="fno">' + fr.num + "</div></div>";
       const z = this.bz === undefined ? (this.bz = this.furnBudget()) : this.bz, S = this.bsec ?? [], cur = S[fr.s];
       // (in the short form: names and fields as their text, cut to z characters)
-      const cut = (h) => { if (!z) return h; const t = h.replace(/<[^>]*>/g, "").replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[e]); return esc(t.length > z ? t.slice(0, z - 1) + "\u2026" : t); };
-      const sh = (k) => cut(this.bshort?.[k] ?? this.meta[k] ?? ""), now = cut(cur?.subs[fr.u] ?? "");
+      const cut = (h) => { if (!z) return h; const t = h.replace(/<[^>]*>/g, "").replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[e]); return t.length > z ? esc(t.slice(0, z - 1) + "\u2026") : h; };
+      const sh = (k) => { const h = this.bshort?.[k] ?? this.meta[k] ?? "", c = cut(h); if (c === h) used.add(k); return c; }, now = cut(cur?.subs[fr.u] ?? "");
       const span = (t, on) => "<span" + (on ? ' class="cur"' : "") + ">" + t + "</span>", cells = (...c) => c.map((x) => "<div>" + x + "</div>").join("");
       // (the names spaced, not only apart: a reader, a copy, the page's text read them as words; in the short form, the
       //  frame's own section and subsection only)
@@ -119,16 +119,27 @@ export function install(proto, CMDS, deps) {
       this.problems.push({ kind: "furniture", name: "the theme's headline, footline and sidebar shortened to each frame's own section (" + frames + " frames, " + S.length + " sections)", at: -1 });
       return 80;
     },
-    // the fields the furniture shows, for SageTeX: their items shown, as the title page's are, not hidden (the short
-    // form's if given, else the long one's; none if no frame is furnished or the document draws that part itself)
-    // (daybreak3, FURN644-SAGE-1)
+    // every frame's furniture, built before the core's SageTeX check (it calls this), within one budget for all of it,
+    // the HTML as built (astra, BEAMER644-FURN-1: the short form's escaping too): past FURN_MAX, the furniture of the
+    // frames after is left out, and one problem says so. The fields shown whole have their SageTeX items shown; one cut,
+    // or left out, keeps them hidden (daybreak3, FURN644-SAGE-1, -SAGE-CUT-1)
     furnishShown() {
-      if (!this.bfurn) return;
-      const [hl, fl] = this.bth ?? [], tpl = this.btpl ?? {}, used = new Set(tpl.footline ? [] : FOOT[fl] ?? []);
-      if (!tpl.headline && hl === "tr") used.add("title");
-      if (hl === "sb" && !tpl["sidebar left"]) { used.add("title"); used.add("author"); }
-      for (const k of used) for (const x of this.bshort?.[k] !== undefined ? this.bshortSage[k] : this.metaSage[k]) this.sageShown.add(x);
+      this.bcache = new Map();
+      let total = 0;
+      for (let n = 1; n <= (this.bfr?.length ?? 0) && !this.bover; n++) for (const w of "shf") {
+        if (this.bfr[n - 1].plain) break;
+        const used = new Set(), h = this.furnishPart(w, n, used);
+        if (!h) continue;
+        if (total + h.length > FURN_MAX) {
+          this.bover = true;
+          this.problems.push({ kind: "furniture", name: "the theme's headline, footline and sidebar left out from frame " + n + " on: over the budget for them", at: -1 });
+          break;
+        }
+        total += h.length; this.bcache.set(w + n, h);
+        for (const k of used) for (const x of this.bshort?.[k] !== undefined ? this.bshortSage[k] : this.metaSage[k]) this.sageShown.add(x);
+      }
     },
+    furnish(w, n) { return this.bcache?.get(w + n) ?? ""; },
   });
   Object.assign(CMDS, {
     // (beamer's overlays: every step is shown, so \only, \uncover, \visible and \onslide show their content; \alt its first)
@@ -192,6 +203,4 @@ const THEMES = { Madrid: [0, "il"], Boadilla: [0, "il"], AnnArbor: ["il", "il"],
 // The furniture's budget: its HTML for every frame within FURN_MAX bytes (about), or the short form (furnBudget)
 export const FURN_MAX = 1 << 20;
 export const fitsFurniture = (perFrame, frames) => perFrame * frames <= FURN_MAX;
-// (the fields each footline shows, as furnish() draws them)
-const FOOT = { il: ["author", "institute", "title", "date"], ai: ["author", "institute", "title"], a: ["author", "title"], ti: ["title", "institute"] };
 const OUTER = { infolines: ["il", "il"], miniframes: ["ss"], smoothbars: ["ss"], split: ["sp", "a"], shadow: ["sp", "a"], tree: ["tr"], smoothtree: ["tr"], sidebar: ["sb"], default: [] };

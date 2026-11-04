@@ -300,6 +300,24 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-furniture-budget-short-form", bigR.stats.outcome === "ok" && bigH.length < 3 * 2 ** 20 && (f1.match(/<span/g) || []).length === 1 && /Section0 x+\u2026/.test(f1)
     && bigR.problems.some((p) => p.kind === "furniture") && !new Engine().update(deck("\\usetheme{Berlin}\n")).problems.some((p) => p.kind === "furniture") && /SecOneShort<\/span> <span>SectionTwo/.test(small),
     { len: bigH.length, f1: f1.slice(0, 300), problems: bigR.problems.filter((p) => p.kind === "furniture") });
+  // (the furniture's budget is for all of it, as built, escaping included (astra, FURN-1 residual): 10,000 Madrid frames
+  //  with four fields of 80 "&" each was 19 MB; now the furniture stops within FURN_MAX, one problem saying from which
+  //  frame. And SageTeX in a field the short form cuts stays hidden, the notice said (daybreak3, FURN644-SAGE-CUT-1); one
+  //  within the cut is shown)
+  const amp = "&".repeat(80), tenK = "\\title{" + amp + "}\\author{" + amp + "}\\institute{" + amp + "}\\date{" + amp + "}\n";
+  const huge = new Engine().update(deck("\\usetheme{Madrid}\n" + tenK, "\\begin{frame}{F}Body\\end{frame}\n".repeat(10000))), hugeH = huge.chunks.join("");
+  const furnBytes = (hugeH.match(/<div class="slide-foot">[\s\S]*?<\/div><\/div>/g) || []).join("").length, left = huge.problems.filter((p) => p.kind === "furniture" && /left out from frame \d+ on/.test(p.name));
+  check("beamer-furniture-budget-all", huge.stats.outcome === "ok" && furnBytes <= beamerCode.FURN_MAX && left.length === 1 && hugeH.length < 4 * 2 ** 20 && /slide-foot/.test(frameOf(hugeH, 1)) && !/slide-foot/.test(frameOf(hugeH, 10000)),
+    { furnBytes, html: hugeH.length, left });
+  const bigSecs = Array.from({ length: 384 }, (_, k) => "\\section{" + ("S" + k).padEnd(128, "x") + "}\n\\begin{frame}{F}b\\end{frame}\n").join("");
+  const cutDeck = (title) => "\\documentclass{beamer}\n\\usetheme{Madrid}\n\\usepackage{sagetex}\n" + title + "\n\\begin{document}\n" + bigSecs + "\\end{document}\n";
+  // (a plain frame's furniture isn't drawn, so its fields' SageTeX stays hidden)
+  const plainOnly = sageRun("\\documentclass{beamer}\n\\usetheme{Madrid}\n\\usepackage{sagetex}\n\\title{T \\sage{6*7}}\n\\begin{document}\n\\begin{frame}[plain]{F}x\\end{frame}\n\\end{document}\n");
+  check("beamer-furniture-sage-plain", plainOnly.sageItems.every((x) => x.err === "hidden") && !/slide-foot/.test(plainOnly.chunks.join("")), plainOnly.sageItems.map((x) => x.err));
+  const cutR = sageRun(cutDeck("\\title{" + "A".repeat(100) + " \\sage{6*7}}")), inR = sageRun(cutDeck("\\title{Short \\sage{6*7}}"));
+  check("beamer-furniture-sage-cut", cutR.problems.some((p) => p.kind === "furniture") && cutR.sageItems.every((x) => x.err === "hidden") && hiddenNote(cutR) && !/42/.test(frameOf(cutR.chunks.join(""), 1)) && /A{70,}\u2026/.test(frameOf(cutR.chunks.join(""), 1))
+    && inR.sageItems.every((x) => x.err !== "hidden") && !hiddenNote(inR) && /slide-foot[\s\S]*Short[\s\S]*42/.test(frameOf(inR.chunks.join(""), 1)),
+    { cut: [cutR.sageItems.map((x) => x.err), hiddenNote(cutR)], within: [inR.sageItems.map((x) => x.err), hiddenNote(inR)], f1: frameOf(cutR.chunks.join(""), 1).slice(-300) });
   // (in another class: \usetheme's and \setbeamertemplate's arguments read and dropped, \title[..] as TeX reads it there:
   //  its argument the "[")
   const art = new Engine().update("\\documentclass{article}\n\\usetheme{Madrid}\\setbeamertemplate{footline}{F}\n\\title[S]{T}\n\\begin{document}\n\\maketitle X \\only<2>{Y}\n\\end{document}\n").chunks.join("");
