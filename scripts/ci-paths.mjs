@@ -82,6 +82,8 @@ const fullTierPaths = [
   // (the Miniflare dispatch helper: its direct consumers, test-sync and test-share among them, run only in web-sync.1
   // and web-sync.2)
   /^web\/miniflare-dispatch\.mjs$/,
+  // (a document's checkpoints, the client's side (BH-0b-2): sync, whose suite runs only in web-sync.1)
+  /^web\/workspace\/checkpoint(?:-types)?\.ts$/,
   // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
   // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
