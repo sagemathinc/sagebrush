@@ -4170,6 +4170,11 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
+ "lib/_sage_ec_rr.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5087,10 +5092,10 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet #0": {
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet #0": {
   "class": "coverage",
   "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "base_extend of a curve over QQ to a ring other than QQ, ZZ, GF(p), Zmod(p): not available yet (Sage has them)"
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
   "class": "coverage",

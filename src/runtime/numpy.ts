@@ -3879,12 +3879,13 @@ newBuiltinModule("_numpy", (m) => {
   M("item", (a: NDArray, ...idx: any[]) => {
     // (a string array's element as a Python str)
     if (isS(a)) return a.data[itemPos(a, idx)];
-    if (idx.length === 0) return scalarOf(a);
-    const c = ascontig(a);
-    let i = intNum(idx.length === 1 ? idx[0] : 0);
-    if (idx.length > 1) i = idx.reduce((acc: number, v: any, d: number) => acc * a.shape[d] + intNum(v), 0);
-    if (i < 0) i += a.size;
-    return pyPlain(a.dt, c.data, i);
+    // (a 1-D array's a.item(i), the common call, inline: no position to unravel)
+    if (idx.length === 1 && typeof idx[0] === "number" && a.shape.length === 1) {
+      const n = a.shape[0];
+      let i = idx[0];
+      if (Number.isInteger(i) && i >= -n && i < n) return pyPlain(a.dt, a.data, a.offset + (i < 0 ? i + n : i) * a.strides[0]);
+    }
+    return pyPlain(a.dt, a.data, itemPos(a, idx));
   });
   M("reshape", (a: NDArray, ...s: any[]) => rs(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
   M("ravel", (a: NDArray) => rs(a, [a.size]));
