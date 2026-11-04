@@ -1,0 +1,33 @@
+== empty
+!! pandas.errors.EmptyDataError: No columns to parse from file
+== blank-only
+!! pandas.errors.EmptyDataError: No columns to parse from file
+== later-too-many
+!! pandas.errors.ParserError: Error tokenizing data. C error: Expected 2 fields in line 3, saw 3
+
+== later-too-many-blank-lines
+!! pandas.errors.ParserError: Error tokenizing data. C error: Expected 2 fields in line 5, saw 3
+
+== too-many-quoted
+!! pandas.errors.ParserError: Error tokenizing data. C error: Expected 2 fields in line 3, saw 3
+
+== unterminated-quote
+!! pandas.errors.ParserError: Error tokenizing data. C error: EOF inside string starting at row 1
+== unterminated-quote-later
+!! pandas.errors.ParserError: Error tokenizing data. C error: EOF inside string starting at row 2
+== usecols-missing
+!! builtins.ValueError: Usecols do not match columns, columns expected but not found: ['z']
+== dtype-int-text
+!! builtins.ValueError: invalid literal for int() with base 10: 'x'
+== dtype-int-na
+!! builtins.ValueError: Integer column has NA values in column 0
+== dtype-float-text
+!! builtins.ValueError: could not convert string to float: 'x'
+== nrows-negative
+!! builtins.ValueError: 'nrows' must be an integer >=0
+== names-duplicate
+!! builtins.ValueError: Duplicate names are not allowed.
+== index-col-missing
+!! builtins.ValueError: Index z invalid
+== header-past-end
+!! pandas.errors.ParserError: Passed header=5 but only 2 lines in file

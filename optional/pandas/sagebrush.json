@@ -1,0 +1,48 @@
+{
+  "name": "@sagebrush/pandas",
+  "version": "0.1.0",
+  "kind": "optional",
+  "sagebrush": ">=0.6.1",
+  "modes": [
+    "python"
+  ],
+  "python": {
+    "root": "py",
+    "modules": [
+      "pandas",
+      "pandas._pd_column",
+      "pandas._pd_csv",
+      "pandas._pd_dtypes",
+      "pandas._pd_frame",
+      "pandas._pd_index",
+      "pandas._pd_indexing",
+      "pandas._pd_license",
+      "pandas._pd_names",
+      "pandas._pd_options",
+      "pandas._pd_reduce",
+      "pandas._pd_repr",
+      "pandas._pd_series",
+      "pandas._pd_toplevel",
+      "pandas.errors"
+    ]
+  },
+  "requires": [],
+  "private_prefix": "_pd_",
+  "files": {
+    "py/pandas/__init__.py": "2cbc0c3497f8e8397f1449eac4a0d24bf0798b053a2d32b66bf588e85cb6675e",
+    "py/pandas/_pd_column.py": "18e115a8b527d56f93adcdaae6ec9dccfea70a9dbb36cbfaabab43dad5f99374",
+    "py/pandas/_pd_csv.py": "902e9b688b51fdcc45a0b939500fa717a671d913fdbece091607ec1914c57264",
+    "py/pandas/_pd_dtypes.py": "a939a6afb9f4073c2fbbc99cecf2a0b3befa6aa2d888969ab663d47108dcba1a",
+    "py/pandas/_pd_frame.py": "f944af5a5e5d35763380b2f6a89158bded9ba6aadd693120b8591b2a7182bd57",
+    "py/pandas/_pd_index.py": "ca34a9eff3b04d6f4e7db1387e1034bd33a102b29bee76cd5cc74d4e0cb22db4",
+    "py/pandas/_pd_indexing.py": "a46e09faa83ed6007f00597f966b053936c3b3ff83d7a19019a88fbc63c365f7",
+    "py/pandas/_pd_license.py": "4213fbbfe7e6ca4b9bfad2a4d69835158471b17acf89156852658deeda2772bb",
+    "py/pandas/_pd_names.py": "223d9dd1f226a7ed65fda8238983f6978a928c6f5b6f1134b5c1fc276453b1bb",
+    "py/pandas/_pd_options.py": "c3c171b8ea00498f8588b5ab28e787d81aca016d5a338a2092f11c5c3eb81917",
+    "py/pandas/_pd_reduce.py": "411203e0dc676b17d3bde796dcc499d470894e37acf9be7cb807b38a7d50ee4f",
+    "py/pandas/_pd_repr.py": "fa1a969399aa0ae2f500fa71daf02972ca68419d0d2e7f1ff35978cf61a5eb0c",
+    "py/pandas/_pd_series.py": "88497c42bdc02b8dbe14351ae28fe12b3c32797b6846284dbf11607d584d5ae0",
+    "py/pandas/_pd_toplevel.py": "9de1fce9e3d7ea9428d7fc9856371ca96284e79efc5da1d4a7327e1e9bbc1259",
+    "py/pandas/errors.py": "01166833c43f6d938a2413a0d57e189f53b0698b8aae5e3faf016f5a692ad463"
+  }
+}

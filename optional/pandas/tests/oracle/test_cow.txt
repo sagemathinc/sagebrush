@@ -1,0 +1,121 @@
+python 3.14.9 x86_64 glibc
+package numpy 2.5.1
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== column
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== columns
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== loc-rows
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== iloc-rows
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== head
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== tail
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== T
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== copy
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== mask
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== row
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== items
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== chained
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== series-head
+
+0    1
+1    2
+2    3
+dtype: int64
+== index-shared-ok
+RangeIndex(start=0, stop=3, step=1)
+== nested-objects-shared
+[1, 2, 9]
+== ndarray-default-copy
+
+     0    1
+0  0.0  0.0
+1  0.0  0.0
+== ndarray-dict-copy
+
+   a
+0  0
+1  1
+2  2
+== series-ndarray-copy
+
+0    0
+1    1
+2    2
+dtype: int64
+== list-copy-false
+
+0    1
+1    2
+2    3
+dtype: int64

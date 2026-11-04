@@ -1,0 +1,42 @@
+== map.int.zero
+(False, 0, 0, False)
+== map.str.zero
+(False, 0, 0, False)
+== map.int.one-label
+(False, 0, 0, False)
+== map.int.enough
+(True, 0, 348, True)
+== map.int.one-short
+(False, 0, 0, False)
+== map.float.enough
+(True, 0, 300, True)
+== map.bool.enough
+(True, 0, 200, True)
+== range.even
+('RangeIndex', [3, 5, 7, 9], 0)
+== range.descending
+('RangeIndex', [9, 6, 3], 0)
+== range.uneven
+('Index', None, 0)
+== range.constant
+('Index', None, 0)
+== mangle.zero
+('refused', 0, 0)
+== mangle.unbudgeted
+['a', 'Unnamed: 1', 'a.1', 'a.1.1', 'Unnamed: 4', 'b', 'a.2', 'Unnamed: 7']
+== mangle.least
+1468
+== mangle.at-least
+(['a', 'Unnamed: 1', 'a.1', 'a.1.1', 'Unnamed: 4', 'b', 'a.2', 'Unnamed: 7'], 8, 668)
+== mangle.one-short
+('refused', 8, 0)
+== mangle.unique-zero
+!! ValueError: read_csv: the decoded-memory budget would be exceeded by the column labels (64 B more, 0 B in use, limit 0 B: Sagebrush's limit 'pandas.decoded_bytes')
+== chain.at-least
+('x.41', 1300)
+== chain.one-short
+('refused', 0)
+== chain.least-minus-kept
+4200
+== short.least-minus-kept
+300

@@ -1,0 +1,6 @@
+id,name,score,passed,note
+1,Ada,91.5,True,"likes ""math"""
+2,Bob,,False,NA
+3,"Lee, C.",78,True,
+4,Dee,88.25,False,"two
+lines"

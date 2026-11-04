@@ -1,0 +1,105 @@
+== column
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== columns
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== loc-rows
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== iloc-rows
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== head
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== tail
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== T
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== copy
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== mask
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== row
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== items
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== chained
+
+   x  s
+0  1  a
+1  2  b
+2  3  c
+== series-head
+
+0    1
+1    2
+2    3
+dtype: int64
+== index-shared-ok
+RangeIndex(start=0, stop=3, step=1)
+== nested-objects-shared
+[1, 2, 9]
+== ndarray-default-copy
+
+     0    1
+0  0.0  0.0
+1  0.0  0.0
+== ndarray-dict-copy
+
+   a
+0  0
+1  1
+2  2
+== series-ndarray-copy
+
+0    0
+1    1
+2    2
+dtype: int64
+== list-copy-false
+
+0    1
+1    2
+2    3
+dtype: int64

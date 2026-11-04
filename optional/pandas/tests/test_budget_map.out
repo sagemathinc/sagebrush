@@ -1,0 +1,26 @@
+== limit
+8388608
+== repeated-2.cap
+(72315, 8388540, True, [0.0, 0.0])
+== repeated-2.cap.later-lookup
+([0.0, 0.0], True)
+== repeated-2.cap.map-labels
+72315
+== repeated-2.cap+1
+"read_csv: the decoded-memory budget would be exceeded by the index's lookup map (100 B more, 8388540 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== repeated-2.cap+1.no-map
+True
+== repeated-2.cap+1.no-charge
+0
+== repeated-3.cap
+(67650, 8388600, True, [0.0, 0.0, 0.0])
+== repeated-3.cap.later-lookup
+([0.0, 0.0, 0.0], True)
+== repeated-3.cap.map-labels
+67650
+== repeated-3.cap+1
+"read_csv: the decoded-memory budget would be exceeded by the index's lookup map (100 B more, 8388600 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== repeated-3.cap+1.no-map
+True
+== repeated-3.cap+1.no-charge
+0

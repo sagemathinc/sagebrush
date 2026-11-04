@@ -1,0 +1,368 @@
+== df.add-column
+
+   x    y  z  w
+0  1  1.5  p  7
+1  2  2.5  q  8
+2  3  3.5  r  9
+== df.add-scalar
+
+   x    y  z  w
+0  1  1.5  p  5
+1  2  2.5  q  5
+2  3  3.5  r  5
+== df.add-series
+
+   x    y  z    w
+0  1  1.5  p  2.0
+1  2  2.5  q  NaN
+2  3  3.5  r  1.0
+== df.add-ndarray
+
+   x    y  z    w
+0  1  1.5  p  0.5
+1  2  2.5  q  1.5
+2  3  3.5  r  2.5
+== df.replace-column
+[('x', 'str'), ('y', 'float64'), ('z', 'str')]
+== df.bad-length
+!! ValueError: Length of values (2) does not match length of index (3)
+== df.loc-cell
+
+     x    y  z
+0    1  1.5  p
+1  100  2.5  q
+2    3  3.5  r
+== df.loc-float-into-int
+!! TypeError: Invalid value '1.5' for dtype 'int64'
+== df.iloc-cell
+
+   x    y  z
+0  9  1.5  p
+1  2  2.5  q
+2  3  3.5  r
+== df.loc-new-row
+
+   x    y  z
+0  1  1.5  p
+1  2  2.5  q
+2  3  3.5  r
+5  0  0.0  n
+== df.loc-new-row-dtypes
+[('x', 'int64'), ('y', 'float64'), ('z', 'str')]
+== df.loc-mask
+
+   x    y  z
+0  1  1.5  p
+1  2  0.0  q
+2  3  0.0  r
+== df.loc-new-column
+
+   x    y  z  q
+0  1  1.5  p  1
+1  2  2.5  q  1
+2  3  3.5  r  1
+== df.str-set-int
+!! TypeError: Invalid value '5' for dtype 'str'. Value should be a string or missing value, got 'int' instead.
+== df.float-set-int
+
+   x    y  z
+0  1  1.5  p
+1  2  7.0  q
+2  3  3.5  r
+== df.iloc-row
+
+   x    y  z
+0  1  1.5  p
+1  0  0.5  w
+2  3  3.5  r
+== df.int-set-nan
+
+     x    y  z
+0  1.0  1.5  p
+1  NaN  2.5  q
+2  3.0  3.5  r
+== df.mask-all-columns
+!! TypeError: Invalid value '0' for dtype 'str'. Value should be a string or missing value, got 'int' instead.
+== df.mask-numeric
+
+   x    y
+0  1  1.5
+1  0  0.0
+2  0  0.0
+== df.slice-rows
+
+   x
+0  0
+1  0
+2  3
+== df.loc-list-values
+
+   x    y  z
+0  7  1.5  p
+1  2  2.5  q
+2  9  3.5  r
+== df.loc-list-wrong
+!! ValueError: Must have equal len keys and value when setting with an iterable
+== df.iloc-block
+
+   x    y
+0  0  0.0
+1  1  1.0
+2  3  3.5
+== df.loc-row-scalar
+
+   x    y
+0  0  0.0
+1  2  2.5
+2  3  3.5
+== df.empty-add
+
+   a
+0  1
+1  2
+== s.enlarge
+
+a    10
+b    20
+c    30
+d    40
+dtype: int64
+== s.upcast
+!! TypeError: Invalid value '1.5' for dtype 'int64'
+== s.upcast-str
+!! TypeError: Invalid value 'x' for dtype 'int64'
+== s.label
+
+a    10
+b     0
+c    30
+dtype: int64
+== s.mask
+
+a    10
+b     0
+c     0
+dtype: int64
+== s.slice
+
+a     1
+b     1
+c    30
+dtype: int64
+== s.list
+
+a     1
+b    20
+c     3
+dtype: int64
+== s.loc-enlarge-float
+
+0    1.5
+1    2.0
+dtype: float64
+== s.loc-enlarge-str
+
+0    1
+1    2
+2    x
+dtype: object
+== hold.int64-0
+
+0    5
+1    2
+dtype: int64
+== hold.int64-1
+
+0    2
+1    2
+dtype: int64
+== hold.int64-2
+!! TypeError: Invalid value '2.5' for dtype 'int64'
+== hold.int64-3
+!! TypeError: Invalid value 'True' for dtype 'int64'
+== hold.int64-4
+
+0    NaN
+1    2.0
+dtype: float64
+== hold.int64-5
+
+0    NaN
+1    2.0
+dtype: float64
+== hold.int64-6
+!! TypeError: Invalid value 'x' for dtype 'int64'
+== hold.int64-7
+
+0    3
+1    2
+dtype: int64
+== hold.int64-8
+
+0    4
+1    2
+dtype: int64
+== hold.int64-9
+!! TypeError: Invalid value 'False' for dtype 'int64'
+== hold.int64-10
+!! ValueError: Invalid integer data type 'O'.
+== hold.float64-0
+
+0    5.0
+1    2.0
+dtype: float64
+== hold.float64-1
+
+0    2.0
+1    2.0
+dtype: float64
+== hold.float64-2
+
+0    2.5
+1    2.0
+dtype: float64
+== hold.float64-3
+!! TypeError: Invalid value 'True' for dtype 'float64'
+== hold.float64-4
+
+0    NaN
+1    2.0
+dtype: float64
+== hold.float64-5
+
+0    NaN
+1    2.0
+dtype: float64
+== hold.float64-6
+!! TypeError: Invalid value 'x' for dtype 'float64'
+== hold.float64-7
+
+0    3.0
+1    2.0
+dtype: float64
+== hold.float64-8
+
+0    4.0
+1    2.0
+dtype: float64
+== hold.float64-9
+!! TypeError: Invalid value 'False' for dtype 'float64'
+== hold.float64-10
+
+0    1.180592e+21
+1    2.000000e+00
+dtype: float64
+== hold.bool-0
+!! TypeError: Invalid value '5' for dtype 'bool'
+== hold.bool-1
+!! TypeError: Invalid value '2.0' for dtype 'bool'
+== hold.bool-2
+!! TypeError: Invalid value '2.5' for dtype 'bool'
+== hold.bool-3
+
+0     True
+1    False
+dtype: bool
+== hold.bool-4
+!! TypeError: Invalid value 'nan' for dtype 'bool'
+== hold.bool-5
+!! TypeError: Invalid value 'nan' for dtype 'bool'
+== hold.bool-6
+!! TypeError: Invalid value 'x' for dtype 'bool'
+== hold.bool-7
+!! TypeError: Invalid value '3' for dtype 'bool'
+== hold.bool-8
+!! TypeError: Invalid value '4.0' for dtype 'bool'
+== hold.bool-9
+
+0    False
+1    False
+dtype: bool
+== hold.bool-10
+!! TypeError: Invalid value '1180591620717411303424' for dtype 'bool'
+== hold.str-0
+!! TypeError: Invalid value '5' for dtype 'str'. Value should be a string or missing value, got 'int' instead.
+== hold.str-1
+!! TypeError: Invalid value '2.0' for dtype 'str'. Value should be a string or missing value, got 'float' instead.
+== hold.str-2
+!! TypeError: Invalid value '2.5' for dtype 'str'. Value should be a string or missing value, got 'float' instead.
+== hold.str-3
+!! TypeError: Invalid value 'True' for dtype 'str'. Value should be a string or missing value, got 'bool' instead.
+== hold.str-4
+
+0    NaN
+1      b
+dtype: str
+== hold.str-5
+
+0    NaN
+1      b
+dtype: str
+== hold.str-6
+
+0    x
+1    b
+dtype: str
+== hold.str-7
+!! TypeError: Invalid value '3' for dtype 'str'. Value should be a string or missing value, got 'int64' instead.
+== hold.str-8
+!! TypeError: Invalid value '4.0' for dtype 'str'. Value should be a string or missing value, got 'float64' instead.
+== hold.str-9
+!! TypeError: Invalid value 'False' for dtype 'str'. Value should be a string or missing value, got 'bool' instead.
+== hold.str-10
+!! TypeError: Invalid value '1180591620717411303424' for dtype 'str'. Value should be a string or missing value, got 'int' instead.
+== hold.object-0
+
+0    5
+1    1
+dtype: object
+== hold.object-1
+
+0    2.0
+1      1
+dtype: object
+== hold.object-2
+
+0    2.5
+1      1
+dtype: object
+== hold.object-3
+
+0    True
+1       1
+dtype: object
+== hold.object-4
+
+0    NaN
+1      1
+dtype: object
+== hold.object-5
+
+0    None
+1       1
+dtype: object
+== hold.object-6
+
+0    x
+1    1
+dtype: object
+== hold.object-7
+
+0    3
+1    1
+dtype: object
+== hold.object-8
+
+0    4.0
+1      1
+dtype: object
+== hold.object-9
+
+0    False
+1        1
+dtype: object
+== hold.object-10
+
+0    1180591620717411303424
+1                         1
+dtype: object

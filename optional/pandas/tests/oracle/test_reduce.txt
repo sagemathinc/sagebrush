@@ -1,0 +1,270 @@
+python 3.14.9 x86_64 glibc
+package numpy 2.5.1
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== int.sum
+('int64', 'np.int64(6)')
+== int.mean
+('float64', 'np.float64(2.0)')
+== int.min
+('int64', 'np.int64(1)')
+== int.max
+('int64', 'np.int64(3)')
+== int.count
+('int64', 'np.int64(3)')
+== int.sum-noskip
+('int64', 'np.int64(6)')
+== int.mean-noskip
+('float64', 'np.float64(2.0)')
+== int.min-noskip
+('int64', 'np.int64(1)')
+== float.sum
+('float64', 'np.float64(4.0)')
+== float.mean
+('float64', 'np.float64(2.0)')
+== float.min
+('float64', 'np.float64(1.5)')
+== float.max
+('float64', 'np.float64(2.5)')
+== float.count
+('int64', 'np.int64(2)')
+== float.sum-noskip
+('float64', 'np.float64(nan)')
+== float.mean-noskip
+('float64', 'np.float64(nan)')
+== float.min-noskip
+('float64', 'np.float64(nan)')
+== bool.sum
+('int64', 'np.int64(2)')
+== bool.mean
+('float64', 'np.float64(0.6666666666666666)')
+== bool.min
+('bool', 'np.False_')
+== bool.max
+('bool', 'np.True_')
+== bool.count
+('int64', 'np.int64(3)')
+== bool.sum-noskip
+('int64', 'np.int64(2)')
+== bool.mean-noskip
+('float64', 'np.float64(0.6666666666666666)')
+== bool.min-noskip
+('bool', 'np.False_')
+== str.sum
+('str', "'ba'")
+== str.mean
+!! TypeError: Cannot perform reduction 'mean' with string dtype
+== str.min
+('str', "'a'")
+== str.max
+('str', "'b'")
+== str.count
+('int64', 'np.int64(2)')
+== str.sum-noskip
+('float', 'nan')
+== str.mean-noskip
+!! TypeError: Cannot perform reduction 'mean' with string dtype
+== str.min-noskip
+('float', 'nan')
+== empty-float.sum
+('float64', 'np.float64(0.0)')
+== empty-float.mean
+('float', 'nan')
+== empty-float.min
+('float', 'nan')
+== empty-float.max
+('float', 'nan')
+== empty-float.count
+('int64', 'np.int64(0)')
+== empty-float.sum-noskip
+('float64', 'np.float64(0.0)')
+== empty-float.mean-noskip
+('float', 'nan')
+== empty-float.min-noskip
+('float', 'nan')
+== empty-int.sum
+('int64', 'np.int64(0)')
+== empty-int.mean
+('float', 'nan')
+== empty-int.min
+('float', 'nan')
+== empty-int.max
+('float', 'nan')
+== empty-int.count
+('int64', 'np.int64(0)')
+== empty-int.sum-noskip
+('int64', 'np.int64(0)')
+== empty-int.mean-noskip
+('float', 'nan')
+== empty-int.min-noskip
+('float', 'nan')
+== all-nan.sum
+('float64', 'np.float64(0.0)')
+== all-nan.mean
+('float', 'nan')
+== all-nan.min
+('float64', 'np.float64(nan)')
+== all-nan.max
+('float64', 'np.float64(nan)')
+== all-nan.count
+('int64', 'np.int64(0)')
+== all-nan.sum-noskip
+('float64', 'np.float64(nan)')
+== all-nan.mean-noskip
+('float64', 'np.float64(nan)')
+== all-nan.min-noskip
+('float64', 'np.float64(nan)')
+== near-2-53.sum
+('int64', 'np.int64(6755399441055739)')
+== near-2-53.mean
+('float64', 'np.float64(2251799813685246.2)')
+== near-2-53.min
+('int64', 'np.int64(-5)')
+== near-2-53.max
+('int64', 'np.int64(4503599627370496)')
+== near-2-53.count
+('int64', 'np.int64(3)')
+== near-2-53.sum-noskip
+('int64', 'np.int64(6755399441055739)')
+== near-2-53.mean-noskip
+('float64', 'np.float64(2251799813685246.2)')
+== near-2-53.min-noskip
+('int64', 'np.int64(-5)')
+== neg-zero.sum
+('float64', 'np.float64(0.0)')
+== neg-zero.mean
+('float64', 'np.float64(0.0)')
+== neg-zero.min
+('float64', 'np.float64(-0.0)')
+== neg-zero.max
+('float64', 'np.float64(-0.0)')
+== neg-zero.count
+('int64', 'np.int64(2)')
+== neg-zero.sum-noskip
+('float64', 'np.float64(0.0)')
+== neg-zero.mean-noskip
+('float64', 'np.float64(0.0)')
+== neg-zero.min-noskip
+('float64', 'np.float64(-0.0)')
+== inf.sum
+('float64', 'np.float64(nan)')
+== inf.mean
+('float64', 'np.float64(nan)')
+== inf.min
+('float64', 'np.float64(-inf)')
+== inf.max
+('float64', 'np.float64(inf)')
+== inf.count
+('int64', 'np.int64(3)')
+== inf.sum-noskip
+('float64', 'np.float64(nan)')
+== inf.mean-noskip
+('float64', 'np.float64(nan)')
+== inf.min-noskip
+('float64', 'np.float64(-inf)')
+== cancel.sum
+('float64', 'np.float64(0.0)')
+== cancel.mean
+('float64', 'np.float64(0.0)')
+== cancel.min
+('float64', 'np.float64(-1e+16)')
+== cancel.max
+('float64', 'np.float64(1e+16)')
+== cancel.count
+('int64', 'np.int64(3)')
+== cancel.sum-noskip
+('float64', 'np.float64(0.0)')
+== cancel.mean-noskip
+('float64', 'np.float64(0.0)')
+== cancel.min-noskip
+('float64', 'np.float64(-1e+16)')
+== df.sum
+
+i      3
+f    1.5
+b      1
+s     ab
+dtype: object
+== df.sum-numeric
+
+i    3.0
+f    1.5
+b    1.0
+dtype: float64
+== df.mean
+!! TypeError: Cannot perform reduction 'mean' with string dtype
+== df.mean-numeric
+
+i    1.5
+f    1.5
+b    0.5
+dtype: float64
+== df.min
+
+i        1
+f      1.5
+b    False
+s        a
+dtype: object
+== df.max-numeric
+
+i       2
+f     1.5
+b    True
+dtype: object
+== df.count
+
+i    2
+f    1
+b    2
+s    2
+dtype: int64
+== df.int-bool-min
+
+i        1
+b    False
+dtype: object
+== df.int-bool-sum
+
+i    3
+b    1
+dtype: int64
+== df.int-sum
+
+i    3
+dtype: int64
+== df.int-float-max
+
+i    2.0
+f    1.5
+dtype: float64
+== df.sum-noskip
+
+i    3.0
+f    NaN
+dtype: float64
+== df.big
+
+a    4.999950e+08
+b    4.999950e+09
+dtype: float64
+== df.big-mean
+
+a    4999.95
+dtype: float64
+== df.empty-sum
+
+a    0.0
+dtype: float64
