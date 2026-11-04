@@ -11,6 +11,6 @@
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
   "swRaw": 219600,
-  "swGzip": 54081,
-  "transition": "TRANSITION: web/sw.js source and sw.js raw are unchanged; the r5 core build rotates generated 16-hex chunk names, moving normalized gzip-9 through hash entropy rather than service-worker code growth. swGzip 54,081 is r5's exact 54,017 measurement plus 64 B tight headroom. Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
+  "swGzip": 54078,
+  "transition": "TRANSITION: web/sw.js source and sw.js raw are unchanged; the r5 core build rotates generated 16-hex chunk names, moving normalized gzip-9 through hash entropy rather than service-worker code growth. swGzip 54,078 is r5's exact 54,014 measurement plus 64 B tight headroom. Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
 }
