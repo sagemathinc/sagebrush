@@ -20,22 +20,45 @@ pub const fn scratch_len() -> usize {
     MC * KC + KC * NC
 }
 
-/// A column-major matrix view: element (i, j) is `data[i + j * ld]`.
+/// The number of elements a column-major `rows x cols` matrix with leading dimension `ld` spans:
+/// `(cols - 1) * ld + rows`, 0 when empty; `None` when `ld < max(rows, 1)` or the span overflows.
+pub fn span(rows: usize, cols: usize, ld: usize) -> Option<usize> {
+    if ld < rows.max(1) {
+        return None;
+    }
+    if rows == 0 || cols == 0 {
+        return Some(0);
+    }
+    (cols - 1).checked_mul(ld)?.checked_add(rows)
+}
+
+/// A column-major matrix view: element (i, j) is `data[i + j * ld]`. Its fields are private, so the only way
+/// to make one is [`Mat::new`], which checks the invariant every kernel relies on: `ld >= max(rows, 1)` and
+/// `data` holds every element.
 #[derive(Clone, Copy)]
 pub struct Mat<'a> {
-    pub data: &'a [f64],
-    pub rows: usize,
-    pub cols: usize,
-    pub ld: usize,
+    data: &'a [f64],
+    rows: usize,
+    cols: usize,
+    ld: usize,
 }
 
 impl<'a> Mat<'a> {
-    /// a view, checked: `ld >= rows` and `data` holds every element
+    /// a view, checked (with overflow-checked arithmetic): `ld >= max(rows, 1)` and `data` holds every element
     pub fn new(data: &'a [f64], rows: usize, cols: usize, ld: usize) -> Option<Self> {
-        if ld < rows.max(1) || (rows > 0 && cols > 0 && data.len() < (cols - 1) * ld + rows) {
+        if data.len() < span(rows, cols, ld)? {
             return None;
         }
         Some(Mat { data, rows, cols, ld })
+    }
+    pub fn rows(&self) -> usize {
+        self.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.cols
+    }
+    pub fn ld(&self) -> usize {
+        self.ld
     }
     #[inline]
     fn at(&self, i: usize, j: usize) -> f64 {
@@ -43,12 +66,16 @@ impl<'a> Mat<'a> {
     }
 }
 
-/// The columns of C a thread computes: blocks of NR columns dealt evenly, fixed by (n, threads) only.
+/// The columns of C thread `id` of `threads` computes, `[j0, j1)`: blocks of NR columns dealt evenly, fixed
+/// by (n, threads) only, so the threads' ranges are disjoint and cover 0..n. An `id` at or beyond `threads`
+/// gets the empty range (n, n). (Overflow-free: the products saturate, then are clamped to n.)
 pub fn partition(n: usize, threads: usize, id: usize) -> (usize, usize) {
     let t = threads.max(1);
-    let blocks = n.div_ceil(NR);
-    let per = blocks.div_ceil(t);
-    ((id * per * NR).min(n), ((id + 1) * per * NR).min(n))
+    if id >= t {
+        return (n, n);
+    }
+    let per = n.div_ceil(NR).div_ceil(t).saturating_mul(NR);
+    (id.saturating_mul(per).min(n), id.saturating_add(1).saturating_mul(per).min(n))
 }
 
 /// Pack rows i0..i0+mc, columns p0..p0+kc of A into MR-row panels (zero-padded to a multiple of MR).
@@ -87,15 +114,17 @@ fn pack_b(b: &Mat, p0: usize, kc: usize, j0: usize, nc: usize, out: &mut [f64]) 
 /// (column-major, leading dimension `ldc`: element (i, j) at `c_cols[i + (j - j_begin) * ldc]`).
 /// `scratch` has at least [`scratch_len`] elements. A is m x k, B is k x n.
 ///
-/// Errors (dimension mismatch, short buffers) return `false` without writing anything.
+/// Errors (dimension mismatch, short buffers, an overflowing layout) return `false` without writing anything:
+/// every check comes before the first write.
 pub fn gemm_cols(a: &Mat, b: &Mat, c_cols: &mut [f64], ldc: usize, j_begin: usize, j_end: usize, scratch: &mut [f64]) -> bool {
     let (m, k) = (a.rows, a.cols);
-    if b.rows != k || j_begin > j_end || j_end > b.cols || ldc < m.max(1) || scratch.len() < scratch_len() {
+    if b.rows != k || j_begin > j_end || j_end > b.cols || scratch.len() < scratch_len() {
         return false;
     }
     let ncols = j_end - j_begin;
-    if ncols > 0 && m > 0 && c_cols.len() < (ncols - 1) * ldc + m {
-        return false;
+    match span(m, ncols, ldc) {
+        Some(need) if c_cols.len() >= need => {}
+        _ => return false,
     }
     if m == 0 {
         return true;
@@ -156,7 +185,8 @@ pub fn gemm(a: &Mat, b: &Mat, c: &mut [f64], threads: usize) -> bool {
     extern crate std;
     use std::vec;
     let (m, n) = (a.rows, b.cols);
-    if b.rows != a.cols || c.len() < m * n {
+    let Some(mn) = m.checked_mul(n) else { return false };
+    if b.rows != a.cols || c.len() < mn {
         return false;
     }
     let t = threads.max(1);
@@ -166,12 +196,12 @@ pub fn gemm(a: &Mat, b: &Mat, c: &mut [f64], threads: usize) -> bool {
     if m == 0 || n == 0 {
         return gemm_cols(a, b, c, m.max(1), 0, n, &mut vec![0.0; scratch_len()]);
     }
-    let chunk = chunk_cols * m;
+    let Some(chunk) = chunk_cols.checked_mul(m) else { return false };
     #[cfg(feature = "parallel")]
     {
         let ok = core::sync::atomic::AtomicBool::new(true);
         sagebrush_par::install(t, || {
-            sagebrush_par::for_each_chunk_mut(&mut c[..m * n], chunk, |id, cs| {
+            sagebrush_par::for_each_chunk_mut(&mut c[..mn], chunk, |id, cs| {
                 let j0 = id * chunk_cols;
                 let j1 = (j0 + chunk_cols).min(n);
                 let mut s = vec![0.0; scratch_len()];
@@ -185,7 +215,7 @@ pub fn gemm(a: &Mat, b: &Mat, c: &mut [f64], threads: usize) -> bool {
     #[cfg(not(feature = "parallel"))]
     {
         let mut s = vec![0.0; scratch_len()];
-        for (id, cs) in c[..m * n].chunks_mut(chunk).enumerate() {
+        for (id, cs) in c[..mn].chunks_mut(chunk).enumerate() {
             let j0 = id * chunk_cols;
             let j1 = (j0 + chunk_cols).min(n);
             if !gemm_cols(a, b, cs, m, j0, j1, &mut s) {
@@ -251,6 +281,46 @@ mod tests {
         }
     }
 
+    /// The seeded inputs shared with test/nd-wasm.test.ts: a 32-bit LCG, exact in f64 in Rust and JS.
+    pub(crate) fn seeded(count: usize, seed: &mut u32) -> Vec<f64> {
+        (0..count)
+            .map(|_| {
+                *seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+                f64::from(*seed) / 4294967296.0 - 0.5
+            })
+            .collect()
+    }
+
+    /// FNV-1a over the f64 bits, as test/nd-wasm.test.ts computes it.
+    pub(crate) fn fnv(c: &[f64]) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        for x in c {
+            for byte in x.to_bits().to_le_bytes() {
+                h = (h ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        h
+    }
+
+    /// The cross-microkernel pin (r4.2 §7; grader T2): C for this seeded 97 x 257 x 513 product (k crosses a
+    /// KC block) hashes to the same value from every microkernel. This native run uses the scalar one; the
+    /// Wasm SIMD128 one must give the same bits (test/nd-wasm.test.ts, on the committed module). A fused
+    /// multiply-add or any reordering in either kernel changes the bits.
+    pub(crate) const CROSS_KERNEL_FNV: u64 = 0x364c3cb66df0cabb;
+
+    #[test]
+    fn cross_kernel_bits() {
+        let (m, k, n) = (97, 257, 513);
+        let mut seed = 2026u32;
+        let av = seeded(m * k, &mut seed);
+        let bv = seeded(k * n, &mut seed);
+        let a = Mat::new(&av, m, k, m).unwrap();
+        let b = Mat::new(&bv, k, n, k).unwrap();
+        let mut c = vec![0.0; m * n];
+        assert!(gemm(&a, &b, &mut c, 1));
+        assert_eq!(fnv(&c), CROSS_KERNEL_FNV, "C's bits: {:#018x}", fnv(&c));
+    }
+
     #[test]
     fn partition_covers_once() {
         for n in [0, 1, 3, 4, 5, 63, 64, 1000] {
@@ -267,6 +337,33 @@ mod tests {
                 assert_eq!(next, n);
             }
         }
+    }
+
+    #[test]
+    fn overflow_and_bad_layouts_are_refused_without_writing() {
+        let v = vec![1.0; 16];
+        // spans that overflow, near usize::MAX
+        assert!(Mat::new(&v, 2, usize::MAX, usize::MAX / 2).is_none());
+        assert!(Mat::new(&v, usize::MAX, 2, usize::MAX).is_none());
+        assert!(span(1, usize::MAX, 2).is_none());
+        assert!(Mat::new(&v, 4, 4, 0).is_none());
+        // gemm_cols: a C layout whose span overflows, a short C, a short scratch: false, C untouched
+        let a = Mat::new(&v, 4, 4, 4).unwrap();
+        let b = Mat::new(&v, 4, 4, 4).unwrap();
+        let mut s = vec![0.0; scratch_len()];
+        let mut c = vec![7.0; 16];
+        assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s));
+        assert!(!gemm_cols(&a, &b, &mut c[..15], 4, 0, 4, &mut s));
+        assert!(!gemm_cols(&a, &b, &mut c, 3, 0, 4, &mut s));
+        assert!(!gemm_cols(&a, &b, &mut c, 4, 0, 5, &mut s));
+        assert!(!gemm_cols(&a, &b, &mut c, 4, 0, 4, &mut s[..10]));
+        assert!(c.iter().all(|&x| x == 7.0), "a refused call wrote C");
+        // partition near usize::MAX: no panic, ranges within n, beyond-threads ids empty
+        for &(n, t, id) in &[(usize::MAX, 3, 2), (usize::MAX, usize::MAX, usize::MAX - 1), (10, 4, 4), (10, 4, 99)] {
+            let (j0, j1) = partition(n, t, id);
+            assert!(j0 <= j1 && j1 <= n);
+        }
+        assert_eq!(partition(10, 4, 4), (10, 10));
     }
 
     #[test]

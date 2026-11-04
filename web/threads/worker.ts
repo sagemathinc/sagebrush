@@ -2,7 +2,9 @@
 // - "helper" (threads 1..T-1): waits on the control word, runs its share of the job, counts in.
 // - "conductor" (thread 0): fills the inputs, checks correctness, then times the job at each thread count. It is
 //   a worker because a page's main thread may not block (Atomics.wait), and the job's thread 0 must wait for the others.
-// Every job returns before anyone reads C (r4.2 §6).
+// Every job returns before anyone reads C (r4.2 §6). Failures never hang (E3): a helper that throws or traps
+// records it and still counts in; a helper that dies outright is caught by the conductor's bounded wait (no
+// helper finishing for STALL_MS fails the job); the page tears the pool down on any failure (page.ts).
 
 type Exports = {
   __stack_pointer: WebAssembly.Global;
@@ -11,8 +13,10 @@ type Exports = {
   nd_microkernel(out: number, cap: number): number;
 };
 
-// control words (Int32): [0] job generation (−1 = stop), [1] helpers done, [2] helper refusals
+// control words (Int32): [0] job generation (−1 = stop), [1] helpers done, [2] helper failures
 const GEN = 0, DONE = 1, FAIL = 2;
+// (no helper finishing for this long fails the job: far above any helper's share of the largest job here)
+const STALL_MS = 15000;
 
 function instantiate(module: WebAssembly.Module, memory: WebAssembly.Memory, stackTop: number): Exports {
   const ex = new WebAssembly.Instance(module, { env: { memory } }).exports as unknown as Exports;
@@ -26,18 +30,31 @@ self.onmessage = (ev: MessageEvent) => {
   else if (m.role === "conductor") conductor(m);
 };
 
-function helper(m: { module: WebAssembly.Module; memory: WebAssembly.Memory; id: number; stackTop: number; ctl: number; desc: number }) {
+// (fault: a test hook from the page's ?fault= (helper 1 only): "refuse", "throw", or "exit" after its first job)
+function helper(m: { module: WebAssembly.Module; memory: WebAssembly.Memory; id: number; stackTop: number; ctl: number; desc: number; fault?: string }) {
   const ex = instantiate(m.module, m.memory, m.stackTop);
   const c = new Int32Array(m.memory.buffer, m.ctl, 4);
   let seen = Atomics.load(c, GEN);
   postMessage({ ready: m.id });
-  for (;;) {
+  const fault = m.id === 1 ? m.fault : undefined;
+  for (let jobs = 0; ; jobs++) {
     Atomics.wait(c, GEN, seen);
     seen = Atomics.load(c, GEN);
     if (seen < 0) return;
-    if (!ex.nd_gemm_part(m.desc, m.id)) Atomics.add(c, FAIL, 1);
-    Atomics.add(c, DONE, 1);
-    Atomics.notify(c, DONE);
+    if (fault === "exit" && jobs > 0) {
+      self.close(); // (a dead worker: it never counts in)
+      return;
+    }
+    try {
+      if (fault === "throw") throw new Error("injected failure");
+      if (fault === "refuse" || !ex.nd_gemm_part(m.desc, m.id)) Atomics.add(c, FAIL, 1);
+    } catch (e) {
+      Atomics.add(c, FAIL, 1);
+      postMessage({ helperError: `helper ${m.id}: ${String((e as Error)?.message ?? e)}` });
+    } finally {
+      Atomics.add(c, DONE, 1);
+      Atomics.notify(c, DONE);
+    }
   }
 }
 
@@ -60,11 +77,21 @@ function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memor
       Atomics.add(c, GEN, 1);
       Atomics.notify(c, GEN);
     }
-    if (!ex.nd_gemm_part(init.desc, 0)) throw new Error("the kernel refused the job");
+    const ok = ex.nd_gemm_part(init.desc, 0);
     // (wait on the very value just checked: re-reading it for the wait would lose a notify that lands between
-    // the two reads, and sleep forever)
-    for (let d; (d = Atomics.load(c, DONE)) < init.helpers; ) Atomics.wait(c, DONE, d);
-    if (Atomics.load(c, FAIL)) throw new Error("a helper refused the job");
+    // the two reads; bounded: no helper finishing for STALL_MS fails the job instead of sleeping forever)
+    let last = performance.now();
+    for (let d, seenDone = -1; (d = Atomics.load(c, DONE)) < init.helpers; ) {
+      if (d !== seenDone) {
+        seenDone = d;
+        last = performance.now();
+      } else if (performance.now() - last > STALL_MS) {
+        throw new Error(`a helper stopped responding (${d} of ${init.helpers} finished)`);
+      }
+      Atomics.wait(c, DONE, d, 100);
+    }
+    if (!ok) throw new Error("the kernel refused the job");
+    if (Atomics.load(c, FAIL)) throw new Error(`${Atomics.load(c, FAIL)} helper(s) failed the job`);
   };
 
   self.onmessage = (ev: MessageEvent) => {

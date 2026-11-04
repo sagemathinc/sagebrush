@@ -711,15 +711,40 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, 2, usize::MAX, usize::MAX / 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, usize::MAX, 2, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(span(1, usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: for &(n, t, id) in &[(usize::MAX, 3, 2), (usize::MAX, usize::MAX, usize::MAX - 1), (10, 4, 4), (10, 4, 99)] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
  "engine/nd/src/wasm.rs :: nd_microkernel :: let n = s.len().min(cap as usize); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "cap is the size of the host's output buffer for the microkernel's static name; the name is truncated to fit and nothing is refused (no user work is limited)"
  },
- "engine/nd/src/wasm.rs :: nd_microkernel :: pub unsafe extern \"C\" fn nd_microkernel(out: *mut u8, cap: u32) -> u32 { #0": {
+ "engine/nd/src/wasm.rs :: nd_microkernel :: pub unsafe extern \"C\" fn nd_microkernel(out: u32, cap: u32) -> u32 { #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
-  "reason": "cap is the size of the host's output buffer for the microkernel's static name; the name is truncated to fit and nothing is refused (no user work is limited)"
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
  },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",

@@ -25,6 +25,9 @@
   #env td { padding: 3px 0; word-break: break-word; }
   code { font-size: 13px; }
   .note { color: var(--muted); font-size: 13px; }
+  .noisy { color: #9a5b00; font-weight: 600; white-space: nowrap; }
+  tr.noisyrow td { background: #fff8e6; }
+  .warn { color: #7a4a00; background: #fff8e6; border: 1px solid #f0d9a0; border-radius: 6px; padding: 6px 10px; }
 </style>
 </head>
 <body>
@@ -39,7 +42,7 @@
       <select id="maxT"></select>
     </label>
     <label>Timed runs per thread count
-      <select id="reps"><option value="5">5</option><option value="11" selected>11</option><option value="21">21</option></select>
+      <select id="reps"><option value="21" selected>21</option><option value="41">41</option><option value="7">7 (quick, non-binding)</option></select>
     </label>
     <button id="run" type="button">Run</button>
   </div>
