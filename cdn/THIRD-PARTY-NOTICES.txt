@@ -7,10 +7,13 @@ Sagebrush itself (Copyright (c) 2026 SageMath, Inc.) is licensed under the MIT l
 
 ### smalljac (used with the author's permission)
 
-The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
-Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
-gave explicit permission for this port to be licensed however Sagebrush
-chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
+The a_p engine (`engine/ap`) is an independent Rust implementation of
+standard methods (baby-step giant-step and related techniques), following
+the genus-1 strategy of Andrew V. Sutherland's smalljac (with Kiran
+Kedlaya). On 2026-10-02 Andrew Sutherland gave permission to read
+smalljac's source and port it under any license Sagebrush chooses. No
+smalljac code is copied or shared, and smalljac 4.1.3 was run as an oracle;
+see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
 ### PSAGE (used with the author's permission)
 
@@ -72,6 +75,10 @@ Copyright (c) 2001 Python Software Foundation. See
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
   Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
+- `lib/_csv.py`: CPython 3.14's `_csv` module, a C module there
+  (`Modules/_csv.c`: its dialect checks, reader state machine, writer and
+  dialect registry), ported to Python, for `lib/csv.py` (CPython 3.14's,
+  unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
 - `lib/pickle.py`: CPython 3.14's `Lib/pickle.py`, changed: protocol 4's

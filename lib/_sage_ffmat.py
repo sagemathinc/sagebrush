@@ -905,10 +905,11 @@ class FFVector:
         ((1, 2, 3), (2, 4, 1), 4)
     """
 
-    __slots__ = ("_base", "_e")
+    __slots__ = ("_base", "_e", "_space")
 
     def __init__(self, base, entries):
         self._base = base
+        self._space = None  # (an element of a subspace: that subspace, its parent)
         # (read within the heap budget, and admitted, before converting:
         # a vector had only the 4M-entry ceiling)
         self._e = [base(x) for x in _admitted_entries(base, entries)]
@@ -956,13 +957,15 @@ class FFVector:
         return list(self._e)
 
     def parent(self):
-        """The ambient vector space.
+        """The ambient vector space (or, for an element got from a subspace, that subspace).
 
         EXAMPLES::
 
             sage: vector(GF(5), [1, 2, 3]).parent()
             Vector space of dimension 3 over Finite Field of size 5
         """
+        if self._space is not None:
+            return self._space
         return VectorSpace(self._base, len(self._e))
 
     def base_ring(self):
@@ -1034,16 +1037,41 @@ class FFVector:
             return _vector_op(self, o, "*")
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
+        import _sage_matrix
+        if isinstance(o, _sage_matrix.Matrix):
+            # (times a matrix over ZZ: in GF(q), as Sage coerces; another
+            # ring: Sage's TypeError)
+            if o._base is _sa().ZZ and o.nrows() == len(self._e):
+                # (by shape: a matrix with no rows keeps its columns)
+                return matrix(self._base, o.nrows(), o.ncols(), [x for r in o._rows for x in r])._vecmat(self)
+            raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), o.parent()))
         c = _admit(self._base, o)
         if c is None:
+            if isinstance(o, _F) or type(o).__name__ == "Rational":
+                # (no coercion of QQ into GF(q), as Sage)
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), _sa().parent(o)))
             return NotImplemented
         return FFVector(self._base, [a * c for a in self._e])
 
     def __rmul__(self, o):
+        """o * self for a scalar o of the base ring (an integer).
+
+        EXAMPLES::
+
+            sage: 3 * vector(GF(5), [1, 2])
+            (3, 1)
+            sage: 1/2 * vector(GF(5), [1, 2])
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5'
+        """
         if _vec_base(o) is not None:
             return _vector_op(o, self, "*")
         c = _admit(self._base, o)
         if c is None:
+            if isinstance(o, _F) or type(o).__name__ == "Rational":
+                # (no coercion of QQ into GF(q), as Sage)
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (_sa().parent(o), self.parent()))
             return NotImplemented
         return FFVector(self._base, [c * a for a in self._e])
 
@@ -1733,6 +1761,86 @@ class FFMatrix:
             import _sage_rdf
             return _sage_rdf._rank(self)
         return _sa().Integer(len(_echelon(self._rows, self._base, self._ncols, want_rows=False)[1]))
+
+    def nullity(self):
+        """The left nullity: nrows - rank (Sage's nullity).
+
+        EXAMPLES::
+
+            sage: matrix(GF(5), [[1, 2], [3, 4]]).nullity()
+            0
+            sage: matrix(GF(2), [[1, 1, 0, 1, 3], [2, 5, 1, 0, 1], [3, 0, 1, 0, 2], [1, 1, 3, 2, 0]]).nullity()
+            0
+        """
+        return int(self.nrows() - self.rank())
+
+    left_nullity = nullity
+
+    def right_nullity(self):
+        """ncols - rank."""
+        return int(self.ncols() - self.rank())
+
+    def _eigen_roots(self, base_field):
+        # (as _sage_matrix.Matrix._eigen_roots; the roots ordered as Sage's
+        # factorization orders x - r: multiplicity, then the constant term)
+        if not self.is_square():
+            raise TypeError("not a square matrix")
+        A = self.change_ring(base_field) if base_field is not None else self
+        R = A.base_ring()
+        if not (hasattr(R, "is_field") and R.is_field()):
+            raise ValueError("matrix entries must be from a field")
+        if hasattr(R, "is_exact") and not R.is_exact():
+            raise ValueError("base field must be exact, but {} is not".format(R))
+        import _sage_ff
+        ff = isinstance(R, _sage_ff.IntegerModRing_)
+        evals = sorted(A.charpoly().roots(), key=lambda t: (t[1], int((-t[0])._v) if ff else -t[0]))
+        return A, evals
+
+    def is_diagonalizable(self, base_field=None):
+        """Whether self is diagonalizable over its base field (Sage's algorithm).
+
+        EXAMPLES::
+
+            sage: matrix(GF(5), [[1, 2], [3, 4]]).is_diagonalizable()
+            False
+            sage: matrix(RR, [[1, 2], [3, 4]]).is_diagonalizable()
+            Traceback (most recent call last):
+            ...
+            ValueError: base field must be exact, but Real Field with 53 bits of precision is not
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            return False
+        n = A.nrows()
+        for e, am in evals:
+            if am != (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().dimension():
+                return False
+        return True
+
+    def diagonalization(self, base_field=None):
+        """(D, P) with P^-1 self P = D (Sage's algorithm); a ValueError if not diagonalizable.
+
+        EXAMPLES::
+
+            sage: D, P = matrix(GF(5), [[2, 1], [1, 2]]).diagonalization(); D
+            [3 0]
+            [0 1]
+            sage: P
+            [1 1]
+            [1 4]
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            raise ValueError("not diagonalizable over {}".format(A.base_ring()))
+        n = A.nrows()
+        dia, bas = [], []
+        for e, am in evals:
+            b = (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().basis()
+            if len(b) != am:
+                raise ValueError("not diagonalizable")
+            dia += [e] * am
+            bas += list(b)
+        return _sa().diagonal_matrix(A.base_ring(), dia), _sa().matrix(A.base_ring(), [list(v) for v in bas]).transpose()
 
     def __getattr__(self, name):
         # numerical matrices (RDF, CDF, RR, CC): eigenvalues, SVD, ... by numpy
@@ -2804,7 +2912,51 @@ class FFSubspace(FFVectorSpace):
                 t //= q
                 if c:
                     v = [a + c * b for a, b in zip(v, r)]
-            yield FFVector(self._base, v)
+            w = FFVector(self._base, v)
+            w._space = self
+            yield w
+
+    def __len__(self):
+        return int(self._base.order()) ** len(self._basis)
+
+    def __getitem__(self, n):
+        """The n-th element in iteration order, or a list for a slice, as Sage's.
+
+        EXAMPLES::
+
+            sage: K2 = matrix(GF(2), [[1, 1, 0, 0], [0, 0, 1, 1]]).right_kernel(); K2[1:]
+            [(1, 1, 0, 0), (0, 0, 1, 1), (1, 1, 1, 1)]
+            sage: K2[1:3]
+            [(1, 1, 0, 0), (0, 0, 1, 1)]
+            sage: K = matrix(GF(2), [[1, 1, 0, 1, 3], [2, 5, 1, 0, 1], [3, 0, 1, 0, 2], [1, 1, 3, 2, 0]]).right_kernel()
+            sage: K[-1], len(K)
+            ((1, 0, 1, 0, 1), 2)
+            sage: K[5]
+            Traceback (most recent call last):
+            ...
+            ValueError: the value must be in the range from 0 to 1
+        """
+        if isinstance(n, slice):
+            # only the elements asked for (a range is lazy): K[0:2] of a large
+            # space doesn't enumerate the whole space
+            return [self[i] for i in range(len(self))[n]]
+        card = len(self)
+        n = int(n)
+        if n < 0:
+            n += card
+        if not 0 <= n < card:
+            raise ValueError("the value must be in the range from 0 to %d" % (card - 1))
+        els = _field_elements(self._base)
+        q = len(els)
+        v = [self._base.zero()] * self._n
+        for r in self._basis:
+            c = els[n % q]
+            n //= q
+            if c:
+                v = [a + c * b for a, b in zip(v, r)]
+        w = FFVector(self._base, v)
+        w._space = self
+        return w
 
     def cardinality(self):
         """q^dimension.

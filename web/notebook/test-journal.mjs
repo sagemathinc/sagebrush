@@ -1,3 +1,4 @@
+// ci: web-runner order=230 runner=bun chrome
 // The notebook journal's core (web/notebook/journal.js; plan-sync-slice2-client r4 §2.1, r9 §3.1a) in headless
 // Chromium, with real IndexedDB and Web Locks: T1 then T2 on every save, the journal's rows and their charges, the
 // pending value while TimeTravel is paused (F4), and recovery on load, each row of its table hit by a case.
@@ -37,6 +38,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as B from ${JSON.stringify(join(here, "bundle.js"))};`,
   `export * as S from ${JSON.stringify(join(here, "stores.js"))};`,
   `export * as P from ${JSON.stringify(join(here, "../sync-protocol/protocol.ts"))};`,
+  `export * as G from ${JSON.stringify(join(here, "../page/session.ts"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -45,10 +47,8 @@ if (!b.success) {
   process.exit(1);
 }
 copyFileSync(join(here, "test-journal.page.js"), join(site, "cases.js"));
-// (the notebook page's source, for its journal functions, run as they are (the cases extract them))
-copyFileSync(join(here, "../index.html"), join(site, "page-src.html"));
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>notebook journal test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
-const FILES = ["/all.js", "/cases.js", "/page-src.html"];
+const FILES = ["/all.js", "/cases.js"];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (p !== "/" && !FILES.includes(p)) return new Response("not found", { status: 404 });

@@ -1,18 +1,20 @@
-// The DEV switch for notebooks' contents (sync 2c-3's DocSync on the account connection, web/workspace/doc-sync.ts).
+// The switch for notebooks' contents (sync 2c-3's DocSync on the account connection, web/workspace/doc-sync.ts), on
+// DEV since Oct and on PROD since Nov 1 (William's GO: his account first; the server's allowlist decides who).
 // It fails closed: on only if ALL of these hold, checked in this order on every page load and never cached:
-//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's own; PROD's, sagebrush.space, is not, and nothing
-//      at all is asked or started on any other origin);
+//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's and PROD's own, nothing else: nothing at all is
+//      asked or started on any other origin);
 //   2. the server says this account may sync: GET /api/sync/v1/status answers 200 with `available: true` (the
-//      allowlist; PROD's site has no such route);
+//      allowlist: SYNC_ACCOUNTS, on each site its own);
 //   3. this page's sync client runs (signed in, sync on for this account).
-// Only then does the notebook page (index.html) turn the journal on (durable for this browser's workspace: the Sync
-// panel's note, DOC_SYNC_NOTE, says so), set DOC_SYNC.on and hand a DocSync to the sync owner (enableDocSync); and a
+// Only then does the notebook page (index.html) turn the journal on (durable for this browser's workspace: a storage
+// upgrade, not a setting, so the Sync panel's note, DOC_SYNC_NOTE, doesn't speak of it; a page that can't go on with it
+// says DOC_SYNC_RELOAD), set DOC_SYNC.on and hand a DocSync to the sync owner (enableDocSync); and a
 // board page, once the journal is active, hands one to its own owner, so whichever tab holds the account connection
 // carries notebooks (followDocSync).  The allowed origins are a frozen constant; tests pass their own list to these
 // functions as an argument, so no page, URL or storage can widen it.
 
-/** The origins notebooks' contents sync on: DEV's only. */
-export const DOC_SYNC_ORIGINS: readonly string[] = Object.freeze(["https://dev.sagebrush.space"]);
+/** The origins notebooks' contents sync on: DEV's and PROD's. */
+export const DOC_SYNC_ORIGINS: readonly string[] = Object.freeze(["https://dev.sagebrush.space", "https://sagebrush.space"]);
 
 /** Condition 1: `origin` is one of `allowed` exactly (by default DOC_SYNC_ORIGINS). */
 export function docSyncOrigin(origin: string, allowed: readonly string[] = DOC_SYNC_ORIGINS): boolean {
@@ -45,15 +47,20 @@ export async function docSyncAllowed(
   }
 }
 
-/** What the Sync panel says of notebooks while the switch is on (DEV, until 2c-4 and the PROD gate). */
+/** What the Sync panel says of notebooks while the switch is on (DEV and PROD), each sentence as the code does it
+ * (William's M9, Nov 3; the facts, with file:line, in the PR): the account's own devices and Sagebrush's server, never
+ * peer-to-peer or another account; no outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
+ * gitpush/rules.ts stripOutputs); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
+ * from its start (doc-sync.ts pull); no clear sent (journal/core.js NO_CLEAR_SYNCED); what stops a notebook
+ * (doc-sync.ts refused, its 1 MiB bound); boards' contents not synced (board/journal.ts sync.on false). */
 export const DOC_SYNC_NOTE = [
-  "Notebooks sync between your devices here (DEV only). Outputs are never synced.",
-  "If the same cell is changed on two devices before they sync, the later change is kept; the other is in TimeTravel.",
-  "TimeTravel shows a notebook's versions since it started syncing on this device.",
-  "Clearing TimeTravel isn't available for a synced notebook.",
-  "A notebook stops syncing on a device if the server restarts its history (a snapshot or a cleared history) or refuses its changes for good; its changes stay on that device.",
-  "Boards don't sync yet: they save in this browser as before.",
-  "Turning this on is lasting for this browser: it keeps saving notebooks through sync's journal even if notebook sync is later turned off, and an older copy of this site open in another tab can't save notebooks until it's reloaded. sagebrush.space (not DEV) is a separate site with its own storage, and isn't affected.",
+  "Your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. Not peer-to-peer, and not shared with other people.",
+  "Only cells' code and text sync. Outputs never leave this browser: not to the server, not into TimeTravel, not in a push to GitHub.",
+  "If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.",
+  "TimeTravel shows every version since the notebook first synced, on every device, including ones added later.",
+  "Clearing TimeTravel isn't available yet for a synced notebook.",
+  "If a notebook can't sync (the server refuses its changes, or a change is too large), the Sync panel says so, and its changes stay in this browser.",
+  "Boards don't sync yet. A board made on another device is listed here, but can't be opened until boards sync.",
 ] as const;
 
 /** Said on the notebook page when the journal's activation began (it can't go back) but this page couldn't go on with

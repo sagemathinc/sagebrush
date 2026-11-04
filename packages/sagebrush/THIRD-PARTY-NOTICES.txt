@@ -46,6 +46,10 @@ Copyright (c) 2001 Python Software Foundation. See
   (`Objects/stringlib/unicode_format.h`: `MarkupIterator_next`,
   `parse_field`, `field_name_split`, `FieldNameIterator_next`), ported to
   Python, for `lib/string/__init__.py` (CPython 3.14's, unchanged).
+- `lib/_csv.py`: CPython 3.14's `_csv` module, a C module there
+  (`Modules/_csv.c`: its dialect checks, reader state machine, writer and
+  dialect registry), ported to Python, for `lib/csv.py` (CPython 3.14's,
+  unchanged).
 - `lib/pprint.py`: CPython 3.14's `Lib/pprint.py`, changed: without a
   `dataclasses` module no object is a dataclass.
 - `lib/pickle.py`: CPython 3.14's `Lib/pickle.py`, changed: protocol 4's
@@ -219,6 +223,13 @@ its explicit Runge-Kutta solvers (`_ivp/ivp.py`, `rk.py`, `common.py`,
 and event handling), DOP853's coefficients (`_ivp/dop853_coefficients.py`,
 Hairer's), and the argument handling of `quad`, `nquad`, `odeint`,
 `trapezoid`, `cumulative_trapezoid` and `simpson`.
+
+`lib/scipy/special.py` follows SciPy 1.18's `scipy/special`: the argument
+handling of `comb`, `perm` and `factorial` and the formula of `polygamma`
+(`_basic.py`), `logsumexp`, `softmax` and `log_softmax` (`_logsumexp.py`),
+and the formulas of `log_ndtr` (`_faddeeva.cxx`); its ufuncs' type
+resolution, poles and domains follow SciPy's behaviour. Two of its
+functions are ported from xsf, SciPy's special-function library (below).
 
 `quad` in `lib/scipy/integrate.py` is a code translation, not only an
 implementation of the published algorithm: `_qags`, `_qk21`, `_qk15i`,
@@ -424,10 +435,13 @@ Copyright 2026 Marimo. All rights reserved.
 
 ### smalljac (used with the author's permission)
 
-The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
-Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
-gave explicit permission for this port to be licensed however Sagebrush
-chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
+The a_p engine (`engine/ap`) is an independent Rust implementation of
+standard methods (baby-step giant-step and related techniques), following
+the genus-1 strategy of Andrew V. Sutherland's smalljac (with Kiran
+Kedlaya). On 2026-10-02 Andrew Sutherland gave permission to read
+smalljac's source and port it under any license Sagebrush chooses. No
+smalljac code is copied or shared, and smalljac 4.1.3 was run as an oracle;
+see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
 ### PSAGE (used with the author's permission)
 
@@ -3183,22 +3197,31 @@ freely, subject to the following restrictions:
 
 3. This notice may not be removed or altered from any source distribution.
 
-== JavaScript packages in the notebook page's bundles (12) ==
+== JavaScript packages in the notebook page's bundles (21) ==
 
-(from web/js-dependencies.json d6d7c799f99aaf60)
+(from web/js-dependencies.json 70bcd29844e2fb26)
 
 @cocalc/diff-match-patch 1.1.1: Apache-2.0 (in TimeTravel)
+@isomorphic-git/idb-keyval 3.3.2: Apache-2.0 (in Push to GitHub's worker)
+@isomorphic-git/lightning-fs 4.10.5: MIT (in Push to GitHub's worker)
 @preact/signals-core 1.14.4: MIT (in the board)
 @xterm/addon-fit 0.11.0: MIT (in the console)
 @xterm/xterm 6.0.0: MIT (in the console)
+async-lock 1.4.1: MIT (in Push to GitHub's worker)
 fast-deep-equal 3.1.3: MIT (in TimeTravel)
 fast-json-stable-stringify 2.1.0: MIT (in TimeTravel)
+ignore 5.3.2: MIT (in Push to GitHub's worker)
 immer 10.2.0: MIT (in TimeTravel)
+isomorphic-git 1.44.9: MIT (in Push to GitHub's worker)
+just-debounce-it 3.2.0: MIT (in Push to GitHub's worker)
+just-once 2.2.0: MIT (in Push to GitHub's worker)
 katex 0.19.0: MIT (in KaTeX's stylesheet and fonts (copied), math, the atlas)
 lru-cache 11.2.4: BlueOak-1.0.0 (in TimeTravel) [vendored by another package; license text from 11.5.3]
 marked 18.0.14: MIT (in the board, the notebook component, the notebook page, the shared collection page)
 mathjax-full 3.2.2: Apache-2.0 (in the command line's board render (math))
+pako 1.0.11: (MIT AND Zlib) (in Push to GitHub's worker)
 patchflow 0.16.0: MIT (in TimeTravel, the board, the notebook page)
+pify 4.0.1: MIT (in Push to GitHub's worker)
 
 ------------------------------------------------------------------------
 @cocalc/diff-match-patch 1.1.1 (LICENSE)
@@ -3407,6 +3430,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ------------------------------------------------------------------------
+@isomorphic-git/idb-keyval 3.3.2 (LICENCE)
+------------------------------------------------------------------------
+
+Copyright 2016, Jake Archibald
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+------------------------------------------------------------------------
+@isomorphic-git/lightning-fs 4.10.5 (LICENSE)
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2018 wmhilton
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
 @preact/signals-core 1.14.4 (LICENSE)
 ------------------------------------------------------------------------
 
@@ -3483,6 +3538,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------
+async-lock 1.4.1 (LICENSE)
+------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Rogier Schouten <github@workingcode.ninja>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
 fast-deep-equal 3.1.3 (LICENSE)
 ------------------------------------------------------------------------
 
@@ -3535,12 +3616,102 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------
+ignore 5.3.2 (LICENSE-MIT)
+------------------------------------------------------------------------
+
+Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors
+http://kael.me/
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
 immer 10.2.0 (LICENSE)
 ------------------------------------------------------------------------
 
 MIT License
 
 Copyright (c) 2017 Michel Weststrate
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
+isomorphic-git 1.44.9 (LICENSE.md)
+------------------------------------------------------------------------
+
+Copyright 2017-2023 the 'isomorphic-git' authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
+just-debounce-it 3.2.0 (LICENSE)
+------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 angus croll
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
+just-once 2.2.0 (LICENSE)
+------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 angus croll
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3902,6 +4073,32 @@ Apache License
    limitations under the License.
 
 ------------------------------------------------------------------------
+pako 1.0.11 (LICENSE)
+------------------------------------------------------------------------
+
+(The MIT License)
+
+Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+------------------------------------------------------------------------
 patchflow 0.16.0 (LICENSE.txt)
 ------------------------------------------------------------------------
 
@@ -3926,6 +4123,20 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+------------------------------------------------------------------------
+pify 4.0.1 (license)
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 == KaTeX's fonts (SIL Open Font License 1.1) ==
 

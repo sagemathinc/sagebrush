@@ -124,7 +124,8 @@ export class WorkerKernel {
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
    * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing but its limits ({init}) is sent to the worker until it is done
-   * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
+   * @param {(message: any, worker: Worker) => boolean | void} [o.onMessage] sees each message first, with the worker that
+   * sent it (an earlier one's, after a restart, may still arrive); returning true consumes it (e.g. fsChanged)
    * @param {string | null} [o.limits] the engine's limits, a JSON text (src/limits.ts): the deployment's
    *   or the course's, never a document's; omitted or null for the defaults.  Every worker this kernel
    *   starts, restarts too, is given the same value first ({init}), and runs nothing before it is valid;
@@ -225,7 +226,7 @@ export class WorkerKernel {
     });
     w.onmessage = (ev) => {
       const m = ev.data;
-      if (this.onMessage?.(m)) return;
+      if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
         this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
         return;
@@ -234,6 +235,8 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (the files permission's shared word, a plain worker's: setWritable sets it at once; a runner's stays in its frame)
+        this.writableWord = m.writable ? new Int32Array(m.writable) : null;
         this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
@@ -245,6 +248,14 @@ export class WorkerKernel {
       // said once it has taken 300 ms, until it is here, in the status and
       // ("loading" event) on the cells waiting for it
       if (m.libChunk !== undefined) return keepChunk(m.libChunk);
+      // (a group the library couldn't load, offline or not: the cells show its item's download button, plan-b8-offline
+      // §10; only the item's id and a few fields, checked here, never the traceback)
+      if (m.offlineMissing !== undefined) {
+        const o = m.offlineMissing;
+        if (o && typeof o.item === "string" && /^[a-z0-9-]{1,64}$/.test(o.item) && (o.code === "SB_OFFLINE_MISSING" || o.code === "SB_FETCH_FAILED"))
+          this.emit("offline-missing", { code: o.code, item: o.item, group: String(o.group).slice(0, 64), offline: o.offline === true, ...(Number.isInteger(o.status) ? { status: o.status } : {}) });
+        return;
+      }
       if (m.pkgUsed !== undefined) {
         if (w === this.worker && Array.isArray(m.pkgUsed)) pkgPins.set(this.uid, m.pkgUsed.filter((d) => typeof d === "string" && /^[0-9a-f]{64}$/.test(d)));
         return pinPackages();
@@ -368,6 +379,7 @@ export class WorkerKernel {
     if (m.overflow) rec.overflow = true;
     if (m.extra) rec.extra = m.extra;
     if (m.unused) rec.unused = m.unused;
+    if (m.files?.sources?.length) rec.sources = m.files.sources;
     if (m.error) rec.error = true;
     if (this.interrupted.delete(m.id)) rec.status = "interrupted";
     this.emit("run", rec);
@@ -479,6 +491,12 @@ export class WorkerKernel {
 
   /** Send the worker anything else (files). */
   post(msg) { this.worker?.postMessage(msg); }
+  /** Whether this document may change files (the page's `files` permission): a run in flight sees it at its next write
+   * (the shared word, a plain worker's here, a runner's in its frame), and the worker keeps it for the next run. */
+  setWritable(on) {
+    if (this.writableWord) Atomics.store(this.writableWord, 0, on ? 1 : 0);
+    this.post({ fsWritable: !!on });
+  }
 
   // Interrupt what is running: KeyboardInterrupt in the worker (Python loops
   // and the Rust engines check a flag shared with this page), keeping every

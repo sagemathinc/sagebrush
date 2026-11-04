@@ -8,8 +8,9 @@
 // A data file opens its preview, with its earlier versions; a folder's ⋯
 // deletes older versions in it; the foot's meter opens the Storage panel
 // (preview.ts, step 2b).
-import { Workspace, WorkspaceError, LIMITS, type Entry } from "./api";
-import { TRASH, freePath, join, nameOf, openableAs, parentOf, splitExt, within, type DocKind } from "./paths";
+import { Workspace, WorkspaceError, LIMITS, type Entry, type TrashGate } from "./api";
+import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind } from "./paths";
+import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
 import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
@@ -29,6 +30,10 @@ export type BrowserHost = {
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
+  /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
+   * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
+   * is web/latex/boot.ts's.) */
+  openFile?(e: Entry, tab: boolean): boolean;
   /** A data file of a kind the page recognises opened as a document: a converted copy beside it (upload.ts, design §3); none: not offered. */
   openAs?(e: Entry, as: DocKind): void | Promise<void | string>;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
@@ -43,7 +48,22 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
+   * are, and this tab's open documents saved first; without exportUrl, not offered. */
+  exportUrl?: (file: string) => string;
+  saveOpen?: () => Promise<void>;
+  /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
+   * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
+   * moved). None: the page can't, and an open document isn't moved to Trash. */
+  trashing?(e: Entry): Promise<string | void | TrashGate>;
+  /** Every Move to Trash of what is open here, once it has settled (moved, refused or failed): `gate` is what trashing
+   * returned (none if it refused), `moved` what went to Trash if it did (the page releases its navigation hold, and
+   * tells a navigation that waited into it, with `dropped`). */
+  trashDone?(gate: TrashGate | undefined, moved?: TrashMoved): void;
 };
+/** What went to Trash, for a navigation that waited into it (#447 r5c, board's (A)): said as not opened, with Restore
+ * and open while it can still be put back (`open` opens the notebook asked for once it is). */
+export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
 const RECENT = 5;
@@ -79,7 +99,13 @@ const STYLE = `
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
-.sbfiles .fsearch { margin: 0 10px 6px; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
+/* (U2, William: "Selecting a checkbox MUST NOT move the checkbox or row". The search box and the selection bar share
+   one slot, stacked in a grid cell, both always laid out (the bar hidden by visibility, not display): its height never
+   changes, so nothing under it moves; while rows are selected the bar covers the search box) */
+.sbfiles .ftop { display: grid; margin: 0 10px 6px; }
+.sbfiles .ftop > * { grid-area: 1 / 1; min-width: 0; }
+.sbfiles.selecting .fsearch { visibility: hidden; }
+.sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
@@ -98,11 +124,27 @@ const STYLE = `
 .sbfiles .frow .more { visibility: hidden; }
 .sbfiles .frow:hover .more, .sbfiles .frow:focus-within .more, .sbfiles .frow.cur .more { visibility: visible; }
 .sbfiles .frow input { flex: 1; font: inherit; padding: 1px 4px; border: 1px solid #4a6b49; border-radius: 4px; min-width: 0; }
+.sbfiles .frow .extnote { flex: none; font-size: 11.5px; color: #8a5a00; }
+/* (B2: a row's checkbox, at its left: shown on the row pointed at or focused, and on every row while any is selected) */
+/* (a span with role=checkbox, not an <input>: a row's one input stays its name typed in place) */
+.sbfiles .frow .sel { flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid #8a8f8b; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: #fff; cursor: pointer; visibility: hidden; }
+.sbfiles .frow .sel[aria-checked=true] { background: #4a6b49; border-color: #4a6b49; }
+.sbfiles .frow:hover .sel, .sbfiles .frow:focus-within .sel, .sbfiles.selecting .frow .sel { visibility: visible; }
+.sbfiles .frow.picked { background: #e6eedf; }
+.sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; background: var(--sbf-bg, #f6f5f0); }
+.sbfiles .fsel[hidden] { display: flex; visibility: hidden; }
+.sbfiles .fsel input { margin: 0; cursor: pointer; }
+.sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
-.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.sbfiles .ftoastslot { flex: none; }
+.sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.sbfiles .ftoast span { flex: 1; min-width: 0; }
 .sbfiles .ftoast button { background: none; border: 0; color: #b9e0a5; font: inherit; cursor: pointer; text-decoration: underline; }
+.sbfiles .ftoast.err { background: #fdecea; color: #7a2418; border: 1px solid #e0897c; font-weight: 500; }
+.sbfiles .ftoast.err::before { content: "⚠"; font-weight: 700; }
+.sbfiles .ftoast.err button { color: #7a2418; }
 .sbfmenu { position: fixed; z-index: 1000; background: #fff; border: 1px solid #d4d4cb; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 5px; min-width: 190px; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2421; }
 .sbfmenu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 5px; font: inherit; cursor: pointer; color: inherit; }
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
@@ -111,7 +153,7 @@ const STYLE = `
 @media (prefers-color-scheme: dark) {
   .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
   .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
-  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur { background: #2b3a29; }
+  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur, .sbfiles .frow.picked { background: #2b3a29; }
   .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; } .sbfmenu button:hover { background: #2b3a29; }
 }
 `;
@@ -168,7 +210,7 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
   const w = host.ws;
-  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => void; sticky?: boolean } | null = null;
+  let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean; label?: string } | null = null;
   const open = new Set<string>(JSON.parse((() => { try { return localStorage.getItem(OPEN_KEY) ?? "[]"; } catch { return "[]"; } })()));
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-500))); } catch {} };
 
@@ -190,27 +232,62 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
-  const toastEl = h("div");
+  // (the toast at the foot of the files, under the list (board's (d)): a message never moves a row; while it shows the
+  // list is that much shorter at its bottom, and what it covers scrolls into view)
+  const toastEl = h("div", { className: "ftoastslot" });
   const tree = h("div", { className: "ftree", role: "tree" });
   const foot = h("div", { className: "ffoot" });
   const picker = h("input", { type: "file", multiple: true, hidden: true });
-  root.append(head, search, toastEl, tree, foot, picker);
+  // (B2, William: rows selected by their checkboxes; a click toggles one, a shift-click the range from the last one
+  // clicked, in the order shown; the bar above the list says how many, selects or clears them all, and acts on them.
+  // Only rows drawn in the tree are selectable (not Recent's, not Trash's): a row that stops being drawn (its folder
+  // closed, a search) leaves the selection, so an action never reaches a row out of sight)
+  const selected = new Set<string>();
+  let anchor: string | null = null;
+  // (U4: the rows being dragged within the list, by path; their drag data's type, which a drop from outside never has)
+  let dragging: string[] | null = null;
+  const MOVE_TYPE = "application/x-sagebrush-paths";
+  const selAll = h("input", { type: "checkbox" });
+  selAll.setAttribute("aria-label", "Select all shown");
+  const selCount = h("span");
+  const selDownload = h("button", { className: "ib", textContent: "Download", title: "Download the selected files", style: "font-size:12.5px" });
+  const selClear = h("button", { className: "ib", textContent: "Clear", title: "Clear the selection (Esc)", style: "font-size:12.5px" });
+  const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
+  selBar.setAttribute("role", "toolbar");
+  selBar.setAttribute("aria-label", "Selected files");
+  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
   container.append(root);
 
-  const say = (text: string, undo?: () => void, sticky = false) => {
-    toast = { text, undo, sticky };
+  // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
+  // being reached for)
+  const hideLater = (t: NonNullable<typeof toast>, ms: number) => setTimeout(() => {
+    if (toast !== t) return;
+    if (toastEl.matches(":hover") || toastEl.contains(document.activeElement)) return void hideLater(t, 2000);
+    toast = null;
     renderToast();
-    if (!sticky) setTimeout(() => { if (toast?.text === text && !toast.sticky) { toast = null; renderToast(); } }, 8000);
+  }, ms);
+  const say = (text: string, undo?: () => unknown, sticky = false, error = false, label = "Undo") => {
+    toast = { text, undo, sticky, error, label };
+    renderToast();
+    if (!sticky) hideLater(toast, 10_000);
+  };
+  // (focus once the toast it was in has gone: the row given, else the current one, else the list's first; never the body)
+  const focusList = (path?: string) => {
+    const r = (path ? tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(path)}"]`) : null) ?? tree.querySelector<HTMLElement>(".frow.cur") ?? tree.querySelector<HTMLElement>(".frow");
+    r?.focus();
   };
   const renderToast = () => {
     toastEl.replaceChildren();
     if (!toast) return;
-    const t = h("div", { className: "ftoast", role: "status" }, h("span", { textContent: toast.text }));
-    if (toast.undo) { const u = h("button", { textContent: "Undo" }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); f(); }; t.append(u); }
-    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Close" }); x.setAttribute("aria-label", "Close"); x.onclick = () => { toast = null; renderToast(); }; t.append(x); }
+    // (an error looks like one, and is announced as one: role=alert, kept until closed)
+    const t = h("div", { className: toast.error ? "ftoast err" : "ftoast", role: toast.error ? "alert" : "status" }, h("span", { textContent: toast.text }));
+    // (Undo: the focus to the list meanwhile, its row after; another action (Restore and open) takes the focus itself)
+    if (toast.undo) { const label = toast.label ?? "Undo", u = h("button", { textContent: label }); const f = toast.undo; u.onclick = () => { toast = null; renderToast(); if (label === "Undo") focusList(); void f(); }; t.append(u); }
+    if (toast.sticky) { const x = h("button", { textContent: "✕", title: "Dismiss" }); x.setAttribute("aria-label", "Dismiss"); x.onclick = () => { const had = toastEl.contains(document.activeElement); toast = null; renderToast(); if (had) focusList(); }; t.append(x); }
     toastEl.append(t);
   };
-  const fail = (e: unknown) => say(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
+  const sayError = (text: string) => say(text, undefined, true, true);
+  const fail = (e: unknown) => sayError(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
   // (sync, step 5: the foot's line, "Synced · 2 min ago", … (role=status); hidden with sync off and nothing to say)
   const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
@@ -304,20 +381,46 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
     // (its sync icon, painted after the render (sync-rows.ts), as text a screen reader says too)
     const si = h("span", { className: "si" });
+    const selectable = !opts.recent && !trashView;
+    if (selectable) {
+      const on = selected.has(e.path);
+      const cb = h("span", { className: "sel", textContent: on ? "✓" : "" });
+      cb.setAttribute("role", "checkbox");
+      cb.setAttribute("aria-checked", String(on));
+      cb.setAttribute("aria-label", `Select ${nameOf(e.path)}`);
+      cb.onclick = (ev) => { ev.stopPropagation(); pick1(e.path, !selected.has(e.path), ev.shiftKey); };
+      r.dataset.sel = "1";
+      if (selected.has(e.path)) r.classList.add("picked");
+      r.append(cb);
+      // (U4: a row dragged onto a folder moves there; a selected row carries the whole selection)
+      r.draggable = true;
+      r.addEventListener("dragstart", (ev) => {
+        if (renamingNow || !ev.dataTransfer) return void ev.preventDefault();
+        dragging = selected.has(e.path) ? [...selected] : [e.path];
+        ev.dataTransfer.setData(MOVE_TYPE, JSON.stringify(dragging));
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
+    }
     r.append(chev, ic, name, si, meta, more);
     if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
       if ((ev.target as HTMLElement).closest("input")) return;
+      // (a shift-click on a row while some are selected extends the selection to it, rather than opening it)
+      if (ev.shiftKey && selectable && selected.size) { pick1(e.path, true, true); return; }
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
+      // (U1: a page with an editor of its own for the file, the board page's .tex)
+      if (e.kind === "file" && host.openFile?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
       host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
     };
     r.onauxclick = (ev) => {
       // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
+      if (ev.button === 1 && e.kind === "file") { if (!trashView) host.openFile?.(e, true); return; }
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };
     r.onkeydown = (ev) => {
@@ -325,6 +428,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (ev.key === "Enter") r.click();
       else if (ev.key === "F2" && !trashView) startRename(r, e);
       else if (ev.key === "Delete" && !trashView) toTrash(e);
+      else if (ev.key === " " && selectable) { ev.preventDefault(); pick1(e.path, !selected.has(e.path), ev.shiftKey); }
+      else if (ev.key === "Escape" && selected.size) clearSel();
       else if (ev.key === "ArrowRight" && e.kind === "folder" && !open.has(e.path)) toggle(e.path);
       else if (ev.key === "ArrowLeft" && e.kind === "folder" && open.has(e.path)) toggle(e.path);
       else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
@@ -339,6 +444,55 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     return r;
   }
 
+  // (B2: the selectable rows as drawn, in order)
+  const selRows = () => [...tree.querySelectorAll<HTMLElement>(".frow[data-sel]")];
+  // (one row's checkbox set to `on`; with shift, every row from the last one clicked to it, in the order shown)
+  function pick1(path: string, on: boolean, shift: boolean) {
+    const paths = selRows().map((r) => r.dataset.path!);
+    const i = anchor === null ? -1 : paths.indexOf(anchor), j = paths.indexOf(path);
+    const range = shift && i >= 0 && j >= 0 ? paths.slice(Math.min(i, j), Math.max(i, j) + 1) : [path];
+    for (const p of range) if (on) selected.add(p); else selected.delete(p);
+    anchor = path;
+    paintSel();
+  }
+  function clearSel() {
+    selected.clear();
+    anchor = null;
+    paintSel();
+  }
+  // (the rows' checkboxes and marks, and the bar, from the selection, without drawing the tree again)
+  function paintSel() {
+    const rows = selRows();
+    let shown = 0;
+    for (const r of rows) {
+      const on = selected.has(r.dataset.path!);
+      if (on) shown++;
+      r.classList.toggle("picked", on);
+      const cb = r.querySelector<HTMLElement>(".sel");
+      if (cb) { cb.setAttribute("aria-checked", String(on)); cb.textContent = on ? "✓" : ""; }
+    }
+    root.classList.toggle("selecting", selected.size > 0);
+    selBar.hidden = selected.size === 0;
+    selCount.textContent = `${selected.size} selected`;
+    selAll.checked = rows.length > 0 && shown === rows.length;
+    selAll.indeterminate = shown > 0 && shown < rows.length;
+  }
+  selAll.onchange = () => {
+    if (selAll.checked) for (const r of selRows()) selected.add(r.dataset.path!);
+    else selected.clear();
+    anchor = null;
+    paintSel();
+  };
+  selClear.onclick = () => { clearSel(); focusList(); };
+  selDownload.onclick = async () => {
+    const files = entries.filter((e) => selected.has(e.path) && e.kind === "file");
+    const skipped = selected.size - files.length;
+    if (!files.length) { say("Only files download: no file is selected"); return; }
+    // (one after another: a browser asks once before a page downloads several files)
+    for (const e of files) await download(e);
+    say(`${files.length} file${files.length === 1 ? "" : "s"} downloaded` + (skipped ? ` (${skipped} not a file: folders, notebooks and boards have their own export)` : ""));
+  };
+
   function toggle(p: string) {
     if (open.has(p)) open.delete(p); else open.add(p);
     saveOpen();
@@ -349,7 +503,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // change meanwhile, here or elsewhere, would take the half-typed name
   // away; it is drawn once the name is done)
   let renamingNow = false;
+  // (a row that had the focus keeps it across a redraw: the same path's new row takes it, so a refresh (a file
+  // opened, a change from elsewhere) never drops the focus to the body)
   function render() {
+    const a = document.activeElement as HTMLElement | null;
+    const fp = a && tree.contains(a) ? a.dataset.path : undefined;
+    renderTree();
+    if (fp !== undefined && !tree.contains(document.activeElement)) tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(fp)}"]`)?.focus();
+  }
+  function renderTree() {
     if (renamingNow) return;
     drawnRows = [];
     tree.replaceChildren();
@@ -395,6 +557,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       empty.onclick = emptyAll;
       foot.append(empty);
     } else foot.append(meterEl);
+    // (B2: a selected row no longer drawn (its folder closed, a search, Trash shown, gone) leaves the selection)
+    const drawn = new Set(selRows().map((r) => r.dataset.path!));
+    for (const p of selected) if (!drawn.has(p)) selected.delete(p);
+    if (anchor !== null && !drawn.has(anchor)) anchor = null;
+    paintSel();
   }
   async function emptyAll() {
     if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;
@@ -412,10 +579,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll }).then(() => meter());
+  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
-  function rowMenu(at: HTMLElement, e: Entry) {
+  async function rowMenu(at: HTMLElement, e: Entry) {
     if (trashView) {
       popup(at, [
         ["Restore", () => w.restore(e.path).then((x) => say(`Restored to ${x.path}`)).catch(fail).then(refresh)],
@@ -430,8 +597,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
     if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
-    // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays)
-    const as = e.kind === "file" && host.openAs ? openableAs(nameOf(e.path)) : null;
+    // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
+    //  by its first 4 KiB, read in at most 300 ms, else by its name: a Jupytext MyST one is a notebook)
+    const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
     if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
@@ -459,7 +627,39 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   async function toTrash(e: Entry) {
     const cur = host.current?.(), at = cur ? await w.pathOf(cur.kind, cur.ref).catch(() => undefined) : undefined;
-    if (at && within(at, e.path)) return say("That's open here: open something else first");
+    // (the document open here, or a folder it is in: the page saves it and opens another in its place first, so what
+    // goes to Trash is what was last seen, and Undo opens it again; a page that can't, says so and moves nothing)
+    const wasOpen = cur && at && within(at, e.path) ? cur : null;
+    // (the page's own condition for the move, checked by the workspace holding its lock (astra's R2 on #447), and its
+    // navigation held from then until the move settles, told here once it has, whatever happened (astra3's
+    // B1-R4-CODE-1, #447 r5c))
+    let gate: TrashGate | undefined, moved: Entry | undefined;
+    if (wasOpen) {
+      if (!host.trashing) return sayError(`Not moved to Trash: "${nameOf(at!)}" is open on this page, and this page can't close it`);
+      const r = await host.trashing(e).catch((err: unknown) => String((err as Error)?.message ?? err));
+      if (typeof r === "string") { host.trashDone?.(undefined); return sayError(`Not moved to Trash: ${r}`); }
+      gate = r || undefined;
+    }
+    try { await toTrashGated(e, wasOpen, gate, (t) => (moved = t)); }
+    finally {
+      if (wasOpen) host.trashDone?.(gate, moved && {
+        entry: moved,
+        // (a navigation that waited into what went: not opened (board's (A)); Restore and open while it is still there)
+        dropped: (name, open) => {
+          const text = `“${name}” was moved to Trash, so it wasn't opened.`;
+          void w.stat(moved!.path).then((x) => {
+            if (!x || x.created !== moved!.created || x.fid !== moved!.fid) return say(text);
+            say(text, async () => {
+              try { await w.restore(moved!.path, moved!); } catch (err) { await refresh(); return fail(err); }
+              await refresh();
+              await open();
+            }, false, false, "Restore and open");
+          }, () => say(text));
+        },
+      });
+    }
+  }
+  async function toTrashGated(e: Entry, wasOpen: ReturnType<NonNullable<BrowserHost["current"]>> | null, gate: TrashGate | undefined, done: (t: Entry) => void) {
     // (a file too large to move beside the index can't go to Trash: deleted for good, asked first, never read)
     if (e.kind === "file" && e.unmoved) {
       if (!confirm(`"${nameOf(e.path)}" is too large to put in Trash (${fmtSize(e.size ?? 0)}, kept by an older version of Sagebrush). Delete it for good? To keep it, Download it first.`)) return;
@@ -470,9 +670,25 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       return refresh();
     }
     try {
-      const t = await w.remove(e.path);
+      // (by its identity: whatever is at that path now, if not the entry chosen (replaced meanwhile, as across the
+      // trashing hook's waits), is refused, astra's R1 on #447)
+      const t = await w.remove(e.path, e, undefined, gate ?? {});
+      done(t);
       // (Undo: that entry, put in Trash that time, if it is still there: CORR-0B0-3)
-      say(`"${nameOf(e.path)}" moved to Trash`, () => w.restore(t.path, t).catch(fail).then(refresh));
+      // (and the document that was open, open again where Undo put it back)
+      const reopen = async () => {
+        if (!wasOpen) return;
+        const p = await w.pathOf(wasOpen.kind, wasOpen.ref);
+        const back = p ? await w.stat(p) : undefined;
+        if (back) host.open(back, "here");
+      };
+      // (Undo: back where it was, the document open again, and the focus on its row)
+      say(`"${nameOf(e.path)}" moved to Trash`, async () => {
+        let back: Entry | undefined;
+        try { back = await w.restore(t.path, t); await reopen(); } catch (err) { fail(err); }
+        await refresh();
+        if (back) focusList(back.path);
+      });
     } catch (err) { fail(err); }
     refresh();
   }
@@ -483,19 +699,34 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const full = nameOf(e.path);
     // (a document keeps its extension: only its name is edited)
     const [base, ext] = e.kind === "notebook" || e.kind === "board" ? splitExt(full) : [full, ""];
+    // (U9, William Nov 2: a file's box holds its whole name with only the base selected; a name typed without an
+    // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
+    // Enter (or leaving the box) renames. A folder's name is all name)
+    const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
+    const note = h("span", { className: "extnote" });
+    note.setAttribute("role", "status");
+    const sayExt = () => {
+      const typed = splitExt(input.value.trim())[1];
+      note.textContent = file && typed && typed.toLowerCase() !== fileExt.toLowerCase() ? `changes the file type: ${fileExt || "(none)"} → ${typed}` : "";
+    };
+    input.addEventListener("input", sayExt);
     nameEl.replaceWith(input);
+    input.after(note);
     renamingNow = true;
     input.focus();
-    input.select();
+    if (file && fileExt) input.setSelectionRange(0, full.length - fileExt.length);
+    else input.select();
     let done = false;
     const finish = async (keep: boolean) => {
       if (done) return;
       done = true;
       renamingNow = false;
+      note.remove();
       const v = input.value.trim();
-      if (keep && v && v !== base) {
+      if (keep && v && finalName(v) !== full) {
         host.renaming?.(e);
         try {
           // (a document renamed since the row was drawn, as by its typed
@@ -504,7 +735,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           // path meanwhile, CORR-4B2-1)
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
           if (!from) say(`"${full}" was moved or deleted meanwhile: not renamed`);
-          else host.renamed?.(await w.rename(from, join(parentOf(from), v + ext), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
+          else host.renamed?.(await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
         } catch (err) {
           if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
           else fail(err);
@@ -559,24 +790,87 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const pick = (folder: string) => { pickFolder = folder; picker.click(); };
   picker.onchange = () => { const fs = [...(picker.files ?? [])]; picker.value = ""; if (fs.length) upload(fs, pickFolder); };
 
-  function dropTarget(el: HTMLElement, folder: string) {
+  // (U4: of the rows being dragged, those that can move into `folder`: not one already there, not a folder into itself
+  // or below itself, and not one inside another being moved (it goes with its folder))
+  const movable = (folder: string) => {
+    const d = dragging ?? [];
+    return d.filter((p) => parentOf(p) !== folder && !within(folder, p) && !d.some((q) => q !== p && within(p, q)));
+  };
+  // (files dropped from outside: uploaded into the folder; rows of this list dropped: moved into it. `folder` is the
+  // folder's path, or for the list itself where the drop lands: a file row's own folder, else the top folder)
+  function dropTarget(el: HTMLElement, folder: string | ((ev: DragEvent) => string)) {
+    const at = (ev: DragEvent) => (typeof folder === "string" ? folder : folder(ev));
     el.addEventListener("dragover", (ev) => {
-      if (!ev.dataTransfer?.types.includes("Files")) return;
+      const types = ev.dataTransfer?.types ?? [];
+      const rows = types.includes(MOVE_TYPE);
+      if (!types.includes("Files") && !rows) return;
       ev.preventDefault();
       ev.stopPropagation();
       tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop"));
+      if (rows && !movable(at(ev)).length) { ev.dataTransfer!.dropEffect = "none"; return; }
+      if (rows) ev.dataTransfer!.dropEffect = "move";
       el.classList.add("drop");
     });
     el.addEventListener("dragleave", () => el.classList.remove("drop"));
     el.addEventListener("drop", (ev) => {
+      if (ev.dataTransfer?.types.includes(MOVE_TYPE)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        el.classList.remove("drop");
+        const to = at(ev), paths = movable(to);
+        dragging = null;
+        if (paths.length) void moveInto(to, paths);
+        return;
+      }
       if (!ev.dataTransfer?.files.length) return;
       ev.preventDefault();
       ev.stopPropagation();
       el.classList.remove("drop");
-      upload([...ev.dataTransfer.files], folder);
+      upload([...ev.dataTransfer.files], at(ev));
     });
   }
-  dropTarget(tree, "/");
+  dropTarget(tree, (ev) => {
+    const r = (ev.target as Element | null)?.closest?.<HTMLElement>(".frow[data-path]");
+    return r ? parentOf(r.dataset.path!) : "/";
+  });
+  // (U4: rows moved into a folder, one at a time, each the way Rename moves one: a document found by its id wherever it
+  // is now, checked holding the lock, the page told so it retitles what it has open. A name already taken there, or a
+  // move that fails, is said and the rest still move; Undo moves back what moved)
+  async function moveInto(folder: string, paths: string[]) {
+    const where = folder === "/" ? "the top folder" : `"${nameOf(folder)}"`;
+    const moved: { from: string; to: string; e: Entry }[] = [], problems: string[] = [];
+    const expect = (e: Entry) => ({ kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+    for (const p of paths) {
+      const e = entries.find((x) => x.path === p);
+      if (!e) { problems.push(`"${nameOf(p)}" is gone`); continue; }
+      try {
+        const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
+        if (!from) { problems.push(`"${nameOf(p)}" was moved or deleted meanwhile`); continue; }
+        const to = join(folder, nameOf(from));
+        if (await w.stat(to)) { problems.push(`${where} already has a "${nameOf(from)}"`); continue; }
+        host.renaming?.(e);
+        const got = await w.rename(from, to, { retitle: !host.retitles?.(e), expect: expect(e) });
+        host.renamed?.(got, from);
+        moved.push({ from, to: got.path, e: got });
+      } catch (err) {
+        problems.push(`"${nameOf(p)}": ${err instanceof WorkspaceError && err.code === "conflict" ? "moved or replaced meanwhile" : String((err as Error)?.message ?? err)}`);
+      }
+    }
+    if (folder !== "/" && moved.length) { open.add(folder); saveOpen(); }
+    for (const m of moved) selected.delete(m.from);
+    await refresh();
+    paintSel();
+    const undo = async () => {
+      for (const m of [...moved].reverse()) {
+        try { host.renaming?.(m.e); host.renamed?.(await w.rename(m.to, m.from, { retitle: !host.retitles?.(m.e), expect: expect(m.e) }), m.to); }
+        catch (err) { fail(err); break; }
+      }
+      await refresh();
+    };
+    const what = moved.length === 1 ? `"${nameOf(moved[0].from)}"` : `${moved.length} items`;
+    if (problems.length) sayError(`${moved.length ? `Moved ${what} to ${where}; n` : "N"}ot moved: ${problems.join("; ")}`);
+    else if (moved.length) say(`Moved ${what} to ${where}`, undo);
+  }
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");

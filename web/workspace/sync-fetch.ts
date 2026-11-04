@@ -7,6 +7,8 @@
 import type { Entry, Workspace } from "./api";
 import { inTx, req } from "./db";
 import { entriesOf, fenceCheck } from "./sync-rewrite";
+import { TRASH, parentOf } from "./paths";
+import { noteToken, chainOf, historyActive, indexGeneration, HIST_STORES } from "../history/tokens";
 
 /** A queue item: what to fetch, for which revision; a signed URL once asked for, kept with its expiry, so a retry or a
  * reload never asks again while it is valid (L1). */
@@ -55,9 +57,22 @@ export async function finalize(w: Workspace, ns: string, it: FetchItem, why: str
     if (!e || e.fetch !== it.sha256 || (e.rev ?? 0) !== it.rev) return;
     const n: Entry = { ...e };
     delete n.fetch;
+    n.fetchFailed = { why, at: Date.now(), final: true };
     st.put(n);
     meta.delete(urlKey(ns, it.fid));
     meta.put({ ...it, url: undefined, exp: undefined, why }, finalKey(ns, it.fid));
+  }));
+}
+
+/** A download of `it` that failed and will be tried again: why, on its entry (by identity, while it still waits for
+ * these bytes), so its row says so rather than "on another device" (B5, Nov 1 2026); gone once it is installed. */
+export async function noteFetchFailed(w: Workspace, ns: string, it: FetchItem, why: string) {
+  await w.locked(() => inTx(w.ws, ["entries"], "readwrite", async (tx) => {
+    await fenceCheck(tx, []);
+    const st = tx.objectStore("entries");
+    const e = (await req(st.index("byIdent").get(it.fid))) as Entry | undefined;
+    if (!e || e.fetch !== it.sha256 || (e.rev ?? 0) !== it.rev) return;
+    st.put({ ...e, fetchFailed: { why: why.slice(0, 200), at: Date.now() } });
   }));
 }
 
@@ -72,8 +87,8 @@ export type Installed = "installed" | "stale";
 export async function install(w: Workspace, ns: string, it: FetchItem, bytes: Uint8Array): Promise<Installed> {
   if (bytes.byteLength !== it.size) throw new Error("sync: install given bytes of another length than the item's");
   return w.locked(async () =>
-    inTx(w.ws, ["entries", "fileBytes", "meta"], "readwrite", async (tx) => {
-      await fenceCheck(tx, []);
+    inTx(w.ws, ["entries", "fileBytes", "meta", "ops", ...HIST_STORES], "readwrite", async (tx) => {
+      const v = await fenceCheck(tx, []);
       const st = tx.objectStore("entries");
       const e = (await req(st.index("byIdent").get(it.fid))) as Entry | undefined;
       tx.objectStore("meta").delete(urlKey(ns, it.fid));
@@ -82,7 +97,15 @@ export async function install(w: Workspace, ns: string, it: FetchItem, bytes: Ui
       const n: Entry = { ...e };
       delete n.remote;
       delete n.fetch;
+      delete n.fetchFailed;
       st.put(n);
+      // (the bytes now here are a change a version needs (stage A: exports are always hydrated): history's token, in
+      // this transaction (web/history/tokens.ts; inert until history is turned on: one read), at the index's generation
+      // (A1.1: no op is logged here), its place read through the logical view, as a large move may have its row elsewhere)
+      if (await historyActive(tx)) {
+        const at = v.logical(n).path;
+        await noteToken(tx, { ident: it.fid, rev: await indexGeneration(tx), kind: "file", chain: () => chainOf(at, !!n.trashed || at === TRASH || at.startsWith(TRASH + "/"), (p) => v.get(p), parentOf) });
+      }
       return "installed";
     }),
   );

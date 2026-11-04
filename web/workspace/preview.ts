@@ -7,9 +7,10 @@
 // panel says what this browser holds, whether the browser may clear it,
 // and frees old versions.
 import { migrationState, type MigrationState } from "./migrator";
-import { WorkspaceError, type Entry, type Version, type Workspace } from "./api";
-import { nameOf, splitExt } from "./paths";
+import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
+import { TRASH, nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+import { restoreServerVersion, serverVersionBytes, serverVersions } from "./server-versions";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -81,6 +82,8 @@ const STYLE = `
 .sbfprev .pb th { background: #efeee7; position: sticky; top: 0; }
 .sbfprev .pb img { max-width: 100%; max-height: 60vh; display: block; margin: 0 auto; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
 .sbfprev .pb .note, .sbfprev .note { color: #5d645f; font-size: 12.5px; margin: 6px 0; }
+.sbfprev .note.remind { color: #7a5a12; }
+.sbfprev .note.remind button { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .sbfprev .pa { display: flex; gap: 8px; padding: 8px 14px; border-top: 1px solid #e2e1d9; align-items: center; flex-wrap: wrap; }
 .sbfprev .pa .sp { flex: 1; }
 .sbfprev .pv { border-top: 1px solid #e2e1d9; padding: 8px 14px 12px; max-height: 34vh; overflow: auto; }
@@ -264,6 +267,7 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
   el.replaceChildren(h("h3", { textContent: list.length ? `Earlier versions (${list.length})` : "Earlier versions" }));
   if (!list.length) {
     el.append(h("p", { className: "note", textContent: "None yet: when this file is written over, what it had is kept here." }));
+    void drawServerVersions(w, e, el, host, close);
     return;
   }
   // (newest first; each by its id, which stays its own while older ones are dropped)
@@ -300,6 +304,38 @@ async function drawVersions(w: Workspace, e: Entry, el: HTMLElement, host: Previ
     }, "danger");
     el.append(h("div", { style: "margin-top:8px" }, del));
   }
+  void drawServerVersions(w, e, el, host, close);
+}
+
+/** The server's versions of a synced data file (version-history note r1), below the device's own: each with Download
+ * and Restore; the file's own bytes now aren't listed.  Nothing where the server can't say (sync off, offline). */
+async function drawServerVersions(w: Workspace, e: Entry, el: HTMLElement, host: PreviewHost, close: () => void) {
+  if (NO_SYNC) return;
+  const list = (await serverVersions(e))?.filter((v) => v.sha256 !== e.sha256);
+  if (!list?.length || !el.isConnected) return;
+  const name = nameOf(e.path);
+  const box = h("div", { className: "server-versions" }, h("h3", { textContent: `On the server (${list.length})` }));
+  for (const v of list) {
+    const r = h("div", { className: "vr" }, h("span", { textContent: `${fmtTime(v.t)} · ${who(v.by)} · ${fmtSize(v.size)}` }));
+    r.dataset.sha256 = v.sha256;
+    r.append(
+      button("Download", async () => {
+        try { downloadBytes(await serverVersionBytes(v), `${splitExt(name)[0]} (${new Date(v.t).toISOString().slice(0, 16).replace(":", "-")})${splitExt(name)[1]}`); } catch (err) { host.say(`That version couldn't be downloaded: ${(err as Error).message}`); }
+      }),
+      button("Restore", async () => {
+        try {
+          await restoreServerVersion(w, e, v);
+          host.say(`"${name}" restored to the server's version of ${fmtTime(v.t)}`);
+          close();
+        } catch (err) {
+          if (err instanceof WorkspaceError) stale(err, name, host, close);
+          else host.say(`"${name}" wasn't restored: ${(err as Error).message}`);
+        }
+      }),
+    );
+    box.append(r);
+  }
+  el.append(box);
 }
 
 /** "Delete older versions in this folder" (§2.5): what it frees said and confirmed; only a person. */
@@ -318,7 +354,35 @@ export async function dropFolderVersions(w: Workspace, folder: string, host: Pre
   }
 }
 
-export type StorageHost = PreviewHost & { showTrash(): void; emptyTrash(): Promise<void> };
+export type StorageHost = PreviewHost & {
+  showTrash(): void;
+  emptyTrash(): Promise<void>;
+  /** "Export all current files (.zip)" (export plan E1 r2c): the address of a file of the lazy export chunk
+   * (sagebrush-export.js, sagebrush-export-worker.js) beside this page; absent, the export isn't offered */
+  exportUrl?: (file: string) => string;
+  /** this tab's open documents saved, before an export reads them */
+  saveOpen?: () => Promise<void>;
+};
+
+/** How long ago `at` was, in words: "just now", "5 min ago", "3 h ago", "yesterday", "9 days ago". */
+const agoText = (at: number, now: number) => {
+  const m = Math.floor((now - at) / 60_000), d = Math.floor(m / 1440);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : d === 1 ? "yesterday" : `${d} days ago`;
+};
+/** "Last export prepared on this device: …" (E1 r2c §0): set only after an export's file was closed. */
+export function exportStatus(last: { at: number; partial: boolean } | undefined, now = Date.now()): string {
+  if (!last) return "No export prepared on this device yet";
+  return `Last export prepared on this device: ${agoText(last.at, now)}${last.partial ? " (partial)" : ""}`;
+}
+/** After this many days without a complete export on this device, the status line becomes a gentle reminder. */
+export const EXPORT_DUE_DAYS = 7;
+/** The reminder that replaces the status line, or null when none is due (William, Nov 2: "Last export: N days ago –
+ * Export now"): the last complete export on this device is older than EXPORT_DUE_DAYS, or there is none (a partial one
+ * doesn't count) and the workspace holds something to export. */
+export function exportReminder(last: { at: number; partial: boolean } | undefined, holds: boolean, now = Date.now()): string | null {
+  if (!last || last.partial) return holds ? (last ? `Last export: ${agoText(last.at, now)}, partial` : "No export yet") : null;
+  return now - last.at > EXPORT_DUE_DAYS * 86_400_000 ? `Last export: ${agoText(last.at, now)}` : null;
+}
 
 /** The browser's estimate of what this site holds, and of what it may: undefined where it can't say. */
 export async function estimate(): Promise<{ usage: number; quota: number } | undefined> {
@@ -329,6 +393,27 @@ export async function estimate(): Promise<{ usage: number; quota: number } | und
 }
 export const fmtBytes = fmtSize;
 
+/** The push proxy's address when "Push to GitHub" is offered here (DEV, or a page on this machine, with the flag), or null. */
+export function gitpushProxy(): string | null {
+  try {
+    if (!/^(dev\.sagebrush\.space|127\.0\.0\.1|localhost)$/.test(location.hostname)) return null;
+    const v = localStorage.getItem("sagebrush.gitpush");
+    return v && /^(https:\/\/[a-z0-9.-]+|http:\/\/127\.0\.0\.1:\d+)$/.test(v) ? v : null;
+  } catch { return null; }
+}
+
+/** "Push to GitHub"'s automatic push (Stage A MVP M3), started by the page once its workspace is open: with the flag,
+ * its chunk loaded a little after the page starts, pushing every 10 minutes when something changed; without it, nothing. */
+export function startGitpushAuto(w: Workspace, url: (file: string) => string): void {
+  const proxy = gitpushProxy();
+  if (!proxy) return;
+  const delay = (globalThis as any).__SB_GITPUSH_TEST__?.autoDelayMs ?? 20_000;
+  setTimeout(() => {
+    import(url("sagebrush-gitpush-panel.js")).then((m) => m.startAuto(w, { say() {}, fail() {}, workerUrl: url("sagebrush-gitpush-worker.js"), proxy, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }))
+      .catch((e) => console.warn("Push to GitHub:", e));
+  }, delay);
+}
+
 /** The Storage panel (§6.3). */
 export async function openStorage(w: Workspace, host: StorageHost): Promise<void> {
   const { box, close, onClose } = panel("Storage");
@@ -338,6 +423,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
   const body = h("div", { className: "pb" });
   box.append(body);
   x.focus();
+  // (whether the workspace holds anything to export, as draw() last counted it; the export reminder asks)
+  let holds = false, restamp: (() => void) | undefined;
   const draw = async () => {
     const [est, use, kept] = await Promise.all([
       estimate(),
@@ -352,6 +439,8 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     } else body.append(h("p", { className: "note", textContent: "This browser doesn't say how much it holds." }));
     const dl = h("dl");
     const line = (label: string, value: string, act?: HTMLElement, cls = "") => { const dd = h("dd", { textContent: value }); dd.className = cls; dl.append(h("dt", { textContent: label }), dd, act ?? h("span")); };
+    holds = use.documents + use.files.count > 0;
+    restamp?.();
     line("Notebooks and boards", String(use.documents));
     line("Data files", `${use.files.count} · ${fmtSize(use.files.bytes)}`);
     let free: HTMLElement | undefined;
@@ -388,8 +477,51 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       keep.append(ask);
     }
     body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
-    body.append(syncBox);
+    body.append(exportBox, gitBox, syncBox);
   };
+  // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
+  const exportBox = h("div", { className: "export" });
+  if (host.exportUrl) {
+    const status = h("p", { className: "note" }), flow = h("div");
+    // (the status line, or, when an export is due, the reminder in its place with "Export now": the same flow as the
+    // button, start())
+    const stamp = () => w.lastExport().then((l) => {
+      const due = exportReminder(l, holds);
+      status.className = due ? "note remind" : "note";
+      if (due) status.replaceChildren(`${due} · `, button("Export now", () => void start()));
+      else status.textContent = exportStatus(l);
+    }, () => { status.className = "note"; status.textContent = ""; });
+    restamp = () => void stamp();
+    let running = false;
+    // (closing the panel cancels the export it shows: entry.ts)
+    const closed = new AbortController();
+    onClose(() => closed.abort());
+    const start = async () => {
+      if (running) return;
+      running = true;
+      go.disabled = true;
+      try {
+        const m = await import(host.exportUrl!("sagebrush-export.js"));
+        const kit = { isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing", maxFileBytes: LIMITS.maxFileBytes, trash: TRASH };
+        await m.openExport(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-export-worker.js"), saveOpen: host.saveOpen, stamped: stamp, site: location.host, app: "sagebrush", kit, closed: closed.signal }, flow);
+      } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
+    };
+    const go = button("Export all current files (.zip)", () => void start());
+    exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
+    void stamp();
+  }
+  // ("Push to GitHub", Stage A MVP r1, DEV only: offered only on DEV or a local page, in a browser whose flag
+  // (localStorage "sagebrush.gitpush") names the push proxy; its flow is the lazy chunk's, web/gitpush)
+  const gitBox = h("div", { className: "export" });
+  const proxy = gitpushProxy();
+  if (host.exportUrl && proxy) {
+    gitBox.append(button("Push to GitHub…", async () => {
+      try {
+        const m = await import(host.exportUrl!("sagebrush-gitpush-panel.js"));
+        await m.openGitpush(w, { say: host.say, fail: host.fail, workerUrl: host.exportUrl!("sagebrush-gitpush-worker.js"), proxy, saveOpen: host.saveOpen, trash: TRASH, isMissing: (e: unknown) => e instanceof WorkspaceError && e.code === "missing" }, gitBox);
+      } catch (err) { host.fail(err); }
+    }));
+  }
   // (sync, step 5: its own section, drawn by its own poll, ended with the panel)
   const syncBox = h("div");
   const sync = NO_SYNC ? { dispose() {} } : syncSection(w, syncBox, { say: host.say, fail: host.fail, usage: () => w.usage() });

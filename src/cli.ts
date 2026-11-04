@@ -9,6 +9,7 @@
 
 import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
+import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { oneLine } from "./terminal-text";
@@ -24,6 +25,7 @@ import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
+import { setDataRoot } from "./runtime/modules";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -55,6 +57,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --figures DIR
            keep the figures shown (plt.show(), a plot's display) as SVG files
            in DIR; without it, they are in a directory removed at exit
+  --data-root DIR
+           the folder whose .sagebrush-data snapshots urllib.request may
+           replay (default: the starting directory); nothing above it is used
   --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)
   -V       print the version
   --licenses  the licenses of Sagebrush and of what it contains
@@ -72,6 +77,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   board open FILE [--port N] [--no-browser]
            a board in your browser, shown again each time FILE changes
            (sagebrush board --help: every board command)
+  latex check|run|render FILE.tex [--png DIR]
+           check a .tex file as Sagebrush's LaTeX editor shows it, run its
+           SageTeX code, and see it: an HTML file, and a PNG per beamer frame
+           (sagebrush latex --help)
 `;
 
 // A SystemExit's status as the process's exit code, by CPython's rule
@@ -322,9 +331,9 @@ const isMagma = (f: string | null) => magma || (!matlab && f !== null && (/\.(ma
 const isMatlab = (f: string | null) => matlab || (!magma && f !== null && /\.m$/.test(f) && !mFileIsMagma(f));
 
 /** MATLAB source as Python, or null after reporting a syntax error. */
-function matlabSource(src: string, file: string): string | null {
+function matlabSource(src: string, file: string, asFile = false): string | null {
   try {
-    return matlabToPython(src, file);
+    return matlabToPython(src, file, { file: asFile });
   } catch (e) {
     if (!(e instanceof MatlabSyntaxError)) throw e;
     process.stderr.write(matlabSyntaxMessage(e, src, file));
@@ -525,6 +534,15 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = await boardCommand(argv.slice(1));
     return;
   }
+  // (`latex`: the LaTeX editor's engine, in a file of its own beside this one, src/latex-cli.ts; a script named latex
+  // here runs as before unless a latex command is asked for)
+  if (argv[0] === "latex" && (["check", "run", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
+    const latex = loadLatex();
+    if (typeof latex === "string") { process.stderr.write(`sagebrush: ${latex}\n`); process.exitCode = 2; return; }
+    // (cli: the script this process runs, the bundle or the npm launcher, for `latex run`'s Sage session)
+    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: process.argv[1] ? resolve(process.argv[1]) : undefined });
+    return;
+  }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
     process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
     return;
@@ -545,6 +563,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   let emit = false, inspect = false, quiet = false;
   let pkgset: string | null = process.env.SAGEBRUSH_PKGSET || null;
   let cmd: string | null = null, mod: string | null = null, file: string | null = null;
+  let dataRootArg: string | null = null;
   while (argv.length) {
     const a = argv[0];
     if (a === "--emit") emit = true;
@@ -562,6 +581,16 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
         return;
       }
       pkgset = argv[0];
+    } else if (a === "--data-root") {
+      // (the data replay layer's root, lib/_sbdata.py: an existing directory;
+      // default, the starting directory)
+      argv.shift();
+      if (!argv.length || !existsSync(argv[0])) {
+        process.stderr.write(`--data-root takes an existing directory\n${USAGE}`);
+        process.exitCode = 2;
+        return;
+      }
+      dataRootArg = argv[0];
     } else if (a === "--figures") {
       // (figures to keep, in DIR: made if it isn't there)
       argv.shift();
@@ -609,6 +638,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     }
     argv.shift();
   }
+  // (fixed before any Python runs: a program can't move it, replay-layer r2 §2.2)
+  setDataRoot(dataRootArg ?? process.cwd());
   // (a file that can't be read: CPython's message and exit status, not a stack trace)
   if (file !== null && file !== "-") {
     try {
@@ -634,7 +665,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       return;
     }
     if (isMatlab(file)) {
-      const py = matlabSource(readFileSync(file, "utf8"), file);
+      const py = matlabSource(readFileSync(file, "utf8"), file, true);
       if (py !== null) process.stdout.write(py);
       return;
     }
@@ -679,7 +710,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       main = execModuleAsMain(mod!);
     });
   } else if (file !== null && file !== "-" && isMatlab(file)) {
-    const py = matlabSource(readFileSync(file, "utf8"), file);
+    const py = matlabSource(readFileSync(file, "utf8"), file, true);
     code = py === null ? 1 : guarded(() => {
       main = execModule(py, file!, "__main__", false, false);
     });
@@ -787,3 +818,15 @@ else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
 // (`board run`'s interpreter, src/board-run.ts)
 else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boardRunWorker(workerData.sagebrushBoardRun));
+
+/** `sagebrush latex`'s module, sagebrush-latex.cjs (scripts/build-cli.mjs): beside this bundle in the npm package and in
+ * build/cli; from a checkout's tsc or bun run, build/cli's. Loaded by its path, so no bundler folds it into this one.
+ * Or why there is none. */
+function loadLatex(): { latexCommand: (argv: string[], opts?: { cli?: string }) => Promise<number> } | string {
+  const here = typeof __dirname === "string" ? __dirname : ".";
+  const req = createRequire(join(here, "x.js"));
+  for (const p of [join(here, "sagebrush-latex.cjs"), join(here, "..", "build", "cli", "sagebrush-latex.cjs"), join(here, "..", "..", "build", "cli", "sagebrush-latex.cjs")]) {
+    if (existsSync(p)) return req(p);
+  }
+  return "this build of sagebrush has no LaTeX commands (sagebrush-latex.cjs isn't beside it): use the npm package, npx sagebrush latex ...";
+}

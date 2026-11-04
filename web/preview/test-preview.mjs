@@ -1,3 +1,4 @@
+// ci: web-runner order=50 test chrome
 // Deferred runtime checks: run on an authorized VM/CI, not the shared project.
 import test from 'node:test';
 import { createHash } from 'node:crypto';

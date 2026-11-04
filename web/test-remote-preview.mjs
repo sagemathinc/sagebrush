@@ -1,3 +1,4 @@
+// ci: web-browser/remote-preview order=10
 // Remote compute's preview in the notebook page (web/notebook/remote-ui.js,
 // sagebrush-remote.js), end to end in headless Chromium: the picker only
 // with ?remote=1, the Connect sheet, a cell run by a person's Run (approved,
@@ -18,7 +19,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 const profile = mkdtempSync(join(tmpdir(), "sb-remote-preview-"));
-let server = null, chrome = null, ws = null;
+let server = null, chrome = null, ws = null, ev = null; // (ev here: the failure-state dump below uses it)
 try {
   const serve = startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
   const port = await serve.port;
@@ -38,7 +39,7 @@ try {
     else if (m.method === "Fetch.requestPaused") paused.push(m.params);
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-  const ev = async (expression) => {
+  ev = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r.result?.value;
@@ -46,6 +47,8 @@ try {
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   const goto = async (url) => { await send("Page.navigate", { url }); await sleep(300); await until("!!(window.sagebrush && window.sagebrush.notebook) && /ready/.test(document.querySelector('#status').textContent)", 60000); };
   const status = () => ev("document.querySelector('#status').textContent");
+  // (a wait on the status line: a timeout says what the status was)
+  const untilStatus = async (expr, ms) => { try { return await until(expr, ms); } catch (e) { throw new Error(`${e.message} (status ${JSON.stringify(await status())})`); } };
   const out = (i) => ev(`sagebrush.notebook.cells()[${i}].el.querySelector('.out')?.textContent ?? ''`);
   const setCode = (i, code) => ev(`(() => { const nb = sagebrush.notebook, c = nb.cells()[${i}]; nb.setInput(c, ${JSON.stringify(code)}); return true; })()`);
   // (a person's Run: the cell's own Run button, whose handler captures their consent)
@@ -113,7 +116,7 @@ try {
   await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
   await shot("remote-connect-sheet.png");
   await ev("document.querySelector('#remoteallow').click(); true");
-  await until("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
+  await untilStatus("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
   ok(true, `connected: ${await status()}`);
 
   // 4. a person's Run: approved, sent, executed
@@ -139,14 +142,14 @@ try {
   const oy = await runCode(C, "y = 1\nprint('y' in globals())");
   ok(/True/.test(oy), `y is set on the GPU kernel (${JSON.stringify(oy.slice(0, 80))})`);
   await ev("document.querySelector('#restart').click(); true");
-  await until("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
+  await untilStatus("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
   await sleep(300);
   const o6 = await runCode(C, "print('y' in globals())");
   ok(/False/.test(o6), `after Restart the GPU kernel's variables are gone (${JSON.stringify(o6.slice(0, 80))})`);
 
   // 7. back to This browser
   await ev("(() => { const p = document.querySelector('#kernelpick'); p.value = 'local'; p.dispatchEvent(new Event('change')); return true; })()");
-  await until("/ready \\(sagebrush/.test(document.querySelector('#status').textContent) || !/Remote compute/.test(document.querySelector('#status').textContent)");
+  await untilStatus("/ready \\(sagebrush/.test(document.querySelector('#status').textContent) || !/Remote compute/.test(document.querySelector('#status').textContent)");
   const o7 = await runCode(C, "print(secret)");
   ok(/local only/.test(o7), `This browser again: the browser's interpreter, with its own variables (${JSON.stringify(o7.slice(0, 80))})`);
   // 8. another notebook opened while the Connect sheet is up: the sheet is settled, nothing connects, the picker is This browser
@@ -166,7 +169,7 @@ try {
     await pick("gpu");
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
-    await until("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
+    await untilStatus("/Remote compute \\(preview, simulated[^)]*\\) · ready/.test(document.querySelector('#status').textContent)");
     // (each run of code the page submits: the remote client's POSTs of runs with code; a forget's, of the names
     // a cell's old text defined, has none)
     await ev(`(() => { window.__runs = 0; const cl = sagebrush.notebook.kernel.client, f = cl.fetch;
@@ -220,7 +223,7 @@ try {
     await pick("gpu");
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
-    await until(`/Remote compute \\(preview, simulated · ${lat} ms/.test(document.querySelector('#status').textContent)`, 30000);
+    await untilStatus(`/Remote compute \\(preview, simulated · ${lat} ms/.test(document.querySelector('#status').textContent)`, 30000);
     ok(true, `${lat} ms: connected, and the status says so: ${await status()}`);
     const cellOut = () => out(L2);
     const busy = () => ev(`(() => { const el = sagebrush.notebook.cells()[${L2}].el; return el.classList.contains('running') || el.classList.contains('queued'); })()`);
@@ -317,11 +320,24 @@ try {
     if (lat === 1000) await shot("remote-latency-1000.png");
   }
   // (connect the page's notebook to remote compute: the sheet, Connect, and the status says it's ready)
-  const connect = async (lat) => {
+  // `retries`: on a lossy link every bind's answer can be lost, and then the status says it couldn't connect and
+  // offers Retry, which a person would click; each Retry is logged (section 14 tests that state itself)
+  const connect = async (lat, { retries = 0 } = {}) => {
     await pick("gpu");
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
-    await until(`/Remote compute \\(preview, simulated · ${lat} ms[^)]*\\) · ready/.test(document.querySelector('#status').textContent)`, 60000);
+    const ready = `/Remote compute \\(preview, simulated · ${lat} ms[^)]*\\) · ready/.test(document.querySelector('#status').textContent)`;
+    const failed = "/couldn't connect/.test(document.querySelector('#status').textContent)";
+    for (let t = 0; ; t++) {
+      await untilStatus(retries ? `${ready} || ${failed}` : ready, 60000);
+      if (await ev(ready)) return;
+      if (t >= retries) throw new Error(`couldn't connect, ${t} of ${retries} Retries used (status ${JSON.stringify(await status())})`);
+      console.log(`info ${lat} ms: the connect failed (status ${JSON.stringify(await status())}); Retry ${t + 1} of ${retries}`);
+      if (!(await ev("(() => { const b = [...(document.querySelector('#remoteacts')?.children ?? [])].find((b) => b.textContent.startsWith('Retry')); if (!b) return false; b.click(); return true; })()")))
+        throw new Error(`couldn't connect, and no Retry was offered (status ${JSON.stringify(await status())})`);
+      // (the Retry takes the status off "couldn't connect"; one that failed again before a poll saw it is the next pass's)
+      try { await until(`!(${failed}) || ${ready}`, 15000); } catch {}
+    }
   };
   const newCell = () => ev("(() => { const nb = sagebrush.notebook; nb.addCell('', null, false, 'code'); return nb.cells().length - 1; })()");
   // 11. what one simple run costs at 400 ms, on a clean link: its requests, and the time from Run to its output
@@ -357,7 +373,7 @@ try {
     await goto(base + `?remote=1&latency=${lat}&jitter=50&loss=10`);
     const first = await newCell();
     for (let i = 1; i < 20; i++) await newCell();
-    await connect(lat);
+    await connect(lat, { retries: 3 });
     ok(/10% loss/.test(await status()), `loss=10 is 10%, and the status line says so: ${await status()}`);
     // (watching, from here on: the picker leaving remote compute, or the notebook's kernel replaced)
     await ev(`(() => { window.__k = sagebrush.notebook.kernel; window.__left = 0;
@@ -462,7 +478,7 @@ try {
     await pick("gpu");
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
-    await until("!!document.querySelector('#remoteacts')", 60000);
+    await untilStatus("!!document.querySelector('#remoteacts')", 60000);
     ok((await acts()) === "Retry|Switch to browser" && (await ev("document.querySelector('#kernelpick').value")) === "gpu" && /couldn't connect/.test(await status()),
       `a connect that fails: the picker stays on Remote compute, Retry and Switch to browser offered (${JSON.stringify(await status())})`);
     ok(await ev("sagebrush.notebook.kernel.remote === true && !sagebrush.notebook.kernel.ready"), "and the notebook's kernel is the remote one, unbound: nothing runs in this browser instead");
@@ -471,7 +487,7 @@ try {
     await until(`/connected/.test(sagebrush.notebook.cells()[${F}].el.querySelector('.out')?.textContent ?? '')`, 20000);
     ok(/remote compute isn't connected/.test(await out(F)) && !/ran somewhere/.test(await out(F)), `a Run while not connected: told so, not run (${JSON.stringify((await out(F)).trim())})`);
     await clickAct("Retry");
-    await until(`/Remote compute \\(preview, simulated · ${lat} ms[^)]*\\) · ready/.test(document.querySelector('#status').textContent) && !document.querySelector('#remoteacts')`, 30000);
+    await untilStatus(`/Remote compute \\(preview, simulated · ${lat} ms[^)]*\\) · ready/.test(document.querySelector('#status').textContent) && !document.querySelector('#remoteacts')`, 30000);
     ok(true, `Retry connects, and the actions go: ${await status()}`);
     await clickRun(F);
     await until(`/ran somewhere/.test(sagebrush.notebook.cells()[${F}].el.querySelector('.out')?.textContent ?? '')`, 30000);
@@ -521,13 +537,13 @@ try {
     const Y = await newCell();
     await setCode(Y, "print('kept' in globals())");
     await clickRun(Y);
-    await until("!!document.querySelector('#remoteacts')", 30000);
+    await untilStatus("!!document.querySelector('#remoteacts')", 30000);
     ok((await acts()) === "Reconnect (a fresh kernel: its variables are lost)|Switch to browser" && /another tab/.test(await status()),
       `another tab took the kernel: Reconnect (saying the kernel will be fresh) and Switch to browser (${JSON.stringify(await status())})`);
     await clickAct("Reconnect");
     await sleep(200);
     ok(!(await ev("!!document.querySelector('#remotedlg')")), "Reconnect doesn't ask the Connect sheet again (this notebook was connected in this page)");
-    await until("/a fresh kernel: earlier variables are gone/.test(document.querySelector('#status').textContent)", 30000);
+    await untilStatus("/a fresh kernel: earlier variables are gone/.test(document.querySelector('#status').textContent)", 30000);
     await setCode(Y, "print('kept' in globals(), 'after reconnect')");
     await clickRun(Y);
     await until(`/after reconnect/.test(sagebrush.notebook.cells()[${Y}].el.querySelector('.out')?.textContent ?? '')`, 30000);
@@ -638,7 +654,7 @@ try {
     await pick("gpu");
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
-    await until("/· ready/.test(document.querySelector('#status').textContent)", 60000);
+    await untilStatus("/· ready/.test(document.querySelector('#status').textContent)", 60000);
     const runWaited = async (i) => { await clickRun(i); await sleep(20); await idle(i); };
     for (const i of [R, ...D]) await runWaited(i);
     const posts = () => ev("sagebrush.notebook.kernel.gateway.executions.length");

@@ -1,3 +1,4 @@
+// ci: web-sync.2 order=10
 // The engines route (web/engines.ts) in Miniflare, with web/dist's engine in
 // a simulated R2 bucket: each file comes back byte for byte with its
 // manifest's headers, immutable and readable from anywhere; nothing else
@@ -11,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { engineIdText, isManifest } from "./engine-id.mts";
+import { dispatch } from "./miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "test-workers/package.json"));
@@ -38,7 +40,7 @@ const bucket = await mf.getR2Bucket("ENGINES");
 const SHARED = /^lib\/tzdata\//;
 for (const f of [...Object.keys(man.files), "manifest.json"]) await bucket.put(SHARED.test(f) ? f : `engine/${id}/${f}`, readFileSync(join(dir, f)));
 
-const get = (path, init) => mf.dispatchFetch(`https://sagebrush.test${path}`, init);
+const get = (path, init) => dispatch(mf, `https://sagebrush.test${path}`, init);
 for (const [f, d] of Object.entries(man.files)) {
   const r = await get(`/engine/${id}/${f}`);
   const bytes = Buffer.from(await r.arrayBuffer());
@@ -156,7 +158,7 @@ const REFUSALS = [
 async function refusals(w) {
   const b = await w.getR2Bucket("ENGINES");
   await b.put(`engine/${"b".repeat(20)}/manifest.json`, readFileSync(join(dir, "manifest.json"))); // (lists the file; no object)
-  const g = (path, init) => w.dispatchFetch(`https://sagebrush.test${path}`, init);
+  const g = (path, init) => dispatch(w, `https://sagebrush.test${path}`, init);
   const lacking = [], other = [];
   // (the witness that "engine 404 (no object)" reaches :86, not :69 (both say "no such engine file"): this id's
   // manifest is served, so the route found its entry)
@@ -191,7 +193,7 @@ await mf.dispose();
   const wb = await w.getR2Bucket("ENGINES");
   for (const f of ["sagebrush-worker.js", "manifest.json"]) await wb.put(`engine/${id}/${f}`, readFileSync(join(dir, f)));
   const { lacking, other } = await refusals(w);
-  const f200 = await w.dispatchFetch(`https://sagebrush.test/engine/${id}/sagebrush-worker.js`);
+  const f200 = await dispatch(w, `https://sagebrush.test/engine/${id}/sagebrush-worker.js`);
   console.log(`G3A-ENGINES control C-E: lacking nosniff [${lacking.join(", ")}]; not as before [${other.join("; ")}]; 200 nosniff ${f200.headers.get("x-content-type-options")}`);
   ok(JSON.stringify(lacking) === JSON.stringify(REFUSALS.map(([n]) => n)) && other.length === 0 && f200.status === 200 && f200.headers.get("x-content-type-options") === "nosniff",
     `control C-E: exactly the ${REFUSALS.length} refusals lack nosniff (${lacking.join(", ") || "none"}), nothing else changed (${other.join("; ") || "none"}), the 200 keeps it`);

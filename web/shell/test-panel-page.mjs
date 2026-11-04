@@ -1,3 +1,4 @@
+// ci: web-browser/terminal.3 order=10 runner=bun
 // The terminal panel on the notebook page (plan-bash-shell r8c E5; step 6's preview): a smoke test in headless
 // Chromium against web/dist built with SAGEBRUSH_TERMINAL=1 (the bash set in dist, as a hosted preview has it).
 // ⋯ ▸ Terminal opens the dock; commands run through the page's ShellHost with the person principal: text, SGR
@@ -112,17 +113,34 @@ try {
     if (t && (t.units > CAPS_SB.units || t.lines > CAPS_SB.lines || t.spans > CAPS_SB.spans)) over.push(`${what}: ${JSON.stringify(t)}`);
     return t;
   };
-  // one command: type, Enter, wait for the polite status after its output
+  // one command: type, Enter, wait for the polite status after its output.  The commands already in the scrollback
+  // are marked first, so the wait is for a new one: a count of commands typed so far stops matching once the
+  // scrollback drops older commands whole.  clear and reset are the panel's own, done at once with no status: their
+  // wait is for the emptied scrollback.  (Each of those waits ran out its 60 s before: about 8 of the terminal group's
+  // 10 minutes on CI, Nov 2.)  (n still counts the commands typed, for the cases below)
   let n = 0;
   const run = async (cmd) => {
     n++;
+    if (/^\s*(?:clear|reset)\s*$/.test(cmd)) {
+      await evaluate(`(() => {
+        const ta = document.querySelector(".sb-term textarea");
+        ta.value = ${JSON.stringify(cmd)};
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      })()`);
+      if (!(await until(`document.querySelectorAll(".sb-term-cmd").length === 0`, 60000))) throw new Error(`run(${JSON.stringify(cmd)}): the scrollback wasn't emptied within 60 s`);
+      await invariant(cmd);
+      return { out: null, html: null, exit: null, status: await evaluate(`document.querySelector(".sb-term-status").textContent`), cwd: await evaluate(`document.querySelector(".sb-term-cwd").textContent`) };
+    }
     await evaluate(`(() => {
+      for (const c of document.querySelectorAll(".sb-term-cmd")) c.dataset.sbSeen = "1";
       const ta = document.querySelector(".sb-term textarea");
       document.querySelector(".sb-term-status").textContent = "";
       ta.value = ${JSON.stringify(cmd)};
       ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     })()`);
-    await until(`document.querySelectorAll(".sb-term-cmd").length >= ${n} && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""`, 60000);
+    // (a wait that runs out is a failure, never a slow pass: unchecked, these waits hid 8 minutes of timeouts)
+    if (!(await until(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return (!c || !c.dataset.sbSeen) && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""; })()`, 60000)))
+      throw new Error(`run(${JSON.stringify(cmd)}): no new command with its status within 60 s`);
     await invariant(cmd);
     return evaluate(`(() => {
       const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1);

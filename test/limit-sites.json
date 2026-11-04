@@ -711,6 +711,106 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/examples/solve_bench.rs :: main :: let an = (0..n).map(|i| (0..n).map(|j| a0[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/examples/solve_bench.rs :: main :: let res = (0..n).map(|i| (b0[i] - (0..n).map(|p| a0[i + p * n] * b[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/boundary.rs ::  :: pub max_len: u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: check_solve :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/boundary.rs :: region :: span(start, len, l, l.max_len) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"n overflowing\", 5, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd test: a deliberately invalid kernel tile (MR near usize::MAX) that the blocking layer must refuse; refuses no user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, 2, usize::MAX, usize::MAX / 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, usize::MAX, 2, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(span(1, usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: for &(n, t, id) in &[(usize::MAX, 3, 2), (usize::MAX, usize::MAX, usize::MAX - 1), (10, 4, 4), (10, 4, 99)] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/lu.rs :: eta :: .fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: eta :: let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: norm_inf :: (0..rows).map(|i| (0..cols).map(|j| m[i + j * ld].abs()).sum::<f64>()).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrf_work_len(usize::MAX, usize::MAX).is_none() && solve_work_len(usize::MAX / 2, 3).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrs_work_len(1, usize::MAX).is_none() && getrs_work_len(usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_solve :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm solve's boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -2493,6 +2593,231 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_csv.py ::  :: _DIALECT_KWS = (\"dialect\", \"delimiter\", \"doublequote\", \"escapechar\", \"lineterminator\", #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _INT_MAX = 2**31 - 1 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _SSIZE_MAX = 2**63 - 1 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py ::  :: _field_limit = 128 * 1024 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: Dialect :: \"_delimiter\", \"_quotechar\", \"_escapechar\", \"_lineterminator\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect :: delimiter = property(lambda self: self._delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: (dialect, delimiter, doublequote, escapechar, lineterminator, quotechar, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_char(\"delimiter\", d_delimiter, d_lineterminator, True) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_chars(\"delimiter\", \"escapechar\", d_delimiter, d_escapechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: _dialect_check_chars(\"delimiter\", \"quotechar\", d_delimiter, d_quotechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: d_delimiter = _set_char(\"delimiter\", delimiter, \",\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: delimiter = getattr_(delimiter, \"delimiter\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: if (isinstance(dialect, Dialect) and delimiter is _NULL and doublequote is _NULL #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__new__ :: set_(self, \"_delimiter\", d_delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: Dialect.__setattr__ :: if name in (\"delimiter\", \"escapechar\", \"lineterminator\", \"quotechar\", \"quoting\"): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: _set_int :: if not -_INT_MAX - 1 <= src <= _INT_MAX: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: _set_int :: raise OverflowError(\"Python int too large to convert to C int\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: field_size_limit :: \"\"\"Sets an upper limit on parsed fields. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: Returns old limit. If limit is not given, no new limit is set and #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: _field_limit = new_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: def field_size_limit(*args, **kwargs): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: global _field_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if k != \"new_limit\": #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if new_limit is not _NULL: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if not -_SSIZE_MAX - 1 <= new_limit <= _SSIZE_MAX: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: if type(new_limit) is not int: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: new_limit = args[0] if args else kwargs.get(\"new_limit\", _NULL) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: old_limit = _field_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise OverflowError(\"Python int too large to convert to C ssize_t\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(\"limit must be an integer\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(f\"field_size_limit() got an unexpected keyword argument '{k}'\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: raise TypeError(f\"field_size_limit() takes at most 1 argument ({len(args) + len(kwargs)} given)\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: return old_limit #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: field_size_limit :: the old limit is returned\"\"\" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._add_char :: if len(self._field) >= _field_limit: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._add_char :: raise Error(f\"field larger than field limit ({_field_limit})\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "CPython's own contract, not a Sagebrush cap: Modules/_csv.c's field limit, ported unchanged (default 128*1024 characters, Error 'field larger than field limit (N)', and csv.field_size_limit(n) to read or change it, with CPython's TypeError and ssize_t OverflowError)"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #1": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: elif c == d._delimiter: #2": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: reader._process_char :: raise Error(f\"'{d._delimiter}' expected after '{d._quotechar}'\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: if c == d._delimiter or c == d._escapechar or c == d._quotechar or c == \"\\n\" or c == \"\\r\" or c in lt: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: if not field and d._delimiter == \" \" and d._skipinitialspace: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: raise Error(\"empty field must be quoted if delimiter is a space \" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: rec.append(d._delimiter) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
+ "lib/_csv.py :: writer._append :: special = (d._delimiter, d._escapechar, d._quotechar, \"\\n\", \"\\r\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing beyond CPython: the census matches 'delimiter' (it contains 'limit') in lib/_csv.py, the port of Modules/_csv.c; and _set_int's C int range check, with its OverflowError, is CPython's own argument contract for a dialect's quoting, as _csv.c's PyLong_AsInt"
+ },
  "lib/_display_budget.py ::  :: LIMITS = {\"steps\": 1 << 23, \"chars\": 1 << 26} #0": {
   "class": "1",
   "owner": "visualization/display",
@@ -3635,6 +3960,66 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
+ "lib/_sage_combinat.py :: Partitions :: \"\"\"The partitions of n (keywords length, max_part, min_part). #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__contains__ :: and all(self._min <= v <= self._max for v in p._p)) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: def __init__(self, n, length=None, max_part=None, min_part=None): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: self._max = self._n if max_part is None else _nonneg(max_part, \"max_part\") #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__init__ :: self._plain = length is None and max_part is None and min_part is None #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__iter__ :: for p in _partitions(self._n, self._max, self._length, self._min): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__repr__ :: conds.append(\"whose parts are at most %d\" % self._max) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.__repr__ :: if self._max != self._n: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Partitions.cardinality :: return _Z(sum(1 for _ in _partitions(self._n, self._max, self._length, self._min))) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: Subsets.__init__ :: raise NotImplementedError(\"Subsets(..., submultiset=True) is not implemented in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "Subsets(..., submultiset=True) is not implemented yet: an unsupported feature, not a cap"
+ },
+ "lib/_sage_combinat.py :: _partitions :: def _partitions(n, maxp, length=None, minp=1): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
+ "lib/_sage_combinat.py :: _partitions :: for k in range(min(n, maxp), minp - 1, -1): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the max_part keyword of Partitions and its stored value: a parameter name, it refuses nothing"
+ },
  "lib/_sage_ec.py :: _quotient_coords :: E(F_q) is too large to enumerate. P -> m P maps E(F_q) onto its Sylow #0": {
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
@@ -3714,6 +4099,181 @@
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
+ },
+ "lib/_sage_ec_ff.py :: EllipticCurvePoint_finite_field._other :: raise TypeError(\"unsupported operand parent(s) for +: '%s' and '%s'\" % (self.parent(), _sa().parent(Q))) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ec_ff.py :: EllipticCurve_finite_field.change_ring :: raise NotImplementedError(\"change_ring of an elliptic curve over %s to %s is not available in Sagebrush yet\" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "change_ring/base_extend of a curve over GF(p) to a ring other than a prime field or Zmod(p) of the same p (e.g. GF(p^k), QQ): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: EllipticCurve_finite_field.lift_x :: raise NotImplementedError(\"lift_x(extend=True) over a finite field is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "lift_x(extend=True) (points over a quadratic extension): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: _count :: raise NotImplementedError(\"the number of points of an elliptic curve over GF(p) with p >= 2^64 \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "the number of points over GF(p) for p >= 2^64 with j-invariant not 0 or 1728: Sage uses PARI's SEA, which Sagebrush lacks (an unsupported algorithm, not a cap)"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise NotImplementedError(\"elliptic curves over %s (not a field) are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "elliptic curves over a ring other than GF(p)/Zmod(p) with p prime (Zmod(n) composite, GF(p^k)): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "elliptic curves over a ring other than GF(p)/Zmod(p) with p prime (Zmod(n) composite, GF(p^k)): unsupported, not a cap"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise TypeError(\"unsupported operand parent(s) for -: '%s' and '%s'\" % (_sa().parent(c), R)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ec_ff.py :: elliptic_curve :: raise TypeError(\"unsupported operand parent(s) for -: '%s' and '%s'\" % (c._parent, R)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for coefficients or points from different parents, Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((r[-1], xmax, '<')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((r[0], xmax, '<')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((xmin, xmax, '=')) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: I.append((xmin, xmax, '=')) #1": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: def plot(E, xmin=None, xmax=None, components='both', **args): #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: elif xmax >= r[1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: elif xmin >= xmax: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if components in ['bounded', 'both'] and len(r) > 1 and (xmin < r[1] or xmax > r[0]): #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if components in ['unbounded', 'both'] and xmax > r[-1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax >= r[1]: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is not None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmax is not None: #1": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: if xmin is None or xmax is None: #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: raise ValueError(\"xmax must be None if xmin is a tuple\") #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: raise ValueError(\"xmin must be less than xmax\") #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: span = xmaxs - xmins #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmax = float(xmax) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmax = xmaxs + .02 * span #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs = [] #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs = max(xmaxs) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(flex + 2 * (flex - r[-1])) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(max(roots(branch(ymax)) + roots(branch(ymin)))) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmaxs.append(r[1]) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: xmin, xmax = xmin #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_plot.py :: plot :: ymax = 2.5 * max([f1(a) for a in critx]) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
+ },
+ "lib/_sage_ec_rr.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
  },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
@@ -3796,6 +4356,26 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError message for a GF(q) vector times a rational: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), o.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: TypeError: unsupported operand parent(s) for *: 'Rational Field' and 'Vector space of dimension 2 over Finite Field of size 5' #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__rmul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
@@ -4177,6 +4757,16 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
+  "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "hermite_form(transformation=True) over ZZ: the integer Hermite form's transformation is not computed yet (an unsupported option, not a cap)"
+ },
  "lib/_sage_matrix.py :: _bounded_list :: \"\"\"list(obj), reading at most limit + 1 items: more than limit is a #0": {
   "class": "2",
   "owner": "matrices/runtime memory",
@@ -4352,6 +4942,206 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: _SR_MAX_CHARS = 4 << 20 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: checked after each row operation (_SR_MAX_CHARS). #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py ::  :: entry cap) for each, then _sr_guard (at most _SR_MAX rows and columns in a #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _memory_error :: def _memory_error(what, need, limit): #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _memory_error :: return _memguard.memory_guard(what, need, limit, \"one symbolic matrix\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: checked against _SR_MAX_CHARS before it is tested. The entry itself is #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: if len(s) > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: if n > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: never changed. Only the reducer's NotImplementedError is undecided, #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: raise _memory_error(\"A reduced entry\", n, _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _nonzero :: raise _memory_error(\"An entry to reduce\", len(s), _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's zero-proof stage: its input admitted and its reduced result checked against _SR_MAX_CHARS (astra3's A3 ruling), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _reduce_trig :: NotImplementedError, before expanding).\"\"\" #0": {
+  "class": "none",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "the zero-proof stage's fallback and its docstring: they refuse nothing (the reducer's NotImplementedError makes an entry undecided, so nonzero)"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: \"\"\"The working rows after a row operation: refused past _SR_MAX_CHARS.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: if n > _SR_MAX_CHARS: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _size_check :: raise _memory_error(\"The entries of a symbolic elimination\", n, _SR_MAX_CHARS) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: \"\"\"A symbolic r x w workspace: at most _SR_MAX rows and columns.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: if max(r, w) > _SR_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _sr_guard :: raise _memory_error(\"A symbolic %d x %d workspace\" % (r, w), max(r, w), _SR_MAX) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: adjugate :: raise NotImplementedError(\"the adjugate of a symbolic matrix larger than 4 x 4 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
+ },
+ "lib/_sage_matrix_sr.py :: det :: raise NotImplementedError(\"the determinant of a symbolic matrix larger than 3 x 3 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "matrices over SR (@sagebrush-sage2)",
+  "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
+ },
+ "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for points on different curves, Sage's comparison message (ECTORS-ENG-2); refuses nothing for size"
+ },
  "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None): #0": {
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
@@ -4401,6 +5191,16 @@
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over QQ to a ring other than QQ, ZZ, GF(p), Zmod(p): not available yet (Sage has them)"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.gens :: def gens(self, height_limit=None, proof=None, max_prime=None): #0": {
   "class": "3",
@@ -4461,6 +5261,16 @@
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: def plot(self, xmin=None, xmax=None, components='both', **args): #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges): matched words, no limit"
+ },
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.plot :: return _sage_ec_plot.plot(self, xmin, xmax, components, **args) #0": {
+  "class": "none",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
@@ -4571,6 +5381,16 @@
   "class": "3",
   "owner": "number fields",
   "row": "inv-28"
+ },
+ "lib/_sage_nf.py :: NumberField :: NotImplementedError: relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; the absolute field is NumberField(h, 'c') for the minimal polynomial h of a primitive element, e.g. (sqrt(2) + sqrt(3)).minpoly() #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
+ },
+ "lib/_sage_nf.py :: NumberField :: raise NotImplementedError(\"relative number fields (a tower, NumberField([f, g], ...)) are not available in Sagebrush yet; \" #0": {
+  "class": "coverage",
+  "owner": "number fields (@sagebrush-sage2)",
+  "reason": "NumberField of a list (a relative field, a tower): not available yet (Sage has them); the refusal points to the absolute field"
  },
  "lib/_sage_nf.py :: NumberField_absolute.class_group :: By default it has no limit on M or that index bound; the opt-in #0": {
   "class": "3",
@@ -4832,6 +5652,178 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sbdata.py :: _Parser.string :: def string(self, cap, capcode=\"cap:string\"): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _Parser.string :: if n > cap: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _Parser.string :: if n > cap: #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e; #459 CI1 revision 7c10a89d: the run-at-a-time charge): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _check_url :: raise Refused(\"cap:\" + f) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _entry :: raise Refused(\"cap:key\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _entry :: raise Refused(\"cap:size\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: _meta :: raise Refused(\"cap:\" + f) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: validate :: raise Refused(\"cap:entries\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_sbdata.py :: validate :: raise Refused(\"cap:folder\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: _fields = (\"nobs\", \"minmax\", \"mean\", \"variance\", \"skewness\", \"kurtosis\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: DescribeResult :: minmax = property(lambda self: self[1]) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: PearsonRResult.confidence_interval :: raise NotImplementedError(\"scipy.stats.PearsonRResult.confidence_interval: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: _rank1 :: val = {\"average\": (pos + end + 2) / 2.0, \"min\": pos + 1.0, \"max\": end + 1.0, \"dense\": float(dense)}[method] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: \"\"\"(nobs, (min, max), mean, variance (ddof), skewness, kurtosis (Fisher's)), as SciPy's\"\"\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: maxs = _out([float(np.max(r)) for r in rows], shape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: describe :: return DescribeResult(np.int64(n), (mins, maxs), means, vars_, sk, ku) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: an axis of a 2-d array is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: jarque_bera :: raise NotImplementedError(\"scipy.stats.jarque_bera: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: kurtosis :: raise NotImplementedError(\"scipy.stats.kurtosis: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: axis and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: method= is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: rankdata :: if method not in (\"average\", \"min\", \"max\", \"dense\", \"ordinal\"): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: skew :: raise NotImplementedError(\"scipy.stats.skew: keepdims=True is not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
  "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
   "class": "3",
   "owner": "special functions",
@@ -4866,6 +5858,36 @@
   "class": "3",
   "owner": "special functions",
   "row": "inv-19"
+ },
+ "lib/_special_ibeta.py ::  :: _BETAINC_MAX = 1e8 #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betainc_check :: if max(a, b) > _BETAINC_MAX and a < _math.inf and b < _math.inf: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betainc_check :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betaincinv_outer :: if max(a, b) > _BETAINC_MAX: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: _betaincinv_outer :: raise NotCovered(\"%s: Sagebrush covers a and b up to %g\" % (name, _BETAINC_MAX)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the incomplete beta function's and its inverse's range: above a or b = 1e8 its continued fraction needs more than about 1e4 terms; a method not implemented there (Algorithm 708's bgrat and basym cover the large-parameter cases below it), not a cap on the user's work"
+ },
+ "lib/_special_ibeta.py :: betainc :: scipy's limits: 0 at x = 0, 1 at x = 1, 1 at a = 0 and 0 at b = 0 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "docstring text naming SciPy's limiting values at the domain's ends; it refuses nothing"
  },
  "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
   "class": "1",
@@ -4922,6 +5944,181 @@
   "owner": "python (@sagebrush-python)",
   "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
  },
+ "lib/csv.py ::  :: \"field_size_limit\", \"reader\", \"writer\", #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: * delimiter - specifies a one-character string to use as the #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: field contains either the quotechar or the delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: field_size_limit, \\ #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: immediately follow a delimiter. It defaults to False, which #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: means that spaces immediately following a delimiter is part #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py ::  :: the delimiter when quoting is set to QUOTE_NONE. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Dialect :: delimiter = None #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Dialect :: delimiter, quotechar, escapechar, doublequote, skipinitialspace, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer :: \"Sniffs\" the format of a CSV file (i.e. delimiter, quotechar) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: (delimiters is None or k in delimiters)): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: 5) the character that best meets its goal is the delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: The delimiter /should/ occur the same number of times on #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: def _guess_delimiter(self, data, delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: threshold = 0.9 #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_delimiter :: while len(delims) == 0 and consistency >= threshold: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: If there is no quotechar the delimiter can't be determined #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: The quote with the most wins, same with the delimiter. #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: by the same character (the probable delimiter). #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: def _guess_quote_and_delimiter(self, data, delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer._guess_quote_and_delimiter :: if key and (delimiters is None or key in delimiters): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: def sniff(self, sample, delimiters=None): #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: delimiter, skipinitialspace = self._guess_delimiter(sample, #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: delimiters) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: dialect.delimiter = delimiter #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: if not delimiter: #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: if not delimiter: #1": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: quotechar, doublequote, delimiter, skipinitialspace = \\ #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: raise Error(\"Could not determine delimiter\") #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: Sniffer.sniff :: self._guess_quote_and_delimiter(sample, delimiters) #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel_tab :: \"\"\"Describe the usual properties of Excel-generated TAB-delimited files.\"\"\" #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: excel_tab :: delimiter = '\\t' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
+ "lib/csv.py :: unix_dialect :: delimiter = ',' #0": {
+  "class": "none",
+  "owner": "csv (@sagebrush-sage2)",
+  "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
+ },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -4976,6 +6173,166 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
+ },
+ "lib/ipaddress.py :: IPv4Network.__init__ :: elif self._prefixlen == (self.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv4Network.__init__ :: if self._prefixlen == (self.max_prefixlen - 1): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv6Network.__init__ :: elif self._prefixlen == self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: IPv6Network.__init__ :: if self._prefixlen == (self.max_prefixlen - 1): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseAddress.__format__ :: padlen = self.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseAddress.__format__ :: padlen = self.max_prefixlen // 4 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork._address_class :: raise NotImplementedError(msg) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: ValueError: The prefixlen_diff is too small or too large. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: if new_prefixlen > self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseNetwork.subnets :: if self._prefixlen == self.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV4 :: max_prefixlen = IPV4LENGTH #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV4._make_netmask :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6 :: max_prefixlen = IPV6LENGTH #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: _max_parts = cls._HEXTET_COUNT + 1 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: if len(parts) > _max_parts: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: msg = \"At most %d colons permitted in %r\" % (_max_parts-1, ip_str) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._ip_int_from_string :: parts = ip_str.split(':', maxsplit=_max_parts) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._make_netmask :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _BaseV6._string_from_ip_int :: raise ValueError('IPv6 address is too large') #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._check_int_address :: raise AddressValueError(msg % (address, self.max_prefixlen, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: byteslen = cls.max_prefixlen // 8 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: cls.max_prefixlen) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_ip_int :: prefixlen = cls.max_prefixlen - trailing_zeroes #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._prefix_from_prefix_string :: if not (0 <= prefixlen <= cls.max_prefixlen): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._split_addr_prefix :: return address, cls.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _IPAddressBase._split_addr_prefix :: return address[0], cls.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: _count_righthand_zero_bits :: bits: maximum number of bits to count. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: collapse_addresses :: elif ip._prefixlen == ip.max_prefixlen: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: summarize_address_range :: ip_bits = first.max_prefixlen #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v4_int_to_packed :: ValueError: If the integer is negative or too large to be an #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v4_int_to_packed :: raise ValueError(\"Address negative or too large for IPv4\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
+ },
+ "lib/ipaddress.py :: v6_int_to_packed :: raise ValueError(\"Address negative or too large for IPv6\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "lib/ipaddress.py vendored unchanged from CPython 3.14 (urllib.parse imports it): CPython's own prefix-length and address checks, Sagebrush adds no limit"
  },
  "lib/locale.py ::  :: \"LC_NUMERIC\", \"LC_ALL\", \"CHAR_MAX\", \"getencoding\"] #0": {
   "class": "none",
@@ -5041,6 +6398,11 @@
   "class": "3",
   "owner": "real/rational arithmetic",
   "row": "inv-15"
+ },
+ "lib/sage_all.py :: Primes.__getitem__ :: raise NotImplementedError(\"Primes()[a:b] needs 0 <= a <= b (a finite slice)\") #0": {
+  "class": "coverage",
+  "owner": "sage2",
+  "reason": "Primes()[a:b] of an open-ended or negative slice: an unsupported form (an infinite list), not a cap"
  },
  "lib/sage_all.py :: Rational._sqrt_prec :: if prec > _SQRT_MAX_PREC: #0": {
   "class": "3",
@@ -5203,6 +6565,31 @@
   "class": "3",
   "owner": "real/rational arithmetic",
   "row": "inv-15"
+ },
+ "lib/sage_permgroup.py ::  :: _ISO_MAX = 5040 #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: if n > _ISO_MAX: #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: raise NotImplementedError(\"is_isomorphic of permutation groups of order %d (above %d) is not available in Sagebrush yet\" % (n, _ISO_MAX)) #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: there is none. Groups of order above _ISO_MAX, or a search past #0": {
+  "class": "none",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "is_isomorphic's docstring describing its refusals: matched words, no limit"
+ },
+ "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic.extends :: raise NotImplementedError(\"is_isomorphic: the isomorphism search passed %d steps; not available in Sagebrush for these groups yet\" % _ISO_STEPS) #0": {
+  "class": "coverage",
+  "owner": "permutation groups (@sagebrush-sage2)",
+  "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
@@ -6129,6 +7516,127 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts ::  :: const PAGES_MAX = 60; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts ::  :: const TEX_MAX = 4 * 2 ** 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from \"path\"; #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: an import line"
+ },
+ "src/latex-cli.ts :: findBrowser :: for (const dir of (env.PATH ?? \"\").split(delimiter)) if (dir) for (const b of [\"google-chrome\", \"google-chrome-stable\", \"chromium\", \"chromium-browser\", \"microsoft-edge\", \"microsoft-edge-stable\", \"brave-browser\"]) cands.push(join(dir, b)); #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: inputsNow :: else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: \"too large\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: an \\input/\\include file over web/latex/inputs.ts INPUT_BOUNDS.perFile (4 MiB, the editor's EDIT_MAX) is refused before it is read: the same bound the page applies to included files"
+ },
+ "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
+  "class": "none",
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: latexCommand :: if (st.size > TEX_MAX) return fail(`${file}: ${st.size} bytes, over the ${TEX_MAX} this reads`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states.push({ key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : \"the plot isn't an SVG\" }); failed = true; continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: msgOf :: return out.join(\"\\n\").slice(-MSG_MAX); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX}:] #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return []; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: key: x.key, s: x.s, ...(typeof x.latex === \"string\" ? { latex: x.latex } : {}), ...(typeof x.src === \"string\" ? { src: x.src } : {}), ...(typeof x.msg === \"string\" ? { msg: x.msg.slice(0, MSG_MAX) } : {}), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: screenshots :: for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",
   "owner": "CLI/runtime configuration",
@@ -6183,6 +7691,274 @@
   "class": "1",
   "owner": "CLI/runtime configuration",
   "row": "src-16"
+ },
+ "src/local-gateway.ts ::  :: cellCode: MiB, // one cell's code in a wave (the client's per-cell limit) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const BODY_MAX = Object.freeze({ run: 2.25 * MiB, other: 64 * 1024 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const GATEWAY_LIMITS = Object.freeze({ #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: export const RESPONSE_MAX = MiB; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts ::  :: jtiMax: 64, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: proofMax: 4096, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts ::  :: segmentMax: 1024, // a proof's decoded header or claims #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: answer :: if (Buffer.byteLength(body, \"utf8\") > RESPONSE_MAX) { status = 502; body = JSON.stringify({ error: \"answer-too-large\" }); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: cellCodeTooLarge :: for (const e of w.entries) if (typeof e.code === \"string\" && Buffer.byteLength(e.code, \"utf8\") > GATEWAY_LIMITS.cellCode) return \"an entry's code over its size limit\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: charge :: this.stats.maxQueuedPayloadBytes = Math.max(this.stats.maxQueuedPayloadBytes, this.stats.queuedPayloadBytes); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: emit :: if (b.eventBytes <= GATEWAY_LIMITS.bindingEventBytes) break; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: emit :: while (r.events.length && b.eventBytes > GATEWAY_LIMITS.bindingEventBytes) this.dropOldest(b, r); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: emit :: while (run.events.length > GATEWAY_LIMITS.eventsPerRun || run.eventBytes > GATEWAY_LIMITS.runEventBytes) this.dropOldest(b, run); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: exit :: queuedPayloadBytes: 0, maxQueuedPayloadBytes: 0, rawBodyRefs: 0, recordBytes: 0, staleOutputs: 0, #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: frame :: if (id.length - 1 > GATEWAY_LIMITS.frameIdDigits) return c.close(1002, \"a frame id is at most 15 digits\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: frame :: if (req.bytes > (rpc === \"g.run\" ? BODY_MAX.run : BODY_MAX.other)) { this.dropRaw(req, msg); return c.close(1002, \"a body over its limit\"); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: frame :: if (s.open.size >= GATEWAY_LIMITS.openIds) return c.close(1002, \"too many open requests\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: numberProblem :: if (v > Number.MAX_SAFE_INTEGER) return \"range\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: postRun :: if (b.runs.size >= GATEWAY_LIMITS.runs) { this.unreserve(req); return this.answer(req, 429, { error: \"limit\", reason: \"runs\" }); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: for (const [j, at] of s.jtis) if (t - at > GATEWAY_LIMITS.jtiMs) s.jtis.delete(j); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.iat < now - GATEWAY_LIMITS.iatPast) return this.refused(\"iat-past\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.iat > now + GATEWAY_LIMITS.iatFuture) return this.refused(\"iat-future\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.jti.length < GATEWAY_LIMITS.jtiMin) return this.refused(\"jti-min\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (claims.jti.length > GATEWAY_LIMITS.jtiMax) return this.refused(\"jti-max\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (hb.length > GATEWAY_LIMITS.segmentMax || cb.length > GATEWAY_LIMITS.segmentMax) return this.refused(\"segment-size\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (proof.length > GATEWAY_LIMITS.proofMax) return this.refused(\"proof-size\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: if (s.jtis.size >= GATEWAY_LIMITS.jtis) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: refused :: return { status: 503, error: \"limit\", headers: { \"retry-after\": \"1\" } }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: rotateNonce :: if (t - this.nonceAt >= GATEWAY_LIMITS.nonceMs) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: socketLost :: this.idleTimer = this.server.timers.setTimeout(() => { this.idleTimer = null; if (!this.server.pairedConn) this.shutdown(); }, GATEWAY_LIMITS.idleMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: start :: const worker = new Worker(entry, { workerData: { sagebrushNotebook: { dir }, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway text that refuses nothing: a statistic (the payload charge's peak) or the stats' initial values, an import, or the session limits handed to its Worker."
+ },
+ "src/local-gateway.ts :: stopWorker :: }, GATEWAY_LIMITS.fallbackMs); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: summary :: if (enc(s) <= GATEWAY_LIMITS.summary) return s; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/local-gateway.ts :: summary :: return enc(s) <= GATEWAY_LIMITS.summary ? s : JSON.stringify({ status: String(o.status).slice(0, 32) }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-remote-compute",
+  "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
  },
  "src/magma.ts :: arrow :: const MAX_CHAIN = 64; #0": {
   "class": "2",
@@ -6312,7 +8088,7 @@
   "owner": "sagebrush-remote-compute",
   "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
  },
- "src/notebook-pair.ts :: paired :: c.send({ jsonrpc: \"2.0\", id, result: { protocol: 1, purpose: \"kernel\", token: c.token, nonce: this.nonce, limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } }); #0": {
+ "src/notebook-pair.ts :: paired :: c.send({ jsonrpc: \"2.0\", id, result: { protocol: 1, purpose: \"kernel\", token: c.token, nonce: this.gateway.currentNonce(), limits: { frame: PAIR_LIMITS.frame }, ...(session ? { session } : {}) } }); #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
   "reason": "Pairing server text that refuses nothing: a statistic (peak buffered output or fragments), a field or option declaration, or the frame cap the hello's result advertises."
@@ -6577,6 +8353,72 @@
   "class": "1",
   "owner": "package runtime",
   "row": "src-19"
+ },
+ "src/reactive-session.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's own limits passed to its worker, not a limit of this file: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: clamp :: send(msg: { cell: string; code: string; opts?: Record<string, unknown> }, on: (m: any) => void, limitMs?: number, absolute?: boolean): Promise<Sent>; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run([id], { budget: 0 })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run(left, o.only ? { budget: 0 } : { budget: Infinity })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget: 0 }) : await reactive.runAll()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: over :: if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, and START_GRACE_MS to be begun: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const send: Interpreter[\"send\"] = (msg, on, limit = Infinity, absolute = false) => new Promise<Sent>((resolve) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, from when the interpreter begins it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
  "src/remote-approval.ts :: beginAction :: beginAction(limits: Partial<Record<BudgetKind, number>> = BUDGET): Budget { #0": {
   "class": "none",
@@ -7317,6 +9159,14 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: chdir :: const READ_NOFOLLOW_MAX = 50_000_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
  "src/runtime/modules.ts :: factorial :: if (n > LLONG_MAX) raise(T.OverflowError, `factorial() argument should not exceed ${LLONG_MAX}`); #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -7402,6 +9252,46 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: const limit = typeof max === \"bigint\" || typeof max === \"number\" ? Number(max) : NaN; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: fn(m, \"read_nofollow\", (path: string, max: any) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return \"bad-max\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (LIMIT-M1-1, daybreak3): _fs.read_nofollow's native max, an integer in 0..READ_NOFOLLOW_MAX (50,000,000, one entry's cap) checked before any open; else 'bad-max'. The buffer is min(max, size)+1. Refuses only the replay read, no user computation"
+ },
+ "src/runtime/modules.ts :: quiet :: if (st.size > limit) return \"too-large\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
+ },
  "src/runtime/modules.ts :: setDigits :: const i = O.index(maxdigits); #0": {
   "class": "3",
   "owner": "python (@sagebrush-python)",
@@ -7426,6 +9316,11 @@
   "class": "3",
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
+ },
+ "src/runtime/modules.ts :: setDigits :: m.float_info = Ty.structseq(\"sys.float_info\", [\"max\", \"max_exp\", \"max_10_exp\", \"min\", \"min_exp\", \"min_10_exp\", \"dig\", \"mant_dig\", \"epsilon\", \"radix\", \"rounds\"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.float_info's values (max is the largest double, a FloatBox): the census word max as a field's name, refusing nothing"
  },
  "src/runtime/modules.ts :: str :: const ZONE_READ_MAX = (1 << 20) + 1; #0": {
   "class": "1",
@@ -7547,10 +9442,30 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
+ },
  "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"set_printoptions\", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
@@ -7561,6 +9476,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: strRefuse :: return raise(T.NotImplementedError, \"this operation on string arrays is not supported by sagebrush's numpy yet (string arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "NumPy shim",
+  "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
@@ -7730,6 +9655,112 @@
   },
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
+ },
+ "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/stall-fetch.js :: fetchMoving :: export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_BYTES_MAX = 16 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_ROWS_MAX = 10000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: acceptedBatch :: export const SCRATCH_GRAPH = { exactCacheMaxEntries: 1, exactCacheMaxSize: 1, valueCacheMaxEntries: 1, valueCacheMaxSize: 1 } as const; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The checkpoint decisions' patchflow graphs keep no cached values (LRU caches of size 1): a decision holds only its current value, charged as V (map r2 G as amended); nothing is refused or truncated by it."
+ },
+ "web/workspace/checkpoint.ts :: itemBytesOf :: const WIDEST = { seq: Number.MAX_SAFE_INTEGER, recv: Number.MAX_SAFE_INTEGER, chain: \"f\".repeat(64) }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: makeCheckpoint :: if (blob.length > CHECKPOINT_BLOB_MAX) throw new Error(\"checkpoint: over the blob's maximum\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: no :: if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || patches > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP || local.length > LOCAL_ROWS_MAX) return no(\"bounds\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: no :: if (localTotal > LOCAL_BYTES_MAX) return no(\"bounds\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: patchBytes :: export const RETAINED_MAX_B = 2; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: settle :: const settle = () => { const v = heldValues(codec, graph, sizes).bytes; ledger.set(\"values\", v); return v <= RETAINED_MAX_B * B; }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: maxHeld = 0; #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: set(name: string, bytes: number) { this.held.set(name, bytes); this.maxHeld = Math.max(this.maxHeld, this.total()); } #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

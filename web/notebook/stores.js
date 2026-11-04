@@ -17,6 +17,7 @@
 // started at) and saves again.  So two tabs editing different cells keep both
 // edits, and no write is lost to a stale one (the systematic review's
 // R2-DOC-F1).  A save without baseRev is written as it is.
+import { noteToken, HIST_STORES } from "../history/tokens";
 
 // The record to write for doc over cur (the stored one), or null on a conflict.
 function revise(cur, doc) {
@@ -61,6 +62,21 @@ export function setSaveGate(f) { saveGate = f; }
  * before a reset (or in a tab whose page knows nothing of it) can't write into the next workspace (astra's
  * CORR-2A4-2).  Every list of notebooks passes it over. */
 export const FENCE = "__sagebrush-workspace__";
+/** A notebook write's scope: with history's stores when this database has them (web/history/tokens.ts; in layer 1 only
+ * the tests' databases do, layer 4 upgrades the rest), so its change token is written in the same transaction. */
+export const notebookScope = (db) => (HIST_STORES.every((s) => db.objectStoreNames.contains(s)) ? ["notebooks", ...HIST_STORES] : "notebooks");
+/** Delete a notebook's record, with its history token in the same transaction (web/history/tokens.ts): every delete of
+ * a notebook's record goes through here.  Resolves when committed; rejects, nothing deleted, if anything fails. */
+export function deleteNotebookRecord(db, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(notebookScope(db), "readwrite");
+    tx.objectStore("notebooks").delete(id);
+    noteToken(tx, { ident: id, rev: 0, kind: "notebook", chain: null }).catch(() => { try { tx.abort(); } catch {} });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("the delete was stopped"));
+  });
+}
 /** Sync's own rows in the history databases (plan-sync-slice2-client r4 §4, F1; web/notebook/sync-rows.js) are under
  * nb keys that begin with this character, which no document id may: so no document's range ever holds one. */
 export const SYNC_KEY_PREFIX = "\u0001";
@@ -511,7 +527,7 @@ export class IdbStore {
     if (why) return { refused: why };
     // read and write in one transaction: the compare and swap is atomic, and so is the fence's check
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction("notebooks", "readwrite"), st = tx.objectStore("notebooks");
+      const tx = this.db.transaction(notebookScope(this.db), "readwrite"), st = tx.objectStore("notebooks");
       let result = null;
       const fence = st.get(FENCE);
       fence.onsuccess = () => {
@@ -537,6 +553,9 @@ export class IdbStore {
         else {
           st.put(rec);
           result = { rec };
+          // (history's change token, in this transaction (web/history/tokens.ts): with no chain, the router resolves a
+          // notebook's place through the index.  Any failure aborts the save, never a change left unrecorded)
+          noteToken(tx, { ident: this.id, rev: rec.rev, kind: "notebook", chain: null }).catch(() => { try { tx.abort(); } catch {} });
         }
       };
       tx.oncomplete = () => resolve(result);

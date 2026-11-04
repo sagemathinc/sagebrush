@@ -32,6 +32,11 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _is_sr_scalar(x):
+    """A symbolic expression (not a relation): a scalar of M + c, c - M."""
+    return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
+
+
 def _qq_entry(x):
     """x as an element of QQ when it is an integer: an integral entry of a
     QQ container is stored as an int (_norm), but Sage hands it out with
@@ -1389,7 +1394,10 @@ class Matrix:
 
     # ---- arithmetic
     def _same(self, other):
-        base = self._base if self._base is other._base else _sa().QQ
+        sa = _sa()
+        if self._base is not other._base and sa.SR in (self._base, other._base):
+            return sa.SR
+        base = self._base if self._base is other._base else sa.QQ
         return base
 
     def _generic(self, other):
@@ -1428,14 +1436,14 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g + other
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+") + self
         return NotImplemented
 
@@ -1443,14 +1451,14 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g - other
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
-        if isinstance(other, (int, _F)):
+        if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-") - self
         return NotImplemented
 
@@ -1474,19 +1482,27 @@ class Matrix:
             return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows], other.ncols())
         if isinstance(other, SeriesVector):
             return other._matvec(self)
+        import _sage_ffmat
+        if isinstance(other, _sage_ffmat.FFVector):
+            # (a matrix over ZZ times a vector over GF(q): in GF(q), as Sage
+            # coerces; over QQ or another ring, Sage's TypeError)
+            if self._base is _sa().ZZ and self.ncols() == len(other):
+                # (by shape: a matrix with no rows keeps its columns)
+                return _sage_ffmat.matrix(other._base, self.nrows(), self.ncols(), [x for r in self._rows for x in r]) * other
+            raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
         if isinstance(other, Vector):
             ov = _raw_entries(other)
             v = Vector(_norm(sum((a * b for a, b in zip(r, ov)), 0)) for r in self._rows)
             return _over_qq(v, other) if self._base is not _sa().QQ else self._vector(v)
         if isinstance(other, (list, tuple)):
             return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
-        base = self._base if isinstance(other, int) else _sa().QQ
+        base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
         if isinstance(other, (list, tuple)):
             return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
-        base = self._base if isinstance(other, int) else _sa().QQ
+        base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[other * a for a in r] for r in self._rows], self.ncols())
 
     def __xor__(self, other):
@@ -1550,6 +1566,9 @@ class Matrix:
         """
         if not self.is_square():
             raise ValueError("self must be a square matrix")
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.det(self)
         from sagebrush import linalg
         return self._out(_norm(linalg.det(self._rows)))
 
@@ -1569,6 +1588,9 @@ class Matrix:
         """
         if not self._rows or not self._rows[0]:
             return 0
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.rank(self)
         from sagebrush import linalg
         return linalg.rank(self._rows)
 
@@ -1580,6 +1602,9 @@ class Matrix:
             sage: matrix(QQ, [[1, 2, 3], [2, 4, 6], [1, 0, 1]]).pivots()
             (0, 1)
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.pivots(self)
         return tuple(self._rref()[1])
 
     def inverse(self):
@@ -1595,6 +1620,9 @@ class Matrix:
         """
         if not self.is_square():
             raise ArithmeticError("self must be a square matrix")
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.inverse(self)
         from sagebrush import linalg
         return Matrix(_sa().QQ, linalg.inverse(self._rows))
 
@@ -1625,6 +1653,9 @@ class Matrix:
             Basis matrix:
             [   1 -1/2    0]
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.left_kernel(self)
         if self.ncols() == 0:
             n, _ = _shape(self.nrows(), self.nrows())
             return FreeModule_(self._base, n, [[int(i == j) for j in range(n)] for i in range(n)])
@@ -1643,6 +1674,9 @@ class Matrix:
             [   1    0 -1/3]
             [   0    1 -2/3]
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.right_kernel(self)
         return _kernel(self, self._base)
 
     def solve_right(self, B):
@@ -1655,6 +1689,9 @@ class Matrix:
             sage: A.solve_right(vector([5, 6]))
             (-4, 9/2)
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.solve_right(self, B)
         is_vec = not isinstance(B, Matrix)
         Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
@@ -1703,6 +1740,9 @@ class Matrix:
         """
         if self._base is _sa().ZZ:
             return self.hermite_form()
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.echelon_form(self)
         m, _ = self._rref()
         return Matrix(self._base, m, self._nc)
 
@@ -1721,19 +1761,187 @@ class Matrix:
             return Matrix(_sa().QQ, self._rows, self._nc).echelon_form()
         return self.echelon_form()
 
-    def hermite_form(self):
-        """The Hermite normal form (rows, zero rows at the bottom).
+    # ---- symbolic matrices (over SR: _sage_matrix_sr)
+    def _symbolic(self, name):
+        if self._base is not _sa().SR:
+            raise AttributeError("'Matrix' object has no attribute '%s'" % name)
+        import _sage_matrix_sr
+        return _sage_matrix_sr
+
+    def adjugate(self):
+        """The adjugate (the transposed cofactor matrix), over SR.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: matrix([[x, 1], [1, y]]).adjugate()
+            [ y -1]
+            [-1  x]
+        """
+        S = self._symbolic("adjugate")
+        if not self.is_square():
+            raise ValueError("self must be a square matrix")
+        return S.adjugate(self)
+
+    def subs(self, *args, **kw):
+        """Substitution in each entry (also substitute).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: matrix([[x, 1], [1, y]]).subs(x=2)
+            [2 1]
+            [1 y]
+        """
+        return self._symbolic("subs").entrywise(self, lambda e: e.subs(*args, **kw))
+
+    substitute = subs
+
+    def derivative(self, *args):
+        """The derivative of each entry (also diff).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: matrix([[x^2, sin(x)], [1, x*y]]).derivative(x)
+            [   2*x cos(x)]
+            [     0      y]
+        """
+        return self._symbolic("derivative").entrywise(self, lambda e: e.diff(*args))
+
+    diff = derivative
+
+    def simplify_full(self):
+        """simplify_full() of each entry.
+
+        EXAMPLES::
+
+            sage: matrix([[(x^2 - 1)/(x - 1), 1], [0, sin(x)^2 + cos(x)^2]]).simplify_full()
+            [x + 1     1]
+            [    0     1]
+        """
+        return self._symbolic("simplify_full").entrywise(self, lambda e: e.simplify_full())
+
+    def simplify_rational(self):
+        """simplify_rational() of each entry."""
+        return self._symbolic("simplify_rational").entrywise(self, lambda e: e.simplify_rational())
+
+    def simplify_trig(self):
+        """simplify_trig() of each entry."""
+        return self._symbolic("simplify_trig").entrywise(self, lambda e: e.simplify_trig())
+
+    def expand(self):
+        """expand() of each entry.
+
+        EXAMPLES::
+
+            sage: matrix([[(x + 1)^2, 1], [0, x]]).expand()
+            [x^2 + 2*x + 1             1]
+            [            0             x]
+        """
+        return self._symbolic("expand").entrywise(self, lambda e: e.expand())
+
+    def factor(self):
+        """factor() of each entry.
+
+        EXAMPLES::
+
+            sage: matrix([[x^2 - 1, 1], [0, x]]).factor()
+            [(x + 1)*(x - 1)               1]
+            [              0               x]
+        """
+        return self._symbolic("factor").entrywise(self, lambda e: e.factor())
+
+    def apply_map(self, phi):
+        """The matrix of phi(e) for each entry e (over SR).
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: matrix([[x, 1], [1, y]]).apply_map(lambda e: e^2)
+            [x^2   1]
+            [  1 y^2]
+        """
+        return self._symbolic("apply_map").entrywise(self, phi)
+
+    def variables(self):
+        """The variables of the entries, sorted.
+
+        EXAMPLES::
+
+            sage: var('y')
+            y
+            sage: matrix([[x, 1], [1, y]]).variables()
+            (x, y)
+        """
+        return self._symbolic("variables").variables(self)
+
+    def hermite_form(self, transformation=False):
+        """The Hermite normal form (rows, zero rows at the bottom); over QQ,
+        a field, Sage's form: forward elimination with neither pivot scaling
+        nor elimination above a pivot, a row swap moving the lower row up and
+        negating the other (it was the integer Hermite form of an integral QQ
+        matrix: a wrong answer; Sage 10.9's outputs, VM2 oracle Nov 1).
 
         EXAMPLES::
 
             sage: matrix(ZZ, [[2, 4, 6], [3, 5, 7]]).hermite_form()
             [1 1 1]
             [0 2 4]
+            sage: matrix(QQ, [[1, 2], [3, 4]]).hermite_form()
+            [ 1  2]
+            [ 0 -2]
+            sage: H, U = matrix(QQ, [[0, 1], [1, 0]]).hermite_form(transformation=True); U * matrix(QQ, [[0, 1], [1, 0]]) == H
+            True
         """
+        if self._base is _sa().QQ:
+            H, U = self._hermite_field(transformation)
+            return (H, U) if transformation else H
+        if transformation:
+            raise NotImplementedError("hermite_form(transformation=True) is implemented over QQ only in sagebrush yet")
         from sagebrush import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
         return Matrix(_sa().ZZ, h, self._nc)
+
+    def _hermite_field(self, transformation=False):
+        # Sage's hermite_form over a field: for each column, the first row at
+        # or below the current one with a nonzero entry is the pivot (a swap
+        # takes (r_i, r_j) to (r_j, -r_i)), and each row below loses its
+        # multiple of the pivot row; pivots aren't scaled, rows above aren't
+        # touched, and a zero column is skipped
+        K = self._base
+        A = [list(r) for r in self._rows]
+        m, n = len(A), self.ncols()
+        U = None
+        if transformation:
+            # (U is m x m: checked before it is allocated, and only made when asked for)
+            _shape(m, m)
+            U = _identity_rows(K, m)
+        r = 0
+        for c in range(n):
+            if r >= m:
+                break
+            p = next((i for i in range(r, m) if A[i][c] != 0), None)
+            if p is None:
+                continue
+            if p != r:
+                A[r], A[p] = A[p], [-x for x in A[r]]
+                if U is not None:
+                    U[r], U[p] = U[p], [-x for x in U[r]]
+            for i in range(r + 1, m):
+                if A[i][c] != 0:
+                    q = K(A[i][c]) / K(A[r][c])
+                    A[i] = [x - q * y for x, y in zip(A[i], A[r])]
+                    if U is not None:
+                        U[i] = [x - q * y for x, y in zip(U[i], U[r])]
+            r += 1
+        # (U self = A: the same row operations on the identity)
+        return Matrix(K, A, n), (Matrix(K, U, m) if U is not None else None)
 
     def elementary_divisors(self):
         """The elementary divisors (diagonal of the Smith form).
@@ -1766,7 +1974,10 @@ class Matrix:
         return d
 
     def smith_form(self):
-        """(D, U, V) with U self V = D diagonal (the elementary divisors).
+        """(D, U, V) with U self V = D diagonal (the elementary divisors);
+        over QQ, a field, D has a 1 for each unit of the rank, as Sage (it
+        was the integer Smith form of an integral QQ matrix: a wrong
+        answer).
 
         EXAMPLES::
 
@@ -1775,8 +1986,46 @@ class Matrix:
             [0 4]
             sage: U * matrix(ZZ, [[2, 4], [6, 8]]) * V == D
             True
+            sage: A = matrix(QQ, [[1, 2], [3, 4]]); D, U, V = A.smith_form(); D
+            [1 0]
+            [0 1]
+            sage: U * A * V == D
+            True
         """
+        if self._base is _sa().QQ:
+            return self._smith_field()
         return _smith_uv(self._integer_rows(), self._nc)
+
+    def _smith_field(self):
+        # over a field: U from the reduced echelon form of [self | I], then
+        # V clears each non-pivot column with the pivot columns and puts
+        # the pivot columns first, so U self V = diag(1, ..., 1, 0, ...)
+        K = self._base
+        m, n = self.nrows(), self.ncols()
+        _smith_field_shapes(m, n)
+        R, U = self._smith_field_reduce(K, m, n)
+        piv = []
+        for r in R:
+            j = next((j for j, v in enumerate(r) if v != 0), None)
+            if j is None:
+                break
+            piv.append(j)
+        V = [[K(1) if i == j else K(0) for j in range(n)] for i in range(n)]
+        for j in range(n):
+            if j not in piv:
+                for i, p in enumerate(piv):
+                    V[p][j] = -R[i][j]
+        order = piv + [j for j in range(n) if j not in piv]
+        V = [[row[j] for j in order] for row in V]
+        D = [[K(1) if i == j and i < len(piv) else K(0) for j in range(n)] for i in range(m)]
+        return Matrix(K, D, n), Matrix(K, U, m), Matrix(K, V, n)
+
+    def _smith_field_reduce(self, K, m, n):
+        # the reduced echelon form of [self | I]: (R, U) with U self = R
+        from sagebrush import linalg
+        aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
+        rows, _ = linalg.rref(aug)
+        return [list(r[:n]) for r in rows], [list(r[n:]) for r in rows]
 
     def LLL(self, delta=None, **kwds):
         """The LLL-reduced basis of the lattice spanned by the rows, with
@@ -2056,6 +2305,102 @@ class Matrix:
         """
         return [self._out(self._rows[i][i]) for i in range(min(self.nrows(), self.ncols()))]
 
+    def nullity(self):
+        """The left nullity: nrows - rank (Sage's nullity).
+
+        EXAMPLES::
+
+            sage: matrix(QQ, 3, 4, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).nullity()
+            1
+        """
+        return int(self.nrows() - self.rank())
+
+    left_nullity = nullity
+
+    def right_nullity(self):
+        """ncols - rank.
+
+        EXAMPLES::
+
+            sage: B = matrix(QQ, 3, 4, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); (B.right_nullity(), B.left_nullity())
+            (2, 1)
+        """
+        return int(self.ncols() - self.rank())
+
+    def _eigen_roots(self, base_field):
+        """(A, [(eigenvalue, multiplicity)]) as Sage's diagonalization uses them: A over
+        base_field (if given), its characteristic polynomial's roots in its base field,
+        ordered as Sage's roots() over QQ gives them (multiplicity, then the value
+        descending)."""
+        if not self.is_square():
+            raise TypeError("not a square matrix")
+        A = self.change_ring(base_field) if base_field is not None else self
+        R = A.base_ring()
+        if not (hasattr(R, "is_field") and R.is_field()):
+            raise ValueError("matrix entries must be from a field")
+        if hasattr(R, "is_exact") and not R.is_exact():
+            raise ValueError("base field must be exact, but {} is not".format(R))
+        evals = sorted(A.charpoly().roots(), key=lambda t: (t[1], -t[0]))
+        return A, evals
+
+    def is_diagonalizable(self, base_field=None):
+        """Whether self is diagonalizable over its base field (or base_field):
+        the eigenvalues' algebraic multiplicities fill the dimension and each
+        equals its geometric multiplicity (Sage's algorithm).
+
+        EXAMPLES::
+
+            sage: matrix(QQ, 3, [-1, 2, 2, 2, 2, -1, 2, -1, 2]).is_diagonalizable()
+            True
+            sage: matrix(QQ, [[1, 1], [0, 1]]).is_diagonalizable(), matrix(QQ, [[0, -1], [1, 0]]).is_diagonalizable()
+            (False, False)
+            sage: matrix(ZZ, [[2, 1], [1, 2]]).is_diagonalizable()
+            Traceback (most recent call last):
+            ...
+            ValueError: matrix entries must be from a field
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            return False
+        n = A.nrows()
+        for e, am in evals:
+            if am != (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().dimension():
+                return False
+        return True
+
+    def diagonalization(self, base_field=None):
+        """(D, P) with D diagonal and P^-1 self P = D: the eigenvalues in the
+        order of Sage's roots(), each eigenspace's echelon basis as P's
+        columns (Sage's algorithm); a ValueError if not diagonalizable.
+
+        EXAMPLES::
+
+            sage: D, P = matrix(QQ, 3, [-1, 2, 2, 2, 2, -1, 2, -1, 2]).diagonalization(); D
+            [-3  0  0]
+            [ 0  3  0]
+            [ 0  0  3]
+            sage: P
+            [   1    1    0]
+            [-1/2    0    1]
+            [-1/2    2   -1]
+            sage: matrix(QQ, [[1, 1], [0, 1]]).diagonalization()
+            Traceback (most recent call last):
+            ...
+            ValueError: not diagonalizable
+        """
+        A, evals = self._eigen_roots(base_field)
+        if sum(m for _, m in evals) < self.nrows():
+            raise ValueError("not diagonalizable over {}".format(A.base_ring()))
+        n = A.nrows()
+        dia, bas = [], []
+        for e, am in evals:
+            b = (A - e * _sa().identity_matrix(A.base_ring(), n)).right_kernel().basis()
+            if len(b) != am:
+                raise ValueError("not diagonalizable")
+            dia += [e] * am
+            bas += list(b)
+        return _sa().diagonal_matrix(dia), _sa().matrix(bas).transpose()
+
     def dense_matrix(self):
         """The matrix itself (matrices are dense).
 
@@ -2096,7 +2441,7 @@ class FreeModule_:
         if self._base is ZZ:
             head = "Free module of degree %d and rank %d over Integer Ring\nEchelon basis matrix:" % (self._degree, len(self._basis))
         else:
-            head = "Vector space of degree %d and dimension %d over Rational Field\nBasis matrix:" % (self._degree, len(self._basis))
+            head = "Vector space of degree %d and dimension %d over %s\nBasis matrix:" % (self._degree, len(self._basis), "Symbolic Ring" if self._base is _sa().SR else "Rational Field")
         return head + "\n" + repr(self.basis_matrix())
 
     def basis_matrix(self):
@@ -2622,6 +2967,12 @@ def vector(*args):
     # read once, boundedly (a generator was read twice: by the finite-field
     # test, then empty)
     entries = _bounded_list(args[0])
+    sa = _sa()
+    if ring is sa.ZZ or ring is sa.QQ:
+        # (vector(ZZ, [GF(2)(1), ...]): the residues lifted, as Sage's
+        # conversion of Z/nZ into ZZ or QQ; the book's 12-Factorization)
+        import _sage_ff
+        entries = [x._v if isinstance(x, _sage_ff.IntegerMod) else x for x in entries]
     if type(ring).__name__ == "SeriesRing_" and not ring._laurent:
         # a vector of power series (the D_p-valued p-adic L-series): the
         # entries in the ring, the ring kept through arithmetic
@@ -2869,6 +3220,32 @@ def _ff_base_of(entries, _left=None):
             if b is not None:
                 return b
     return None
+
+
+def _identity_rows(K, m):
+    # the m x m identity's rows over K (allocates m^2 entries: callers check _shape(m, m) first)
+    return [[K(1) if i == j else K(0) for j in range(m)] for i in range(m)]
+
+
+def _smith_field_shapes(m, n):
+    """The field Smith form's allocations, checked before any is made (as
+    _smith_uv's): the transforms, m x m and n x n, and the augmented
+    [A | I], m x (n + m); beyond what _shape admits, the memory guard's
+    SagebrushMemoryError (a 1 x 100000 matrix would ask for 10^10 entries
+    of V).
+
+    EXAMPLES::
+
+        sage: from _sage_matrix import _smith_field_shapes
+        sage: _smith_field_shapes(2047, 2)
+        sage: _smith_field_shapes(2047, 3)
+        Traceback (most recent call last):
+        ...
+        SagebrushMemoryError: ...
+    """
+    _shape(m, m)
+    _shape(n, n)
+    _shape(m, n + m)
 
 
 def _smith_uv(a, n=None):
@@ -3207,7 +3584,7 @@ def matrix(*args, **kwds):
         if pb is not None:
             import _sage_padic
             return _sage_padic.padic_matrix(pb, args[0])
-    if args and args[0] in (sa.ZZ, sa.QQ):
+    if args and (args[0] is sa.SR or args[0] in (sa.ZZ, sa.QQ)):
         base, args = args[0], args[1:]
     if base is None and args and not isinstance(args[0], (list, tuple, range)) and _is_parent(args[0]):
         # a ring this function does not know: never iterated (Zp's K[0],

@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=110 runner=bun
 // The board page under the board journal (page.ts's wiring) in headless
 // Chromium, the built site (web/dist, or SB_DIST) and a helper page served from one origin
 // (test-board-journal-lib.mjs): the versions from before the journal kept read-only (test 15), a save's T1/T2 with no
@@ -192,6 +193,8 @@ try {
       await openBoard(u, id, how === "pending copy");
       if (how === "none") { await u.ev(setTj("first")); await rowTj(u, id, "first"); }
       else await u.until(`${rowExpr(id)}.then((r) => !!r)`);
+      // (the store's load stamps the row (its j) after the row is made: waited for, not raced (board's diagnosis, #490 CI1))
+      await u.until(`${rowExpr(id)}.then((r) => !!r && Number.isSafeInteger(r.j))`);
       const r = await row(u, id);
       await u.until(`${B}.versions().then((v) => v.length >= 1)`);
       check(!!r && Number.isSafeInteger(r.j) && coherent(r) && (await versions(u)) === 1 && (await pending(u, id)) === null, `test 14 (${how}): its row made first, then stamped by the store's load: one version: ` + J({ j: r?.j, v: await versions(u) }));
@@ -529,8 +532,9 @@ try {
       await u.go(`${origin}/board/?doc=local:${id}`);
       const shown = await u.until(`!!${B}?.snapshot?.().doc`, 30000);
       await recordAlerts(u);
-      const said = await barSays(u, "isn't in this browser yet");
-      check(shown && said && (await editOff(u)), "bug #4 (a): a remote board opens saying its content isn't here yet, with Back to files, and no Edit");
+      // (said as it is: boards don't sync, so never "once sync brings it": William's M9 (g))
+      const said = (await barSays(u, "Boards don't sync yet")) && !(await u.ev(`(document.getElementById("sbb-blocked")?.innerText ?? "").includes("once sync brings it")`));
+      check(shown && said && (await editOff(u)), "bug #4 (a): a remote board opens saying it was made on another device and boards don't sync yet (not that it's on its way), with Back to files, and no Edit");
       const nodes = await u.ev(`(${nodesOf})(${B}.snapshot().doc).length`);
       check(nodes === 0 && J(await row(helper, id)) === J(r0), "bug #4 (a): nothing of it shown, and nothing written over it: " + J({ nodes }));
       await openFromFiles(u, targetPath);

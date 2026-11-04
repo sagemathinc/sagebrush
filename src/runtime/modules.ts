@@ -499,7 +499,7 @@ newBuiltinModule("sys", (m) => {
     const e = handled();
     return e === null ? tuple([null, null, null]) : tuple([typeOf(e), e, e.__traceback__ ?? null]);
   });
-  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [1.7976931348623157e308, 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
+  m.float_info = Ty.structseq("sys.float_info", ["max", "max_exp", "max_10_exp", "min", "min_exp", "min_10_exp", "dig", "mant_dig", "epsilon", "radix", "rounds"], [new FloatBox(1.7976931348623157e308), 1024, 308, 2.2250738585072014e-308, -1021, -307, 15, 53, 2.220446049250313e-16, 2, 1]);
 });
 dictSet(sysModules, "builtins", builtins);
 
@@ -1791,6 +1791,28 @@ function chdir(p: string) {
   }
 }
 
+// _fs.read_nofollow's ceiling: the largest read the replay layer makes (one
+// entry's cap, lib/_sbdata.py ENTRY_CAP); a fixed native bound, not Python's
+const READ_NOFOLLOW_MAX = 50_000_000;
+
+// The data replay layer's root (_fs.data_root): set once by the host before
+// any Python runs (the CLI: --data-root DIR, else its starting directory),
+// as a realpath; null on a host that sets none.
+let dataRoot: string | null = null;
+let dataRootSet = false;
+export function setDataRoot(dir: string): void {
+  if (dataRootSet) return; // (the first host setting wins)
+  dataRootSet = true;
+  // (a root that can't be resolved, e.g. Deno without --allow-read, is no
+  // root: replay then misses with "no data root on this host", and the
+  // program still runs)
+  try {
+    dataRoot = require("fs").realpathSync(dir);
+  } catch {
+    dataRoot = null;
+  }
+}
+
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
 
 newBuiltinModule("_fs", (m) => {
@@ -1826,6 +1848,16 @@ newBuiltinModule("_fs", (m) => {
     }
   };
   fn(m, "exists", (path: string) => quiet(() => fs.existsSync(at(path))));
+  // (open()'s "a": whether an existing file may be written, before its first flush writes it; one not there yet is
+  // made at that flush, its error raised there)
+  fn(m, "may_append", (path: string) => {
+    try {
+      fs.accessSync(at(path), 2);
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") return oserr(e, path);
+    }
+    return null;
+  });
   fn(m, "isdir", (path: string) => quiet(() => fs.existsSync(at(path)) && fs.statSync(at(path)).isDirectory()));
   // (CPython's path_converter, for os.path (lib/posixpath.py): a path argument
   // of stat ("stat", allowFd), lstat ("lstat"), or posix._path_normpath and
@@ -1879,6 +1911,63 @@ newBuiltinModule("_fs", (m) => {
   fn(m, "isfile", (path: string) => quiet(() => fs.statSync(at(path)).isFile()));
   fn(m, "islink", (path: string) => quiet(() => fs.lstatSync(at(path)).isSymbolicLink()));
   fn(m, "lexists", (path: string) => quiet(() => (fs.lstatSync(at(path)), true)));
+  // (the data replay layer, lib/_sbdata.py, replay-layer r2 §2.2-2.3: the
+  // trusted data root fixed before any Python runs (null where the host set
+  // none: replay then fails closed); a no-follow, nonblocking, regular-file-
+  // only read of at most max bytes + 1 (the caller compares the length), or
+  // a refusal code, never a host path; lstat's kind, device and inode; and
+  // realpath, which os lacks (no os.readlink))
+  fn(m, "data_root", () => dataRoot);
+  fn(m, "read_nofollow", (path: string, max: any) => {
+    // (max is checked here, before any open, read or allocation: an integer
+    // in 0..READ_NOFOLLOW_MAX, the largest replay read (one entry's 50 MB
+    // cap); anything else is refused (daybreak3, LIMIT-M1-1))
+    const limit = typeof max === "bigint" || typeof max === "number" ? Number(max) : NaN;
+    if (!Number.isInteger(limit) || limit < 0 || limit > READ_NOFOLLOW_MAX) return "bad-max";
+    let fd = -1;
+    try {
+      fd = fs.openSync(at(path), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) return "not-regular";
+      if (st.size > limit) return "too-large";
+      const buf = new Uint8Array(Math.min(limit, st.size) + 1);
+      let n = 0;
+      while (n < buf.length) {
+        let k = 0;
+        try {
+          k = fs.readSync(fd, buf, n, buf.length - n, null);
+        } catch (e: any) {
+          if (e?.code === "EAGAIN") break; // (no more bytes now: a nonblocking descriptor)
+          throw e;
+        }
+        if (k <= 0) break;
+        n += k;
+      }
+      return new PyBytes(buf.slice(0, n));
+    } catch (e: any) {
+      return e?.code === "ELOOP" ? "symlink" : "unreadable";
+    } finally {
+      if (fd >= 0) try { fs.closeSync(fd); } catch {}
+    }
+  });
+  fn(m, "lstat_kind", (path: string) => {
+    try {
+      const st = fs.lstatSync(at(path), { bigint: true });
+      const kind = st.isSymbolicLink() ? "link" : st.isDirectory() ? "dir" : st.isFile() ? "file" : "other";
+      return tuple([kind, String(st.dev), String(st.ino)]);
+    } catch (e: any) {
+      // (only a missing path is absent: any other error (EACCES, EIO, ELOOP,
+      // ENOTDIR...) is "error", which every caller refuses: fail closed)
+      return tuple([e?.code === "ENOENT" ? "none" : "error", "", ""]);
+    }
+  });
+  fn(m, "realpath", (path: string) => {
+    try {
+      return fs.realpathSync(at(path));
+    } catch {
+      return null;
+    }
+  });
   // (this process's CPU time, all its threads, user and system apart, in
   // seconds: for tests' diagnostics, sbx's CPU ratio, shard-7 proposal r1;
   // time.process_time() is their sum)

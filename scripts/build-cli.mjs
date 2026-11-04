@@ -28,8 +28,9 @@ function denoCompile(flags, exe, launcher = false, entryText = null) {
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-deno-"));
   if (launcher) {
     copyFileSync(bundle, join(dir, "pyjs.cjs"));
+    copyFileSync(join(out, "sagebrush-latex.cjs"), join(dir, "sagebrush-latex.cjs"));
     copyFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), join(dir, "sagebrush.cjs"));
-    flags = [...flags, "--include", join(dir, "pyjs.cjs")];
+    flags = [...flags, "--include", join(dir, "pyjs.cjs"), "--include", join(dir, "sagebrush-latex.cjs")];
   } else if (entryText !== null) writeFileSync(join(dir, "sagebrush.cjs"), entryText);
   else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
   run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
@@ -80,7 +81,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
 // there, so the page's worker and the wasm engines are not needed.
 const web = {};
 const webDir = join(root, "web", "dist");
-for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
+for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
 // (the site's early-alpha notice is for sagebrush.space, not the page `sagebrush notebook` serves on this
@@ -137,6 +138,16 @@ run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--
   "--outfile", join(out, "pyjs.cjs")]);
 const bundle = join(out, "pyjs.cjs");
 writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
+// 2b. `sagebrush latex` (src/latex-cli.ts: the LaTeX editor's engine, KaTeX and its WOFF2 fonts) in a file of its own,
+// sagebrush-latex.cjs beside the bundle, which loads it only for that command (src/cli.ts loadLatex)
+{
+  const kdir = join(root, "node_modules", "katex", "dist");
+  const fonts = {};
+  for (const f of readdirSync(join(kdir, "fonts")).sort()) if (f.endsWith(".woff2")) fonts[f] = readFileSync(join(kdir, "fonts", f)).toString("base64");
+  writeFileSync(join(out, "latex-assets.gen.js"), `globalThis.__SAGEBRUSH_LATEX_ASSETS__ = ${JSON.stringify({ css: readFileSync(join(kdir, "katex.min.css"), "utf8"), fonts })};\n`);
+  writeFileSync(join(out, "latex-entry.ts"), `import "./latex-assets.gen.js";\nexport { latexCommand } from "../../src/latex-cli";\n`);
+  run("bun", ["build", join(out, "latex-entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace", "--outfile", join(out, "sagebrush-latex.cjs")]);
+}
 // The launcher (packages/sagebrush/bin/sagebrush.cjs, the npm package's
 // command): Node's compile cache on, and a program run in a worker thread so
 // that Ctrl-C raises KeyboardInterrupt in it.
@@ -144,7 +155,8 @@ writeFileSync(join(out, "pyjs"), readFileSync(join(root, "packages", "sagebrush"
 // The npm package `sagebrush` (packages/sagebrush) ships this bundle.
 mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
 writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
-console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files)`);
+copyFileSync(join(out, "sagebrush-latex.cjs"), join(root, "packages", "sagebrush", "dist", "sagebrush-latex.cjs"));
+console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files); sagebrush-latex.cjs ${(statSync(join(out, "sagebrush-latex.cjs")).size / 1e6).toFixed(2)} MB`);
 
 // 3a. Node single executable application (node --build-sea, Node >= 25.5).
 if (process.argv.includes("--sea")) {

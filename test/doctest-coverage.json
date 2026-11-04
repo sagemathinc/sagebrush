@@ -1,5 +1,5 @@
 {
-  "sage_all": 70,
+  "sage_all": 72,
   "_sage_modular": 172,
   "_sage_hmf": 115,
   "_sage_poly": 65,
@@ -34,5 +34,10 @@
   "board_checks": 12,
   "_sage_integer": 51,
   "_memguard": 5,
-  "_sage_lazy": 2
+  "_sage_combinat": 13,
+  "_sage_lazy": 2,
+  "_sage_ec_ff": 13,
+  "_sage_ec_plot": 1,
+  "_sage_ec_rr": 6,
+  "_sage_ec_torsion": 10
 }

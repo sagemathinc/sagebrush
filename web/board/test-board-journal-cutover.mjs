@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // The board journal's cutover (test 16): two builds of the site served from ONE
 // origin (one IndexedDB), the build from before the board journal under /old/ (SB_DIST_OLD) and this one under /new/
 // (SB_DIST): a page of the old build, open on a board, can't change its row once a page of this build has opened the
@@ -43,14 +44,14 @@ try {
   const helper = await br.tab("helper");
   await helper.go(`${origin}/__bj/`);
   if (!(await helper.until("window.ready === true"))) throw new Error("the helper page didn't load: " + (await helper.state()));
-  check(await helper.ev(activateExpr), "this build opens the workspace (version 9) and activates the journal");
+  check(await helper.ev(activateExpr), "this build opens the workspace (version 10) and activates the journal");
   const neu = await br.tab("new");
   await neu.go(`${origin}/new/board/?doc=local:${id}`);
   if (!(await neu.until(`!!${B}?.snapshot?.().doc && !!window.sagebrush.boardJournal?.()`, 30000))) throw new Error("this build's board didn't open journaled: " + (await neu.state()));
   await neu.ev(setTj("new 1"));
   await neu.until(`${rowExpr(id)}.then((r) => r && typeof r.hash === "string" && (r.doc.nodes ?? []).some((n) => n.text === "new 1"))`);
   const r1 = await neu.ev(rowExpr(id));
-  check(Number.isSafeInteger(r1.j) && typeof r1.hash === "string" && (await neu.ev(dbVersion)) === 9, "this build's page stamped and saved the row (version 9): " + J({ j: r1.j }));
+  check(Number.isSafeInteger(r1.j) && typeof r1.hash === "string" && (await neu.ev(dbVersion)) === 10, "this build's page stamped and saved the row (version 10): " + J({ j: r1.j }));
   section("3. the old page saves again: refused before anything changes");
   await old.ev(setTj("old 2")).catch(() => {});
   await sleep(2000);

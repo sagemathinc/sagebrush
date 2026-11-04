@@ -272,10 +272,37 @@ test("a target that exits at once after its last DONE: the last sample, read as 
   }
 });
 
-test("a final thread drop then the target's own exit: the drop is marked, dropped and said (the leak final-drop design r2's autonomous-exit control)", async () => {
+// (the final DONE's sample is read when the harness reads that line; a target that exits about 1 ms after it may be
+// read live, its threads already falling, or already in the kernel's exit (Z, X, PF_EXITING).  CI 41061496397 and
+// 41433230816 read it in the exit, threads 2 and no RSS, under load: no final_drop, and the same verdict.  So the
+// prompt-exit row passes in either shape and says which; the marking path is pinned by the held row below)
+test("a final thread drop then the target's own exit at once: the verdict is the same whichever shape the last sample is read in (the leak final-drop design r2's autonomous-exit control; CI 41061496397, 41433230816)", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
   try {
     const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 0, 3000, { dropWorker: true }));
+    assert.equal(e2.cells.length, 5, row);
+    assert.ok(e2.leak?.ok === true && e2.leak.threads_same === true && e2.leak.last_exiting === true && e2.leak.to === 4, row);
+    if (e2.final_drop) {
+      // (read live: the drop is marked, dropped and said)
+      assert.ok(e2.final_drop.marked === true && e2.final_drop.end_after_done_ms >= 0 && e2.final_drop.end_after_done_ms <= 1000, row);
+      assert.match(e2.leak.last_exiting_why, /^threads falling \(\d+ -> \d+\), the target exited on its own /, row);
+    } else {
+      // (read in the kernel's exit, or already gone: the sample itself says exiting, and nothing is marked)
+      const last = e2.sessions?.[0]?.samples?.at(-1);
+      assert.ok(last?.i === 5 && last.exiting === true && (last.why === undefined || last.why === "gone") && e2.leak.last_exiting_why === last.why, row);
+    }
+    t.diagnostic(e2.final_drop ? `shape: read live, a final drop marked on the target's own exit (${JSON.stringify(e2.final_drop)})` : `shape: read in the exit (${JSON.stringify(e2.sessions?.[0]?.samples?.at(-1))})`);
+    assert.equal(e2.outcome, "KNOWN", row);
+    assert.equal(code, 0, err.slice(-600));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a final thread drop then the target's own exit 400 ms later: the drop is read live, marked, dropped and said (the marking path, deterministic)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intr-run-"));
+  try {
+    const { e2, code, err, row } = await e2OnFake(dir, fakeIgnoring(dir, 400, 3000, { dropWorker: true }));
     assert.equal(e2.cells.length, 5, row);
     assert.ok(e2.final_drop, "the worker's end must show as a final thread drop: " + row);
     assert.ok(e2.final_drop.marked === true && e2.final_drop.end_after_done_ms >= 0 && e2.final_drop.end_after_done_ms <= 1000, row);

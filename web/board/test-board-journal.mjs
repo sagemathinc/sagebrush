@@ -1,3 +1,4 @@
+// ci: web-runner order=280 runner=bun chrome
 // The board journal (web/board/journal.ts, Workspace.journalWrite) in headless Chromium,
 // with real IndexedDB and Web Locks: a board's T1 then T2, its load's recovery (an old row stamped), the row's
 // envelope all or none whatever writes it, markOnly's races, the record/document boundary, the kind's law and merge,
@@ -16,12 +17,16 @@ const J = JSON.stringify;
 const statics = [];
 {
   // (the census of the raw paths that change a board's row (api.ts): each ordinary one drops the envelope; the only
-  // transaction over boards and meta is the journal's T2.  A new raw path makes this fail, to be looked at)
+  // transaction over boards and meta is the journal's T2.  A new raw path makes this fail, to be looked at.  Stage A L1:
+  // every boards transaction's scope is withBoard(...) (boards, entries and history's stores) and every row write goes
+  // through boardRowWrite (the row and its history token together); a bare "boards" scope or put is a raw path again)
   const api = readFileSync(join(here, "../workspace/api.ts"), "utf8");
-  const plain = (api.match(/"boards", "readwrite"/g) ?? []).length, journal = (api.match(/\["boards", "meta"\], "readwrite"/g) ?? []).length;
+  const plain = (api.match(/withBoard\(\), "readwrite"/g) ?? []).length, journal = (api.match(/withBoard\("meta"\), "readwrite"/g) ?? []).length;
+  const bare = (api.match(/"boards", "readwrite"|\["boards", "meta"\], "readwrite"|objectStore\("boards"\)\.(put|add|delete)\(/g) ?? []).length;
+  statics.push([bare === 0, `no boards write outside withBoard/boardRowWrite (census): ${bare}`]);
   statics.push([plain === 5 && journal === 1, `the boards store is written in 5 ordinary transactions and 1 journal one (census): ${J({ plain, journal })}`]);
-  statics.push([/const \{ tag: _t, \.\.\.rest \} = plainRow\(cur\);/.test(api) && /st\.put\(\{ \.\.\.plainRow\(rec\), doc: \{ \.\.\.rec\.doc, title: newName \}/.test(api), "write and retitle drop the row's envelope (plainRow)"]);
-  statics.push([/tx\.objectStore\("boards"\)\.put\(plainRow\(also\.board\)\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never"]);
+  statics.push([/const \{ tag: _t, \.\.\.rest \} = plainRow\(cur\);/.test(api) && /boardRowWrite\(tx, e\.ref!, \{ \.\.\.plainRow\(rec\), doc: \{ \.\.\.rec\.doc, title: newName \}/.test(api), "write and retitle drop the row's envelope (plainRow)"]);
+  statics.push([/boardRowWrite\(tx, also\.board\.id, plainRow\(also\.board\), also\.board\.rev\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never"]);
   statics.push([/await dropRows\(st, pre\)/.test(api), "a board's deletion drops its journal's rows"]);
   // (the field guard (test 7): no board the site ships has a field of the journal's own, or an id, at its top)
   const ex = join(here, "examples"), bad = [];

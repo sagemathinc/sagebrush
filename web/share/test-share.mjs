@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=10
 // Tests for the share API and the files Worker (web/share/), in Miniflare
 // with a real D1 and R2 simulation, and a fake CoCalc for sign-in and limits.
 //
@@ -8,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
@@ -78,7 +80,8 @@ const bucket = await mf.getR2Bucket("SHARE_BUCKET");
 for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort())
   for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
-const fetchSite = (path, init = {}) => mf.dispatchFetch(SITE + path, { redirect: "manual", ...init });
+// (each Miniflare answer through web/miniflare-dispatch.mjs: its body read at once, S4d)
+const fetchSite = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 
 async function signIn(account_id, { verified = true, ret = "/x" } = {}) {
@@ -153,7 +156,7 @@ async function upload(c, files, title = "T") {
 const keyOf = async (account, h) => (await db.prepare("SELECT key FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(account, h).first())?.key ?? null;
 const stored = async (key) => !!key && !!(await bucket.head(key));
 const tick = async () => (await mf.getWorker()).scheduled({ cron: "17 3 * * *" });
-const fileAt = (col, h, init) => mf.dispatchFetch(`${FILES}/c/${col}/${h}`, init);
+const fileAt = (col, h, init) => dispatch(mf, `${FILES}/c/${col}/${h}`, init);
 const a = api((await signIn(A)).session);
 fake.limits.set(B, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
 const b = api((await signIn(B)).session);
@@ -186,7 +189,7 @@ let colA, keyA;
   const part = await fileAt(col, sha(data), { headers: { range: "bytes=4-6" } });
   ok(part.status === 206 && (await part.text()) === "1,2" && part.headers.get("content-range") === `bytes 4-6/${data.length}`, "range requests");
   ok((await fileAt(col, sha(data), { headers: { range: "bytes=999-" } })).status === 416, "an unsatisfiable range is 416");
-  ok((await mf.dispatchFetch(`${FILES}/b/${sha(data)}`)).status === 404 && (await fileAt(col, sha(data), { method: "POST" })).status === 405, "nothing else on the files domain (no reading by hash alone)");
+  ok((await dispatch(mf, `${FILES}/b/${sha(data)}`)).status === 404 && (await fileAt(col, sha(data), { method: "POST" })).status === 405, "nothing else on the files domain (no reading by hash alone)");
   const me = await (await a.get("/api/share/me")).json();
   ok(me.usage > data.length + nb.length && me.usage < data.length + nb.length + 1000, "usage counts the files and the manifest: " + me.usage);
 }
@@ -562,6 +565,23 @@ async function purgeStatus(rid) {
     go();
     return Promise.all(out);
   };
+  // (responses that came at once: each one's status, bodyUsed and content-length logged first, then its body read with
+  // its status, so a body that can't be read is a failed check that names it, not a TypeError that ends the run:
+  // master 576f0bf6, run 41798910733, found one twin's body already disturbed before its .json())
+  const bodies = async (label, rs) => {
+    const shape = rs.map((x) => [x.status, x.bodyUsed, x.headers.get("content-length")]);
+    console.log(`${label} responses [status, bodyUsed, content-length]: ${JSON.stringify(shape)}`);
+    const js = await Promise.all(rs.map(async (x) => {
+      try {
+        return JSON.parse(await x.text());
+      } catch (e) {
+        return { unreadable: `${x.status}: ${e?.message ?? e}` };
+      }
+    }));
+    const bad = js.filter((j) => j.unreadable).map((j) => j.unreadable);
+    ok(bad.length === 0, `${label}: every response's body read: ` + JSON.stringify({ shape, bad }));
+    return js;
+  };
   const served = async (id, v) => { const r = await fetchSite(`/api/share/c/${id}${v ? `?at=${v}` : ""}`); return r.status === 200 ? (await r.json()).manifest.files.map((f) => f.path).sort().join() : r.status; };
   const r = api((await signIn(R)).session);
   const e1 = await blob(r, "a.txt", "first file"), e2 = await blob(r, "private.csv", "a private table"), e3 = await blob(r, "b.txt", "another file");
@@ -620,13 +640,13 @@ async function purgeStatus(rid) {
     ok(res.every(Boolean) && (await rows(R)) === 1 && (await versions(c1)) === 1 && (await served(c1)) === "a.txt,private.csv", "S4b the same attempt with other files, title or license: 409 attempt_used naming the first share, nothing written, and the share still holds the first request's files: " + res.join());
     const a2 = att();
     const race = await atOnce(R, [() => first(r, { title: "S4c", files: [e1], attempt: a2 }), () => first(r, { title: "S4c", files: [e3], attempt: a2 })]);
-    const rj = await Promise.all(race.map((x) => x.json()));
+    const rj = await bodies("S4c", race);
     const win = rj.find((_, i) => race[i].status === 201), lose = rj.find((_, i) => race[i].status === 409);
     ok(race.map((x) => x.status).sort().join() === "201,409" && lose?.error === "attempt_used" && lose.version === win?.version && (await served(win.collection)) === (race[0].status === 201 ? "a.txt" : "b.txt") && (await rows(R)) === 2,
       "S4c one attempt, two payloads at once: one 201, one 409 naming the winner's version, and the share holds the winner's files: " + race.map((x) => x.status).join());
     const a3 = att();
     const twins = await atOnce(R, [() => first(r, { title: "S4d", files: [e3], attempt: a3 }), () => first(r, { title: "S4d", files: [e3], attempt: a3 })]);
-    const tj = await Promise.all(twins.map((x) => x.json()));
+    const tj = await bodies("S4d", twins);
     ok(twins.map((x) => x.status).sort().join() === "200,201" && tj[0].version === tj[1].version && tj[0].collection === tj[1].collection && (await rows(R)) === 3, "S4d one attempt, the same payload at once: one 201 and one 200, naming the same version: " + twins.map((x) => x.status).join());
     const v2 = await r.post(`/api/share/collections/${c1}/versions`, { files: [e1, e3] });
     const v2j = await v2.json();
@@ -755,14 +775,14 @@ async function purgeStatus(rid) {
         for (const st of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await d3.prepare(st).run();
       const O = owner("8");
       fake.limits.set(O, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
-      const dev = await m3.dispatchFetch(SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
+      const dev = await dispatch(m3, SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
       const cookie = (dev.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
       const clientSrc = execFileSync("bun", ["build", join(here, "../share-client/upload.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
       const { uploadCollection } = await import("data:text/javascript;base64," + Buffer.from(clientSrc).toString("base64"));
       const realFetch = globalThis.fetch, realLocation = globalThis.location;
       const paths = [];
       globalThis.location = { href: SITE + "/" };
-      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return m3.dispatchFetch(url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
+      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return dispatch(m3, url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
       let e = null;
       try { await uploadCollection({ id: null, attempt: "0".repeat(31) + "1", title: "rolled back", files: [{ path: "a.txt", size: 5, read: async () => new TextEncoder().encode("hello") }] }); } catch (x) { e = x; }
       globalThis.fetch = realFetch;

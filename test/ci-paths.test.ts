@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,12 +10,12 @@ import { join } from "node:path";
 const script = join(__dirname, "..", "..", "scripts", "ci-paths.mjs");
 const dir = mkdtempSync(join(tmpdir(), "ci-paths-"));
 
-function classify(files: string[]): Record<string, string> {
+function classify(files: string[], labels = "", env: Record<string, string> = {}): Record<string, string> {
   const list = join(dir, "files.txt");
   writeFileSync(list, files.join("\n") + "\n");
   const r = spawnSync(process.execPath, [script], {
     encoding: "utf8",
-    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge" },
+    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels, ...env },
   });
   assert.equal(r.status, 0, r.stderr);
   return Object.fromEntries(r.stdout.trim().split("\n").map((l) => l.split("=") as [string, string]));
@@ -104,7 +104,7 @@ test("engine-cpython runs on pull requests that touch the CPython package's inpu
   // tested here, since engine/Cargo.lock is engine/'s)
   for (const f of ["scripts/ci-cpus.sh", "scripts/clippy/clippy-summary.py", "scripts/clippy/fixtures/expected.tsv", "web/workspace/schema.json", "web/workspace/paths.ts", "engine/modsym/examples/sage/eisenstein_new_dims.jsonl", "Cargo.lock", "Cargo.toml"])
     assert.equal(cp([f]), "true", f);
-  for (const f of ["web/board/test-merge.mjs", "web/workspace/api.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
+  for (const f of ["web/board/test-merge.mjs", "web/workspace/browser.ts", "scripts/build-cli.mjs", "design/notes.md", "README.md", "app/src/main.ts", "src/runtime/progress.ts", "test/progress.test.ts", "wasm/sagebrush-engine.wasm", "cdn/sagebrush-engine.mjs"])
     assert.equal(cp([f]), "false", f);
   // the full tier always runs it
   const list = join(dir, "files.txt");
@@ -272,4 +272,108 @@ test("the unsafe boundary's routes: every build input the scanner reads selects 
     assert.equal(classify([f]).unsafe_sweep, "true", f);
   for (const f of ["scripts/build-cli.mjs", "web/run-tests.sh", ".github/workflows/pypi.yml", "app/src-tauri/Cargo.toml", "newdir/unknown.xyz", "design/plan.md"])
     assert.equal(classify([f]).unsafe_sweep, "false", f);
+});
+
+test("the full tier on a pull request: the full-ci label, or a sync, sharing, security or data-loss path (CI speed plan option 2)", () => {
+  // one path of each class selects the full tier, and with it every suite, the WebKit job included
+  for (const f of [
+    "web/sync/doc.ts", "web/sync-protocol/doc-protocol.ts", "web/journal/store.js", "web/workspace/sync-outbox.ts",
+    "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
+    "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
+    "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
+    "web/latex/save.ts", "scripts/check-export-size.mjs",
+    // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
+    "web/latex/page.ts", "web/latex/engine/render.mjs", "web/latex/core/machine.mjs", "web/workspace/paths.ts", "scripts/latex-group.mjs",
+    // (the lazy chunks' inputs outside web/latex: the agent pairing's modules)
+    "web/workspace/agent-ui.ts", "web/workspace/agent-pair.ts", "web/workspace/verbs.ts", "web/workspace/notebook-edit.ts",
+    "web/workspace/pair-link.ts", "web/workspace/agent-grant.ts", "web/workspace/agent-schema.ts",
+    // (what makes those bundles: the build and its helpers, and the dependencies)
+    "web/build.ts", "web/build-articles.ts", "web/build-package-dir.mjs", "package.json", "pnpm-lock.yaml",
+    // (the Miniflare dispatch helper: its consumers run only in web-sync.1 and web-sync.2)
+    "web/miniflare-dispatch.mjs",
+    // (a document's checkpoints, the client's side: its suite runs only in web-sync.1)
+    "web/workspace/checkpoint.ts", "web/workspace/checkpoint-types.ts",
+  ]) {
+    const o = classify([f]);
+    assert.equal(o.full, "true", f);
+    assert.deepEqual([o.node, o.web, o.modes, o.webkit, o.engine_full], ["true", "true", "true", "true", "true"], f);
+  }
+  // the label alone, beside other labels, even on a prose-only change
+  const labelled = classify(["README.md"], "documentation,full-ci");
+  assert.equal(labelled.full, "true");
+  assert.equal(labelled.docs_only, "false");
+  // the fast tier: other web code, other labels, and the one big page (its author labels a save or Trash change)
+  for (const f of ["web/index.html", "web/workspace/browser.ts", "web/notebook/test-start-all.mjs", "web/board/frame.ts", "web/latex/test-latex-page.mjs", "web/latex/README.md", ".github/workflows/ci.yml", "web/miniflare-dispatch.md", "web/workspace/checkpoints.ts"]) {
+    assert.equal(classify([f]).full, "false", f);
+  }
+  assert.equal(classify(["web/index.html"], "bug,full-ci-later").full, "false");
+});
+
+test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
+  const ALL = ["notebook", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const pick = (files: string[]) => {
+    const o = classify(files);
+    return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
+  };
+  // the board: its browser groups and web-runner (the board frame); no export, lookalike, terminal or notebook
+  for (const f of ["web/board/frame.ts", "web/graph/spring.ts", "examples/primes.json", "packages/sagebrush-board/test.mjs"]) {
+    assert.deepEqual(pick([f]), { groups: ["board-a", "board-b", "board-c", "board-unit"], runner: "true", export: "false", lookalike: "false" }, f);
+  }
+  // the terminal panel: its group alone
+  assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
+  // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)
+  assert.deepEqual(pick(["web/workspace/browser.ts"]), { groups: ["board-unit"], runner: "true", export: "true", lookalike: "true" });
+  // two areas: their union
+  assert.deepEqual(pick(["web/shell/panel.ts", "web/workspace/browser.ts"]).groups, ["board-unit", "terminal"]);
+  // the core page and any other web file: everything
+  for (const f of ["web/index.html", "web/build.ts", "web/worker.ts", "web/notebook/kernel.ts", "web/board/frame.ts\nweb/index.html"]) {
+    assert.deepEqual(pick(f.split("\n")), { groups: ALL, runner: "true", export: "true", lookalike: "true" }, f);
+  }
+  // the runtime (a library module): every browser group and web-runner, but not the workspace's export and lookalike
+  assert.deepEqual(pick(["lib/scipy/special.py"]), { groups: ALL, runner: "true", export: "false", lookalike: "false" });
+  // the full tier: everything; prose: nothing
+  assert.deepEqual(pick(["web/shell/panel.ts"].concat(["web/sync/doc.ts"])), { groups: ALL, runner: "true", export: "true", lookalike: "true" });
+  assert.deepEqual(pick(["README.md"]), { groups: [], runner: "false", export: "false", lookalike: "false" });
+});
+
+
+test("a changed suite runs on its own pull request: its `// ci:` job, and the full tier for a full-tier-only job (#565)", () => {
+  // #565's pair: the service worker and a new web-sync.2 suite (the suite is not on master: a checkout of its own)
+  const root = mkdtempSync(join(dir, "root-"));
+  mkdirSync(join(root, "web", "shell"), { recursive: true });
+  writeFileSync(join(root, "web", "test-sw-read-stall.mjs"), "// ci: web-sync.2 order=70 chrome\n// (the stalled read)\n");
+  writeFileSync(join(root, "web", "shell", "test-cross.mjs"), "// ci: web-browser/notebook order=10 chrome\n");
+  const at = { CI_PATHS_ROOT: root };
+  for (const files of [["web/sw.js", "web/test-sw-read-stall.mjs"], ["web/test-sw-read-stall.mjs"], ["web/sw.js"]]) {
+    const o = classify(files, "", at);
+    assert.deepEqual([o.full, o.web], ["true", "true"], files.join(" "));
+  }
+  // each full-tier-only job, by a suite of it from this checkout
+  for (const f of ["web/test-pwa.mjs", "web/workspace/test-workspace-sync-ops.mjs", "web/workspace/test-doc-sync.mjs", "web/agents/test-agents-layout.mjs"]) {
+    assert.equal(classify([f]).full, "true", f);
+  }
+  // a fast-tier suite stays fast and selects its own group, beside its area's (a terminal-area file in notebook's group)
+  const o = classify(["web/shell/test-cross.mjs"], "", at);
+  assert.equal(o.full, "false");
+  assert.deepEqual(JSON.parse(o.web_groups), ["notebook", "terminal"]);
+  assert.equal(classify(["web/board/test-ink.mjs"]).full, "false");
+  // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
+  assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
+  assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
+  // a deleted suite (not in the checkout) runs nowhere
+  assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
+});
+
+test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on the full tier", () => {
+  const source = readFileSync(script, "utf8");
+  const listed = JSON.parse(/const fullOnlyJobs = (\[[^\]]*\]);/.exec(source)![1]);
+  const workflow = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const gated: string[] = [];
+  let job = "";
+  for (const line of workflow.split("\n")) {
+    const m = /^  ([a-z0-9-]+):$/.exec(line);
+    if (m) job = m[1];
+    else if (/^    if:.*needs\.changes\.outputs\.full == 'true'/.test(line)) gated.push(job);
+  }
+  assert.deepEqual([...listed].sort(), gated.sort());
 });

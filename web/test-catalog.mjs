@@ -1,3 +1,4 @@
+// ci: web-runner order=60 chrome
 // The function catalog's examples (catalog/SCHEMA.md) in the browser: the
 // notebook page's worker runs every example of each mode that has an example
 // runner (lib/_catalog.py RUNNERS), and each output must equal the entry's

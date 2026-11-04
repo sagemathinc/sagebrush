@@ -1,3 +1,4 @@
+// ci: web-sync.1 order=80 runner=bun chrome
 // D11 (design/sync-client.md; plan-pr65-d11-chunked-moves r7 and its r8 notes) in headless Chromium: large moves applied
 // in chunks, on small trees, each compared with the same change made in one transaction.  The cases are in sync-d11-cases.js.
 //   CHROME=google-chrome bun web/workspace/test-workspace-sync-d11.mjs
@@ -6,6 +7,7 @@ import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { buildGuard, guardScript, guardFiles, guardFails } from "../history/guard-harness.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const site = mkdtempSync(join(tmpdir(), "sb-ws-d11-site-"));
@@ -14,11 +16,13 @@ if (!built.success) {
   console.error(built.logs.join("\n"));
   process.exit(1);
 }
+// (HISTORY_GUARD=1: the suite run under history's census guard, web/history/guard-harness.mjs)
+await buildGuard(site);
 copyFileSync(join(here, "sync-d11-cases.js"), join(site, "cases.js"));
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync ops test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync ops test</title>${guardScript()}<script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
-  if (!["/", "/ws.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
+  if (!["/", "/ws.js", "/cases.js", ...guardFiles].includes(p)) return new Response("not found", { status: 404 });
   return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
 } });
 
@@ -52,6 +56,7 @@ try {
   // (measurements, printed pass or fail)
   for (const [, what] of results) if (/figures/.test(what)) console.log("  " + what);
   for (const e of errors) fails.push("page error: " + e);
+  fails.push(...(await guardFails(ev)));
   if (fails.length) console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   else {
     console.log(`ok: D11 large moves, ${results.length} checks`);

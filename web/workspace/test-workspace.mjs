@@ -1,3 +1,4 @@
+// ci: web-runner order=150 runner=bun chrome
 // The workspace (web/workspace/: design/workspace-files.md §2, §8.2) in
 // headless Chromium, with real IndexedDB, localStorage, Web Locks and
 // BroadcastChannel: paths; making, reading and writing notebooks, boards and
@@ -16,6 +17,7 @@ import { mkdtempSync, rmSync, copyFileSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { GUARDED, buildGuard, guardScript, guardFiles, guardFails } from "../history/guard-harness.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 // schema.json as verbs.ts writes it, and its verbs the agent facade's (no drift)
@@ -58,11 +60,13 @@ await Bun.build({ entrypoints: [join(here, "../notebook/stores.js")], outdir: si
   const js = new Bun.Transpiler({ loader: "ts" }).transformSync("export " + page.slice(at, end + 1)).replace(/^export /m, "");
   writeFileSync(join(site, "wssave.js"), `export const WS_SAVE = ${JSON.stringify(js)};\n`);
 }
+// (HISTORY_GUARD=1: the suite run under history's census guard, web/history/guard-harness.mjs)
+await buildGuard(site);
 copyFileSync(join(here, "test-workspace.page.js"), join(site, "cases.js"));
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>workspace test</title><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>workspace test</title>${guardScript()}<script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
-  if (!["/", "/ws.js", "/fileopen.js", "/cases.js", "/stores.js", "/wssave.js"].includes(p)) return new Response("not found", { status: 404 });
+  if (!["/", "/ws.js", "/fileopen.js", "/cases.js", "/stores.js", "/wssave.js", ...guardFiles].includes(p)) return new Response("not found", { status: 404 });
   const f = Bun.file(join(site, p === "/" ? "index.html" : p.slice(1)));
   return new Response(f, { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
 } });
@@ -93,10 +97,11 @@ try {
   const results = await ev("window.run()");
   const fails = results.filter(([ok]) => !ok).map(([, what]) => what);
   for (const e of errors) fails.push("page error: " + e);
+  fails.push(...(await guardFails(ev)));
   if (fails.length) {
     console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
   } else {
-    console.log(`ok: the workspace, ${results.length} checks`);
+    console.log(`ok: the workspace, ${results.length} checks${GUARDED ? ", under history's census guard" : ""}`);
     // (SHOW=1: every check said, with what it measured)
     if (process.env.SHOW) for (const [, what] of results) console.log("  " + what);
     code = 0;

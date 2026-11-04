@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=140 runner=bun
 // A pen stroke's outline (ink.ts): a closed shape around the line, as wide
 // as the pen (wider where it pressed harder; thinner where a mouse moved
 // faster), smoother than a shaky hand, round at a sharp turn and at its ends
@@ -6,7 +7,7 @@
 //   bun web/board/test-ink.mjs        (SVG=file.svg: the strokes, to look at)
 import { writeFileSync } from "node:fs";
 import { InkCapture, inkBox, inkHit, inkOutline, inkPath } from "./ink.ts";
-import { canonical, cleanDoc, inkNode, layout } from "./doc.ts";
+import { canonical, cleanDoc, inkNode, inkNodeSteps, INK_STEP, layout, boardText, boardTextParts, BOARD_TEXT_STEP, BOARD_TEXT_CENSUS, cleanDocSteps } from "./doc.ts";
 
 const fails = [];
 let checks = 0;
@@ -175,6 +176,34 @@ check(inkHit(loop, 90, 50, 2) && inkHit(loop, 93.2, 50, 2) && !inkHit(loop, 96, 
 if (process.env.SVG) {
   const paths = strokes.map((o, i) => `<path transform="translate(20 ${40 + i * 70})" d="${inkPath(o)}" fill="#1d241a"/>`).join("");
   writeFileSync(process.env.SVG, `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="${80 + strokes.length * 70}" style="background:#fff">${paths}</svg>`);
+}
+// ---- E1 r2e (daybreak2's bounds review): the long stroke's work in steps of at most INK_STEP numbers
+{
+  // (a 200,000-point stroke: 600,000 numbers, irregular values; its node by inkNode and by its steps are the same)
+  const N = 200000, p = new Array(3 * N);
+  for (let i = 0; i < N; i++) { p[3 * i] = 1000 + ((i * 7919) % 50021) / 7; p[3 * i + 1] = -500 + ((i * 104729) % 30011) / 3; p[3 * i + 2] = ((i * 31) % 137) / 120; }
+  const want = inkNode("big", p, { size: 4, color: "#123456", opacity: 0.5 });
+  const g = inkNodeSteps("big", p, { size: 4, color: "#123456", opacity: 0.5 });
+  let steps = 0, r;
+  for (;;) { r = g.next(); if (r.done) break; steps++; }
+  check(JSON.stringify(r.value) === JSON.stringify(want), "E1 r2e: inkNodeSteps gives inkNode's node exactly (a 200,000-point stroke)");
+  const blocks = Math.ceil(p.length / INK_STEP);
+  check(INK_STEP % 3 === 0 && INK_STEP <= 65536 && steps === 2 * blocks, `E1 r2e: inkNodeSteps yields after every ${INK_STEP} numbers in both passes (${steps} steps, ${2 * blocks} expected)`);
+  // (cleanDocSteps drives it: the cleaned document is cleanDoc's, and its steps include the stroke's blocks)
+  const doc = { format: "sagebrush-board", version: 1, title: "t", nodes: [{ id: "big", kind: "ink", x: 10, y: 20, points: p, size: 4 }] };
+  const cg = cleanDocSteps(doc);
+  let csteps = 0, cr;
+  for (;;) { cr = cg.next(); if (cr.done) break; csteps++; }
+  check(JSON.stringify(cr.value) === JSON.stringify(cleanDoc(doc)), "E1 r2e: cleanDocSteps's document equals cleanDoc's for a long stroke");
+  check(csteps >= 2 * blocks, `E1 r2e: cleanDocSteps steps through the stroke's builder too (${csteps} steps, at least ${2 * blocks})`);
+  // (boardTextParts: the same bytes as boardText, its checkpoints carry no text, one per BOARD_TEXT_CENSUS elements of a
+  // scalar array's census, so no step inspects more than that)
+  const cleaned = cleanDoc(doc), parts = [...boardTextParts(cleaned)];
+  const text = parts.map((x) => (typeof x === "string" ? x : "step" in x ? "" : JSON.stringify(x.s))).join("");
+  check(text === boardText(cleaned), "E1 r2e: boardTextParts' parts, checkpoints written as nothing, are boardText's bytes exactly");
+  const pts2 = cleaned.nodes[0].points.length, nstep = parts.filter((x) => x === BOARD_TEXT_STEP).length;
+  check(nstep === Math.floor(pts2 / BOARD_TEXT_CENSUS), `E1 r2e: boardTextParts' census checkpoints: ${nstep} for ${pts2} numbers (one per ${BOARD_TEXT_CENSUS})`);
+  check(parts.every((x) => typeof x === "string" || "s" in x || x === BOARD_TEXT_STEP), "E1 r2e: boardTextParts yields only text, strings and the one checkpoint object");
 }
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);

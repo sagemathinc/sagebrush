@@ -1,3 +1,4 @@
+// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
 // End-to-end checks of the notebook page in headless Chromium: notebooks and
 // files persist across reloads, File > New/Open/Download/Upload, the files
 // panel, share links.  Serve web/dist first:
@@ -95,6 +96,8 @@ try {
       ok(fit.bottom <= fit.h && fit.scrolls && last.focused && last.inView && last.pressable, `in a 420 px window, ${menu} fits in it, its last entry reachable by keyboard and pointer: ` + JSON.stringify([fit, last]));
       await ev(`document.querySelector('${btn}').click(), 1`);
     }
+    // (the function search is in ⋯'s More tools row now (the declutter, William Nov 2): opened, as a person would)
+    await ev("(document.querySelector('#toolrow').hidden && document.querySelector('#moretools').click(), 1)");
     // (the function search's results, from the toolbar's middle, within the window at laptop widths, astra's UI-CA2-1)
     for (const width of [1100, 1024]) {
       await send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -104,6 +107,23 @@ try {
       const d = await ev("(() => { const r = document.querySelector('#docresults').getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), w: innerWidth }; })()");
       ok(d.left >= 0 && d.right <= d.w, `at ${width} px, the function search's results are within the window: ` + JSON.stringify(d));
       await ev("(() => { const q = document.querySelector('#docsearch'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); q.blur(); return 1; })()");
+    }
+    // (B7, William Nov 1: the function search's results over the file browser when they reach it, never under it; a
+    // window narrow enough that they do, the files open)
+    {
+      await send("Emulation.setDeviceMetricsOverride", { width: 760, height: 800, deviceScaleFactor: 1, mobile: false });
+      await sleep(300);
+      const files = await until("!!document.querySelector('#wsfilesbtn') && !document.querySelector('#wsfilesbtn').hidden", 30000);
+      if (files && (await ev("document.querySelector('#wssidebar').hidden"))) await ev("document.querySelector('#wsfilesbtn').click(), 1");
+      await until("!document.querySelector('#wssidebar').hidden");
+      await ev("(() => { const q = document.querySelector('#docsearch'); q.focus(); q.value = 'sin'; q.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()");
+      await until("!document.querySelector('#docresults').hidden && document.querySelectorAll('#docresults li').length > 0");
+      const o = await ev("(() => { const l = document.querySelector('#docresults').getBoundingClientRect(), s = document.querySelector('#wssidebar').getBoundingClientRect(); const x = Math.round(l.left + 6), y = Math.round(l.top + 12), at = document.elementFromPoint(x, y); return { reaches: l.left < s.right, x, sidebarRight: Math.round(s.right), onTop: !!at && document.querySelector('#docresults').contains(at) }; })()");
+      ok(files && o.reaches && o.onTop, "B7: the function search's results lie over the file browser, not under it: " + JSON.stringify(o));
+      // (SHOT_B7=file.png: the results open over the file browser)
+      if (process.env.SHOT_B7) writeFileSync(process.env.SHOT_B7, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+      await ev("(() => { const q = document.querySelector('#docsearch'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); q.blur(); document.querySelector('#wsfilesbtn')?.click(); return 1; })()");
+      await until("document.querySelector('#wssidebar').hidden");
     }
     await send("Emulation.clearDeviceMetricsOverride");
     await ev("document.querySelector('#__tall').remove(), scrollTo(0, 0), 1");

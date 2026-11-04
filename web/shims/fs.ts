@@ -4,16 +4,40 @@
 // about every change Python makes.  Paths are absolute from "/", which is
 // also the initial working directory.  Output streams go to hooks.write.
 // (read: a file's contents were read, for the reactive notebook's file
-// tracking)  A shared collection's files are mounted (mount()): fetched from
+// tracking; with the version of the page's file whose bytes they are (its
+// origin, below) if they are still those, for the replay bundle:
+// web/notebook/bundle-blobs.mjs)  A shared collection's files are mounted (mount()): fetched from
 // the user-content domain the first time Python reads them, and checked
 // against their SHA-256, so a notebook that reads one file of a large
 // collection downloads only that file.
 const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
-  read: (path: string) => void;
-} = { write: () => {}, changed: () => {}, read: () => {} };
+  read: (path: string, origin?: string) => void;
+  /** a change refused (the files permission is off): the page shows its "wants to change files" bar */
+  refused: (path: string, what: string) => void;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {} };
 export const __hooks = hooks;
+
+// Whether this document may change the person's files (the page's `files` permission, web/notebook/permissions.js:
+// William, Nov 2: a notebook from elsewhere runs, but changes nothing until the person allows it). Checked at every
+// change, before anything changes: a write, an append, an open for writing (a handle opened before, at its next
+// write), mkdir, unlink, rmdir, rename (both ends), rm. /tmp is scratch: changed freely, and the page keeps none of
+// it while the permission is off; /$pyjs is the runtime's own. Refused: a PermissionError saying why.
+let writable: () => boolean = () => true;
+export function setWritable(f: () => boolean) { writable = f; }
+export const NOT_WRITABLE = "this notebook can't change your files (it came from elsewhere): press Allow changes for this notebook";
+const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r.startsWith("/$pyjs");
+function mayChange(r: string, what: string) {
+  if (scratch(r) || writable()) return;
+  hooks.refused(r, what);
+  // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
+  const e: any = new Error(NOT_WRITABLE);
+  e.name = "PermissionDenied";
+  e.code = "EACCES";
+  e.errno = -13;
+  throw e;
+}
 
 import { sha256Hex } from "../../src/runtime/sha256";
 
@@ -30,6 +54,13 @@ interface Entry {
   /** the path that names it now, null once it is unlinked (an open file
    * keeps the entry, as a descriptor keeps an inode: onceOpen) */
   path: string | null;
+  /** a file the page gave (load, put): which version of the page's file its
+   * bytes are, while they are still (or still begin with) that version's:
+   * "s:<path>" for one the session started with, else the token the page gave
+   * with it (a put's, or a load's third element); kept through a rename and an
+   * append, gone once Python writes it over or truncates it, or the page puts
+   * it again (another version) */
+  origin?: string;
 }
 const files = new Map<string, Entry>();
 // (an entry named r; one that r named before is unlinked)
@@ -83,12 +114,13 @@ function ensureDirs(p: string) {
   for (let d = parent(p); !dirs.has(d); d = parent(d)) dirs.set(d, Date.now());
 }
 
-// The page's files (path -> bytes), as a worker starts: no change hooks.
-export function load(entries: [string, Uint8Array][]) {
-  for (const [p, data] of entries) {
+// The page's files (path -> bytes, and a version's token if not one the session
+// starts with), as a worker starts: no change hooks.
+export function load(entries: [string, Uint8Array, string?][]) {
+  for (const [p, data, tok] of entries) {
     const r = resolve(p);
     ensureDirs(r);
-    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r });
+    place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: typeof tok === "string" ? tok : "s:" + String(p) });
   }
 }
 // A shared collection's files: [path, {url, sha256, size}], fetched when read.
@@ -134,13 +166,18 @@ function contents(r: string, f: Entry): Uint8Array {
   return f.data;
 }
 
-// Changes the page makes (an upload, a delete in the files panel).
-export function put(p: string, data: Uint8Array | null) {
+// Changes the page makes (an upload, a delete in the files panel), with the
+// new version's token (none: bytes no version of the page's, e.g. another
+// interpreter's write).
+export function put(p: string, data: Uint8Array | null, tok?: string) {
   const r = resolve(p);
   if (data === null) drop(r);
   else {
     ensureDirs(r);
     rewrite(r, new Uint8Array(data));
+    const f = files.get(r)!;
+    if (typeof tok === "string") f.origin = tok;
+    else delete f.origin;
   }
 }
 // (a file's new contents: the same entry if there is one, as a write to an
@@ -175,6 +212,7 @@ export function onceOpen(p: string, append: boolean): OpenFile {
   const r = resolve(p);
   if (dirs.has(r)) fail("EISDIR", -21, "open", p);
   if (!dirs.has(parent(r))) fail("ENOENT", -2, "open", p);
+  mayChange(r, "open");
   let f = files.get(r);
   if (f === undefined) {
     f = { data: new Uint8Array(0), mtime: Date.now(), path: r };
@@ -182,6 +220,7 @@ export function onceOpen(p: string, append: boolean): OpenFile {
     hooks.changed(r, f.data);
   } else if (!append) {
     delete f.remote;
+    delete f.origin;
     f.data = new Uint8Array(0);
     f.mtime = Date.now();
     hooks.changed(r, f.data);
@@ -192,6 +231,7 @@ export function onceOpen(p: string, append: boolean): OpenFile {
 // told of the change while a path names the file
 export function onceWrite(h: OpenFile, data: Uint8Array): void {
   const f = h.entry;
+  if (f.path !== null) mayChange(f.path, "write");
   const old = contents(f.path ?? "", f);
   const at = h.append ? old.length : h.pos;
   const out = new Uint8Array(Math.max(old.length, at + data.length));
@@ -220,16 +260,20 @@ export function readFileSync(p: string, enc?: any): any {
   const r = resolve(p);
   const f = files.get(r);
   if (!f) dirs.has(r) ? fail("EISDIR", -21, "read", p) : fail("ENOENT", -2, "open", p);
-  hooks.read(r);
+  hooks.read(r, f!.origin);
   const data = contents(r, f!);
   const encoding = typeof enc === "string" ? enc : enc?.encoding;
   return encoding ? new TextDecoder().decode(data) : data.slice();
 }
 export function writeFileSync(p: string, data: any) {
-  setFile(resolve(p), bytes(data));
+  const r = resolve(p);
+  mayChange(r, "write");
+  setFile(r, bytes(data));
+  delete files.get(r)!.origin; // (Python's bytes now, not the page's; an append keeps them: appendFileSync)
 }
 export function appendFileSync(p: string, data: any) {
   const r = resolve(p);
+  mayChange(r, "append");
   const f = files.get(r);
   const old = f ? contents(r, f) : new Uint8Array(0);
   const add = bytes(data);
@@ -244,6 +288,7 @@ export function mkdirSync(p: string, opts?: any) {
     if (files.has(r)) fail("EEXIST", -17, "mkdir", p);
     for (let d = r, todo: string[] = []; ; d = parent(d)) {
       if (dirs.has(d)) {
+        if (todo.length) mayChange(r, "mkdir");
         for (const t of todo.reverse()) dirs.set(t, Date.now());
         return;
       }
@@ -253,6 +298,7 @@ export function mkdirSync(p: string, opts?: any) {
   }
   if (dirs.has(r) || files.has(r)) fail("EEXIST", -17, "mkdir", p);
   if (!dirs.has(parent(r))) fail("ENOENT", -2, "mkdir", p);
+  mayChange(r, "mkdir");
   dirs.set(r, Date.now());
 }
 export function readdirSync(p: string): string[] {
@@ -264,6 +310,13 @@ export function readdirSync(p: string): string[] {
     if (k !== r && k.startsWith(pre)) names.add(k.slice(pre.length).split("/")[0]);
   }
   return [...names].sort();
+}
+// (whether `p` may be written (mode's W_OK, 2), with nothing changed: open()'s "a", which writes only at its flush,
+// refused at the open as CPython's is)
+export function accessSync(p: string, mode = 0) {
+  const r = resolve(p);
+  if (!files.has(r) && !dirs.has(r)) fail("ENOENT", -2, "access", p);
+  if (mode & 2) mayChange(r, "open");
 }
 export function statSync(p: string) {
   const r = resolve(p);
@@ -283,6 +336,7 @@ export function statSync(p: string) {
 export function unlinkSync(p: string) {
   const r = resolve(p);
   if (!files.has(r)) dirs.has(r) ? fail("EISDIR", -21, "unlink", p) : fail("ENOENT", -2, "unlink", p);
+  mayChange(r, "unlink");
   drop(r);
   hooks.changed(r, null);
 }
@@ -290,12 +344,16 @@ export function rmdirSync(p: string) {
   const r = resolve(p);
   if (!dirs.has(r)) fail("ENOENT", -2, "rmdir", p);
   if (readdirSync(r).length) fail("ENOTEMPTY", -39, "rmdir", p);
+  mayChange(r, "rmdir");
   if (r !== "/") dirs.delete(r);
 }
 export function renameSync(a: string, b: string) {
   const ra = resolve(a), rb = resolve(b);
   if (!dirs.has(parent(rb))) fail("ENOENT", -2, "rename", b);
   const f = files.get(ra);
+  if (!f && !dirs.has(ra)) fail("ENOENT", -2, "rename", a);
+  mayChange(ra, "rename");
+  mayChange(rb, "rename");
   if (f) {
     // (the same entry under its new name: a file held open follows it)
     if (dirs.has(rb)) fail("EISDIR", -21, "rename", b);

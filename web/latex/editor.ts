@@ -5,6 +5,7 @@
 import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { mark } from "./marks";
+import { autoClose } from "./envclose";
 
 declare const __SB_LATEX_TEST__: boolean | undefined;
 
@@ -25,6 +26,14 @@ export type EditorOpts = {
   // the image names: the same object is sent with every request; a host that resolves them fills it and calls request()
   images?: Record<string, string | { why: string }>;
   onImageRefs?(refs: string[], tok: Token): void;
+  // the files \input and \include read (inputs.ts): the host fills `known` (by workspace path), bumps `version` and
+  // calls request(); they are sent again only when the version changed (or to a new worker), and the names the
+  // document asked for come back to onInputRefs
+  inputs?: { docPath: string; known: Map<string, unknown>; version: number };
+  onInputRefs?(refs: string[], tok: Token): void;
+  // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
+  // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
+  sage?: { wrapper: string | null; saved: unknown[] };
   onEdit?(): void;                // after each edit by the person (not setText), once the request for it is made
 };
 
@@ -70,8 +79,10 @@ export function createEditor(o: EditorOpts) {
   let posTok: Token | null = null;
   const rendered = new Set<() => void>();
   let destroyed = false;
+  let inputsSent = -1;
   const startWorker = () => {
     worker?.terminate();
+    inputsSent = -1;
     worker = new Worker(o.workerUrl, { type: "module", name: "sagebrush-latex" });
     worker.onmessage = (m) => {
       // (the test build only: the page test can hold a reply here; elsewhere this folds away)
@@ -93,8 +104,12 @@ export function createEditor(o: EditorOpts) {
       restartedAt = t.rev; startWorker(); request();
     }, 15000);
     mark("tex-request", { rev: t.rev });
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images });
+    const inputs = o.inputs && o.inputs.version !== inputsSent ? { docPath: o.inputs.docPath, known: [...o.inputs.known], version: o.inputs.version } : undefined;
+    if (o.inputs) inputsSent = o.inputs.version;
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
   };
+  // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
+  let lastCheck: { text: string; rev: number; check: any } | null = null;
   const onReply = (r: any) => {
     if (destroyed) return;
     const tReply = performance.now();
@@ -105,9 +120,12 @@ export function createEditor(o: EditorOpts) {
     const ok = gate.accept(r);
     if (!ok.patch) return;
     if (!r.ok) { say("the preview failed: " + String(r.error).slice(0, 200)); return; }
+    // (this reply's check kept before its patch: a small patch is done within schedulePatch, and the host's onRendered
+    //  listeners, Run's among them, read lastCheck() then; set after, they saw the check of the text before this edit)
+    if (ok.current) lastCheck = { text: src.value, rev: r.rev as number, check: r.check };
     schedulePatch(r.items as Item[], r.groups as number, r.rev as number, Array.isArray(r.pos) ? (r.pos as number[]) : [], { doc: r.doc as number, rev: r.rev as number });
     preview.dataset.replyMs = String(Math.round(performance.now() - tReply));
-    if (ok.current) o.onImageRefs?.(r.imageRefs as string[], gate.token());
+    if (ok.current) { o.onImageRefs?.(r.imageRefs as string[], gate.token()); o.onInputRefs?.((r.inputRefs ?? []) as string[], gate.token()); }
   };
 
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
@@ -189,7 +207,26 @@ export function createEditor(o: EditorOpts) {
     request();
     if (byPerson) o.onEdit?.();
   };
-  src.addEventListener("input", () => edited(true));
+  // (a "}" typed that completes \begin{X}: \end{X} put on the next line as well, envclose.ts, the caret left after the
+  //  "}" for X's arguments. The browser's own insertion, a second undo step after the "}" (one undo takes back only the
+  //  close); its nested input event is folded into the person's, so one edit, one render. Never for a paste, an IME
+  //  composition, a selection or setText)
+  let closing = false, typedOver = false;
+  // (whether the "}" replaces a selection: known only before the browser applies it, so read in beforeinput, for the
+  //  input event that follows it)
+  src.addEventListener("beforeinput", () => { typedOver = src.selectionStart !== src.selectionEnd; });
+  src.addEventListener("input", (ev) => {
+    const e = ev as InputEvent, over = typedOver;
+    typedOver = false;
+    if (closing || over || src.readOnly || e.isComposing || e.inputType !== "insertText" || e.data !== "}" || src.selectionStart !== src.selectionEnd) return;
+    const at = src.selectionStart, ins = autoClose(src.value, at);
+    if (!ins) return;
+    closing = true;
+    // (the caret moved away and back first: the browser then starts a new undo step, not one with the typed "}")
+    try { src.setSelectionRange(at - 1, at - 1); src.setSelectionRange(at, at); if (!document.execCommand("insertText", false, ins)) src.setRangeText(ins, at, at, "end"); } finally { closing = false; }
+    src.setSelectionRange(at, at);
+  });
+  src.addEventListener("input", () => { if (!closing) edited(true); });
   // the host's own change of the text: drawn and rendered as an edit is, but not reported back to it (onEdit)
   const setText = (t: string) => { if (t === src.value) return; src.value = t; edited(false); };
 
@@ -266,6 +303,8 @@ export function createEditor(o: EditorOpts) {
     groups: () => { const out: { el: HTMLElement; start: number; end: number }[] = []; groups.forEach((g, k) => { const r = rangeOf(k); if (r) out.push({ el: g, ...r }); }); return out; },
     groupOf: (el: Node | null) => { const w = (el instanceof Element ? el : el?.parentElement)?.closest(".ch") as HTMLElement | null; return w ? groups.indexOf(w) : -1; },
     findIn, rangeOf,
+    // the check data of the preview now shown, if it is of the source now in the editor (else null: one is coming)
+    lastCheck: () => (lastCheck && lastCheck.text === src.value ? lastCheck.check : null),
     onRendered: (f: () => void) => { rendered.add(f); return () => { rendered.delete(f); }; },
     destroy: () => { destroyed = true; clearTimeout(watchdog); worker?.terminate(); worker = null; fitObs.disconnect(); rendered.clear(); },
   };

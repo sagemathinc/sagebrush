@@ -81,6 +81,15 @@ function install(group: string, kind: Kind, bytes: Uint8Array) {
   }
 }
 
+// Told when a group's sources can't be had (plan-b8-offline §10): the worker passes it to the page, which shows a
+// download button for the item under the error; nothing is ever downloaded because of it
+export type OfflineMissing = { code: "SB_OFFLINE_MISSING" | "SB_FETCH_FAILED"; item: string; group: string; offline: boolean; status?: number };
+let onMissing: ((m: OfflineMissing) => void) | null = null;
+export function onOfflineMissing(f: (m: OfflineMissing) => void) {
+  onMissing = f;
+}
+const ITEM_NAMES: Record<string, string> = { python: "Python library", scientific: "Scientific Python library", sage: "Sage library", matlab: "MATLAB library", magma: "Magma library", modules: "Python module" };
+
 function fetchSync(url: string): Uint8Array {
   // (in the runner, which has no network, the page fetches it: web/runner)
   if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") return g.__SAGEBRUSH_FETCH_SYNC__(url);
@@ -88,7 +97,7 @@ function fetchSync(url: string): Uint8Array {
   x.open("GET", url, false);
   x.responseType = "arraybuffer";
   x.send();
-  if (x.status !== 200) throw new Error(`HTTP ${x.status}`);
+  if (x.status !== 200) throw Object.assign(new Error(`HTTP ${x.status}`), { status: x.status });
   return new Uint8Array(x.response);
 }
 
@@ -105,7 +114,15 @@ function loadSync(group: string) {
       if (sha256Hex(bytes) !== ref.sha256) throw new Error("not the chunk this worker was built with");
       install(group, kind, bytes);
     } catch (e: any) {
-      if (kind === "src") throw new Error(`could not load the Python library's ${group} modules (${ref.file}: ${e?.message ?? e}${navigator.onLine === false ? "; offline" : ""})`);
+      if (kind !== "src") continue;
+      // (offline only when the browser says so: an online failure never says "offline")
+      const offline = navigator.onLine === false, item = M.items?.[group] ?? group;
+      const what = item.startsWith("pkg-") ? `The package ${item.slice(4)}` : `The ${ITEM_NAMES[item] ?? item} (${group})`;
+      try {
+        onMissing?.({ code: offline ? "SB_OFFLINE_MISSING" : "SB_FETCH_FAILED", item, group, offline, ...(typeof e?.status === "number" ? { status: e.status } : {}) });
+      } catch {}
+      if (offline) throw new Error(`${what} is not on this device and this device is offline. Storage → Offline lists what is downloaded`);
+      throw new Error(`Could not fetch the Python library's ${group} modules (${ref.file}: ${e?.message ?? e})`);
     }
   }
 }
@@ -168,8 +185,12 @@ const MODE_NAMES: Record<string, string> = { sage: "Sage", matlab: "MATLAB", mag
 const pending = new Map<string, Promise<void>>();
 /** Fetch the groups mode `mode` starts with, if not here yet; `loading` is
  * told when that has to fetch something (with the mode's name), and when it
- * is done (null).  Never rejects: what failed is fetched again, synchronously,
- * when a module needs it (and that says why it can't be). */
+ * is done (null).  What failed is fetched again, synchronously, when a module
+ * needs it (and that says why it can't be), except sources whose fetch stalled
+ * twice (web/stall-fetch.js: no data for its bound, then again on one retry):
+ * that rejects, naming the chunk, as a synchronous fetch of it could hang the
+ * run, and the next call starts afresh.  Compiled code that stalled twice is
+ * done without: its modules compile from their sources. */
 export function prefetchMode(mode: string, fetchBytes: (url: string) => Promise<ArrayBuffer | Uint8Array>, loading: (what: string | null) => void): Promise<void> {
   const todo = (M.modes[mode] ?? []).flatMap((group) => (["src", "pre"] as Kind[]).filter((k) => M.chunks[group]?.[k] && !installed.has(group + "." + k)).map((k) => [group, k] as [string, Kind]));
   if (!todo.length) return Promise.resolve();
@@ -177,19 +198,30 @@ export function prefetchMode(mode: string, fetchBytes: (url: string) => Promise<
     pending.get(mode) ??
     (async () => {
       loading(MODE_NAMES[mode] ?? mode);
+      const stalled: string[] = [];
       try {
         await Promise.all(
           todo.map(async ([group, kind]) => {
-            try {
-              const ref = M.chunks[group][kind]!;
-              const url = chunkUrl(ref.file);
-              if (url === null) return;
-              const bytes = await fetchBytes(url);
-              if ((await digestHex(bytes)) !== ref.sha256) return;
-              install(group, kind, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
-            } catch {}
+            const ref = M.chunks[group][kind]!;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const url = chunkUrl(ref.file);
+                if (url === null) return;
+                const bytes = await fetchBytes(url);
+                if ((await digestHex(bytes)) !== ref.sha256) return;
+                install(group, kind, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+                return;
+              } catch (e: any) {
+                // (a stall is tried once more; anything else is left to the synchronous fetch, as before; compiled
+                // code that stalled twice is done without (its modules compile from their sources), sources aren't)
+                if (!e?.stalled) return;
+                if (attempt === 1 && kind === "src") stalled.push(`${ref.file}: ${e.message}`);
+                else if (attempt === 1) console.warn(`sagebrush: ${ref.file} didn't load (${e.message}); its modules compile from their sources`);
+              }
+            }
           }),
         );
+        if (stalled.length) throw new Error(`The ${MODE_NAMES[mode] ?? mode} library didn't load (${stalled.join("; ")}): run the cell again`);
       } finally {
         pending.delete(mode);
         loading(null);

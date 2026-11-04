@@ -77,6 +77,9 @@ export const CODES = Object.freeze([
   "invalid", "exists", "missing", "conflict", "order", "epoch", "unknown_doc", "forbidden",
   "limit", "storage_full", "rate", "readonly", "deleting", "busy",
   "unknown_client", "fenced", "stale_epoch", "unavailable",
+  // (force-reload plan r7.2 §2: a build below the floor, or not a registered release; and a commit whose floors went
+  // stale between its two stages, retried)
+  "stale_build", "floor_refresh",
 ] as const);
 export type Code = (typeof CODES)[number];
 const KNOWN_CODES: ReadonlySet<string> = new Set(CODES);
@@ -122,6 +125,37 @@ export function refusalOf(e: { code?: unknown; message?: unknown; detail?: Recor
 }
 
 export const invalid = (m: string) => new SyncError("invalid", m);
+
+// ---- the force-reload floors (plan force-reload r7.2 §1-§2)
+
+/** A client's declared release: a registered build's ordinal `n` (releases.json, plus 1 per release) and the exact core
+ * sha it was built from, or none (`n = 0`: a dev, CI or playground build).  A compatibility and accident guard, not
+ * attestation: a client can claim any pair, and every write is still checked as before. */
+export interface Release { n: number; core: string }
+export const NO_RELEASE: Release = Object.freeze({ n: 0, core: "" });
+export const RELEASE_MAX = 2 ** 31 - 1;
+/** hello's optional `release` (absent: NO_RELEASE). */
+export function checkRelease(v: unknown): Release {
+  if (v === undefined) return NO_RELEASE;
+  const o = fields(v, ["n", "core"], "release");
+  if (!Number.isSafeInteger(o.n) || (o.n as number) < 1 || (o.n as number) > RELEASE_MAX) throw invalid("release: n");
+  if (typeof o.core !== "string" || !/^[0-9a-f]{40}$/.test(o.core)) throw invalid("release: core");
+  return { n: o.n as number, core: o.core };
+}
+/** The floors in force: the reload floor R, the compat floor C, and the served release's n. */
+export interface Floors { reload: number; compat: number; served: number }
+/** The admission bound: a release below it is refused.  R never locks out the served release (a rollback lowers it);
+ * C is never lowered by a deployment. */
+export const admissionBound = (f: Floors) => Math.max(Math.min(f.reload, f.served), f.compat);
+/** Why `r` may not write under `f` (a stale_build refusal), or null.  A registered release is an exact {n, core} pair
+ * of `registry` (n -> core): a known n with another sha, and an unknown n, are refused at any bound. */
+export function releaseRefusal(r: Release, f: Floors, registry: ReadonlyMap<number, string>): SyncError | null {
+  const bound = admissionBound(f);
+  if (r.n === 0) return bound > 0 ? new SyncError("stale_build", "Sagebrush was updated: reload this page", { bound, why: "below" }) : null;
+  if (registry.get(r.n) !== r.core) return new SyncError("stale_build", "this build isn't a registered release: reload this page", { bound, why: "unknown" });
+  if (r.n < bound) return new SyncError("stale_build", "Sagebrush was updated: reload this page", { bound, why: "below" });
+  return null;
+}
 const tooBig = (limit: string, max: number, m: string) => new SyncError("limit", m, { limit, max });
 
 // ---- ids: the client's own, keyed by account (§3)

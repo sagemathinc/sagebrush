@@ -19,7 +19,8 @@
 // matlab-more, magma-more; MATLAB's sparse LU, _matlab_lu and _matlab_colamd,
 // is matlab-lu) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
-// "-").  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
+// "-"; scipy.special and scipy.stats are mod-scipy-special and
+// mod-scipy-stats, apart from scipy's other submodules).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
 // pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
 // mode's start imports it (recorded as "pkg:<name>/<path>"), and in that
 // mode's start then; the manifest carries the packages' registry
@@ -40,6 +41,8 @@ export type LibManifest = {
   modes: Record<string, string[]>;
   /** the packages' registry, and each package file ("<dir>/<path>") -> its group */
   packages: { registry: unknown; files: Record<string, string> };
+  /** group -> its offline item (web/offline-inventory.mts), set by web/build.ts */
+  items?: Record<string, string>;
   /** the pinned zone data's index (web/tzdata-chunks.mts), for a browser's time */
   tzdata?: ChunkRef & { version: string };
 };
@@ -51,12 +54,20 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
+  // (elliptic curves over GF(p), imported only by EllipticCurve() over a
+  // finite field: its own group, so sage-more's users don't fetch it)
+  if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
   if (/^_?sage/.test(top)) return "sage-more";
   // (MATLAB mode's sparse LU, imported only by a measured sparse solve: its
   // own group, so the other MATLAB extras' users don't fetch it)
   if (/^_matlab_(lu|colamd)$/.test(top)) return "matlab-lu";
   if (/^_matlab/.test(top)) return "matlab-more";
   if (/^_magma/.test(top)) return "magma-more";
+  // (scipy.special and scipy.stats: each a group of its own, mod-scipy-special
+  // and mod-scipy-stats, so that importing scipy's other submodules
+  // (mod-scipy) doesn't fetch them, nor they those)
+  const sub = /^scipy\/(special|stats)(?:\.py$|\/)/.exec(path);
+  if (sub) return "mod-scipy-" + sub[1];
   // (lowercase letters, digits and "-": an engine file's name has nothing
   // else, web/engines.ts; mod-future for __future__, mod-ipython for IPython)
   return "mod-" + top.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");

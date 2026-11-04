@@ -1,3 +1,4 @@
+// ci: web-browser/board-c order=130
 // mountBoard's destroy() leaves nothing behind (web/board/mount.ts), in
 // headless Chromium on the board page with its own host: a board with code
 // (examples/live.json: its engine, the runner's frame and workers, the

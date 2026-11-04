@@ -1,3 +1,4 @@
+// ci: web-browser/notebook order=170
 // The kernel's start barrier (web/notebook/worker-kernel.js; astra's
 // CORR-PR68-3): nothing reaches a worker, no run, interact, question or check,
 // until its onStart is done (the page's: the notebook's package set resolved

@@ -212,6 +212,9 @@ class IntegerModRing_:
             sage: R = Integers(12); R(17), R(1/5), R(Mod(5, 24))
             (5, 5, 5)
         """
+        if isinstance(x, UnitGroupElement_):
+            # a unit group's element: its generators' product in this ring
+            return _elt(self, x._value() % self._n)
         if isinstance(x, IntegerMod):
             if x._parent is self:
                 return x
@@ -375,6 +378,28 @@ class IntegerModRing_:
         from _sage_modular import _unit_gens
         return tuple(_elt(self, int(g) % self._n) for g, order in _unit_gens(self._n))
 
+    def unit_group(self, algorithm="sage"):
+        """The group of units as an abstract abelian group on unit_gens(), as
+        Sage's: generators f (or f0, f1, ...), elements as products of them;
+        R(x) maps an element back to the unit of R.
+
+        EXAMPLES::
+
+            sage: Z5 = Zmod(5); Z5.unit_group()
+            Multiplicative Abelian group isomorphic to C4
+            sage: list(Z5.unit_group()), sorted(Z5(x) for x in Z5.unit_group())
+            ([1, f, f^2, f^3], [1, 2, 3, 4])
+            sage: Z24 = Zmod(24); Z24.unit_group(), Z24.unit_group().gens()
+            (Multiplicative Abelian group isomorphic to C2 x C2 x C2, (f0, f1, f2))
+            sage: list(Z24.unit_group())
+            [1, f2, f1, f1*f2, f0, f0*f2, f0*f1, f0*f1*f2]
+            sage: Zmod(2).unit_group()
+            Trivial Abelian group
+        """
+        from _sage_modular import _unit_gens
+        pairs = [(int(g) % self._n, int(o)) for g, o in _unit_gens(self._n)]
+        return UnitGroup_(self, pairs)
+
     def multiplicative_generator(self):
         """A generator of the cyclic group of units (the least one).
 
@@ -384,6 +409,19 @@ class IntegerModRing_:
             (5, 11)
         """
         return _elt(self, int(primitive_root(self._n)))
+
+    def primitive_element(self):
+        """A generator of the multiplicative group of the prime field GF(p) (the least one, as
+        Sage's); Zmod(n) has no primitive_element in Sage, nor here.
+
+        EXAMPLES::
+
+            sage: GF(331).primitive_element(), GF(7).primitive_element(), GF(2).primitive_element()
+            (3, 3, 1)
+        """
+        if not self._is_gf:
+            raise AttributeError("'IntegerModRing_generic_with_category' object has no attribute 'primitive_element'")
+        return self.multiplicative_generator()
 
     def __getitem__(self, names):
         return _poly_ring_from_names(self, names)
@@ -428,6 +466,141 @@ def IntegerModRing(n=0, is_field=False, category=None):
 
 Integers = IntegerModRing
 Zmod = IntegerModRing
+
+
+class UnitGroup_:
+    """(Z/nZ)^* as an abstract multiplicative abelian group on the ring's
+    unit_gens() (IntegerModRing_.unit_group), printed as Sage prints it.
+
+    EXAMPLES::
+
+        sage: G = Zmod(100).unit_group(); G, G.gens_orders()
+        (Multiplicative Abelian group isomorphic to C2 x C20, (2, 20))
+        sage: [Zmod(100)(g) for g in G.gens()]
+        [51, 77]
+    """
+
+    def __init__(self, ring, pairs):
+        self._ring = ring
+        self._g = [g for g, _ in pairs]
+        self._o = [o for _, o in pairs]
+        self._names = ["f"] if len(pairs) == 1 else ["f%d" % i for i in range(len(pairs))]
+
+    def __repr__(self):
+        if not self._o:
+            return "Trivial Abelian group"
+        return "Multiplicative Abelian group isomorphic to " + " x ".join("C%d" % o for o in self._o)
+
+    def __eq__(self, other):
+        return isinstance(other, UnitGroup_) and other._ring._n == self._ring._n and other._g == self._g
+
+    def __hash__(self):
+        return hash(("unitgroup", self._ring._n, tuple(self._g)))
+
+    def _el(self, exps):
+        return UnitGroupElement_(self, tuple(e % o for e, o in zip(exps, self._o)))
+
+    def one(self):
+        return self._el([0] * len(self._o))
+
+    def gens(self):
+        return tuple(self._el([int(i == j) for j in range(len(self._o))]) for i in range(len(self._o)))
+
+    def gen(self, i=0):
+        return self.gens()[i]
+
+    def ngens(self):
+        return len(self._o)
+
+    def gens_orders(self):
+        return tuple(_Integer(o) for o in self._o)
+
+    def order(self):
+        r = 1
+        for o in self._o:
+            r *= o
+        return _Integer(r)
+
+    cardinality = order
+
+    def __len__(self):
+        return int(self.order())
+
+    def is_cyclic(self):
+        return len(self._o) <= 1
+
+    def is_finite(self):
+        return True
+
+    def __iter__(self):
+        import itertools
+        for exps in itertools.product(*[range(o) for o in self._o]):
+            yield UnitGroupElement_(self, exps)
+
+    def list(self):
+        return list(self)
+
+    def __contains__(self, x):
+        return isinstance(x, UnitGroupElement_) and x._group == self
+
+
+class UnitGroupElement_:
+    """An element of a UnitGroup_: exponents of its generators."""
+
+    __slots__ = ("_group", "_e")
+
+    def __init__(self, group, exps):
+        self._group = group
+        self._e = tuple(exps)
+
+    def __repr__(self):
+        parts = [n if e == 1 else "%s^%d" % (n, e) for n, e in zip(self._group._names, self._e) if e]
+        return "*".join(parts) if parts else "1"
+
+    def _value(self):
+        n = self._group._ring._n
+        v = 1 % n
+        for g, e in zip(self._group._g, self._e):
+            v = v * pow(g, e, n) % n
+        return v
+
+    def parent(self):
+        return self._group
+
+    def __mul__(self, other):
+        if not isinstance(other, UnitGroupElement_) or other._group != self._group:
+            return NotImplemented
+        return self._group._el([a + b for a, b in zip(self._e, other._e)])
+
+    def __pow__(self, k):
+        k = int(k)
+        return self._group._el([a * k for a in self._e])
+
+    def __invert__(self):
+        return self ** -1
+
+    def __truediv__(self, other):
+        return self * ~other
+
+    def __eq__(self, other):
+        if isinstance(other, UnitGroupElement_):
+            return other._group == self._group and other._e == self._e
+        if isinstance(other, int) and other == 1:
+            return not any(self._e)
+        return False
+
+    def __hash__(self):
+        return hash(("unitgroupelement", self._e))
+
+    def order(self):
+        r = 1
+        for e, o in zip(self._e, self._group._o):
+            k = o // _m.gcd(e, o)
+            r = r * k // _m.gcd(r, k)
+        return _Integer(r)
+
+    def exponents(self):
+        return self._e
 
 
 class IntegerMod:
@@ -642,6 +815,23 @@ class IntegerMod:
     def __pos__(self):
         return self
 
+    def __rpow__(self, b):
+        """b ** self for an integer, rational or real b: the power by the
+        exponent's lift, as Sage's (2^Mod(-1, 7) is 2^6).
+
+        EXAMPLES::
+
+            sage: 2^Mod(3, 7), 2^Mod(-1, 7), (1/2)^GF(3)(2), 3^GF(2)(0)
+            (8, 64, 1/4, 1)
+            sage: parent(2^Mod(3, 7)), 2.0^GF(5)(3)
+            (Integer Ring, 8.00000000000000)
+        """
+        if isinstance(b, IntegerMod) or getattr(b, "_is_ffmatrix", False):
+            return NotImplemented
+        if isinstance(b, (int, float, _F)) or type(b).__name__ in ("Rational", "Integer"):
+            return b ** self._v
+        return NotImplemented
+
     def __pow__(self, e, mod=None):
         if isinstance(e, IntegerMod):
             e = e._v
@@ -720,6 +910,9 @@ class IntegerMod:
         """
         n = self._parent._n
         return _Integer(n // _m.gcd(self._v, n))
+
+    # Sage's IntegerMod.order() is the ADDITIVE order (Mod(3, 11).order() = 11)
+    order = additive_order
 
     def multiplicative_order(self):
         """The order in the group of units.

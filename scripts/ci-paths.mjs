@@ -2,7 +2,9 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { gateInputs } from "./size-measure.mjs";
+import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
@@ -54,10 +56,70 @@ function changedFiles() {
 const files = process.env.CI_PATHS_FILES
   ? readFileSync(process.env.CI_PATHS_FILES, "utf8").split("\n").filter(Boolean)
   : changedFiles();
-const full = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "push" && ref === "refs/heads/master");
 const matches = (patterns) => files.some((file) => patterns.some((pattern) => pattern.test(file)));
 const every = (patterns) => files.length > 0 && files.every((file) => patterns.some((pattern) => pattern.test(file)));
+
+// The two tiers (CI speed plan option 2, William, Nov 2 2026): a pull request runs the fast tier, unless it has the
+// `full-ci` label or changes a path where a bug loses data or trust: sync, sharing and security (CSP, HTML
+// sanitizing), and data loss (save, Trash, export, purge).  Then it runs the full suite, as every master push, the
+// nightly schedule and a dispatch do.  A save or Trash change inside web/index.html is not seen here: its author adds
+// the label.  (test/ci-paths.test.ts has a case for each path class)
+const fullTierPaths = [
+  // sync and its journals and merges
+  /^web\/sync\//, /^web\/sync-protocol\//, /^web\/journal\//, /^web\/workspace\/[^/]*sync[^/]*$/,
+  /^web\/notebook\/(?:sync-rows|journal|journal-rows|db-merge3|p2c-merge|merge3)[^/]*$/, /^web\/board\/(?:syncdb|journal|merge)\.ts$/,
+  // sharing and security
+  /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
+  // data loss: save, Trash, export, purge, and the workspace's store and its migrations
+  /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
+  /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
+  // (the workspace's API: Trash's remove, restore and move, and emptying it)
+  /^web\/workspace\/api\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
+  /^scripts\/check-export-size\.mjs$/,
+  // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
+  // offline pages), the dependency files and the site preview (web-sync.4))
+  /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
+  // (the Miniflare dispatch helper: its direct consumers, test-sync and test-share among them, run only in web-sync.1
+  // and web-sync.2)
+  /^web\/miniflare-dispatch\.mjs$/,
+  // (a document's checkpoints, the client's side (BH-0b-2): sync, whose suite runs only in web-sync.1)
+  /^web\/workspace\/checkpoint(?:-types)?\.ts$/,
+  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
+  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
+  // That suite checks every input of the two bundles is matched here)
+  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
+  // pairing's modules (its doc-protocol.ts is above, with sync))
+  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs)\.ts$/,
+  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
+  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
+  // request in six: a bun or node bump carries the full-ci label instead)
+  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
+];
+// A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
+// neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
+// CI_PATHS_ROOT, for the tests).  A suite of a job only the full tier runs selects the full tier; a web-browser
+// suite selects its group, and a web-runner, export or lookalike suite its job.  (a deleted suite runs nowhere)
+const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
+const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
+const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
+  let text;
+  try {
+    text = readFileSync(join(suiteRoot, file), "utf8");
+  } catch {
+    return [];
+  }
+  return headers(file, text).filter((h) => h.kind === "run").map((h) => h.target);
+});
+const suiteJobs = new Set(suiteTargets.map((target) => target.split(/[./]/)[0]));
+const suiteGroups = new Set(suiteTargets.filter((target) => target.startsWith("web-browser/")).map((target) => target.slice("web-browser/".length).split(".")[0]));
+const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
+const fullTier = event === "pull_request" &&
+  (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
+const full = event === "workflow_dispatch" || event === "schedule" ||
+  (event === "push" && ref === "refs/heads/master") || fullTier;
 
 // Only these paths are certified as prose-only.  In particular, examples/*.md
 // is executable board input and must not be treated as documentation.
@@ -92,7 +154,7 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/,
 ];
 // The CPython package's inputs: what its wheel builds (engine/, and a root
 // Cargo manifest if one is ever added), what it ships (lib/, through
@@ -154,7 +216,7 @@ const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "pull_request" && (matches(webkitPaths) || fallback));
+  (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
 // whenever they, its registry, baseline or tool change, even when the node
@@ -163,7 +225,7 @@ const webkit = event === "workflow_dispatch" || event === "schedule" ||
 // (test/ci-paths.test.ts checks that every file test/limit_sites.py scans,
 // its WEB set included, selects this job, and the files the job reads)
 const censusPaths = [
-  /^engine\//, /^lib\//, /^src\//, /^web\/workspace\/sync-ledger\.ts$/, /^web\/notebook\/text-overlap\.ts$/,
+  /^engine\//, /^lib\//, /^src\//, /^web\/workspace\/sync-ledger\.ts$/, /^web\/notebook\/text-overlap\.ts$/, /^web\/stall-fetch\.js$/,
   /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/, /^test\/limits\.test\.ts$/,
   // (the baseline sweep's files and tooling, which the census's check reads: plan-limit-sites-sweep-r3)
   /^test\/limit-sweep\//, /^test\/limit_sweep\.py$/, /^test\/limit_sweep_cases\.py$/,
@@ -187,6 +249,43 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // otherwise first ran on master (@sagebrush, Oct 30).  Those jobs need engine-wasm, which engine_smoke selects.
 const engineFull = full || matches([/^src\/runtime\//]);
 
+// The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
+// directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
+// worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
+// workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
+// alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
+const webAreas = {
+  board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\//, /^packages\/sagebrush-board\//],
+  shell: [/^web\/shell\//],
+  workspace: [/^web\/workspace\//],
+};
+const webFiles = files.filter((file) => webPaths.some((pattern) => pattern.test(file)));
+const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) => pattern.test(file)));
+const webCore = webFiles.some((file) => !Object.values(webAreas).some((patterns) => patterns.some((pattern) => pattern.test(file))));
+const allWeb = full || workflowOrBuild || fallback || webCore;
+const webRuntime = allWeb || runtime;
+// (a source another area's group tests, beside its own area's: test-latex-page opens a .tex from the board's
+// newLatexHere, #566)
+const groupSources = { latex: [/^web\/board\/page\.ts$/] };
+const testedBy = (group) => matches(groupSources[group]);
+const webGroups = [
+  ["notebook", webRuntime || suiteGroups.has("notebook")],
+  // (the LaTeX editor's page and agent tools, on a build with the editor on loopback hosts: web/latex/ is the core)
+  ["latex", webRuntime || suiteGroups.has("latex") || testedBy("latex")],
+  ["board-a", webRuntime || inArea("board") || suiteGroups.has("board-a")],
+  ["board-b", webRuntime || inArea("board") || suiteGroups.has("board-b")],
+  ["board-c", webRuntime || inArea("board") || suiteGroups.has("board-c")],
+  // (board-unit also runs the export's measure and reminder units)
+  ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
+  ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
+  ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
+].filter(([, selected]) => web && selected).map(([group]) => group);
+// (web-runner: the runner, the workspace, the board frame and the notebook's merges)
+const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
+const webWorkspace = web && (allWeb || inArea("workspace"));
+const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
+const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
+
 const outputs = {
   full,
   docs_only: docsOnly,
@@ -199,6 +298,10 @@ const outputs = {
   engine_full: engineFull,
   engine_cpython: engineCpython,
   webkit,
+  web_groups: JSON.stringify(webGroups),
+  web_runner: webRunner,
+  web_export: webExport,
+  web_lookalike: webLookalike,
   census,
   unsafe_sweep: unsafeSweep,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)

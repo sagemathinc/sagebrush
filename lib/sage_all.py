@@ -30,7 +30,7 @@ __all__ = [
     # finite fields and Z/nZ
     "QQbar", "AA", "RealField", "ComplexField", "RealIntervalField", "RIF", "RDF", "CDF", "PowerSeriesRing", "LaurentSeriesRing", "O", "Zp", "Qp", "ZpCR", "QpCR", "Graph", "DiGraph", "graphs", "digraphs", "true", "false",
     "Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph", "parallel_firing_graph", "numerical_approx", "CartanType", "RootSystem", "DynkinDiagram", "WeylGroup", "WeylCharacterRing", "WeightRing", "branching_rule", "branching_rule_from_plethysm", "BranchingRule", "crystals", "Tableau", "Word", "CartanMatrix", "Polyhedron", "polytopes", "EuclideanSpace", "FiniteRankFreeModule", "rank", "dim", "MixedIntegerLinearProgram", "codes", "channels", "LinearCode", "lfsr_sequence", "lfsr_autocorrelation", "lfsr_connection_polynomial", "IndexedSequence", "AlphabeticStrings", "SubstitutionCryptosystem", "TranspositionCryptosystem", "random_vector", "ideal", "Ideal", "TermOrder", "GF", "FiniteField", "IntegerModRing", "Integers", "Zmod", "Mod", "mod", "primitive_root",
-    "conway_polynomial", "Hom", "VectorSpace", "random_matrix",
+    "conway_polynomial", "Hom", "VectorSpace", "random_matrix", "jacobian",
     "RationalField", "IntegerRing", "randint", "random", "bernoulli", "zeta", "symbolic_sum", "sum", "assume", "forget", "assumptions", "assuming", "hue", "norm", "timeit", "set_random_seed", "initial_seed",
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
@@ -39,8 +39,12 @@ __all__ = [
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
+    "prime_divisors", "prime_factors", "random_prime", "Primes", "randrange", "choice", "sample",
     "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
-    "binomial", "factorial", "fibonacci", "catalan_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "prod", "continued_fraction",
+    "binomial", "factorial", "fibonacci", "catalan_number",
+    # enumerative combinatorics (lib/_sage_combinat.py)
+    "Partition", "Partitions", "Compositions", "Set", "Subsets", "Combinations", "Permutation", "Permutations",
+    "number_of_partitions", "stirling_number1", "stirling_number2", "bell_number", "tmp_filename", "tmp_dir", "isqrt", "sqrt", "srange", "xsrange", "prod", "continued_fraction",
     "numerator", "denominator", "valuation", "digits", "n", "N", "pi", "e",
     # the language: [a..b], 1.5, f(x) = ...
     "ellipsis_range", "ellipsis_iter", "RealNumber", "symbolic_expression",
@@ -142,6 +146,8 @@ from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles,
 from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
+from _sage_combinat import (Partition, Partitions, Compositions, Set, Subsets, Combinations, Permutation, Permutations,
+                           number_of_partitions, stirling_number1, stirling_number2, bell_number)
 from _sage_polyhedra import Polyhedron, polytopes
 from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
 from _sage_milp import MixedIntegerLinearProgram
@@ -225,6 +231,71 @@ def randint(a, b):
     """
     import random as _r
     return _r.randint(int(a), int(b))
+
+
+def randrange(*args, **kwds):
+    """A random integer from range(*args) (Python's random.randrange, as in Sage).
+
+    EXAMPLES::
+
+        sage: all(2 <= randrange(2, 20) < 20 for _ in range(50))
+        True
+    """
+    import random as _r
+    return _r.randrange(*[int(a) for a in args], **kwds)
+
+
+def choice(seq):
+    """A random element of seq (Python's random.choice, as in Sage).
+
+    EXAMPLES::
+
+        sage: choice([1, 10, 11]) in [1, 10, 11]
+        True
+    """
+    import random as _r
+    return _r.choice(seq)
+
+
+def sample(population, k=None, **kwds):
+    """k distinct random elements of population (Python's random.sample, as in Sage).
+
+    EXAMPLES::
+
+        sage: v = sample(list(range(20)), k=3); len(v), len(set(v)), all(0 <= a < 20 for a in v)
+        (3, 3, True)
+    """
+    import random as _r
+    return _r.sample(population, int(k), **kwds)
+
+
+def random_prime(n, proof=None, lbound=2):
+    """A random prime p with lbound <= p <= n, as Sage's.
+
+    EXAMPLES::
+
+        sage: p = random_prime(100, lbound=50); is_prime(p) and 50 <= p <= 100
+        True
+        sage: random_prime(2)
+        2
+        sage: random_prime(1)
+        Traceback (most recent call last):
+        ...
+        ValueError: n must be greater than or equal to 2
+    """
+    import random as _r
+    n, lbound = int(n), max(int(lbound), 2)
+    if n < 2:
+        raise ValueError("n must be greater than or equal to 2")
+    if n < lbound:
+        raise ValueError("n must be at least lbound: %s" % lbound)
+    if next_prime(lbound - 1) > n:
+        raise ValueError("there are no primes between %s and %s (inclusive)" % (lbound, n))
+    while True:
+        # a random point, then the next prime at or above it (wrapping to lbound)
+        p = next_prime(_r.randint(lbound, n) - 1)
+        if p <= n:
+            return Integer(p)
 
 
 def hue(h, s=1, v=1):
@@ -407,6 +478,24 @@ from _sage_matrix import (matrix, MatrixSpace, identity_matrix, zero_matrix, dia
 Matrix = matrix
 
 
+def jacobian(functions, variables):
+    """The Jacobian matrix of functions (one function or a list) in the
+    variables, over SR.
+
+    EXAMPLES::
+
+        sage: var('y')
+        y
+        sage: jacobian([x*y, x + y], [x, y])
+        [y x]
+        [1 1]
+        sage: jacobian(x^2*y, [x, y])
+        [2*x*y   x^2]
+    """
+    import _sage_matrix_sr
+    return _sage_matrix_sr.jacobian(functions, variables)
+
+
 def parent(x):
     """The parent structure of x: ZZ, QQ, a polynomial ring, ...
 
@@ -414,17 +503,22 @@ def parent(x):
 
         sage: parent(2), parent(2/3), parent(1.5)
         (Integer Ring, Rational Field, Real Field with 53 bits of precision)
+        sage: parent(True), parent([1, 2])
+        (<class 'bool'>, <class 'list'>)
     """
+    if isinstance(x, bool):
+        return type(x)  # (before .parent(): bools are ints, which carry Integer's methods here)
     if hasattr(x, "parent"):
         return x.parent()
-    if isinstance(x, bool) or isinstance(x, int):
+    if isinstance(x, int):
         return ZZ
     if isinstance(x, _Fraction):
         return QQ
     if isinstance(x, float):
         from _sage_lang import _RealField
         return _RealField()
-    raise NotImplementedError("parent of %r" % (x,))
+    # anything else (a list, a str, ...): its Python type, as Sage's parent() gives
+    return type(x)
 
 
 from _pyjs_docsearch import search_doc
@@ -494,6 +588,22 @@ def _rational_power(b, e):
             r = _Fraction(a, d) ** p
             return Integer(r.numerator) if r.denominator == 1 else Rational._from_coprime_ints(r.numerator, r.denominator)
     return SR(Integer(b.numerator) if b.denominator == 1 else Rational._from_coprime_ints(b.numerator, b.denominator)) ** SR(Rational._from_coprime_ints(p, q))
+
+
+def _poly_var_name(var):
+    """A polynomial variable's name as Sage takes it for a number's charpoly
+    or minpoly: str(var), one name, a letter then letters, digits or _."""
+    name = str(var)
+    if "," in name:
+        # (several names: a multivariate ring, which x - a doesn't map into)
+        raise TypeError("Could not find a mapping of the passed element to this ring.")
+    if not name:
+        raise ValueError("variable name must be nonempty")
+    if not name[0].isalpha():
+        raise ValueError("variable name '%s' does not start with a letter" % name)
+    if not all(c.isalnum() or c == "_" for c in name):
+        raise ValueError("variable name '%s' is not alphanumeric" % name)
+    return name
 
 
 class Rational(_Fraction):
@@ -790,6 +900,34 @@ class Rational(_Fraction):
             (True, False)
         """
         return self._numerator == 1 and self._denominator == 1
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial over QQ: var - self.
+
+        EXAMPLES::
+
+            sage: QQ(3/2).charpoly()
+            x - 3/2
+            sage: (2/3).charpoly('z')
+            z - 2/3
+            sage: QQ(0).charpoly()
+            x
+        """
+        return polygen(QQ, _poly_var_name(var)) - self
+
+    def minpoly(self, var="x"):
+        """The minimal polynomial over QQ: var - self, in QQ[var].
+
+        EXAMPLES::
+
+            sage: QQ(3/2).minpoly()
+            x - 3/2
+            sage: QQ(3/2).minpoly().parent()
+            Univariate Polynomial Ring in x over Rational Field
+            sage: QQ(-7).minpoly(var='y')
+            y + 7
+        """
+        return self.charpoly(var)
 
     def __mod__(self, n):
         """self % n for an integral n: the residue of numerator *
@@ -1898,6 +2036,76 @@ def nth_prime(k):
     return prime_range(bound + 1)[int(k) - 1]
 
 
+def prime_divisors(n):
+    """The primes dividing n, in increasing order (Sage's prime_divisors; prime_factors is the same).
+
+    EXAMPLES::
+
+        sage: prime_divisors(360), prime_factors(-12), prime_factors(1)
+        ([2, 3, 5], [2, 3], [])
+    """
+    n = abs(Integer(n))
+    return [] if n == 1 else [Integer(q) for q, _ in factor(n)]
+
+
+prime_factors = prime_divisors
+
+
+class Primes:
+    """The set of all prime numbers, in order (Sage's Primes()): sliceable, iterable, `in`.
+
+    EXAMPLES::
+
+        sage: P = Primes(); P
+        Set of all prime numbers: 2, 3, 5, 7, ...
+        sage: P[0:10], P[3], 7 in P, 8 in P, P.next(10), P.unrank(0)
+        ([2, 3, 5, 7, 11, 13, 17, 19, 23, 29], 7, True, False, 11, 2)
+    """
+
+    def __init__(self, proof=True):
+        pass
+
+    def __repr__(self):
+        return "Set of all prime numbers: 2, 3, 5, 7, ..."
+
+    def __contains__(self, n):
+        try:
+            return Integer(n) == n and is_prime(n)
+        except (TypeError, ValueError):
+            return False
+
+    def __iter__(self):
+        p = Integer(2)
+        while True:
+            yield p
+            p = next_prime(p)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            start, stop, step = i.start or 0, i.stop, i.step or 1
+            if stop is None or start < 0 or stop < 0 or step < 1:
+                raise NotImplementedError("Primes()[a:b] needs 0 <= a <= b (a finite slice)")
+            return [Integer(q) for q in primes_first_n(int(stop))[start::step]]
+        if i < 0:
+            raise IndexError("Primes() has no negative indices")
+        return Integer(nth_prime(int(i) + 1))
+
+    def unrank(self, i):
+        return self[i]
+
+    def next(self, n):
+        return Integer(next_prime(n))
+
+    def first(self):
+        return Integer(2)
+
+    def __eq__(self, other):
+        return isinstance(other, Primes)
+
+    def __hash__(self):
+        return hash("Primes")
+
+
 def prime_pi(x):
     """The number of primes <= x.
 
@@ -2235,19 +2443,22 @@ def valuation(n, p):
     return v
 
 
-def digits(n, base=10):
-    """The digits of n in base, least significant first (as in Sage).
+def digits(n, base=10, digits=None):
+    """The digits of n in base, least significant first (as in Sage); digits=: the symbols to use
+    for 0, 1, ... (n.digits(base=16, digits="0123456789ABCDEF")).
 
     EXAMPLES::
 
         sage: digits(1234), digits(255, 16), digits(10, 2)  # sagebrush only
         ([4, 3, 2, 1], [15, 15], [0, 1, 0, 1])
+        sage: 41943.digits(base=16, digits="0123456789ABCDEF")
+        ['7', 'D', '3', 'A']
     """
     n, out = abs(int(n)), []
     while n:
         n, d = divmod(n, base)
         out.append(d)
-    return out
+    return out if digits is None else [digits[d] for d in out]
 
 
 # ------------------------------------------------------------------ arithmetic
@@ -2338,14 +2549,26 @@ def _xgcd_int(a, b):
     return (g, s, (g - s * a) // b if b else 0)
 
 
-def xgcd(a, b):
-    """(g, s, t) with g = gcd(a, b) = s*a + t*b.
+def xgcd(a, b=None):
+    """(g, s, t) with g = gcd(a, b) = s*a + t*b; for a list v (b omitted), (g, c_1, ..., c_k) with
+    g = gcd(v) = sum(c_i * v_i), folding the pairwise xgcd from the left, as Sage's.
 
     EXAMPLES::
 
         sage: xgcd(240, 46), xgcd(1/3, 2)
         ((2, -9, 47), (1/3, 1, 0))
+        sage: xgcd([30, 42, 70]), xgcd([12, 18]), xgcd([6])
+        ((2, 36, -24, -1), (6, -1, 1), (6, 1))
     """
+    if b is None:
+        v = list(a)
+        if not v:
+            raise ValueError("xgcd of an empty list")
+        g, cs = v[0], [1]
+        for x in v[1:]:
+            g, u, w = xgcd(g, x)
+            cs = [c * u for c in cs] + [w]
+        return tuple([g] + cs)
     if _poly_like(a) or _poly_like(b):
         return a.xgcd(b) if _poly_like(a) else b.parent()(a).xgcd(b)
     if isinstance(a, _Fraction) or isinstance(b, _Fraction):
@@ -2362,6 +2585,208 @@ def xgcd(a, b):
     if a < 0:
         a, x0, y0 = -a, -x0, -y0
     return (a, x0, y0)
+
+
+_DL_MUL_NAMES = ("multiplication", "times", "product", "*")
+_DL_ADD_NAMES = ("addition", "plus", "sum", "+")
+
+
+def _dl_group(x, operation, identity, inverse, op):
+    """(identity, inverse, op) of the group of x, as Sage's _parse_group_def."""
+    if operation in _DL_MUL_NAMES or operation in _DL_ADD_NAMES:
+        if identity is not None or inverse is not None or op is not None:
+            raise ValueError("in order to specify custom identity/inverse/op, operation must be 'other'")
+        mul = operation in _DL_MUL_NAMES
+        P = parent(x)
+        try:
+            identity = P.one() if mul else P.zero()
+        except AttributeError:
+            identity = x ** 0 if mul else x * 0
+        return identity, (_operator.inv if mul else _operator.neg), (_operator.mul if mul else _operator.add)
+    if identity is None or inverse is None or op is None:
+        raise ValueError("identity, inverse and operation must all be specified "
+                         "when operation is neither addition nor multiplication")
+    return identity, inverse, op
+
+
+def _dl_multiple(x, n, identity, inverse, op):
+    """x^n (or n*x) in the group given by op, by repeated squaring."""
+    n = int(n)
+    if op is _operator.mul:
+        return x ** n
+    if op is _operator.add:
+        return n * x
+    if n == 0:
+        return identity
+    if n < 0:
+        x, n = inverse(x), -n
+    r = None
+    while n:
+        if n & 1:
+            r = x if r is None else op(r, x)
+        n >>= 1
+        if n:
+            x = op(x, x)
+    return r
+
+
+def bsgs(a, b, bounds, operation="*", identity=None, inverse=None, op=None):
+    """The least i in bounds = (lb, ub) with a^i = b (or i*a = b), by
+    baby-step giant-step; ported from Sage's sage.groups.generic.bsgs.
+
+    EXAMPLES::
+
+        sage: bsgs(Mod(2, 101), Mod(16, 101), (0, 100))
+        4
+        sage: bsgs(Mod(3, 101), Mod(21, 101), (0, 100), operation='+')
+        7
+        sage: bsgs(Mod(2, 101), Mod(16, 101), (10, 20))
+        Traceback (most recent call last):
+        ...
+        ValueError: no solution in bsgs()
+    """
+    identity, inverse, op = _dl_group(a, operation, identity, inverse, op)
+    if bounds is None:
+        raise TypeError("cannot unpack non-iterable NoneType object")
+    lb, ub = bounds
+    lb, ub = Integer(lb), Integer(ub)
+    if lb < 0 or ub < lb:
+        raise ValueError("bsgs() requires 0<=lb<=ub")
+    if a == identity and b != identity:
+        raise ValueError("no solution in bsgs()")
+    ran = 1 + ub - lb
+    c = op(inverse(b), _dl_multiple(a, lb, identity, inverse, op))
+    if ran < 30:
+        d = c
+        for i0 in range(ran):
+            if identity == d:
+                return lb + i0
+            d = op(a, d)
+        raise ValueError("no solution in bsgs()")
+    m = _math.isqrt(ran) + 1
+    table = {}
+    d = c
+    for i0 in range(m):
+        if identity == d:
+            return lb + i0
+        table[d] = lb + i0
+        d = op(d, a)
+    c = op(c, inverse(d))
+    d = identity
+    for i in range(m):
+        j = table.get(d)
+        if j is not None:
+            return i * m + j
+        d = op(c, d)
+    raise ValueError("log of %s to the base %s does not exist in %s" % (b, a, bounds))
+
+
+def discrete_log(a, base, ord=None, bounds=None, operation="*", identity=None, inverse=None, op=None,
+                 algorithm="bsgs", *, verify=True):
+    """An integer n with base^n = a (or n*base = a): Pohlig-Hellman over the
+    factorization of ord (default: the order of base), each prime-order
+    digit by baby-step giant-step; ported from Sage's
+    sage.groups.generic.discrete_log, so bounds, a non-multiple ord and the
+    errors behave as Sage's.  The result is reduced modulo ord.  (The
+    'rho' and 'lambda' algorithms are accepted and solve each digit by
+    baby-step giant-step: the digit is the same.)
+
+    EXAMPLES::
+
+        sage: p = 1019; g = Mod(2, p); discrete_log(Mod(5, p), g)
+        10
+        sage: [discrete_log(Mod(l, p), g) for l in prime_range(20)]
+        [1, 958, 10, 363, 756, 289, 48, 542]
+        sage: discrete_log(Mod(21, 101), Mod(3, 101), operation='+')
+        7
+        sage: discrete_log(Mod(16, 101), Mod(2, 101), bounds=(50, 300))
+        4
+        sage: discrete_log(Mod(3, 7), Mod(6, 7))
+        Traceback (most recent call last):
+        ...
+        ValueError: no discrete log of 3 found to base 6
+        sage: discrete_log(Mod(16, 101), Mod(2, 101), bounds=(10, 20))
+        Traceback (most recent call last):
+        ...
+        ValueError: no discrete log of 16 found to base 2 with bounds (10, 20)
+    """
+    identity, inverse, op = _dl_group(a, operation, identity, inverse, op)
+    mult = op
+
+    def power(x, n):
+        return _dl_multiple(x, n, identity, inverse, op)
+
+    original_a = a
+    if bounds:
+        lb, ub = map(Integer, bounds)
+    if ord is None:
+        if op is _operator.add:
+            ord = base.additive_order()
+        elif op is _operator.mul:
+            if isinstance(base, int):
+                ord = 1 if base == 1 else (2 if base == -1 else Infinity)
+            else:
+                ord = base.multiplicative_order()
+        else:
+            raise ValueError("ord must be specified when operation is neither addition nor multiplication")
+    elif ord != Infinity:
+        ord = Integer(ord)
+    try:
+        if ord == Infinity:
+            if algorithm in ("bsgs", "lambda"):
+                return bsgs(base, a, bounds, identity=identity, inverse=inverse, op=op, operation="other")
+            if algorithm == "rho":
+                raise ValueError("pollard rho algorithm does not work with infinite order elements")
+            raise ValueError("unknown algorithm %s" % algorithm)
+        ord = int(ord)
+        if base == power(base, 0) and a != base:
+            raise ValueError
+        f = list(factor(ord)) if ord > 1 else []
+        l = [0] * len(f)
+        mods = []
+        running_mod = 1
+        offset = 0
+        if bounds:
+            a = mult(a, power(base, -lb))
+            offset = lb
+            bound = ub - lb
+        i = -1
+        for i, (pi, ri) in enumerate(f):
+            gamma = power(base, ord // pi)
+            while gamma == power(gamma, 0) and ri > 0:
+                ord //= pi
+                ri -= 1
+                gamma = power(base, ord // pi)
+            if not bounds:
+                bound = ord - 1
+            running_bound = min(bound, pi ** ri - 1)
+            j = -1
+            for j in range(ri):
+                temp_bound = min(running_bound, pi - 1)
+                h = power(mult(a, power(base, -l[i])), ord // pi ** (j + 1))
+                if algorithm not in ("bsgs", "rho", "lambda"):
+                    raise ValueError("unknown algorithm %s" % algorithm)
+                c = bsgs(gamma, h, (0, temp_bound), identity=identity, inverse=inverse, op=op, operation="other")
+                l[i] += c * pi ** j
+                running_bound //= pi
+                running_mod *= pi
+                if running_mod > bound:
+                    break
+            mods.append(pi ** (j + 1))
+            if running_mod > bound:
+                break
+        l = l[:i + 1]
+        result = (crt(l, mods) + offset) % ord if l else offset % ord
+        if verify and power(base, result) != original_a:
+            raise ValueError
+        return Integer(result)
+    except ValueError:
+        with_bounds = " with bounds %s" % (bounds,) if bounds else ""
+        raise ValueError("no discrete log of %s found to base %s%s" % (original_a, base, with_bounds)) from None
+
+
+discrete_log_generic = discrete_log
+__all__ += ["bsgs", "discrete_log", "discrete_log_generic"]
 
 
 def inverse_mod(a, m):
@@ -2896,6 +3321,24 @@ def srange(start, stop=None, step=1):
         out.append(x)
         x = x + step
     return out
+
+
+def xsrange(start, stop=None, step=1):
+    """srange as an iterator (a generator, as in Sage), for loops that shouldn't build a list.
+
+    EXAMPLES::
+
+        sage: list(xsrange(10, 20)), list(xsrange(11, 31, 2)), list(xsrange(5)), list(xsrange(10, 0, -3))
+        ([10, 11, 12, 13, 14, 15, 16, 17, 18, 19], [11, 13, 15, 17, 19, 21, 23, 25, 27, 29], [0, 1, 2, 3, 4], [10, 7, 4, 1])
+    """
+    if stop is None:
+        start, stop = 0, start
+    if step == 0:
+        raise ValueError("step must not be 0")
+    x = start
+    while (x < stop) if step > 0 else (x > stop):
+        yield x
+        x = x + step
 
 
 def prod(x, z=None, recursion_cutoff=5):

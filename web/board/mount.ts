@@ -36,6 +36,7 @@
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
+import { boardFileText } from "./file-text";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
@@ -129,6 +130,9 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** an edit made on this page changed the board's title (never a change from elsewhere, nor a load): the board page
+   * renames its file to follow (William's B2) */
+  titleEdited?(title: string): void;
   /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
    * key is left to the browser, as on a page that is itself a saved board
    * (an exported file), whose ⋯ menu still downloads it again */
@@ -1259,6 +1263,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the document as shown: its pictures' bytes are kept apart, by the
     // host's images; not kept, said, HARD-7F9-1)
     try { host.store?.save(doc!); unkept = null; } catch (e: any) { unkept = e; say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
+    if (!unkept && (prev?.title ?? "") !== (doc!.title ?? "")) host.titleEdited?.(doc!.title ?? "");
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
@@ -1559,7 +1564,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("download").onclick = async () => {
     const a = document.createElement("a");
     // (with its pictures)
-    a.href = URL.createObjectURL(new Blob([canonical(await images.inline(doc!))], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([await boardFileText(doc!, images)], { type: "application/json" }));
     a.download = fileName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -2359,7 +2364,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** the document as a file carries it: with its pictures (data: URLs) */
       portable: () => images.inline(doc!),
       /** the board's file (foo.board.json), as Download JSON writes it */
-      json: async () => canonical(await images.inline(doc!)),
+      json: async () => boardFileText(doc!, images),
       /** the board as a JSON Canvas (Download JSON Canvas), and what that left out, in words */
       canvas: () => canvasText(),
       /** the page shown as a Mermaid flowchart (with `all`, every page, as Markdown), and what that left out, in words */

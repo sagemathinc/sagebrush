@@ -1,3 +1,4 @@
+// ci: web-browser/board-b order=40
 // Code items on a board (web/board/code.ts): examples/live.json runs, in
 // reading order, reactively; outputs show in their items, which grow to hold
 // them; editing (the agent API, and the code editor: double-click, then

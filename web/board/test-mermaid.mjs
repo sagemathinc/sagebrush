@@ -1,3 +1,4 @@
+// ci: inline (ci.yml)
 // Differential test of web/board/mermaid.ts against Mermaid itself: every
 // flowchart in a corpus is parsed by both (Mermaid's parser in headless
 // Chromium, CHROME=...), and the nodes, edges (ends, labels, line style)

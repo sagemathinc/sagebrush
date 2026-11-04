@@ -1,3 +1,4 @@
+// ci: web-runner order=10 chrome
 // The runner (design/runner.md) in headless Chromium: the notebook page runs
 // Python in an opaque-origin sandboxed frame (?runner=0: in a plain worker,
 // where NO_RUNNER=1 checks that these tests fail).  Checks that code
@@ -48,9 +49,15 @@ const FALLBACK = /the runner did not start/;
 const FALLBACK_TEXT = "sagebrush: the runner did not start; Python runs in a plain worker";
 let phase = "main";
 let mainFrameId, stuckCtx, lastRunnerFrameId;
+// (the library chunks the page fetches, web/lib-chunks.mts: lib/<group>.src.<hash>.json)
+const libFetched = [];
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
   if (m.method === "Fetch.requestPaused") paused?.(m.params);
+  if (m.method === "Network.requestWillBeSent") {
+    const g = /\/lib\/([a-z0-9][a-z0-9-]*)\.src\.[0-9a-f]{16}\.json$/.exec(new URL(m.params.request.url, "http://x").pathname);
+    if (g) libFetched.push(g[1]);
+  }
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.executionContextCreated") contexts.push({ ...m.params.context, sessionId: m.sessionId });
   if (m.method === "Runtime.executionContextDestroyed") for (const c of contexts) if (c.id === m.params.executionContextId && c.sessionId === m.sessionId) c.gone = true;
@@ -346,6 +353,7 @@ try {
   selectorFixtures();
   await send("Runtime.enable");
   await send("Log.enable");
+  await send("Network.enable");
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   const ft = await sendWithin(5000, "Page.getFrameTree", "Page.getFrameTree");
   mainFrameId = ft.result?.frameTree?.frame?.id;
@@ -375,6 +383,17 @@ try {
   // checked against the registry, src/compile.ts)
   const ec = (await run("EllipticCurve('11a1').ainvs()")).trim();
   ok(ec === "(0, -1, 1, -10, -20)", "a package's module imports (Cremona's table, @sagebrush/cremona-small): " + ec);
+  // (elliptic curves over GF(p), lib/_sage_ec_ff.py, are their own chunk,
+  // mod-sage-ec-ff: Sage's start and another Sage extra fetch none of it (a
+  // symbolic matrix's determinant, lib/_sage_matrix_sr.py in sage-more); the
+  // first curve over GF(p) fetches it once and gives Sage's answer; the
+  // expected lines are SageMath 10.9's output of the same statements)
+  const ecFetches = () => libFetched.filter((g) => g === "mod-sage-ec-ff").length;
+  const moreBefore = libFetched.filter((g) => g === "sage-more").length;
+  const det = (await run("var('t'); print(matrix(SR, [[t, 1], [1, t]]).det())")).trim();
+  ok(det === "t^2 - 1" && libFetched.filter((g) => g === "sage-more").length > moreBefore && ecFetches() === 0, "another Sage extra (sage-more) fetches no mod-sage-ec-ff: " + JSON.stringify([det, libFetched]));
+  const ff = (await run("E = EllipticCurve([Mod(7, 11), Mod(2, 11)]); print(E.order(), E((8, 3)))")).trim();
+  ok(ff === "7 (8 : 3 : 1)" && ecFetches() === 1, "an elliptic curve over GF(p) fetches mod-sage-ec-ff, once, and gives Sage's answer: " + JSON.stringify([ff, libFetched]));
 
   // Stop: a KeyboardInterrupt that keeps the variables (if the frame is cross-origin isolated)
   await run("kept = 42");

@@ -1832,7 +1832,9 @@ async function durabilityResetManySmall() {
     const ms = performance.now() - t0;
     W.RESET_HOOK.afterPage = undefined;
     check(pages.length === N / W.RESET_PAGE && pages.every((n) => n <= W.RESET_PAGE), `200,000 small versions: ${W.RESET_PAGE} a page (${pages.length} pages)`);
-    check(ms < 60000, `…the whole reset done in under a minute (${Math.round(ms)} ms)`);
+    // (under history's census guard (HISTORY_GUARD=1) every write is shadowed, so this time is the guard's: reported, not
+    // judged there; the unguarded run of this suite judges it)
+    check(ms < 60000 || !!window.__historyGuard, `…the whole reset done in under a minute (${Math.round(ms)} ms${window.__historyGuard ? ", guarded: not judged" : ""})`);
     check(progress > 0, `…its progress told meanwhile (${progress} records removed at a notice)`);
     w.close();
   }
@@ -2853,6 +2855,8 @@ async function rowWords() {
     remoteBoard: W.fileRowMeta({ path: "/b.board.json", kind: "board", ref: "bd-there", created: 1, updated: 1, remote: true }, here),
     remoteBoardHere: W.fileRowMeta({ path: "/b.board.json", kind: "board", ref: "bd-here", created: 1, updated: 1, remote: true }, here),
     remoteFile: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3, remote: true }, here),
+    remoteFileFailing: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3, remote: true, fetchFailed: { why: "the files server answered 403", at: 1 } }, here),
+    remoteFileApart: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3, remote: true, fetchFailed: { why: "too large to sync", at: 1, final: true } }, here),
     ownFile: W.fileRowMeta({ path: "/f.txt", kind: "file", ref: "/f.txt", created: 1, updated: 1, size: 3 }, here),
     ownMissing: W.fileRowMeta({ ...nb, missing: true }, here),
     renamed: W.fileRowMeta({ ...nb, ref: "nb-here", path: "/a (2).ipynb", renamed: { from: "/a.ipynb", to: "/a (2).ipynb" } }, here),
@@ -2861,6 +2865,7 @@ async function rowWords() {
   check(words.remoteNotebook === "on another device" && words.remoteBoard === "on another device" && words.remoteFile === "on another device", "another device's notebook, board and file, their content not here: \"on another device\", never \"missing\": " + J(words));
   check(words.remoteNotebookHere === "Sage" && words.remoteBoardHere === "" && words.ownFile === "3 B", "…with their content here (or this device's own): the usual words: " + J(words));
   check(words.ownMissing === "missing", "this device's own whose contents aren't found: \"missing\" as before");
+  check(words.remoteFileFailing === "download failed, retrying" && words.remoteFileApart === "not downloaded: too large to sync", "another device's file whose download fails: said, never \"on another device\" in silence (B5): " + J([words.remoteFileFailing, words.remoteFileApart]));
   check(words.renamed === "(renamed)" && words.renamedMovedOn === "Sage", "this device's own renamed by the server's index: \"(renamed)\" while it stays at that name, not once it has moved on: " + J(words));
   const sums = [W.listedSummary({ count: 3, renamed: 1, paths: [] }), W.listedSummary({ count: 1, renamed: 1, paths: [] }), W.listedSummary({ count: 2, paths: [] })];
   check(sums[0] === "2 items sync kept aside; 1 item renamed (another device has one with the name)" && sums[1] === "1 item renamed (another device has one with the name)" && sums[2] === "2 items sync kept aside", "the Sync panel counts renamed ones apart from those kept aside (N-AD-2): " + J(sums));

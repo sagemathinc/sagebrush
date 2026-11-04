@@ -5,8 +5,12 @@
 //    head), so styles carry over; list items keep their explicit labels (span.lbl: the list CSS has no counters);
 //  - a paragraph div.p is split at the boundaries between its inline runs, each later piece a div.p.cont;
 //  - a table is never split (its columns would misalign): over PIECE_MAX it is a placeholder, with its size;
+//  - nor a beamer slide (section.slide: a box of fixed size), the same way, its placeholder still that slide (its own
+//    open tag: Present and the tools find every frame);
 //  - anything that can't be split into pieces of PIECE_MAX or less (one inline element, one cell, one formula), and
 //    any chunk over CHUNK_MAX, is a placeholder saying so, with its size.
+// A piece's size against PIECE_TARGET and PIECE_MAX leaves out the data: URLs of its images' src (a \sageplot's SVG,
+// sagetex.mjs): one attribute value, read in one pass, not markup to parse; CHUNK_MAX counts every byte.
 // The input is the renderer's own HTML: well formed, every text escaped (no raw "<" in text), attributes quoted.
 export const PIECE_MAX = 128 * 1024, CHUNK_MAX = 2 * 2 ** 20;
 // (the size aimed for: smaller pieces parse in less time each; PIECE_MAX stays the most any piece may be)
@@ -14,10 +18,22 @@ export const PIECE_TARGET = 32 * 1024;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const enc = new TextEncoder();
 export const bytes = (s: string) => enc.encode(s).length;
+/** The UTF-8 size less the data: URLs in img src attributes (ASCII: one byte a character). */
+export function weight(s: string): number {
+  let n = bytes(s);
+  for (const m of s.matchAll(/<img\s[^>]*?\ssrc="(data:[^"]*)"/g)) n -= m[1].length;
+  return n;
+}
 const kib = (n: number) => Math.ceil(n / 1024) + " KiB";
 
 export function placeholder(why: string, size: number): string {
   return '<div class="placeholder toolarge">[' + why + " (" + kib(size) + ")]</div>";
+}
+
+/** latex check's problem (check.ts, kind "toolarge") for a chunk splitChunk showed as a placeholder: why, its size
+ * and the limit it is over, at the chunk's source offset. */
+export function tooLargeProblem(why: string, size: number, at: number | undefined): { kind: string; name: string; at: number } {
+  return { kind: "toolarge", name: why.replace(/ to display in the prototype$/, "") + " (" + kib(size) + ", over " + kib(size > CHUNK_MAX ? CHUNK_MAX : PIECE_MAX) + ")", at: typeof at === "number" ? at : -1 };
 }
 
 type Node = { start: number; end: number };
@@ -70,38 +86,46 @@ function splitText(t: string, max: number): string[] | null {
   return out;
 }
 
-/** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder). */
-export function splitChunk(h: string): string[] {
-  const n = bytes(h);
-  if (n <= PIECE_TARGET) return [h];
-  if (n > CHUNK_MAX) return [placeholder("this block is too large to display in the prototype", n)];
+/** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder: `tooLarge`, if given, is told why and its
+ * size, for latex check). */
+export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void): string[] {
+  const n = bytes(h), w = weight(h);
+  const ph = (why: string, open = "", close = "") => { tooLarge?.(why, n); return [open + placeholder(why, n) + close]; };
+  if (w <= PIECE_TARGET && n <= CHUNK_MAX) return [h];
+  if (n > CHUNK_MAX) {
+    // (a slide over it too keeps its own open tag, found without parsing it all: every frame still a slide)
+    const so = /^<section\s[^>]*?\bclass="(?:[^"]*\s)?slide(?:\s[^"]*)?"[^>]*>/.exec(h.slice(0, 4096));
+    return so && h.endsWith("</section>") ? ph("this slide is too large to display in the prototype", so[0], "</section>") : ph("this block is too large to display in the prototype");
+  }
   const o = outer(h);
-  if (!o) return [placeholder("this block is too large to display in the prototype", n)];
+  if (!o) return ph("this block is too large to display in the prototype");
   const cls = (/\sclass="([^"]*)"/.exec(o.open) || [])[1] || "";
-  if (o.tag === "table" || /\btabular\b/.test(cls) || o.kids.some((k) => /^<table\b/.test(h.slice(k.start, k.end)) && bytes(h.slice(k.start, k.end)) > PIECE_MAX))
-    return n <= PIECE_MAX ? [h] : [placeholder("this table is too large to display in the prototype", n)];
+  // (a beamer slide neither: it is one box of a fixed size, and its pieces would each be a slide)
+  if (o.tag === "section" && /\bslide\b/.test(cls)) return w <= PIECE_MAX ? [h] : ph("this slide is too large to display in the prototype", o.open, o.close);
+  if (o.tag === "table" || /\btabular\b/.test(cls) || o.kids.some((k) => /^<table\b/.test(h.slice(k.start, k.end)) && weight(h.slice(k.start, k.end)) > PIECE_MAX))
+    return w <= PIECE_MAX ? [h] : ph("this table is too large to display in the prototype");
   const para = o.tag === "div" && /(^|\s)p(\s|$)/.test(cls);
   // the children, a text run split further where it is itself too large (a paragraph's long text)
   const parts: string[] = [];
   for (const k of o.kids) {
     const s = h.slice(k.start, k.end);
-    const b = bytes(s);
+    const b = weight(s);
     if (b <= PIECE_TARGET - 256) { parts.push(s); continue; }
-    if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return [placeholder("this block is too large to display in the prototype", n)]; parts.push(...t); continue; }
+    if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return ph("this block is too large to display in the prototype"); parts.push(...t); continue; }
     // (one element over the target: a piece of its own, if it fits the maximum)
     if (b <= PIECE_MAX - 256) { parts.push(s); continue; }
-    return [n <= PIECE_MAX ? h : placeholder("this block is too large to display in the prototype", n)].filter(Boolean) as string[];
+    return w <= PIECE_MAX ? [h] : ph("this block is too large to display in the prototype");
   }
   const first = o.open, later = contOpen(o.open, o.tag);
   // (byte counts kept as it goes: linear in the chunk)
   const pieces: string[] = []; let cur: string[] = [], cn = 0;
   const flush = () => { if (cur.length) pieces.push((pieces.length ? later : first) + cur.join("") + o.close); cur = []; cn = 0; };
   for (const s of parts) {
-    const b = bytes(s);
+    const b = weight(s);
     if (cur.length && cn + b + 256 > PIECE_TARGET) flush();
     cur.push(s); cn += b;
   }
   flush();
   void para;
-  return pieces.every((p) => bytes(p) <= PIECE_MAX) ? pieces : [placeholder("this block is too large to display in the prototype", n)];
+  return pieces.every((p) => weight(p) <= PIECE_MAX) ? pieces : ph("this block is too large to display in the prototype");
 }

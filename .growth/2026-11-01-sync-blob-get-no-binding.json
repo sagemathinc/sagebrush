@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "#448, B5: the blob GET sends no binding headers (every download failed across the 303's CORS), and a failed download notes why on its entry (fetchFailed), said on the Files row; web/workspace's client code is embedded in the CLI bundle. Figures: CI attempt 1 (run 41354558497, size-gate job 124993012732) measured cli/pyjs.cjs +1116 B; re-measured locally with CI's build order (pnpm run build, build-cli, bun 1.4.4 web/build.ts, build-cli) and scripts/size-measure.mjs --record: master 0cdfa151 25169682 B, this head 25170798 B, +1116 B; the allowance a little above, within growth + 1024",
+ "bytes": {
+  "cli/pyjs.cjs": 1250
+ }
+}

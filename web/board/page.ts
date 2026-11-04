@@ -59,14 +59,14 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
-import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
+import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG;
 // that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
-import { uploadFiles, openableAs, convertCopy, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { mountBrowser } from "../workspace/browser";
@@ -81,6 +81,7 @@ import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "..
 declare const __SB_NO_SYNC__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
+import { latexOn } from "../latex/boot";
 // (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
 // board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
 // fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
@@ -303,6 +304,12 @@ function takeConverted(id: string): string {
 // copy, made beside it, opened, the file left as it is; one replaced
 // meanwhile (another fid), or that isn't a board, said, nothing made
 let openAsFailed = "";
+// (a Jupytext MyST .md sent here (agents-ui's N-2): its notice offers the notebook page, by a link focused once shown)
+let offerNotebook = false;
+// the notebook page's address that opens a workspace file as a notebook (index.html ?openas)
+const asNotebook = (e: { path: string; fid: string }) => "/?openas=" + encodeURIComponent(e.path) + "&fid=" + encodeURIComponent(e.fid);
+// (a name as Markdown text: its marks escaped)
+const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
 {
   const at = q.get("openas"), fid = q.get("fid");
   if (at !== null && !embedded()) {
@@ -314,7 +321,12 @@ let openAsFailed = "";
       if (!e || e.kind !== "file" || e.fid !== fid) throw new Error(`"${at}" isn't there any more`);
       const made = await convertedAsBoard(ws, e, "python");
       q.set("doc", "local:" + made.ref);
-    } catch (err) { openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`; }
+    } catch (err) {
+      if (err instanceof MystNotebookError && fid !== null) {
+        openAsFailed = `**"${mdText(nameOf(at))}" is a Jupytext MyST notebook,** so no board was made from it. [Open it as a notebook](<${asNotebook({ path: at, fid })}>)`;
+        offerNotebook = true;
+      } else openAsFailed = `**"${nameOf(at)}" couldn't be opened as a board:** ${String((err as Error)?.message ?? err)}`;
+    }
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
@@ -672,6 +684,48 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 // view is kept: the board journal's load bridge)
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
+// A board's title is its file's name, as a notebook's is (William's B2, the notebook page's wsRenameSoon): a title
+// changed by an edit on this page (mount.ts titleEdited; never a change from elsewhere) renames its file in the workspace, after the saves before it, to a free name beside it (never over
+// another), only this board (its identity checked holding the lock). A rename in the file browser retitles the board
+// instead (renamed, below), which then matches its file and renames nothing.
+let boardRenameTimer: ReturnType<typeof setTimeout> | undefined, boardRenameGen = 0;
+function boardRenameSoon(id: string, title: unknown) {
+  clearTimeout(boardRenameTimer);
+  const gen = ++boardRenameGen, base = safeTitle(title);
+  boardRenameTimer = setTimeout(async () => {
+    const w = ws;
+    if (!w) return;
+    // (a conflict: the board written, moved or replaced since it was read; asked again from the start, at most three
+    // times, so a save of this page's own in between still renames, and another's newer title renames nothing)
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        await wsWriting;
+        if (gen !== boardRenameGen) return;
+        const from = await w.pathOf("board", id);
+        if (!from || splitExt(nameOf(from))[0] === base) return;
+        const e = await w.stat(from);
+        if (!e || e.kind !== "board" || e.ref !== id) return;
+        // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
+        // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence.  Its revision is
+        // the rename's too, checked holding the lock: anything written after this read stops it, astra's BOARD-RENAME-1)
+        const now = await w.read(from).catch(() => null);
+        if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
+        const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
+        const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
+        if (!to || to === from) return;
+        // (tests: a write between the read and the rename)
+        await (globalThis as any).__SB_BOARD_TEST__?.beforeRename?.(from);
+        await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created, rev: now.rev } });
+        return;
+      } catch (err: any) {
+        if (err?.code === "conflict") continue;
+        // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
+        if (err?.code !== "missing" && err?.code !== "exists") console.warn("workspace: a board's rename:", err);
+        return;
+      }
+    }
+  }, 800);
+}
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
   // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
   if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
@@ -922,6 +976,16 @@ const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
 // (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
+// (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
+// notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
+// open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+function openTex(e: Entry, tab: boolean): boolean {
+  if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
+  const url = "/?tex=" + e.fid;
+  if (tab) window.open(url, "_blank", "noopener");
+  else void leaveFor(url, nameOf(e.path));
+  return true;
+}
 function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
@@ -1042,7 +1106,8 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
     carryNotice(refused ? said + refused : "");
     openEntry(e, "here");
   } else if (single && r.kept.length === 1 && !r.made.length) {
-    const e = r.kept[0], as = openableAs(nameOf(e.path)), name = nameOf(e.path);
+    // (a Jupytext MyST .md is a notebook by its first 4 KiB: web/notebook/myst.js)
+    const e = r.kept[0], name = nameOf(e.path), as = openableAsFile(name, /\.md$/i.test(name) ? await blobHead(files[0]) : null);
     if (as && confirm(`Open "${name}" as a ${as}?\n\nA converted copy, "${splitExt(name)[0]}${as === "board" ? ".board.json" : ".ipynb"}", is made beside it; "${name}" stays as it is.`)) {
       const err = await openAsHere(w, e, as, mode);
       if (err) return `${said}${refused}. **"${name}" couldn't be opened as a ${as}:** ${err}`;
@@ -1052,8 +1117,10 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
 }
 // (a data file opened as a document: its converted copy, made beside it, opened; the original stays; why not, if not)
 async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Promise<string | null> {
+  // (a Jupytext MyST .md as a notebook: the notebook page reads it, which this page's bundle doesn't carry the reader for)
+  if (as === "notebook" && /\.md$/i.test(e.path)) { location.assign(asNotebook(e as { path: string; fid: string })); return null; }
   try {
-    const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode });
+    const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode, said: (m) => carryNotice(m) });
     openEntry(made, "here");
     return null;
   } catch (err) { return String((err as Error)?.message ?? err); }
@@ -1092,12 +1159,13 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
-        // (listed from another device, its content not here yet (sync brings it): nothing to show or write; said, with
-        // the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
+        // (listed from another device, its content not here: boards' contents don't sync (board/journal.ts sync.on false),
+        // so it won't arrive, and the page says so, not that it's on its way (William's M9 (g)); nothing to show or
+        // write; said, with the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
         const entry = path ? await ws.stat(path).catch(() => undefined) : undefined;
         if (path && entry?.remote) {
-          const why = "**This board's content isn't in this browser yet.** It's in your files from another device, and it appears here once sync brings it; until then it can't be shown or changed here.";
-          blockBoard(new Error(`${path}'s content isn't in this browser yet`), why, "This board's content isn't in this browser yet.");
+          const why = "**This board was made on another device.** Boards don't sync yet, so its content isn't in this browser and it can't be opened here. Open it on the device that made it.";
+          blockBoard(new Error(`${path}'s content isn't in this browser: boards don't sync yet`), why, "This board was made on another device. Boards don't sync yet.");
           return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
         }
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
@@ -1338,6 +1406,9 @@ const host: BoardHost = {
     return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (a title changed by an edit on this page: its file renamed to follow; a change from elsewhere, an agent's write
+  // or another tab's, is never a rename: CI on #531)
+  titleEdited: (t) => { if (local && ws) boardRenameSoon(source.slice(6), t); },
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language
@@ -1399,6 +1470,12 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// (N-2's offer focused once the caption shows it)
+if (offerNotebook) {
+  let tries = 0;
+  const focusOffer = () => { const a = document.querySelector<HTMLAnchorElement>('a[href^="/?openas="]'); if (a) a.focus(); else if (++tries < 50) setTimeout(focusOffer, 100); };
+  focusOffer();
+}
 // (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
 // workspace/agent-ui.ts)
 if (ws && (q.has("agents") || pairLink())) mountAgentPairing(ws, { button: floatingButton() });
@@ -1513,9 +1590,26 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
+      openFile: openTex,
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
+      // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
+      exportUrl: (f) => new URL("/" + f, location.href).href,
+      // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
+      // what is being written kept, every save made, a refused save said, never a second writer (astra's E1-A5))
+      saveOpen: async () => {
+        for (let i = 0; ; i++) {
+          await mounted.keepWriting();
+          let late: ReturnType<typeof setTimeout> | undefined;
+          const saved = await Promise.race([wsFlush().then(() => true), new Promise<boolean>((r) => (late = setTimeout(() => r(false), DEPART_MS)))]);
+          clearTimeout(late);
+          if (!saved) throw new Error("this board's last changes are still being saved (your files are busy); try again in a moment");
+          if (local && ws && wsRefused) throw new Error(`this board's last changes aren't kept in your files (${String(wsRefused.message).slice(0, 200)}), so it isn't exported as it is now`);
+          if (!mounted.writing()) return;
+          if (i >= 9) throw new Error("this board is still being written; try again in a moment");
+        }
+      },
       // (this board renamed here: its title follows, saved by this page as
       // its other changes are, never written beside them: CORR-0B0-2)
       retitles: (e) => e.kind === "board" && e.ref === source.slice(6),

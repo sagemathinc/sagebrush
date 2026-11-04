@@ -1,3 +1,4 @@
+// ci: web-browser/board-unit.2 order=80 runner=bun
 // Edges between neighbours (route.ts; friction 14): an edge straight across
 // from one box to the next, as between neighbours in a grid's row or a
 // column, stays straight when other edges share its side, those spread
