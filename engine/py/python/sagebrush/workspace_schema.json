@@ -425,7 +425,7 @@
       }
     },
     "workspace.git_status": {
-      "description": "Where your branch stands: open, review, accepted or rejected, the person's note, and whether main moved on since it began. Without name, every branch.",
+      "description": "Where your branch stands: open, review, accepted, partly-accepted or rejected; each file's decision (accepted or rejected, with the person's reason); their note; whether main moved on since it began. After a partial accept or a reject the branch is still yours: fix the rest and commit with review: true again. Without name, every branch.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -436,6 +436,27 @@
           }
         },
         "required": [],
+        "additionalProperties": false
+      }
+    },
+    "workspace.git_wait": {
+      "description": "Wait for the person's decision on your branch (it asks for review): returns as soon as they accept or reject, or after seconds (at most 50; call again to keep waiting), with what git_status says.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+          },
+          "seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "name"
+        ],
         "additionalProperties": false
       }
     }

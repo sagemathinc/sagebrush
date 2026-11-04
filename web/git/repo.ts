@@ -28,7 +28,9 @@ const enc = new TextEncoder(), dec = new TextDecoder();
 
 export type Files = Map<string, Uint8Array>; // relative path -> canonical bytes
 export type Who = { name: string; email?: string };
-export type BranchState = { name: string; status: "open" | "review" | "accepted" | "rejected"; base: string; title?: string; note?: string; updated: number };
+/** One file's decision at the person's last review: accepted into main, or rejected, with the person's reason. */
+export type FileDecision = { decision: "accepted" | "rejected"; reason?: string };
+export type BranchState = { name: string; status: "open" | "review" | "accepted" | "partly-accepted" | "rejected"; base: string; title?: string; note?: string; files?: Record<string, FileDecision>; decided?: number; updated: number };
 
 let ready: Promise<void> | undefined;
 export function init(): Promise<void> {

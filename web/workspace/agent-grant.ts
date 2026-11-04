@@ -28,7 +28,7 @@ export type Grant = {
   lastUsed: number;
 };
 
-const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version", "workspace.git_status"]);
+const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version", "workspace.git_status", "workspace.git_wait"]);
 const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore", "workspace.git_branch", "workspace.git_commit"]);
 
 /** A path as normPath makes it, or null if it isn't one. */
@@ -120,7 +120,7 @@ export async function authorize(method: string, params: any, g: Grant | null, no
       outArg.expect = e;
       return null;
     }
-    case "workspace.git_branch": case "workspace.git_commit": case "workspace.git_status": {
+    case "workspace.git_branch": case "workspace.git_commit": case "workspace.git_status": case "workspace.git_wait": {
       // (PROTOTYPE git-proto: an agent's branch is its worktree folder)
       const p = norm(params.name ? `/Branches/${params.name}` : "/Branches");
       return inGrant(p, folders) ? null : out(p);

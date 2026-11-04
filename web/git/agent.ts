@@ -5,8 +5,11 @@
 //   git_branch {name}                    a branch agent/<name> from main's last commit, and its worktree
 //                                        /Branches/<name>/ filled with main's committed files
 //   git_commit {name, message, review?}  a commit of the worktree on agent/<name>; review: true asks the person
-//   git_status {name?}                   where the branch stands: open, review, accepted or rejected, and the
-//                                        person's note; whether main moved on since the branch began
+//   git_status {name?}                   where the branch stands: open, review, accepted, partly-accepted or
+//                                        rejected; each file's decision with the person's reason; their note;
+//                                        whether main moved on since the branch began
+//   git_wait {name, seconds?}            waits (at most 50 s a call) until the person decides on a branch that asks
+//                                        for review, then says what git_status says
 
 import * as R from "./repo";
 
@@ -35,18 +38,30 @@ export async function gitVerb(verb: string, p: any, ws: any, actor: string): Pro
     case "git_commit": {
       const st = (await R.states())[name!];
       if (!st || !(await R.head(ref!))) throw fail("missing", `no branch ${ref}: call workspace_git_branch first`);
-      if (st.status === "accepted" || st.status === "rejected") throw fail("invalid", `${ref} was ${st.status}: start a new branch`);
+      if (st.status === "accepted") throw fail("invalid", `${ref} was accepted whole: start a new branch for new work`);
       const files = await R.snapshot(ws, tree!);
       const oid = await R.commit(ref!, files, p.message, { name: actor });
       const changes = R.diff(await R.filesAt(st.base), files).map((c) => ({ path: "/" + c.path, kind: c.kind }));
       if (p.review) await R.setState(name!, { status: "review", title: String(p.message).split("\n")[0].slice(0, 200) });
+      else if (st.status !== "open" && st.status !== "review") await R.setState(name!, { status: "open" });
       return { branch: ref, commit: oid ?? (await R.head(ref!)), unchanged: oid === null, changes, review: !!p.review || st.status === "review", next: p.review ? "The person was asked to review it on the Git page. Call workspace_git_status to learn what they decided." : "Commit again with review: true when it's ready." };
     }
     case "git_status": {
       const all = await R.states(), main = await R.head("main");
-      const one = async (n: string) => { const s = all[n]; return { branch: "agent/" + n, status: s.status, title: s.title, note: s.note, head: await R.head("agent/" + n), base: s.base, mainMovedOn: !!main && main !== s.base, updated: new Date(s.updated).toISOString() }; };
+      const one = async (n: string) => { const s = all[n]; return { branch: "agent/" + n, status: s.status, title: s.title, note: s.note, files: s.files, decided: s.decided ? new Date(s.decided).toISOString() : undefined, head: await R.head("agent/" + n), base: s.base, mainMovedOn: !!main && main !== s.base, updated: new Date(s.updated).toISOString(), ...(s.status === "partly-accepted" || s.status === "rejected" ? { next: `The branch is still yours: change the files the person didn't take (see files, with their reasons) in ${R.BRANCHES}/${n}/, then commit with review: true.` } : {}) }; };
       if (name) { if (!all[name]) throw fail("missing", `no branch agent/${name}`); return await one(name); }
       return { main, branches: await Promise.all(Object.keys(all).map(one)) };
+    }
+    case "git_wait": {
+      if (!name) throw fail("invalid", "name the branch");
+      const ms = Math.min(50, Math.max(1, Number(p.seconds ?? 50))) * 1000, t0 = Date.now();
+      for (;;) {
+        const s = (await R.states())[name];
+        if (!s) throw fail("missing", `no branch agent/${name}`);
+        if (s.status !== "review") return { decided: s.status !== "open", ...(await gitVerb("git_status", { name }, ws, actor) as object) };
+        if (Date.now() - t0 >= ms) return { decided: false, status: "review", next: "Still waiting for the person: call workspace_git_wait again." };
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
   }
   throw fail("invalid", `not a verb: ${verb}`);

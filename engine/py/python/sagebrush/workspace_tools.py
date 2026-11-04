@@ -115,9 +115,9 @@ TITLES = {
     "create": "Create a document or file", "mkdir": "Create a folder", "rename": "Rename or move", "duplicate": "Duplicate",
     "remove": "Move to Trash", "restore": "Restore from Trash", "history": "List versions", "version": "Read a version",
     # (PROTOTYPE git-proto: an agent's own git branch, web/git/agent.ts)
-    "git_branch": "Start my git branch", "git_commit": "Commit my branch", "git_status": "Status of my branch",
+    "git_branch": "Start my git branch", "git_commit": "Commit my branch", "git_status": "Status of my branch", "git_wait": "Wait for the review of my branch",
 }
-READ_ONLY = {"list", "stat", "read", "history", "version", "git_status"}
+READ_ONLY = {"list", "stat", "read", "history", "version", "git_status", "git_wait"}
 #: verb -> (description, parameter schema), from the schema; only verbs that
 #: have a title here become tools (a verb the page adds is not offered until
 #: this server knows it)

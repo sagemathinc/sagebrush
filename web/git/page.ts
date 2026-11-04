@@ -122,7 +122,7 @@ async function drawList() {
   const list = Object.values(states).sort((a, b) => (a.status === "review" ? 0 : 1) - (b.status === "review" ? 0 : 1) || b.updated - a.updated);
   const waiting = list.filter((s) => s.status === "review").length;
   document.title = waiting ? `Git (${waiting}) · Sagebrush` : "Git · Sagebrush";
-  for (const s of list) item(s.name, "agent/" + s.name, `${s.status === "review" ? "asks for review" : s.status} · ${ago(s.updated)}`, s.status === "accepted" || s.status === "rejected");
+  for (const s of list) item(s.name, "agent/" + s.name, `${s.status === "review" ? "asks for review" : s.status.replace("-", " ")} · ${ago(s.updated)}`, s.status === "accepted" || s.status === "rejected");
 }
 
 // ---- main: commit your files --------------------------------------------------------------------------------------
@@ -167,13 +167,18 @@ async function drawBranch(box: HTMLElement, name: string) {
   if (s.title) box.append(el("div", { className: "desc" }, s.title));
   if (said.get(name)) box.append(el("p", { className: "done-note" }, said.get(name)!));
   if (s.note) box.append(el("p", { className: "m" }, "Your note to the agent: " + s.note));
-  const ticks = new Map<string, HTMLInputElement>();
-  if (s.status === "open" || s.status === "review") {
+  const ticks = new Map<string, HTMLInputElement>(), reasons = new Map<string, HTMLInputElement>();
+  const live = s.status === "open" || s.status === "review";
+  if (live) {
     const note = el("input", { type: "text", placeholder: "A note for the agent (optional)" }) as HTMLInputElement;
     const acc = el("button", { className: "primary", textContent: "Accept" }), rej = el("button", { textContent: "Reject" });
     const say = el("span", { className: "say", role: "status" });
-    acc.onclick = () => accept(name, changes, ticks, note.value, say);
-    rej.onclick = async () => { await R.setState(name, { status: "rejected", note: note.value || undefined }); said.set(name, "Rejected. Your files weren't changed; the agent sees this in git_status."); drawList(); drawOne(); };
+    acc.onclick = () => accept(name, changes, ticks, reasons, note.value, say);
+    rej.onclick = async () => {
+      const files = Object.fromEntries(changes.map((c) => ["/" + c.path, { decision: "rejected" as const, reason: reasons.get(c.path)?.value.trim() || undefined }]));
+      await R.setState(name, { status: "rejected", note: note.value || undefined, files, decided: Date.now() });
+      said.set(name, "Rejected. Your files weren't changed; the agent sees this, with your reasons, in git_status, and can keep working on this branch."); drawList(); drawOne();
+    };
     box.append(el("div", { className: "actions" }, acc, rej, note, say));
     if (s.status === "open") box.append(el("p", { className: "m" }, "The agent hasn't asked for review yet: this is its work so far."));
   }
@@ -181,9 +186,13 @@ async function drawBranch(box: HTMLElement, name: string) {
   if (!changes.length) box.append(el("p", { className: "muted" }, "No changes committed on this branch yet."));
   for (const c of changes) {
     const both = !R.eq(base.get(c.path), mainNow.get(c.path));
-    const t = el("input", { type: "checkbox", checked: true, disabled: !(s.status === "open" || s.status === "review") }) as HTMLInputElement;
+    const t = el("input", { type: "checkbox", checked: true, disabled: !live }) as HTMLInputElement;
     ticks.set(c.path, t);
-    const note = el("label", { className: "pick" }, t, " accept this file", both ? el("span", { className: "tag warn", title: "You changed it on main too" }, "also changed on main") : "");
+    const why = el("input", { type: "text", className: "why", placeholder: "why not? (optional, for the agent)", disabled: !live }) as HTMLInputElement;
+    reasons.set(c.path, why);
+    const was = s.files?.["/" + c.path];
+    const note = el("div", { className: "pick" }, el("label", {}, t, " accept this file"), both ? el("span", { className: "tag warn", title: "You changed it on main too" }, "also changed on main") : "", live ? why : "",
+      !live && was ? el("span", { className: "tag" + (was.decision === "rejected" ? " warn" : "") }, was.decision + (was.reason ? ": " + was.reason : "")) : "");
     box.append(changeView(c, note));
   }
   if (log.length) {
@@ -194,7 +203,7 @@ async function drawBranch(box: HTMLElement, name: string) {
   }
 }
 
-async function accept(name: string, changes: R.Change[], ticks: Map<string, HTMLInputElement>, note: string, say: HTMLElement) {
+async function accept(name: string, changes: R.Change[], ticks: Map<string, HTMLInputElement>, reasons: Map<string, HTMLInputElement>, note: string, say: HTMLElement) {
   const tree = `${R.BRANCHES}/${name}`;
   const picked = changes.filter((c) => ticks.get(c.path)?.checked);
   if (!picked.length) return void (say.textContent = "Tick at least one file, or Reject.");
@@ -215,8 +224,21 @@ async function accept(name: string, changes: R.Change[], ticks: Map<string, HTML
     const s = (await R.states())[name];
     const files = await R.snapshot(ws, "/");
     const oid = await R.commit("main", files, `Accept agent/${name}${s.title ? ": " + s.title : ""}${picked.length < changes.length ? ` (${picked.length} of ${changes.length} files)` : ""}`, { name: "you" });
-    await R.setState(name, { status: "accepted", note: [picked.length < changes.length ? `accepted ${picked.length} of ${changes.length} files` : "", note].filter(Boolean).join("; ") || undefined });
-    said.set(name, `Accepted ${plural(picked.length, "file")} into your files and committed main${oid ? " " + oid.slice(0, 8) : ""}. Their old versions are in TimeTravel.`);
+    const part = picked.length < changes.length;
+    if (part && oid) {
+      // (the agent's worktree brought up to the new main, keeping only what you didn't take: every other file becomes
+      //  main's, so the branch never shows your own later edits as the agent undoing them)
+      const keep = new Set(changes.filter((c) => !picked.includes(c)).map((c) => c.path));
+      const now = await R.filesAt(oid), wt = await R.snapshot(ws, tree);
+      for (const [rel, b] of now) if (!keep.has(rel) && !R.eq(wt.get(rel), b)) await R.put(ws, `${tree}/${rel}`, b);
+      for (const rel of wt.keys()) if (!keep.has(rel) && !now.has(rel)) await ws.remove(`${tree}/${rel}`).catch(() => {});
+      await R.commit("agent/" + name, await R.snapshot(ws, tree), `Update agent/${name} to main ${oid.slice(0, 8)}, keeping the files not accepted`, { name: "you" });
+    }
+    const decisions = Object.fromEntries(changes.map((c) => ["/" + c.path, picked.includes(c) ? { decision: "accepted" as const } : { decision: "rejected" as const, reason: reasons.get(c.path)?.value.trim() || undefined }]));
+    // (partly accepted: the branch stays the agent's to keep working on; its base becomes the new main, so what it
+    //  shows next is only what's still different: the files you didn't take, and whatever it changes from here)
+    await R.setState(name, { status: part ? "partly-accepted" : "accepted", note: note || undefined, files: decisions, decided: Date.now(), ...(part && oid ? { base: oid } : part ? { base: (await R.head("main")) ?? s.base } : {}) });
+    said.set(name, `Accepted ${plural(picked.length, "file")} into your files and committed main${oid ? " " + oid.slice(0, 8) : ""}.${part ? " The agent sees which files you left out, and why, and can keep working on them on this branch." : ""} Their old versions are in TimeTravel.`);
     drawList(); drawOne();
   } catch (e) { say.textContent = "Not accepted: " + String((e as Error)?.message ?? e).slice(0, 300); }
 }
@@ -234,7 +256,7 @@ const AGENT_HELP = `Work on your own git branch, then ask me to review it:
 1. workspace_git_branch {name: "<short-name>"}: your branch agent/<short-name>, with its worktree folder /Branches/<short-name>/ holding main's committed files.
 2. Edit, create and run things ONLY under /Branches/<short-name>/ (the same paths as in main, below that folder). Verify your work there.
 3. workspace_git_commit {name, message, review: true} when it's verified. Commit as often as you like without review: true.
-4. workspace_git_status {name} tells you whether I accepted or rejected it, and my note. If main moved on, say so and offer to redo it.
+4. workspace_git_wait {name} waits (up to 50 s a call) for my decision; workspace_git_status {name} shows it: each file accepted or rejected, with my reason, and my note. If I accepted only part, the branch is still yours: fix the rest in the same worktree and commit with review: true again.
 Never change my files outside /Branches yourself.`;
 
 async function main() {

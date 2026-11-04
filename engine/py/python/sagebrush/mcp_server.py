@@ -63,7 +63,9 @@ nothing is deleted for good (workspace_remove moves to Trash).
 (PROTOTYPE git-proto) To change the person's files, prefer your own git
 branch: workspace_git_branch {name}, then edit and verify only under
 /Branches/<name>/, then workspace_git_commit {name, message, review: true};
-workspace_git_status {name} tells you what the person decided.
+workspace_git_wait {name} waits for the person's decision (call again if it
+says still waiting); workspace_git_status {name} shows it, file by file with reasons. After a partial accept
+or a reject, keep working on the same branch and commit with review: true again.
 
 """ + CH.INSTRUCTIONS
 
