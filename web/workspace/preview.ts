@@ -465,9 +465,11 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     else if (use.migration.left) line("Moving your files' storage", `${use.migration.left} file${use.migration.left === 1 ? "" : "s"} left (read where they are meanwhile)`);
     body.append(dl);
     const keep = h("p", { className: "keep" });
-    if (kept === true) keep.textContent = "Kept: this browser won't clear it when space runs short.";
+    // (the browser's own clearing, said as the browser's, never Sagebrush's: William, Nov 3, on the two lines reading
+    // as contradictory)
+    if (kept === true) keep.textContent = "Kept: the browser won't clear this storage when the disk runs short.";
     else {
-      keep.textContent = kept === false ? "This browser may clear it when space runs short. " : "This browser doesn't say whether it keeps it when space runs short. ";
+      keep.textContent = kept === false ? "Until you ask the browser to keep it, the browser itself may clear this storage when the disk runs short. " : "The browser doesn't say whether it keeps this storage when the disk runs short: until you ask it to keep it, it may clear it. ";
       const ask = button("Ask the browser to keep it", async () => {
         let ok = false;
         try { ok = !!(await (globalThis.navigator as any)?.storage?.persist?.()); } catch {}
@@ -476,7 +478,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       });
       keep.append(ask);
     }
-    body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
+    body.append(keep, h("p", { className: "note", textContent: "Sagebrush never clears anything of yours without asking: only caches it can fetch or compute again. Old versions and Trash go only when you delete them here." }));
     body.append(exportBox, gitBox, syncBox);
   };
   // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
