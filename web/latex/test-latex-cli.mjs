@@ -6,9 +6,9 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
@@ -16,8 +16,9 @@ if (!existsSync(CLI) || !existsSync(new URL("../../build/cli/sagebrush-latex.cjs
   console.log("FAIL: no build/cli/pyjs.cjs and sagebrush-latex.cjs: run node scripts/build-cli.mjs first");
   process.exit(1);
 }
-const run = (cwd, ...a) => new Promise((res) => {
-  const p = spawn(process.execPath, [CLI, "latex", ...a], { cwd });
+const run = (cwd, ...a) => runWith(CLI, cwd, ...a);
+const runWith = (cli, cwd, ...a) => new Promise((res) => {
+  const p = spawn(process.execPath, [cli, "latex", ...a], { cwd });
   let o = "", e = "";
   p.stdout.on("data", (d) => (o += d)); p.stderr.on("data", (d) => (e += d));
   p.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, out: o, err: e, json }); });
@@ -344,6 +345,42 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
   check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
   rmSync(join(dir, "latex"));
+
+  // ---- the bundle moved to another folder: `sagebrush latex` loads the sagebrush-latex.cjs beside where the bundle,
+  //  or the npm launcher, really is. (Bun bakes the build machine's folder into the bundle as __dirname: a copy loaded
+  //  the build's own module here, and on any other machine found none.) A stub module in each copy says it was the one.
+  {
+    const away = mkdtempSync(join(tmpdir(), "sb-latex-moved-"));
+    try {
+      const STUB = 'exports.latexCommand = async () => { process.stdout.write("THE MOVED MODULE\\n"); return 0; };\n';
+      // the bundle alone, the stub beside it
+      mkdirSync(join(away, "cli"));
+      copyFileSync(CLI, join(away, "cli", "pyjs.cjs")); writeFileSync(join(away, "cli", "sagebrush-latex.cjs"), STUB);
+      const alone = await runWith(join(away, "cli", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: the bundle in another folder loads the module beside it", alone.code === 0 && alone.out === "THE MOVED MODULE\n", alone);
+      // the npm package's layout (bin/sagebrush.cjs, dist/sagebrush.cjs and the module), run through a symlink as
+      // node_modules/.bin/sagebrush is
+      for (const d of ["pkg/bin", "pkg/dist", ".bin"]) mkdirSync(join(away, d), { recursive: true });
+      copyFileSync(new URL("../../packages/sagebrush/bin/sagebrush.cjs", import.meta.url).pathname, join(away, "pkg", "bin", "sagebrush.cjs"));
+      copyFileSync(CLI, join(away, "pkg", "dist", "sagebrush.cjs")); writeFileSync(join(away, "pkg", "dist", "sagebrush-latex.cjs"), STUB);
+      symlinkSync(join(away, "pkg", "bin", "sagebrush.cjs"), join(away, ".bin", "sagebrush"));
+      const npm = await runWith(join(away, ".bin", "sagebrush"), dir, "check", "clean.tex");
+      check("moved: the npm layout, through a .bin symlink, loads dist/'s module", npm.code === 0 && npm.out === "THE MOVED MODULE\n", npm);
+      // the npm layout with the real module: `latex run` starts its Sage session from the bundle the launcher loaded
+      // (in the launcher's worker, process.argv[1] is "[worker eval]": before, "can't find this sagebrush's own bundle")
+      for (const d of ["real-pkg/bin", "real-pkg/dist", "doc"]) mkdirSync(join(away, d), { recursive: true });
+      copyFileSync(join(away, "pkg", "bin", "sagebrush.cjs"), join(away, "real-pkg", "bin", "sagebrush.cjs"));
+      copyFileSync(CLI, join(away, "real-pkg", "dist", "sagebrush.cjs")); copyFileSync(join(dirname(CLI), "sagebrush-latex.cjs"), join(away, "real-pkg", "dist", "sagebrush-latex.cjs"));
+      writeFileSync(join(away, "doc", "one.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{2+3}$\n\\end{document}\n");
+      const nrun = await runWith(join(away, "real-pkg", "bin", "sagebrush.cjs"), join(away, "doc"), "run", "one.tex", "--json");
+      check("moved: latex run through the npm launcher runs its code", nrun.code === 0 && nrun.json?.items?.length === 1 && nrun.json.items[0].state === "ok", { code: nrun.code, err: nrun.err.slice(0, 300), items: nrun.json?.items });
+      // and the real module beside a moved bundle checks a file
+      mkdirSync(join(away, "real"));
+      copyFileSync(CLI, join(away, "real", "pyjs.cjs")); copyFileSync(join(dirname(CLI), "sagebrush-latex.cjs"), join(away, "real", "sagebrush-latex.cjs"));
+      const real = await runWith(join(away, "real", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: the real module beside a moved bundle checks the file", real.code === 0 && real.out.startsWith("clean.tex: beamer, 1 frame; no problems"), real);
+    } finally { rmSync(away, { recursive: true, force: true }); }
+  }
 
   // ---- usage
   const u = await run(dir, "render");
