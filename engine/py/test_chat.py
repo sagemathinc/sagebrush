@@ -433,8 +433,12 @@ def test_end_to_end():
         assert r["result"]["capabilities"]["experimental"] == {"claude/channel": {}, "claude/channel/permission": {}}
         assert "author=\"person\"" in r["result"]["instructions"]
         got = rpc(2, "tools/call", {"name": "workspace_connect", "arguments": {}})["result"]["structuredContent"]["result"]
+        assert got["link"] and got["link"].endswith("pair=%s&port=%d" % (got["code"], got["port"])), got
         c = Client(got["port"])
         assert "result" in c.hello(got["code"])
+        # (once a page has paired, workspace_connect hands out no link and no code: grader's P8)
+        again = rpc(20, "tools/call", {"name": "workspace_connect", "arguments": {}})["result"]["structuredContent"]["result"]
+        assert again["paired"] is True and again["link"] is None and again["code"] is None, again
         c.send({"jsonrpc": "2.0", "method": "chat.message", "params": msg(text="hello agent")})
         time.sleep(0.3)
         if client_name == "claude-code":

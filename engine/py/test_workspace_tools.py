@@ -533,6 +533,10 @@ def test_through_the_server():
     got = r["structuredContent"]["result"]
     assert not r["isError"] and len(got["code"]) == 26 and got["port"] > 0 and got["paired"] is False, r
     assert got["code"] in r["content"][0]["text"] and srv.link.sock.getsockname()[0] == "127.0.0.1"
+    # (the one-click link: this listener's port and the one-time code, given first in the text)
+    assert got["link"] == "https://sagebrush.space/board/?pair=%s&port=%d" % (got["code"], srv.link.sock.getsockname()[1]), got
+    text = r["content"][0]["text"]
+    assert text.index(got["link"]) < text.index("Or by hand: code " + got["code"]) and "\n" not in text, text
     r = rpc(32, "tools/call", {"name": "workspace_list", "arguments": {"folder": "/"}})["result"]
     assert r["isError"] and r["structuredContent"]["error"]["code"] == "not_connected"
     srv.link.close()
