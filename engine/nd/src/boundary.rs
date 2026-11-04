@@ -12,8 +12,10 @@
 //! (`isize::MAX`: a slice's limit); the arena is above `floor` and within memory; C and the scratch lie in the
 //! arena; the descriptor lies outside it; C and the scratch overlap neither A, B nor each other; and the calling
 //! thread's own frame lies below the arena. That last check is per thread: that every *other* participant's
-//! stack is below the arena too is the host's precondition (the page asserts its layout), as is that no one
-//! writes the descriptor, A, B, C or the scratch until every participant has returned.
+//! stack is below the arena too, with all stacks mutually disjoint and disjoint from the module's own memory,
+//! the descriptor and every operand and scratch region, is the trusted host's precondition (the page asserts
+//! its layout), as is that nothing but the job's own calls (each writing only its columns of C and its scratch)
+//! writes the descriptor, A, B, C or the scratch until every participant has returned (`nd_gemm_part`).
 
 use crate::gemm::scratch_len;
 

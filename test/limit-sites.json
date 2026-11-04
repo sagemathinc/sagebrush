@@ -711,6 +711,21 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/src/boundary.rs ::  :: pub max_len: u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: check :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: region :: if start == 0 || start < l.floor || len > l.max_len { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
  "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
