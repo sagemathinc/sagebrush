@@ -5,8 +5,9 @@
 //   - a middle-click on a file row: a new tab of the editor only for a .tex it takes; otherwise nothing, as before;
 //   - opening by fid, the banner, Save gated on edits, Ctrl/Cmd+S, "Saved" / "No changes to save", cleared by an edit;
 //   - the byte rules: the fixtures saved and read back; mixed endings and NUL open without Save;
-//   - the save target: a rename followed; the file in Trash, refused; another tab's save overwritten (and kept as a
-//     version); beforeunload with unsaved edits;
+//   - the save target: a rename followed; the file in Trash, refused; beforeunload with unsaved edits;
+//   - a change to the open file made elsewhere (an agent, another tab, another device): followed when nothing is
+//     unsaved; otherwise the bar, Save refused, Keep mine / Use theirs, and their races;
 //   - images: one in the folder shown from a blob: URL; one outside refused with its reason; a held read under a
 //     second render: each name read and kept once, within the count bound;
 //   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once;
@@ -863,18 +864,351 @@ try {
   await ev(`${W}.remove("/t/moved.tex").then(() => 1)`);
   await typeInto(DOC + "% y\n"); await ctrlS();
   check(await statusIs(/Not saved: this file isn't here any more/), "the file in Trash: not saved");
-  // another tab's save, then this one's: last write wins, the other kept as a version
-  const f3 = await mk("/t/lw.tex", enc(DOC));
-  await open(f3); await sleep(500);
-  await ev(`${W}.write("/t/lw.tex", new TextEncoder().encode("other tab\\n")).then(() => 1)`);
-  await typeInto(DOC + "% mine\n"); await ctrlS(); await statusIs(/^Saved$/);
-  const hist = await ev(`${W}.history("/t/lw.tex").then((h) => h.length)`);
-  check(JSON.stringify(await bytesOf("/t/lw.tex")) === JSON.stringify(enc(DOC + "% mine\n")) && hist >= 2, "another tab saved: overwritten (last write wins), its bytes kept as a version", { hist });
+  // (another tab's save, then this one's: no longer last write wins, the block "a change to the open file made
+  // elsewhere" below)
   // beforeunload with unsaved edits
   await typeInto(DOC + "% unsaved\n");
   dialogs.length = 0;
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
   check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
+
+  // ---- a change to the open file made elsewhere (William, Nov 3: an agent's write didn't show until the file was
+  // opened again, "a critical thing to get right"; plan r2 5d9a0c2a): with nothing unsaved, the text follows it in
+  // place, the cursor and scroll kept, "Updated by …"; with unsaved edits, nothing replaced or written, the bar asks;
+  // Save writes only over the revision its text came from (S3). Agents write as sagebrush-mcp's do (forAgent).
+  {
+    const AG = `window.__sbTexWs.forAgent("agent:Claude-Code")`;
+    const put = (p, bytes) => ev(`${AG}.write(${JSON.stringify(p)}, new Uint8Array(${JSON.stringify(bytes)})).then((r) => r.rev)`);
+    const agentWrite = (p, s) => put(p, enc(s));
+    const textOf = async (p) => { try { return new TextDecoder().decode(new Uint8Array(await bytesOf(p))); } catch { return null; } };
+    const srcIs = (s) => ev(`document.querySelector(".tex-src")?.value === ${JSON.stringify(s)}`);
+    const srcBecomes = (s, ms = 5000) => until(`document.querySelector(".tex-src")?.value === ${JSON.stringify(s)}`, ms);
+    const barUp = () => page(`P.querySelector(".tex-conflict")?.hidden === false`);
+    const barShows = () => until(`document.querySelector(".tex-conflict")?.hidden === false`, 5000);
+    const barText = () => page(`P.querySelector(".tex-conflict-t")?.textContent ?? null`);
+    const status = () => page(`P.querySelector(".tex-status").textContent`);
+    const revOf = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e.rev ?? 0)`);
+    const exists = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
+    const click = (sel) => page(`(P.querySelector(${JSON.stringify(sel)})?.click(), true)`);
+    // (a page hook held on its first call only (with a phase, that phase's first), released by the test; later calls pass)
+    const hold = (name, phase = null) => ev(`(() => { const h = { hit: false }; h.p = new Promise((r) => (h.release = r)); (window.__holds ??= {})[${JSON.stringify(name)}] = h;
+      window[${JSON.stringify(name)}] = (x) => { if (h.hit || (${JSON.stringify(phase)} !== null && x !== ${JSON.stringify(phase)})) return; h.hit = true; return h.p; }; return true; })()`);
+    const held = (name) => until(`!!window.__holds?.[${JSON.stringify(name)}]?.hit`, 8000);
+    const release = (name) => ev(`(() => { const h = window.__holds[${JSON.stringify(name)}]; delete window[${JSON.stringify(name)}]; h.release(); return true; })()`);
+    // (every text the editor is given, its value setter watched: a text never to be shown is never set)
+    const spy = () => ev(`(() => { const t = document.querySelector(".tex-src"), d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value"); window.__vals = [];
+      Object.defineProperty(t, "value", { configurable: true, get() { return d.get.call(this); }, set(v) { window.__vals.push(v); d.set.call(this, v); } }); return true; })()`);
+    const LONG = DOC.replace("\\end{document}", Array.from({ length: 220 }, (_, i) => `Line ${i} of filler text.`).join("\n") + "\n\\end{document}");
+    const opened = async (name, bytes = enc(DOC)) => { const f = await mk(name, bytes); await open(f); await until(`!!document.querySelector(".tex-src")`, 20000); await sleep(500); return f; };
+    // (a dirty editor and the agent's change: the bar up)
+    const conflicted = async (name) => { await opened(name); await typeInto(DOC + "% mine\n"); await agentWrite(name, DOC + "% theirs\n"); return barShows(); };
+
+    // T1: a clean editor, the agent adds a section: here at once, the cursor and the scroll kept, said who; nothing unsaved
+    await opened("/x/curves.tex", enc(LONG));
+    await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(40, 47); t.scrollTop = 900; return true; })()`);
+    const top0 = await ev(`document.querySelector(".tex-src").scrollTop`);
+    const LONG2 = LONG.replace("\\end{document}", "\\section{Curves}\nAdded by the agent.\n\\end{document}");
+    await agentWrite("/x/curves.tex", LONG2);
+    const t1 = { text: await srcBecomes(LONG2), status: await statusIs(/^Updated by Claude Code$/, 3000) };
+    t1.preview = await until(`[...document.querySelectorAll(".tex-preview h2")].some((h) => h.textContent.includes("Curves"))`, 15000);
+    Object.assign(t1, await ev(`(() => { const t = document.querySelector(".tex-src"); return { a: t.selectionStart, b: t.selectionEnd, top: t.scrollTop }; })()`), { top0 });
+    t1.clean = await page(`P.querySelector(".tex-dirty").hidden && P.querySelector(".tex-conflict")?.hidden !== false`);
+    check(t1.text && t1.status && t1.preview && t1.a === 40 && t1.b === 47 && top0 > 0 && Math.abs(t1.top - top0) <= 2 && t1.clean, "T1 a clean editor, the agent writes: shown in place, the cursor and scroll kept, \"Updated by Claude Code\", nothing unsaved", t1);
+
+    // T3: this editor's own Save: no reload, no "Updated by", no bar, its revision the next; a keystroke while the
+    // Save's own change is looked at stays unsaved, no bar
+    const r3 = await revOf("/x/curves.tex");
+    await typeInto(LONG2 + "% mine\n");
+    await hold("__sbTexCheckRead", "after");
+    await ctrlS();
+    const t3 = { saved: await statusIs(/^Saved$/, 5000), held: await held("__sbTexCheckRead") };
+    await typeInto(LONG2 + "% mine\n% more\n");
+    await release("__sbTexCheckRead"); await sleep(400);
+    Object.assign(t3, { rev: (await revOf("/x/curves.tex")) - r3, bar: await barUp(), status: await status(), src: await srcIs(LONG2 + "% mine\n% more\n"), file: (await textOf("/x/curves.tex")) === LONG2 + "% mine\n", dirty: await page(`!P.querySelector(".tex-dirty").hidden`) });
+    check(t3.saved && t3.held && t3.rev === 1 && !t3.bar && !/Updated/.test(t3.status) && t3.src && t3.file && t3.dirty, "T3 the editor's own Save: no reload, no bar, its revision next; typing meanwhile stays unsaved", t3);
+
+    // T2: unsaved edits, the agent writes: the bar says who; nothing replaced, nothing written; Save refuses (S3); Use
+    // theirs keeps mine as "… (mine).tex" and shows theirs; Keep mine writes mine, theirs kept as a version
+    const t2 = { bar: await conflicted("/x/b.tex"), text: await barText() };
+    await ctrlS();
+    Object.assign(t2, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000) });
+    Object.assign(t2, { src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/b.tex")) === DOC + "% theirs\n", buttons: await page(`[P.querySelector(".tex-theirs")?.hidden === false, P.querySelector(".tex-mine")?.hidden === false]`) });
+    check(t2.bar && t2.text === "Claude Code changed this file while you were editing." && t2.refused && t2.src && t2.file && t2.buttons.join() === "true,true", "T2 unsaved edits, the agent writes: the bar names it; mine kept here, theirs in the file; Save refuses", t2);
+    await click(".tex-theirs");
+    const t2b = { said: await statusIs(/^Your text is in b \(mine\)\.tex$/, 8000), copy: (await textOf("/x/b (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% theirs\n"), bar: await barUp(), dirty: await page(`!P.querySelector(".tex-dirty").hidden`) };
+    check(t2b.said && t2b.copy && t2b.src && !t2b.bar && !t2b.dirty, "T2 Use theirs: mine in \"b (mine).tex\", theirs here, nothing unsaved", t2b);
+    const t2c = { bar0: await conflicted("/x/k.tex") };
+    await click(".tex-mine");
+    Object.assign(t2c, { said: await statusIs(/^Saved: yours kept, theirs is in TimeTravel$/, 8000), file: (await textOf("/x/k.tex")) === DOC + "% mine\n", bar: await barUp(),
+      theirs: await ev(`${W}.history("/x/k.tex").then(async (h) => { for (let i = 0; i < h.length; i++) if (new TextDecoder().decode(await ${W}.version("/x/k.tex", i)) === ${JSON.stringify(DOC + "% theirs\n")}) return true; return false; })`) });
+    check(t2c.bar0 && t2c.said && t2c.file && !t2c.bar && t2c.theirs, "T2 Keep mine: mine in the file, theirs kept as a version", t2c);
+
+    // R1: Keep mine is for the change the bar showed: one made after it (its check held, so the bar still shows the
+    // first), then the click: nothing written, then the bar shows the newer; one made during Keep mine's write too
+    const r1 = { bar0: await conflicted("/x/r1.tex") };
+    await hold("__sbTexCheckRead", "after");
+    await agentWrite("/x/r1.tex", DOC + "% theirs 2\n");
+    r1.held = await held("__sbTexCheckRead");
+    await click(".tex-mine");
+    r1.again = await statusIs(/^Not saved: it was changed again; choose again$/, 5000);
+    r1.file = (await textOf("/x/r1.tex")) === DOC + "% theirs 2\n";
+    await release("__sbTexCheckRead"); await sleep(400);
+    r1.bar = await barUp(); r1.src = await srcIs(DOC + "% mine\n");
+    await hold("__sbTexKeepWrite");
+    await click(".tex-mine");
+    r1.held2 = await held("__sbTexKeepWrite");
+    await agentWrite("/x/r1.tex", DOC + "% theirs 3\n");
+    await release("__sbTexKeepWrite");
+    r1.again2 = await statusIs(/^Not saved: it was changed again; choose again$/, 5000);
+    await sleep(400);
+    r1.file3 = (await textOf("/x/r1.tex")) === DOC + "% theirs 3\n"; r1.bar3 = await barUp(); r1.src3 = await srcIs(DOC + "% mine\n");
+    // (for the third, shown now, Keep mine writes)
+    await click(".tex-mine");
+    r1.saved = await statusIs(/^Saved: yours kept/, 5000); r1.mine = (await textOf("/x/r1.tex")) === DOC + "% mine\n";
+    check(Object.values(r1).every((v) => v === true), "R1 Keep mine writes only over the change the bar showed: a later one (before the click, during its write) refuses it, nothing written", r1);
+
+    // R2: the copy is made, never written over: "(mine)" taken, it is "(mine 2)"; a copy that can't be made keeps
+    // everything; E5: "(mine)" to "(mine 20)" all taken: nothing done, said
+    await mk("/x/c (mine).tex", enc("an older copy\n"));
+    const r2 = { bar0: await conflicted("/x/c.tex") };
+    await click(".tex-theirs");
+    Object.assign(r2, { said: await statusIs(/^Your text is in c \(mine 2\)\.tex$/, 8000), copy2: (await textOf("/x/c (mine 2).tex")) === DOC + "% mine\n", old: (await textOf("/x/c (mine).tex")) === "an older copy\n", src: await srcIs(DOC + "% theirs\n") });
+    check(Object.values(r2).every((v) => v === true), "R2 \"(mine)\" taken: the copy is \"(mine 2)\", the older copy untouched", r2);
+    const r2b = { bar0: await conflicted("/x/f.tex") };
+    await ev(`window.__sbTexCopyCreate = () => { throw Object.assign(new Error("no room"), { code: "limit" }); }; true`);
+    await click(".tex-theirs");
+    r2b.said = await statusIs(/^Not done: your text couldn't be kept as a copy \(it is still here\)/, 5000);
+    await ev(`delete window.__sbTexCopyCreate; true`);
+    Object.assign(r2b, { bar: await barUp(), src: await srcIs(DOC + "% mine\n"), none: !(await exists("/x/f (mine).tex")), file: (await textOf("/x/f.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r2b).every((v) => v === true), "R2 a copy that can't be made: mine still here, the bar still up, nothing written", r2b);
+    for (let k = 1; k <= 20; k++) await mk(`/x/f (mine${k > 1 ? " " + k : ""}).tex`, enc("taken\n"));
+    await click(".tex-theirs");
+    const e5 = { said: await statusIs(/^Not done: f \(mine\)\.tex to \(mine 20\) are all taken; your text is still here$/, 8000), bar: await barUp(), src: await srcIs(DOC + "% mine\n"), none: !(await exists("/x/f (mine 21).tex")) };
+    check(Object.values(e5).every((v) => v === true), "E5 every copy name taken: nothing done, mine still here, said", e5);
+
+    // R3: a clean editor, a keystroke while the change's read is held: the keystroke kept, the bar instead
+    await opened("/x/r3.tex");
+    await hold("__sbTexCheckRead", "after");
+    await agentWrite("/x/r3.tex", DOC + "% theirs\n");
+    const r3t = { held: await held("__sbTexCheckRead") };
+    await typeInto(DOC + "% typed\n");
+    await release("__sbTexCheckRead");
+    Object.assign(r3t, { bar: await barShows(), src: await srcIs(DOC + "% typed\n"), file: (await textOf("/x/r3.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r3t).every((v) => v === true), "R3 a keystroke while the change is read: kept, the bar shown, nothing replaced", r3t);
+    // (grader X6: a keystroke undone while the read is held, the text back to the saved one: still an edit made
+    //  during the read, so the bar, never their text put over a person typing)
+    await opened("/x/r3b.tex");
+    await hold("__sbTexCheckRead", "after");
+    await agentWrite("/x/r3b.tex", DOC + "% theirs\n");
+    const r3b = { held: await held("__sbTexCheckRead") };
+    await typeInto(DOC + "x"); await typeInto(DOC);
+    await release("__sbTexCheckRead");
+    Object.assign(r3b, { bar: await barShows(), src: await srcIs(DOC), file: (await textOf("/x/r3b.tex")) === DOC + "% theirs\n" });
+    await sleep(300); r3b.notInstalled = await srcIs(DOC);
+    check(Object.values(r3b).every((v) => v === true), "R3b a keystroke typed and undone while the change is read: the bar, nothing replaced", r3b);
+
+    // R4: this Save and the agent's write: (a) the agent's lands while the Save waits: refused, the bar; (b) typing
+    // while a Save waits stays unsaved after it; a Save, then the agent's write: followed, said
+    await opened("/x/r4.tex");
+    await typeInto(DOC + "% mine\n");
+    await hold("__sbTexSaveWrite");
+    await ctrlS();
+    const r4 = { held: await held("__sbTexSaveWrite") };
+    await agentWrite("/x/r4.tex", DOC + "% theirs\n");
+    await release("__sbTexSaveWrite");
+    Object.assign(r4, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r4).every((v) => v === true), "R4a the agent's write lands while this Save waits: the Save refused, the bar, nothing written", r4);
+    await opened("/x/r4b.tex");
+    await typeInto(DOC + "% mine\n");
+    await hold("__sbTexSaveWrite");
+    await ctrlS();
+    const r4b = { held: await held("__sbTexSaveWrite") };
+    await typeInto(DOC + "% mine\n% more\n");
+    await release("__sbTexSaveWrite");
+    Object.assign(r4b, { saved: await statusIs(/^Saved$/, 5000), file: (await textOf("/x/r4b.tex")) === DOC + "% mine\n", dirty: await page(`!P.querySelector(".tex-dirty").hidden`) });
+    await agentWrite("/x/r4b.tex", DOC + "% theirs\n");
+    Object.assign(r4b, { bar: await barShows(), src: await srcIs(DOC + "% mine\n% more\n") });
+    await click(".tex-theirs"); await statusIs(/^Your text is in/, 8000);
+    await typeInto(DOC + "% saved again\n"); await ctrlS(); await statusIs(/^Saved$/, 5000);
+    await agentWrite("/x/r4b.tex", DOC + "% theirs after\n");
+    Object.assign(r4b, { followed: await srcBecomes(DOC + "% theirs after\n"), said: await statusIs(/^Updated by Claude Code$/, 3000) });
+    // (c) a change being read when this Save begins (its read older than the Save): never shown over the Save's text
+    await opened("/x/r4c.tex");
+    await typeInto(DOC + "% mine\n");
+    await hold("__sbTexCheckRead", "after");
+    await ev(`${W}.rename("/x/r4c.tex", "/x/r4c2.tex").then(() => 1)`);
+    const r4c = { held: await held("__sbTexCheckRead") };
+    await ctrlS();
+    r4c.saved = await statusIs(/^Saved$/, 5000);
+    await release("__sbTexCheckRead"); await sleep(600);
+    Object.assign(r4c, { src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4c2.tex")) === DOC + "% mine\n", quiet: !/Updated/.test(await status()), bar: !(await barUp()), clean: await page(`P.querySelector(".tex-dirty").hidden`) });
+    check(Object.values(r4c).every((v) => v === true), "R4c a change read from before this Save, finished after it: never shown over the saved text", r4c);
+    check(Object.values(r4b).every((v) => v === true), "R4b typing while the Save waits stays unsaved (then the bar); a Save, then the agent's write: followed", r4b);
+
+    // R5: a keystroke while Use theirs's copy is made: the copy has the text up to then, the newer text stays here
+    const r5 = { bar0: await conflicted("/x/r5.tex") };
+    await hold("__sbTexCopyCreate");
+    await click(".tex-theirs");
+    r5.held = await held("__sbTexCopyCreate");
+    await typeInto(DOC + "% mine\n% newer\n");
+    await release("__sbTexCopyCreate");
+    Object.assign(r5, { said: await statusIs(/^Your text up to then is in r5 \(mine\)\.tex; you've typed since, so your text stays here$/, 8000), copy: (await textOf("/x/r5 (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% mine\n% newer\n"), bar: await barUp() });
+    check(Object.values(r5).every((v) => v === true), "R5 typing while the copy is made: the copy has the text up to then, the newer stays here, the bar too", r5);
+    // (and while theirs is read after the copy: the same)
+    const r5b = { bar0: await conflicted("/x/r5b.tex") };
+    await hold("__sbTexTheirsRead");
+    await click(".tex-theirs");
+    r5b.held = await held("__sbTexTheirsRead");
+    await typeInto(DOC + "% mine\n% newer\n");
+    await release("__sbTexTheirsRead");
+    Object.assign(r5b, { said: await statusIs(/^Your text up to then is in r5b \(mine\)\.tex; you've typed since, so your text stays here$/, 8000), copy: (await textOf("/x/r5b (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% mine\n% newer\n"), bar: await barUp() });
+    check(Object.values(r5b).every((v) => v === true), "R5 typing while theirs is read after the copy: the newer text stays here, the bar too", r5b);
+
+    // (daybreak3 LATEX-EXT-SEM-1: a change made while Use theirs reads theirs: looked at after it, so the newer one is
+    // shown, never the older left in place; and one made while Keep mine writes: the bar for it after)
+    const r5c = { bar0: await conflicted("/x/r5c.tex") };
+    await hold("__sbTexTheirsRead");
+    await click(".tex-theirs");
+    r5c.held = await held("__sbTexTheirsRead");
+    await agentWrite("/x/r5c.tex", DOC + "% theirs 2\n");
+    await sleep(400);
+    await release("__sbTexTheirsRead");
+    Object.assign(r5c, { newer: await srcBecomes(DOC + "% theirs 2\n", 5000), bar: !(await barUp()), copy: (await textOf("/x/r5c (mine).tex")) === DOC + "% mine\n" });
+    check(Object.values(r5c).every((v) => v === true), "R5c a change while Use theirs reads: the newer one shown after it, the copy kept", r5c);
+
+    // R6: two changes, the first one's read held past the second's: the last one shown, never the first after it;
+    // two writers in one change: "elsewhere"
+    await opened("/x/r6.tex");
+    await hold("__sbTexCheckRead", "after");
+    await agentWrite("/x/r6.tex", DOC + "% first\n");
+    const r6 = { held: await held("__sbTexCheckRead") };
+    await agentWrite("/x/r6.tex", DOC + "% second\n");
+    await sleep(600);
+    await release("__sbTexCheckRead");
+    await sleep(800);
+    r6.last = await srcIs(DOC + "% second\n");
+    await ev(`(async () => { await ${AG}.write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC + "% a\n")})); await ${W}.write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC + "% b\n")})); return true; })()`);
+    Object.assign(r6, { both: await srcBecomes(DOC + "% b\n"), who: await statusIs(/^Updated elsewhere$/, 3000) });
+    // (daybreak2: many writers while a check waits: the label kept is one string, "elsewhere", not one per writer)
+    await hold("__sbTexCheckRead", "before");
+    await agentWrite("/x/r6.tex", DOC + "% c\n");
+    r6.held2 = await held("__sbTexCheckRead");
+    await ev(`(async () => { for (let k = 0; k < 40; k++) await window.__sbTexWs.forAgent("agent:writer-" + k).write("/x/r6.tex", new TextEncoder().encode(${JSON.stringify(DOC)} + "% w" + k + "\\n")); return true; })()`);
+    r6.bounded = (await ev(`window.__sbTexActor?.() ?? null`)) === "elsewhere";
+    await release("__sbTexCheckRead");
+    r6.many = await srcBecomes(DOC + "% w39\n", 8000) && (await statusIs(/^Updated elsewhere$/, 3000));
+    check(Object.values(r6).every((v) => v === true), "R6 a held earlier read never installs over a later change; two writers at once: \"Updated elsewhere\"", r6);
+
+    // T4: another tab, a person there: the same file open in a second page's editor, edited and saved there: followed
+    // here, "Updated by another tab"
+    const t4f = await opened("/x/t4.tex");
+    const tgt = await send("Target.createTarget", { url: base + "?tex=" + encodeURIComponent(t4f) + "&latex=1" });
+    let tabs = []; for (let i = 0; i < 50 && !tabs.some((t) => t.id === tgt.targetId); i++) { tabs = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); await sleep(100); }
+    const ws2 = new WebSocket(tabs.find((t) => t.id === tgt.targetId).webSocketDebuggerUrl);
+    await new Promise((r) => (ws2.onopen = r));
+    let n2 = 0; const wait2 = new Map();
+    ws2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && wait2.has(m.id)) { wait2.get(m.id)(m.result ?? m.error); wait2.delete(m.id); } };
+    const ev2 = (expression) => new Promise((r) => { const id = ++n2; wait2.set(id, r); ws2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }).then((r) => r?.result?.value);
+    let ready2 = false; for (let i = 0; i < 300 && !ready2; i++) { ready2 = !!(await ev2(`!!document.querySelector(".tex-src")`)); if (!ready2) await sleep(100); }
+    await sleep(500);
+    const saved2 = await ev2(`(async () => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(DOC + "% from the other tab\n")}; t.dispatchEvent(new Event("input")); document.querySelector(".tex-save").click();
+      for (let i = 0; i < 100; i++) { if (document.querySelector(".tex-status").textContent === "Saved") return true; await new Promise((r) => setTimeout(r, 50)); } return false; })()`);
+    const t4 = { ready2, saved2, followed: await srcBecomes(DOC + "% from the other tab\n", 8000), said: await statusIs(/^Updated by another tab$/, 3000) };
+    await send("Target.closeTarget", { targetId: tgt.targetId }); ws2.close();
+    check(Object.values(t4).every((v) => v === true), "T4 the same file saved from another tab's editor: followed here, \"Updated by another tab\"", t4);
+
+    // T5: another device's change, as sync's view applies one (its op with origin "server"): followed when clean,
+    // "Updated by another device"; the bar when not. (The bytes written here, the op told as the view tells it; the
+    // write's own op held back.)
+    const fromServer = (p, s) => ev(`(async () => { const ws = window.__sbTexWs; ws.tell = () => {};
+      try { await ws.write(${JSON.stringify(p)}, new TextEncoder().encode(${JSON.stringify(s)})); } finally { delete ws.tell; }
+      const e = await ws.stat(${JSON.stringify(p)}); ws.tell({ ops: [{ op: "write", path: e.path, kind: "file", fid: e.fid, t: Date.now(), device: "elsewhere", by: "person", origin: "server" }] }); return true; })()`);
+    await opened("/x/t5.tex");
+    const t5 = { hook: await ev(`!!window.__sbTexWs`) };
+    if (t5.hook) {
+      await fromServer("/x/t5.tex", DOC + "% synced\n");
+      t5.followed = await srcBecomes(DOC + "% synced\n"); t5.said = await statusIs(/^Updated by another device$/, 3000);
+      await typeInto(DOC + "% mine\n");
+      await fromServer("/x/t5.tex", DOC + "% synced 2\n");
+      t5.bar = await barShows(); t5.text = (await barText()) === "Another device changed this file while you were editing."; t5.src = await srcIs(DOC + "% mine\n");
+    }
+    check(Object.values(t5).every((v) => v === true) && Object.keys(t5).length === 6, "T5 another device's change (an op from the server): followed when clean, the bar when not", t5);
+
+    // T5b: its bytes not here yet (a remote entry: readUpTo says "missing", sync-docs): this text kept, said; once
+    // they are (sync-fetch installs them without an op), followed, "Updated by another device"
+    await opened("/x/t5b.tex");
+    await ev(`(() => { const ws = window.__sbTexWs, real = ws.readUpTo; window.__notHere = true; ws.readUpTo = function (p, ...a) { if (window.__notHere && p === "/x/t5b.tex") return Promise.reject(Object.assign(new Error("the contents of " + p + " are not in this browser"), { code: "missing" })); return real.call(this, p, ...a); }; return true; })()`);
+    await fromServer("/x/t5b.tex", DOC + "% synced later\n");
+    const t5b = { waiting: await statusIs(/^This file was changed on another device; its new text is on its way…$/, 5000), kept: await srcIs(DOC) };
+    await sleep(2500);
+    t5b.still = (await srcIs(DOC)) && !(await barUp());
+    await ev(`window.__notHere = false; true`);
+    Object.assign(t5b, { followed: await srcBecomes(DOC + "% synced later\n", 6000), said: await statusIs(/^Updated by another device$/, 3000) });
+    await ev(`delete window.__sbTexWs.readUpTo; true`);
+    check(Object.values(t5b).every((v) => v === true), "T5b another device's change whose bytes aren't here yet: this text kept, said; followed once they are", t5b);
+    // T5c (grader X21): a read that succeeds while the entry is still remote (its bytes on their way): this text
+    // kept, said, nothing shown from that read; followed once the entry is local
+    await opened("/x/t5c.tex");
+    await ev(`(() => { const ws = window.__sbTexWs, real = ws.readUpTo; window.__remote = true; ws.readUpTo = async function (p, ...a) { const r = await real.call(this, p, ...a); return window.__remote && p === "/x/t5c.tex" ? { ...r, entry: { ...r.entry, remote: true } } : r; }; return true; })()`);
+    await fromServer("/x/t5c.tex", DOC + "% synced remote\n");
+    const t5c = { waiting: await statusIs(/^This file was changed on another device; its new text is on its way…$/, 5000), kept: await srcIs(DOC) };
+    await sleep(2500);
+    t5c.still = (await srcIs(DOC)) && !(await barUp());
+    await ev(`window.__remote = false; true`);
+    Object.assign(t5c, { followed: await srcBecomes(DOC + "% synced remote\n", 6000), said: await statusIs(/^Updated by another device$/, 3000), save: await page(`!P.querySelector(".tex-save").hidden`) });
+    await ev(`delete window.__sbTexWs.readUpTo; true`);
+    check(Object.values(t5c).every((v) => v === true), "T5c a remote entry read while its bytes are on their way: this text kept, said; followed (and saveable) once local", t5c);
+
+    // E1: deleted elsewhere: the text kept, never emptied, said; renamed elsewhere: no reload; another file put at
+    // its old path while a change is looked at: never shown here
+    await opened("/x/e1.tex");
+    await ev(`${W}.remove("/x/e1.tex").then(() => 1)`);
+    const e1 = { said: await statusIs(/^This file was deleted elsewhere; your text is still here\.$/, 5000), src: await srcIs(DOC) };
+    await opened("/x/e1b.tex"); await spy();
+    await ev(`${W}.rename("/x/e1b.tex", "/x/e1c.tex").then(() => 1)`); await sleep(400);
+    e1.renamed = (await srcIs(DOC)) && !/Updated/.test(await status());
+    await hold("__sbTexCheckRead", "before");
+    await agentWrite("/x/e1c.tex", DOC + "% theirs\n");
+    e1.held = await held("__sbTexCheckRead");
+    await ev(`${W}.rename("/x/e1c.tex", "/x/e1d.tex").then(() => 1)`);
+    // (the other file at a revision of its own, not this one's: never mistaken for a revision already shown)
+    await mk("/x/e1c.tex", enc("IMPOSTER\n"));
+    await ev(`${W}.write("/x/e1c.tex", new TextEncoder().encode("IMPOSTER 2\\n")).then(() => ${W}.write("/x/e1c.tex", new TextEncoder().encode("IMPOSTER 3\\n")))`);
+    await release("__sbTexCheckRead");
+    e1.after = await srcBecomes(DOC + "% theirs\n");
+    e1.never = !(await ev(`window.__vals.some((v) => v.includes("IMPOSTER"))`));
+    check(Object.values(e1).every((v) => v === true), "E1 deleted elsewhere: the text kept, said; renamed: no reload; another file at the old path: never shown here", e1);
+
+    // E2: a shorter text: the cursor past its end clamped, the scroll within it
+    await opened("/x/e2.tex", enc(LONG));
+    await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length - 5, t.value.length); t.scrollTop = t.scrollHeight; return true; })()`);
+    await agentWrite("/x/e2.tex", DOC);
+    const e2 = { followed: await srcBecomes(DOC) };
+    Object.assign(e2, await ev(`(() => { const t = document.querySelector(".tex-src"); return { a: t.selectionStart, b: t.selectionEnd, n: t.value.length, top: t.scrollTop, max: Math.max(0, t.scrollHeight - t.clientHeight) }; })()`));
+    check(e2.followed && e2.a <= e2.n && e2.b === e2.n && e2.top <= e2.max, "E2 a shorter text: the cursor and scroll clamped to it", e2);
+
+    // E3: an editor that can't save (mixed line endings), unsaved edits, a change: only Use theirs; the copy has LF
+    await opened("/x/e3.tex", enc("a\r\nb\nc\n"));
+    await typeInto("a\nb\nc\nmine\n");
+    await agentWrite("/x/e3.tex", DOC);
+    const e3 = { bar: await barShows(), buttons: (await page(`[P.querySelector(".tex-theirs")?.hidden === false, P.querySelector(".tex-mine")?.hidden === false]`)).join() === "true,false" };
+    await click(".tex-theirs");
+    Object.assign(e3, { said: await statusIs(/^Your text is in e3 \(mine\)\.tex$/, 8000), copy: JSON.stringify(await bytesOf("/x/e3 (mine).tex").catch(() => null)) === JSON.stringify(enc("a\nb\nc\nmine\n")), src: await srcIs(DOC), save: await page(`!P.querySelector(".tex-save").hidden`) });
+    check(Object.values(e3).every((v) => v === true), "E3 an unsaveable editor: the bar offers only Use theirs; the copy LF; theirs here, saveable", e3);
+
+    // E4: a clean editor; the file made binary elsewhere: this text kept, Save off, said; made mixed-ending: shown,
+    // Save off; nothing written after either
+    await opened("/x/e4.tex");
+    await put("/x/e4.tex", [0x61, 0, 0x62]);
+    const e4 = { said: await statusIs(/^Claude Code changed this file into one the editor can't show/, 5000), src: await srcIs(DOC), off: await page(`P.querySelector(".tex-save").hidden && P.querySelector(".tex-banner").textContent.includes("NUL")`) };
+    const rv4 = await revOf("/x/e4.tex");
+    await put("/x/e4.tex", enc("x\r\ny\nz\n"));
+    Object.assign(e4, { mixed: await srcBecomes("x\ny\nz\n"), off2: await page(`P.querySelector(".tex-save").hidden && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`) });
+    await sleep(500);
+    e4.writes = (await revOf("/x/e4.tex")) - rv4 === 1;
+    check(Object.values(e4).every((v) => v === true), "E4 made binary elsewhere: the text kept, Save off; made mixed-ending: shown, Save off; nothing written after", e4);
+    await ev(`window.onbeforeunload = null; true`);
+  }
 
   // ---- images as TeX finds them (William's L2, Nov 2: cv.tex in "LaTeX examples/", images.png at the top, "not
   // found"): in the folder, in a parent (../), in a \graphicspath folder, each from a blob: URL; a file of that name
