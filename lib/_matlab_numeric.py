@@ -1047,7 +1047,8 @@ def cart2pol_(nargout, x, y, z=None):
     theta, rho = _call("atan2", y, x), _call("hypot", x, y)
     if nargout <= 2 and z is None:
         return [theta, rho][:max(nargout, 1)] if nargout > 1 else theta
-    return [theta, rho, z if z is not None else _m._box(np.zeros((0, 0)))][:max(nargout, 1)]
+    # (z is a value of its own: a copy, so that changing the output leaves the caller's z alone)
+    return [theta, rho, _m.cp(z) if z is not None else _m._box(np.zeros((0, 0)))][:max(nargout, 1)]
 
 
 @_bi("pol2cart")
@@ -1057,7 +1058,8 @@ def pol2cart_(nargout, theta, rho, z=None):
     x, y = _m.times(rho, _call("cos", theta)), _m.times(rho, _call("sin", theta))
     if nargout <= 1:
         return x
-    return [x, y, z if z is not None else _m._box(np.zeros((0, 0)))][:nargout]
+    # (z is a value of its own: a copy, as in cart2pol)
+    return [x, y, _m.cp(z) if z is not None else _m._box(np.zeros((0, 0)))][:nargout]
 
 
 @_bs("cumtrapz")

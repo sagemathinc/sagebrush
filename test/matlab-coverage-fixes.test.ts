@@ -409,6 +409,16 @@ test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart:
   ]);
 });
 
+test("cart2pol and pol2cart's z output is a value of its own: changing it, or the input z, leaves the other unchanged (astra CART650-Z-ALIAS)", () => {
+  const out = lines(run([
+    "z = [1 2; 3 4]; [t, r, q] = cart2pol(1, 2, z); q(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [t, r, q] = cart2pol(1, 2, z); z(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [x, y, q] = pol2cart(1, 2, z); q(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [x, y, q] = pol2cart(1, 2, z); z(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+  ].join("\n")));
+  assert.deepEqual(out, ["1 99", "99 1", "1 99", "99 1"]);
+});
+
 test("tril, triu, diag and sortrows refuse a 3-D array: 'Arguments must be 2-D.' (grader's C9 on #646)", () => {
   const out = lines(run([
     "c = {@() tril(ones(2, 2, 2)), @() triu(ones(2, 2, 2)), @() diag(ones(2, 2, 2)), @() sortrows(ones(2, 2, 2))};",
