@@ -51,7 +51,8 @@ declare const __SB_RASTER_HASH__: string;
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
-import { __hooks, load as loadFiles, mount, put as putFile, setWritable } from "./shims/fs";
+import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
+import { startDirOf } from "./start-dir";
 import { R } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
@@ -236,6 +237,17 @@ self.onmessage = async (ev: MessageEvent) => {
   if (typeof m.fsWritable === "boolean") {
     writableNow = m.fsWritable;
     if (writableWord) Atomics.store(writableWord, 0, m.fsWritable ? 1 : 0);
+    return;
+  }
+  if (m.startDir !== undefined) {
+    // (the notebook's own folder: the working folder and sys.path[0], as Jupyter runs a notebook (Nov 4 ruling), so it
+    // opens and imports what is beside it; set as it arrives: the page sends it in onStart, which every run and
+    // question waits for (web/notebook/worker-kernel.js), and it holds even sent before the init)
+    const d = startDirOf(m.startDir);
+    if (d === null) return;
+    startIn(d);
+    const sys = R.importModule("sys");
+    if (sys.path[0] !== d) sys.path.unshift(d);
     return;
   }
   if (m.files) return loadFiles(m.files);
