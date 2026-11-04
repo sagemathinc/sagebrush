@@ -1149,6 +1149,51 @@ function intIndex(k: any, n: number, axis: number): number {
   return i;
 }
 
+// One index of ndarray.item, made non-negative and bounded by n, as NumPy's:
+// an int or an object with __index__ (operator.index), a bool (np.bool_ too)
+// none; one past int64 overflows; the error names the axis (axis null: a
+// flat index into an array of more than one dimension)
+function itemIndex(v: any, n: number, axis: number | null): number {
+  let x: number | bigint = v;
+  // (a plain int, the common index, as it is)
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    if (typeof Obj.unbox(v) === "boolean" || typeDtypes.get(Obj.typeOf(v)) === D.bool) raise(T.TypeError, "an integer is required");
+    x = O.index(v);
+    if (typeof x === "bigint" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, "Python int too large to convert to C long");
+  }
+  const i = Number(x);
+  if (i < -n || i >= n) raise(T.IndexError, `index ${x} is out of bounds for ${axis === null ? "" : `axis ${axis} with `}size ${n}`);
+  return i < 0 ? i + n : i;
+}
+// ndarray.item's element, its position in a.data, as NumPy's: no index (a
+// size-1 array), one flat C-order index, or one index an axis (or their
+// tuple)
+function itemPos(a: { shape: number[]; strides: number[]; offset: number; size: number }, idx: any[], unpacked = false): number {
+  const nd = a.shape.length;
+  if (idx.length === 1) {
+    const k = idx[0];
+    if (!unpacked && Array.isArray(k) && (k as any).$t) return itemPos(a, k, true);
+    // (one flat index: a 1-D array's own axis, else unravelled in C order)
+    if (nd === 1) return a.offset + itemIndex(k, a.shape[0], 0) * a.strides[0];
+    let i = itemIndex(k, a.size, null);
+    let p = a.offset;
+    for (let d = nd - 1; d >= 0; d--) {
+      const r = i % a.shape[d];
+      p += r * a.strides[d];
+      i = (i - r) / a.shape[d];
+    }
+    return p;
+  }
+  if (idx.length === 0) {
+    if (a.size !== 1) raise(T.ValueError, "can only convert an array of size 1 to a Python scalar");
+    return a.offset;
+  }
+  if (idx.length !== nd) raise(T.ValueError, "incorrect number of indices for array");
+  let p = a.offset;
+  for (let d = 0; d < nd; d++) p += itemIndex(idx[d], a.shape[d], d) * a.strides[d];
+  return p;
+}
+
 function getitem(a: NDArray, key: any): any {
   // a[i] on a 1-D array
   if (typeof key === "number" && a.ndim === 1 && Number.isInteger(key)) {
@@ -3369,12 +3414,13 @@ newBuiltinModule("_numpy", (m) => {
   M("copy", (a: NDArray) => copy(a));
   M("tolist", (a: NDArray) => tolist(a));
   M("item", (a: NDArray, ...idx: any[]) => {
-    if (idx.length === 0) return scalarOf(a);
-    const c = ascontig(a);
-    let i = intNum(idx.length === 1 ? idx[0] : 0);
-    if (idx.length > 1) i = idx.reduce((acc: number, v: any, d: number) => acc * a.shape[d] + intNum(v), 0);
-    if (i < 0) i += a.size;
-    return pyPlain(a.dt, c.data, i);
+    // (a 1-D array's a.item(i), the common call, inline: no position to unravel)
+    if (idx.length === 1 && typeof idx[0] === "number" && a.shape.length === 1) {
+      const n = a.shape[0];
+      let i = idx[0];
+      if (Number.isInteger(i) && i >= -n && i < n) return pyPlain(a.dt, a.data, a.offset + (i < 0 ? i + n : i) * a.strides[0]);
+    }
+    return pyPlain(a.dt, a.data, itemPos(a, idx));
   });
   M("reshape", (a: NDArray, ...s: any[]) => reshape(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
   M("ravel", (a: NDArray) => ravel(a));
