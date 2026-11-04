@@ -17,8 +17,10 @@ if (!existsSync(CLI) || !existsSync(new URL("../../build/cli/sagebrush-latex.cjs
   process.exit(1);
 }
 const run = (cwd, ...a) => runWith(CLI, cwd, ...a);
-const runWith = (cli, cwd, ...a) => new Promise((res) => {
-  const p = spawn(process.execPath, [cli, "latex", ...a], { cwd });
+const runWith = (cli, cwd, ...a) => runOpts({}, cli, cwd, ...a);
+// (opts.node: node's own options before the script; opts.env: more environment)
+const runOpts = (opts, cli, cwd, ...a) => new Promise((res) => {
+  const p = spawn(process.execPath, [...(opts.node ?? []), cli, "latex", ...a], { cwd, env: opts.env ? { ...process.env, ...opts.env } : process.env });
   let o = "", e = "";
   p.stdout.on("data", (d) => (o += d)); p.stderr.on("data", (d) => (e += d));
   p.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, out: o, err: e, json }); });
@@ -366,6 +368,16 @@ $\sage{1/0}$ then $\sage{2+2}$.
       symlinkSync(join(away, "pkg", "bin", "sagebrush.cjs"), join(away, ".bin", "sagebrush"));
       const npm = await runWith(join(away, ".bin", "sagebrush"), dir, "check", "clean.tex");
       check("moved: the npm layout, through a .bin symlink, loads dist/'s module", npm.code === 0 && npm.out === "THE MOVED MODULE\n", npm);
+      // (grader, #625: the launcher without its worker requires the bundle in this thread, so the entry is bin/'s
+      //  launcher, and dist/ is found as bin/../dist)
+      const inproc = await runOpts({ env: { SAGEBRUSH_NO_WORKER: "1" } }, join(away, ".bin", "sagebrush"), dir, "check", "clean.tex");
+      check("moved: the npm layout without the launcher's worker (SAGEBRUSH_NO_WORKER) loads dist/'s module", inproc.code === 0 && inproc.out === "THE MOVED MODULE\n", inproc);
+      // (grader, #625: a symlink to the moved bundle, run with --preserve-symlinks-main: the entry's real path is the
+      //  bundle's folder, not the symlink's)
+      mkdirSync(join(away, "links"));
+      symlinkSync(join(away, "cli", "pyjs.cjs"), join(away, "links", "pyjs.cjs"));
+      const preserved = await runOpts({ node: ["--preserve-symlinks-main"] }, join(away, "links", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: a symlink to the moved bundle, with --preserve-symlinks-main, loads the module beside the real bundle", preserved.code === 0 && preserved.out === "THE MOVED MODULE\n", preserved);
       // the npm layout with the real module: `latex run` starts its Sage session from the bundle the launcher loaded
       // (in the launcher's worker, process.argv[1] is "[worker eval]": before, "can't find this sagebrush's own bundle")
       for (const d of ["real-pkg/bin", "real-pkg/dist", "doc"]) mkdirSync(join(away, d), { recursive: true });
