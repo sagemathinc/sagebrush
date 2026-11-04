@@ -53,6 +53,17 @@ check("R10 duplicate expected entry: red", err == ["expected-pass.txt lists a sc
 err, new = R.judge(M, E, M, {"a/one.m": True, "a/two.m": False, "b/three.m": True, "a/@C/C.m": True})
 check("R11 a result outside the manifest: red", err == ["a result for a script not in scripts.txt: a/@C/C.m"], str(err))
 
+# R12-R15: not-matlab.txt, scripts that run but are never pinned
+err, new = R.judge(M, E, M, {"a/one.m": True, "a/two.m": True, "b/three.m": True}, ["a/two.m"])
+check("R12 a not-MATLAB script that passes: no NEW PASS, green", err == [] and new == [], f"{err} {new}")
+err, new = R.judge(M, E, M, {"a/one.m": True, "a/two.m": False, "b/three.m": True}, ["b/three.m"])
+check("R13 expected-pass pins a not-MATLAB script: red", err == ["expected-pass.txt pins a script of not-matlab.txt: b/three.m"], str(err))
+err, new = R.judge(M, E, M, {"a/one.m": True, "a/two.m": False, "b/three.m": True}, ["z/gone.m"])
+check("R14 not-matlab names a script outside the manifest: red", err == ["not-matlab.txt names a script not in scripts.txt: z/gone.m"], str(err))
+err, new = R.judge(M, E, M, {"a/one.m": True, "a/two.m": False, "b/three.m": True}, ["a/two.m", "a/two.m"])
+check("R15 a duplicate not-matlab entry: red", err == ["not-matlab.txt lists a script twice"], str(err))
+check("R16 --write-expected never writes a not-MATLAB script", R.pinnable({"a/one.m": True, "a/two.m": True, "b/three.m": False}, ["a/two.m"]) == ["a/one.m"])
+
 # P1-P4: the pass rule
 check("P1 SUCCESS last", R.passed("x\nSUCCESS\n"))
 check("P2 SUCCESS then the figure epilogue", R.passed("SUCCESS\nPlot: line through 3 points\nSaved /tmp/sagebrush-figures-1-a/figure-1.svg (Plot)\n(figures are removed when sagebrush exits; sagebrush --figures DIR keeps them)\n"))
@@ -72,9 +83,10 @@ with tempfile.TemporaryDirectory() as d:
     check("D1 discovery: .m with SUCCESS, not under @/+/wasm", got == ["a/t1.m", "b/c/t2.m"], str(got))
 
 # M1: the real lists: expected-pass is a subset of scripts.txt, and scripts.txt equals the vendored tree's discovery
-manifest, expected = R.read_list(R.MANIFEST), R.read_list(R.EXPECTED)
-err, _ = R.judge(manifest, expected, R.discover(R.SCRIPTS_DIR), {s: s in set(expected) for s in manifest})
-check(f"M1 the committed lists agree with the vendored tree ({len(manifest)} scripts, {len(expected)} expected)", err == [], "; ".join(err[:5]))
+manifest, expected, not_matlab = R.read_list(R.MANIFEST), R.read_list(R.EXPECTED), R.read_list(R.NOT_MATLAB)
+err, _ = R.judge(manifest, expected, R.discover(R.SCRIPTS_DIR), {s: s in set(expected) for s in manifest}, not_matlab)
+check(f"M1 the committed lists agree with the vendored tree ({len(manifest)} scripts, {len(expected)} expected, {len(not_matlab)} not MATLAB)",
+      err == [] and len(not_matlab) > 0, "; ".join(err[:5]))
 
 # I1-I8: the whole ratchet (discovery, the run, the verdict, the exit status) on the real corpus, with a fake engine.
 # A JSON map says how each script behaves: "ok" prints SUCCESS and exits 0, "exit1" prints SUCCESS and exits 1, "hang"
@@ -117,7 +129,7 @@ by_dir = {}
 for s in expected:
     by_dir.setdefault(os.path.dirname(s), []).append(s)
 slow2 = next(v[:2] for k, v in sorted(by_dir.items()) if len(v) >= 2)
-modes = {s: "ok" for s in expected}
+modes = {s: "ok" for s in expected + not_matlab}  # (a not-MATLAB script that passes is no NEW PASS)
 modes.update({s: "slow" for s in slow2})
 rc, out, rows, slow = ratchet(modes)
 ran = [r[0] for r in rows]
@@ -130,7 +142,7 @@ check(f"I8 one directory's scripts run one at a time ({slow2[0]} and {slow2[1]} 
 excluded = [s for s in ran if any(c.startswith(("@", "+")) or c == "wasm" for c in s.split("/")[:-1])]
 check("I2 the run ran every script of scripts.txt once, and nothing else (no @/+/wasm file)",
       sorted(ran) == sorted(manifest) and not excluded, f"{len(ran)} runs, {len(set(ran))} distinct, {len(manifest)} listed, excluded {excluded[:3]}")
-extra = next(s for s in manifest if s not in set(expected))
+extra = next(s for s in manifest if s not in set(expected) and s not in set(not_matlab))
 modes = {s: "ok" for s in expected[3:] + [extra]}
 modes[expected[1]], modes[expected[2]] = "exit1", "hang"
 rc, out, rows, slow = ratchet(modes)

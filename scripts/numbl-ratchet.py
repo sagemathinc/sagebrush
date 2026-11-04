@@ -12,8 +12,11 @@ Red (exit 1) when:
   - the scripts found by numbl's own discovery rule differ from upstream/numbl/scripts.txt (a script lost or added);
   - a script of scripts.txt got no result (one dropped from the run);
   - expected-pass.txt names a script that isn't in scripts.txt, or one twice (names match exactly, never by prefix);
+  - not-matlab.txt names a script that isn't in scripts.txt, or one twice, or one that expected-pass.txt pins;
   - a script of expected-pass.txt didn't pass (a regression).
-A script that passes but isn't in expected-pass.txt is reported (a new pass, to add); that alone stays green.
+A script that passes but isn't in expected-pass.txt is reported (a new pass, to add); that alone stays green. The
+scripts of not-matlab.txt (not valid MATLAB, or asserting against MATLAB's documentation; upstream/numbl/README.md)
+still run, but are never pinned: never a NEW PASS, and never written by --write-expected.
 --write-expected rewrites expected-pass.txt from this run (after a reviewed fix, never to hide a regression).
 
 A script passes when the CLI exits 0 and the script's last non-empty output line is exactly SUCCESS (numbl's rule,
@@ -33,6 +36,7 @@ CORPUS = os.path.join(ROOT, "upstream", "numbl")
 SCRIPTS_DIR = os.path.join(CORPUS, "numbl_test_scripts")
 MANIFEST = os.path.join(CORPUS, "scripts.txt")
 EXPECTED = os.path.join(CORPUS, "expected-pass.txt")
+NOT_MATLAB = os.path.join(CORPUS, "not-matlab.txt")
 TIMEOUT = 60
 EPILOGUE = re.compile(r"^(Plot: |Figure with \d+ plots?: |Saved .*sagebrush-figures-|\(figures are removed when sagebrush exits)")
 
@@ -63,7 +67,7 @@ def read_list(path):
         return [l.strip() for l in f if l.strip() and not l.startswith("#")]
 
 
-def judge(manifest, expected, discovered, results):
+def judge(manifest, expected, discovered, results, not_matlab=()):
     """The verdict, pure: (errors, new_passes). results maps script -> passed (bool) for every script that ran."""
     errors = []
     m, e, d = set(manifest), set(expected), set(discovered)
@@ -84,8 +88,21 @@ def judge(manifest, expected, discovered, results):
     for s in sorted(e):
         if s in results and not results[s]:
             errors.append(f"REGRESSION: expected to pass, failed: {s}")
-    new = sorted(s for s in m if results.get(s) and s not in e)
+    # (scripts that aren't valid MATLAB, or whose assert contradicts MATLAB's documentation: run, never pinned)
+    n = set(not_matlab)
+    if len(n) != len(not_matlab):
+        errors.append("not-matlab.txt lists a script twice")
+    for s in sorted(n - m):
+        errors.append(f"not-matlab.txt names a script not in scripts.txt: {s}")
+    for s in sorted(n & e):
+        errors.append(f"expected-pass.txt pins a script of not-matlab.txt: {s}")
+    new = sorted(s for s in m if results.get(s) and s not in e and s not in n)
     return errors, new
+
+
+def pinnable(results, not_matlab):
+    """What --write-expected writes: the passing scripts, minus not-matlab.txt's."""
+    return sorted(s for s, ok in results.items() if ok and s not in set(not_matlab))
 
 
 def run_all(cli, scripts, jobs, node, timeout=TIMEOUT):
@@ -132,7 +149,7 @@ def main():
     ap.add_argument("--results")
     ap.add_argument("--write-expected", action="store_true")
     a = ap.parse_args()
-    manifest, expected = read_list(MANIFEST), read_list(EXPECTED)
+    manifest, expected, not_matlab = read_list(MANIFEST), read_list(EXPECTED), read_list(NOT_MATLAB)
     discovered = discover(SCRIPTS_DIR)
     t0 = time.time()
     rows = run_all(a.cli, manifest, a.jobs, a.node, a.timeout)
@@ -141,7 +158,7 @@ def main():
             for r in rows:
                 f.write(json.dumps(r) + "\n")
     results = {r["script"]: r["pass"] for r in rows}
-    errors, new = judge(manifest, expected, discovered, results)
+    errors, new = judge(manifest, expected, discovered, results, not_matlab)
     n_pass = sum(results.values())
     print(f"numbl corpus: {n_pass}/{len(manifest)} pass, {len(expected)} expected, in {time.time() - t0:.0f} s")
     for s in new:
@@ -149,7 +166,7 @@ def main():
     if a.write_expected:
         with open(EXPECTED, "w") as f:
             f.write("# Scripts of scripts.txt that pass in Sagebrush's MATLAB mode (scripts/numbl-ratchet.py --write-expected).\n")
-            for s in sorted(s for s, ok in results.items() if ok):
+            for s in pinnable(results, not_matlab):
                 f.write(s + "\n")
         print(f"wrote {os.path.relpath(EXPECTED, ROOT)}")
         errors = [e for e in errors if not e.startswith("REGRESSION")]
