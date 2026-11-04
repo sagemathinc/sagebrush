@@ -345,6 +345,17 @@ export function merge(recorded, gen, newLevel, changes = []) {
   return { api: out, problems, added };
 }
 
+// Everything --check reports, for a recorded surface, the generated one, the
+// reviewed changes and src/pkgset.ts's constants (the CLI's --check is this)
+export function checkErrors(recorded, gen, changes, consts, fileBytes) {
+  const { problems, added } = merge(recorded, gen, recorded.level + 1, changes);
+  const errs = [...problems, ...staleChanges(recorded, changes)];
+  if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
+  if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
+  if (fileBytes > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");
+  return errs;
+}
+
 function countEntries(api) {
   let n = 0;
   for (const m of Object.values(api.modules)) for (const e of Object.values(m.names)) n += 1 + Object.keys(e.members ?? {}).length;
@@ -381,11 +392,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (Object.keys(gen.failed).length) console.log("modules that could not be imported (left out): " + Object.keys(gen.failed).join(", "));
   } else if (mode === "--check") {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
-    const { problems, added } = merge(recorded, gen, recorded.level + 1, changes);
-    const errs = [...problems, ...staleChanges(recorded, changes)];
-    if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
-    if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
-    if (readFileSync(FILE, "utf8").length > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");
+    const errs = checkErrors(recorded, gen, changes, consts, readFileSync(FILE, "utf8").length);
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
       process.exit(1);

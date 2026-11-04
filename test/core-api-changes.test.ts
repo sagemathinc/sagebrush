@@ -60,3 +60,19 @@ test("the changes file's shape: every field, old != new, one entry per name", ()
   assert.throws(() => C.readChanges(doc([entry(), entry()])), /two entries for one name/);
   assert.throws(() => C.readChanges(JSON.stringify({ changes: [] })), /not \{format/);
 });
+
+test("--check reports a stale entry (checkErrors, what the CLI's --check runs): a surface already at the entry's new signature passes, one elsewhere fails", () => {
+  const consts = { api: 1, level: 5 };
+  // (applied: the recorded surface has the new signature, the generated one too)
+  assert.deepEqual(C.checkErrors(surface(NEW), surface(NEW), [entry()], consts, 100), []);
+  // (stale: the function moved on since; nothing else differs)
+  const LATER = [P("a", "pos", false), P("skip_header"), P("ndmin", "kwonly"), P("like", "kwonly")];
+  const errs = C.checkErrors(surface(LATER), surface(LATER), [entry()], consts, 100);
+  assert.deepEqual(errs, ["core-api-changes.json: m.f is not needed by the surface (recorded (a, skip_header=, *, ndmin=, like=), the entry's new (a, skip_header=, *, ndmin=)): remove the entry"]);
+  // (an entry for a name the surface doesn't have)
+  assert.equal(C.checkErrors(surface(NEW), surface(NEW), [entry(), entry({ name: "m.zz" })], consts, 100).length, 1);
+  // (and the rest of --check: a listed change not yet recorded, the level, the caps)
+  assert.match(C.checkErrors(surface(OLD), surface(NEW), [entry()], consts, 100).join("|"), /1 addition\(s\) or widening\(s\)/);
+  assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], { api: 1, level: 4 }, 100).join(), /src\/pkgset\.ts has CORE_API 1 level 4/);
+  assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], consts, 10 * 1024 * 1024).join(), /over its caps/);
+});
