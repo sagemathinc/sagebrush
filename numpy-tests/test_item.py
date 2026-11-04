@@ -36,3 +36,21 @@ for c in [(2, 3), (0, 3), (3, 0), (2, -4), (-3, 3), (1, 4), (11,), (-12,), (12,)
         print("3x4", c, repr(r.item(*c)))
     except Exception as e:
         print("3x4", c, type(e).__name__, e)
+# (an index is anything with __index__, as operator.index takes it: flat, per axis, a tuple; daybreak3's case)
+
+
+class I:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+for f in [lambda: np.arange(3).item(I(-1)), lambda: np.arange(6).reshape(2, 3).item((I(1), I(-1))), lambda: np.arange(6).reshape(2, 3).item(I(1), 2),
+          lambda: np.arange(6).reshape(2, 3).item(I(5)), lambda: np.arange(3).item(I(2 ** 70)), lambda: np.arange(3).item(I(3)),
+          lambda: np.arange(3).item(np.int8(-1)), lambda: np.arange(3).item(np.uint64(2)), lambda: np.arange(3).item(np.True_)]:
+    try:
+        print("index", repr(f()))
+    except Exception as e:
+        print("index", type(e).__name__, e)
