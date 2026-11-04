@@ -3577,6 +3577,23 @@ function strConcat(arrs: StrArray[], axis: number): StrArray {
   return out;
 }
 
+// (the ndarray members and module functions that take a string array too:
+// its string operation; the rest refuse it by themselves, through operand
+// or fromPy)
+const isS = (a: any): a is StrArray => a instanceof StrArray;
+const tr = (a: any, axes: number[] | null): any => (isS(a) ? strView(transpose(N(a), axes)) : transpose(a, axes));
+const cp = (a: any): any => (isS(a) ? strCopy(a) : copy(a));
+const rs = (a: any, shape: number[]): any => (isS(a) ? strReshape(a, shape) : reshape(a, shape));
+// (a string array printed as itself)
+const printed = (a: any): NDArray => (a instanceof StrArray ? N(a) : asarray(a));
+// a string array of a shape, every element v (as str gives it, cut to sd's length)
+function strFull(shape: number[], v: any, sd: StrDType | null): StrArray {
+  const src = sd !== null ? (strFromPy(v, sd) as StrArray) : strOperand(v);
+  const a = strEmpty(shape, sd !== null && sd.n ? sd : src.dt);
+  strSetitem(a, Obj.Ellipsis, src);
+  return a;
+}
+
 // ------------------------------------------------------------------ the Python module
 
 newBuiltinModule("_numpy", (m) => {
@@ -3620,10 +3637,6 @@ newBuiltinModule("_numpy", (m) => {
   const A = Ty.builtinTypeFor("ndarray", NDArray, "numpy", (shape: any, dtype: any = null) => empty(shapeArg(shape), toDtype(dtype ?? null)));
   const M = (name: string, f: any, s: Obj.Signature | null = null) => Ty.method(A, name, f, s);
   Ty.bindClass(StrArray, A);
-  // (each member below takes a string array too: its string operation, or
-  // refused; the arithmetic ones refuse it by themselves, through operand)
-  const isS = (a: any): a is StrArray => a instanceof StrArray;
-  const tr = (a: any, axes: number[] | null): any => (isS(a) ? strView(transpose(N(a), axes)) : transpose(a, axes));
   Ty.getset(A, "shape", (a: NDArray) => tuple(a.shape.slice()), (a: NDArray, v: any) => {
     const r: any = isS(a) ? strReshape(a, shapeArg(v)) : reshape(a, shapeArg(v));
     if (r.data !== a.data) raise(T.AttributeError, "Incompatible shape for in-place modification. Use `.reshape()` to make a copy with the desired shape.");
@@ -3809,7 +3822,6 @@ newBuiltinModule("_numpy", (m) => {
   M("__pos__", (a: NDArray) => unary("positive", a));
   M("__abs__", (a: NDArray) => unary("absolute", a));
   M("__invert__", (a: NDArray) => unary("invert", a));
-  const cp = (a: any): any => (isS(a) ? strCopy(a) : copy(a));
   M("__copy__", cp);
   M("__deepcopy__", (a: any, memo: any) => cp(a));
   M("__array__", (a: NDArray) => a);
@@ -3831,7 +3843,6 @@ newBuiltinModule("_numpy", (m) => {
     if (i < 0) i += a.size;
     return pyPlain(a.dt, c.data, i);
   });
-  const rs = (a: any, shape: number[]): any => (isS(a) ? strReshape(a, shape) : reshape(a, shape));
   M("reshape", (a: NDArray, ...s: any[]) => rs(a, shapeArg(s.length === 1 ? s[0] : tuple(s))));
   M("ravel", (a: NDArray) => rs(a, [a.size]));
   M("flatten", (a: NDArray) => cp(rs(a, [a.size])));
@@ -3864,13 +3875,6 @@ newBuiltinModule("_numpy", (m) => {
   };
 
   // creation (strings in the data, a string array or a string dtype: a string array)
-  // (a string array of a shape, every element s; or v, as str gives it)
-  const strFull = (shape: number[], v: any, sd: StrDType | null): StrArray => {
-    const src = sd !== null ? (strFromPy(v, sd) as StrArray) : strOperand(v);
-    const a = strEmpty(shape, sd !== null && sd.n ? sd : src.dt);
-    strSetitem(a, Obj.Ellipsis, src);
-    return a;
-  };
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
     let r: any;
     if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
@@ -4322,8 +4326,6 @@ newBuiltinModule("_numpy", (m) => {
     return null;
   });
   // np.array2string's text (prefix: what the first line follows, for the indent)
-  // (a string array is printed as itself)
-  const printed = (a: any): NDArray => (a instanceof StrArray ? N(a) : asarray(a));
   fn("array_text", (a: any, sep: any, prefix: any, suffix: any) => {
     const arr = printed(a);
     if (arr.size === 0) return "[]";
