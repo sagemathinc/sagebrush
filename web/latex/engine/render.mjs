@@ -62,6 +62,7 @@ export function buildTree(events, items = []) {
       case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
+      case "ctr": top().kids.push({ t: "C", name: e.name, v: e.v }); break;
       case "verbenv": {
         const v = { t: "V", env: e.env, text: e.text };
         if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); v.it.at = last; items.push(v.it); }
@@ -341,6 +342,14 @@ class Renderer {
           break;
         case "s": this.sec(n, ctx, flow); break;
         case "v": flow.html('<code class="verb">' + esc(n.text) + "</code>", ctx.st); break;
+        // (a counter set or added to (\setcounter, \addtocounter): the renderer's own numbering follows it; enumi..enumiv,
+        //  the enclosing enumerate of that depth)
+        case "C": {
+          if (Object.hasOwn(this.ctr, n.name)) this.ctr[n.name] = n.v;
+          const d = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 }[n.name], L = d && this.lists.filter((x) => x.kind === "enum")[d - 1];
+          if (L) L.n = n.v;
+          break;
+        }
         case "V":
           if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
@@ -484,7 +493,8 @@ class Renderer {
     flow.noindent = true;
   }
   footnote(n, ctx, flow) {
-    const k = ++this.ctr.footnote, id = this.nid("fn");
+    // (\footnote[n]: that number, the counter not stepped, as in LaTeX)
+    const k = /^\s*\d+\s*$/.test(n.short ?? "") ? +n.short : ++this.ctr.footnote, id = this.nid("fn");
     const save = this.target;
     this.setTarget(String(k), id, "footnote");
     const f = new Flow(false);

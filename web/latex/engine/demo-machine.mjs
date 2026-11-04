@@ -347,6 +347,15 @@ export class Machine extends CoreMachine {
       });
     }
     P.prim("sb@eot", function () { this.mark({ k: "eot" }); });
+    // \setcounter and \addtocounter: the core's, and the counter's new value marked for the renderer, whose own numbering
+    // (sections, figures, tables, equations, footnotes, enumerate's items) follows it (astra4's fidelity digest, gap 1)
+    for (const nm of ["setcounter", "addtocounter"]) {
+      const f = core(nm);
+      P.prim(nm, function (t) {
+        const name = this.readArgString(); this.pushArg(name); f.call(this, t);
+        const r = this.counterReg(name); if (r >= 0) this.mark({ k: "ctr", name, v: this.regGet(r) });
+      });
+    }
     // inline verbatim: the text is kept
     for (const nm of ["verb", "lstinline", "Verb"]) P.prim(nm, function () {
       const f = this.stack[this.stack.length - 1];

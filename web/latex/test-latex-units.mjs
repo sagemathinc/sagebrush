@@ -415,6 +415,26 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-furniture-other-class", !/Madrid|>F</.test(art) && !/slide-(head|foot)/.test(art) && art.includes("X") && /<div class="title">\[<\/div>/.test(art), art.slice(0, 300));
 }
 
+// ---- counters (astra4's fidelity digest, gap 1: the renderer's numbering ignored \setcounter and \footnote[n], silently).
+//      M01..M06 as astra4 reduced them, with TeX Live's text for each; then \addtocounter, enumii, a footnote after [n]
+{
+  setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src + "</span>");
+  const text = (body) => new Engine().update("\\documentclass{article}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const cases = [
+    ["ctr-m01-footnote-optional", "X\\footnote[7]{NoteText.}", (t) => /^X 7 .*7 NoteText\.$/.test(t)],
+    ["ctr-m02-footnote-counter", "\\setcounter{footnote}{4}X\\footnote{NoteText.}", (t) => /^X 5 .*5 NoteText\.$/.test(t)],
+    ["ctr-m03-figure", "\\setcounter{figure}{7}\\begin{figure}\\caption{CaptionText.}\\end{figure}", (t) => t.includes("Figure 8: CaptionText.")],
+    ["ctr-m04-equation", "\\setcounter{equation}{9}\\begin{equation}1=1\\end{equation}", (t) => /\\tag\{10\}/.test(t) && !/\\tag\{1\}/.test(t)],
+    ["ctr-m05-section", "\\setcounter{section}{4}\\section{HeadingText}", (t) => t === "5 HeadingText"],
+    ["ctr-m06-enumerate", "\\begin{enumerate}\\setcounter{enumi}{3}\\item EntryText.\\end{enumerate}", (t) => t === "4. EntryText."],
+    ["ctr-addtocounter", "\\section{A}\\addtocounter{section}{2}\\section{B}", (t) => t === "1 A 4 B"],
+    ["ctr-enumii", "\\begin{enumerate}\\item P\\begin{enumerate}\\setcounter{enumii}{2}\\item Q\\end{enumerate}\\end{enumerate}", (t) => /^1\. P .*c\. Q|^1\. P .*3\. Q|^1\. P .*\(c\) Q/.test(t)],
+    ["ctr-enumi-from-inner", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\setcounter{enumi}{5}\\end{enumerate}\\item R\\end{enumerate}", (t) => /^1\. P .*Q .*6\. R$/.test(t) && !/2\. Q/.test(t)],
+    ["ctr-footnote-after-optional", "A\\footnote[7]{N7.}B\\footnote{N1.}", (t) => /A 7 B 1 .*7 N7\. .*1 N1\./.test(t)],
+  ];
+  for (const [name, body, ok] of cases) { const t = text(body); check(name, ok(t), t); }
+}
+
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
