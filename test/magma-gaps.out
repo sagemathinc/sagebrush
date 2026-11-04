@@ -1,0 +1,58 @@
+4
+[ 5, 7 ]
+7
+42
+10
+
+>>   y := 10 div (2 - i);
+             ^
+Runtime error in 'div': Division by zero
+
+1
+2
+2
+
+>>     if i eq 2 then z := [1,2][5]; end if;
+                                ^
+Runtime error in '[]': Index 1 (5) should be in the range [1 .. 2]
+
+
+>> print v;
+         ^
+User error: Identifier 'v' has not been declared or assigned
+
+>> Append(~undefined_list, 5);
+         ^
+Runtime error in 'Append': Argument 1 has not been initialized
+Argument types given: *nothing ~, RngIntElt
+
+1 2
+
+>> print true / 0;
+              ^
+Runtime error in '/': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> print 1 / false;
+           ^
+Runtime error in '/': Bad argument types
+Argument types given: RngIntElt, BoolElt
+
+
+>> print false / 0;
+               ^
+Runtime error in '/': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> print true div 0;
+              ^
+Runtime error in 'div': Bad argument types
+Argument types given: BoolElt, RngIntElt
+
+
+>> print 7 mod 0;
+           ^
+Runtime error in 'mod': Division by zero
+

@@ -1,0 +1,47 @@
+A Runtime error in '/': Division by zero
+
+T Err
+P >>   x := 1/z;
+           ^
+
+Runtime error: boom
+obj 5 MonStgElt
+1
+f: too big
+in: inner
+out: outer
+
+>>     continue;
+       ^
+User error: A 'continue' can only be used inside a loop
+
+>>   print undefined_x;
+           ^
+User error: Identifier 'undefined_x' has not been declared or assigned
+C cond
+in x
+5
+
+>>     if i eq 2 then break; end if;
+                      ^
+User error: A 'break' can only be used inside a loop
+1 1
+1 2
+2 1
+2 2
+x
+deep
+Err
+
+>>   x := 1/z;
+           ^
+Runtime error in '/': Division by zero
+
+after print
+Err
+Err
+AS Runtime error in assert: Assertion failed
+M a 5 [ 1, 2 ]
+Err
+1/2 -1
+102
