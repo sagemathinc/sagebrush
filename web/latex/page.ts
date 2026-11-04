@@ -8,7 +8,7 @@
 // SECURITY: file names, paths and messages reach the page through textContent; preview HTML is the renderer's (its
 // own escaping, KaTeX trust:false); images only as <img> from blob: URLs made of bytes checked by images.ts.
 import type { Workspace, Entry } from "../workspace/api";
-import { nameOf, parentOf } from "../workspace/paths";
+import { nameOf, parentOf, join, safeName } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
 import { engineInputs, admitInput, type Known } from "./inputs";
@@ -422,6 +422,78 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { edits++; showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // ---- the name at the top (William's M0, Nov 3): it follows this file renamed or moved elsewhere (the file panel,
+  // another tab), read again by its identity on any change; and a click on it renames the file there, as a notebook's
+  // title does: a true rename of the .tex, with its results and comments files beside it moved along
+  // (the rename is offered only for a file that can be saved here: elsewhere the name is plain text, no control)
+  const showName = (p: string) => { title.textContent = nameOf(p); title.title = saveable ? p + ": click to rename" : p; document.title = nameOf(p) + " — Sagebrush"; };
+  let renamingTitle = false, nameCheck: any = null;
+  // (the name the file has now, found again by its identity; not while the name is being edited)
+  const refreshName = () => host.ws.pathOfFile(host.fid).then((at) => { if (live() && at.ok && !renamingTitle) showName(at.path); }, () => {});
+  const unwatchName = host.ws.watch(() => { clearTimeout(nameCheck); nameCheck = setTimeout(() => void refreshName(), 50); });
+  life.signal.addEventListener("abort", () => { unwatchName(); clearTimeout(nameCheck); });
+  if (saveable) { title.classList.add("renamable"); title.tabIndex = 0; title.setAttribute("role", "button"); title.setAttribute("aria-label", "Rename this file"); }
+  showName(where.path);
+  const renameTitle = async () => {
+    if (renamingTitle || !saveable) return;
+    const at = await host.ws.pathOfFile(host.fid);
+    if (!live() || !at.ok) return;
+    renamingTitle = true;
+    const input = el("input", "tex-titlein"); input.value = nameOf(at.path); input.setAttribute("aria-label", "The file's new name");
+    title.replaceWith(input); input.focus(); input.setSelectionRange(0, input.value.replace(/\.tex$/i, "").length);
+    let done = false;
+    // (every end but a rename done: the name the file has now, found again, since it may have been renamed elsewhere
+    //  while the field was open, daybreak3's M0-SEM-1)
+    const finish = async (keep: boolean) => {
+      if (done) return; done = true;
+      let renamed = false;
+      try { renamed = await commit(keep); } finally { if (!renamed) void refreshName(); }
+    };
+    const commit = async (keep: boolean): Promise<boolean> => {
+      const v = input.value.trim();
+      input.replaceWith(title); renamingTitle = false;
+      if (!keep || !v) return false;
+      const name = safeName(/\.tex$/i.test(v) ? v : v + ".tex");
+      const now = await host.ws.pathOfFile(host.fid);
+      if (!live()) return false;
+      if (!now.ok) { say("Not renamed: this file isn't here any more"); return false; }
+      const to = join(parentOf(now.path), name);
+      if (to === now.path) return false;
+      try {
+        // (its results and comments files, as they are BEFORE the rename (astra LATEX-RENAME-1): once the .tex has moved,
+        //  its old name is free, and another document's files made there meanwhile must never be taken along)
+        const companions: { ext: string; e: Entry }[] = [];
+        for (const ext of [".results.json", ".comments.json"]) {
+          const se = await host.ws.stat(now.path + ext).catch(() => undefined);
+          if (se && !se.trashed && se.kind === "file") companions.push({ ext, e: se });
+        }
+        const e = await host.ws.rename(now.path, to, { expect: { kind: now.entry.kind, ref: now.entry.ref, fid: now.entry.fid, created: now.entry.created } });
+        // (the test build only: the page test can make files at the freed name here; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexRenamed?.(now.path, e.path);
+        // (each moved along only if it is still the very entry found before (its identity checked holding the lock) and
+        //  the new name is free; one that can't be is left where it was, said)
+        let left = 0;
+        for (const { ext, e: se } of companions) {
+          if (await host.ws.stat(e.path + ext).catch(() => undefined)) { left++; continue; }
+          try { await host.ws.rename(se.path, e.path + ext, { expect: { kind: se.kind, ref: se.ref, fid: se.fid, created: se.created } }); } catch { left++; }
+        }
+        if (!live()) return true;
+        where.path = e.path; inputs.docPath = e.path; inputs.version++;
+        showName(e.path); request();
+        say(left ? `Renamed; ${left} file${left === 1 ? "" : "s"} beside it kept ${left === 1 ? "its" : "their"} old name` : "Renamed");
+        return true;
+      } catch (err: any) {
+        say(err?.code === "exists" ? `Not renamed: there is already a "${name}" here` : err?.code === "conflict" ? "Not renamed: this file was moved or replaced meanwhile" : "Not renamed: " + String(err?.message ?? err).slice(0, 200));
+        return false;
+      }
+    };
+    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); void finish(true); } else if (ev.key === "Escape") { ev.preventDefault(); void finish(false); } });
+    input.addEventListener("blur", () => void finish(true));
+  };
+  if (saveable) {
+    title.addEventListener("click", () => void renameTitle());
+    title.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void renameTitle(); } });
+  }
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
   void loadResults();
   window.addEventListener("focus", () => void loadResults(), on);
@@ -612,7 +684,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       const w = await host.ws.write(at.path, bytes, { fid: host.fid, base });
       savedText = text; docRev = w.rev;
       void cm?.saved(snap);
-      if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
+      if (at.path !== where.path && !renamingTitle) showName(at.path);
       say("Saved");
     } catch (err) {
       // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
