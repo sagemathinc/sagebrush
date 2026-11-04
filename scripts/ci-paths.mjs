@@ -79,6 +79,15 @@ const fullTierPaths = [
   // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
   // offline pages), the dependency files and the site preview (web-sync.4))
   /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
+  // (the LaTeX group's absolute ceiling, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
+  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
+  // That suite checks every input of the two bundles is matched here)
+  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
+  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
+  // request in six: a bun or node bump carries the full-ci label instead)
+  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
 ];
 // A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
 // neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
