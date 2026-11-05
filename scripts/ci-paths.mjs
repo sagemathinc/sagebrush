@@ -286,6 +286,31 @@ const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
 
+// The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
+// of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
+// and on a pull request that changes what one of them tests.  Not on a master push, whose CI is to stay within 15
+// minutes: the nightly run is their master check.  (test/ci-paths.test.ts has a case for each path class)
+const slowTestPaths = [
+  // tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
+  // (test/arraybuffer-sites.test.ts): the TypeScript and tsc 7 versions, the compiler options, the census and its tables
+  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^scripts\/arraybuffer-sites[^/]*\.mjs$/,
+  /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/,
+  // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
+  /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
+  // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
+  /^src\/local-gateway\.ts$/, /^test\/local-gateway\.test\.ts$/,
+  // the nmod ops' peaks in wasm (test/nmod-fp-wasm.test.ts): the engine artifact and the nmod kernels
+  /^wasm\/sagebrush-engine\.wasm$/, /^engine\/web\/src\/nmod[^/]*\.rs$/, /^engine\/arith\/src\/nmod[^/]*\.rs$/,
+  /^engine\/bigint\/src\/nmod\.rs$/, /^test\/nmod-fp-wasm\.test\.ts$/,
+  // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
+  /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
+  /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
+  // and the list itself
+  /^test\/slow-tests\.ts$/,
+];
+const slowTests = event === "workflow_dispatch" || event === "schedule" ||
+  (event === "pull_request" && (labels.includes("full-ci") || matches(slowTestPaths)));
+
 const outputs = {
   full,
   docs_only: docsOnly,
@@ -304,6 +329,7 @@ const outputs = {
   web_lookalike: webLookalike,
   census,
   unsafe_sweep: unsafeSweep,
+  slow_tests: slowTests,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
