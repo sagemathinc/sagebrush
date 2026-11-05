@@ -20,7 +20,8 @@
 // is matlab-lu) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
 // "-"; scipy.special and scipy.stats are mod-scipy-special and
-// mod-scipy-stats, apart from scipy's other submodules).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
+// mod-scipy-stats, apart from scipy's other submodules; fredapi, yfinance and
+// _sbdata_live together are mod-live-data).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
 // pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
 // mode's start imports it (recorded as "pkg:<name>/<path>"), and in that
 // mode's start then; the manifest carries the packages' registry
@@ -58,6 +59,9 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   // finite field: its own group, so sage-more's users don't fetch it)
   if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
   if (/^_?sage/.test(top)) return "sage-more";
+  // (live data's small modules, imported together: fredapi and its bridge, and yfinance's refusal; one group,
+  // design-data-access r3.1)
+  if (top === "fredapi" || top === "yfinance" || top === "_sbdata_live") return "mod-live-data";
   // (MATLAB mode's sparse LU, imported only by a measured sparse solve: its
   // own group, so the other MATLAB extras' users don't fetch it)
   if (/^_matlab_(lu|colamd)$/.test(top)) return "matlab-lu";
