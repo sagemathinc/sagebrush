@@ -62,6 +62,7 @@ import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
 import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
 import { startDirOf } from "./start-dir";
+import { ndWarm, ndWarmAsked } from "../src/runtime/nd";
 import { R, onOptionalUse } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
@@ -317,6 +318,9 @@ self.onmessage = async (ev: MessageEvent) => {
   }
   try {
     await session.handle(m);
+    // (a run that imported numpy: engine/nd's module is compiled now, while the worker is idle, so linear algebra's
+    // first call only instantiates it; the same bits as without, src/runtime/nd.ts)
+    if (m.code !== undefined && ndWarmAsked()) setTimeout(() => void ndWarm(fetchBytes), 0);
   } catch (e) {
     // (the session never became ready: its limits are invalid)
     if (gate !== "failed") throw e;

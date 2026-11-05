@@ -1,0 +1,15 @@
+{
+ "title": "Calculus (Sage)",
+ "summary": "Symbolic expressions, derivatives, limits, integrals, series and differential equations.",
+ "tags": [
+  "calculus"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

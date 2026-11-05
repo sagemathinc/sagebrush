@@ -1,0 +1,14 @@
+{
+ "title": "Mermaid flowcharts, laid out by the board",
+ "summary": "Markdown with two Mermaid diagrams: every shape and kind of line, and about 100 nodes of code flow.",
+ "tags": [
+  "diagrams"
+ ],
+ "level": "intro",
+ "main": "mermaid.md",
+ "files": [
+  "mermaid.md"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

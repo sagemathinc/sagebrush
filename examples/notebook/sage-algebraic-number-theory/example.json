@@ -1,0 +1,16 @@
+{
+ "title": "Algebraic number theory (Sage)",
+ "summary": "Number fields: discriminants, maximal orders, units, regulators and how primes split.",
+ "tags": [
+  "number theory",
+  "algebra"
+ ],
+ "level": "research",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

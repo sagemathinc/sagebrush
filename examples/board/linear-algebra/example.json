@@ -1,0 +1,17 @@
+{
+ "title": "Linear algebra with NumPy",
+ "summary": "NumPy code items: solving a linear system, eigenvalues and a least-squares fit.",
+ "tags": [
+  "linear algebra"
+ ],
+ "level": "intro",
+ "main": "gallery-linear-algebra.board.json",
+ "files": [
+  "gallery-linear-algebra.board.json"
+ ],
+ "modes": [
+  "python"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

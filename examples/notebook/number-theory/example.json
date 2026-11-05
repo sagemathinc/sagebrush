@@ -1,0 +1,15 @@
+{
+ "title": "Number theory",
+ "summary": "The extended Euclidean algorithm, Fermat numbers, RSA in a few lines and Pell's equation, in plain Python.",
+ "tags": [
+  "number theory"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

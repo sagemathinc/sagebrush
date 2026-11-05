@@ -1,0 +1,25 @@
+\documentclass{article}
+\usepackage{pythontex}
+\begin{document}
+\section*{PythonTeX}
+
+\emph{In this preview:} PythonTeX code is not run yet, so its results are missing; the code is shown as
+written. A full run (latex, then pythontex, then latex again) runs the Python and puts the results in.
+
+\begin{pycode}
+from math import comb, factorial
+rows = [[comb(n, k) for k in range(n + 1)] for n in range(6)]
+\end{pycode}
+
+Ten factorial is \py{factorial(10)}, and $\binom{10}{3}$ is \py{comb(10, 3)}.
+
+The sixth row of Pascal's triangle: \py{rows[5]}.
+
+\begin{pyverbatim}
+def fib(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+\end{pyverbatim}
+\end{document}

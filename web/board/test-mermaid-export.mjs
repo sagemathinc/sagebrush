@@ -10,6 +10,9 @@
 import { readFileSync } from "node:fs";
 import { cleanDoc, pageCount, pageView } from "./doc.ts";
 import { boardFromText, fromMermaid, mermaidBlocks, toMermaid, toMermaidMarkdown } from "./mermaid.ts";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 const fails = [];
 let checks = 0;
@@ -18,7 +21,7 @@ const here = new URL(".", import.meta.url).pathname;
 
 // flowcharts: the example's, and the syntax the importer reads
 const corpus = [
-  ...mermaidBlocks(readFileSync(here + "examples/mermaid.md", "utf8")).map((b) => b.text),
+  ...mermaidBlocks(readFileSync(EXAMPLES.get("mermaid.md"), "utf8")).map((b) => b.text),
   "graph TD\n  A --> B\n  B --> C\n  C --> A",
   "flowchart LR\n  a([Stadium]) --- b((Circle))\n  b ==> c{Diamond}\n  c -.-> d{{Hexagon}}\n  d <--> e[(Cylinder)]\n  e --x f[[Subroutine]]\n  f -.- g>Flag]",
   "flowchart TB\n  p[/Lean right/] --> q[\\Lean left\\]\n  q --> r[/Trapezoid\\]\n  r --> s[\\Inverted/]",
@@ -50,7 +53,7 @@ const graph = (d, rename = (x) => x) => {
   return JSON.stringify([nodes.sort(), edges.sort()]);
 };
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
-  const d = cleanDoc(JSON.parse(readFileSync(here + "examples/" + f + ".json", "utf8")));
+  const d = cleanDoc(JSON.parse(readFileSync(EXAMPLES.get(f + ".json"), "utf8")));
   for (let i = 0; i < pageCount(d); i++) {
     const v = pageView(d, i), { text } = toMermaid(d, i);
     // (ids that are not plain words were renamed: map them back by the order written)

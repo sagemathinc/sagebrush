@@ -1,0 +1,17 @@
+{
+ "title": "Number theory in Sage",
+ "summary": "Sage code items: primes, a Fermat number factored, the Chinese remainder theorem, and arithmetic functions.",
+ "tags": [
+  "number theory"
+ ],
+ "level": "intro",
+ "main": "gallery-number-theory.board.json",
+ "files": [
+  "gallery-number-theory.board.json"
+ ],
+ "modes": [
+  "sage"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

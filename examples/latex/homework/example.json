@@ -1,0 +1,15 @@
+{
+ "title": "Homework or exam",
+ "summary": "Numbered problems with points",
+ "tags": [
+  "teaching",
+  "writing"
+ ],
+ "level": "intro",
+ "main": "homework.tex",
+ "files": [
+  "homework.tex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}
