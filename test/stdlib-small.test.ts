@@ -16,6 +16,11 @@ test("__future__, pprint and textwrap as CPython's (CPython 3.14's modules)", ()
   same("stdlib_small_cases.py", (s) => s.replace(/id=\d+/g, "id=?"));
 });
 
+test("math.sumprod as CPython 3.14's (its int, float and generic paths, in its order), and the statistics module as CPython's (#709)", () => {
+  same("sumprod_cases.py");
+  same("statistics_cases.py");
+});
+
 test("collections.abc is CPython's _collections_abc; UserDict, UserList, UserString and ChainMap are CPython's", () => {
   same("collections_cases.py");
 });

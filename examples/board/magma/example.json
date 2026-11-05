@@ -1,0 +1,17 @@
+{
+ "title": "Magma",
+ "summary": "Magma code items: factoring, prime sequences, Euler's phi and the Chinese remainder theorem.",
+ "tags": [
+  "basics"
+ ],
+ "level": "intro",
+ "main": "gallery-magma.board.json",
+ "files": [
+  "gallery-magma.board.json"
+ ],
+ "modes": [
+  "magma"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

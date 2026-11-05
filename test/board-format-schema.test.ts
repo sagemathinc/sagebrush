@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanDoc, safeColor } from "../web/board/doc";
 import { SchemaValidator, didYouMean } from "../src/json-schema";
+import { boardExample, boardExamples } from "./board-examples";
 
 // The board format's JSON Schema (web/board-format.schema.json), written
 // from web/board/doc.ts by scripts/board-format-schema.mjs, against the
@@ -25,10 +26,9 @@ test("web/board-format.schema.json is as web/board/doc.ts says", () => {
 });
 
 test("every example board is valid", () => {
-  const dir = join(repo, "web", "board", "examples");
-  const files = readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "index.json");
+  const files = [...boardExamples.keys()].filter((f) => f.endsWith(".json")).sort();
   assert.ok(files.length >= 10);
-  for (const f of files) assert.deepEqual(v.validate(JSON.parse(readFileSync(join(dir, f), "utf8"))), [], f);
+  for (const f of files) assert.deepEqual(v.validate(JSON.parse(readFileSync(boardExample(f), "utf8"))), [], f);
 });
 
 // A board with every field of every kind of thing, each a value the format takes.

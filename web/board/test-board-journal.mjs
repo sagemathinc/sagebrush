@@ -11,6 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { buildFailure, closeChrome, bounded, track, unlessEnding, inFlight } from "./test-board-journal-lib.mjs";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 const here = new URL(".", import.meta.url).pathname;
 const J = JSON.stringify;
@@ -29,9 +32,9 @@ const statics = [];
   statics.push([/boardRowWrite\(tx, also\.board\.id, plainRow\(also\.board\), also\.board\.rev\)/.test(api) && /stampOf\?: never/.test(api), "adopt writes plainRow of the row it is given; PlainBoardRecord's envelope fields are never"]);
   statics.push([/await dropRows\(st, pre\)/.test(api), "a board's deletion drops its journal's rows"]);
   // (the field guard (test 7): no board the site ships has a field of the journal's own, or an id, at its top)
-  const ex = join(here, "examples"), bad = [];
-  for (const f of readdirSync(ex).filter((f) => f.endsWith(".json") && f !== "index.json")) {
-    const d = JSON.parse(readFileSync(join(ex, f), "utf8"));
+  const bad = [];
+  for (const f of [...EXAMPLES.keys()].filter((f) => f.endsWith(".json")).sort()) {
+    const d = JSON.parse(readFileSync(EXAMPLES.get(f), "utf8"));
     for (const k of ["rev", "j", "hash", "unjournaled", "stampOf", "baseRev", "id"]) if (d && typeof d === "object" && k in d) bad.push(`${f}: ${k}`);
   }
   statics.push([bad.length === 0, "no example board has a top-level rev, j, hash, unjournaled, stampOf, baseRev or id: " + J(bad)]);

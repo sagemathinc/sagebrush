@@ -1,0 +1,16 @@
+{
+ "title": "Modular forms (Sage)",
+ "summary": "Modular symbols, Hecke polynomials, spaces with a character and dimensions of cusp forms.",
+ "tags": [
+  "modular forms",
+  "number theory"
+ ],
+ "level": "research",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

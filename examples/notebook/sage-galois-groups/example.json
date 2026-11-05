@@ -1,0 +1,17 @@
+{
+ "title": "Galois groups (Sage)",
+ "summary": "Galois groups of polynomials over the rationals, and how the descent found them.",
+ "tags": [
+  "group theory",
+  "polynomials",
+  "number theory"
+ ],
+ "level": "research",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

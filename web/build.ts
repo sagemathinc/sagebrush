@@ -130,8 +130,13 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
   const list = runnerFetchList(engineSha256, rasterSha256, ndSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   const build0 = Bun.build.bind(Bun);
+  // (and the editors' old example lists, web/examples/legacy.ts: in a bundle, its lists as literals, never its file
+  // reading code)
+  const { legacySource } = await import("./examples/legacy.ts");
+  const legacy = legacySource();
+  const examplesLegacyPlugin = { name: "examples-legacy", setup(b: any) { b.onLoad({ filter: /[\\/]web[\\/]examples[\\/]legacy\.ts$/ }, () => ({ contents: legacy, loader: "js" })); } };
   (Bun as any).build = async (o: any) => {
-    const r = await build0({ ...o, define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
+    const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
     if (r.success) checkRunnerDefine(String(o.entrypoints?.[0] ?? "a bundle"), Object.keys(r.metafile?.inputs ?? {}), await Promise.all(r.outputs.map((x: any) => x.text())));
     return r;
   };
@@ -425,7 +430,10 @@ function boardMystClosure(what: string, r: any) {
   // other sites embed (below) nor a downloaded board (export.ts) ever carries it)
   writeFileSync(join(here, "dist", "board", "index.html"), withAlphaBanner(readFileSync(join(here, "board", "index.html"), "utf8")));
   mkdirSync(join(here, "dist", "board", "examples"), { recursive: true });
-  for (const f of readdirSync(join(here, "board", "examples"))) if (/\.(json|md|mmd)$/.test(f)) copyFileSync(join(here, "board", "examples", f), join(here, "dist", "board", "examples", f));
+  // (the corpus's boards, examples/board/<slug>/, under their own file names, and the menu: web/examples/legacy.ts)
+  const { boardFiles, boardMenu } = await import("./examples/legacy.ts");
+  for (const [f, path] of boardFiles()) copyFileSync(path, join(here, "dist", "board", "examples", f));
+  writeFileSync(join(here, "dist", "board", "examples", "index.json"), JSON.stringify(boardMenu(), null, 1) + "\n");
   // (and the generated ones: scripts/board-examples.mjs)
   const gen = Bun.spawnSync(["node", join(here, "..", "scripts", "board-examples.mjs"), join(here, "dist", "board", "examples")]);
   if (gen.exitCode !== 0) { console.error(gen.stderr.toString()); process.exit(1); }

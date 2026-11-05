@@ -10,6 +10,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonical, cleanDoc, layout, formatError, isBoard } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fails = [];
@@ -18,8 +21,8 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // every example, and Mermaid's converted: read and written, the same text; nothing lost
-const docs = readdirSync(join(here, "examples")).filter((f) => /\.(json|md)$/.test(f) && f !== "index.json")
-  .map((f) => [f, boardFromText(readFileSync(join(here, "examples", f), "utf8"), f, () => {})]);
+const docs = [...EXAMPLES.keys()].filter((f) => /\.(json|md)$/.test(f)).sort()
+  .map((f) => [f, boardFromText(readFileSync(EXAMPLES.get(f), "utf8"), f, () => {})]);
 check(docs.length >= 6, "the examples: " + docs.length);
 for (const [f, d] of docs) {
   const t = canonical(d);

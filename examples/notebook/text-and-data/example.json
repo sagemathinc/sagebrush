@@ -1,0 +1,16 @@
+{
+ "title": "Text & data",
+ "summary": "Regular expressions, JSON, counting and sorting words.",
+ "tags": [
+  "data",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
