@@ -398,3 +398,29 @@ d
 [dtype('int32'), np.int64(6442450941), np.float64(2147483647.0), np.int32(2147483647)]
 == to.exact-false-no-format
 DatetimeIndex(['2020-01-01'], dtype='datetime64[us]', freq=None)
+== pin.T5-nat-text
+DatetimeIndex(['2020-01-01', 'NaT', 'NaT'], dtype='datetime64[us]', freq=None)
+== pin.T11-hour-24
+!! DateParseError: hour must be in 0..23, not 24: 2020-01-01 24:00
+== pin.T14-literal-dot
+!! ValueError: time data "2020x01x02" doesn't match format "%Y.%m.%d". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== pin.T15-prefix
+!! ValueError: unconverted data remains when parsing with format "%Y-%m-%d": " junk". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== pin.T16-y-pivot
+DatetimeIndex(['2068-01-01', '1969-01-01'], dtype='datetime64[us]', freq=None)
+== pin.T17-j
+[Timestamp('2020-01-01 00:00:00'), Timestamp('2020-12-31 00:00:00'), Timestamp('2020-01-01 00:00:00')]
+== pin.T26-bool
+!! TypeError: <class 'bool'> is not convertible to datetime
+== pin.T11-minute
+!! DateParseError: minute must be in 0..59, not 60: 2020-01-01 23:60
+== pin.T11-second
+!! DateParseError: second must be in 0..59, not 60: 2020-01-01 23:59:60
+== pin.T20-whole-us
+[Timestamp('1970-01-01 00:00:00.000002'), Timestamp('1970-01-01 00:00:00.001500')]

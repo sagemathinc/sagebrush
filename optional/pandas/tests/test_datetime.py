@@ -168,3 +168,16 @@ case("int32.reduce", lambda: [y.sum(), y.mean(), y.min(), y.max(), y.count()])
 big = pd.Series(np.full(3, 2 ** 31 - 1, dtype=np.int32))
 case("int32.big-sum", lambda: [big.dtype, big.sum(), big.mean(), big.max()])
 case("to.exact-false-no-format", lambda: pd.to_datetime(["2020-01-01"], exact=False))
+
+# grader's pins on #680 r3 (T1-T26): each a behaviour with its oracle answer
+from datetime import datetime as _dt, timezone as _tz
+case("pin.T5-nat-text", lambda: pd.to_datetime(["2020-01-01", "nat", "NAT"]))
+case("pin.T11-hour-24", lambda: pd.to_datetime("2020-01-01 24:00"))
+case("pin.T14-literal-dot", lambda: pd.to_datetime("2020x01x02", format="%Y.%m.%d"))
+case("pin.T15-prefix", lambda: pd.to_datetime("2020-01-02 junk", format="%Y-%m-%d"))
+case("pin.T16-y-pivot", lambda: pd.to_datetime(["68-01-01", "69-01-01"], format="%y-%m-%d"))
+case("pin.T17-j", lambda: [pd.to_datetime("2020-001", format="%Y-%j"), pd.to_datetime("2020-366", format="%Y-%j"), pd.to_datetime("2019-366", format="%Y-%j")])
+case("pin.T26-bool", lambda: pd.to_datetime(True, unit="s"))
+case("pin.T11-minute", lambda: pd.to_datetime("2020-01-01 23:60"))
+case("pin.T11-second", lambda: pd.to_datetime("2020-01-01 23:59:60"))
+case("pin.T20-whole-us", lambda: [pd.to_datetime(0.000002, unit="s"), pd.to_datetime(1.5, unit="ms")])

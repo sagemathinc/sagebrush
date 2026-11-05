@@ -296,8 +296,9 @@ def _checked(t, y, mo, d, h=0, mi=0, sec=0, us=0):
     last = (date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)).day
     if not 1 <= d <= last:
         raise DateParseError("day %d must be in range 1..%d for month %d in year %d: %s" % (d, last, mo, y, t))
-    if h > 23 or mi > 59 or sec > 59:
-        raise DateParseError("hour, minute or second out of range: %s" % t)
+    for name, v, top in (("hour", h, 23), ("minute", mi, 59), ("second", sec, 59)):
+        if v > top:
+            raise DateParseError("%s must be in 0..%d, not %d: %s" % (name, top, v, t))
     return datetime(y, mo, d, h, mi, sec, us)
 
 
@@ -342,7 +343,7 @@ def _parse_like(s, rx, fmt):
     raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
 
 
-_FMT = {"%Y": r"(?P<Y>\d{4})", "%m": r"(?P<m>\d{1,2})", "%d": r"(?P<d>\d{1,2})", "%H": r"(?P<H>\d{1,2})", "%M": r"(?P<M>\d{1,2})", "%S": r"(?P<S>\d{1,2})", "%y": r"(?P<y>\d{2})", "%f": r"(?P<f>\d{1,6})", "%%": "%"}
+_FMT = {"%Y": r"(?P<Y>\d{4})", "%m": r"(?P<m>\d{1,2})", "%d": r"(?P<d>\d{1,2})", "%H": r"(?P<H>\d{1,2})", "%M": r"(?P<M>\d{1,2})", "%S": r"(?P<S>\d{1,2})", "%y": r"(?P<y>\d{2})", "%f": r"(?P<f>\d{1,6})", "%j": r"(?P<j>\d{1,3})", "%%": "%"}
 
 
 def _parse_format(s, fmt):
@@ -362,11 +363,21 @@ def _parse_format(s, fmt):
     t = s.strip()
     if t in _NAT_TEXT:
         return NaT
-    m = re.fullmatch("".join(pat), t)
+    rx = re.compile("".join(pat))
+    m = rx.fullmatch(t)
     if not m:
+        pm = rx.match(t)
+        if pm:
+            raise ValueError("unconverted data remains when parsing with format \"%s\": \"%s\"" % (fmt, t[pm.end():]) + _TRY)
         raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
     g = m.groupdict()
     y = int(g["Y"]) if g.get("Y") else (2000 + int(g["y"]) if int(g["y"]) < 69 else 1900 + int(g["y"])) if g.get("y") else 1900
+    if g.get("j"):
+        # (a day of the year: counted from 1 January, into the next year past its end, as pandas' strptime)
+        if int(g["j"]) < 1:
+            raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
+        d0 = _checked(t, y, 1, 1, int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
+        return d0 + timedelta(days=int(g["j"]) - 1)
     return _checked(t, y, int(g.get("m") or 1), int(g.get("d") or 1), int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
 
 
@@ -380,7 +391,11 @@ def _number_us(v, unit, origin_us, scalar):
         # (pandas 3.1 makes a list with a fractional number datetime64[ns]: not here; a scalar is a Timestamp)
         if not scalar and not float(v).is_integer():
             raise _subset("to_datetime of a list with a fractional number (a datetime64[ns] result)")
-        us = origin_us + int(round(float(v) * _UNITS[unit]))
+        exact = float(v) * _UNITS[unit]
+        # (a fraction of a microsecond is a nanosecond Timestamp in pandas: not here)
+        if exact != int(exact):
+            raise _subset("to_datetime of a number below a microsecond (a nanosecond result)")
+        us = origin_us + int(exact)
     else:
         us = origin_us + int(v) * _UNITS[unit]
     if not -_EXACT < us < _EXACT:
@@ -452,7 +467,8 @@ def to_datetime(arg, errors="raise", dayfirst=False, yearfirst=False, utc=False,
     elif unit is not None:
         origin_us = as_us(Timestamp(origin))
     else:
-        raise ValueError("origin %r is only meaningful with a unit" % (origin,))
+        # (pandas then reads numbers as nanoseconds after the origin: not here)
+        raise _subset("to_datetime's origin= without a unit (nanoseconds)")
     from ._pd_series import Series
     from ._pd_index import Index
     from ._pd_column import Column
