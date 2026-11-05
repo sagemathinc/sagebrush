@@ -616,7 +616,7 @@ def _moving(A, kb, kf, stat, w, omit, ends):
         lo = _m._take_along(W, np.maximum((m - 1) // 2, 0).reshape((1,) + A.shape), 0)[0]
         hi = _m._take_along(W, np.maximum(m // 2, 0).reshape((1,) + A.shape), 0)[0]
         with np.errstate(invalid="ignore"):
-            res = np.where(m % 2 == 1, lo, lo + (hi - lo) / 2)
+            res = np.where(m % 2 == 1, lo, _m._median_middle(lo, hi))
         res = np.where(m == 0, _math.nan, res)
     if not omit:
         res = np.where(hasnan, _math.nan, res)

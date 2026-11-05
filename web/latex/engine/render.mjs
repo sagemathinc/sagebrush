@@ -9,7 +9,7 @@
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
 let renderToString = null;
 export function setKatex(f) { renderToString = f; }
-import { CAT, isCs, catOf, codeOf } from "./demo-machine.mjs";
+import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
 
@@ -18,7 +18,8 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39
 // eslint-disable-next-line no-control-regex
 export const esc = (s) => String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/[&<>"']/g, (c) => ESC[c]);
 const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailto:)[^\s"'<>\\]*$/i.test(s) && s.length < 2048 ? s : null; };
-const roman = (n) => { if (n <= 0 || n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
+// (\roman of 0 or less: nothing, as TeX's \romannumeral; past 4999, the number in digits, a bound on the text)
+const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
@@ -62,6 +63,7 @@ export function buildTree(events, items = []) {
       case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
+      case "ctr": top().kids.push({ t: "C", name: e.name, v: e.v }); break;
       case "verbenv": {
         const v = { t: "V", env: e.env, text: e.text };
         if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); v.it.at = last; items.push(v.it); }
@@ -175,6 +177,8 @@ const KATEX_ENVS = new Set(["array", "darray", "matrix", "pmatrix", "bmatrix", "
 const MATH_ENVS = new Set(["equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*",
   "displaymath", "flalign", "flalign*", "alignat", "alignat*", "math"]);
 const LIST_ENVS = new Set(["itemize", "enumerate", "description", "list", "compactitem", "compactenum", "inparaenum", "asparaenum"]);
+// (a counter stepped as TeX's \advance by 1 does it, on a 32-bit register: 2147483647 steps to -2147483648)
+const step = (v) => (v + 1) | 0;
 const SEC_LEVEL = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
 const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy", "fussy", "nobreak", "allowbreak", "frenchspacing", "nonfrenchspacing",
   "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
@@ -183,12 +187,17 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
   ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
+// (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
+//  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+export const BOX_MAX = 1 << 20, BOX_KEY = 16;
+export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
+export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
   DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
-  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], savebox: [1, 2], sbox: [0, 2], usebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
+  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
   bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1],
   usetheme: [1, 1], usecolortheme: [1, 1], usefonttheme: [1, 1], useinnertheme: [1, 1], useoutertheme: [1, 1], setbeamertemplate: [0, 2],
@@ -212,6 +221,7 @@ class Renderer {
     // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
     this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
+    this.boxes = new Map(); this.boxUsed = 0;   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox, BOX_MAX for the copies)
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
     this.secnumdepth = 3;
@@ -335,6 +345,16 @@ class Renderer {
           break;
         case "s": this.sec(n, ctx, flow); break;
         case "v": flow.html('<code class="verb">' + esc(n.text) + "</code>", ctx.st); break;
+        // (a counter set or added to (\setcounter, \addtocounter): the renderer's own numbering follows it; enumi..enumiv,
+        //  the enclosing enumerate of that depth)
+        case "C": {
+          if (Object.hasOwn(this.ctr, n.name)) this.ctr[n.name] = n.v;
+          // (secnumdepth: which levels are numbered, as in LaTeX: 0 none below chapter, 4 and 5 \paragraph and \subparagraph)
+          if (n.name === "secnumdepth") this.secnumdepth = n.v;
+          const d = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 }[n.name], L = d && this.lists.filter((x) => x.kind === "enum")[d - 1];
+          if (L) L.n = n.v;
+          break;
+        }
         case "V":
           if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
@@ -355,7 +375,7 @@ class Renderer {
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
-        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
+        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
     }
@@ -434,7 +454,7 @@ class Renderer {
     void ctx;
   }
   eqNumber() {
-    this.ctr.equation++;
+    this.ctr.equation = step(this.ctr.equation);
     const pre = this.eqWithin === "section" ? this.secNum(1) + "." : this.book ? this.chapNum() + "." : "";
     return pre + this.ctr.equation;
   }
@@ -457,9 +477,9 @@ class Renderer {
     const level = SEC_LEVEL[n.cmd];
     const names = ["chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
     let num = "";
-    if (n.cmd === "part") { if (!n.star) { this.ctr.part++; num = roman(this.ctr.part).toUpperCase(); } }
+    if (n.cmd === "part") { if (!n.star) { this.ctr.part = step(this.ctr.part); num = roman(this.ctr.part).toUpperCase(); } }
     else if (!n.star) {
-      this.ctr[n.cmd]++;
+      this.ctr[n.cmd] = step(this.ctr[n.cmd]);
       for (let l = level + 1; l < names.length; l++) this.ctr[names[l]] = 0;
       if (n.cmd === "chapter") { this.ctr.equation = 0; this.ctr.figure = 0; this.ctr.table = 0; this.ctr.footnote = 0; }
       if (n.cmd === "section" && this.eqWithin === "section") this.ctr.equation = 0;
@@ -470,7 +490,8 @@ class Renderer {
     const id = this.nid("sec");
     this.setTarget(num, id, n.cmd);
     const title = this.inline(n.kids, ctx);
-    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (num ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
+    // (an unstarred part says "Part" with its numeral, which TeX leaves empty at 0 or less)
+    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (!n.star ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
     else if (n.cmd === "chapter") flow.block('<h1 class="chapter" id="' + id + '">' + (num ? '<div class="chapnum">' + (this.appendix ? "Appendix " : "Chapter ") + esc(num) + "</div>" : "") + title + "</h1>");
     else if (level >= 4) { flow.par(); flow.html('<span class="runin" id="' + id + '">' + (num ? esc(num) + " " : "") + title + "</span> ", ctx.st); }
     else flow.block("<h" + (level + 1) + ' id="' + id + '">' + (num ? '<span class="secnum">' + esc(num) + "</span>" : "") + title + "</h" + (level + 1) + ">");
@@ -478,7 +499,11 @@ class Renderer {
     flow.noindent = true;
   }
   footnote(n, ctx, flow) {
-    const k = ++this.ctr.footnote, id = this.nid("fn");
+    // (\footnote[n]: that number, signed, within TeX's limit, the counter not stepped, as in LaTeX; anything else (TeX
+    //  would read its leading number and set the rest as text, \footnote[2a] as 2 and a stray "a") the counter, and said)
+    const opt = n.short ?? "", num = /^\s*[+-]?\d+\s*$/.test(opt);
+    if (!num && opt.trim()) this.problem("footnote", "\\footnote[" + opt.trim().slice(0, 40) + "]: not a number; TeX would read its leading digits and set the rest as text");
+    const k = num ? Math.max(-2147483647, Math.min(2147483647, +opt)) : (this.ctr.footnote = step(this.ctr.footnote)), id = this.nid("fn");
     const save = this.target;
     this.setTarget(String(k), id, "footnote");
     const f = new Flow(false);
@@ -494,7 +519,7 @@ class Renderer {
   }
   caption(n, ctx, flow) {
     const fl = this.floatKind || "figure";
-    this.ctr[fl]++;
+    this.ctr[fl] = step(this.ctr[fl]);
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
@@ -533,6 +558,7 @@ class Renderer {
       }
       // (beamer: columns side by side, each a minipage of its width)
       case "columns": { const b = flow.open("div", ' class="bcols" style="display:flex;gap:1em;align-items:flex-start"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "lrbox": { const [a, j] = this.arg(n.kids, -1); this.saveBox(a, () => this.inline(n.kids.slice(j + 1), c2)); return; }
       case "column":
       case "minipage": {
         let j = -1; let pos = "c"; let o;
@@ -663,7 +689,7 @@ class Renderer {
       let lbl;
       if (o) lbl = this.inline(o, ctx);
       else if (kind === "enum") {
-        L.n++;
+        L.n = step(L.n);
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
@@ -808,6 +834,10 @@ class Renderer {
   // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
   sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
   /** fn's result, and the SageTeX items it rendered (a title field's) */
+  // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
+  // shown too (a box never used is never shown, as in TeX)
+  boxName(a) { return this.str(a).trim(); }
+  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys: [...new Set(keys)] }); }
   captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
@@ -923,6 +953,25 @@ const CMDS = {
   ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
+  // saved boxes (astra4's digest, gap 3: they were dropped, silently): \sbox{\name}{text}, \savebox{\name}[width][pos]{text}
+  // (as \makebox), and lrbox (the environments) kept, and \usebox{\name} shows the box; one never saved shows nothing,
+  // as TeX's empty box, and check says so
+  sbox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i), [b, j] = this.arg(nodes, j0); this.saveBox(a, () => this.inline(b, ctx)); return j; },
+  savebox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i); let j = j0; this.saveBox(a, () => { const f = new Flow(true); j = this.makebox(nodes, j0, ctx, f, false); return f.inlineHtml(); }); return j; },
+  usebox: function (nodes, i, ctx, flow) {
+    const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
+    if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
+    // (every copy within one budget, BOX_MAX, checked before it's made: a box copied into a box, again and again, would
+    //  double each time (astra, BOX653-EXPAND-1); its SageTeX items too, each once in the box (a box doubled into itself
+    //  with no HTML still doubled them, BOX653-EXPAND-1's residual); past it, left out, said once)
+    const cost = boxCost(b);
+    if (!fitsBoxes(this.boxUsed, cost)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
+    this.boxUsed += cost;
+    // (its SageTeX seen as where it's used is: shown in the body, held in a field or another box until those are, never
+    //  in the preamble (daybreak3, BOX653-SAGE-CAPTURE-1))
+    for (const k of b.keys) this.sageSeen(k);
+    flow.html(b.h, ctx.st); return j;
+  },
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
     let j = i, o, pos = "c", h = null, ipos = null;
