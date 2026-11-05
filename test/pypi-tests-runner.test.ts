@@ -50,6 +50,7 @@ const wrapper = (marker: string) => [
   "capture = io.StringIO()",
   "with contextlib.redirect_stdout(capture): runpy.run_path(sys.argv[0], run_name='__main__')",
   "lines = capture.getvalue().splitlines(True)",
+  "if os.environ.get('FAKE_' + WHO + '_DROP_CHANNEL'): lines = [line for line in lines if not line.startswith(os.environ.get('PYPI_TEST_RECORD_PREFIX', 'NO_PREFIX'))]",
   "record_lines = [i for i, line in enumerate(lines) if line.startswith(os.environ.get('PYPI_TEST_RECORD_PREFIX', 'NO_PREFIX')) and line.lstrip().endswith(']\\n')]",
   "if os.environ.get('FAKE_' + WHO + '_DROP_RECORD') and record_lines: del lines[record_lines[0]]",
   "if os.environ.get('FAKE_' + WHO + '_DUP_RECORD') and record_lines: lines.insert(record_lines[0], lines[record_lines[0]])",
@@ -78,6 +79,10 @@ const excludedExpected = "test_demo.test_async: skipped\ntest_demo.test_known: o
 
 test("pypi-tests/run.py: --refresh writes CPython's records, and only from a clean exit", () => {
   writeFileSync(expected, "KEEP ORIGINAL\n");
+  const absent = runner(["--refresh", "demo"], { FAKE_CP_DROP_CHANNEL: "1" });
+  assert.equal(absent.status, 1, absent.out);
+  assert.match(absent.out, /missing harness inventories/);
+  assert.equal(readFileSync(expected, "utf8"), "KEEP ORIGINAL\n");
   const missing = runner(["--refresh", "demo"], { FAKE_CP_DROP_RECORD: "1" });
   assert.equal(missing.status, 1, missing.out);
   assert.match(missing.out, /missing harness records/);

@@ -67,7 +67,7 @@ for name in modules:
         continue
     functions = sorted(k for k in vars(mod) if k.startswith("test") and callable(vars(mod)[k]))
     if record_prefix:
-        print(record_prefix + json.dumps({"tests": [name + "." + fn for fn in functions]}, separators=(",", ":")))
+        print(record_prefix + json.dumps({"module": name, "tests": [name + "." + fn for fn in functions]}, separators=(",", ":")))
     for fn in functions:
         full = name + "." + fn
         if full in excluded:

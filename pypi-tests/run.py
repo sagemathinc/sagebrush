@@ -67,14 +67,17 @@ def exited(who, err, rc):
     return None
 
 
-def records(out):
+def records(out, modules):
     """Decode the harness-owned channel and require one record per name."""
-    got, declared = {}, set()
+    got, declared, inventories = {}, set(), set()
     for line in out.splitlines():
         if not line.startswith(RECORD_PREFIX):
             continue
         row = json.loads(line[len(RECORD_PREFIX):])
-        if isinstance(row, dict) and sorted(row) == ["tests"] and isinstance(row["tests"], list) and all(isinstance(x, str) for x in row["tests"]):
+        if isinstance(row, dict) and sorted(row) == ["module", "tests"] and isinstance(row["module"], str) and isinstance(row["tests"], list) and all(isinstance(x, str) for x in row["tests"]):
+            if row["module"] in inventories:
+                raise ValueError("duplicate harness inventory for %s" % row["module"])
+            inventories.add(row["module"])
             for name in row["tests"]:
                 if name in declared:
                     raise ValueError("duplicate discovered test %s" % name)
@@ -88,6 +91,11 @@ def records(out):
         if status not in ("ok", "skipped", "excluded") and not status.startswith("FAIL "):
             raise ValueError("unknown harness status for %s" % name)
         got[name] = status
+    missing_modules, extra_modules = sorted(set(modules) - inventories), sorted(inventories - set(modules))
+    if missing_modules:
+        raise ValueError("missing harness inventories for %s" % ", ".join(missing_modules))
+    if extra_modules:
+        raise ValueError("inventories for unpinned modules %s" % ", ".join(extra_modules))
     missing, extra = sorted(declared - set(got)), sorted(set(got) - declared)
     if missing:
         raise ValueError("missing harness records for %s" % ", ".join(missing))
@@ -139,6 +147,7 @@ for name in names:
     # (the test files are the pinned ones, and only those)
     up = os.path.join(d, "upstream")
     have = sorted(f for f in os.listdir(up) if f != "__pycache__")
+    test_modules = sorted(f[:-3] for f in src["files"] if f.startswith("test_") and f.endswith(".py"))
     problems = ["SOURCE.json pins %r, not a plain .py name" % f for f in src["files"] if not FILE_NAME.match(f)]
     if problems:
         print("%s: FAILED\n  %s" % (name, "\n  ".join(problems)))
@@ -195,13 +204,13 @@ for name in names:
     pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX)
     cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
-    cp_records = records(cp)
-    cp = normal(cp, name)
     why = exited("CPython", cerr, crc)
     if why is not None:
         print("%s %s: FAIL\n  %s" % (name, src["version"], why))
         bad += 1
         continue
+    cp_records = records(cp, test_modules)
+    cp = normal(cp, name)
     if "--refresh" in sys.argv:
         open(os.path.join(d, "expected.out"), "w").write(cp)
         print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp_records), record_counts(cp_records)["FAIL"]))
@@ -215,11 +224,13 @@ for name in names:
     if cp != want:
         problems.append("CPython does not print expected.out:\n" + "".join("    " + l + "\n" for l in sorted(set(cp.splitlines()) ^ set(want.splitlines()))[:20]) + (cerr[-1000:] if verbose else ""))
     sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX))
-    sp_records = records(sp)
-    sp = normal(sp, name)
     why = exited("Sagebrush", serr, sbrc)
     if why is not None:
         problems.append(why)
+        sp_records = {}
+    else:
+        sp_records = records(sp, test_modules)
+    sp = normal(sp, name)
     # (a known test's line: CPython's "ok", Sagebrush's that FAIL; then the
     # same line on both sides for the comparison)
     sl = sp.splitlines(True)
