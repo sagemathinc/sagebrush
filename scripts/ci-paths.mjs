@@ -91,6 +91,9 @@ const fullTierPaths = [
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
   // That suite checks every input of the two bundles is matched here)
   /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the LaTeX editor's example list, web/examples/legacy.ts (#543). The build fills it from the corpus's LaTeX
+  // examples, but a change to one of them selects that example, not the full tier: its own run checks it)
+  /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
   // pairing's modules (its doc-protocol.ts is above, with sync))
   /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs)\.ts$/,
