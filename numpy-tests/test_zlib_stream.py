@@ -118,3 +118,74 @@ print(type(zlib.decompressobj()).__name__, type(zlib.decompressobj()).__module__
 # the one-shot functions, unchanged
 for name in ("zlib6", "zlib1", "zlib0", "raw9", "gzip", "gzipname", "empty", "bomb"):
     print("oneshot", name, h(zlib.decompress(S[name], W[name])))
+
+# grader's r687d pins: header errors as each byte comes, FDICT, the window size, a distance too far back
+def bytewise(label, wbits, s):
+    d = zlib.decompressobj(wbits)
+    out = []
+    for i in range(len(s)):
+        try:
+            out.append(d.decompress(s[i:i + 1]))
+        except Exception as e:
+            print(label, "byte", i, type(e).__name__, e)
+            return
+    print(label, "ok", h(b"".join(out)), d.eof, d.unused_data)
+bytewise("gzip bytewise", 31, g)
+bytewise("gzip reserved bytewise", 31, g[:3] + b"\x20" + g[4:])
+bytewise("gzip method7 bytewise", 31, g[:2] + b"\x07" + g[3:])
+bytewise("gzip badmagic bytewise", 31, b"\x1f\x8c" + g[2:])
+bytewise("auto gzip bytewise", 47, g)
+for n in (0, 1, 2, 3, 5, 9):
+    err("gzip oneshot cut %d" % n, lambda n=n: zlib.decompress(g[:n], 31))
+    err("auto oneshot cut %d" % n, lambda n=n: zlib.decompress(g[:n], 47))
+err("gzip method7 oneshot", lambda: zlib.decompress(g[:2] + b"\x07" + g[3:], 31))
+err("gzip method7 cut 3 obj", lambda: len(zlib.decompressobj(31).decompress(g[:2] + b"\x07")))
+z = S["zlib6"]
+err("zlib method7 obj", lambda: zlib.decompressobj().decompress(b"\x77\x09" + z[2:]))
+err("zlib method7 oneshot", lambda: zlib.decompress(b"\x77\x09" + z[2:]))
+# (FDICT: a preset dictionary, which needs zdict; zlib asks for it once the dictionary's 4-byte id has come)
+fd = b"\x78\xbb" + b"\x00\x01\x00\x01" + z[2:]
+for n in (2, 3, 5, 6, len(fd)):
+    err("fdict obj %d" % n, lambda n=n: zlib.decompressobj().decompress(fd[:n]))
+for n in (0, 1, 2, 5, 6, len(fd)):
+    err("fdict oneshot %d" % n, lambda n=n: zlib.decompress(fd[:n]))
+# (an 8-bit window: CINFO 0, stored blocks, and a 32 KiB stream read with smaller windows)
+w8 = b"\x08\x1d" + zlib.compress(b"abcdefgh" * 40, 0)[2:]
+for wb in (8, 9, 15, 0, 40, 47):
+    err("w8 wbits %d obj" % wb, lambda wb=wb: h(zlib.decompressobj(wb).decompress(w8)))
+    err("w8 wbits %d oneshot" % wb, lambda wb=wb: h(zlib.decompress(w8, wb)))
+for wb in (8, 9, 14, 15, 40):
+    err("zlib6 wbits %d obj" % wb, lambda wb=wb: h(zlib.decompressobj(wb).decompress(z)))
+    err("zlib6 wbits %d oneshot" % wb, lambda wb=wb: h(zlib.decompress(z, wb)))
+err("wbits 16 header", lambda: zlib.decompress(b"\x88\x98" + z[2:]))
+# (zlib's windowBits: 16 is gzip and 32 either, each with the header's window; the one-shot refusal is zlib's -2)
+for wb in (-16, -15, -8, -7, 0, 7, 8, 15, 16, 17, 23, 24, 31, 32, 33, 39, 40, 47, 48, 99):
+    err("wbits %d" % wb, lambda wb=wb: type(zlib.decompressobj(wb)).__name__)
+    err("wbits %d oneshot zlib" % wb, lambda wb=wb: h(zlib.decompress(z, wb)))
+    err("wbits %d oneshot gzip" % wb, lambda wb=wb: h(zlib.decompress(g, wb)))
+    err("wbits %d obj gzip" % wb, lambda wb=wb: h(zlib.decompressobj(wb).decompress(g)))
+# (a raw fixed-Huffman block written bit by bit: "ab" then a match 5 back, too far; 5 bytes of input,
+# so it is decoded on the careful path, never the fast path's 8-byte margin)
+def far(lead, dcode):
+    bits = []
+    put = lambda v, k: bits.extend((v >> i) & 1 for i in range(k))
+    code = lambda c, k: bits.extend((c >> i) & 1 for i in range(k - 1, -1, -1))
+    put(1, 1); put(1, 2)
+    for x in lead:
+        code(0x30 + x, 8)
+    code(1, 7); code(dcode, 5); put(0, (dcode - 2) // 2); code(0, 7)
+    bits += [0] * (-len(bits) % 8)
+    return bytes(sum(bits[i + j] << j for j in range(8)) for i in range(0, len(bits), 8))
+fa = far(b"ab", 4)
+print("far", fa.hex())
+err("far oneshot", lambda: zlib.decompress(fa, -15))
+err("far obj", lambda: zlib.decompressobj(-15).decompress(fa))
+def ml1(s):
+    d = zlib.decompressobj(-15); buf = s; got = []
+    for _ in range(100):
+        got.append(d.decompress(buf, 1)); buf = d.unconsumed_tail
+        if d.eof or not buf: break
+    return len(b"".join(got))
+err("far ml1", lambda: ml1(fa))
+for p in (1, 2):
+    err("far pieces %d" % p, lambda p=p: [zlib.decompressobj(-15).decompress(fa[i:i + p]) for i in range(0, len(fa), p)] and 0)

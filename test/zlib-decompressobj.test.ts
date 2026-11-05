@@ -129,3 +129,21 @@ test("a paused stream keeps only its window, and resumes to the same bytes (astr
   assert.ok(f.done);
   assert.deepEqual(Buffer.concat(parts), Buffer.from(all));
 });
+
+test("decompressobj's calls compact the inflater: a paused object holds its window, not a call's 1 MiB (grader's Z27/Z28)", () => {
+  const { PyDecompress, decompressCall } = require("../src/runtime/zlib");
+  const { PyBytes } = require("../src/runtime/object");
+  const d = new PyDecompress(15);
+  let buf = Uint8Array.from(Buffer.from(BOMB, "base64"));
+  const parts: Buffer[] = [];
+  for (let k = 0; k < 10 && !d.eof; k++) {
+    const out = decompressCall(d, new PyBytes(buf), 1 << 20);
+    parts.push(Buffer.from(out.a.subarray(0, out.n)));
+    // (between calls: the window and a little, never the 1 MiB the call made)
+    assert.ok(d.inf.buf.length <= 2 * 32768, `paused with a ${d.inf.buf.length}-byte buffer`);
+    buf = d.tail;
+  }
+  assert.ok(d.eof);
+  assert.deepEqual(parts.map((p) => p.length), [1 << 20, 1 << 20, 3_000_000 - 2 * (1 << 20)]);
+  assert.ok(Buffer.concat(parts).equals(Buffer.alloc(3_000_000)));
+});

@@ -9765,7 +9765,7 @@
    }
   }
  },
- "src/runtime/zlib.ts :: decompressCall :: function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes { #0": {
+ "src/runtime/zlib.ts :: decompressCall :: export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes { #0": {
   "class": "1+2",
   "owner": "file formats/raster",
   "row": "src-13",

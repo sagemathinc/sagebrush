@@ -492,10 +492,15 @@ const TRUNCATED = "Error -5 while decompressing data: incomplete or truncated st
  *  CRC-32 and length (as zlib checks them: corrupt or truncated files were
  *  accepted, the systematic review's R2-DOC-F6), and the position after it. */
 export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, number] {
-  if (data[start] !== 0x1f || data[start + 1] !== 0x8b || data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
-  if (start + 10 > data.length) raise(ZlibError, TRUNCATED);
+  // (each check as its byte comes, as zlib's: a short header is truncated only past the bytes it has)
+  const n = data.length - start;
+  if (n < 2) raise(ZlibError, TRUNCATED);
+  if (data[start] !== 0x1f || data[start + 1] !== 0x8b) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  if (n < 4) raise(ZlibError, TRUNCATED);
+  if (data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
   const flg = data[start + 3];
   if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
+  if (n < 10) raise(ZlibError, TRUNCATED);
   let p = start + 10;
   if (flg & 4) p += 2 + (data[p] | (data[p + 1] << 8));
   if (flg & 8) while (p < data.length && data[p++]) {}
@@ -513,13 +518,28 @@ export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, numb
   return [out, end + 8];
 }
 
-/** zlib (wbits 9..15), raw deflate (wbits < 0) or gzip (wbits >= 16 + 9):
- *  the first stream, as CPython's zlib.decompress. */
+/** zlib's windowBits: the kind of stream and the largest window a zlib
+ *  header may ask for (0: the header's own), or null when zlib refuses it. */
+function wbitsKind(wbits: number): [string, number] | null {
+  if (wbits >= -15 && wbits <= -8) return ["raw", 0];
+  if (wbits === 0 || (wbits >= 8 && wbits <= 15)) return ["zlib", wbits];
+  if (wbits === 16 || (wbits >= 24 && wbits <= 31)) return ["gzip", 0];
+  if (wbits === 32 || (wbits >= 40 && wbits <= 47)) return ["auto", wbits - 32];
+  return null;
+}
+
+/** zlib (wbits 0, 8..15), raw deflate (-15..-8), gzip (16, 24..31) or
+ *  either (32, 40..47): the first stream, as CPython's zlib.decompress. */
 export function decompress(data: Uint8Array, wbits = 15): Uint8Array {
-  if (wbits < 0) return inflateRaw(data, 0)[0];
-  const magic = data[0] === 0x1f && data[1] === 0x8b;
-  if ((wbits >= 24 && wbits < 32) || (wbits >= 40 && magic)) return gunzipMember(data, 0)[0];
-  if (data.length < 2 || ((data[0] << 8) | data[1]) % 31 !== 0 || (data[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  const k = wbitsKind(wbits);
+  if (!k) raise(ZlibError, "Error -2 while preparing to decompress data: inconsistent stream state");
+  const [kind, w] = k;
+  if (kind === "raw") return inflateRaw(data, 0)[0];
+  if (kind === "gzip" || (kind === "auto" && data[0] === 0x1f && data[1] === 0x8b)) return gunzipMember(data, 0)[0];
+  if (data.length < 2) raise(ZlibError, TRUNCATED);
+  zlibHeader(data, w);
+  // (a preset dictionary, which needs zdict: once its id is there, as zlib)
+  if (data[1] & 0x20) raise(ZlibError, data.length < 6 ? TRUNCATED : "Error 2 while decompressing data");
   const [out, end] = inflateRaw(data, 2);
   // the Adler-32 trailer (a corrupted one was accepted: R2-DOC-F6)
   if (end + 4 > data.length) raise(ZlibError, TRUNCATED);
@@ -571,7 +591,7 @@ export function compress(data: Uint8Array): Uint8Array {
 // input it didn't read back as unconsumed_tail (whose bytes it then no longer
 // holds), as CPython does; with max_length 0 a call's output is bounded by
 // the array limit, past which it is zlib.error.
-class PyDecompress {
+export class PyDecompress {
   inf = new Inflater();
   // "zlib", "raw", "gzip", or "auto" (zlib or gzip, by the header)
   kind: string;
@@ -582,12 +602,12 @@ class PyDecompress {
   eof = false;
   unused: Uint8Array = new Uint8Array(0);
   tail: Uint8Array = new Uint8Array(0);
+  // the largest window a zlib header may ask for (0: the header's own)
+  wbits: number;
   constructor(wbits: number) {
-    if (wbits >= -15 && wbits <= -8) this.kind = "raw";
-    else if ((wbits >= 8 && wbits <= 15) || wbits === 0) this.kind = "zlib";
-    else if (wbits >= 24 && wbits <= 31) this.kind = "gzip";
-    else if (wbits >= 40 && wbits <= 47) this.kind = "auto";
-    else raise(T.ValueError, "Invalid initialization option");
+    const k = wbitsKind(wbits);
+    if (!k) raise(T.ValueError, "Invalid initialization option");
+    [this.kind, this.wbits] = k;
     if (this.kind === "raw") this.phase = 1;
     this.check = this.kind === "zlib" ? 1 : 0;
   }
@@ -601,6 +621,15 @@ const cat = (a: Uint8Array, b: Uint8Array) => {
   return n;
 };
 
+/** A zlib header's checks, in zlib's order: the check bits, the method, and
+ *  a window no larger than `wbits` allows (0: the header's own). */
+function zlibHeader(h: Uint8Array, wbits: number): void {
+  if (((h[0] << 8) | h[1]) % 31 !== 0) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  if ((h[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
+  const w = (h[0] >> 4) + 8;
+  if (w > 15 || (wbits !== 0 && w > wbits)) raise(ZlibError, "Error -3 while decompressing data: invalid window size");
+}
+
 /** The header's length if `h` holds all of it (0: not yet), checking it. */
 function headerLength(d: PyDecompress, h: Uint8Array): number {
   if (d.kind === "auto") {
@@ -610,16 +639,22 @@ function headerLength(d: PyDecompress, h: Uint8Array): number {
   }
   if (d.kind === "zlib") {
     if (h.length < 2) return 0;
-    if (((h[0] << 8) | h[1]) % 31 !== 0 || (h[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
-    // (a preset dictionary, which needs zdict: not here)
-    if (h[1] & 0x20) raise(ZlibError, "Error 2 while decompressing data");
-    return 2;
+    zlibHeader(h, d.wbits);
+    if (!(h[1] & 0x20)) return 2;
+    // (a preset dictionary, which needs zdict: not here; zlib asks for it once the dictionary's id has come)
+    if (h.length < 6) return 0;
+    raise(ZlibError, "Error 2 while decompressing data");
   }
-  if (h.length < 10) return 0;
-  if (h[0] !== 0x1f || h[1] !== 0x8b || h[2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  // (each of the gzip header's checks as soon as its byte comes, as zlib's)
+  if (h.length < 2) return 0;
+  if (h[0] !== 0x1f || h[1] !== 0x8b) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  // (the method and the flags come as one 16-bit read)
+  if (h.length < 4) return 0;
+  if (h[2] !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
   const flg = h[3];
   // (as zlib: reserved flags refused, and the header's CRC-16 checked when FHCRC says it is there; daybreak3's ZLIB687-GZIPHDR-1)
   if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
+  if (h.length < 10) return 0;
   let p = 10;
   if (flg & 4) {
     if (h.length < p + 2) return 0;
@@ -680,7 +715,7 @@ function step(d: PyDecompress, room: number): Uint8Array {
   return out;
 }
 
-function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes {
+export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes {
   const input = bytesOf(data);
   const ml = maxLength === undefined ? 0 : Number(O.index(maxLength));
   if (ml < 0) raise(T.ValueError, "max_length must be non-negative");
