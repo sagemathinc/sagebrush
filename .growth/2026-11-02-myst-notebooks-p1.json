@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Jupytext MyST notebooks, P1 (plan-myst-notebooks r3, UI tier). The renderer, its styles and its notebook glue are the new lazy asset engine/sagebrush-myst.js (10788 B, its budgets.json entry); the notebook component keeps only markdown.ts's MystHook option and a 10-line loader in notebook.js (+479 B, with a ceiling raise of 479 B); the page (in the CLI's embedded web/dist, with the board frame's page) also gets the reader (web/notebook/myst.js, its byte-bounded head) and Open as a notebook. Measured with bun 1.4.4 / node 24.21.0 (size-measure.mjs) on master d43adff7 vs this branch's head 0b5b983f (the merge of d43adff7), both built at build paths of equal length (cli/pyjs.cjs embeds its build directory's path): engine/sagebrush-notebook.js 233434 -> 233913 (+479); cli/pyjs.cjs 25343151 -> 25368242 (+25091); the pyjs marker allows 69 B over that.",
- "bytes": {
-  "cli/pyjs.cjs": 25160,
-  "engine/sagebrush-notebook.js": 479
- }
-}
