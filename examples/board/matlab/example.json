@@ -1,0 +1,18 @@
+{
+ "title": "MATLAB",
+ "summary": "MATLAB code items: a determinant, eigenvectors, a linear solve, polyfit, a loop, a function and a plot.",
+ "tags": [
+  "basics",
+  "linear algebra"
+ ],
+ "level": "intro",
+ "main": "gallery-matlab.board.json",
+ "files": [
+  "gallery-matlab.board.json"
+ ],
+ "modes": [
+  "matlab"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

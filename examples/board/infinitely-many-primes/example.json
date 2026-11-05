@@ -1,0 +1,15 @@
+{
+ "title": "Three proofs that there are infinitely many primes",
+ "summary": "Euclid, Euler and Fürstenberg, a page each, with tours: pages, math, and printing (or saving as PDF) a sheet per page or per step.",
+ "tags": [
+  "number theory",
+  "proofs"
+ ],
+ "level": "intro",
+ "main": "primes.json",
+ "files": [
+  "primes.json"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

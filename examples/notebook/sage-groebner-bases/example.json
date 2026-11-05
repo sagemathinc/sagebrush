@@ -1,0 +1,16 @@
+{
+ "title": "Gröbner bases (Sage)",
+ "summary": "Multivariate polynomials: products, gcds, factoring and Gröbner bases.",
+ "tags": [
+  "polynomials",
+  "algebra"
+ ],
+ "level": "research",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

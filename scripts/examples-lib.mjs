@@ -34,6 +34,8 @@ export const LIMITS = {
   depth: 4,
   file: 200 * 1024,
   total: 512 * 1024,
+  // (a notebook's committed outputs, its preview: section 5's "generated preview, at most 1 MB" row; r4.1)
+  outputs: 1024 * 1024,
   summary: 160,
   title: 120,
 };
@@ -88,7 +90,8 @@ const ENGINE = [
   /^pnpm-lock\.yaml$/,
 ];
 const BOARD = [/^web\/board\//, /^packages\/sagebrush-board\//];
-const LATEX = [/^web\/latex\//, /^src\/latex-cli\.ts$/];
+// (examples/shared/: the LaTeX previews' shared stylesheet)
+const LATEX = [/^web\/latex\//, /^src\/latex-cli\.ts$/, /^examples\/shared\//];
 export const EXAMPLE_PATH =
   /^examples\/(notebook|board|latex)\/([a-z0-9]+(?:-[a-z0-9]+)*)\//;
 
@@ -331,19 +334,88 @@ export function filesJson(dir, m) {
   };
 }
 
-/** An example's size problems (plan section 5). */
+/**
+ * An example's size problems (plan section 5). A notebook's committed outputs are its preview, not its sources
+ * (r4.1): both are measured on their canonical (minified JSON) form, not on the file's formatting. The sources are
+ * the notebook without its outputs, under the file and total limits; the outputs, every code cell's, have their own.
+ * (validate also requires the file in the runner's own form: notebookFormProblem)
+ */
 export function sizeProblems(dir, m) {
   const p = [];
-  let total = 0;
+  let total = 0,
+    outputs = 0;
   for (const f of m.files ?? []) {
     if (pathProblem(f) || !existsSync(join(dir, f))) continue;
-    const n = statSync(join(dir, f)).size;
+    let n = statSync(join(dir, f)).size;
+    if (/\.ipynb$/.test(f)) {
+      try {
+        const nb = JSON.parse(readFileSync(join(dir, f), "utf8"));
+        const cells = nb.cells ?? [];
+        for (const c of cells) if (c.cell_type === "code") outputs += Buffer.byteLength(JSON.stringify(c.outputs ?? []));
+        n = Buffer.byteLength(JSON.stringify({ ...nb, cells: cells.map((c) => (c.cell_type === "code" ? { ...c, outputs: [] } : c)) }));
+      } catch {}
+    }
     total += n;
     if (n > LIMITS.file) p.push(`${f}: ${n} bytes, more than ${LIMITS.file}`);
   }
   if (total > LIMITS.total)
     p.push(`${total} bytes in all, more than ${LIMITS.total}`);
+  if (outputs > LIMITS.outputs)
+    p.push(`its outputs: ${outputs} bytes, more than ${LIMITS.outputs}`);
   return p;
+}
+
+/** Why a committed notebook's text isn't the runner's own form (JSON.stringify(nb, null, 1) and a newline), or null. */
+export function notebookFormProblem(text) {
+  let nb;
+  try {
+    nb = JSON.parse(text);
+  } catch (err) {
+    return `not JSON: ${err.message}`;
+  }
+  return text === JSON.stringify(nb, null, 1) + "\n"
+    ? null
+    : "not in the runner's form (node scripts/examples.mjs run ID --update writes it)";
+}
+
+/**
+ * The committed form of a LaTeX preview (r4.1): `latex render` inlines KaTeX's stylesheet with its fonts, the same
+ * 369 KB in every preview. The corpus keeps one copy, examples/shared/katex-preview.css (SHARED_CSS), and each
+ * committed preview.html holds a marker naming that copy's sha256 in its place; everything else is the render's
+ * bytes. The runner checks each render's stylesheet against the copy, validate each marker, and the site puts the
+ * copy back where its marker is (PR 3).
+ */
+export const SHARED_CSS = "shared/katex-preview.css";
+export const fontsMark = (sha) => `<style data-sagebrush-shared="katex" data-sha256="${sha}"></style>`;
+export const FONTS_MARK_RE = /<style data-sagebrush-shared="katex" data-sha256="([0-9a-f]{64})"><\/style>/g;
+const KATEX_STYLE = /<style>(@font-face\{font-display:block;font-family:KaTeX_[^<]*)<\/style>/g;
+export function committedPreview(html) {
+  const found = [...html.matchAll(KATEX_STYLE)];
+  if (found.length !== 1) return { html, fonts: null };
+  const fonts = found[0][1];
+  return { html: html.replace(found[0][0], () => fontsMark(sha256(fonts))), fonts };
+}
+/** Why a committed preview's markers don't name the corpus's shared stylesheet (exactly one, its sha256), or null. */
+export function previewMarkProblem(html, sharedSha) {
+  const marks = [...html.matchAll(FONTS_MARK_RE)];
+  if (marks.length !== 1) return `preview.html has ${marks.length} shared-stylesheet markers, not 1`;
+  if (sharedSha === null) return `examples/${SHARED_CSS} is missing (node scripts/examples.mjs run ID --update writes it)`;
+  return marks[0][1] === sharedSha ? null : `preview.html's marker names a stylesheet (${marks[0][1].slice(0, 12)}) that isn't examples/${SHARED_CSS} (${sharedSha.slice(0, 12)})`;
+}
+
+/**
+ * The outputs a notebook commits (r4.1): a display output with a static image (SVG or PNG) keeps the image and its
+ * text/plain, not the interactive forms beside it (a 3D scene's viewer HTML and scene JSON), which a static page
+ * never shows and which are the bulk of the bytes. Everything else is kept as it came.
+ */
+export const KEEP_WITH_IMAGE = ["image/svg+xml", "image/png", "text/plain"];
+export function committedOutputs(outputs) {
+  return (outputs ?? []).map((o) => {
+    const d = o.data;
+    if (!d || !("image/svg+xml" in d || "image/png" in d)) return o;
+    const keep = (x) => Object.fromEntries(Object.entries(x ?? {}).filter(([k]) => KEEP_WITH_IMAGE.includes(k)));
+    return { ...o, data: keep(d), ...(o.metadata ? { metadata: keep(o.metadata) } : {}) };
+  });
 }
 
 // ---- SVG canonicalization (A5): ids renamed by order of appearance, a fixed list of nondeterministic
@@ -420,11 +492,15 @@ export function normalizeNotebook(nb, loose = []) {
   });
 }
 
-/** Text an output must never hold (A5): the run's temporary folder, today's date, the host's name. */
-export function leaks(nbNorm, { tmp, date, host }) {
+/** Text an output must never hold (A5): the run's temporary folder, the checkout's path, today's date, the host's name. */
+export function leaks(nbNorm, { tmp, date, host, checkout }) {
   const s = JSON.stringify(nbNorm);
   return [
     tmp && s.includes(tmp) ? `the run's temporary folder (${tmp})` : null,
+    // (the checkout's own path, as a help page's "File:" line printed it: another machine's differs)
+    checkout && checkout.length > 1 && s.includes(JSON.stringify(checkout).slice(1, -1))
+      ? `the checkout's path (${checkout})`
+      : null,
     date && s.includes(date) ? `today's date (${date})` : null,
     host && host.length > 3 && s.includes(host)
       ? `the host name (${host})`

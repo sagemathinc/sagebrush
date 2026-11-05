@@ -1,0 +1,27 @@
+\documentclass{article}
+\usepackage{listings}
+\lstset{language=Matlab, basicstyle=\ttfamily\small, frame=single}
+\begin{document}
+\section*{MATLAB in LaTeX}
+
+A MATLAB listing, typeset with \texttt{listings} (the \texttt{matlab-prettifier} package gives a closer MATLAB look
+in a full LaTeX run).
+
+\emph{In this preview:} the code is shown, not run. To compute with it, open a notebook in MATLAB mode (File,
+New, Notebook, then choose MATLAB) and paste it there; then copy the results back.
+
+\begin{lstlisting}
+% the eigenvalues of a symmetric matrix
+A = [2 -1 0; -1 2 -1; 0 -1 2];
+[V, D] = eig(A);
+lambda = diag(D)'
+x = linspace(0, 2*pi, 100);
+plot(x, sin(x)), grid on
+\end{lstlisting}
+
+For this $A$, the eigenvalues are $2 - \sqrt{2}$, $2$ and $2 + \sqrt{2}$:
+\[
+  A = \begin{pmatrix} 2 & -1 & 0 \\ -1 & 2 & -1 \\ 0 & -1 & 2 \end{pmatrix},
+  \qquad \lambda \in \{\, 2-\sqrt{2},\ 2,\ 2+\sqrt{2} \,\}.
+\]
+\end{document}

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boardExample, boardExamples } from "./board-examples";
 
 // sagebrush board try: a board's questions tried with given answers, for an
 // evaluator (src/board-try.ts, lib/_sb_check.py, the session's `evaluate`).
@@ -231,8 +232,8 @@ test("board try: the contract's edges: --json refusals are reports; --case besid
   assert.match(j.runtime.engine, /^cli-[0-9a-f]{20}$/);
 });
 
-test("board try: the transitivity lesson (web/board/examples/teach-transitive.board.json), its examples right, wrong answers said, hints computed", () => {
-  const f = __dirname + "/../../web/board/examples/teach-transitive.board.json";
+test("board try: the transitivity lesson (examples/board/what-is-transitive/), its examples right, wrong answers said, hints computed", () => {
+  const f = boardExample("teach-transitive.board.json");
   const r = run(["board", "try", f, "--case", 'q-c="no"', "--case", "q-h=1", "--case", "q-stab=4", "--case", 'q-prim="yes"', "--json"]);
   assert.equal(r.status, 0, r.stderr);
   const j = JSON.parse(r.stdout);

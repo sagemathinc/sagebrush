@@ -97,9 +97,23 @@ def _file(obj):
     return fn
 
 
+def _root_of(file):
+    """The folder of a module's file, with "/" separators and a trailing "/" (Windows paths use "\\"), or None."""
+    f = (file or "").replace("\\", "/")
+    return f.rsplit("/", 1)[0] + "/" if "/" in f else None
+
+
+# (and the library's own folder wherever it was loaded from, as a checkout's lib/ by the development CLI, on
+# Windows too: a help page shows lib/<module>.py, never one machine's path)
+_HERE = _root_of(globals().get("__file__")) or _LIB
+
+
 def _show_file(fn):
-    if fn and fn.startswith(_LIB):
-        return "lib/" + fn[len(_LIB):]
+    # (compared with "/" separators; the root ends at a separator, so lib2/ or lib_old/ beside it isn't the library)
+    f = (fn or "").replace("\\", "/")
+    for root in (_LIB, _HERE):
+        if fn and f.startswith(root):
+            return "lib/" + f[len(root):]
     return fn
 
 

@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FILE_MAX, checkText } from "../src/board-check";
+import { boardExample, boardExamples } from "./board-examples";
 
 // sagebrush board check FILE: everything that can be said of a board before
 // anyone opens it, in one report (src/board-check.ts).
@@ -108,8 +109,7 @@ test("an item in another language than the board's: an error, its code not run i
 });
 
 test("every example board has no problems", () => {
-  const ex = join(repo, "web", "board", "examples");
-  for (const f of readdirSync(ex).filter((f) => f.endsWith(".board.json"))) assert.deepEqual(lines(readFileSync(join(ex, f), "utf8")), [], f);
+  for (const f of [...boardExamples.keys()].filter((f) => f.endsWith(".board.json")).sort()) assert.deepEqual(lines(readFileSync(boardExample(f), "utf8")), [], f);
 });
 
 test("not JSON, not a board, no header, a later version", () => {
@@ -183,7 +183,7 @@ test("pages that share an id: an error at the second, running or not; check refu
     { ...base(), nodes: [{ id: "a" }, { id: "a" }] }, { ...base(), nodes: [{ id: "a" }, { id: "g", kind: "group", children: [{ id: "a" }] }] },
     { format: "sagebrush-board", version: 1 }, { format: "sagebrush-board", version: 1, nodes: "x" }, { format: "sagebrush-board", version: 1, pages: [{ title: "no nodes" }] },
     d, { format: "sagebrush-board", version: 1, pages: [{ id: 1, nodes: [] }, { id: "1", nodes: [] }] },
-    ...readdirSync(join(repo, "web", "board", "examples")).filter((f) => f.endsWith(".board.json")).map((f) => JSON.parse(readFileSync(join(repo, "web", "board", "examples", f), "utf8"))),
+    ...[...boardExamples.keys()].filter((f) => f.endsWith(".board.json")).sort().map((f) => JSON.parse(readFileSync(boardExample(f), "utf8"))),
   ];
   for (const doc of corpus) {
     const refused = formatError(doc) !== null || !isBoard(doc);

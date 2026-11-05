@@ -1,0 +1,14 @@
+{
+ "title": "MATLAB code",
+ "summary": "A MATLAB listing, with the math it computes",
+ "tags": [
+  "writing"
+ ],
+ "level": "intro",
+ "main": "matlab.tex",
+ "files": [
+  "matlab.tex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

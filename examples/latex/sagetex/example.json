@@ -1,0 +1,17 @@
+{
+ "title": "SageTeX",
+ "summary": "Sage computations in the document (\\sage, sagesilent, \\sageplot)",
+ "tags": [
+  "writing"
+ ],
+ "level": "course",
+ "main": "sagetex.tex",
+ "files": [
+  "sagetex.tex"
+ ],
+ "features": [
+  "sagetex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

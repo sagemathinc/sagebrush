@@ -1,0 +1,15 @@
+{
+ "title": "Generators & classes",
+ "summary": "Generators, a vector class with operators, and coroutines driven by hand.",
+ "tags": [
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

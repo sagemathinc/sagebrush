@@ -1,0 +1,17 @@
+{
+ "title": "PythonTeX",
+ "summary": "Python in the document (pycode, \\py)",
+ "tags": [
+  "writing"
+ ],
+ "level": "course",
+ "main": "pythontex.tex",
+ "files": [
+  "pythontex.tex"
+ ],
+ "features": [
+  "pythontex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

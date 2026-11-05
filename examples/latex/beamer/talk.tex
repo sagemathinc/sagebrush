@@ -1,0 +1,46 @@
+\documentclass{beamer}
+\usetheme{Madrid}
+\title{A Short Talk}
+\subtitle{Slides with beamer}
+\author{A. Speaker}
+\date{October 2026}
+
+\begin{document}
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{In this preview}
+  The preview shows each frame as a slide, with its title and the theme's headline and footline (not its
+  colors). Every \texttt{\textbackslash pause} and \texttt{<2->} step is shown at once here; Present
+  steps through them. A full LaTeX run makes the PDF slides.
+\end{frame}
+
+\begin{frame}{Overlays}
+  \begin{itemize}
+    \item<1-> First, the question.
+    \item<2-> Then, an idea.
+    \item<3-> Finally, the answer.
+  \end{itemize}
+  \pause
+  Revealed last.
+\end{frame}
+
+\begin{frame}{Two columns}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      Left: words.
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      Right: $e^{i\pi} + 1 = 0$.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{A math slide}
+  \begin{block}{Theorem}
+    For every $n \ge 1$, $\displaystyle \sum_{k=1}^{n} k = \frac{n(n+1)}{2}$.
+  \end{block}
+  \[ \det\begin{pmatrix} a & b \\ c & d \end{pmatrix} = ad - bc \]
+\end{frame}
+\end{document}
