@@ -38,7 +38,7 @@
     "py/pandas/_pd_csv.py": "902e9b688b51fdcc45a0b939500fa717a671d913fdbece091607ec1914c57264",
     "py/pandas/_pd_datetime.py": "2ee719585e6236d9737d7a4e5d193c797e43ae72d6b97cc18440d1c1a489f8c0",
     "py/pandas/_pd_dtypes.py": "58d5b548a35f415cfdf7820ed9a37242602276462f2271c4e6e1ea5f5e28d716",
-    "py/pandas/_pd_excel.py": "cf415c8ba66942750ebe8c2d0958acddf53ece6f966c38af063c427017885d45",
+    "py/pandas/_pd_excel.py": "c7faf7158344e6029da323445457ed0d3cc8a30124b61c37d8c7e847c65c3edb",
     "py/pandas/_pd_frame.py": "584ebcda432c5b8427bb3859637f7938eacebaa7713479f49cf6c005f01d049d",
     "py/pandas/_pd_index.py": "f91852a1e165e5f4a96d35c4d348d2777609bbb845a4efd39a3485cd21af7333",
     "py/pandas/_pd_indexing.py": "a46e09faa83ed6007f00597f966b053936c3b3ff83d7a19019a88fbc63c365f7",

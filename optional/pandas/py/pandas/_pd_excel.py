@@ -158,14 +158,167 @@ def _col_index(letters):
     return n - 1
 
 
+# The fast path for a sheet's cells: sheetData scanned by one pattern of rows and cells, whose matches must
+# cover it exactly (whitespace between them aside), each cell's attributes in the strict form Excel and openpyxl
+# write; the rest of the document is checked by the scanner (events), sheetData left out.  Anything else, a
+# prefix, a gap, an attribute in another form, falls back to the scanner for the whole sheet, so a malformed
+# part is refused exactly as there.  A cell holding more than one <v>, or a formula, an inline string or a
+# reference, is read by the scanner too.
+_SHEET_DATA = re.compile(r"<sheetData>(.*)</sheetData>", re.S)
+_ATTRS = r'((?:\s+[A-Za-z_][\w.\-]*="[^"<]*")*)\s*'
+_ROW_CELL = re.compile(r"\s*(?:<row" + _ATTRS + r"(/?)>|</row>|<c" + _ATTRS + r"(?:/>|>(.*?)</c>))", re.S)
+# (the common cell, as Excel writes it: r, then s and t if any, then one plain <v>; its groups read directly)
+_PLAIN_CELL = re.compile(r'\s*<c r="([A-Z]{1,3})([0-9]+)"(?: s="([0-9]+)")?(?: t="([a-z]+)")?>(?:<v>([^<&]*)</v>)?</c>')
+_ATTR_R = re.compile(r'\sr="([A-Z]{1,3})([0-9]+)"')
+_ATTR_RR = re.compile(r'\sr="([0-9]+)"')
+_ATTR_T = re.compile(r'\st="([^"]*)"')
+_ATTR_S = re.compile(r'\ss="([0-9]+)"')
+
+
+def _fast_rows(text, strings, xfs, d1904):
+    """The sheet's cells as {row: {col: value}}, or None (the scanner reads it)."""
+    m = _SHEET_DATA.search(text)
+    if m is None:
+        return None
+    body = m.group(1)
+    # (the document's structure, sheetData's content left out, by the scanner: it refuses what it refuses)
+    for _ in events(text[:m.start()] + "<sheetData/>" + text[m.end():]):
+        pass
+    rows = {}
+    pos, n = 0, len(body)
+    row_i, col, open_row = -1, -1, False
+    match = _ROW_CELL.match
+    plain = _PLAIN_CELL.match
+    cols = {}
+    row = None
+    nx = len(xfs)
+    while pos < n:
+        q = plain(body, pos) if open_row else None
+        if q is not None:
+            if int(q.group(2)) - 1 != row_i:
+                return None
+            letters = q.group(1)
+            col = cols.get(letters)
+            if col is None:
+                col = cols[letters] = _col_index(letters)
+            pos = q.end()
+            v = q.group(5)
+            if v is None:
+                continue
+            ct = q.group(4)
+            if ct is None or ct == "n":
+                st = q.group(3)
+                kind = xfs[int(st)] if st is not None and int(st) < nx else None
+                if kind or "." in v or "e" in v or "E" in v:
+                    f = float(v)
+                    if kind:
+                        val = _from_excel(f, d1904, kind)
+                    else:
+                        i = int(f)
+                        val = i if i == f else f
+                else:
+                    val = int(v)
+            elif ct == "s":
+                val = strings[int(v)]
+            else:
+                val = _cell_value({"t": ct, "s": int(q.group(3) or 0), "v": v, "is": []}, strings, xfs, d1904)
+            if val != "":
+                if row is None:
+                    row = rows.setdefault(row_i, {})
+                row[col] = val
+            continue
+        t = match(body, pos)
+        if t is None or t.end() == pos:
+            if body[pos:].strip():
+                return None
+            break
+        pos = t.end()
+        tok = t.group(0).lstrip()
+        if tok.startswith("<row"):
+            if open_row:
+                return None
+            r = _ATTR_RR.search(t.group(1) or "")
+            row_i = int(r.group(1)) - 1 if r else row_i + 1
+            col = -1
+            row = None
+            open_row = not t.group(2)
+            continue
+        if tok == "</row>":
+            if not open_row:
+                return None
+            open_row = False
+            continue
+        if not open_row:
+            return None
+        attrs, inner = t.group(3), t.group(4)
+        ref = _ATTR_R.search(attrs)
+        if ref:
+            if int(ref.group(2)) - 1 != row_i:
+                return None
+            col = _col_index(ref.group(1))
+        elif ' r="' in attrs:
+            return None
+        else:
+            col += 1
+        tt = _ATTR_T.search(attrs)
+        ss = _ATTR_S.search(attrs)
+        cell = {"t": tt.group(1) if tt else "n", "s": int(ss.group(1)) if ss else 0, "v": None, "is": []}
+        if inner:
+            if inner.startswith("<v>") and inner.endswith("</v>") and inner.count("<") == 2 and "&" not in inner:
+                cell["v"] = inner[3:-4]
+            else:
+                # (anything else in the cell: the scanner's events for it, as the slow path reads them)
+                text_ = None
+                for ev in events("<c>" + inner + "</c>"):
+                    if ev[0] == "start":
+                        nm = local(ev[1])
+                        if nm in ("v", "t"):
+                            text_ = []
+                    elif ev[0] == "text":
+                        if text_ is not None:
+                            text_.append(ev[1])
+                    else:
+                        nm = local(ev[1])
+                        if nm == "v" and text_ is not None:
+                            cell["v"] = "".join(text_)
+                            text_ = None
+                        elif nm == "t" and text_ is not None:
+                            cell["is"].append("".join(text_))
+                            text_ = None
+        val = _cell_value(cell, strings, xfs, d1904)
+        if val != "":
+            rows.setdefault(row_i, {})[col] = val
+    if open_row:
+        return None
+    return rows
+
+
 def _sheet_rows(z, path, strings, xfs, d1904):
     """The sheet's values as rows of Python values ("" for an empty cell, as
     pandas' openpyxl reader has them), trailing empties dropped."""
+    text = _xml(z, path)
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    rows = _fast_rows(text, strings, xfs, d1904)
+    if rows is None:
+        rows = _scan_rows(text, strings, xfs, d1904)
+    if not rows:
+        return []
+    last = max(rows)
+    out = []
+    for i in range(last + 1):
+        r = rows.get(i, {})
+        out.append([r.get(j, "") for j in range(max(r) + 1)] if r else [])
+    return out
+
+
+def _scan_rows(doc, strings, xfs, d1904):
+    """The sheet's cells as {row: {col: value}}, by the scanner's events."""
     rows = {}
     row_i = -1
     cell = None
     text = None
-    for ev in events(_xml(z, path)):
+    for ev in events(doc):
         kind = ev[0]
         if kind == "start":
             n = local(ev[1])
@@ -199,14 +352,7 @@ def _sheet_rows(z, path, strings, xfs, d1904):
                 if val != "":
                     rows.setdefault(row_i, {})[col] = val
                 cell = None
-    if not rows:
-        return []
-    last = max(rows)
-    out = []
-    for i in range(last + 1):
-        r = rows.get(i, {})
-        out.append([r.get(j, "") for j in range(max(r) + 1)] if r else [])
-    return out
+    return rows
 
 
 def _cell_value(c, strings, xfs, d1904):
@@ -221,11 +367,14 @@ def _cell_value(c, strings, xfs, d1904):
         return float("nan") if t == "e" else v
     if t == "b":
         return v.strip() == "1"
-    f = float(v)
     kind = xfs[c["s"]] if c["s"] < len(xfs) else None
+    # (openpyxl's _cast_number: text with no point or exponent an int, exactly; otherwise a float, which pandas'
+    # openpyxl reader makes an int when it has no fraction)
+    if not kind and "." not in v and "e" not in v and "E" not in v:
+        return int(v)
+    f = float(v)
     if kind:
         return _from_excel(f, d1904, kind)
-    # (pandas' openpyxl reader: a number with no fraction is an int)
     i = int(f)
     return i if i == f else f
 
