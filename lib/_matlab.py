@@ -8448,7 +8448,8 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    # Character-array rows are matrix rows, including brackets spanning rows.
+    t = ("\n".join(s.rows()) if type(s) is Char else _text(s)).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
