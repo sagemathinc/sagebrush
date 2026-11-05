@@ -157,13 +157,19 @@ def matrix_power(a, n):
 
 
 def cholesky(a, *, upper=False):
+    return _chol(a, upper, True)
+
+
+def _chol(a, upper, numpy_nan):
+    # (numpy_nan: NumPy's rule, OpenBLAS potrf's, refusing only a pivot <= 0, so a NaN pivot passes and fills the
+    # rest with NaN; without it MATLAB's, refusing any pivot not > 0, NaN included: MATLAB mode calls this so)
     a = _float(a)
     _square(a)
     # (upper=True reads the upper triangle, as NumPy's (LAPACK uplo='U'): the lower kernel factors the transpose,
     # whose lower triangle it is, and its factor transposed is the upper one; the lower triangle is not read)
     if upper:
         a = _np.swapaxes(a, -1, -2)
-    L = _stacked(_L.cholesky, a, empty=lambda m, n, dt: ((n, n), dt))
+    L = _stacked(lambda m: _L.cholesky(m, False, numpy_nan), a, empty=lambda m, n, dt: ((n, n), dt))
     return _np.swapaxes(L, -1, -2) if upper else L
 
 
