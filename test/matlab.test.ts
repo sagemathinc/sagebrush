@@ -2699,7 +2699,11 @@ test("histc counts along the requested dimension (MCF-32)", () => {
   // Real MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf32/transcript.txt:
   // SHA256 aed0a2b033a35fe955410f4f89f944091af6e7888d0ea4fab44ff456b2f05422.
   const calls = ["[0 1;2 3],[0 1 2],2", "0,[0 1],1", "[0 1;2 3],[0 1],2", "[0 1;2 3],[0 1 2],1", "[0 1;2 3],[0 1 2]"];
-  const code = calls.map((s) => `[n,b]=histc(${s}); disp(mat2str(size(n))); disp(mat2str(n)); disp(mat2str(size(b))); disp(mat2str(b));`).join("\n");
+  // Vector/default/singleton-axis controls: /scratch/matlab-tmp/mcf32b/transcript.txt,
+  // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
+  calls.push("[0 1 2],[0 1 2]", "[0;1;2],[0 1 2]", "0,[0 1]");
+  const code = calls.map((s) => `[n,b]=histc(${s}); disp(mat2str(size(n))); disp(mat2str(n)); disp(mat2str(size(b))); disp(mat2str(b));`).join("\n") +
+    "\n[n,b]=histc([0 1;2 3],[0 1],3); disp(mat2str(size(n))); disp(mat2str(n(:,:,1))); disp(mat2str(n(:,:,2))); disp(mat2str(size(b))); disp(mat2str(b));";
   const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
   assert.deepEqual(lines, [
@@ -2708,5 +2712,9 @@ test("histc counts along the requested dimension (MCF-32)", () => {
     "[2 2]", "[1 1;0 0]", "[2 2]", "[1 2;0 0]",
     "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
     "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
+    "[1 3]", "[1 1 1]", "[1 3]", "[1 2 3]",
+    "[3 1]", "[1;1;1]", "[3 1]", "[1;2;3]",
+    "[1 2]", "[1 0]", "[1 1]", "1",
+    "[2 2 2]", "[1 0;0 0]", "[0 1;0 0]", "[2 2]", "[1 2;0 0]",
   ]);
 });
