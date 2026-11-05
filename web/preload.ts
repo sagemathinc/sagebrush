@@ -155,3 +155,30 @@ export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string;
   if (idle) idle(() => void go(), { timeout: o.wait ?? 2000 });
   else setTimeout(() => void go(), o.wait ?? 2000);
 }
+
+/** An optional package set's files a document's imports need (web/pkgset-browser.ts fetches the same ones at the
+ * import): each package one of whose modules' top-level names `tops` has, with the packages it requires, by its
+ * source chunk, pkg/<sha256>.json (a set's precompiled chunks are per core build, and the notebooks' set has none),
+ * and their bytes. Anything that isn't an index's shape contributes nothing. */
+export function pkgIntent(index: unknown, tops: readonly string[], base: string): { urls: string[]; bytes: number } {
+  const pk = (index as any)?.packages;
+  if (!pk || typeof pk !== "object" || !tops.length) return { urls: [], bytes: 0 };
+  const want: string[] = [], queue: string[] = [];
+  for (const [id, p] of Object.entries<any>(pk)) if (Array.isArray(p?.modules) && p.modules.some((m: unknown) => typeof m === "string" && tops.includes(m.split(".")[0]))) queue.push(id);
+  // (the packages they require, at most 64 in all)
+  while (queue.length && want.length < 64) {
+    const id = queue.shift()!;
+    if (want.includes(id) || !pk[id]) continue;
+    want.push(id);
+    for (const r of Array.isArray(pk[id].requires) ? pk[id].requires : []) if (typeof r === "string") queue.push(r);
+  }
+  const urls: string[] = [];
+  let bytes = 0;
+  for (const id of want) {
+    const s = pk[id]?.src;
+    if (typeof s?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(s.sha256)) continue;
+    urls.push(new URL(`pkg/${s.sha256}.json`, base).href);
+    bytes += Number.isSafeInteger(s.size) && s.size > 0 ? s.size : 0;
+  }
+  return { urls, bytes };
+}

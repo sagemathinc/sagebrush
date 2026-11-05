@@ -9,7 +9,9 @@
 // - Save-Data, a 3G connection, a hidden tab, the tests' off switch: nothing fetched;
 // - a Run while sci.pre is still being fetched (the proxy serves it slowly): it is downloaded once;
 // - a Run while the first of the files (sci.src) is in flight: that one finishes, the next is never asked;
-// - a plain notebook whose only import lines are in a markdown cell: nothing fetched.
+// - a plain notebook whose only import lines are in a markdown cell: nothing fetched;
+// - a notebook importing pandas: the site's latest package set's pandas source chunk (with what it requires), each
+//   once, at idle, nothing pinned before the Run; the Run fetches it no more, and pins the same set it was given.
 //   bun web/build.ts && node web/test-preload-page.mjs      (CHROME=... for the browser)
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:fs";
@@ -35,6 +37,16 @@ ok(at > 0 && TABLE.groups && TABLE.modes && TABLE.tops?.numpy === "sci", "the pa
 const filesOf = (g) => { const e = TABLE.groups[g]; return [`/lib/${g}.src.${e[1]}.json`, ...(e[2] ? [`/lib/${g}.pre.${e[2]}.json`] : [])]; };
 const SCI = filesOf("sci");
 const SAGE = (TABLE.modes.sage ?? []).flatMap(filesOf);
+// the site's latest package set, and the chunks `import pandas` needs from it: pandas's source, and those of the
+// packages it requires (a set's precompiled chunks are per core build; the notebooks' set has none)
+const S = JSON.parse(readFileSync(join(dist, "pkgset", "latest.json"), "utf8")).id;
+const INDEX = JSON.parse(readFileSync(join(dist, "pkgset", S + ".json"), "utf8"));
+const PANDAS = (() => {
+  const seen = [], todo = Object.keys(INDEX.packages).filter((id) => id.startsWith("@sagebrush/pandas@"));
+  while (todo.length) { const id = todo.shift(); if (seen.includes(id)) continue; seen.push(id); todo.push(...(INDEX.packages[id].requires ?? [])); }
+  return seen.map((id) => `/pkg/${INDEX.packages[id].src.sha256}.json`);
+})();
+ok(PANDAS.length > 0 && PANDAS.every((f) => statSync(join(dist, f)).isFile()), `the latest set has pandas: ${PANDAS.length} source chunk(s)`);
 ok(SCI.every((f) => statSync(join(dist, f)).isFile()) && SAGE.length > 0 && SAGE.every((f) => statSync(join(dist, f)).isFile()), `the table's files are the build's own (sci: 2, sage's groups: ${SAGE.length})`);
 
 const NB = (mode, cells) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: mode === "sage" ? { name: "sagemath", language: "sage" } : { name: "python3", language: "python" } }, cells: cells.map((c) => (typeof c === "object" ? { cell_type: "markdown", source: c.md, metadata: {} } : { cell_type: "code", source: c, metadata: {}, outputs: [], execution_count: null })) });
@@ -44,6 +56,7 @@ const DOCS = {
   "numpy2.ipynb": NB("python", ["import numpy as np\nprint(np.arange(3))", "print(1)"]),
   "markdown.ipynb": NB("python", [{ md: "import numpy\n\nfrom scipy import linalg" }, "print(1)"]),
   "sage.ipynb": NB("sage", ["factor(12)"]),
+  "pandas.ipynb": NB("python", ["import pandas as pd\nprint(pd.DataFrame({'a': [1, 2]}).shape)"]),
 };
 
 // web/dist behind a recording proxy; /t/<name> serves the notebooks above; `slow`: a path served at 256 KB/s
@@ -54,10 +67,11 @@ async function site(slow = null) {
   const front = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     if (path.startsWith("/t/")) { res.writeHead(200, { "content-type": "application/json" }); return res.end(DOCS[path.slice(3)] ?? "{}"); }
-    if (path.startsWith("/lib/")) asked.push(path);
+    const rec = path.startsWith("/lib/") || path.startsWith("/pkg/");
+    if (rec) asked.push(path);
     const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
       res.writeHead(r.statusCode, r.headers);
-      if (!path.startsWith("/lib/")) return r.pipe(res);
+      if (!rec) return r.pipe(res);
       if (path !== slow) {
         r.on("data", (d) => bytes.set(path, (bytes.get(path) ?? 0) + d.length));
         return r.pipe(res);
@@ -188,6 +202,20 @@ try {
   await kase("markdown.ipynb", async (t, s) => {
     await sleep(6000);
     ok(s.asked.length === 0 && (await t.ev("sagebrush.preload.outcome")) === "nothing", "import lines only in a markdown cell: no /lib/ file fetched (outcome nothing): " + JSON.stringify([s.asked, await t.ev("sagebrush.preload.outcome")]));
+  });
+
+  // 8. pandas: the latest set's chunks it needs, each once, before any Run, nothing pinned; the Run fetches them no
+  // more and pins the set it was given (the same one)
+  await kase("pandas.ipynb", async (t, s) => {
+    for (let i = 0; i < 300 && !PANDAS.every((f) => s.bytes.get(f) === size(f)); i++) await sleep(100);
+    await sleep(1000);
+    const pkg = s.asked.filter((p) => p.startsWith("/pkg/"));
+    ok(JSON.stringify([...new Set(pkg)].sort()) === JSON.stringify([...PANDAS].sort()) && PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "a pandas notebook: exactly the set's chunks pandas needs, each once, at idle: " + JSON.stringify(pkg));
+    ok((await t.ev("window.__warms.length")) === 0 && (await t.ev("sagebrush.notebook.meta.pkgset")) === undefined, "...nothing ran, nothing pinned (its metadata names no set)");
+    const out = await t.run(0, 240000);
+    ok(out.includes("(2, 1)"), "its Run: " + JSON.stringify(out));
+    ok(PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "...fetched none of them again: " + JSON.stringify(s.asked.filter((p) => p.startsWith("/pkg/"))));
+    ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S, "...and pinned the set it used at the Run: the latest, the one prefetched");
   });
 } catch (e) {
   ok(false, "the test threw: " + (e?.stack ?? e));

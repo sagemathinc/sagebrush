@@ -3,7 +3,7 @@
 // mode's, then those its import lines name), the exact files, the skips (Save-Data, slow, offline, hidden), the
 // storage check, and the fetch loop (one at a time; a stop never cancels the file in flight, only the next).
 //   bun web/test-preload.mjs
-import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState } from "./preload.ts";
+import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, pkgIntent } from "./preload.ts";
 
 let fails = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -93,6 +93,28 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
   for (const [code, want] of [["import\tnumpy", '["numpy"]'], ["import numpy\r\nx = 1", '["numpy"]'], ["import numpy.x!", "[]"], ["from numpy.a-b import c", "[]"], ["import a\nimport a", '["a"]']])
     ok(J(importTops([code])) === want, `scan: ${J(code)}: ${want} (${J(importTops([code]))})`);
   ok(J(importTops(["import a.b as c, d", "from e.f import g", "from . import h", "from .i import j", "import k l", "import m;", "xfrom n import o", "importp"])) === '["a","d","e"]', "scan: the forms it takes, and those it doesn't (relative, malformed, not a statement start)");
+}
+
+// a package set's chunks for the imports' top-level names: each package naming one among its modules, with what it
+// requires (once each), by its source chunk; nothing for a malformed index or entry
+{
+  const h = (c) => c.repeat(64);
+  const IX = { packages: {
+    "@sagebrush/pandas@2": { modules: ["pandas", "pandas.core"], src: { sha256: h("a"), size: 100 }, pre: {}, requires: ["@sagebrush/dateutil@1", "@sagebrush/pytz@1"] },
+    "@sagebrush/dateutil@1": { modules: ["dateutil"], src: { sha256: h("b"), size: 20 }, pre: {}, requires: ["@sagebrush/six@1"] },
+    "@sagebrush/pytz@1": { modules: ["pytz"], src: { sha256: h("c"), size: 5 }, pre: {}, requires: ["@sagebrush/six@1"] },
+    "@sagebrush/six@1": { modules: ["six"], src: { sha256: h("d"), size: 1 }, pre: {}, requires: [] },
+    "@sagebrush/bad@1": { modules: ["bad"], src: { sha256: "../x", size: 1 }, pre: {}, requires: ["@sagebrush/missing@1"] },
+  } };
+  const base = "https://sagebrush.space/", P = (c) => `${base}pkg/${h(c)}.json`;
+  ok(J(pkgIntent(IX, ["pandas"], base)) === J({ urls: [P("a"), P("b"), P("c"), P("d")], bytes: 126 }), "pkg: pandas, then what it requires, each once (six named twice): " + J(pkgIntent(IX, ["pandas"], base)));
+  ok(J(pkgIntent(IX, ["pytz"], base)) === J({ urls: [P("c"), P("d")], bytes: 6 }), "pkg: a top-level name another package requires: it and its own");
+  ok(J(pkgIntent(IX, ["numpy", "os"], base)) === J({ urls: [], bytes: 0 }) && J(pkgIntent(IX, [], base).urls) === "[]", "pkg: imports the set lacks, or none: nothing");
+  ok(J(pkgIntent(IX, ["bad"], base).urls) === "[]", "pkg: an entry whose source isn't a SHA-256, requiring one the set lacks: nothing");
+  ok(J(pkgIntent(null, ["pandas"], base).urls) === "[]" && J(pkgIntent({ packages: 3 }, ["pandas"], base).urls) === "[]", "pkg: not an index: nothing");
+  ok(J(pkgIntent(IX, ["core"], base).urls) === "[]", "pkg: a module's dotted name never matches by its tail (pandas.core is pandas's)");
+  const many = { packages: Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`p${i}`, { modules: [`m${i}`], src: { sha256: (i % 16).toString(16).repeat(64), size: 1 }, requires: [`p${i + 1}`] }])) };
+  ok(pkgIntent(many, ["m0"], base).urls.length === 64, "pkg: a chain of 100 requirements: at most 64 packages");
 }
 
 // redirects are refused, never followed (PRELOAD674-REDIRECT-1), as the runner broker's: real servers on two origins
