@@ -215,7 +215,6 @@ await listenStops();
   const magma = itemPaths("magma");
   const pool = LAZY.filter((p) => cacheFirst(p) && !magma.includes(p));
   const small = [...pool].sort((a, b) => size(a) - size(b))[0];
-  const bigW = pool.reduce((a, p) => (size(p) > size(a) ? p : a));
   await api({ offline: "remove", build: A, items: ["magma"] }, 30000);
   await hook({ hold: 63 * MiB });
   ok(await until(async () => (await hook()).budgetUsed === 63 * MiB, 5000), "N15 (setup): 63 MiB of the budget held");
@@ -229,8 +228,15 @@ await listenStops();
   let h = await hook();
   ok(served === size(small) && J(h.grants) === '["serve"]' && h.waiting === bgWaiting && bgWaiting <= 8, `N15: a serving reservation is granted ahead of the ${bgWaiting} background ones queued earlier: grants ${J(h.grants)}, waiting ${h.waiting}`);
   // (a refused one is answered from the network, with the server's Last-Modified; a kept copy is made from DIGESTS and
-  // has none.  Counted as answered, not by server requests: the HTTP cache serializes identical requests)
-  await ev(`(window.__net = 0, window.__w = Array.from({ length: 70 }, () => fetch(${J(urlOf.get(bigW))}).then((r) => (r.headers.has("last-modified") && window.__net++, r))), 1)`);
+  // has none.  Counted as answered, not by server requests: the HTTP cache serializes identical requests.  Each of the
+  // 70 is a different kept file: the service worker checks a key's kept copy one request at a time (a1e770d9,
+  // APP-565-1), so 70 requests for one file would wait behind each other and only the first would reach the budget.
+  // With the budget's last MiB held too, every one of them waits there, whatever its size)
+  await hook({ hold: MiB });
+  ok(await until(async () => (await hook()).budgetUsed === 64 * MiB, 5000), "N15 (setup): the whole budget held");
+  const seventy = pool.filter((p) => p !== small).slice(0, 70);
+  ok(seventy.length === 70, `N15 (setup): 70 different kept files (of ${pool.length})`);
+  await ev(`(window.__net = 0, window.__w = ${J(seventy.map((p) => urlOf.get(p)))}.map((u) => fetch(u).then((r) => (r.headers.has("last-modified") && window.__net++, r))), 1)`);
   await sleep(3000);
   h = await hook();
   const refused = await ev("window.__net");
