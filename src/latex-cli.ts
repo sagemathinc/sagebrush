@@ -243,10 +243,12 @@ try:
     _sbtx_cs = __pyjs_compile_sage__
 except NameError:
     _sbtx_cs = None
-# (the document's folder first on sys.path, as real SageTeX has it: \`sage doc.sagetex.sage\`, run in the document's
-#  folder, imports a helper.py beside the .tex; this session runs there too, but its script is in a temporary folder.
-#  After the script's own imports: a sagebrush.py beside the .tex is the items' to import, never the script's)
-sys.path.insert(0, os.getcwd())
+# (the document's folder on sys.path, last, as real SageTeX has it: \`sage doc.sagetex.sage\`, run in the document's
+#  folder, imports a helper.py beside the .tex, and its sys.path ends with that folder, so a statistics.py there
+#  doesn't replace the standard library's (Sage 10.9's sage command, checked Nov 5). This session runs there too,
+#  but its script is in a temporary folder. After the script's own imports: a sagebrush.py beside the .tex is the
+#  items' to import, never the script's)
+sys.path.append(os.getcwd())
 _sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
