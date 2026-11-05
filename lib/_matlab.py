@@ -9946,9 +9946,11 @@ def nthroot_(x, n):
     X = _farr(x)
     N = _farr(n)
     with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.sign(X) * np.abs(X) ** (1.0 / N)
-        r = np.where((X < 0) & (np.mod(N, 2) == 0), _math.nan, r)
-    return _box(r)
+        if np.any((X < 0) & (np.mod(N, 2) != 1)):
+            raise _err("If X is negative, N must be an odd integer.", "MATLAB:nthroot:NegXNotOddIntegerN")
+        r = np.abs(X) ** (1.0 / N)
+        r = np.where(X < 0, -r, r)
+    return _finish(r, _float_class(x, n))
 
 
 def _bitop(f):
