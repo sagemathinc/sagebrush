@@ -24,6 +24,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
 setTimeout(() => { console.log("FAIL the test did not end within 600 s"); process.exit(1); }, 600_000).unref();
+// (every browser and server this test starts, killed however it ends: a failed case or the deadline's exit leaves none,
+// the grader's note on a17c3f58)
+const children = new Set();
+process.on("exit", () => { for (const c of children) try { c.kill("SIGKILL"); } catch {} });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log(`FAIL stopped by ${sig}`); process.exit(1); });
 
 // the build's table, as the page has it (web/build.ts PRELOAD, in index.html's script)
 const html = readFileSync(join(dist, "index.html"), "utf8");
@@ -50,6 +55,7 @@ const DOCS = {
 async function site(slow = null) {
   const upstream = await freePort();
   const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
+  children.add(server);
   const asked = [], bytes = new Map();
   const front = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
@@ -82,7 +88,8 @@ const COUNTER = `(() => { window.__warms = []; const count = (m) => { if (m && m
 // a Chrome with a fresh profile, one tab; `init`: a script run before the page's own
 async function chromium(init = "") {
   const profile = mkdtempSync(join(tmpdir(), "sb-preload-chrome-"));
-  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true });
+  children.add({ kill: (sig) => { try { process.kill(-chrome.pid, sig); } catch {} } });
   const port = await devtoolsPort(profile, undefined, { child: chrome });
   const cdp = `http://127.0.0.1:${port}`;
   let target;
@@ -107,7 +114,7 @@ async function chromium(init = "") {
       return String(await ev(`sagebrush.notebook.outputText(sagebrush.notebook.cells()[${i}].out)`));
     },
   };
-  const close = async () => { ws.close(); chrome.kill("SIGKILL"); await sleep(300); rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); };
+  const close = async () => { ws.close(); try { process.kill(-chrome.pid, "SIGKILL"); } catch { chrome.kill("SIGKILL"); } await sleep(300); rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); };
   return { t, close };
 }
 

@@ -49,11 +49,16 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [], sizes = new Map(), reqUrl = new Map();
+// (each request by its id, in order: its URL, whether it was answered from the cache, its bytes over the network)
+const byId = [], idInfo = new Map();
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); reqUrl.set(m.params.requestId, m.params.request.url); }
+  if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); reqUrl.set(m.params.requestId, m.params.request.url); if (!idInfo.has(m.params.requestId)) { const x = { url: m.params.request.url, cached: false, bytes: null, status: null }; idInfo.set(m.params.requestId, x); byId.push(x); } }
+  if (m.method === "Network.requestServedFromCache" && idInfo.has(m.params.requestId)) idInfo.get(m.params.requestId).cached = true;
+  if (m.method === "Network.responseReceived" && idInfo.has(m.params.requestId)) { const x = idInfo.get(m.params.requestId); x.status = m.params.response.status; if (m.params.response.fromDiskCache || m.params.response.fromPrefetchCache) x.cached = true; }
+  if (m.method === "Network.loadingFinished" && idInfo.has(m.params.requestId)) idInfo.get(m.params.requestId).bytes = m.params.encodedDataLength;
   if (m.method === "Network.loadingFinished") sizes.set(reqUrl.get(m.params.requestId) ?? m.params.requestId, m.params.encodedDataLength);
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.type); send("Page.handleJavaScriptDialog", { accept: true }); }
 };
@@ -780,6 +785,9 @@ try {
   // own script); and used: opening a .tex then downloads neither again (from the cache, or a revalidation's few bytes).
   // (No .tex in the workspace, no LaTeX prefetch: web/test-preload-page.mjs, a plain notebook's outcome "nothing".)
   {
+    // (from an empty HTTP cache: the cases before opened the editor, so its files would otherwise be cached already,
+    // and the prefetch itself a cache answer rather than the download it is on a first visit)
+    await send("Network.clearBrowserCache");
     const counter = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { window.__latexWorkers = 0; const W0 = window.Worker; window.Worker = function (u, o) { if (String(u).includes("sagebrush-latex") || o?.name === "sagebrush-latex") window.__latexWorkers++; return new W0(u, o); }; window.Worker.prototype = W0.prototype; })();` });
     await fromBlank();
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
@@ -793,14 +801,18 @@ try {
     // (then a .tex is opened, in this tab: neither file downloaded again)
     const two = latexFetches().filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
     const full = Object.fromEntries(two.map((u) => [new URL(u).pathname, sizes.get(u)]));
-    const n0 = requests.length;
+    const n0 = requests.length, i0 = byId.length;
     const pf = await mk("/preload-used.tex", enc("\\documentclass{article}\n\\begin{document}\nused\n\\end{document}\n"));
     const opened = await open(pf);
     await sleep(1500);
     const again = requests.slice(n0).filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
-    const bytes = Object.fromEntries(again.map((u) => [new URL(u).pathname, sizes.get(u)]));
-    check(opened && Object.values(full).every((b) => b > 10_000) && again.every((u) => (sizes.get(u) ?? Infinity) < 2048),
-      "background loading: …and used: opening a .tex then downloads neither file again (asked again only as a revalidation or from the cache)", { opened, full, again: again.map((u) => new URL(u).pathname), bytes });
+    // (the editor's page, asked again: answered from the cache, or with only a revalidation's few bytes. Its worker's
+    // script is asked by the worker, whose answer this page's session never sees (no response, no finish), so it isn't
+    // judged here: a follow-up for @sagebrush-latex, by the worker's own target)
+    const againIds = byId.slice(i0).filter((x) => /\/sagebrush-latex(-worker)?\.js$/.test(x.url)).map((x) => ({ path: new URL(x.url).pathname, cached: x.cached, bytes: x.bytes, status: x.status }));
+    const page = againIds.filter((x) => x.path === "/sagebrush-latex.js");
+    check(opened && Object.values(full).every((b) => b > 10_000) && page.length >= 1 && page.every((x) => x.cached || (x.bytes !== null && x.bytes < 2048) || x.status === 304),
+      "background loading: …and used: opening a .tex then downloads the editor's page no more (from the cache, or a revalidation)", { opened, full, again: againIds });
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: counter.identifier });
   }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
