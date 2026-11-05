@@ -142,7 +142,8 @@ const size = (f) => statSync(join(dist, f)).size;
 async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
   const s = await site(slow, alter), { t, close } = await chromium(init);
   try {
-    ok(await t.open(`${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`), `(${doc}: the page is ready)`);
+    t.href = `${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`;
+    ok(await t.open(t.href), `(${doc}: the page is ready)`);
     await body(t, s);
   } finally { await close(); await s.stop(); }
 }
@@ -245,6 +246,28 @@ try {
     await sleep(12000);
     const pkg = s.asked.filter((p) => p.startsWith("/pkg/") || p.startsWith("/pkgset/"));
     ok((await t.ev("sagebrush.notebook.mode")) === mode && pkg.length === 0, `an import line in a ${mode} notebook: no package chunk, nor the set's index, fetched at idle: ` + JSON.stringify({ mode: await t.ev("sagebrush.notebook.mode"), pkg, outcome: await t.ev("sagebrush.preload.outcome") }));
+  });
+
+  // 11. a second visit, the page now controlled by the service worker: its idle preload goes through the HTTP cache
+  // only, so no /lib/ chunk is kept in the service worker's caches (they're kept at a Run, as without background
+  // loading; test-pwa's "installing keeps ... the library's chunks" rule, for a controlled page)
+  const libKept = `(async () => { const out = []; for (const n of await caches.keys()) for (const r of await (await caches.open(n)).keys()) { const p = new URL(r.url).pathname; if (p.startsWith("/lib/")) out.push(n + " " + p); } return out; })()`;
+  await kase("numpy.ipynb", async (t, s) => {
+    ok(await t.until("!!navigator.serviceWorker.controller", 30000), "(the service worker controls the page)");
+    ok(await t.until("sagebrush.preload.outcome !== null", 30000), "(the first visit's preload done: " + (await t.ev("sagebrush.preload.outcome")) + ")");
+    await sleep(1000);
+    const before = s.asked.length;
+    ok(await t.open(t.href), "(the second visit: the page is ready)");
+    ok(await t.ev("!!navigator.serviceWorker.controller") && (await t.until("sagebrush.preload.outcome === 'fetched'", 30000)), "(the second visit, controlled, preloaded: " + (await t.ev("sagebrush.preload.outcome")) + ")");
+    await sleep(3000);
+    const kept = await t.ev(libKept);
+    ok(Array.isArray(kept) && kept.length === 0, "a controlled page's idle preload: no /lib/ chunk kept by the service worker: " + JSON.stringify({ kept, asked: s.asked.slice(before) }));
+    // (its Run: answered without a new download, and then kept, so the notebook works offline as before)
+    const at = s.asked.length, out = await t.run(0);
+    ok(out.includes("[0 1 2]"), "its Run: " + JSON.stringify(out));
+    for (let i = 0; i < 50 && (await t.ev(libKept)).length < SCI.length; i++) await sleep(200);
+    const after = await t.ev(libKept);
+    ok(SCI.every((f) => after.some((k) => k.endsWith(" " + f))) && SCI.every((f) => !s.asked.slice(at).includes(f)), "...sci's two files then kept by the service worker (at the Run), neither downloaded again: " + JSON.stringify({ after, asked: s.asked.slice(at) }));
   });
 } catch (e) {
   ok(false, "the test threw: " + (e?.stack ?? e));
