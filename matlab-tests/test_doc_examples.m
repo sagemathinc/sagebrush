@@ -479,6 +479,49 @@ show(v);
 clear
 v = trapz([1 2 3]);
 show(v);
+% cumtrapz
+clear
+v = cumtrapz([1 2 3 4]);
+show(v);
+% cumtrapz
+clear
+v = cumtrapz([0 1 3], [1 2 3]);
+show(v);
+% rref
+clear
+v = rref([1 2 3; 4 5 6; 7 8 10]);
+show(v);
+% rref
+clear
+[R, p] = rref([1 2 1; 2 4 0; 3 6 1]);
+show(R);
+show(p);
+% nextpow2
+clear
+v = nextpow2([1 5 1000]);
+show(v);
+% unwrap
+clear
+v = unwrap([0 3.5 7]);
+show(v);
+% deg2rad
+clear
+v = deg2rad(180);
+show(v);
+% rad2deg
+clear
+v = rad2deg(pi/2);
+show(v);
+% cart2pol
+clear
+[theta, rho] = cart2pol(1, 1);
+show(theta);
+show(rho);
+% pol2cart
+clear
+[x, y] = pol2cart(pi/2, 2);
+show(x);
+show(y);
 % int16
 clear
 v = int16([-40000 -2.5 2.5 40000]);
@@ -1162,6 +1205,14 @@ show(v);
 clear
 s = struct('a', 1, 'b', 'text');
 show(s);
+% perms
+clear
+v = perms(1:3);
+show(v);
+% perms
+clear
+v = perms('ab');
+show(v);
 % abs
 clear
 v = abs([-3 2 -1.5]);
@@ -1274,6 +1325,21 @@ show(round(p * 1e12) / 1e12);
 clear
 v = polyval([1 2 3], 2);
 show(v);
+% rat
+clear
+[n, d] = rat(0.75);
+show(n);
+show(d);
+% rat
+clear
+[n, d] = rat(pi);
+show(n);
+show(d);
+% rat
+clear
+[n, d] = rat([1/4 2/5]);
+show(n);
+show(d);
 % all
 clear
 v = all([1 1 0]);
@@ -1357,6 +1423,15 @@ show(v);
 % var
 clear
 v = var([1 2 3 4], 1);
+show(v);
+% xcorr
+clear
+[r, lags] = xcorr([1 2 3], [0 1 2]);
+show(r);
+show(lags);
+% xcorr
+clear
+v = xcorr([1 2 3]);
 show(v);
 % find
 clear

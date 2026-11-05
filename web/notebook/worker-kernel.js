@@ -118,20 +118,42 @@ function pinPackages() {
   } else if (pkgPins.size && !pinTimer) pinTimer = setInterval(pinPackages, 2 * 60 * 1000);
 }
 
+// Live data's answer where a plain worker waits (src/live-data.ts's layout:
+// Int32 [0] the state, [1] the length, then UTF-8 JSON), once, in a buffer of
+// exactly the size the worker makes; the answers come checked
+// (web/notebook/live-data.js), and the worker checks them again.
+const LIVE_BUFFER = 8 + (8 << 20);
+function writeLive(buffer, a) {
+  if (!(typeof SharedArrayBuffer === "function" && buffer instanceof SharedArrayBuffer) || buffer.byteLength !== LIVE_BUFFER) return;
+  const ctl = new Int32Array(buffer, 0, 2);
+  if (Atomics.load(ctl, 0) !== 0) return;
+  let bytes = new TextEncoder().encode(JSON.stringify(a));
+  if (bytes.length > LIVE_BUFFER - 8) bytes = new TextEncoder().encode('{"error":"unavailable"}');
+  new Uint8Array(buffer, 8, bytes.length).set(bytes);
+  Atomics.store(ctl, 1, bytes.length);
+  Atomics.store(ctl, 0, 1);
+  Atomics.notify(ctl, 0);
+}
+// (no admission given, as until the key broker exists: every request is unavailable, nothing fetched)
+const NO_LIVE_DATA = { admit: (m, w, gen, active, send) => active() && send({ error: "unavailable" }), abort() {} };
+
 export class WorkerKernel {
   static count = 0;
   /**
    * @param {object} o
    * @param {() => Worker} o.createWorker a new worker (or anything with postMessage/onmessage/terminate)
    * @param {(worker: Worker) => Promise<void> | void} [o.onStart] called with each new worker before code runs (e.g. to send it files); nothing but its limits ({init}) is sent to the worker until it is done
-   * @param {(message: any) => boolean | void} [o.onMessage] sees each message first; returning true consumes it (e.g. fsChanged)
+   * @param {(message: any, worker: Worker) => boolean | void} [o.onMessage] sees each message first, with the worker that
+   * sent it (an earlier one's, after a restart, may still arrive); returning true consumes it (e.g. fsChanged)
    * @param {string | null} [o.limits] the engine's limits, a JSON text (src/limits.ts): the deployment's
    *   or the course's, never a document's; omitted or null for the defaults.  Every worker this kernel
    *   starts, restarts too, is given the same value first ({init}), and runs nothing before it is valid;
    *   anything else supplied (an object, a number...) is passed on as it is, for the worker to refuse:
    *   settings given wrongly are never the defaults (astra CORR-FF93-1)
+   * @param {{admit: Function, abort: Function}} [o.live] live data's admission (web/notebook/live-data.js's
+   *   LiveCalls, with the adapter that holds the reader's key); none: every live-data request is unavailable
    */
-  constructor({ createWorker, onStart, onMessage, limits = null }) {
+  constructor({ createWorker, onStart, onMessage, limits = null, live = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
     this.limits = limits === undefined ? null : limits;
@@ -165,8 +187,16 @@ export class WorkerKernel {
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // input() questions shown and not yet answered: reply -> its run's id
     this.inputs = new Map();
+    // live data's admission (web/notebook/live-data.js): one for every worker this kernel starts
+    this.live = live ?? NO_LIVE_DATA;
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
+  }
+
+  /** Hold the current worker's later messages until `p` settles (whatever it settles to), then deliver them in order. */
+  holdMessages(p) {
+    const h = (this.held = (this.held ?? Promise.resolve()).then(() => p).then(() => {}, () => {}));
+    h.then(() => { if (this.held === h) this.held = null; });
   }
 
   on(event, f) { (this.listeners[event] ??= []).push(f); return () => { this.listeners[event] = this.listeners[event].filter((g) => g !== f); }; }
@@ -191,7 +221,7 @@ export class WorkerKernel {
       w.postMessage({ init: { limits: { uncloneable: typeof this.limits } } });
     }
     // (a barrier: every run, interact, question and check waits for onStart,
-    // e.g. the notebook's package set resolved and durably pinned (index.html);
+    // e.g. the notebook's package set resolved, and durable if pinned (index.html);
     // if it fails, what waits is stopped, and the next one starts a new
     // worker: nothing ever runs in one whose start failed, astra's CORR-PR68-3)
     this.startError = null;
@@ -223,9 +253,9 @@ export class WorkerKernel {
       this.modeClaims.clear();
       for (const p of pending) p.stopped(message);
     });
-    w.onmessage = (ev) => {
+    const handle = (ev) => {
       const m = ev.data;
-      if (this.onMessage?.(m)) return;
+      if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
         this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
         return;
@@ -234,6 +264,8 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (the files permission's shared word, a plain worker's: setWritable sets it at once; a runner's stays in its frame)
+        this.writableWord = m.writable ? new Int32Array(m.writable) : null;
         this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
@@ -266,6 +298,14 @@ export class WorkerKernel {
       }
       const p = this.pending.get(m.id);
       if (!p) return;
+      // live data (web/worker.ts's liveData): admitted, checked again and bound to this worker, its generation and
+      // this run, here, for a plain worker (its buffer) and a runner's (its frame writes the answer) alike
+      if (m.liveData !== undefined) {
+        const gen = this.generation;
+        const send = (a) => (m.buffer ? writeLive(m.buffer, a) : w.postMessage({ runnerLive: m.id, key: m.liveData?.key, answer: a }));
+        this.live.admit(m, w, gen, () => w === this.worker && gen === this.generation && this.pending.get(m.id) === p, send);
+        return;
+      }
       // (a request's one terminal message settles the language entry it was sent with)
       if (p.reply || m.skipped || m.done) this.settleMode(m.id, m.modeReady === true);
       if (p.reply) { this.pending.delete(m.id); return p.reply(m); }
@@ -301,6 +341,7 @@ export class WorkerKernel {
       }
       if (m.done) {
         this.retireInputs(m.id);
+        this.live.abort((c) => c.id === m.id);
         this.pending.delete(m.id);
         // (Stop: it ended with the KeyboardInterrupt it was sent)
         const interrupted = this.interrupted.has(m.id) && !!m.error;
@@ -308,6 +349,14 @@ export class WorkerKernel {
         else this.interrupted.delete(m.id);
         p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
+    };
+    // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
+    // done is then not settled before, e.g., the package set pin its import made is durable)
+    this.held = null;
+    w.onmessage = (ev) => {
+      if (this.held === null) return handle(ev);
+      const h = (this.held = this.held.then(() => handle(ev)).catch((e) => setTimeout(() => { throw e; })));
+      h.then(() => { if (this.held === h) this.held = null; });
     };
     // (a worker that failed may never answer: what waits on it is told, and a
     // new one starts, rather than waiting forever)
@@ -357,6 +406,7 @@ export class WorkerKernel {
   // a worker whose start failed is replaced before anything more is asked of it
   retryStart() {
     if (!this.startError) return;
+    this.live.abort();
     this.worker?.terminate();
     this.start();
   }
@@ -488,6 +538,12 @@ export class WorkerKernel {
 
   /** Send the worker anything else (files). */
   post(msg) { this.worker?.postMessage(msg); }
+  /** Whether this document may change files (the page's `files` permission): a run in flight sees it at its next write
+   * (the shared word, a plain worker's here, a runner's in its frame), and the worker keeps it for the next run. */
+  setWritable(on) {
+    if (this.writableWord) Atomics.store(this.writableWord, 0, on ? 1 : 0);
+    this.post({ fsWritable: !!on });
+  }
 
   // Interrupt what is running: KeyboardInterrupt in the worker (Python loops
   // and the Rust engines check a flag shared with this page), keeping every
@@ -498,6 +554,8 @@ export class WorkerKernel {
     // (a question shown before the Stop is over, answered or not: what the
     // program asks after catching the KeyboardInterrupt is a new one)
     this.retireInputs();
+    // (live data asked for before the Stop: aborted, never answered)
+    this.live.abort();
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
@@ -524,8 +582,14 @@ export class WorkerKernel {
     }
   }
 
+  /** Forget or sign-out (the key broker): every live-data call in flight is aborted, none answered. */
+  forgetLiveData() {
+    this.live.abort();
+  }
+
   /** A fresh interpreter; what was running or queued is told `message`. */
   restart(message = "\nInterpreter restarted.\n") {
+    this.live.abort();
     this.worker?.terminate();
     this.retireInputs();
     const pending = [...this.pending.values()];
@@ -539,6 +603,7 @@ export class WorkerKernel {
 
   /** Stop for good: what was running or queued is told `message`. */
   close(message = "\nThe interpreter was stopped.\n") {
+    this.live.abort();
     this.worker?.terminate();
     this.worker = null;
     this.retireInputs();

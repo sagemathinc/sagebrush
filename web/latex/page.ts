@@ -1,21 +1,24 @@
 // The LaTeX editor page (DEV only, behind the flag: plan sbspace r5 + r6b). The page index.html hands itself to
 // mount() for /?tex=<fid>. It binds to the file's fid (Workspace.pathOfFile), reads the whole file (at most 4 MiB),
 // shows the source on the left and the live preview on the right, and saves only when asked (Ctrl/Cmd+S or Save),
-// last write wins (r6b E5), with the kept minimums of save.ts. The preview comes from a module Worker
+// only over the revision its text came from (a change made elsewhere is followed, or asked about), with the kept
+// minimums of save.ts. The preview comes from a module Worker
 // (dist/sagebrush-latex-worker.js), whose replies are taken only for the request's own document/revision (gate.ts),
 // patched under a per-frame budget, a split chunk's pieces replaced as one unit (staged hidden, then swapped).
 // SECURITY: file names, paths and messages reach the page through textContent; preview HTML is the renderer's (its
 // own escaping, KaTeX trust:false); images only as <img> from blob: URLs made of bytes checked by images.ts.
 import type { Workspace, Entry } from "../workspace/api";
-import { nameOf, parentOf } from "../workspace/paths";
+import { nameOf, parentOf, join, safeName } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
-import { imageCandidates, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images";
+import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
+import { engineInputs, admitInput, type Known } from "./inputs";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import { EXAMPLES, type Example } from "./examples";
+import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
 export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
@@ -36,6 +39,12 @@ const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
 const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
 let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
 const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
+// (Run's Sage session, run-core.mjs: the hosting page's kernel and runner classes (Host.sandbox), its interpreter in
+// the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
+// for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
+// current only while it is the last one asked for, on a page not disposed of)
+let sageSession: ReturnType<typeof sessionOf> | null = null;
+let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -51,7 +60,8 @@ export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, 
 const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
-type Host = { ws: Workspace; fid: string; back(): void };
+// (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
+type Host = { ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
 // (a reply's piece: its group, its HTML and, from the worker, its UTF-8 size)
@@ -111,6 +121,16 @@ export async function makeExample(ws: Workspace, ex: Example): Promise<Entry> {
     return main!;
   }
   throw new Error("no free folder name");
+}
+
+// ---- a published document, opened read only (?tex-doc=, boot.ts: the articles' links): doc.ts, a chunk of its own
+// (/sagebrush-latex-doc.js), fetched only for such a link; it's given the editor's pieces from here, so they aren't
+// bundled twice
+const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
+export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
+  let m: typeof import("./doc");
+  try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
+  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
 }
 
 /** The file browser's New, "LaTeX file" (boot.ts adds the item and loads this module on its click): /Untitled.tex, or
@@ -215,7 +235,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (PRINT_CSS), and its dialog's "Save as PDF" makes the file
   const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.title = "Print the preview, or save it as a PDF (the browser's print dialog)";
   printBtn.onclick = () => printPreview();
-  head.append(back, newBtn, title, dirty, save, toggle, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
+  // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
+  const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; runBtn.hidden = true;
+  head.append(back, newBtn, title, dirty, save, toggle, runBtn, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -224,7 +246,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const preview = el("div", "page tex-preview");
   right.appendChild(preview);
   main.append(left, right);
-  page.append(banner, head, main);
+  // (the bar for a change made elsewhere while this text had unsaved edits: one at a time, below)
+  const bar = el("div", "tex-conflict"); bar.hidden = true; bar.setAttribute("role", "alert");
+  const barText = el("span", "tex-conflict-t");
+  const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
+  bar.append(barText, useTheirs, keepMine);
+  page.append(banner, head, bar, main);
   banner.textContent = BANNER;
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
@@ -313,10 +340,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); banner.textContent = BANNER_NO_SAVE(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
-  const whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
+  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
   if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); save.hidden = true; }
-  const eol = opened.eol;
+  let eol = opened.eol;
   let savedText = opened.text;
+  // (the revision savedText was read or saved as, the Save's base; and the person's edits, counted: an await that
+  //  saw the text clean knows whether it still is)
+  let docRev = read.entry.rev ?? 0, edits = 0;
 
   // ---- the editor and its preview (editor.ts); the images, the saving and the controls are this page's
   const images: Record<string, string | { why: string }> = {};
@@ -345,14 +375,135 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       request();
     } catch {}
   };
+  // ---- \input and \include (William's L4, Nov 2; inputs.ts): the files the document asks for, found as TeX finds them
+  // (from this file's folder, ../, a leading "/" for the top), read by identity as images are, bounded, given to the
+  // engine; one reader at a time; a change to any of them (another tab, Python, an agent) reads it again
+  const inputs = { docPath: where.path, known: new Map<string, Known>(), version: 0 };
+  let inputBytes = 0, readingInputs = false;
+  const inputsWanted = new Set<string>();
+  const readInputs = async (refs: string[], tok: Token) => {
+    for (const p of engineInputs(where.path, inputs.known).wanted(refs)) inputsWanted.add(p);
+    if (readingInputs || !inputsWanted.size) return;
+    readingInputs = true;
+    let changed = false;
+    try {
+      for (const p of inputsWanted) {
+        inputsWanted.delete(p);
+        if (inputs.known.has(p) || inputs.known.size >= 1024) continue;
+        const e = await host.ws.stat(p).catch(() => undefined);
+        if (!alive(tok)) { inputsWanted.clear(); return; }
+        let k: Known;
+        if (!e || e.kind !== "file" || e.trashed) k = { absent: true };
+        else if (e.remote) k = { why: "it is in the cloud: open it on the device that made it" };
+        else {
+          let r: { entry: Entry; content: Uint8Array } | null = null;
+          try { r = await host.ws.readUpTo(p, EDIT_MAX + 1); } catch {}
+          const now = await host.ws.stat(p).catch(() => undefined);
+          if (!alive(tok)) { inputsWanted.clear(); return; }
+          if (!r) k = { why: "not readable" };
+          else if (!now || now.fid !== e.fid || r.entry.fid !== e.fid || now.updated !== e.updated) k = { why: "changed while it was read" };
+          else {
+            const count = [...inputs.known.values()].filter((x) => "text" in x).length;
+            k = admitInput(r.content, inputBytes, count);
+            if ("text" in k) inputBytes += r.content.length;
+          }
+        }
+        inputs.known.set(p, k); changed = true;
+      }
+    } finally { readingInputs = false; }
+    if (changed && alive(tok)) { inputs.version++; request(); }
+  };
+  // (a file the document read, or looked for, changed: forgotten, so the next render asks for it and it is read again)
+  const unwatchInputs = host.ws.watch((c) => {
+    let again = false;
+    for (const op of c.ops ?? []) for (const q of [op.path, op.to]) if (q && inputs.known.has(q)) {
+      const k = inputs.known.get(q)!; if ("text" in k) inputBytes -= new TextEncoder().encode(k.text).length;
+      inputs.known.delete(q); again = true;
+    }
+    if (again) { inputs.version++; request(); }
+  });
+  life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
     left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
+    inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
     // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
-    onEdit: () => { showDirty(); if (!saving) say(""); },
+    onEdit: () => { edits++; showDirty(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // ---- the name at the top (William's M0, Nov 3): it follows this file renamed or moved elsewhere (the file panel,
+  // another tab), read again by its identity on any change; and a click on it renames the file there, as a notebook's
+  // title does: a true rename of the .tex, with its results and comments files beside it moved along
+  // (the rename is offered only for a file that can be saved here: elsewhere the name is plain text, no control)
+  const showName = (p: string) => { title.textContent = nameOf(p); title.title = saveable ? p + ": click to rename" : p; document.title = nameOf(p) + " — Sagebrush"; };
+  let renamingTitle = false, nameCheck: any = null;
+  // (the name the file has now, found again by its identity; not while the name is being edited)
+  const refreshName = () => host.ws.pathOfFile(host.fid).then((at) => { if (live() && at.ok && !renamingTitle) showName(at.path); }, () => {});
+  const unwatchName = host.ws.watch(() => { clearTimeout(nameCheck); nameCheck = setTimeout(() => void refreshName(), 50); });
+  life.signal.addEventListener("abort", () => { unwatchName(); clearTimeout(nameCheck); });
+  if (saveable) { title.classList.add("renamable"); title.tabIndex = 0; title.setAttribute("role", "button"); title.setAttribute("aria-label", "Rename this file"); }
+  showName(where.path);
+  const renameTitle = async () => {
+    if (renamingTitle || !saveable) return;
+    const at = await host.ws.pathOfFile(host.fid);
+    if (!live() || !at.ok) return;
+    renamingTitle = true;
+    const input = el("input", "tex-titlein"); input.value = nameOf(at.path); input.setAttribute("aria-label", "The file's new name");
+    title.replaceWith(input); input.focus(); input.setSelectionRange(0, input.value.replace(/\.tex$/i, "").length);
+    let done = false;
+    // (every end but a rename done: the name the file has now, found again, since it may have been renamed elsewhere
+    //  while the field was open, daybreak3's M0-SEM-1)
+    const finish = async (keep: boolean) => {
+      if (done) return; done = true;
+      let renamed = false;
+      try { renamed = await commit(keep); } finally { if (!renamed) void refreshName(); }
+    };
+    const commit = async (keep: boolean): Promise<boolean> => {
+      const v = input.value.trim();
+      input.replaceWith(title); renamingTitle = false;
+      if (!keep || !v) return false;
+      const name = safeName(/\.tex$/i.test(v) ? v : v + ".tex");
+      const now = await host.ws.pathOfFile(host.fid);
+      if (!live()) return false;
+      if (!now.ok) { say("Not renamed: this file isn't here any more"); return false; }
+      const to = join(parentOf(now.path), name);
+      if (to === now.path) return false;
+      try {
+        // (its results and comments files, as they are BEFORE the rename (astra LATEX-RENAME-1): once the .tex has moved,
+        //  its old name is free, and another document's files made there meanwhile must never be taken along)
+        const companions: { ext: string; e: Entry }[] = [];
+        for (const ext of [".results.json", ".comments.json"]) {
+          const se = await host.ws.stat(now.path + ext).catch(() => undefined);
+          if (se && !se.trashed && se.kind === "file") companions.push({ ext, e: se });
+        }
+        const e = await host.ws.rename(now.path, to, { expect: { kind: now.entry.kind, ref: now.entry.ref, fid: now.entry.fid, created: now.entry.created } });
+        // (the test build only: the page test can make files at the freed name here; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexRenamed?.(now.path, e.path);
+        // (each moved along only if it is still the very entry found before (its identity checked holding the lock) and
+        //  the new name is free; one that can't be is left where it was, said)
+        let left = 0;
+        for (const { ext, e: se } of companions) {
+          if (await host.ws.stat(e.path + ext).catch(() => undefined)) { left++; continue; }
+          try { await host.ws.rename(se.path, e.path + ext, { expect: { kind: se.kind, ref: se.ref, fid: se.fid, created: se.created } }); } catch { left++; }
+        }
+        if (!live()) return true;
+        where.path = e.path; inputs.docPath = e.path; inputs.version++;
+        showName(e.path); request();
+        say(left ? `Renamed; ${left} file${left === 1 ? "" : "s"} beside it kept ${left === 1 ? "its" : "their"} old name` : "Renamed");
+        return true;
+      } catch (err: any) {
+        say(err?.code === "exists" ? `Not renamed: there is already a "${name}" here` : err?.code === "conflict" ? "Not renamed: this file was moved or replaced meanwhile" : "Not renamed: " + String(err?.message ?? err).slice(0, 200));
+        return false;
+      }
+    };
+    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); void finish(true); } else if (ev.key === "Escape") { ev.preventDefault(); void finish(false); } });
+    input.addEventListener("blur", () => void finish(true));
+  };
+  if (saveable) {
+    title.addEventListener("click", () => void renameTitle());
+    title.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void renameTitle(); } });
+  }
   // (an agent in the browser checks and sees this document: latex_check, latex_render, agent-tools.ts)
   void loadResults();
   window.addEventListener("focus", () => void loadResults(), on);
@@ -366,21 +517,68 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   life.signal.addEventListener("abort", () => presenting?.stop());
+
+  // ---- Run (run-core.mjs): the SageTeX items of the text in the editor now (the preview's own list of them, so only
+  // once it has caught up), run in page order in this page's Sage session, on the person's click only (never on
+  // open); their states written as the results file beside the .tex, then read and shown as the CLI's are. A second
+  // click while it runs stops it.
+  let running = false;
+  E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
+  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
+  runBtn.onclick = async () => {
+    if (running) { sageSession?.kernel?.interrupt(); say("stopping…"); return; }
+    if (!host.sandbox) { say(NO_SANDBOX); return; }
+    const session = (sageSession ??= sessionOf(sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
+    const c = E.lastCheck();
+    if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
+    const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
+    if (!items.length) { say("No SageTeX code to run"); return; }
+    running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
+    const my = ++runGen, run = new AbortController(), stop = () => run.abort();
+    life.signal.addEventListener("abort", stop, { once: true });
+    const current = () => live() && my === runGen;
+    try {
+      const r = await runAndSave({
+        items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
+        session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
+        exec: runIn,
+      });
+      if (r.stale || !current()) return;
+      if (r.msg) { say(r.msg); return; }
+      await loadResults();
+      const bad = r.states.filter((x: any) => x.s !== "ok").length;
+      say(`Ran ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : ""));
+    } catch (err) {
+      if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
+  };
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
 
-  // ---- images (r5 §3): resolved inside the file's folder, read by identity, checked, shown from blob: URLs
+  // ---- images (r5 §3): resolved as TeX does (images.ts), read by identity, checked, shown from blob: URLs
   // One resolver at a time (i1c01 A3-1): a reply's names join the queue, and only the running loop reads, counts and
   // keeps images, so no two resolutions are admitted against the same count or bytes, and a name is read once.
   const wanted = new Set<string>();
   let resolving = false;
   // (a read that completes after this page was disposed of keeps nothing: E.destroy leaves the gate's document current)
   const alive = (tok: Token) => !life.signal.aborted && gate.sameDoc(tok);
+  // (\graphicspath, from the source: when it changes, every name is resolved again)
+  let gpKey = "";
+  // (a name not found: the files of the same name elsewhere, from one listing of the workspace per resolution)
+  let everywhere: Promise<Entry[]> | null = null;
+  const elsewhere = async (name: string) => {
+    everywhere ??= host.ws.list("/", { recursive: true }).catch(() => [] as Entry[]);
+    const leaf = name.replace(/^.*\//, ""), want = /\.[A-Za-z0-9]+$/.test(leaf) ? [leaf] : IMAGE_EXTS.map((x) => leaf + x);
+    return (await everywhere).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && want.includes(e.path.replace(/^.*\//, ""))).map((e) => e.path).slice(0, 3);
+  };
   const resolveImages = async (refs: string[], tok: Token) => {
+    const dirs = graphicsPathOf(src.value), key = JSON.stringify(dirs);
+    if (key !== gpKey) { gpKey = key; for (const n of Object.keys(images)) delete images[n]; dropImages(); imageBytes = 0; }
     for (const name of refs) if (!Object.hasOwn(images, name)) wanted.add(name);
     if (resolving) return;
     resolving = true;
+    everywhere = null;
     let changed = false;
     try {
       // (a Set visits names added while it is iterated: those from replies that came during an await)
@@ -388,12 +586,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         wanted.delete(name);
         if (Object.hasOwn(images, name)) continue;
         if (Object.keys(images).length >= IMAGE_BOUNDS.perDocument) { images[name] = { why: "too many images" }; changed = true; continue; }
-        const c = imageCandidates(name, where.path);
+        const c = imageCandidates(name, where.path, dirs);
         if (!c.ok) { images[name] = { why: c.why }; changed = true; continue; }
         let found: Entry | undefined;
         for (const p of c.paths) { const e = await host.ws.stat(p).catch(() => undefined); if (e && e.kind === "file" && !e.trashed) { found = e; break; } }
         if (!alive(tok)) { wanted.clear(); return; }
-        if (!found) { images[name] = { why: "not found" }; changed = true; continue; }
+        if (!found) { const why = notFoundWhy(where.path, c.searched, await elsewhere(name), false, name); if (!alive(tok)) { wanted.clear(); return; } images[name] = { why }; changed = true; continue; }
         if ((found.size ?? 0) > IMAGE_BOUNDS.perImage || imageBytes + (found.size ?? 0) > IMAGE_BOUNDS.total) { images[name] = { why: "too large" }; changed = true; continue; }
         let r: { entry: Entry; content: Uint8Array };
         // (the test build only: the page test can hold an image read here; elsewhere this folds away)
@@ -417,10 +615,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (changed && alive(tok)) request();
   };
   const dropImages = () => { for (const u of blobs) URL.revokeObjectURL(u); blobs.clear(); };
+  // (back in this tab, an image not found is looked for again: the file may have been moved or added meanwhile)
+  window.addEventListener("focus", () => {
+    let again = false;
+    for (const [n, v] of Object.entries(images)) if (typeof v !== "string" && v.why.startsWith("not found")) { delete images[n]; again = true; }
+    if (again) request();
+  }, on);
 
   // ---- editing
   const isDirty = () => src.value !== savedText;
-  function showDirty() { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving; }
+  function showDirty() { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving || acting; }
   src.addEventListener("keydown", (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); void doSave(); }
   });
@@ -465,14 +669,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   current = { dispose: () => dispose(), dirty: isDirty };
+  // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 
-  // ---- saving (r6b E5): the opened file only, last write wins
+  // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
+  // change made elsewhere since is never written over, the bar below asks
   let saving = false;
   async function doSave() {
     if (!saveable) { say("This file can't be saved here: " + whyNot + "."); return; }
-    if (saving) { say("saving…"); return; }
+    if (saving || acting) { say("saving…"); return; }
     if (!isDirty()) { say("No changes to save"); return; }
-    const text = src.value;
+    const text = src.value, base = docRev;
     // (the comments' anchors with this text, taken now: before anything waits, an edit can't move them in between)
     const snap = cm?.snapshot();
     const bytes = encodeText(text, eol);
@@ -480,20 +687,181 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     saving = true; showDirty(); say("saving…");
     try {
       const at = await host.ws.pathOfFile(host.fid);
-      if (!at.ok) { say("Not saved: this file isn't here any more"); return; }
+      if (!at.ok) { say("Not saved: this file isn't here any more"); goneSaid = true; return; }
       if (at.entry.remote) { say("Not saved: this file is in the cloud"); return; }
       // (the test build only: the page test can hold the .tex's write here; elsewhere this folds away)
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexSaveWrite?.();
-      await host.ws.write(at.path, bytes, { fid: host.fid });
-      savedText = text;
+      const w = await host.ws.write(at.path, bytes, { fid: host.fid, base });
+      savedText = text; docRev = w.rev;
       void cm?.saved(snap);
-      if (at.path !== where.path) { title.textContent = nameOf(at.path); title.title = at.path; }
+      if (at.path !== where.path && !renamingTitle) showName(at.path);
       say("Saved");
     } catch (err) {
       // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
-      say((err as any)?.code === "conflict" ? "Not saved: another file is at this path now" : "Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
-    } finally { saving = false; showDirty(); }
+      const other = (err as any)?.code === "conflict" && /another file/.test(String((err as Error)?.message));
+      if ((err as any)?.code === "conflict" && !other) { say("Not saved: this file was changed elsewhere"); again = true; }
+      else say(other ? "Not saved: another file is at this path now" : "Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { saving = false; showDirty(); if (again && live()) void check(); }
   }
+
+  // ---- a change to this file made elsewhere (an agent through sagebrush-mcp, another tab, another device): with no
+  // unsaved edits here, the text follows it in place, the cursor and scroll kept; with them, nothing is replaced or
+  // written and the bar asks (William, Nov 3: "a critical thing to get right"). One check at a time, each reading
+  // the file's bytes, fid and revision together (readUpTo, under the workspace's lock); one asked for meanwhile, or
+  // during a Save or a choice in the bar (Keep mine, Use theirs), runs after it.
+  let checking = false, again = false, acting = false, goneSaid = false, checkTimer: any = null, docPath = where.path;
+  let conflict: { fid: string; rev: number; theirs: boolean; by: string } | null = null;
+  // (who changed it, a label only: the one actor among this file's ops since the last check, "elsewhere" once there
+  //  is a second (one string, however many ops wait); this tab's own Save's ops are its own)
+  let actor: string | null = null;
+  let waits = 0;
+  const actorName = (op: any) => { const by = typeof op.by === "string" ? op.by : "";
+    return op.origin === "server" ? "another device" : by === "agent:page" ? "an agent in this page" : by.startsWith("agent:") ? by.slice(6).replace(/[-_]+/g, " ").trim() || "an agent" : "another tab"; };
+  const unwatchDoc = host.ws.watch((c) => {
+    let hit = false;
+    for (const op of c.ops ?? []) if (op.fid === host.fid || op.path === docPath || op.to === docPath) {
+      hit = true;
+      if (!((saving || acting) && op.by === "person" && op.origin !== "server")) { const n = actorName(op); actor = actor === null || actor === n ? n : "elsewhere"; }
+    }
+    if (hit) { waits = 0; clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
+  });
+  life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
+  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); save.hidden = !ok; };
+  // (a coherent read's saveability, as at opening: whole, text, written back exactly, not in the cloud)
+  const judge = (r: { entry: Entry; content: Uint8Array }) => {
+    const o = openBytes(r.content);
+    if (o.kind !== "text") return { o, ok: false, why: o.why };
+    const ok = o.saveable && r.content.length === (r.entry.size ?? -1) && !r.entry.remote;
+    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud: open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
+  };
+  // (their text in the editor, as the text saved: the selection and scroll kept, clamped to its length)
+  const install = (text: string, rev: number, nextEol: "\n" | "\r\n", ok: boolean, why: string) => {
+    const a = src.selectionStart, b = src.selectionEnd, d = src.selectionDirection, top = src.scrollTop, lft = src.scrollLeft;
+    E.setText(text);
+    src.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length), d);
+    src.scrollTop = top; src.scrollLeft = lft;
+    savedText = text; docRev = rev; eol = nextEol; setSaveable(ok, why);
+    conflict = null; bar.hidden = true; showDirty();
+  };
+  const showBar = (c: NonNullable<typeof conflict>) => {
+    conflict = c;
+    barText.textContent = c.by === "elsewhere" ? "This file was changed elsewhere while you were editing." : c.by[0].toUpperCase() + c.by.slice(1) + " changed this file while you were editing.";
+    // (Keep mine only where this text can be saved; Use theirs only where theirs is text)
+    keepMine.hidden = !saveable; useTheirs.hidden = !c.theirs;
+    bar.hidden = false;
+  };
+  // (another device's change, its bytes not here yet (readUpTo: "missing"; sync-fetch installs them without an op):
+  //  nothing replaced, this text kept; looked at again every 2 s until they are (for 5 minutes; then at the next
+  //  change), who changed it kept for then)
+  const keepActor = (by: string) => { actor = actor === null || actor === by ? by : "elsewhere"; };
+  const onItsWay = (by: string) => {
+    say("This file was changed on another device; its new text is on its way…");
+    keepActor(by);
+    if (++waits > 150) return;
+    clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 2000);
+  };
+  const check = async (): Promise<void> => {
+    // (one at a time, and none during a Save or a choice in the bar: asked for meanwhile, it runs when they end)
+    if (checking || saving || acting) { again = true; return; }
+    checking = true; again = false;
+    // (who: the writers seen up to when the read is done, the read being of their writes)
+    const take = () => { const b = actor ?? "elsewhere"; actor = null; return b; };
+    try {
+      const at = await host.ws.pathOfFile(host.fid);
+      if (!live()) return;
+      if (!at.ok) { take(); if (!goneSaid) say("This file was deleted elsewhere; your text is still here."); goneSaid = true; return; }
+      goneSaid = false; docPath = at.path;
+      const e0 = edits, d0 = docRev;
+      // (the test build only: the page test can hold the check here, before its read and after it; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("before");
+      let r: { entry: Entry; content: Uint8Array };
+      try { r = await host.ws.readUpTo(at.path, EDIT_MAX); } catch (err) {
+        if (!live()) return;
+        if ((err as any)?.code === "missing") { onItsWay(take()); return; }
+        say("This file was changed elsewhere and can't be read here now: " + String((err as Error)?.message ?? err).slice(0, 160)); return;
+      }
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCheckRead?.("after");
+      const by = take();
+      // (another file at this path now is never this editor's)
+      if (!live() || r.entry.fid !== host.fid) return;
+      // (a Save or Keep mine done while it read: what it read may be older than that; read again)
+      if (docRev !== d0) { keepActor(by); again = true; return; }
+      const rev = r.entry.rev ?? 0;
+      if (rev === docRev || rev === conflict?.rev) return;
+      if (r.entry.remote) { onItsWay(by); return; }
+      waits = 0;
+      const j = judge(r);
+      if (!conflict && edits === e0 && src.value === savedText) {
+        // (no unsaved edits, before the read and after it: their text here; one the editor can't show leaves this
+        //  text, and Save off)
+        if (j.o.kind !== "text") { setSaveable(false, j.why); say(`${by === "elsewhere" ? "This file was changed elsewhere" : by[0].toUpperCase() + by.slice(1) + " changed this file"} into one the editor can't show: ${j.why}`); return; }
+        const same = j.o.text === src.value;
+        install(j.o.text, rev, j.o.eol, j.ok, j.why);
+        if (!same) say(by === "elsewhere" ? "Updated elsewhere" : "Updated by " + by);
+        return;
+      }
+      showBar({ fid: r.entry.fid!, rev, theirs: j.o.kind === "text", by });
+    } finally { checking = false; if (again && live()) void check(); }
+  };
+  const barBusy = (b: boolean) => { acting = b; keepMine.disabled = useTheirs.disabled = b; showDirty(); };
+  // Keep mine: this text, written over exactly the revision the bar shows (its fid and rev, taken at the click);
+  // a later change makes it a conflict again, nothing written, the bar shown for that one
+  keepMine.onclick = async () => {
+    const c = conflict;
+    if (!c || acting || saving || !saveable) return;
+    const t = src.value, snap = cm?.snapshot(), bytes = encodeText(t, eol);
+    barBusy(true); say("saving…");
+    try {
+      const at = await host.ws.pathOfFile(c.fid);
+      if (!at.ok) { if (live()) say("Not saved: this file isn't here any more"); return; }
+      // (the test build only: the page test can hold this write; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexKeepWrite?.();
+      const w = await host.ws.write(at.path, bytes, { fid: c.fid, base: c.rev });
+      if (!live()) return;
+      savedText = t; docRev = w.rev; void cm?.saved(snap);
+      if (conflict === c) { conflict = null; bar.hidden = true; }
+      say("Saved: yours kept, theirs is in TimeTravel");
+    } catch (err) {
+      if (!live()) return;
+      if ((err as any)?.code === "conflict") { say("Not saved: it was changed again; choose again"); again = true; }
+      else say("Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
+    } finally { if (live()) { barBusy(false); if (again) void check(); } }
+  };
+  // Use theirs: this text first kept as a new file beside it, "name (mine).tex" (else "(mine 2)", … "(mine 20)",
+  // made, never written over); only then, and only if nothing was typed meanwhile, their text read and put here
+  useTheirs.onclick = async () => {
+    if (!conflict || acting || saving) return;
+    const t = src.value, e0 = edits;
+    barBusy(true); say("keeping your text as a copy…");
+    let made = "";
+    try {
+      const at = await host.ws.pathOfFile(host.fid);
+      if (!at.ok) { if (live()) say("Not done: this file isn't here any more; your text is still here"); return; }
+      const dir = parentOf(at.path), stem = nameOf(at.path).replace(/\.tex$/i, "");
+      // (an unsaveable file's copy has LF line endings, so it can be saved)
+      const bytes = encodeText(t, saveable ? eol : "\n");
+      for (let k = 1; k <= 20 && !made; k++) {
+        const p = (dir === "/" ? "/" : dir + "/") + `${stem} (mine${k > 1 ? " " + k : ""}).tex`;
+        // (the test build only: the page test can hold or fail this create; elsewhere this folds away)
+        if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexCopyCreate?.(p);
+        try { await host.ws.createByPerson(p, { content: bytes }); made = p; } catch (err) { if ((err as any)?.code !== "exists") throw err; }
+      }
+      if (!live()) return;
+      if (!made) { say(`Not done: ${stem} (mine).tex to (mine 20) are all taken; your text is still here`); return; }
+      const kept = nameOf(made);
+      const r = await host.ws.readUpTo(at.path, EDIT_MAX);
+      // (the test build only: the page test can hold this read; elsewhere this folds away)
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexTheirsRead?.();
+      if (!live()) return;
+      const j = judge(r);
+      if (edits !== e0 || src.value !== t) { say(`Your text up to then is in ${kept}; you've typed since, so your text stays here`); return; }
+      if (r.entry.fid !== host.fid || j.o.kind !== "text" || r.entry.remote) { say(`Your text is in ${kept}; theirs can't be shown here now, so your text stays here too`); return; }
+      install(j.o.text, r.entry.rev ?? 0, j.o.eol, j.ok, j.why);
+      say(`Your text is in ${kept}`);
+    } catch (err) {
+      if (live()) say((made ? `Your text is in ${nameOf(made)}, but theirs couldn't be read: ` : "Not done: your text couldn't be kept as a copy (it is still here): ") + String((err as Error)?.message ?? err).slice(0, 160));
+    } finally { if (live()) { barBusy(false); if (again) void check(); } }
+  };
 
   // ---- source and preview in sync (editor.ts): Follow (remembered, on by default) and Show
   const showFollow = () => followBtn.setAttribute("aria-pressed", String(E.following()));

@@ -369,7 +369,7 @@ def funm_(x, f):
 @_bs("orth")
 def orth_(x):
     """an orthonormal basis of the range: the left singular vectors of the nonzero singular values"""
-    A = _mat(x)
+    A = _m._svd_finite(_mat(x), "orth")
     if A.size == 0:
         return _unmat(np.zeros((A.shape[0], 0)))
     U, s, _ = np.linalg.svd(A, full_matrices=False)

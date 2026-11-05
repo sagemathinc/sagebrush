@@ -40,7 +40,10 @@ test("no source stores to INTR[0]: producers or, consumers and (the census)", ()
   // one per question), never of the interrupt word, which an embedding binds
   // only through \`new Int32Array(...interrupt)\` (the aliases found above).
   const atomic = /Atomics\.(?:store|exchange|compareExchange|add|sub|xor)\(\s*([^,()]+?)\s*,\s*0\s*,/;
-  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl"]);
+  // (and the files permission's word, `writableWord` / the runner's `writable`: a SharedArrayBuffer of its own that
+  // web/worker.ts makes and announces in `ready`, never the interrupt word; and live data's answer state word,
+  // src/live-data.ts writeAnswer's `ctl`, a view of the answer's own SharedArrayBuffer, as input()'s is)
+  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl", "web/worker.ts writableWord", "web/runner/index.html writable", "web/notebook/worker-kernel.js this.writableWord", "src/live-data.ts ctl"]);
   const bad: string[] = [];
   for (const [f, t] of text)
     t.split("\n").forEach((line, i) => {

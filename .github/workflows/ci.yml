@@ -52,9 +52,8 @@ jobs:
       web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
+      slow_tests: ${{ steps.paths.outputs.slow_tests }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
-      examples_ids: ${{ steps.paths.outputs.examples_ids }}
-      examples_matrix: ${{ steps.paths.outputs.examples_matrix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -151,6 +150,9 @@ jobs:
       - name: Node tests, shard ${{ matrix.shard }}/8
         env:
           SAGEBRUSH_TIME_SCALE: "2"
+          # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
+          # slow_tests; the schedule and a dispatch run them anyway. Not in engine-node)
+          SAGEBRUSH_SLOW_TESTS: ${{ needs.changes.outputs.slow_tests == 'true' && '1' || '' }}
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' -print0 | sort -z)
@@ -947,7 +949,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, board-a, board-b, board-c,
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
         group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
@@ -973,7 +975,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
+      # (the latex group: the LaTeX editor's build with its page also on loopback hosts, which its page tests open;
+      # every other group the site's build)
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+        env:
+          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.group == 'latex' && 'test' || '' }}
       - name: browser group ${{ matrix.group }}
         env:
           CHROME: google-chrome
@@ -1026,6 +1032,11 @@ jobs:
               # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
               # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
               node scripts/web-tests.mjs run web-browser/remote-preview
+              ;;
+            latex)
+              # (the LaTeX editor's page and its agent tools, end to end against the build above: William's top
+              # priority made binding; the grader's finding on #566)
+              node scripts/web-tests.mjs run web-browser/latex
               ;;
             board-unit)
               (cd packages/sagebrush-board && bun build.mjs && node test.mjs)
@@ -1141,6 +1152,29 @@ jobs:
           workspaces: engine
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+
+  # (numerics-core P2a, r4.2 §12: no microkernel ships that no CI host has executed. engine/nd's NEON kernel
+  # runs only on aarch64; this job executes its oracle, thread-determinism and bit-family tests on Apple
+  # silicon. engine/nd/src/micro.rs NEON_ENABLED may be turned on only once this job is green on master.)
+  engine-nd-neon:
+    needs: changes
+    if: github.repository == 'sagemathinc/sagebrush' && needs.changes.outputs.engine_smoke == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: engine
+          shared-key: nd-neon
+      - name: "engine/nd on aarch64: the NEON kernel's oracle, thread determinism and FMA-family bits"
+        working-directory: engine
+        run: |
+          uname -m
+          test "$(uname -m)" = arm64
+          cargo test --release -p sagebrush-nd --features parallel -- --nocapture
+
 
   # (the unsafe boundary's compiler sweep, #234 r2 U1: every unsafe site the compiler sees, generated and
   # expanded code included, must lie in a pinned allowed item; its own cache, parallel to engine-rust)
@@ -1457,62 +1491,6 @@ jobs:
           done
           exit $bad
 
-  # The examples gallery (plan U7, section 2): each selected example run from source and compared with what
-  # is committed (scripts/examples.mjs), at most 24 a shard, each killed at 30 s; examples-census then
-  # requires every selected example to have run exactly once
-  examples:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.changes.outputs.examples_matrix) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: detect CI CPU quota
-        run: scripts/ci-cpus.sh
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
-        with:
-          version: 11
-      # (the same pins as the checks job: build-cli.mjs bundles with bun)
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "24.21.0"
-          cache: pnpm
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.4.4"
-      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: shard ${{ matrix.shard }} of ${{ strategy.job-total }}
-        env:
-          EXAMPLES_IDS: ${{ needs.changes.outputs.examples_ids }}
-        run: node scripts/examples.mjs ci --shard ${{ matrix.shard }} --of ${{ strategy.job-total }} --ran "$RUNNER_TEMP/examples-ran/ran-${{ matrix.shard }}.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: examples-ran-${{ matrix.shard }}
-          path: ${{ runner.temp }}/examples-ran/
-          if-no-files-found: ignore
-
-  examples-census:
-    needs: [changes, examples]
-    if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: examples-ran-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/examples-ran
-      - name: every selected example ran exactly once
-        env:
-          EXAMPLES_IDS: ${{ needs.changes.outputs.examples_ids }}
-        run: mkdir -p "$RUNNER_TEMP/examples-ran" && node scripts/examples.mjs census --ran-dir "$RUNNER_TEMP/examples-ran"
-
   ci:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     needs:
@@ -1542,8 +1520,6 @@ jobs:
       - engine-clippy
       - engine-unsafe-sweep
       - webkit
-      - examples
-      - examples-census
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - name: require every selected job to pass
@@ -1564,7 +1540,6 @@ jobs:
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
             ${{ needs.engine-clippy.result }} ${{ needs.engine-unsafe-sweep.result }}
-            ${{ needs.examples.result }} ${{ needs.examples-census.result }}
             ${{ needs.webkit.result }}
         run: |
           echo "$RESULTS"

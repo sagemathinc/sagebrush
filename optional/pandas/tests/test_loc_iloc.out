@@ -1,0 +1,201 @@
+== s.iloc-out
+!! IndexError: single positional indexer is out-of-bounds
+== s.iloc-neg
+np.int64(30)
+== s.iloc-list
+
+a    10
+c    30
+dtype: int64
+== s.iloc-list-out
+!! IndexError: positional indexers are out-of-bounds
+== s.iloc-str
+!! TypeError: Cannot index by location index with a non-integer key
+== s.iloc-slice
+
+b    20
+c    30
+dtype: int64
+== s.iloc-mask
+
+a    10
+c    30
+dtype: int64
+== s.iloc-mask-series
+!! ValueError: iLocation based boolean indexing cannot use an indexable as a mask
+== s.loc-slice-open
+
+b    20
+c    30
+dtype: int64
+== s.loc-list-missing
+!! KeyError: "['z'] not in index"
+== s.loc-int-missing
+!! KeyError: 0
+== s.loc-mask
+
+b    20
+c    30
+dtype: int64
+== df.loc-row
+
+x      2
+y    2.5
+z      q
+Name: 1, dtype: object
+== df.loc-cell
+np.float64(2.5)
+== df.loc-column
+
+0    1.5
+1    2.5
+2    3.5
+Name: y, dtype: float64
+== df.loc-slice-list
+
+   x  z
+0  1  p
+1  2  q
+== df.loc-row-list
+
+x    2.0
+y    2.5
+Name: 1, dtype: float64
+== df.loc-missing
+!! KeyError: 5
+== df.loc-mask
+
+   x    y  z
+0  1  1.5  p
+2  3  3.5  r
+== df.loc-mask-col
+
+1    q
+2    r
+Name: z, dtype: str
+== df.loc-col-missing
+!! KeyError: 'w'
+== df.iloc-row
+
+x      1
+y    1.5
+z      p
+Name: 0, dtype: object
+== df.iloc-row-types
+['int64', 'float64', 'str']
+== df.iloc-cell
+'p'
+== df.iloc-column
+
+0    1.5
+1    2.5
+2    3.5
+Name: y, dtype: float64
+== df.iloc-lists
+
+   x    y
+0  1  1.5
+2  3  3.5
+== df.iloc-out
+!! IndexError: single positional indexer is out-of-bounds
+== df.iloc-slices
+
+   x    y
+0  1  1.5
+1  2  2.5
+== df.iloc-neg
+'r'
+== df.iloc-col-out
+!! IndexError: index 5 is out of bounds for axis 0 with size 3
+== df.iloc-too-many
+!! IndexingError: Too many indexers
+== df.row-int-float
+
+x    1.0
+y    1.5
+Name: 0, dtype: float64
+== df.row-int-bool
+
+i       1
+b    True
+Name: 0, dtype: object
+== df.row-str
+
+z    p
+Name: 0, dtype: str
+== lbl.slice-unsorted-present
+
+   v
+a  2
+d  3
+== lbl.slice-unsorted-missing
+!! KeyError: "Cannot get right slice bound for non-monotonic index with a missing label 'e'. Either sort the index or specify an existing label."
+== lbl.slice-sorted-missing
+
+    v
+20  2
+30  3
+== lbl.slice-sorted-open
+
+    v
+10  1
+20  2
+== lbl.slice-reversed
+
+Empty DataFrame
+Columns: [v]
+Index: []
+== lbl.dec-both-missing
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-start-missing
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-stop-missing
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-start-above
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-stop-below
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-none-between
+
+Series([], dtype: int64)
+== lbl.dec-wrong-way
+
+Series([], dtype: int64)
+== lbl.dec-open-start
+
+6    1
+4    2
+dtype: int64
+== lbl.dec-open-stop
+
+4    2
+2    3
+dtype: int64
+== lbl.dec-dup-missing
+
+4    2
+4    3
+dtype: int64
+== lbl.dec-dup-present
+
+4    2
+4    3
+2    4
+dtype: int64
+== lbl.unsorted-missing
+!! KeyError: 'Cannot get left slice bound for non-monotonic index with a missing label 5. Either sort the index or specify an existing label.'

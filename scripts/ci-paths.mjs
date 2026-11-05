@@ -2,8 +2,10 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gateInputs } from "./size-measure.mjs";
+import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
 
@@ -76,9 +78,48 @@ const fullTierPaths = [
   // (the workspace's API: Trash's remove, restore and move, and emptying it)
   /^web\/workspace\/api\.ts$/, /^web\/board\/export\.ts$/, /^web\/latex\/save\.ts$/,
   /^scripts\/check-export-size\.mjs$/,
+  // (sources whose tests run only in the full tier: the service worker and its test hook (web-sync.2's PWA and
+  // offline pages), the dependency files and the site preview (web-sync.4))
+  /^web\/sw\.js$/, /^web\/sw-hook\.mts$/, /^web\/deps\/(?:file-deps|deps-client)\.ts$/, /^web\/site\/src\/preview\.ts$/,
+  // (the Miniflare dispatch helper: its direct consumers, test-sync and test-share among them, run only in web-sync.1
+  // and web-sync.2)
+  /^web\/miniflare-dispatch\.mjs$/,
+  // (a document's checkpoints, the client's side (BH-0b-2): sync, whose suite runs only in web-sync.1)
+  /^web\/workspace\/checkpoint(?:-types)?\.ts$/,
+  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
+  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
+  // That suite checks every input of the two bundles is matched here)
+  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
+  // pairing's modules (its doc-protocol.ts is above, with sync))
+  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs)\.ts$/,
+  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
+  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
+  // request in six: a bun or node bump carries the full-ci label instead)
+  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
 ];
+// A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
+// neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
+// CI_PATHS_ROOT, for the tests).  A suite of a job only the full tier runs selects the full tier; a web-browser
+// suite selects its group, and a web-runner, export or lookalike suite its job.  (a deleted suite runs nowhere)
+const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
+const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
+const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
+  let text;
+  try {
+    text = readFileSync(join(suiteRoot, file), "utf8");
+  } catch {
+    return [];
+  }
+  return headers(file, text).filter((h) => h.kind === "run").map((h) => h.target);
+});
+const suiteJobs = new Set(suiteTargets.map((target) => target.split(/[./]/)[0]));
+const suiteGroups = new Set(suiteTargets.filter((target) => target.startsWith("web-browser/")).map((target) => target.slice("web-browser/".length).split(".")[0]));
 const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
-const fullTier = event === "pull_request" && (labels.includes("full-ci") || matches(fullTierPaths));
+const fullTier = event === "pull_request" &&
+  (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const full = event === "workflow_dispatch" || event === "schedule" ||
   (event === "push" && ref === "refs/heads/master") || fullTier;
 
@@ -115,7 +156,7 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/,
 ];
 // The CPython package's inputs: what its wheel builds (engine/, and a root
 // Cargo manifest if one is ever added), what it ships (lib/, through
@@ -188,7 +229,7 @@ const webkit = event === "workflow_dispatch" || event === "schedule" ||
 // (test/ci-paths.test.ts checks that every file test/limit_sites.py scans,
 // its WEB set included, selects this job, and the files the job reads)
 const censusPaths = [
-  /^engine\//, /^lib\//, /^src\//, /^web\/workspace\/sync-ledger\.ts$/, /^web\/notebook\/text-overlap\.ts$/,
+  /^engine\//, /^lib\//, /^src\//, /^web\/workspace\/sync-ledger\.ts$/, /^web\/notebook\/text-overlap\.ts$/, /^web\/stall-fetch\.js$/,
   /^test\/limit-sites\.json$/, /^test\/limit-sites-baseline\.txt$/, /^test\/limit_sites\.py$/, /^test\/limits\.test\.ts$/,
   // (the baseline sweep's files and tooling, which the census's check reads: plan-limit-sites-sweep-r3)
   /^test\/limit-sweep\//, /^test\/limit_sweep\.py$/, /^test\/limit_sweep_cases\.py$/,
@@ -229,19 +270,52 @@ const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) =
 const webCore = webFiles.some((file) => !Object.values(webAreas).some((patterns) => patterns.some((pattern) => pattern.test(file))));
 const allWeb = full || workflowOrBuild || fallback || webCore;
 const webRuntime = allWeb || runtime;
+// (a source another area's group tests, beside its own area's: test-latex-page opens a .tex from the board's
+// newLatexHere, #566)
+const groupSources = { latex: [/^web\/board\/page\.ts$/] };
+const testedBy = (group) => matches(groupSources[group]);
 const webGroups = [
-  ["notebook", webRuntime],
-  ["board-a", webRuntime || inArea("board")],
-  ["board-b", webRuntime || inArea("board")],
-  ["board-c", webRuntime || inArea("board")],
+  ["notebook", webRuntime || suiteGroups.has("notebook")],
+  // (the LaTeX editor's page and agent tools, on a build with the editor on loopback hosts: web/latex/ is the core)
+  ["latex", webRuntime || suiteGroups.has("latex") || testedBy("latex")],
+  ["board-a", webRuntime || inArea("board") || suiteGroups.has("board-a")],
+  ["board-b", webRuntime || inArea("board") || suiteGroups.has("board-b")],
+  ["board-c", webRuntime || inArea("board") || suiteGroups.has("board-c")],
   // (board-unit also runs the export's measure and reminder units)
-  ["board-unit", webRuntime || inArea("board") || inArea("workspace")],
-  ["terminal", webRuntime || inArea("shell")],
-  ["remote-preview", webRuntime],
+  ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
+  ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
+  ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
-const webRunner = web && (webRuntime || inArea("board") || inArea("workspace"));
+const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
+const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
+const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
+
+// The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
+// of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
+// and on a pull request that changes what one of them tests.  Not on a master push, whose CI is to stay within 15
+// minutes: the nightly run is their master check.  (test/ci-paths.test.ts has a case for each path class)
+const slowTestPaths = [
+  // tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
+  // (test/arraybuffer-sites.test.ts): the TypeScript and tsc 7 versions, the compiler options, the census and its tables
+  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^scripts\/arraybuffer-sites[^/]*\.mjs$/,
+  /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/,
+  // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
+  /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
+  // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
+  /^src\/local-gateway\.ts$/, /^test\/local-gateway\.test\.ts$/,
+  // the nmod ops' peaks in wasm (test/nmod-fp-wasm.test.ts): the engine artifact and the nmod kernels
+  /^wasm\/sagebrush-engine\.wasm$/, /^engine\/web\/src\/nmod[^/]*\.rs$/, /^engine\/arith\/src\/nmod[^/]*\.rs$/,
+  /^engine\/bigint\/src\/nmod\.rs$/, /^test\/nmod-fp-wasm\.test\.ts$/,
+  // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
+  /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
+  /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
+  // and the list itself
+  /^test\/slow-tests\.ts$/,
+];
+const slowTests = event === "workflow_dispatch" || event === "schedule" ||
+  (event === "pull_request" && (labels.includes("full-ci") || matches(slowTestPaths)));
 
 // The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
 // its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
@@ -261,10 +335,11 @@ const outputs = {
   webkit,
   web_groups: JSON.stringify(webGroups),
   web_runner: webRunner,
-  web_export: webWorkspace,
-  web_lookalike: webWorkspace,
+  web_export: webExport,
+  web_lookalike: webLookalike,
   census,
   unsafe_sweep: unsafeSweep,
+  slow_tests: slowTests,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,

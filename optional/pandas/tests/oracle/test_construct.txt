@@ -1,0 +1,346 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== series.list
+
+0    1
+1    2
+2    3
+dtype: int64
+== series.floats-none
+
+0    1.5
+1    NaN
+2    3.0
+dtype: float64
+== series.str-none
+
+0      a
+1    NaN
+2    ccc
+dtype: str
+== series.bool-name
+
+0     True
+1    False
+Name: x, dtype: bool
+== series.mixed
+
+0    a
+1    1
+dtype: object
+== series.empty-float
+
+Series([], dtype: float64)
+== series.empty
+
+Series([], dtype: object)
+== series.dict
+
+a    1
+b    2
+dtype: int64
+== series.dict-index
+
+b    2.0
+c    NaN
+dtype: float64
+== series.scalar-index
+
+a    5
+b    5
+dtype: int64
+== series.scalar
+
+0    5
+dtype: int64
+== series.length-mismatch
+!! ValueError: Length of values (3) does not match length of index (2)
+== series.ndarray
+
+0    0
+1    1
+2    2
+dtype: int64
+== series.ndarray-float
+
+p    0.0
+q    0.5
+r    1.0
+dtype: float64
+== series.from-series
+
+0    1
+1    2
+Name: s, dtype: int64
+== series.from-series-index
+
+b    2.0
+z    NaN
+dtype: float64
+== series.range
+
+0    0
+1    1
+2    2
+3    3
+dtype: int64
+== series.tuple
+
+0    1.5
+1    2.5
+dtype: float64
+== series.dtype-float
+
+0    1.0
+1    2.0
+dtype: float64
+== series.dtype-str
+
+0    1
+1    2
+dtype: str
+== series.dtype-object
+
+0       a
+1    None
+dtype: object
+== series.dtype-int-bad
+!! TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+== series.int64-numpy-scalars
+
+0    3
+1    4
+dtype: int64
+== series.int-float
+
+0    1.0
+1    2.5
+dtype: float64
+== series.bool-int
+
+0    True
+1       1
+dtype: object
+== series.bool-none
+
+0    True
+1    None
+dtype: object
+== series.only-none
+
+0    None
+1    None
+dtype: object
+== series.nan-str
+
+0      a
+1    NaN
+dtype: str
+== series.ndarray-copied
+
+0    1
+1    2
+dtype: int64
+== frame.dict
+
+   x    y  z
+0  1  1.5  p
+1  2  2.5  q
+2  3  3.5  r
+== frame.dict-unequal
+!! ValueError: All arrays must be of the same length
+== frame.dict-index-mismatch
+!! ValueError: Length of values (2) does not match length of index (3)
+== frame.dict-scalars
+!! ValueError: If using all scalar values, you must pass an index
+== frame.dict-scalar-list
+
+   a  b
+0  1  1
+1  1  2
+== frame.dict-scalars-index
+
+   a
+0  1
+1  1
+== frame.dict-columns
+
+   b    c
+0  3  NaN
+1  4  NaN
+== frame.dict-columns-dtypes
+[('b', 'int64'), ('c', 'object')]
+== frame.lists
+
+   0  1
+0  1  2
+1  3  4
+== frame.lists-columns
+
+   n  s
+0  1  a
+1  3  b
+== frame.lists-columns-mismatch
+!! ValueError: 1 columns passed, passed data had 2 columns
+== frame.dicts
+
+     a  b    c
+0  1.0  2  NaN
+1  NaN  3  4.0
+== frame.dicts-columns
+
+   a   b
+0  1 NaN
+== frame.ndarray
+
+   0  1  2
+0  0  1  2
+1  3  4  5
+== frame.ndarray-labels
+
+     x    y    z
+r  0.0  1.0  2.0
+s  3.0  4.0  5.0
+== frame.series
+
+   q
+0  1
+1  2
+== frame.series-noname
+
+   0
+0  1
+1  2
+== frame.dict-of-series-aligned
+
+     a    b
+x  1.0  NaN
+y  2.0  3.0
+z  NaN  4.0
+== frame.dict-of-series-list
+
+   a  b
+x  1  3
+y  2  4
+== frame.dict-of-dicts
+
+   a
+x  1
+y  2
+== frame.empty
+
+Empty DataFrame
+Columns: []
+Index: []
+== frame.empty-columns
+
+Empty DataFrame
+Columns: [a, b]
+Index: []
+== frame.empty-columns-dtypes
+[('a', 'object'), ('b', 'object')]
+== frame.dtype
+
+     a
+0  1.0
+1  2.0
+== frame.lists-dtype
+
+     0    1
+0  1.0  2.0
+== frame.tuples
+
+   0  1
+0  1  2
+1  3  4
+== frame.flat-list
+
+   0
+0  1
+1  2
+2  3
+== frame.mixed-labels
+Index([1, 'a'], dtype='object')
+== frame.from-frame
+
+   a
+0  1
+== frame.ndarray-copied
+
+     0    1
+0  0.0  0.0
+1  0.0  0.0
+== index.ints
+Index([1, 2], dtype='int64')
+== index.strs
+Index(['a', 'b'], dtype='str')
+== index.floats
+Index([1.5, 2.0], dtype='float64')
+== index.mixed
+Index([1, 'a'], dtype='object')
+== index.named
+Index(['a', 'b'], dtype='str', name='nm')
+== range.stop
+RangeIndex(start=0, stop=5, step=1)
+== range.step-name
+RangeIndex(start=0, stop=10, step=2, name='r')
+== range.zero-step
+!! ValueError: Step must not be zero
+== range.len
+3
+== range.list
+[1, 4, 7]
+== series.cast-0-int64
+!! TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+== series.cast-1-int64
+!! ValueError: Trying to coerce float values to integers
+== series.cast-2-int64
+!! ValueError: cannot convert float NaN to integer
+== series.cast-3-int64
+!! TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+== series.cast-4-int64
+[1, 2]
+== series.cast-5-int64
+[1, 2]
+== series.cast-6-int64
+!! ValueError: invalid literal for int() with base 10: 'x'
+== series.cast-7-int64
+[1, 0]
+== series.cast-8-int64
+!! OverflowError: The elements provided in the data cannot all be casted to the dtype int64
+== series.cast-9-float64
+!! ValueError: could not convert string to float: 'x'
+== series.cast-10-float64
+[1.5]
+== series.cast-11-float64
+[1.0]
+== series.cast-12-float64
+!! ValueError: could not convert string to float: 'a'
+== series.cast-13-bool
+[True, False]
+== series.cast-14-bool
+[True]
+== series.cast-15-bool
+[False]
+== series.cast-16-bool
+[True, False]
+== series.cast-17-str
+['1', nan]
+== series.cast-18-str
+['1.5', 'True']

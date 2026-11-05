@@ -60,6 +60,7 @@ import { IMAGE_TYPES, prepare, type ImageStore } from "./images";
 import { COLORS } from "./colors";
 import type { Version } from "./history";
 import { track, active } from "./focus";
+import { shortcutMode, EDIT_TITLE, EDITING_TITLE } from "../doc-mode";
 import css from "./board.css" with { type: "text" };
 
 /** Where a board's document comes from, and where its edits go. */
@@ -100,6 +101,9 @@ export interface BoardTimeTravel {
 }
 export interface BoardHost {
   store?: BoardStore;
+  /** View or Edit as the board opens, and the person's own toggles, to keep (web/doc-mode.ts: documents open in View,
+   * except one made here or last left in Edit); none: View, nothing kept */
+  mode?: { start: boolean; toggled(on: boolean): void };
   /** where pictures' bytes are kept (images.ts: Images, this browser's IndexedDB) */
   images: ImageStore;
   /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
@@ -130,6 +134,9 @@ export interface BoardHost {
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
   exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  /** an edit made on this page changed the board's title (never a change from elsewhere, nor a load): the board page
+   * renames its file to follow (William's B2) */
+  titleEdited?(title: string): void;
   /** whether Ctrl/Cmd+S downloads the board as HTML (default); false: the
    * key is left to the browser, as on a page that is itself a saved board
    * (an exported file), whose ⋯ menu still downloads it again */
@@ -1200,6 +1207,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (editor.on && e.key === " ") return;
     if (e.key === "ArrowRight" || e.key === " ") go(onward);
     else if (e.key === "ArrowLeft") go(back);
+    // (E for Edit; Esc, with nothing of the editor's to stop, back to View: web/doc-mode.ts, the same in every editor)
+    else if (shortcutMode(e) === "edit" && !editor.on) { e.preventDefault(); toggle(true); }
+    else if (shortcutMode(e) === "view" && editor.on && !editor.escapes) { e.preventDefault(); toggle(false); }
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
     else if (e.key === "Escape" && !editor.escapes) go(() => step(-1));
     // (0, as the button that says so: everything, out of the tour; Esc, the board as it opens)
@@ -1260,6 +1270,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the document as shown: its pictures' bytes are kept apart, by the
     // host's images; not kept, said, HARD-7F9-1)
     try { host.store?.save(doc!); unkept = null; } catch (e: any) { unkept = e; say(`**Not kept in this browser:** ${String(e?.message ?? e)}. Download the board (File) to keep it.`); }
+    if (!unkept && (prev?.title ?? "") !== (doc!.title ?? "")) host.titleEdited?.(doc!.title ?? "");
     remember(prev);
   }, (d) => pageOf(d, pageIx));
   editor.isActive = mine;
@@ -1317,7 +1328,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.docs = host.docs ?? null;
   editor.images = images;
   const editBtn = $("edit");
-  editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
+  // (the person's own toggle, by the button or the shortcut: kept by the host; Present, TimeTravel and a dropped
+  // picture change the mode for their own reasons, and aren't kept)
+  const toggle = (on: boolean) => {
+    if (on && !editor.allowed) return;
+    if (on) closeTimeTravel();
+    editor.setOn(on);
+    if (editor.on === on) host.mode?.toggled(on);
+  };
+  editBtn.onclick = () => toggle(!editor.on);
+  // (an edit chosen from a menu in View (Add page, Tidy, a version restored): the board goes to Edit first, as a
+  // dropped picture does, so the change is made in Edit; where Edit isn't allowed, nothing is changed)
+  const inEdit = () => { if (!editor.on) toggle(true); return editor.on; };
   // (a CoCalc board, converted: said in the caption, with what was left out,
   // until the next edit; and a notice, there until the next edit too: declared
   // before the store's editing hook, which may say why at once)
@@ -1327,13 +1349,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const offEditing = host.store?.editing?.((s) => {
     editBtn.hidden = !!s.hidden;
     editBtn.toggleAttribute("disabled", !s.allowed);
-    editBtn.title = s.allowed ? "" : s.why ?? "";
-    if (!s.allowed && editor.on) editor.setOn(false);
+    editor.allowed = s.allowed && !s.hidden;
+    editBtn.title = s.allowed ? (editor.on ? EDITING_TITLE : EDIT_TITLE) : s.why ?? "";
+    if (!editor.allowed && editor.on) editor.setOn(false);
     if (s.why) say(s.why.startsWith("**") ? s.why : `**${s.why}**`);
   });
   if (offEditing) offs.push(offEditing);
+  // (opening in Edit, where the host says the person made this board here or last left it in Edit, and Edit is allowed)
+  if (host.mode?.start) editor.setOn(true);
   offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
+    if (!editBtn.hasAttribute("disabled")) editBtn.title = editor.editing.value ? EDITING_TITLE : EDIT_TITLE;
     root.classList.toggle("sbb-editing", editor.editing.value);
     // (Find's bar under the Edit toolbar, once it is shown or gone)
     requestAnimationFrame(placeFind);
@@ -1430,10 +1456,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     ($("exdlg") as HTMLDialogElement).showModal();
   };
-  $("tidy").onclick = () => editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
+  $("tidy").onclick = () => inEdit() && editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
   // the language of the board's code (one per board): Python or Sage
   for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) {
-    b.onclick = () => editor.commit((d) => { const m = b.dataset.mode; if (m === "sage" || m === "magma" || m === "matlab") d.mode = m; else delete d.mode; });
+    b.onclick = () => inEdit() && editor.commit((d) => { const m = b.dataset.mode; if (m === "sage" || m === "magma" || m === "matlab") d.mode = m; else delete d.mode; });
   }
   $("pgprev").onclick = () => go(() => page(pageIx - 1));
   $("pgnext").onclick = () => go(() => page(pageIx + 1));
@@ -1450,6 +1476,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     return d.pages!;
   }
   $("addpage").onclick = async () => {
+    if (!inEdit()) return;
     let n = 0;
     // (made from the template the page shown uses, or is)
     await editor.commit((d) => {
@@ -1522,6 +1549,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("pg-go").onclick = async (e) => {
     e.preventDefault();
     pgdlg.close();
+    if (!inEdit()) return;
     const title = ($("pg-title") as HTMLInputElement).value.trim(), slide = ($("pg-slide") as HTMLInputElement).checked;
     const card = slide && !pageOf(doc!, pageIx).slide ? cardAround() : null;
     await editor.commit((d) => {
@@ -1548,6 +1576,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     return { x: Math.round((b.x0 + b.x1) / 2 - w / 2), y: Math.round((b.y0 + b.y1) / 2 - h / 2), w, h };
   }
   $("rmpage").onclick = async () => {
+    if (!inEdit()) return;
     const p = pageOf(doc!, pageIx);
     if (pageCount(doc!) < 2 || (p.nodes?.length && !confirm(`Delete the page “${p.title || "Page " + (pageIx + 1)}” and everything on it? (Undo brings it back.)`))) return;
     await editor.commit((d) => {
@@ -1617,9 +1646,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     htmldlg.close();
     // (which version it runs is the board's: kept in it)
     const use = f.get("engine") === "latest" ? "latest" : undefined;
-    if (doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
+    // (kept with the board in Edit only: in View, this download uses it, and the board is left as it is)
+    if (editor.on && doc && use !== doc.engine) await editor.commit((d) => { if (use) d.engine = use; else delete d.engine; });
     // (the outputs as they are now: not as when the dialog opened, another board perhaps, CORR-2D0-1)
-    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" && carried.length > 0);
+    await downloadHtml(f.get("python") === "on", f.get("outputs") === "on" && carried.length > 0, use ?? null);
   };
   /** The document to export and, with `outputs`, its slow items' outputs:
    * of the same moment, the notebook's code that of this document (else read
@@ -1635,12 +1665,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     }
     return { d: doc!, outputs: [] };
   }
-  async function downloadHtml(python: boolean, outputs = false) {
+  // (`engine`: the version chosen for this download (null: the pinned one), whether or not it is kept in the board)
+  async function downloadHtml(python: boolean, outputs = false, engine?: string | null) {
     if (!doc) return;
     try {
       const a = document.createElement("a");
       const x = await toExport(outputs);
-      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(x.d), { python, outputs: x.outputs })], { type: "text/html" }));
+      const d = engine === undefined ? x.d : engine ? { ...x.d, engine } : (({ engine: _e, ...rest }) => rest)(x.d);
+      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(d as BoardDoc), { python, outputs: x.outputs })], { type: "text/html" }));
       a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -1663,7 +1695,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // astra, on 3df6006)
     loadGen++;
     pageGen++;
-    await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); });
+    await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); }, false, true, "page");
     // (its own caption from its start: not the last document's intro and
     // tour, the welcome's on /board/, friction 7)
     step(-1, true);
@@ -1798,9 +1830,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     for (const k of Object.keys(d)) delete (d as any)[k];
     Object.assign(d, { title: "Untitled board", seed: [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), nodes: [] });
     pageIx = 0;
-  })).then(() => { if (!editor.on) editBtn.click(); });
+  }, false, true, "page")).then(() => { if (!editor.on) editBtn.click(); });
   $("revert").onclick = async () => {
-    if (!original) return;
+    if (!original || !inEdit()) return;
     pageIx = 0;
     newOutputs(true);
     writtenHere = host.store?.writtenHere?.(false) ?? false;
@@ -2279,6 +2311,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const v = viewing;
     if (!v) return;
     closeTimeTravel(false);
+    if (!inEdit()) return;
     // (an edit like any other: undoable, and a version itself; the toolbar's tools are a setting, left as they are)
     await editor.commit((d) => { const tools = d.tools; for (const k of Object.keys(d)) delete (d as any)[k]; Object.assign(d, JSON.parse(JSON.stringify(v))); if (tools) d.tools = tools; else delete d.tools; });
   };
@@ -2296,7 +2329,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     freeze: (on: boolean) => editor.holdForLeaving(on),
     /** The board's title made `t` if it is `was` (its file renamed by the
      * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
-    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false) : Promise.resolve(null)),
+    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false, "page") : Promise.resolve(null)),
     /** Unmount: what is being written is kept first; then nothing of the
      * board is left (its listeners and effects, the code engine and its
      * interpreter, TimeTravel's history, its elements; its stylesheet with
@@ -2378,7 +2411,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       /** The document, the tour's step, the camera, and the laid out items' boxes. */
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
       /** Change the document (undoable, as an edit): f gets a copy to modify. */
-      edit: (f: (d: BoardDoc) => void) => editor.commit(f),
+      edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page"),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */
       run: async (ids?: string[]) => {
         const c = engine();

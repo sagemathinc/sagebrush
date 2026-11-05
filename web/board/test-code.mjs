@@ -316,6 +316,8 @@ try {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    // (in Edit: previews are kept, or dropped, in Edit only; View writes nothing, web/doc-mode.ts)
+    await ev("window.sagebrush.board.editing(true)");
     const stale = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE\n" }] };
     const page = (title) => ({ title, nodes: [{ id: "x", title, code: "import random\nprint(random.random())", preview: stale, x: 0, y: 0, w: 300 }] });
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Previews", pages: [page("One"), page("Two")] })}).then(() => 1)`);
@@ -329,6 +331,8 @@ try {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
     await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+    // (in Edit: previews are kept, or dropped, in Edit only; View writes nothing, web/doc-mode.ts)
+    await ev("window.sagebrush.board.editing(true)");
     const stale = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "STALE\n" }] };
     const page = (title) => ({ title, nodes: [{ id: "x", title, code: "import time\ntime.sleep(2)\nimport random\nprint(random.random())", preview: stale, x: 0, y: 0, w: 300 }] });
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Previews", pages: [page("One"), page("Two")] })}).then(() => 1)`);

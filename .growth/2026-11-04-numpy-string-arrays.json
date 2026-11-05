@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "numpy string arrays (dtype '<Un'), v1: creation, astype, shape and indexing, comparisons, sort/argsort/unique/where/isin, full and *_like, printing, as NumPy 2.5.1; every other operation refused (src/runtime/numpy.ts StrArray, lib/numpy np.str_). Re-measured with bun 1.4.4 (size-record.sh) on master 1cfc9b44 vs head b250faa1: cli/lib.gen.js +812 (+816 on master 706258db, a probe merge: its marker), cli/pyjs.cjs +17375, engine/lib/sci.pre +7174, engine/lib/sci.src +1974, engine/sagebrush-worker.js +11152; no other row moves. Markers: exact, except cli/pyjs.cjs 17407 (+17375 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 816,
+  "cli/pyjs.cjs": 17407,
+  "engine/lib/sci.pre": 7174,
+  "engine/lib/sci.src": 1974,
+  "engine/sagebrush-worker.js": 11152
+ }
+}

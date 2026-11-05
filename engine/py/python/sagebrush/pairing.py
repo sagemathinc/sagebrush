@@ -9,9 +9,13 @@ port is not the guard; the code is):
 - it listens on 127.0.0.1 only, never on another interface;
 - the handshake must come from an allowed origin, exactly (Origin:
   https://sagebrush.space, and SAGEBRUSH_MCP_DEV_ORIGIN when set: a
-  local development server or one https://<name>.sagebrush.cloud), to
+  local development server, one https://<name>.sagebrush.cloud, or the
+  development site https://dev.sagebrush.space), to
   this port at 127.0.0.1 or localhost (Host, against DNS rebinding), at
-  the path /sagebrush, as WebSocket version 13; anything else gets 403;
+  the path /sagebrush, as WebSocket version 13; anything else gets 403
+  (but a Sagebrush site this server does not accept, in an otherwise valid
+  handshake, gets the upgrade and at once a close 4403 "origin not allowed",
+  which a page can read);
 - the page's first message is "hello" with the code: 128 random bits,
   shown as 26 base32 letters, compared in constant time, used once, and
   valid for 5 minutes; 5 wrong codes and the code is retired;
@@ -48,20 +52,33 @@ import struct
 import sys
 import threading
 import time
+import urllib.parse
 
 from sagebrush.workspace_tools import LIMITS, NotConnected, PageError, loads_strict, strict_json
 
 PATH = "/sagebrush"
 #: SAGEBRUSH_MCP_DEV_ORIGIN: one more origin allowed, exactly, for a
 #: development server of the page (http://localhost:<port> or
-#: http://127.0.0.1:<port>) or one hosted preview of it
-#: (https://<name>.sagebrush.cloud); off by default, said on stderr when on
+#: http://127.0.0.1:<port>), one hosted preview of it
+#: (https://<name>.sagebrush.cloud), or the development site
+#: (DEV_SITE_ORIGIN); off by default, said on stderr when on
 DEV_ORIGIN_ENV = "SAGEBRUSH_MCP_DEV_ORIGIN"
+DEV_SITE_ORIGIN = "https://dev.sagebrush.space"
 #: a preview site's origin: one DNS label under sagebrush.cloud, https, no
 #: port (the Origin header must then equal it exactly, as every origin here)
 PREVIEW_ORIGIN = r"https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sagebrush\.cloud"
 PROTOCOL = 1
 ORIGINS = ("https://sagebrush.space",)
+#: where a pairing link opens: a page that reads ?pair=CODE&port=N on every build (web/workspace/pair-link.ts, read by
+#: web/board/page.ts; the notebook page at / doesn't read it)
+LINK_PATH = "/board/"
+#: refused handshakes said on stderr, at most this many (then one line saying the rest aren't)
+MAX_REFUSALS_SAID = 20
+#: Sagebrush's own sites (sagebrush.space, sagebrush.cloud and their subdomains, https): an origin among them that
+#: this server doesn't accept is told so (ORIGIN_REFUSED) rather than refused with a 403 the page can't read
+SAGEBRUSH_SITE = r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*sagebrush\.(?:space|cloud)"
+#: the WebSocket close code for that refusal (4000-4999: an application's own)
+ORIGIN_REFUSED = 4403
 #: a frame's payload (and a fragmented message's) at most this many bytes:
 #: 8 MiB of contents as base64, with the JSON around it
 MAX_FRAME = LIMITS["maxFrameBytes"]  # (12 MiB: web/workspace/schema.json)
@@ -90,6 +107,20 @@ def _code():
     return base64.b32encode(secrets.token_bytes(16)).decode().rstrip("=")
 
 
+def _said(value, most=100):
+    """A header value as stderr shows it: quoted and escaped (repr), cut to `most` characters."""
+    if value is None:
+        return "(none)"
+    r = repr(value)
+    return r if len(r) <= most else r[:most] + "..."
+
+
+def pair_link(origin, code, port):
+    """<origin>/board/?pair=CODE&port=PORT: what pair-link.ts reads (both values URL-encoded, though a code is
+    base32 and a port digits, so neither changes)."""
+    return "%s%s?%s" % (origin, LINK_PATH, urllib.parse.urlencode({"pair": code, "port": str(int(port))}))
+
+
 class Pairing:
     """Listen for one page.  start() returns (port, code); the code goes to
     the person (through the agent, which shows it, and stderr), who enters
@@ -100,12 +131,16 @@ class Pairing:
         self.agent = agent  # {name, client, version}: what the hello's reply says
         dev = os.environ.get(DEV_ORIGIN_ENV, "")
         if dev:
-            if not (re.fullmatch(r"http://(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}", dev) or re.fullmatch(PREVIEW_ORIGIN, dev)):
-                raise ValueError("%s must be exactly http://localhost:<port>, http://127.0.0.1:<port> or https://<name>.sagebrush.cloud" % DEV_ORIGIN_ENV)
+            if not (re.fullmatch(r"http://(localhost|127\.0\.0\.1):[1-9][0-9]{0,4}", dev) or re.fullmatch(PREVIEW_ORIGIN, dev)
+                    or dev == DEV_SITE_ORIGIN):
+                raise ValueError("%s must be exactly http://localhost:<port>, http://127.0.0.1:<port>, https://<name>.sagebrush.cloud or %s"
+                                 % (DEV_ORIGIN_ENV, DEV_SITE_ORIGIN))
             origins = tuple(origins) + (dev,)
             # (whoever runs this server set it: said where they will see it)
             sys.stderr.write("sagebrush-mcp: also accepting pages from %s (%s)\n" % (dev, DEV_ORIGIN_ENV))
         self.origins = tuple(origins)
+        # (the site a pairing link opens: the one SAGEBRUSH_MCP_DEV_ORIGIN opted in, else the first allowed)
+        self.link_origin = dev or self.origins[0]
         self.on_notify = on_notify or (lambda method, params: None)
         self.now = now
         self.lock = threading.Lock()
@@ -127,6 +162,8 @@ class Pairing:
         self.session_hash = None  # the SHA-256 of the page's session secret, for reconnecting
         self.pairings = 0
         self.session_tries = 0
+        self.refusals = 0  # refused handshakes, for what stderr says
+        self.last_refused = None  # why the last one was refused, for the agent (status()["last_refused"])
 
     # ---- listening
     def start(self):
@@ -143,6 +180,15 @@ class Pairing:
             self.tries = 0
             return self.port, self.code
 
+    def link(self):
+        """The one-click pairing link for the code start() gave, or None when there is no live code:
+        <site>/board/?pair=CODE&port=PORT, which the page reads once and takes out of its address bar
+        (web/workspace/pair-link.ts).  It holds nothing but the one-time code and this listener's port."""
+        with self.lock:
+            if self.code is None or self.port is None or self.now() >= self.code_until:
+                return None
+            return pair_link(self.link_origin, self.code, self.port)
+
     def status(self):
         with self.lock:
             return {
@@ -153,6 +199,7 @@ class Pairing:
                 "granted": self.grant is not None,
                 "grant": self.grant,
                 "code_valid": self.code is not None and self.now() < self.code_until,
+                "last_refused": self.last_refused,
             }
 
     def close(self):
@@ -242,24 +289,65 @@ class Pairing:
                 self._http(c, 400, "Bad Request")
             headers[k] = v.strip()
         hosts = ("127.0.0.1:%d" % self.port, "localhost:%d" % self.port)
-        ok = (
-            len(parts) == 3 and parts[0] == "GET" and parts[1] == PATH and parts[2] == "HTTP/1.1"
-            and headers.get("host") in hosts
-            and headers.get("origin") in self.origins
-            and headers.get("upgrade", "").lower() == "websocket"
-            and "upgrade" in [t.strip().lower() for t in headers.get("connection", "").split(",")]
-            and headers.get("sec-websocket-version") == "13"
-        )
         key = headers.get("sec-websocket-key", "")
         try:
-            ok = ok and len(base64.b64decode(key, validate=True)) == 16
+            key_ok = len(base64.b64decode(key, validate=True)) == 16
         except Exception:
-            ok = False
-        if not ok:
+            key_ok = False
+        line_ok = len(parts) == 3 and parts[0] == "GET" and parts[1] == PATH and parts[2] == "HTTP/1.1"
+        host_ok = headers.get("host") in hosts
+        origin = headers.get("origin")
+        upgrade_ok = (headers.get("upgrade", "").lower() == "websocket"
+                      and "upgrade" in [t.strip().lower() for t in headers.get("connection", "").split(",")])
+        version_ok = headers.get("sec-websocket-version") == "13"
+        # (the first check that fails is the reason, said on stderr and kept for workspace_connect; most often the
+        # page's origin, the site it is on, which only SAGEBRUSH_MCP_DEV_ORIGIN can add to)
+        if not line_ok:
+            why = "not GET %s HTTP/1.1" % PATH
+        elif not host_ok:
+            why = "Host %s is not this server (%s)" % (_said(headers.get("host")), " or ".join(hosts))
+        elif origin not in self.origins:
+            why = "refused origin %s; allowed: %s" % (_said(origin), ", ".join(self.origins))
+        elif not upgrade_ok:
+            why = "not a WebSocket upgrade"
+        elif not version_ok:
+            why = "not WebSocket version 13"
+        elif not key_ok:
+            why = "a malformed Sec-WebSocket-Key"
+        else:
+            why = None
+        if why is not None:
+            self._refused(why)
+            # A browser can't read a 403's status, so a Sagebrush site this server doesn't accept (the development
+            # site, say, without SAGEBRUSH_MCP_DEV_ORIGIN) gets an honest refusal instead: the upgrade, then at once a
+            # close with ORIGIN_REFUSED, so the page can say "the agent refused this site".  Only for Sagebrush's own
+            # sites and an otherwise valid handshake: any other site still gets the 403, and so can't tell this
+            # server from a closed port.  Nothing is read after the upgrade; the connection is closed at once.
+            if line_ok and host_ok and upgrade_ok and version_ok and key_ok and origin is not None and re.fullmatch(SAGEBRUSH_SITE, origin):
+                accept = base64.b64encode(hashlib.sha1((key + _GUID).encode()).digest()).decode()
+                try:
+                    c.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                               "Sec-WebSocket-Accept: %s\r\n\r\n" % accept).encode())
+                finally:
+                    self._close(c, ORIGIN_REFUSED, "origin not allowed")
+                    raise _Refused(why)
             self._http(c, 403, "Forbidden")
         accept = base64.b64encode(hashlib.sha1((key + _GUID).encode()).digest()).decode()
         c.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                    "Sec-WebSocket-Accept: %s\r\n\r\n" % accept).encode())
+
+    def _refused(self, why):
+        """Say a refused handshake on stderr, where whoever runs this server sees it (at most MAX_REFUSALS_SAID
+        of them, then one line that the rest aren't: a page can knock without end), and keep the last reason for
+        status(), which workspace_connect gives the agent to tell the person."""
+        with self.lock:
+            self.refusals += 1
+            self.last_refused = why
+            n = self.refusals
+        if n <= MAX_REFUSALS_SAID:
+            sys.stderr.write("sagebrush-mcp: refused a page's connection: %s\n" % why)
+        elif n == MAX_REFUSALS_SAID + 1:
+            sys.stderr.write("sagebrush-mcp: more connections refused; not saying them\n")
 
     def _http(self, c, status, reason):
         try:
