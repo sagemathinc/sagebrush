@@ -5737,7 +5737,7 @@ def mean_(x, *args):
             ok = ~np.isnan(A)
             return np.sum(np.where(ok, A, 0), axis=ax) / np.sum(ok, axis=ax)
         return np.sum(A, axis=ax) / A.shape[ax]
-    return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
+    return _reduce(x, args, m, "mean", empty_value=_math.nan, out_cls="single" if cls == "single" else "double")
 
 
 def _csort(A, ax):
@@ -5800,7 +5800,7 @@ def median_(x, *args):
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
     if cls == "logical":
         R = _arr(r)
         if not np.all((R == 0) | (R == 1)):
@@ -5902,7 +5902,7 @@ def _var_impl(x, args, sq):
         den = n - 1 if (w == 0 and n > 1) else n
         r = np.sum(dev, axis=ax) / den
         return np.sqrt(r) if sq else r
-    return _reduce(x, rest, v, "var", out_cls="double")
+    return _reduce(x, rest, v, "var", empty_value=_math.nan, out_cls="double")
 
 
 @_bs("var")
@@ -6913,7 +6913,10 @@ def ndgrid_(nargout, *vs):
     if not vs:
         raise _err("Not enough input arguments.")
     if len(vs) == 1:
-        vs = vs * max(2, nargout)
+        if nargout <= 1:
+            # (one grid vector and one output: a 1-D grid, numel(x1)-by-1)
+            return _unmat(_farr(vs[0]).reshape((-1, 1)))
+        vs = vs * nargout
     vecs = [_farr(v).reshape(-1) for v in vs]
     if len(vecs) == 2:
         xv, yv = vecs
@@ -7339,11 +7342,29 @@ def qr_(nargout, x, *args):
 
 @_bi("chol")
 def chol_(nargout, x, *args):
-    L = np.linalg.cholesky(_mat(x))
-    if args and _istext(args[0]) and _text(args[0]) == "lower":
-        return _unmat(L)
-    R = np.conj(L.T)
-    return _unmat(R) if nargout <= 1 else [_unmat(R), 0.0]
+    if nargout > 2:
+        raise _err("chol: permutation outputs are not supported in Sagebrush.")
+    if len(args) > 1 or (args and (not _istext(args[0]) or _text(args[0]) not in ("lower", "upper"))):
+        raise _err("chol: triangle must be 'upper' or 'lower'.")
+    lower = bool(args and _text(args[0]) == "lower")
+    M = _mat(x)
+    if M.shape[0] != M.shape[1]:
+        raise _err("chol: input matrix must be square.")
+    # The kernel reads the lower triangle. Default MATLAB chol reads the
+    # upper triangle, even when the unused half is nonsymmetric.
+    if not lower:
+        M = np.conj(M.T)
+    if nargout <= 1:
+        L = np.linalg.cholesky(M)
+        return _unmat(L if lower else np.conj(L.T))
+    if M.dtype.kind == "c":
+        raise _err("chol: complex matrices are not supported in Sagebrush.")
+    import _nplinalg
+    L, flag = _nplinalg.cholesky(M, True)
+    if flag:
+        q = int(flag) - 1
+        L = L[:q, :q]
+    return [_unmat(L if lower else np.conj(L.T)), float(flag)]
 
 
 @_bs("null")
@@ -8481,7 +8502,12 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
@@ -9968,9 +9994,11 @@ def nthroot_(x, n):
     X = _farr(x)
     N = _farr(n)
     with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.sign(X) * np.abs(X) ** (1.0 / N)
-        r = np.where((X < 0) & (np.mod(N, 2) == 0), _math.nan, r)
-    return _box(r)
+        if np.any((X < 0) & (np.mod(N, 2) != 1)):
+            raise _err("If X is negative, N must be an odd integer.", "MATLAB:nthroot:NegXNotOddIntegerN")
+        r = np.abs(X) ** (1.0 / N)
+        r = np.where(X < 0, -r, r)
+    return _finish(r, _float_class(x, n))
 
 
 def _bitop(f):

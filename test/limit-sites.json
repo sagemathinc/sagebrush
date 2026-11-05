@@ -7741,6 +7741,14 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
+ "src/latex-cli.ts :: removeTemp :: try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "latex",
+  "reason": "removeTemp retries the scratch folder's removal at most 10 times, 50 ms apart (Node's rmSync maxRetries), so a browser helper still writing can't fail a finished render; then it gives up quietly"
+ },
  "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
   "class": "1",
   "disposition": {
@@ -9577,10 +9585,40 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
  },
+ "src/runtime/numpy.ts :: minmax :: : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the max or min fold (firstWins: fmax/fmin's tie rule, for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x) #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fmax or fmin fold (firstWins: nanmax/nanmin, NaN skipped, the accumulator wins ties)"
+ },
+ "src/runtime/numpy.ts :: minmax :: const init = initial !== null ? toNum(initial, a.dt) : firstWins ? NaN : isMax ? -Infinity : Infinity; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fold's start (-Infinity or +Infinity; NaN for fmax/fmin, so their first element starts), or initial= as NumPy's"
+ },
+ "src/runtime/numpy.ts :: minmax :: function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null, firstWins = false): any { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the max/min fold (firstWins: fmax/fmin's tie rule for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: maximum is the reduction's name in NumPy's no-identity ValueError for a max/min over no elements without initial="
+ },
  "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"amax\", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: amax/amin, the max/min reduction's names, registered with initial= and the fmax tie flag"
  },
  "src/runtime/numpy.ts :: notIndex :: fn(\"set_printoptions\", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => { #0": {
   "class": "none",

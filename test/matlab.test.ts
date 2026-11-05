@@ -2694,6 +2694,21 @@ test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted b
 });
 
 
+test("empty mean median std and var retain NaN with missing-value flags (MCF-11)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf11/transcript.txt.
+  // SHA256 c3b4b49ad0e9cd05239f1c6cf1c2e59a781ca267fddafb101a9d2f182e47a2ff.
+  const expressions = [
+    "mean([],'omitnan')", "median([],'omitnan')", "std([],'omitnan')", "var([],'omitnan')",
+    "mean([],'includenan')", "median([],'includenan')", "std([],'includenan')", "var([],'includenan')",
+  ];
+  const code = expressions.map((s) => `y=${s}; disp(mat2str(size(y))); disp(class(y)); disp(mat2str(y,17));`).join("\n")
+    + "\ndisp(sum([])); disp(prod([]));";
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [...expressions.flatMap(() => ["[1 1]", "double", "NaN"]), "0", "1"]);
+});
+
 test("median and movmedian preserve infinite middle values without finite overflow (MCF-09)", () => {
   const { execFileSync } = require("node:child_process");
   // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf09/transcript.txt.
@@ -2712,5 +2727,47 @@ test("median and movmedian preserve infinite middle values without finite overfl
     "[1 1]", "double", "NaN", "[1 1]", "double", "Inf", "[1 1]", "double", "Inf",
     "[1 1]", "double", "-Inf", "[1 1]", "double", "1e+308", "[1 1]", "double", "0",
     "[1 1]", "single", "Inf", "[1 2]", "double", "[-Inf -Inf]",
+  ]);
+});
+
+
+test("nthroot preserves zero roots, infinities and single class (MCF-13)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/o3/transcript.txt,
+  // SHA256 9c5b8c0c9932b9c3720bc70c44a48d69132ed33b6e131c17b2e691c5a790e094. K1-K6.
+  const calls = ["nthroot(0,-1)", "nthroot([0 0 0],[-1 -2 2])", "nthroot([-8 8],3)",
+    "nthroot(0,0)", "nthroot(single(0),single(-1))"];
+  const code = calls.map((s) => `y=${s}; disp([mat2str(size(y)) '|' class(y) '|' mat2str(y,17)]);`).join("\n") +
+    "\ntry, nthroot(-8,2); catch e, disp(e.identifier); disp(e.message); end";
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[1 1]|double|Inf", "[1 3]|double|[Inf Inf 0]", "[1 2]|double|[-2 2]",
+    "[1 1]|double|0", "[1 1]|single|Inf", "MATLAB:nthroot:NegXNotOddIntegerN",
+    "If X is negative, N must be an odd integer.",
+  ]);
+});
+
+test("str2num preserves character-array rows (MCF-30)", () => {
+  const { execFileSync } = require("node:child_process");
+  // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf30/transcript.txt:
+  // SHA256 f3eee5c037f55905b2a6374da7d752da7e428afcf8abb461af6a4eb2669d22c0.
+  // Pin dimensions as well as values: flattening used to turn case 1 into 1234.
+  // Extra bracket cases: MATLAB differs from Octave; /scratch/matlab-tmp/mcf32b/transcript.txt,
+  // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
+  const inputs = ["['12';'34']", "['1 2';'3 4']", "['1 ';' 2']", "['[1 2';'3 4]']", "['1 2';'3  ']",
+    "['[1 2]';'[3 4]']", "'[1 2;3 4]'", "['[1 2]';'[3  ]']"];
+  const code = inputs.map((s) => `[X,ok]=str2num(${s}); disp(mat2str(size(X))); disp(class(X)); disp(mat2str(X)); disp(class(ok)); disp(mat2str(ok));`).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[2 1]", "double", "[12;34]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[2 1]", "double", "[1;2]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
   ]);
 });
