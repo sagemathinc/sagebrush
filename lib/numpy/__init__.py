@@ -1277,23 +1277,16 @@ def _minmax(a, axis, keepdims, initial, mask, is_max):
                              "specify 'initial'" % ("maximum" if is_max else "minimum"))
         return (_np.amax if is_max else _np.amin)(a, axis, keepdims)
     # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
-    # plain int or float into float64 needs no array)
-    t = type(initial)
-    if (t is float or t is int) and a.dtype.name == "float64":
-        ini = float(initial)
+    # plain float into float64 needs no array; the runtime's fold starts from it)
+    if type(initial) is float and a.dtype.name == "float64":
+        ini = initial
     else:
         if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
             raise ValueError("setting an array element with a sequence.")
-        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype)
+        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype).item()
     if mask is not True:
-        a = _np.where3(mask, a, ini)  # (an element masked out counts as initial)
-    # (a reduction over no elements: only an empty array has one)
-    if a.size == 0 and _count(a, axis) == 0:
-        shape = asarray(_np.sum(a, axis, keepdims)).shape  # (the result's shape, the axes checked)
-        r = full(shape, ini, dtype=a.dtype)
-    else:
-        r = (maximum if is_max else minimum)((_np.amax if is_max else _np.amin)(a, axis, keepdims), ini)
-    return r[()] if isinstance(r, ndarray) and r.ndim == 0 else r
+        a = _np.where3(mask, a, array(ini, dtype=a.dtype))  # (an element masked out counts as initial; a's dtype)
+    return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini)
 
 
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):

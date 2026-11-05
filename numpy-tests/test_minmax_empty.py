@@ -91,3 +91,11 @@ for ini in [0, 2, 2.5, -1e308, float("nan"), True, np.float32(1.5), np.int8(3)]:
     show("max float64 axis=0 initial=%r" % (ini,), lambda: np.max(np.array([[1.0], [2.0]]), axis=0, initial=ini))
 show("max float32 initial=1e40", lambda: np.max(np.array([1.0], np.float32), initial=1e40))
 show("max float64 initial=10**400", lambda: np.max(np.array([1.0]), initial=10 ** 400))
+# where= and initial= on integer and bool arrays keep the dtype
+u = np.array([7, 200, 3], dtype=np.uint8)
+show("uint8 max where initial", lambda: np.max(u, where=np.array([True, False, True]), initial=5))
+show("uint8 min where initial axis", lambda: np.min(u.reshape(1, 3), axis=1, where=np.array([[False, True, False]]), initial=250))
+show("int64 max where initial", lambda: np.max(np.array([-4, 9, 2]), where=np.array([True, False, True]), initial=-100))
+show("bool max where initial", lambda: np.max(np.array([False, True]), where=np.array([True, False]), initial=False))
+show("int64 max initial big", lambda: np.max(np.array([1, 2]), initial=2 ** 62))
+show("float32 min initial", lambda: np.min(np.array([1.5, 2.5], np.float32), initial=0.1))
