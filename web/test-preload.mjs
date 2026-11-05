@@ -316,13 +316,14 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
     [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }), later }, { quota: 1e9, usage: 0 });
     ok(out === "fetched" && J(asked) === J([...sci, "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]), "preloadSoon: `later`'s files after the first's: " + J(asked));
     ok(events.length === 1, "…planned once");
+    ok(J(preloadState.urls) === J([...sci, "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]) && J(preloadState.fetched) === J(preloadState.urls), "…its record holds both phases, the first's then `later`'s: " + J([preloadState.urls, preloadState.fetched]));
     [out, asked] = await run({ doc: () => ({ mode: "python", codes: [] }), later }, { quota: 1e9, usage: 0 });
     ok(out === "fetched" && J(asked) === J(["https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]), "preloadSoon: no first files, `later`'s alone: " + J([out, asked]));
     [out, asked] = await run({ doc: () => ({ mode: "python", codes: [] }), later: async () => null }, { quota: 1e9, usage: 0 });
     ok(out === "nothing" && J(asked) === "[]", "preloadSoon: neither: nothing: " + J([out, asked]));
     // (the second phase's guards: a URL of both phases fetched once; too little room for it: not fetched, the first
-    // phase's outcome kept; blocked (offline) between the phases: never planned. The stop takes the same guard,
-    // `!stopped && !preloadBlocked()`, and is module-wide, so the loop's own stop pins below cover it)
+    // phase's outcome kept; blocked (offline) between the phases: never planned. A Run's stop: at the end, each with
+    // its own copy of the module)
     const P1 = "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json";
     [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }), later: async () => ({ urls: [sci[0], P1], bytes: 10 }) }, { quota: 1e9, usage: 0 });
     await new Promise((r) => setTimeout(r, 50));
@@ -359,6 +360,24 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
   ok(J(started.map((s) => s[0])) === '["u1","u2"]' && started.every((s) => s[1] === "low" && s[2] === "omit" && s[3] === "no-referrer"), "low priority, the broker's shape (no cookie, no referrer), one at a time; a Run while u2 is in flight: u3 never starts: " + J(started));
   ok(J(done) === '["u1","u2"]' && J(finished) === '["u1","u2"]', "...and u2, in flight, finishes (read to its end): " + J(done));
   ok(J(await preloadFetch(["u4"], () => null)) === "[]", "after a stop, nothing more starts");
+}
+// the second phase and a Run's stop, each with its own copy of the module (its stop is module-wide and for good): a
+// stop while the first files are fetched: `later` is never planned; a stop while `later` plans: none of its files
+// fetched, nor recorded
+for (const when of ["first", "plan"]) {
+  const m = await import("./preload.ts?stop-" + when), P1 = "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json";
+  const sci = intentUrls(T, ["sci"], "https://sagebrush.space/");
+  Object.defineProperty(globalThis, "navigator", { value: { onLine: true, storage: { estimate: async () => ({ quota: 1e9, usage: 0 }) } }, configurable: true, writable: true });
+  globalThis.document = { visibilityState: "visible" };
+  globalThis.location = { href: "https://sagebrush.space/" };
+  const asked = [];
+  let planned = 0;
+  globalThis.fetch = async (u) => { asked.push(u); if (when === "first") m.preloadStop(); return { ok: true, body: body(1) }; };
+  m.preloadSoon({ table: T, wait: 1, doc: () => ({ mode: "python", codes: ["import numpy"] }), later: async () => { planned++; if (when === "plan") m.preloadStop(); return { urls: [P1], bytes: 10 }; } });
+  for (let i = 0; i < 200 && m.preloadState.outcome === null; i++) await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 50));
+  if (when === "first") ok(planned === 0 && J(asked) === J(sci.slice(0, 1)) && !m.preloadState.urls.includes(P1), "preloadSoon: a Run's stop during the first phase: `later` never planned, nothing more fetched: " + J([planned, asked]));
+  else ok(planned === 1 && J(asked) === J(sci) && !m.preloadState.urls.includes(P1) && !m.preloadState.fetched.includes(P1), "preloadSoon: a Run's stop while `later` plans: none of its files fetched, nor recorded: " + J([planned, asked, m.preloadState.urls]));
 }
 if (fails) { console.log(`${fails} failed`); process.exit(1); }
 console.log("all passed");
