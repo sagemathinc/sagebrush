@@ -1,6 +1,8 @@
 // engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm, about 70 KB;
 // numerics-core r4.3) for the kernels the runtime hands to it: so far
-// np.linalg.cholesky of a real float64 matrix (CHOL-1), through nd_potrf.
+// np.linalg.cholesky of a real float64 matrix (CHOL-1), through nd_potrf,
+// and solve, det, slogdet and inv (LU with partial pivoting), through
+// nd_solve's gesv mode.
 // The module is compiled the first time one of them is called, from wherever
 // the host keeps it (as the PNG module's, src/runtime/raster.ts):
 //   globalThis.__SAGEBRUSH_ND__      its bytes, as base64 (the CLI bundle)
@@ -21,6 +23,7 @@ import { sha256Hex } from "./sha256";
 interface Nd {
   nd_info(what: number): number;
   nd_potrf(desc: number): number;
+  nd_solve(desc: number): number;
 }
 
 let decided = false;
@@ -156,4 +159,44 @@ export function ndCholesky(A: Float64Array, n: number): Float64Array | number {
   const L = f64.slice(a / 8, a / 8 + n * n);
   for (let i = 0; i < n; i++) L.fill(0, i * n + i + 1, (i + 1) * n);
   return L;
+}
+
+/** PA = LU of the n x n real A (row-major float64) by nd_solve's gesv mode
+ *  (LAPACK's dgesv, as NumPy calls it), and X = A^-1 B for the n x r B
+ *  (row-major; null: the identity, for inv; r may be 0, for det): U's
+ *  diagonal and P's sign (all det and slogdet need of the factors), X
+ *  (row-major) and
+ *  whether a pivot is exactly zero (X then holds what division by it gives). Null if A or B has an Inf or
+ *  NaN: the module computes nothing then (the caller's LU runs instead). Only
+ *  when useNd(). A RangeError if the module's memory can't hold the work. */
+export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: number): { diag: Float64Array; sign: number; x: Float64Array; singular: boolean } | null {
+  // nd_solve reads column-major operands: A and B go in transposed (the
+  // identity is its own transpose), X comes out transposed. The layout: the
+  // descriptor at the host's floor, then the arena (A, B, the pivots, the
+  // work, the report), each 64-byte aligned.
+  const SCRATCH = ex!.nd_info(0);
+  const up = (x: number) => Math.ceil(x / 64) * 64;
+  const desc = up(floor), lo = desc + 64;
+  const wl = Math.max(n * n, n * r) + SCRATCH;
+  const a = lo, b = up(a + 8 * n * n), ipiv = up(b + 8 * n * r), work = up(ipiv + 4 * n), report = up(work + 8 * wl), hi = report + 32;
+  reserve(hi);
+  const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
+  for (let i = 0, p = a / 8; i < n; i++) for (let j = 0; j < n; j++) f64[p + i + j * n] = A[i * n + j];
+  if (B) for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) f64[p + i + j * n] = B[i * r + j];
+  else {
+    f64.fill(0, b / 8, b / 8 + n * r);
+    for (let i = 0; i < Math.min(n, r); i++) f64[b / 8 + i + i * n] = 1;
+  }
+  u32.set([a, b, ipiv, work, report, n, r, Math.max(n, 1), Math.max(n, 1), wl, lo, hi, 1], desc / 4);
+  if (ex!.nd_solve(desc) !== 1) throw new Error("the numerics module refused a solve layout");
+  const code = u32[report / 4];
+  if (code === 3) return null;
+  const x = new Float64Array(n * r);
+  for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) x[i * r + j] = f64[p + i + j * n];
+  const diag = new Float64Array(n);
+  for (let i = 0; i < n; i++) diag[i] = f64[a / 8 + i + i * n];
+  // (the pivots are 0-based: row k was interchanged with row ipiv[k])
+  let sign = 1;
+  for (let k = 0; k < n; k++) if (u32[ipiv / 4 + k] !== k) sign = -sign;
+  return { diag, sign, x, singular: code === 2 };
 }

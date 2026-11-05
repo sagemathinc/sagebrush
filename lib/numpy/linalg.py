@@ -171,10 +171,11 @@ def _kernels():
     """Which code Sagebrush's linear algebra runs in this session: for each
     function backed by engine/nd, its path ("engine/nd", "typescript", or
     "undecided" before its first call that could use it), the kernel, why not
-    engine/nd, and the smallest n it is used for (below it, the TypeScript
-    code, which is faster there)."""
-    path, kernel, why, from_n = _L._kernels()
-    return {"cholesky": {"path": path, "kernel": kernel, "why": why, "from_n": from_n}}
+    engine/nd, and the smallest n it is used for (below it, the older code,
+    which is faster there)."""
+    path, kernel, why, chol, lu = _L._kernels()
+    k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n}
+    return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 
 class _Result(tuple):
