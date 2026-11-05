@@ -61,3 +61,33 @@ show("min where all false", lambda: np.min(np.array([1.0, 5.0]), where=np.array(
 show("max where 2-D axis=1", lambda: np.max(np.arange(6.0).reshape(2, 3), axis=1, where=np.array([[True, False, True], [False, False, False]]), initial=-1))
 show("ndarray.max where", lambda: np.arange(4.0).max(where=np.array([True, False, False, False]), initial=-1))
 show("max out=", lambda: np.max(np.zeros((0, 3)), axis=0, initial=2, out=np.empty(3)))
+# where= masks that exclude the extreme and a NaN, flat and along an axis (grader #654 M13/M14)
+w = np.array([1.0, np.nan, -5.0, 3.0, 9.0])
+m = np.array([True, False, False, True, False])
+W = np.array([[1.0, np.nan, 9.0], [-5.0, 2.0, np.nan]])
+M = np.array([[True, False, False], [False, True, False]])
+show("ndarray.min where initial", lambda: w.min(where=m, initial=10))
+show("ndarray.max where initial", lambda: w.max(where=m, initial=-10))
+show("ndarray.min where initial axis=1", lambda: W.min(axis=1, where=M, initial=10))
+show("ndarray.max where initial axis=0", lambda: W.max(axis=0, where=M, initial=-10))
+show("nanmax where initial", lambda: np.nanmax(w, where=m, initial=-10))
+show("nanmin where initial", lambda: np.nanmin(w, where=m, initial=10))
+show("nanmax where initial axis=1", lambda: np.nanmax(W, axis=1, where=M, initial=-10))
+show("nanmin where initial axis=0", lambda: np.nanmin(W, axis=0, where=M, initial=10))
+show("nanmax where all-nan kept", lambda: np.nanmax(np.array([np.nan, 1.0]), where=np.array([True, False]), initial=-3))
+# where= without initial: the where-mask error, before any count, with nanmax/nanmin's fmax/fmin (daybreak3 NP654-NANWHERE-1)
+for f in ("nanmax", "nanmin"):
+    show(f + " where no initial nonempty", lambda: getattr(np, f)(np.array([1.0, 2.0]), where=np.array([True, False])))
+    show(f + " where no initial empty", lambda: getattr(np, f)(np.zeros(0), where=np.zeros(0, bool)))
+    show(f + " where no initial axis", lambda: getattr(np, f)(np.zeros((2, 3)), axis=0, where=np.ones((2, 3), bool)))
+    show(f + " where=True no initial", lambda: getattr(np, f)(np.array([1.0, np.nan, 2.0]), where=True))
+# only the literal True is no mask
+for tag, wv in [("np.True_", np.True_), ("np.array(True)", np.array(True)), ("1", 1), ("False", False), ("[True, True]", [True, True])]:
+    show("max where=%s no initial" % tag, lambda: np.max(np.array([1.0, 2.0]), where=wv))
+    show("min where=%s initial=0" % tag, lambda: np.min(np.array([1.0, 2.0]), where=wv, initial=0))
+# initial into float64 by the fast path and by array(): same results
+for ini in [0, 2, 2.5, -1e308, float("nan"), True, np.float32(1.5), np.int8(3)]:
+    show("max float64 initial=%r" % (ini,), lambda: np.max(np.array([1.0, 2.0]), initial=ini))
+    show("max float64 axis=0 initial=%r" % (ini,), lambda: np.max(np.array([[1.0], [2.0]]), axis=0, initial=ini))
+show("max float32 initial=1e40", lambda: np.max(np.array([1.0], np.float32), initial=1e40))
+show("max float64 initial=10**400", lambda: np.max(np.array([1.0]), initial=10 ** 400))

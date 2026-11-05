@@ -1271,25 +1271,29 @@ def _minmax(a, axis, keepdims, initial, mask, is_max):
     # NumPy's maximum/minimum reduction: initial (in a's dtype, converted as NumPy converts it) takes part, and is
     # the result of a reduction over no elements, which without it has no identity; a where mask needs it
     a = asarray(a)
-    op = maximum if is_max else minimum
-    if mask is not True and initial is None:
-        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
-                         "specify 'initial'" % op.__name__)
     if initial is None:
+        if mask is not True:
+            raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                             "specify 'initial'" % ("maximum" if is_max else "minimum"))
         return (_np.amax if is_max else _np.amin)(a, axis, keepdims)
-    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s)
-    if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
-        raise ValueError("setting an array element with a sequence.")
-    ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype)
+    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
+    # plain int or float into float64 needs no array)
+    t = type(initial)
+    if (t is float or t is int) and a.dtype.name == "float64":
+        ini = float(initial)
+    else:
+        if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
+            raise ValueError("setting an array element with a sequence.")
+        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype)
     if mask is not True:
         a = _np.where3(mask, a, ini)  # (an element masked out counts as initial)
-    if _count(a, axis) == 0:
+    # (a reduction over no elements: only an empty array has one)
+    if a.size == 0 and _count(a, axis) == 0:
         shape = asarray(_np.sum(a, axis, keepdims)).shape  # (the result's shape, the axes checked)
         r = full(shape, ini, dtype=a.dtype)
     else:
-        r = op((_np.amax if is_max else _np.amin)(a, axis, keepdims), ini)
-    r = asarray(r)
-    return r[()] if r.ndim == 0 else r
+        r = (maximum if is_max else minimum)((_np.amax if is_max else _np.amin)(a, axis, keepdims), ini)
+    return r[()] if isinstance(r, ndarray) and r.ndim == 0 else r
 
 
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
@@ -1361,16 +1365,26 @@ def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
     return prod(_nanfill(a, 1), axis, dtype, out, keepdims)
 
 
+def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
+    # (NumPy's nanmax/nanmin reduce with fmax/fmin, the names in their errors; a where mask needs initial first)
+    name = "fmax" if is_max else "fmin"
+    if initial is None:
+        if where is not True:
+            raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                             "specify 'initial'" % name)
+        a = asarray(a)
+        if a.size == 0 and _count(a, axis) == 0:
+            raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
+        return _out((_np.amax if is_max else _np.amin)(_nanfill(a, -inf if is_max else inf), axis, keepdims), out)
+    return (amax if is_max else amin)(_nanfill(a, -inf if is_max else inf), axis, out, keepdims, initial, where)
+
+
 def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    if initial is None and _count(asarray(a), axis) == 0:
-        raise ValueError("zero-size array to reduction operation fmax which has no identity")  # (NumPy's: fmax)
-    return amax(_nanfill(a, -inf), axis, out, keepdims, initial, where)
+    return _nan_minmax(a, axis, out, keepdims, initial, where, True)
 
 
 def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    if initial is None and _count(asarray(a), axis) == 0:
-        raise ValueError("zero-size array to reduction operation fmin which has no identity")  # (NumPy's: fmin)
-    return amin(_nanfill(a, inf), axis, out, keepdims, initial, where)
+    return _nan_minmax(a, axis, out, keepdims, initial, where, False)
 
 
 def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
