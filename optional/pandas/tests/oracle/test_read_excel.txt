@@ -253,6 +253,34 @@ Index: [])
 !! ValueError: invalid literal for int() with base 10: '3.0'
 == cell r=' B3'
 !! ValueError: ' B' is not a valid column name. Column names are from A to ZZZ
+== row r='3.5', cell without r
+!! ValueError: 3.5 is not a valid row number
+== row r='x', cell without r
+!! ValueError: could not convert string to float: 'x'
+== row r='', cell without r
+!! ValueError: could not convert string to float: ''
+== row r='3.0', cell without r
+([('a', 'float64'), ('b', 'float64')], [['nan', '5.0'], ['nan', 'nan']],      a   b
+0  NaN NaN
+1  5.0 NaN)
+== row r='5.0', cell without r
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan', 'nan', '5.0'], ['nan', 'nan', 'nan', 'nan']],      a   b
+0  NaN NaN
+1  NaN NaN
+2  NaN NaN
+3  5.0 NaN)
+== row r=' 5', cell without r
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan', 'nan', '5.0'], ['nan', 'nan', 'nan', 'nan']],      a   b
+0  NaN NaN
+1  NaN NaN
+2  NaN NaN
+3  5.0 NaN)
+== row r='05', cell without r
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan', 'nan', '5.0'], ['nan', 'nan', 'nan', 'nan']],      a   b
+0  NaN NaN
+1  NaN NaN
+2  NaN NaN
+3  5.0 NaN)
 == bytes
 !! TypeError: Expected file path name or file-like object, got <class 'bytes'> type
 == not a file

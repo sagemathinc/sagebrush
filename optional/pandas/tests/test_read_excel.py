@@ -117,13 +117,18 @@ case("cell in another row, scanner", lambda: show(pd.read_excel(B([("S", moved.r
 # a row's number and a cell's reference in other forms, as openpyxl parses them: the row an int or an integral
 # float, the cell's letters any case before an int (the row element's row is the one used)
 def refs(row_r, cell_r):
+    # (cell_r None: a cell with no reference, placed by its row element alone, so the row's own number decides,
+    # on the fast path as on the scanner's)
+    cell = '<c><v>5</v></c>' if cell_r is None else '<c r="%s"><v>5</v></c>' % cell_r
     xml = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="B1" t="inlineStr"><is><t>b</t></is></c></row>'
-           '<row r="%s"><c r="%s"><v>5</v></c></row></sheetData></worksheet>') % (MAIN, row_r, cell_r)
+           '<row r="%s">%s</row></sheetData></worksheet>') % (MAIN, row_r, cell)
     return show(pd.read_excel(B([("S", xml)])))
 for r in (" 3", "3 ", "+3", "03", "3.0", "3.5", "x", "", "0", "-1"):
     case("row r=%r" % r, lambda r=r: refs(r, "B3"))
 for c in ("b3", "B03", "$B$3", "B 3", "3", "B", "AAAA3", "B3.0", " B3"):
     case("cell r=%r" % c, lambda c=c: refs("3", c))
+for r in ("3.5", "x", "", "3.0", "5.0", " 5", "05"):
+    case("row r=%r, cell without r" % r, lambda r=r: refs(r, None))
 
 # what isn't a workbook: pandas' errors
 case("bytes", lambda: pd.read_excel(workbook([("S", [["a"]])])))
