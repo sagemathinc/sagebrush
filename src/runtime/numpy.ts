@@ -2166,10 +2166,22 @@ function combineComplex(r: any, i: any, dt: DType): any {
   return out;
 }
 
-function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean): any {
-  if (a.size === 0 && (axis === null || axis === undefined)) raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
-  const fold = isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
-  return finish(reduceAxes(a, axesArg(axis, a.ndim), keepdims, a.dt, isMax ? -Infinity : Infinity, fold), axis, keepdims);
+// initial: the fold's start, a value of a's dtype (lib/numpy's amax converts it as NumPy does), so it takes part
+// (a NaN propagates) and is the result of a reduction over no elements. Without it there is no identity: NumPy
+// refuses any reduction over no elements, even one whose result is empty too, as max(zeros((0, 0)), axis=0)
+function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null, firstWins = false): any {
+  const axes = axesArg(axis, a.ndim);
+  if (initial === null && (axes === null ? a.size : prod([...new Set(axes)].map((i) => a.shape[i]))) === 0)
+    raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
+  // (firstWins: fmax/fmin, nanmax/nanmin's reduction: a NaN on either side is skipped, so a slice of NaNs alone
+  // gives NaN and so does a NaN initial with no other values; without initial the fold starts from the first
+  // element, as NumPy's reduce. A tie, as of +0 and -0: maximum/minimum keep the later operand, fmax/fmin the
+  // accumulator, as NumPy's element loops)
+  const init = initial !== null ? toNum(initial, a.dt) : firstWins ? NaN : isMax ? -Infinity : Infinity;
+  const fold = firstWins
+    ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x)
+    : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
+  return finish(reduceAxes(a, axes, keepdims, a.dt, init, fold), axis, keepdims);
 }
 
 function argminmax(a: NDArray, axis: any, isMax: boolean): any {
@@ -4143,8 +4155,8 @@ newBuiltinModule("_numpy", (m) => {
     const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
     return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null), axis, !!keepdims);
   });
-  fn("amax", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true));
-  fn("amin", (a: any, axis: any = null, keepdims: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false));
+  fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first));
+  fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial), !!first));
   fn("argmax", (a: any, axis: any = null) => argminmax(asarray(a), opt(axis), true));
   fn("argmin", (a: any, axis: any = null) => argminmax(asarray(a), opt(axis), false));
   fn("all", (a: any, axis: any = null, keepdims: any = false) => {
@@ -4257,6 +4269,14 @@ newBuiltinModule("_numpy", (m) => {
     if (!(a instanceof NDArray)) raise(T.TypeError, "_own: an ndarray is required");
     a.base = null;
     return a;
+  });
+  // (a library's own combined admission, admitWork's, for what a Python step
+  // keeps at once: lib/scipy/optimize.py's differences and scratch)
+  fn("_admit_work", (nbytes: any, what: any) => {
+    const b = typeof nbytes === "bigint" ? Number(nbytes) : nbytes;
+    if (typeof b !== "number" || typeof what !== "string") raise(T.TypeError, "_admit_work: a byte count and a name are required");
+    admitWork(b, what);
+    return null;
   });
   fn("where3", (c: any, x: any, y: any) => {
     if (strArg(x) || strArg(y)) return strWhere(asarray(c), x, y);

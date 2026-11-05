@@ -423,6 +423,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-scipy-optimize.src": {
+   "exact": false,
+   "ceiling": 95774,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-scipy-special.src": {
    "exact": false,
    "ceiling": 46064,
@@ -628,7 +635,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 237670,
+   "ceiling": 237760,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -636,6 +643,13 @@
   "engine/sagebrush-raster.wasm": {
    "exact": false,
    "ceiling": 889713,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-nd.wasm": {
+   "exact": false,
+   "ceiling": 78216,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -720,6 +734,7 @@
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-scipy-optimize.src": 87068,
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
    "engine/lib/mod-scipy-stats-py.src": 23101,
@@ -751,6 +766,7 @@
    "engine/sagebrush-myst.js": 10788,
    "engine/sagebrush-notebook.js": 208117,
    "engine/sagebrush-raster.wasm": 825569,
+   "engine/sagebrush-nd.wasm": 71106,
    "engine/sagebrush-viewer3d.js": 88151,
    "engine/sagebrush-worker.js": 1545037
   },
