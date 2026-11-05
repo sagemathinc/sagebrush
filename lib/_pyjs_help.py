@@ -97,9 +97,15 @@ def _file(obj):
     return fn
 
 
+# (and the library's own folder wherever it was loaded from, as a checkout's lib/ by the development CLI: a help
+# page shows lib/<module>.py, never one machine's path)
+_HERE = __file__.rsplit("/", 1)[0] + "/" if "/" in globals().get("__file__", "") else _LIB
+
+
 def _show_file(fn):
-    if fn and fn.startswith(_LIB):
-        return "lib/" + fn[len(_LIB):]
+    for root in (_LIB, _HERE):
+        if fn and fn.startswith(root):
+            return "lib/" + fn[len(root):]
     return fn
 
 
