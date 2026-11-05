@@ -320,6 +320,24 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
     ok(out === "fetched" && J(asked) === J(["https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]), "preloadSoon: no first files, `later`'s alone: " + J([out, asked]));
     [out, asked] = await run({ doc: () => ({ mode: "python", codes: [] }), later: async () => null }, { quota: 1e9, usage: 0 });
     ok(out === "nothing" && J(asked) === "[]", "preloadSoon: neither: nothing: " + J([out, asked]));
+    // (the second phase's guards: a URL of both phases fetched once; too little room for it: not fetched, the first
+    // phase's outcome kept; blocked (offline) between the phases: never planned. The stop takes the same guard,
+    // `!stopped && !preloadBlocked()`, and is module-wide, so the loop's own stop pins below cover it)
+    const P1 = "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json";
+    [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }), later: async () => ({ urls: [sci[0], P1], bytes: 10 }) }, { quota: 1e9, usage: 0 });
+    await new Promise((r) => setTimeout(r, 50));
+    ok(J(asked) === J([...sci, P1]), "preloadSoon: a URL in both phases: fetched once: " + J(asked));
+    [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }), later: async () => ({ urls: [P1], bytes: 1e12 }) }, { quota: 1e9, usage: 0 });
+    await new Promise((r) => setTimeout(r, 50));
+    ok(out === "fetched" && J(asked) === J(sci) && !preloadState.urls.includes(P1), "preloadSoon: no room for the second phase: not fetched, the first's outcome kept: " + J([out, asked]));
+    let planned = 0;
+    globalThis.fetch = async (u) => { Object.defineProperty(globalThis, "navigator", { value: { onLine: false, storage: { estimate: async () => ({ quota: 1e9, usage: 0 }) } }, configurable: true, writable: true }); return { ok: true, body: body(1) }; };
+    Object.defineProperty(globalThis, "navigator", { value: { onLine: true, storage: { estimate: async () => ({ quota: 1e9, usage: 0 }) } }, configurable: true, writable: true });
+    Object.assign(preloadState, { outcome: null, urls: [], fetched: [] });
+    preloadSoon({ table: T, wait: 1, doc: () => ({ mode: "python", codes: ["import numpy"] }), later: async () => (planned++, { urls: [P1], bytes: 10 }) });
+    for (let i = 0; i < 200 && preloadState.outcome === null; i++) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 50));
+    ok(planned === 0 && !preloadState.urls.includes(P1), "preloadSoon: offline after the first phase: the second never planned: " + planned);
     globalThis.fetch = realF;
   }
   if (nav) Object.defineProperty(globalThis, "navigator", nav);
