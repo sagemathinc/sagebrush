@@ -960,6 +960,10 @@ export class Machine {
     // standard counters (LaTeX's article)
     for (const c of ["part", "section", "subsection", "subsubsection", "paragraph", "equation", "figure", "table", "footnote", "page", "enumi", "enumii"]) this.newCounter(c, null);
     this.newCounter("chapter", null);
+    // (and the rest of LaTeX's: \subparagraph's, enumerate's third and fourth levels, and secnumdepth and tocdepth, 3 as in
+    //  article, so \setcounter and \addtocounter reach them)
+    for (const c of ["subparagraph", "enumiii", "enumiv", "secnumdepth", "tocdepth"]) this.newCounter(c, null);
+    for (const c of ["secnumdepth", "tocdepth"]) this.regSet(this.counterReg(c), 3, true);
     { const k = "cl:section"; this.setS(k, meaning("data", { data: ["subsection"] }), true); this.setS("cl:subsection", meaning("data", { data: ["subsubsection"] }), true); }
     this.setS("m:@empty", meaning("macro", { pre: [], delims: [], body: [], long: false, prot: false }), true);
     this.setS("cat:64", CAT.OTHER, true);
