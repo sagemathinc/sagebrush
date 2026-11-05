@@ -1,0 +1,16 @@
+{
+ "title": "Sage",
+ "summary": "Sage mode: ^ is a power, division is exact; harmonic numbers, factoring and primes.",
+ "tags": [
+  "basics",
+  "number theory"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

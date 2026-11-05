@@ -1,0 +1,19 @@
+{
+ "title": "Bibliography",
+ "summary": "Citations and a reference list (and a .bib file)",
+ "tags": [
+  "bibliography",
+  "writing"
+ ],
+ "level": "course",
+ "main": "bibliography.tex",
+ "files": [
+  "bibliography.tex",
+  "refs.bib"
+ ],
+ "features": [
+  "bibliography"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

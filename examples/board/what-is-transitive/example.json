@@ -1,0 +1,18 @@
+{
+ "title": "What does transitive mean?",
+ "summary": "A Sage lesson on permutation groups: orbits, orbit-stabilizer, blocks, with questions that check answers.",
+ "tags": [
+  "group theory",
+  "teaching"
+ ],
+ "level": "course",
+ "main": "teach-transitive.board.json",
+ "files": [
+  "teach-transitive.board.json"
+ ],
+ "modes": [
+  "sage"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

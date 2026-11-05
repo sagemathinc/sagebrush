@@ -1,0 +1,16 @@
+{
+ "title": "Figure with an image",
+ "summary": "graphicx, a caption and a reference to the figure",
+ "tags": [
+  "figures",
+  "writing"
+ ],
+ "level": "intro",
+ "main": "figure.tex",
+ "files": [
+  "figure.tex",
+  "plot.png"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

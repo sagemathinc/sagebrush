@@ -7,6 +7,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, firstDifference } from "./lossless.ts";
 import { boardMerge3, keyOf } from "./merge.ts";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 let checks = 0;
 const fails = [];
@@ -47,9 +50,8 @@ for (const name of ["__proto__", "constructor", "toString"]) {
 }
 
 // ---- the example boards
-const dir = new URL("./examples/", import.meta.url).pathname;
-for (const f of readdirSync(dir).filter((f) => f.endsWith(".board.json")).sort()) {
-  const d = JSON.parse(readFileSync(dir + f, "utf8"));
+for (const f of [...EXAMPLES.keys()].filter((f) => f.endsWith(".board.json")).sort()) {
+  const d = JSON.parse(readFileSync(EXAMPLES.get(f), "utf8"));
   const r = roundTrips(d);
   check(r.ok, `${f}: comes back as it was${r.ok ? "" : " (differs at " + r.at + ")"}`);
   const bytes = serialize(fromEditRecords(editRecords(d)));

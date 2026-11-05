@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 import { canvasLeftOut, fromCanvas, isCanvas, toCanvas } from "./canvas.ts";
 import { formatError, layout, pageCount, pageView } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fails = [];
@@ -109,7 +112,7 @@ const shaped = (shape) => { const d = { nodes: [{ id: "s", title: "S", shape }] 
 check(shaped("rect") === undefined && shaped("diamond") === 1, "a rectangle is not an outline left out (a diamond is)");
 
 // every example as a canvas: valid, and the same board read back
-const examples = readdirSync(join(here, "examples")).filter((f) => /\.(json|md)$/.test(f) && f !== "index.json").map((f) => [f, boardFromText(readFileSync(join(here, "examples", f), "utf8"), f, () => {})]);
+const examples = [...EXAMPLES.keys()].filter((f) => /\.(json|md)$/.test(f)).sort().map((f) => [f, boardFromText(readFileSync(EXAMPLES.get(f), "utf8"), f, () => {})]);
 const shape = (d) => {
   const out = [];
   // (a canvas has no pen strokes, counted as left out, nor stickers or questions: each comes back as a card, a note)

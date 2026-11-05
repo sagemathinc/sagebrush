@@ -1,0 +1,19 @@
+{
+ "title": "TikZ and pgfplots",
+ "summary": "A plot and a drawing",
+ "tags": [
+  "figures",
+  "plots"
+ ],
+ "level": "course",
+ "main": "tikz.tex",
+ "files": [
+  "tikz.tex"
+ ],
+ "features": [
+  "tikz",
+  "pgfplots"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

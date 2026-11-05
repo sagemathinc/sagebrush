@@ -3,7 +3,7 @@
 // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/mermaid.md
 // ci: web-browser/board-a order=40 env=NO_EDIT=1 -- examples/source.json
 // ci: web-browser/board-a order=50 env=NO_EDIT=1 -- examples/integers.json
-// The board page with a document (web/board/examples/*.json), in headless
+// The board page with a document (examples/board/<slug>/, served as examples/<file>), in headless
 // Chromium (CHROME=...): it loads without errors, its notes do not overlap
 // and fit their text, each group holds its members, and the tour moves the
 // camera.  Serve web/dist first (python3 web/serve.py 8765), then

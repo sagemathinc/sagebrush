@@ -1,0 +1,15 @@
+{
+ "title": "How do you solve polynomial equations over Q? A museum tour",
+ "summary": "Rational roots, Galois groups, rational points on a circle and on an elliptic curve, in Sage code items.",
+ "tags": [
+  "polynomials",
+  "number theory"
+ ],
+ "level": "course",
+ "main": "polynomials.json",
+ "files": [
+  "polynomials.json"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

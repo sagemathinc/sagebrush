@@ -1,0 +1,17 @@
+{
+ "title": "Calculus in Sage",
+ "summary": "Sage code items: a derivative, integrals, a Taylor polynomial, a limit, a series, an ODE, and a plot of cos x against its Taylor polynomial.",
+ "tags": [
+  "calculus"
+ ],
+ "level": "intro",
+ "main": "gallery-calculus.board.json",
+ "files": [
+  "gallery-calculus.board.json"
+ ],
+ "modes": [
+  "sage"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

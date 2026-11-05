@@ -1,0 +1,17 @@
+{
+ "title": "Plots with matplotlib",
+ "summary": "matplotlib code items: a line plot, a histogram, a scatter plot and side-by-side bar charts.",
+ "tags": [
+  "plots"
+ ],
+ "level": "intro",
+ "main": "gallery-plots.board.json",
+ "files": [
+  "gallery-plots.board.json"
+ ],
+ "modes": [
+  "python"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

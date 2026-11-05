@@ -1,0 +1,49 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+
+\title{Sums of Squares}
+\author{A. Student}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+A short article: sections, numbered equations, theorems with proofs, and cross-references.
+\end{abstract}
+\tableofcontents
+
+\section{Introduction}\label{sec:intro}
+Which integers are sums of two squares? We collect the classical answer; see Theorem~\ref{thm:fermat}
+and Section~\ref{sec:proof}.
+
+\section{Statement}
+\begin{definition}
+An integer $n \ge 0$ is a \emph{sum of two squares} if $n = a^2 + b^2$ for some $a, b \in \mathbb{Z}$.
+\end{definition}
+
+\begin{lemma}\label{lem:product}
+Products of sums of two squares are sums of two squares:
+\begin{equation}\label{eq:brahmagupta}
+(a^2+b^2)(c^2+d^2) = (ac-bd)^2 + (ad+bc)^2 .
+\end{equation}
+\end{lemma}
+
+\begin{theorem}[Fermat]\label{thm:fermat}
+An odd prime $p$ is a sum of two squares if and only if $p \equiv 1 \pmod 4$.
+\end{theorem}
+
+\section{Proof sketch}\label{sec:proof}
+\begin{proof}
+If $p = a^2 + b^2$, then $p \equiv 1 \pmod 4$, since squares are $0$ or $1$ modulo $4$. Conversely,
+choose $x$ with $x^2 \equiv -1 \pmod p$ and apply Thue's lemma; by \eqref{eq:brahmagupta} the rest follows.
+\end{proof}
+
+\begin{align}
+  \sum_{n=1}^{\infty} \frac{1}{n^2} &= \frac{\pi^2}{6}, &
+  \int_0^1 x^n \, dx &= \frac{1}{n+1}.
+\end{align}
+\end{document}

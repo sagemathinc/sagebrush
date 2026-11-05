@@ -6,17 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanPreview } from "../web/board/preview";
 import { codeOrder } from "../web/board/doc";
+import { boardExample, boardExamples } from "./board-examples";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
 const run = (args: string[], input?: string) => spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "run", ...args], { encoding: "utf8", input, timeout: 120_000 });
-const examples = __dirname + "/../../web/board/examples/";
 const board = (nodes: any[], more: any = {}) => JSON.stringify({ format: "sagebrush-board", version: 1, title: "T", ...more, nodes: nodes.map((n, i) => ({ x: (i % 3) * 400, y: Math.floor(i / 3) * 300, w: 300, ...n })) });
 const json = (args: string[], input?: string) => { const r = run([...args, "--json"], input); return { status: r.status, stderr: r.stderr, report: JSON.parse(r.stdout) }; };
 const item = (rep: any, id: string) => rep.items.find((i: any) => i.id === id);
 
 test("board run: an example board, every item as the board shows it", () => {
-  const r = run([examples + "live.json"]);
+  const r = run([boardExample("live.json")]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /871 takes 178 steps/);
   assert.match(r.stdout, /111 steps, as high as 9232/);
@@ -135,8 +135,8 @@ test("board run --store-previews: a copy with its items' outputs as previews, ne
 
 test("board run: what it is told wrong, a board that is not one, and text for a terminal", () => {
   assert.equal(run([]).status, 2);
-  assert.equal(run([examples + "live.json", "--bogus"]).status, 2);
-  assert.equal(run([examples + "live.json", "-o", "x.json"]).status, 2, "-o is for --store-previews");
+  assert.equal(run([boardExample("live.json"), "--bogus"]).status, 2);
+  assert.equal(run([boardExample("live.json"), "-o", "x.json"]).status, 2, "-o is for --store-previews");
   assert.equal(run(["/nonexistent.board.json"]).status, 1);
   assert.equal(run(["-"], '{"format": "something-else"}').status, 1);
   const r = run(["-"], board([{ id: "a\u001b[31m", title: "T\u001b[2J", code: "print('\\x1b[31mred')" }]));
@@ -184,7 +184,7 @@ test("board run --store-previews: a file made while the board ran is not written
 test("board run: no control character reaches the terminal from an early error either (HARD-CD6-3)", () => {
   for (const r of [
     run(["-"], JSON.stringify({ format: "evil\u001b[31m", nodes: [] })),
-    run([examples + "live.json", "--bad\u001b[31m"]),
+    run([boardExample("live.json"), "--bad\u001b[31m"]),
     run(["/nonexistent\u001b[2J.board.json"]),
   ]) {
     assert.ok(r.status === 1 || r.status === 2, String(r.status));
@@ -194,12 +194,12 @@ test("board run: no control character reaches the terminal from an early error e
 
 test("board run: --timeout is a number of seconds a timer can wait; --preview-ms 0 or more (CORR-CD6-4)", () => {
   for (const t of ["Infinity", "2147484", "0", "-1", "NaN", "x"]) {
-    const r = run([examples + "live.json", "--timeout", t]);
+    const r = run([boardExample("live.json"), "--timeout", t]);
     assert.equal(r.status, 2, t);
     assert.match(r.stderr, /--timeout takes a number of seconds, more than 0 and at most 2147483/);
   }
-  assert.equal(run([examples + "live.json", "--timeout", "2147483"]).status, 0);
-  for (const t of ["Infinity", "-1"]) assert.match(run([examples + "live.json", "--store-previews", "--preview-ms", t]).stderr, /--preview-ms takes a number of milliseconds, 0 or more/);
+  assert.equal(run([boardExample("live.json"), "--timeout", "2147483"]).status, 0);
+  for (const t of ["Infinity", "-1"]) assert.match(run([boardExample("live.json"), "--store-previews", "--preview-ms", t]).stderr, /--preview-ms takes a number of milliseconds, 0 or more/);
 });
 
 test("board run: an item whose own id is another's cell's (x, x, x@p2): three cells, each run and reported (CORR-239-1)", () => {
@@ -232,7 +232,7 @@ test("board run: what it says of a board it refuses is one line, a newline or a 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  r = run([examples + "live.json", "--x\ny"]);
+  r = run([boardExample("live.json"), "--x\ny"]);
   assert.equal(r.status, 2);
   assert.ok(r.stderr.startsWith("sagebrush board run: unknown option --x\\x0ay\n"), r.stderr);
   r = run(["-"], board([{ id: "p", code: "print('one\\ttwo\\nthree')" }]));

@@ -1,0 +1,16 @@
+{
+ "title": "Plots (Sage)",
+ "summary": "Plots that add up, points and labels, and interacts with sliders.",
+ "tags": [
+  "plots",
+  "interactive"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "sage",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

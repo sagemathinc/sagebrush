@@ -1,0 +1,14 @@
+{
+ "title": "CV",
+ "summary": "A one-page curriculum vitae",
+ "tags": [
+  "writing"
+ ],
+ "level": "intro",
+ "main": "cv.tex",
+ "files": [
+  "cv.tex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

@@ -1,0 +1,16 @@
+{
+ "title": "numpy",
+ "summary": "Arrays, seeded random streams, eigenvalues and least squares with numpy.",
+ "tags": [
+  "linear algebra",
+  "data"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

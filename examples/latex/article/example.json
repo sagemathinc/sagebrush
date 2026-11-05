@@ -1,0 +1,15 @@
+{
+ "title": "Article",
+ "summary": "Sections, equations, theorems and proofs, cross-references, a table of contents",
+ "tags": [
+  "writing",
+  "proofs"
+ ],
+ "level": "intro",
+ "main": "article.tex",
+ "files": [
+  "article.tex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

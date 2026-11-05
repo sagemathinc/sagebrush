@@ -1,5 +1,5 @@
-// Generated example boards (web/board/examples/index.json lists them with
-// the hand-written ones), written by web/build.ts into dist/board/examples:
+// Generated example boards (dist/board/examples/index.json, from web/examples/legacy.ts, lists them with
+// the corpus's, examples/board/), written by web/build.ts into dist/board/examples:
 //
 //   integers.json  the integers to 10,000: each a note with its factorization
 //                  and arithmetic functions in LaTeX, by hundreds and thousands

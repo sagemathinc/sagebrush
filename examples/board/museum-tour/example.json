@@ -1,0 +1,15 @@
+{
+ "title": "Museum tour: how do you solve polynomial equations? (after Bianca Viray)",
+ "summary": "A tour in rooms: solving polynomial equations by Newton's method, number fields, Galois groups and rational points.",
+ "tags": [
+  "polynomials",
+  "number theory"
+ ],
+ "level": "course",
+ "main": "museum-tour.json",
+ "files": [
+  "museum-tour.json"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

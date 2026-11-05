@@ -13,6 +13,9 @@ import { readFileSync } from "node:fs";
 import { cleanDoc, pageCount } from "./doc.ts";
 import { boardSvg } from "./svg.ts";
 import { texSvg } from "../../src/board-math.ts";
+// (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
+import { boardFiles } from "../examples/legacy.ts";
+const EXAMPLES = new Map(boardFiles());
 
 const fails = [];
 let checks = 0;
@@ -86,7 +89,7 @@ const HASHES = {
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
-  const d = JSON.parse(readFileSync(here + "examples/" + f + ".json", "utf8"));
+  const d = JSON.parse(readFileSync(EXAMPLES.get(f + ".json"), "utf8"));
   for (let p = 0; p < pageCount(cleanDoc(d)); p++) {
     const a = boardSvg(d, { page: p }), b = boardSvg(d, { page: p });
     const h = createHash("sha256").update(a.svg).digest("hex").slice(0, 16);

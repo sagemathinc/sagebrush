@@ -1,0 +1,17 @@
+\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+\section*{A figure with an image}
+
+Figure~\ref{fig:plot} shows $\sin x \cos y$ on $[0, 2\pi]^2$ as colour bands. The image,
+\texttt{plot.png}, is a file in this folder: the preview reads it from there.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.4\textwidth]{plot.png}
+  \caption{The function $\sin x \cos y$: blue below zero, red above.}
+  \label{fig:plot}
+\end{figure}
+
+As Figure~\ref{fig:plot} shows, the zero set is a grid of lines.
+\end{document}

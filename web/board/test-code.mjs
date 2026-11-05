@@ -397,7 +397,7 @@ try {
   // ...nor when the reader's move is a flight not yet begun (Find, a double-click), or a key pressed during the refit's own flight (CORR-300-1)
   {
     // (a real picture, which the board mounts as an <img>: the refit waits for it to decode)
-    const leaf = JSON.parse(readFileSync(new URL("examples/gallery-hello.board.json", import.meta.url), "utf8")).images.leaf;
+    const leaf = JSON.parse(readFileSync(new URL("../../examples/board/hello/gallery-hello.board.json", import.meta.url), "utf8")).images.leaf;
     const doc = { title: "Refit", layout: "column", images: { pic: leaf }, nodes: [
       { id: "pic", title: "A picture", image: "pic" },
       { id: "long", title: "Long", code: "import time\ntime.sleep(1.5)\nfor i in range(120):\n    print(i)" },

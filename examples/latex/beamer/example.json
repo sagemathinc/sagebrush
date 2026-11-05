@@ -1,0 +1,17 @@
+{
+ "title": "Beamer talk",
+ "summary": "Slides: overlays, columns, a math slide",
+ "tags": [
+  "slides"
+ ],
+ "level": "intro",
+ "main": "talk.tex",
+ "files": [
+  "talk.tex"
+ ],
+ "features": [
+  "beamer"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

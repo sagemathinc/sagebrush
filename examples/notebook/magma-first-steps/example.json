@@ -1,0 +1,16 @@
+{
+ "title": "Magma",
+ "summary": "Magma programs: sequences, functions and procedures, polynomials.",
+ "tags": [
+  "basics",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "magma",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

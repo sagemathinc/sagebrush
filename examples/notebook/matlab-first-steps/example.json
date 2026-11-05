@@ -1,0 +1,16 @@
+{
+ "title": "MATLAB",
+ "summary": "MATLAB programs: matrices, linear algebra and functions defined in a cell.",
+ "tags": [
+  "basics",
+  "linear algebra"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
