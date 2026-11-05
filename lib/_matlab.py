@@ -6016,7 +6016,7 @@ def _fft_call(x, args, inverse, name):
     if length == 0:
         shape = list(A.shape)
         shape[ax] = 0
-        return _canon(np.zeros(tuple(shape)))
+        return _finish(np.zeros(tuple(shape)), "single" if class_(x) == "single" else "double")
     if inverse and not symmetric and A.dtype.kind == "c" and A.shape[ax] == length:
         # (MATLAB's ifft is real when X is exactly conjugate-symmetric along dim)
         B = np.moveaxis(A, ax, -1)
@@ -6313,11 +6313,12 @@ def _minmax(nargout, args, which):
             raise _err("%s: the dimension must be a positive integer or a vector of them." % which)
         dim = sorted(set(int(k) for k in v.reshape(-1))) if v.size > 1 else _int_arg(dv)
     cls = class_(x)
+    oc = "double" if cls == "char" else cls
     A = _farr(x, which)
     if dim is None:
         if d == (0, 0):
             e = np.zeros((0, 0))
-            return e if nargout <= 1 else [e, e.copy()]
+            return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
         dim = _default_dim(d)
     full = A
     if dim == "all":
@@ -6340,7 +6341,7 @@ def _minmax(nargout, args, which):
         shp = list(A2.shape)
         shp[ax] = 0
         e = np.zeros(tuple(shp))
-        return e if nargout <= 1 else [e, e.copy()]
+        return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
     key = np.abs(A2) if A2.dtype.kind == "c" else A2
     nan = np.isnan(key)
     filled = np.where(nan, -np.inf if big else np.inf, key)
@@ -6362,7 +6363,6 @@ def _minmax(nargout, args, which):
     vals = _take_along(A2, np.expand_dims(idx, ax), ax)
     vals = _canon(_contig(vals.reshape(shape)))
     # (logical stays logical, as in MATLAB; char gives double)
-    oc = "double" if cls == "char" else cls
     m = _finish(vals, oc)
     if nargout <= 1:
         return m
