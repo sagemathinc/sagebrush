@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "LU-ND: np.linalg.solve, det and slogdet from n = 32, and inv from n = 64, run on engine/nd's LU (nd_solve's gesv mode, already in engine/sagebrush-nd.wasm, so the module doesn't grow), loaded on first use as cholesky's is: 1.1-1.4x at n = 64-128 in Node, about 2.4x at n = 1000 (daybreak4's profile). The worker grows by the loader's ndLu and the routing in numpy_linalg.ts (+1,847); sci by np.linalg._kernels() reporting the four functions (+1,155 pre, +95 src); lib.gen +36; the CLI bundle carries the same code (pyjs +2,284).",
+ "reason": "LU-ND: np.linalg.solve, det, slogdet and inv run on engine/nd's LU (nd_solve's gesv mode, already in engine/sagebrush-nd.wasm, so the module doesn't grow) from n = 256, loaded on first use as cholesky's is: about 2.4x at n = 1000, and never slower on a session's first call, which pays the module's instantiation (daybreak4's cold PERF; @sagebrush's ruling). The worker grows by the loader's ndLu and the routing in numpy_linalg.ts (+1,839); sci by np.linalg._kernels() reporting the four functions (+1,132 pre, +89 src); lib.gen +36; the CLI bundle carries the same code (pyjs +2,295).",
  "bytes": {
-  "cli/pyjs.cjs": 2284,
+  "cli/pyjs.cjs": 2295,
   "cli/lib.gen.js": 36,
-  "engine/lib/sci.pre": 1155,
-  "engine/lib/sci.src": 95,
-  "engine/sagebrush-worker.js": 1847
+  "engine/lib/sci.pre": 1132,
+  "engine/lib/sci.src": 89,
+  "engine/sagebrush-worker.js": 1839
  }
 }
