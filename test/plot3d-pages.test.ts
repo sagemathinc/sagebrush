@@ -155,3 +155,34 @@ test("two writers of one pid and thread, overlapping: both pages whole, neither 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an interrupt in the middle of a write: no page, and the write's own temporary removed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-plot3d-"));
+  try {
+    const out = py(
+      [
+        "import builtins, os, sage_plot3d as p3",
+        "os.makedirs('d')",
+        "real_open = builtins.open",
+        "class Stopped:",
+        "    def __init__(self, f): self.f = f",
+        "    def write(self, s): raise KeyboardInterrupt",
+        "    def close(self): return self.f.close()",
+        "builtins.open = lambda *a, **k: Stopped(real_open(*a, **k))",
+        "try:",
+        "    p3._write_page(os.path.join('d', 'a.html'), 'x')",
+        "    print('no interrupt')",
+        "except KeyboardInterrupt:",
+        "    print('KeyboardInterrupt')",
+        "finally:",
+        "    builtins.open = real_open",
+        "h = os.path.join('d', '.plot3d-tmp', p3._host())",
+        "print(os.path.exists(os.path.join('d', 'a.html')), os.listdir(h) if os.path.isdir(h) else [])",
+      ].join("\n"),
+      dir,
+    );
+    assert.equal(out, "KeyboardInterrupt\nFalse []\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
