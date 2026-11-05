@@ -10,7 +10,9 @@ import numpy as np
 from ._pd_column import Column, column_from, set_values
 from ._pd_dtypes import STR, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
-from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object
+from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column
+from ._pd_datetime import DT, to_us
+from .errors import _INPLACE, inplace_given
 from . import _pd_indexing as X
 from . import _pd_reduce as R
 from . import _pd_repr
@@ -61,8 +63,10 @@ def _row_values(cols, i, dtype):
 
 
 def _column_of(values, dtype):
-    if dtype in ("int64", "float64", "bool"):
+    if dtype in ("int64", "float64", "bool", "int32"):
         return Column(dtype, np.array(values, dtype=dtype))
+    if dtype is DT:
+        return Column(DT, np.array([to_us(v) for v in values], dtype=np.int64))
     return Column(dtype, list(values))
 
 
@@ -276,6 +280,8 @@ class DataFrame(object):
     def _pd_export(self, what, copy):
         # (r7 §C3: homogeneous numeric -> a read-only copy; int64 with
         # float64 -> a writable float64 copy; any str/object -> rejected)
+        if any(c.dtype is DT for c in self._pd_cols):
+            raise _unsupported("%s of a frame with datetime64[us] columns (Sagebrush's numpy has no datetime64 yet)" % what)
         d = _common_dtype(self._pd_cols)
         if d not in ("int64", "float64", "bool") or any(c.is_list for c in self._pd_cols):
             raise _unsupported("%s of a frame with %s columns" % (what, "str/object" if any(c.is_list for c in self._pd_cols) else "mixed bool"))
@@ -419,6 +425,69 @@ class DataFrame(object):
         if scalar:
             return self._pd_column_series(cols[0])
         return self._pd_take_cols(cols)
+
+    # --- time series (design-pandas-xlsx-timeseries PR A) --------------------
+
+    def dropna(self, *, axis=0, how=None, thresh=None, subset=None, inplace=_INPLACE, ignore_index=False):
+        """The rows without a missing value (how='any'), with at least one
+        value (how='all'), or with at least `thresh` values, counting the
+        `subset` columns only if given."""
+        inplace = inplace_given(inplace, "DataFrame.dropna")
+        if axis not in (0, "index", "rows") or ignore_index:
+            raise _unsupported("DataFrame.dropna(axis=, ignore_index=)")
+        if how is not None and thresh is not None:
+            raise TypeError("You cannot set both the how and thresh arguments at the same time.")
+        if how is None:
+            how = "any"
+        if how not in ("any", "all"):
+            raise ValueError("invalid how option: %s" % (how,))
+        if subset is None:
+            js = list(range(len(self._pd_cols)))
+        else:
+            labels = [subset] if not X.is_list_like(subset) else list(subset)
+            js = []
+            missing = []
+            for lab in labels:
+                try:
+                    p = self._pd_columns._pd_positions(lab)
+                except KeyError:
+                    missing.append(lab)
+                    continue
+                js.extend(p if isinstance(p, list) else [p])
+            if missing:
+                raise KeyError(missing)
+        present = np.zeros(len(self), dtype=np.int64)
+        for j in js:
+            present = present + (~self._pd_cols[j].isna()).astype(np.int64)
+        need = len(js) if thresh is None and how == "any" else 1 if thresh is None else int(thresh)
+        keep = [i for i, k in enumerate(present.tolist()) if k >= need]
+        out = self._pd_take_rows(keep)
+        if inplace:
+            self._pd_init(out._pd_cols, out._pd_columns, out._pd_index)
+            return None
+        return out
+
+    def diff(self, periods=1, axis=0):
+        if axis not in (0, "index", "rows"):
+            raise _unsupported("DataFrame.diff(axis=1)")
+        return DataFrame._pd_new([diff_column(c, periods) for c in self._pd_cols], self._pd_columns.copy(), self._pd_index.copy())
+
+    def set_index(self, keys, *, drop=True, append=False, inplace=_INPLACE, verify_integrity=False):
+        """A column as the index (one column label; drop it from the
+        columns unless drop=False)."""
+        inplace = inplace_given(inplace, "DataFrame.set_index")
+        if append or verify_integrity or X.is_list_like(keys):
+            raise _unsupported("DataFrame.set_index(a list, append=, verify_integrity=)")
+        p = self._pd_columns._pd_positions(keys)
+        if isinstance(p, list):
+            raise _unsupported("DataFrame.set_index of a repeated column label")
+        index = Index(self._pd_cols[p].copy(), name=keys)
+        js = [j for j in range(len(self._pd_cols)) if j != p or not drop]
+        out = DataFrame._pd_new([self._pd_cols[j].copy() for j in js], self._pd_columns._pd_take(js), index)
+        if inplace:
+            self._pd_init(out._pd_cols, out._pd_columns, out._pd_index)
+            return None
+        return out
 
     def __getattr__(self, name):
         if not name.startswith("_pd_") and not name.startswith("__"):

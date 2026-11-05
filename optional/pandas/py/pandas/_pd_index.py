@@ -10,15 +10,22 @@ r7).
 """
 
 from ._pd_column import Column, column_from
-from ._pd_dtypes import is_missing
+from ._pd_dtypes import is_missing, infer
+from ._pd_datetime import DT, NAT_INT, as_us, is_time, Timestamp, NaT
 
-__all__ = ["Index", "RangeIndex", "default_index", "ensure_index"]
+__all__ = ["Index", "RangeIndex", "DatetimeIndex", "default_index", "ensure_index"]
 
 
 class Index(object):
     """An immutable sequence of labels, with an optional name."""
 
     __slots__ = ("_pd_col", "_pd_name", "_pd_map", "_pd_budget")
+
+    def __new__(cls, data=None, dtype=None, copy=False, name=None):
+        # (an index of times is a DatetimeIndex, as pandas makes it)
+        if cls is Index and _is_times(data, dtype):
+            return object.__new__(DatetimeIndex)
+        return object.__new__(cls)
 
     def __init__(self, data=None, dtype=None, copy=False, name=None):
         if isinstance(data, Index):
@@ -111,11 +118,13 @@ class Index(object):
             charged = 0
             # (the labels read one at a time from the column's own storage:
             # no full copy of them before the first charge; astra's PD626-3)
-            vals = self._pd_column()._pd_values
+            col = self._pd_column()
+            vals = col._pd_values
             is_list = isinstance(vals, list)
+            times = col.dtype is DT
             try:
                 for i in range(len(vals)):
-                    v = vals[i] if is_list else vals[i].item()
+                    v = vals[i] if is_list else (from_key(vals[i].item()) if times else vals[i].item())
                     key = _key(v)
                     old = m.get(key)
                     if old is None:
@@ -187,6 +196,81 @@ class Index(object):
         raise TypeError("Index does not support mutable operations")
 
     __hash__ = None
+
+
+def _is_times(data, dtype):
+    if isinstance(data, Index):
+        return data._pd_column().dtype is DT
+    if isinstance(data, Column):
+        return data.dtype is DT
+    if dtype is not None:
+        return dtype is DT or (isinstance(dtype, str) and dtype in ("datetime64[us]", "M8[us]", "<M8[us]"))
+    if isinstance(data, (list, tuple)):
+        return any(is_time(v) for v in data) and infer(list(data)) is DT
+    return False
+
+
+class DatetimeIndex(Index):
+    """An index of times (datetime64[us]): its labels are Timestamps (or
+    NaT); a label is looked up as a Timestamp, a datetime or a string."""
+
+    __slots__ = ()
+
+    def __init__(self, data=None, dtype=None, copy=False, name=None, freq=None):
+        if freq is not None:
+            raise NotImplementedError("pandas: DatetimeIndex(freq=) is not in Sagebrush's pandas 0.x subset")
+        if not isinstance(data, (Index, Column)):
+            from ._pd_datetime import to_datetime
+            data = to_datetime([] if data is None else list(data))
+        Index.__init__(self, data, None, copy, name)
+        if self._pd_col.dtype is not DT:
+            raise TypeError("DatetimeIndex needs times, got %s" % (self._pd_col.dtype,))
+
+    def _pd_positions(self, label):
+        try:
+            us = _label_us(label)
+            return Index._pd_positions(self, from_key(us))
+        except (TypeError, ValueError, KeyError):
+            # (the label as given, as pandas' KeyError has it)
+            raise KeyError(label) from None
+
+    def _pd_field(self, f):
+        import numpy as np
+        from ._pd_datetime import FIELDS
+        vals = [FIELDS[f](t) for t in self.tolist() if t is not NaT]
+        if len(vals) < len(self):
+            raise NotImplementedError("pandas: DatetimeIndex.%s with NaT (a float64 index) is not in Sagebrush's pandas 0.x subset" % f)
+        return Index(Column("int32", np.array(vals, dtype=np.int32)), name=self._pd_name)
+
+    year = property(lambda self: self._pd_field("year"))
+    month = property(lambda self: self._pd_field("month"))
+    day = property(lambda self: self._pd_field("day"))
+
+    @property
+    def freq(self):
+        return None
+
+    def strftime(self, date_format):
+        from ._pd_dtypes import STR
+        return Index(Column(STR, [float("nan") if t is NaT else t.strftime(date_format) for t in self.tolist()]), name=self._pd_name)
+
+
+def from_key(us):
+    # (the lookup map's key for a time: its Timestamp, as the map's labels are)
+    from ._pd_datetime import from_us
+    return from_us(us)
+
+
+def _label_us(label):
+    from ._pd_datetime import Timestamp as _T
+    if isinstance(label, str):
+        t = _T(label)
+        if t is NaT:
+            return NAT_INT
+        return as_us(t)
+    if is_time(label):
+        return as_us(label)
+    raise TypeError(label)
 
 
 def _key(v):

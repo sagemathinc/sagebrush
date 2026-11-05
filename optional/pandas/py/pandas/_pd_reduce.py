@@ -49,7 +49,8 @@ def reduce_column(col, op, skipna):
     d = col.dtype
     if op == "count":
         return np.int64(int(len(col) - int(_scalar(col.isna().sum()))))
-    if d in ("int64", "bool"):
+    if d in ("int64", "bool", "int32"):
+        # (int32, what .dt.year gives: summed in int64 and averaged in float64, its min/max np.int32, as pandas 3.1)
         v = col._pd_values
         if op == "sum":
             return np.int64(int(_scalar(v.astype("int64").sum())) if len(v) else 0)
@@ -58,7 +59,7 @@ def reduce_column(col, op, skipna):
         if not len(v):
             return float("nan")
         r = _scalar(v.min() if op == "min" else v.max())
-        return np.bool_(bool(r)) if d == "bool" else np.int64(int(r))
+        return np.bool_(bool(r)) if d == "bool" else np.int32(int(r)) if d == "int32" else np.int64(int(r))
     if d == "float64":
         v = col._pd_values
         if not len(v):

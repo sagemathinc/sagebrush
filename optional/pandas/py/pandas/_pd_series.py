@@ -8,6 +8,8 @@ import numpy as np
 
 from ._pd_column import Column, column_from, set_values
 from ._pd_dtypes import STR, infer, is_missing, resolve_dtype
+from ._pd_datetime import DT, NaT, FIELDS
+from .errors import _INPLACE, inplace_given
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
 from . import _pd_indexing as X
 from . import _pd_reduce as R
@@ -140,6 +142,8 @@ class Series(object):
         if dtype is not None or na_value is not None:
             raise _unsupported("Series.to_numpy(dtype=, na_value=)")
         if copy:
+            if self._pd_col.dtype is DT:
+                return _export(self._pd_col, "Series.to_numpy()")
             if self._pd_col.is_list:
                 raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if self._pd_col.dtype == "object" else "", self._pd_col.dtype))
             return self._pd_col._pd_values.copy()
@@ -343,6 +347,8 @@ class Series(object):
         raise _unsupported("Series.__abs__ (arithmetic)")
 
     def __getattr__(self, name):
+        if name == "dt":
+            raise AttributeError("Can only use .dt accessor with datetimelike values")
         from ._pd_names import SERIES
         if name in SERIES:
             raise _unsupported("Series.%s" % name)
@@ -428,6 +434,30 @@ class Series(object):
     def iloc(self):
         return _SeriesILoc(self)
 
+    # --- time series (design-pandas-xlsx-timeseries PR A) --------------------
+
+    @property
+    def dt(self):
+        if self._pd_col.dtype is not DT:
+            raise AttributeError("Can only use .dt accessor with datetimelike values")
+        return _DatetimeProperties(self)
+
+    def diff(self, periods=1):
+        """The difference from the value `periods` before (after, if
+        negative), as float64; NaN where there is none."""
+        return Series._pd_new(diff_column(self._pd_col, periods), self._pd_index.copy(), self._pd_name)
+
+    def dropna(self, *, axis=0, inplace=_INPLACE, how=None, ignore_index=False):
+        inplace = inplace_given(inplace, "Series.dropna")
+        if axis not in (0, "index", "rows") or ignore_index:
+            raise _unsupported("Series.dropna(axis=, ignore_index=)")
+        keep = [i for i, na in enumerate(self._pd_col.isna().tolist()) if not na]
+        out = self._pd_take(keep)
+        if inplace:
+            self._pd_col, self._pd_index = out._pd_col, out._pd_index
+            return None
+        return out
+
     # --- reprs -------------------------------------------------------------
 
     def __repr__(self):
@@ -470,9 +500,9 @@ _ObjectDtype = _ObjectDtypeType()
 
 def dtype_object(d):
     """The dtype object pandas shows for a column dtype."""
-    if d in ("int64", "float64", "bool"):
+    if d in ("int64", "float64", "bool", "int32"):
         return np.dtype(d)
-    return d if d is STR else _ObjectDtype
+    return d if d is STR or d is DT else _ObjectDtype
 
 
 def _astype(col, dtype):
@@ -484,7 +514,11 @@ def _astype(col, dtype):
 
 def _export(col, what):
     """to_numpy()/.values of one column: a read-only copy of a numeric
-    column (r7 §C3's table); str/object are rejected."""
+    column (r7 §C3's table); str/object are rejected, and so is a datetime
+    column: pandas gives a numpy datetime64 array, which Sagebrush's numpy
+    doesn't have yet (never the microsecond ints in its place)."""
+    if col.dtype is DT:
+        raise _unsupported("%s of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet)" % what)
     if col.is_list:
         raise _unsupported("%s of a%s %s column" % (what, "n" if col.dtype == "object" else "", col.dtype))
     a = col._pd_values.copy()
@@ -569,3 +603,56 @@ class _SeriesLoc(object):
             return
         positions, scalar = X.loc_positions(s._pd_index, key)
         s._pd_set_positions(positions, value)
+
+
+def diff_column(col, periods):
+    """Column.diff: float64, NaN where the value `periods` away is missing
+    or past either end (pandas 3.1: int64 and float64 alike)."""
+    if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
+        raise ValueError("periods must be an integer")
+    periods = int(periods)
+    if col.dtype is DT:
+        raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
+    if col.dtype not in ("int64", "float64", "int32"):
+        raise _unsupported("diff of a %s column" % (col.dtype,))
+    v = col._pd_values.astype(np.float64)
+    n = len(v)
+    out = np.full(n, np.nan, dtype=np.float64)
+    if periods >= 0 and periods < n:
+        out[periods:] = v[periods:] - v[:n - periods]
+    elif periods < 0 and -periods < n:
+        out[:n + periods] = v[:n + periods] - v[-periods:]
+    return Column("float64", out)
+
+
+class _DatetimeProperties(object):
+    """Series.dt for a datetime64[us] Series: year, month and day (int32,
+    or float64 with NaN when there's a NaT, as pandas), and strftime."""
+
+    __slots__ = ("_pd_s",)
+
+    def __init__(self, s):
+        self._pd_s = s
+
+    def _pd_field(self, f):
+        s = self._pd_s
+        ts = s._pd_col.tolist()
+        if any(t is NaT for t in ts):
+            col = Column("float64", np.array([np.nan if t is NaT else float(FIELDS[f](t)) for t in ts], dtype=np.float64))
+        else:
+            col = Column("int32", np.array([FIELDS[f](t) for t in ts], dtype=np.int32))
+        return Series._pd_new(col, s._pd_index.copy(), s._pd_name)
+
+    year = property(lambda self: self._pd_field("year"))
+    month = property(lambda self: self._pd_field("month"))
+    day = property(lambda self: self._pd_field("day"))
+    hour = property(lambda self: self._pd_field("hour"))
+    minute = property(lambda self: self._pd_field("minute"))
+    second = property(lambda self: self._pd_field("second"))
+
+    def strftime(self, date_format):
+        s = self._pd_s
+        return Series._pd_new(Column(STR, [float("nan") if t is NaT else t.strftime(date_format) for t in s._pd_col.tolist()]), s._pd_index.copy(), s._pd_name)
+
+    def __getattr__(self, name):
+        raise _unsupported("Series.dt.%s" % name)
