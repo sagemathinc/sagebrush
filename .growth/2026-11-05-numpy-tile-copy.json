@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "np.tile returns a new array for every count 1 (it returned the input or a view: writing to the result changed the input), and refuses negative and float counts as NumPy 2.5.1 does (lib/numpy/__init__.py tile). Re-measured with bun 1.4.4 (size-record.sh) on master b32dbb58 vs head d155d39c: cli/lib.gen.js +384, cli/pyjs.cjs +328, engine/lib/sci.pre +2727, engine/lib/sci.src +969; no other row moves. Markers: exact, except cli/pyjs.cjs 360 (+328 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 384,
+  "cli/pyjs.cjs": 360,
+  "engine/lib/sci.pre": 2727,
+  "engine/lib/sci.src": 969
+ }
+}
