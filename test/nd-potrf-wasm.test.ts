@@ -19,7 +19,7 @@ const POTRF_FNV = 0x3c1e8bf25e29f991n;
 // the report: [status, column, kernel name address, length]
 const REPORT_WORDS = 4;
 
-type Exports = { __stack_pointer: WebAssembly.Global; nd_potrf(desc: number): number; nd_info(what: number): number };
+type Exports = { __stack_pointer: WebAssembly.Global; nd_potrf(desc: number): number; nd_solve(desc: number): number; nd_info(what: number): number };
 
 function instance(pages: number) {
   const memory = new WebAssembly.Memory({ initial: pages, maximum: 65536, shared: true });
@@ -187,4 +187,32 @@ test("nd_potrf refuses every bad layout before writing anything: each region pai
   u32.set(L.words, BASE / 4);
   assert.equal(ex.nd_potrf(BASE), 1);
   assert.equal(u32[L.report / 4], 1);
+});
+
+test("nd_potrf and nd_solve refuse a descriptor that runs past memory's end before reading it: no trap, nothing written (grader P15 on #655)", () => {
+  const { memory, ex } = instance(Math.ceil((ARENA + 4096) / PAGE) + 1);
+  const end = memory.buffer.byteLength;
+  // (a good layout's words just below the end, so that only the descriptor's place is wrong)
+  const u32 = new Uint32Array(memory.buffer);
+  u32.set(layout(4).words, end / 4 - 8);
+  // (the host's part of memory, from the module's floor: below it, its own stack, which every call uses)
+  const floor = ex.nd_info(1);
+  const host = () => Buffer.from(new Uint8Array(memory.buffer, floor));
+  const before = host();
+  for (const desc of [end - 16, end - 4, end, end + 4096, 0xfffffffc])
+    for (const [name, f] of [["nd_potrf", ex.nd_potrf], ["nd_solve", ex.nd_solve]] as const) {
+      assert.equal(f(desc), 0, `${name}(${desc}): not refused`);
+      assert.ok(host().equals(before), `${name}(${desc}): memory written`);
+    }
+});
+
+test("each export that reads a descriptor checks its region (desc_region_of) before the read, in the source (grader P15 on #655: the compiled module moves the read after check_potrf's own check, so a runtime test can't see the order)", () => {
+  const src = readFileSync(join(root, "engine", "nd", "src", "wasm.rs"), "utf8");
+  const fns = [...src.matchAll(/pub unsafe extern "C" fn (nd_[a-z_]+)\(desc: u32[^)]*\) -> u32 \{([\s\S]*?)\n\}/g)];
+  assert.deepEqual(fns.map((m) => m[1]).sort(), ["nd_gemm_part", "nd_potrf", "nd_solve"], "the exports scanned");
+  for (const [, name, body] of fns) {
+    const check = body.indexOf("desc_region"), read = body.indexOf("with_exposed_provenance::<[u32;");
+    assert.ok(read > 0, `${name}: no descriptor read found`);
+    assert.ok(check > 0 && check < read, `${name}: the descriptor is read before its region is checked`);
+  }
 });
