@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "CHOL-1 step 2 (@sagebrush's rulings R1/R2): np.linalg.cholesky runs engine/nd's blocked Cholesky (5.9x at n=1000 in Node, 7.0x on m1), loaded on first use. The module ships as its own file, engine/sagebrush-nd.wasm (71,106 B, a new bundle with its budgets.json entry), fetched by the worker only at the first cholesky; nothing else loads it. The worker grows by the loader (src/runtime/nd.ts) and its URL/hash (+3,372); the notebook bundle by the runner broker's one new URL (+39); sci by np.linalg._kernels(), which says which path runs (+1,012 pre, +382 src); lib.gen +208. The CLI embeds the module as base64, as it does the PNG module (pyjs +98,818, marked +64 for build-specific bytes).",
+ "bytes": {
+  "cli/pyjs.cjs": 98882,
+  "cli/lib.gen.js": 208,
+  "engine/lib/sci.pre": 1012,
+  "engine/lib/sci.src": 382,
+  "engine/sagebrush-notebook.js": 39,
+  "engine/sagebrush-worker.js": 3372
+ }
+}
