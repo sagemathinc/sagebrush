@@ -6973,6 +6973,21 @@ def _svd_finite(M, name):
     return M
 
 
+def _basis_spacing(s, cls):
+    """eps(norm(A)) in the input precision, for null/orth rank decisions."""
+    norm = float(s[0]) if s.size else 0.0
+    single = cls == "single"
+    if single:
+        norm = _single_scalar(norm)
+    if not _math.isfinite(norm):
+        return _math.nan
+    exponent = _math.frexp(norm)[1] - (24 if single else 53)
+    floor = -149 if single else -1074
+    if norm == 0 or exponent < floor:
+        exponent = floor
+    return _math.ldexp(1.0, exponent)
+
+
 @_bs("pinv")
 def pinv_(x):
     M = _mat(x)
@@ -7371,9 +7386,13 @@ def chol_(nargout, x, *args):
 def null_(x):
     M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
-    tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
+    cls = _float_class(x)
+    tol = max(M.shape) * _basis_spacing(s, cls)
+    if cls == "single":
+        s = _single_values(s)
+        tol = _single_scalar(tol)
     r = int(np.sum(s > tol))
-    return _unmat(np.conj(Vh[r:].T))
+    return _finish(np.array(np.conj(Vh[r:])), cls)
 
 
 @_bs("expm")
