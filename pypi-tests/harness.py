@@ -46,6 +46,14 @@ if os.path.exists(excluded_path):
             raise ValueError("excluded.json lists %s twice" % name)
         excluded[name] = reason
 seen_excluded = set()
+record_prefix = os.environ.get("PYPI_TEST_RECORD_PREFIX")
+
+
+def emit(name, status):
+    if record_prefix:
+        print(record_prefix + json.dumps([name, status], separators=(",", ":")))
+    else:
+        print("%s: %s" % (name, status))
 
 modules = sorted(f[:-3] for f in os.listdir(os.path.join(pkg, "upstream")) if f.startswith("test_") and f.endswith(".py"))
 module_prefix = "upstream." if os.path.exists(os.path.join(pkg, "upstream", "__init__.py")) else ""
@@ -57,25 +65,36 @@ for name in modules:
             raise
         print("%s: FAIL import %s: %s" % (name, type(e).__name__, str(e).split("\n")[0][:200]))
         continue
-    for fn in sorted(k for k in vars(mod) if k.startswith("test") and callable(vars(mod)[k])):
+    functions = sorted(k for k in vars(mod) if k.startswith("test") and callable(vars(mod)[k]))
+    if record_prefix:
+        print(record_prefix + json.dumps({"tests": [name + "." + fn for fn in functions]}, separators=(",", ":")))
+    for fn in functions:
         full = name + "." + fn
         if full in excluded:
             seen_excluded.add(full)
-            print("%s: excluded" % full)
+            emit(full, "excluded")
             continue
         if getattr(vars(mod)[fn], "_pytest_skip", None) is not None:
-            print("%s.%s: skipped" % (name, fn))
+            emit(full, "skipped")
             continue
         try:
-            vars(mod)[fn]()
-            print("%s.%s: ok" % (name, fn))
+            result = vars(mod)[fn]()
+            # This tiny harness does not run an event loop.  A discovered
+            # async test is therefore a real runtime discovery, but skipped
+            # rather than incorrectly reported ok without executing its body.
+            if hasattr(result, "__await__"):
+                if hasattr(result, "close"):
+                    result.close()
+                emit(full, "skipped")
+            else:
+                emit(full, "ok")
         except BaseException as e:
             if isinstance(e, KeyboardInterrupt):
                 raise
             if getattr(type(e), "_pytest_skip", False):
-                print("%s.%s: skipped" % (name, fn))
+                emit(full, "skipped")
                 continue
-            print("%s.%s: FAIL %s: %s" % (name, fn, type(e).__name__, str(e).split("\n")[0][:200]))
+            emit(full, "FAIL %s: %s" % (type(e).__name__, str(e).split("\n")[0][:200]))
             if os.environ.get("PYPI_TESTS_TRACEBACK"):
                 traceback.print_exc()
     sys.stdout.flush()

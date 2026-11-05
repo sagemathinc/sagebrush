@@ -16,12 +16,12 @@ error where CPython passes is a difference too.
     python3 pypi-tests/run.py [-v] [--fetch] [NAME...]
     python3 pypi-tests/run.py --refresh NAME    write expected.out from CPython
 """
-import ast
 import hashlib
 import io
 import re
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tarfile
@@ -48,6 +48,7 @@ TAR_BYTES = 256 << 20
 TAR_MEMBERS = 20000
 # (a pinned test file is a plain name in upstream/: no directory, no dot-dot)
 FILE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*\.py$")
+RECORD_PREFIX = "__SAGEBRUSH_PYPI_RECORD_%s__" % secrets.token_hex(16)
 
 
 def run(cmd, env=None):
@@ -66,6 +67,35 @@ def exited(who, err, rc):
     return None
 
 
+def records(out):
+    """Decode the harness-owned channel and require one record per name."""
+    got, declared = {}, set()
+    for line in out.splitlines():
+        if not line.startswith(RECORD_PREFIX):
+            continue
+        row = json.loads(line[len(RECORD_PREFIX):])
+        if isinstance(row, dict) and sorted(row) == ["tests"] and isinstance(row["tests"], list) and all(isinstance(x, str) for x in row["tests"]):
+            for name in row["tests"]:
+                if name in declared:
+                    raise ValueError("duplicate discovered test %s" % name)
+                declared.add(name)
+            continue
+        if not isinstance(row, list) or len(row) != 2 or not all(isinstance(x, str) for x in row):
+            raise ValueError("malformed harness record")
+        name, status = row
+        if name in got:
+            raise ValueError("duplicate harness record for %s" % name)
+        if status not in ("ok", "skipped", "excluded") and not status.startswith("FAIL "):
+            raise ValueError("unknown harness status for %s" % name)
+        got[name] = status
+    missing, extra = sorted(declared - set(got)), sorted(set(got) - declared)
+    if missing:
+        raise ValueError("missing harness records for %s" % ", ".join(missing))
+    if extra:
+        raise ValueError("records for undiscovered tests %s" % ", ".join(extra))
+    return got
+
+
 def normal(out, name):
     """A run's output with what is presentation, not behaviour, made the
     same: a traceback a test prints names the package's files by where they
@@ -74,42 +104,28 @@ def normal(out, name):
     traceback's source line (^^^, ~~~), which Sagebrush does not print, are
     left out."""
     pre = re.compile(r'"[^"]*/packages/pypi-' + re.escape(name.lower()) + r'/py/')
-    return "".join(pre.sub('"<package>/', l) for l in out.splitlines(True) if not re.match(r"^\s+[~^]+\s*$", l))
+    lines = []
+    for line in out.splitlines(True):
+        if line.startswith(RECORD_PREFIX):
+            row = json.loads(line[len(RECORD_PREFIX):])
+            if isinstance(row, dict):
+                continue
+            test, status = row
+            line = "%s: %s\n" % (test, status)
+        if not re.match(r"^\s+[~^]+\s*$", line):
+            lines.append(pre.sub('"<package>/', line))
+    return "".join(lines)
 
 
-def upstream_tests(up, files):
-    """The closed set the harness discovers: top-level test_* functions."""
-    names = set()
-    for filename in files:
-        module = filename[:-3]
-        tree = ast.parse(open(os.path.join(up, filename), encoding="utf-8").read(), filename=filename)
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-                names.add(module + "." + node.name)
-    return names
-
-
-def record_counts(out, test_names):
-    """Count exactly one harness record for every pinned upstream test."""
+def record_counts(got):
     counts = {"ok": 0, "skipped": 0, "excluded": 0, "FAIL": 0}
-    seen = set()
-    record = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*): (ok|skipped|excluded|FAIL(?: .*)?)$")
-    for line in out.splitlines():
-        hit = record.match(line)
-        if hit and hit.group(1) in test_names:
-            name, status = hit.group(1), hit.group(2).strip()
-            if name in seen:
-                raise ValueError("duplicate harness record for %s" % name)
-            seen.add(name)
-            counts["FAIL" if status.startswith("FAIL") else status] += 1
-    missing = sorted(test_names - seen)
-    if missing:
-        raise ValueError("missing harness records for %s" % ", ".join(missing))
+    for status in got.values():
+        counts["FAIL" if status.startswith("FAIL") else status] += 1
     return counts
 
 
-def summary(out, test_names):
-    counts = record_counts(out, test_names)
+def summary(got):
+    counts = record_counts(got)
     total = sum(counts.values())
     return "%d tests (%d passed, %d skipped, %d excluded)" % (
         total, counts["ok"], counts["skipped"], counts["excluded"]
@@ -122,7 +138,6 @@ for name in names:
     src = json.load(open(os.path.join(d, "SOURCE.json")))
     # (the test files are the pinned ones, and only those)
     up = os.path.join(d, "upstream")
-    test_names = upstream_tests(up, src["files"])
     have = sorted(f for f in os.listdir(up) if f != "__pycache__")
     problems = ["SOURCE.json pins %r, not a plain .py name" % f for f in src["files"] if not FILE_NAME.match(f)]
     if problems:
@@ -178,8 +193,9 @@ for name in names:
                     elif got[f] != h:
                         problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
     pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
-    env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0")
+    env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX)
     cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
+    cp_records = records(cp)
     cp = normal(cp, name)
     why = exited("CPython", cerr, crc)
     if why is not None:
@@ -188,7 +204,7 @@ for name in names:
         continue
     if "--refresh" in sys.argv:
         open(os.path.join(d, "expected.out"), "w").write(cp)
-        print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp, test_names), record_counts(cp, test_names)["FAIL"]))
+        print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp_records), record_counts(cp_records)["FAIL"]))
         continue
     want = open(os.path.join(d, "expected.out")).read()
     # (its known differences, packages/pypi-<name>/known.json: each test may
@@ -198,7 +214,8 @@ for name in names:
     known = {t["test"]: t for t in json.load(open(kp))["tests"]} if os.path.exists(kp) else {}
     if cp != want:
         problems.append("CPython does not print expected.out:\n" + "".join("    " + l + "\n" for l in sorted(set(cp.splitlines()) ^ set(want.splitlines()))[:20]) + (cerr[-1000:] if verbose else ""))
-    sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0"))
+    sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX))
+    sp_records = records(sp)
     sp = normal(sp, name)
     why = exited("Sagebrush", serr, sbrc)
     if why is not None:
@@ -233,5 +250,5 @@ for name in names:
         for p in problems:
             print("  " + p)
     else:
-        print("%s %s: %s, CPython and Sagebrush identical%s" % (name, src["version"], summary(want, test_names), "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
+        print("%s %s: %s, CPython and Sagebrush identical%s" % (name, src["version"], summary(cp_records), "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
 sys.exit(1 if bad else 0)
