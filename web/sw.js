@@ -358,8 +358,8 @@ async function pkgReconcile(cache) {
   if (del.length) await ledgerTx((s, rows) => { for (const r of rows) if (r.state === "deleting") s.delete(r.digest); });
 }
 
-async function pkgFetch(url) {
-  const res = await fetch(url.href, { redirect: "error", credentials: "same-origin", cache: "no-store" });
+async function pkgFetch(url, r) {
+  const res = await fetch(url.href, { redirect: "error", credentials: r.credentials, referrerPolicy: r.referrerPolicy, cache: "no-store" });
   if (res.status !== 200 || res.type !== "basic") throw new Error("HTTP " + res.status);
   const len = Number(res.headers.get("content-length") ?? 0);
   if (len > PKG_MAX_BODY) throw new Error("too large");
@@ -399,7 +399,7 @@ async function pkgResponse(url, digest, ev) {
   }
   let b;
   try {
-    b = await pkgFetch(url);
+    b = await pkgFetch(url, ev.request);
   } catch {
     // (offline, or not there: no stand-in is ever served)
     return new Response(null, { status: 504 });
