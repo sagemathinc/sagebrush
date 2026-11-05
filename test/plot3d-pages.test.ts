@@ -59,3 +59,57 @@ test("_temp_for names its writer's temporary by host, process and thread; _write
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("_write_page's guards: another writer's removal is retried, never swallowed; only a missing descriptor skips the fsync", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-plot3d-"));
+  try {
+    const out = py(
+      [
+        "import builtins, os, sage_plot3d as p3",
+        "os.makedirs('d')",
+        "real_makedirs = os.makedirs",
+        // (another writer removes the empty directory just after this one makes it: once, then every time)
+        "def racing(times):",
+        "    left = [times]",
+        "    def makedirs(path, *a, **k):",
+        "        real_makedirs(path, *a, **k)",
+        "        if left[0] > 0:",
+        "            left[0] -= 1",
+        "            os.rmdir(path)",
+        "    return makedirs",
+        "os.makedirs = racing(1)",
+        "p3._write_page(os.path.join('d', 'a.html'), 'raced')",
+        "print(open(os.path.join('d', 'a.html')).read(), sorted(os.listdir('d')))",
+        "os.makedirs = racing(100)",
+        "try:",
+        "    p3._write_page(os.path.join('d', 'b.html'), 'never')",
+        "    print('no error')",
+        "except FileNotFoundError:",
+        "    print('FileNotFoundError', os.path.exists(os.path.join('d', 'b.html')))",
+        "os.makedirs = real_makedirs",
+        // (a file whose descriptor fails another way, EBADF (9; Sagebrush has no errno module): that error is
+        // raised, the temporary removed)
+        "real_open = builtins.open",
+        "class NoFd:",
+        "    def __init__(self, f): self.f = f",
+        "    def write(self, s): return self.f.write(s)",
+        "    def flush(self): return self.f.flush()",
+        "    def close(self): return self.f.close()",
+        "    def fileno(self): raise OSError(9, 'bad descriptor')",
+        "builtins.open = lambda *a, **k: NoFd(real_open(*a, **k))",
+        "try:",
+        "    p3._write_page(os.path.join('d', 'c.html'), 'x')",
+        "    print('no error')",
+        "except OSError as e:",
+        "    print(type(e).__name__, e.errno == 9, os.path.exists(os.path.join('d', 'c.html')))",
+        "finally:",
+        "    builtins.open = real_open",
+        "print(sorted(os.listdir('d')), os.listdir(os.path.join('d', '.plot3d-tmp', p3._host())) if os.path.isdir(os.path.join('d', '.plot3d-tmp', p3._host())) else [])",
+      ].join("\n"),
+      dir,
+    );
+    assert.equal(out, "raced ['a.html']\nFileNotFoundError False\nOSError True False\n['.plot3d-tmp', 'a.html'] []\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
