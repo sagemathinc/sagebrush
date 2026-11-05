@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "MCF11: return scalar NaN for flagged empty mean, median, std and var. TIGHT exact growth measured by SIZE against master 6dfcbe3c with the pinned toolchain. pyjs shrinks by 166 bytes. No dependencies or new chunks.",
+  "bytes": {
+    "engine/lib/matlab.pre": 417,
+    "engine/lib/matlab.src": 69,
+    "cli/lib.gen.js": 4
+  }
+}
