@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "B3 (William's Nov 2 DEV report): the notebook page's wait for a notebook still arriving from sync (Downloading…, opened once its history is here), in the page the CLI embeds. Measured with node 24.21.0 and bun 1.4.4 at the exact probe merge fec7ecb8 of head c9ea6dad onto master 9fe74dda: pyjs +2568 measured; 2700 allowed (132 over it). The export's own chunk has its ceiling in web/workspace/export/size-ceiling.json.",
- "bytes": {
-  "cli/pyjs.cjs": 2700
- }
-}

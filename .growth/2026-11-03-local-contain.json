@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "sagebrush notebook DIR: every path really inside DIR (realpath containment in src/notebook.ts's inside(), for api/file, the listing, the page and a session's folder), in the server the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +1255, with the PUT checked again after its body and written whole by src/fs-write.ts).",
- "bytes": {
-  "cli/pyjs.cjs": 1300
- }
-}

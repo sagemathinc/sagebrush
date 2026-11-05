@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "sys.float_info.max is a float (it was an int: an integral JS number is one in Sagebrush, and numpy refused it as an int64 beyond 2**53; found by daybreak3's B1 on #489): the structseq's first value boxed in src/runtime/modules.ts. Measured with bun 1.4.4 on master ace2ac56: pyjs +142 (+122 on a39bec34: it drifts with master), marked 180.",
- "bytes": {
-  "cli/pyjs.cjs": 180,
-  "engine/sagebrush-worker.js": 8
- }
-}

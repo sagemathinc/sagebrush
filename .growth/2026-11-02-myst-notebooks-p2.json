@@ -1,9 +1,0 @@
-{
- "v": 1,
- "reason": "Jupytext MyST notebooks, P2: a book (plan-myst-notebooks-p2 r2). The lazy asset engine/sagebrush-myst.js gains the _toc.yml reader, the book index and its rendering (cross-chapter links, the TOC, the way back): 10788 -> 21251 (+10463, its exact landing; its ceiling renewed to the landing + 10%, 23377, its epoch kept). The notebook component passes the page's book capability to it (+16, under its ceiling 234156). The page (the CLI's embedded web/dist, with the board frame's page) gains the capability and the head-only module (cli/pyjs.cjs +19564; the marker allows 66 B over). Measured with bun 1.4.4 / node 24.21.0 (size-measure.mjs) on master 2e53a56d vs the probe merge with b3d949eb, both built at build paths of equal length.",
- "bytes": {
-  "cli/pyjs.cjs": 19630,
-  "engine/sagebrush-myst.js": 10463,
-  "engine/sagebrush-notebook.js": 16
- }
-}

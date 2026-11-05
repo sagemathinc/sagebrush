@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Stage A MVP M3, Push to GitHub's automatic push (DEV flag): the page starts it once its workspace is open (web/index.html, web/workspace/preview.ts startGitpushAuto; nothing without the flag), so the page the CLI embeds grows. Measured with bun 1.4.4 at the exact probe merge over M2 (pyjs +548 over M2's +27675).",
- "bytes": {
-  "cli/pyjs.cjs": 600
- }
-}

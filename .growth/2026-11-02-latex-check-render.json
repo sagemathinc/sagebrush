@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "sagebrush latex check/render (an agent verifies and sees a .tex): the engine, KaTeX and its fonts ship as their own lazily loaded file, sagebrush-latex.cjs (0.91 MB, not measured by the gate), loaded only for `latex`; cli/pyjs.cjs grows only by the dispatch, loader and help lines: +1099 measured locally (build-cli with and without src/cli.ts's change).",
- "bytes": {
-  "cli/pyjs.cjs": 1400
- }
-}

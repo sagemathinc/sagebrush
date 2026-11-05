@@ -1,9 +1,0 @@
-{
- "v": 1,
- "reason": "smalljac provenance and independence wording in the embedded notices; text only. Re-measured with bun 1.4.4 (size-record.sh) on master 464c893b vs head 18ff6d12: cli/lib.gen.js +199, cli/pyjs.cjs +460, engine/sagebrush-worker.js +196; no other row moves. Markers: exact, except cli/pyjs.cjs 492 (+460 measured, plus 32 B of margin, as it moves with master).",
- "bytes": {
-  "cli/lib.gen.js": 199,
-  "cli/pyjs.cjs": 492,
-  "engine/sagebrush-worker.js": 196
- }
-}

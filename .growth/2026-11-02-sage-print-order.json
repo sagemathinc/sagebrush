@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Sage kernel lane 4p step 2: symbolic sums and products print in Sage's order (engine/sym/src/print.rs, P-SPEC v2's comparator with the C and F rules, plus its S7 consistency and render-only tests, which are test-only code), so the engine wasm grows, and with it the CLI bundle that embeds it. Lighter tier (@sagebrush Nov 2 05:21Z). Measured with bun 1.4.4 (size-record.sh, CI's measurement key ec7979a4) on master 98a9f74f vs this PR's code commit 1f0fb901: engine/sagebrush-engine.wasm 7249975 -> 7270531 (+20556), cli/pyjs.cjs 25172014 -> 25199410 (+27396); no other row moves.",
- "bytes": {
-  "cli/pyjs.cjs": 27396,
-  "engine/sagebrush-engine.wasm": 20556
- }
-}

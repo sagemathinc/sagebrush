@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "#546 adds no code to cli/pyjs.cjs (its \\input reader is in the lazily loaded sagebrush-latex.cjs and the page). The +156 is the embedded board frame page (frame/board/index.html.gz): its raw HTML is the same length (1597722 B), only the engine manifest's build id and file hashes differ, and those hashes compress 116 B worse gzipped (+156 as base64). Measured exactly (probe merge e208abba of 5425deaa into master 15914dc3, node 24.21.0, bun 1.4.4, CI's build order): /scratch/sagebrush-reviews/latex546-size-5425deaa-on-15914dc3.",
- "bytes": {
-  "cli/pyjs.cjs": 156
- }
-}

@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The LaTeX editor's read-only documents (#656, /?tex-doc= for the articles' links): boot.ts's 3-line hook, which hands such a link to the page module's openDoc, is in the notebook page's bundle that the CLI embeds (web/dist index.html, base64). Everything else of the feature is in the lazy chunk sagebrush-latex-doc.js, which the CLI does not carry. Measured with bun 1.4.4 at the exact probe merge onto master 27220e1c: pyjs +176, as CI's size-gate reported on b09d0c24.",
- "bytes": {
-  "cli/pyjs.cjs": 176
- }
-}
