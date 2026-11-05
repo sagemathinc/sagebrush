@@ -12,6 +12,9 @@ Copyright (c) 2001 Python Software Foundation. See
 
 - `lib/`: standard-library modules copied unchanged from CPython 3.14, each
   marked "Copied unchanged from CPython 3.14" in its first line.
+- `lib/statistics.py`: CPython 3.14's `Lib/statistics.py`, changed (the PSF License's clause 3 on derivative
+  works): when the `decimal` module is missing, as it is in Sagebrush, `Decimal` is a placeholder class that no
+  value is an instance of.
 - `lib/contextlib.py`: CPython 3.14's `Lib/contextlib.py`, changed (the PSF License's clause 3
   on derivative works): `_collections_abc._check_methods` is copied into it, and
   `suppress()` handles exception groups only when the builtins have
@@ -102,6 +105,10 @@ Copyright (c) 2001 Python Software Foundation. See
   half-even correction, `m_remainder`, `math_isclose_impl`,
   `math_modf_impl`, `math_fmod_impl`); `src/runtime/ops.ts`, `floatDivmod`:
   `_float_div_mod` (`Objects/floatobject.c`).
+- `src/runtime/modules.ts`, `math.sumprod`: ported from CPython 3.14's
+  `Modules/mathmodule.c` (`math_sumprod_impl`, with its triple-length
+  arithmetic `dl_sum`, `dl_mul`, `tl_fma` and `tl_to_d`); `fma`'s exact
+  product error is Dekker's split, with the factors scaled by powers of two.
 - `src/runtime/modules.ts`, `math.factorial`, `math.comb`, `math.perm` and
   `math.prod`: ported from CPython 3.14's `Modules/mathmodule.c`
   (`math_factorial` with `factorial_odd_part`, `factorial_partial_product`
