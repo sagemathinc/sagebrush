@@ -70,6 +70,9 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     add(f, t, at); add(f, e, at, 0, "texExamples");
     if (x?.textContent!.startsWith("Nothing")) { add(x, "New " + t); add(x, e, null, 0, "texExamples"); }
 }).observe(document.body, { childList: true, subtree: true });
+  // a published document, read only (?tex-doc=/articles/<series>/<name>.tex; the page module's openDoc checks the path)
+  const doc = p.get("tex-doc");
+  if (doc !== null) { const root = el("div"); document.body.append(root); await (await import(page)).openDoc(root, doc, ws, g.__sbTex); return true; }
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);

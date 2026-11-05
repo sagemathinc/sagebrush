@@ -123,6 +123,16 @@ export async function makeExample(ws: Workspace, ex: Example): Promise<Entry> {
   throw new Error("no free folder name");
 }
 
+// ---- a published document, opened read only (?tex-doc=, boot.ts: the articles' links): doc.ts, a chunk of its own
+// (/sagebrush-latex-doc.js), fetched only for such a link; it's given the editor's pieces from here, so they aren't
+// bundled twice
+const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
+export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
+  let m: typeof import("./doc");
+  try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
+  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
+}
+
 /** The file browser's New, "LaTeX file" (boot.ts adds the item and loads this module on its click): /Untitled.tex, or
  * "Untitled (2).tex", ... (the first name not taken), made by the person here with a short document, then opened in
  * the editor by boot.ts's own hook (`open`). */

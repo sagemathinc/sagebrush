@@ -250,6 +250,8 @@ for (const series of existsSync(adir) ? readdirSync(adir).sort((a, b) => rank(a)
   mkdirSync(join(out, "articles", series), { recursive: true });
   // (a series' boards, *.board.json, beside its pages, for /board/?doc=/articles/<series>/<name>.board.json)
   for (const f of readdirSync(sdir).filter((f) => f.endsWith(".board.json"))) copyFileSync(join(sdir, f), join(out, "articles", series, f));
+  // (and its LaTeX documents, *.tex, for the editor's read-only /?tex-doc=/articles/<series>/<name>.tex)
+  for (const f of readdirSync(sdir).filter((f) => /^[a-z0-9-]+\.tex$/.test(f))) copyFileSync(join(sdir, f), join(out, "articles", series, f));
   for (const p of pages) {
     const file = p.index ? join(out, "articles", series, "index.html") : join(out, "articles", series, p.url.split("/").pop() + ".html");
     writeFileSync(file, page(p));
