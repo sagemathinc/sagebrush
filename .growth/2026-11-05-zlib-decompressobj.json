@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "zlib.decompressobj (CPython's, for pandas read_excel's zip entries; ENGINE note r3.1): the inflater rewritten as a resumable state machine with a fast path, shared by zlib.decompress, gzip and _decompress_limited, and the Decompress type with decompress, flush, unused_data, unconsumed_tail and eof. It is core (zlib is a runtime module), in the worker and the CLI. With r2's one-shot cap, window compaction and gzip header checks; measured exactly with bun 1.4.4 at the merge of master b3b3f7b1 (#671) into this branch: worker +8389, pyjs +9649 (marked +64; the probe onto the earlier master gave +9521).",
+ "reason": "zlib.decompressobj (CPython's, for pandas read_excel's zip entries; ENGINE note r3.1): the inflater rewritten as a resumable state machine with a fast path, shared by zlib.decompress, gzip and _decompress_limited, and the Decompress type with decompress, flush, unused_data, unconsumed_tail and eof. It is core (zlib is a runtime module), in the worker and the CLI. With r2's one-shot cap, window compaction, and zlib's header checks and windowBits table (grader's r687d pins); measured exactly with bun 1.4.4 against master b3b3f7b1: worker +9013, pyjs +10462 (marked +64).",
  "bytes": {
-  "cli/pyjs.cjs": 9713,
-  "engine/sagebrush-worker.js": 8389
+  "cli/pyjs.cjs": 10526,
+  "engine/sagebrush-worker.js": 9013
  }
 }
