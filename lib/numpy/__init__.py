@@ -1703,13 +1703,30 @@ def repeat(a, repeats, axis=None):
 
 
 def tile(A, reps):
+    # (as NumPy's: reps is a sequence or one count. Every count 1 gives a COPY of an array, never A itself or a
+    # view of it, so writing to the result leaves A alone. A negative count is refused while A has elements, as
+    # NumPy's repeat refuses it; a count that is no integer (past the all-1 check, which 1.0 passes) as NumPy's
+    # final reshape refuses it)
+    try:
+        reps = tuple(reps)
+    except TypeError:
+        reps = (reps,)
+    if isinstance(A, ndarray) and reps.count(1) == len(reps):
+        return array(A, copy=True, ndmin=len(reps))
     A = asarray(A)
-    reps = (reps,) if isinstance(reps, int) else tuple(reps)
+    if A.size and reps and _builtins.min(reps) < 0:
+        raise ValueError("negative dimensions are not allowed")
+    reps = tuple(map(_index, reps))
     nd = _builtins.max(len(reps), A.ndim)
     A = A.reshape((1,) * (nd - A.ndim) + A.shape)
     reps = (1,) * (nd - len(reps)) + reps
     for ax, r in enumerate(reps):
-        if r == 0:
+        if r < 0:
+            # (A has no elements: NumPy only reshapes it, so a negative count is refused only on an axis of
+            # nonzero length, where it would make a negative one)
+            if A.shape[ax]:
+                raise ValueError("negative dimensions are not allowed")
+        elif r == 0:
             # (no copies: the axis is empty, as NumPy's tile gives)
             A = A[(slice(None),) * ax + (slice(0, 0),)]
         elif r != 1:
