@@ -9,7 +9,9 @@
 // - Save-Data, a 3G connection, a hidden tab, the tests' off switch: nothing fetched;
 // - a Run while sci.pre is still being fetched (the proxy serves it slowly): it is downloaded once;
 // - a Run while the first of the files (sci.src) is in flight: that one finishes, the next is never asked;
-// - a plain notebook whose only import lines are in a markdown cell: nothing fetched.
+// - a plain notebook whose only import lines are in a markdown cell: nothing fetched;
+// - a notebook importing pandas: the site's latest package set's pandas source chunk (with what it requires), each
+//   once, at idle, nothing pinned before the Run; the Run fetches it no more, and pins the same set it was given.
 //   bun web/build.ts && node web/test-preload-page.mjs      (CHROME=... for the browser)
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:fs";
@@ -40,19 +42,32 @@ ok(at > 0 && TABLE.groups && TABLE.modes && TABLE.tops?.numpy === "sci", "the pa
 const filesOf = (g) => { const e = TABLE.groups[g]; return [`/lib/${g}.src.${e[1]}.json`, ...(e[2] ? [`/lib/${g}.pre.${e[2]}.json`] : [])]; };
 const SCI = filesOf("sci");
 const SAGE = (TABLE.modes.sage ?? []).flatMap(filesOf);
+// the site's latest package set, and the chunks `import pandas` needs from it: pandas's source, and those of the
+// packages it requires (a set's precompiled chunks are per core build; the notebooks' set has none)
+const S = JSON.parse(readFileSync(join(dist, "pkgset", "latest.json"), "utf8")).id;
+const INDEX = JSON.parse(readFileSync(join(dist, "pkgset", S + ".json"), "utf8"));
+const PANDAS = (() => {
+  const seen = [], todo = Object.keys(INDEX.packages).filter((id) => id.startsWith("@sagebrush/pandas@"));
+  while (todo.length) { const id = todo.shift(); if (seen.includes(id)) continue; seen.push(id); todo.push(...(INDEX.packages[id].requires ?? [])); }
+  return seen.map((id) => `/pkg/${INDEX.packages[id].src.sha256}.json`);
+})();
+ok(PANDAS.length > 0 && PANDAS.every((f) => statSync(join(dist, f)).isFile()), `the latest set has pandas: ${PANDAS.length} source chunk(s)`);
 ok(SCI.every((f) => statSync(join(dist, f)).isFile()) && SAGE.length > 0 && SAGE.every((f) => statSync(join(dist, f)).isFile()), `the table's files are the build's own (sci: 2, sage's groups: ${SAGE.length})`);
 
-const NB = (mode, cells) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: mode === "sage" ? { name: "sagemath", language: "sage" } : { name: "python3", language: "python" } }, cells: cells.map((c) => (typeof c === "object" ? { cell_type: "markdown", source: c.md, metadata: {} } : { cell_type: "code", source: c, metadata: {}, outputs: [], execution_count: null })) });
+const NB = (mode, cells) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: mode === "sage" ? { name: "sagemath", language: "sage" } : mode === "python" ? { name: "python3", language: "python" } : { name: mode, language: mode } }, cells: cells.map((c) => (typeof c === "object" ? { cell_type: "markdown", source: c.md, metadata: {} } : { cell_type: "code", source: c, metadata: {}, outputs: [], execution_count: null })) });
 const DOCS = {
   "plain.ipynb": NB("python", ["print(1)", "x = 2\nprint(x * 3)"]),
   "numpy.ipynb": NB("python", ["import numpy as np\nprint(np.arange(3))"]),
   "numpy2.ipynb": NB("python", ["import numpy as np\nprint(np.arange(3))", "print(1)"]),
   "markdown.ipynb": NB("python", [{ md: "import numpy\n\nfrom scipy import linalg" }, "print(1)"]),
   "sage.ipynb": NB("sage", ["factor(12)"]),
+  "pandas.ipynb": NB("python", ["import pandas as pd\nprint(pd.DataFrame({'a': [1, 2]}).shape)"]),
+  "pandas-magma.ipynb": NB("magma", ["import pandas"]),
+  "pandas-matlab.ipynb": NB("matlab", ["import pandas"]),
 };
 
 // web/dist behind a recording proxy; /t/<name> serves the notebooks above; `slow`: a path served at 256 KB/s
-async function site(slow = null) {
+async function site(slow = null, alter = null) {
   const upstream = await freePort();
   const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
   children.add(server);
@@ -60,10 +75,13 @@ async function site(slow = null) {
   const front = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     if (path.startsWith("/t/")) { res.writeHead(200, { "content-type": "application/json" }); return res.end(DOCS[path.slice(3)] ?? "{}"); }
-    if (path.startsWith("/lib/")) asked.push(path);
+    // (`alter`: this path served with its bytes changed, still JSON, so they no longer have their SHA-256)
+    if (path === alter) { const b = readFileSync(join(dist, path.slice(1)), "utf8") + " "; asked.push(path); res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(b) }); return res.end(b); }
+    const rec = path.startsWith("/lib/") || path.startsWith("/pkg/");
+    if (rec) asked.push(path);
     const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
       res.writeHead(r.statusCode, r.headers);
-      if (!path.startsWith("/lib/")) return r.pipe(res);
+      if (!rec) return r.pipe(res);
       if (path !== slow) {
         r.on("data", (d) => bytes.set(path, (bytes.get(path) ?? 0) + d.length));
         return r.pipe(res);
@@ -121,8 +139,8 @@ async function chromium(init = "") {
 const count = (asked, f) => asked.filter((p) => p === f).length;
 const size = (f) => statSync(join(dist, f)).size;
 // (a case: a fresh site and browser, the notebook opened, `body` given them)
-async function kase(doc, body, { init = "", slow = null } = {}) {
-  const s = await site(slow), { t, close } = await chromium(init);
+async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
+  const s = await site(slow, alter), { t, close } = await chromium(init);
   try {
     ok(await t.open(`${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`), `(${doc}: the page is ready)`);
     await body(t, s);
@@ -195,6 +213,38 @@ try {
   await kase("markdown.ipynb", async (t, s) => {
     await sleep(6000);
     ok(s.asked.length === 0 && (await t.ev("sagebrush.preload.outcome")) === "nothing", "import lines only in a markdown cell: no /lib/ file fetched (outcome nothing): " + JSON.stringify([s.asked, await t.ev("sagebrush.preload.outcome")]));
+  });
+
+  // 8. pandas: the latest set's chunks it needs, each once, before any Run, nothing pinned; the Run fetches them no
+  // more and pins the set it was given (the same one)
+  await kase("pandas.ipynb", async (t, s) => {
+    for (let i = 0; i < 300 && !PANDAS.every((f) => s.bytes.get(f) === size(f)); i++) await sleep(100);
+    await sleep(1000);
+    const pkg = s.asked.filter((p) => p.startsWith("/pkg/"));
+    ok(JSON.stringify([...new Set(pkg)].sort()) === JSON.stringify([...PANDAS].sort()) && PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "a pandas notebook: exactly the set's chunks pandas needs, each once, at idle: " + JSON.stringify(pkg));
+    ok((await t.ev("window.__warms.length")) === 0 && (await t.ev("sagebrush.notebook.meta.pkgset")) === undefined, "...nothing ran, nothing pinned (its metadata names no set)");
+    const out = await t.run(0, 240000);
+    ok(out.includes("(2, 1)"), "its Run: " + JSON.stringify(out));
+    ok(PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "...fetched none of them again: " + JSON.stringify(s.asked.filter((p) => p.startsWith("/pkg/"))));
+    ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S, "...and pinned the set it used at the Run: the latest, the one prefetched");
+  });
+
+  // 9. the set's index served with other bytes than its id's (the grader's H1, on 3803c922): refused, so no chunk of it
+  // is fetched at idle
+  await kase("pandas.ipynb", async (t, s) => {
+    for (let i = 0; i < 200 && (await t.ev("sagebrush.preload.outcome")) === null; i++) await sleep(100);
+    await sleep(12000);
+    const pkg = s.asked.filter((p) => p.startsWith("/pkg/")), index = s.asked.filter((p) => p === `/pkgset/${S}.json`);
+    ok(index.length >= 1 && pkg.length === 0, "the set's index with other bytes than its id's: no chunk of it fetched at idle: " + JSON.stringify({ index: index.length, pkg, outcome: await t.ev("sagebrush.preload.outcome") }));
+  }, { alter: `/pkgset/${S}.json` });
+
+  // 10. an import line in a Magma or a MATLAB notebook (the grader's H6, on a003dea1): not Python, so no package chunk is
+  // fetched at idle, nor the set's index
+  for (const [name, mode] of [["pandas-magma.ipynb", "magma"], ["pandas-matlab.ipynb", "matlab"]]) await kase(name, async (t, s) => {
+    for (let i = 0; i < 200 && (await t.ev("sagebrush.preload.outcome")) === null; i++) await sleep(100);
+    await sleep(12000);
+    const pkg = s.asked.filter((p) => p.startsWith("/pkg/") || p.startsWith("/pkgset/"));
+    ok((await t.ev("sagebrush.notebook.mode")) === mode && pkg.length === 0, `an import line in a ${mode} notebook: no package chunk, nor the set's index, fetched at idle: ` + JSON.stringify({ mode: await t.ev("sagebrush.notebook.mode"), pkg, outcome: await t.ev("sagebrush.preload.outcome") }));
   });
 } catch (e) {
   ok(false, "the test threw: " + (e?.stack ?? e));
