@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "MCF-12 (#669): real Cholesky failed-pivot status and completed leading factors, honoring the selected triangle. After merging master 388201305, ordinary calls retain engine/nd dispatch; status-reporting calls keep the loop so partial factors survive failure. Exact candidate 3134858d5 measured by daybreak2 against 388201305 with Bun 1.4.4 and Node 24.21.0: lib.gen +296, pyjs +412 (+64 build-metadata allowance gives marker 476), matlab.pre +3199, matlab.src +834, worker +64. No dependencies or new chunks.",
+ "bytes": {
+  "cli/lib.gen.js": 296,
+  "cli/pyjs.cjs": 476,
+  "engine/lib/matlab.pre": 3199,
+  "engine/lib/matlab.src": 834,
+  "engine/sagebrush-worker.js": 64
+ }
+}
