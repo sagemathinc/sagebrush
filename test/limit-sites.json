@@ -7731,6 +7731,14 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
+ "src/latex-cli.ts :: removeTemp :: try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "latex",
+  "reason": "removeTemp retries the scratch folder's removal at most 10 times, 50 ms apart (Node's rmSync maxRetries), so a browser helper still writing can't fail a finished render; then it gives up quietly"
+ },
  "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
   "class": "1",
   "disposition": {
