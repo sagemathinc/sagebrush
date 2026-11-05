@@ -5,6 +5,7 @@
 // ({file: {path, bytes}}, the buffer transferred, decoded here), so nothing is
 // cloned; it reports each finding as it goes.  Built as its own chunk (web/build.ts), loaded only when Share opens.
 import { fileDeps } from "./file-deps";
+import { dependencies } from "./document-deps";
 
 const waiting = new Map<string, { ok: (t: string) => void; no: (e: Error) => void }>();
 
@@ -23,6 +24,31 @@ self.onmessage = (ev: MessageEvent) => {
 async function run(s: any) {
   const gen = s.gen;
   const post = (x: object) => (self as any).postMessage({ gen, ...x });
+  const readFile = (path: string) =>
+    new Promise<string>((ok, no) => {
+      waiting.set(path, { ok, no });
+      post({ need: path });
+    });
+  // (a document (documentDeps, deps-client.ts): its files, as Dep objects, through the same messages)
+  if (s.doc) {
+    try {
+      const r = await dependencies(s.doc.path, s.doc.text, s.doc.kind, {
+        files: new Map(s.files),
+        readFile,
+        importPath: s.importPath,
+        builtinModules: new Set(s.builtinModules),
+        externalModules: new Set(s.externalModules),
+        packageModules: new Set(s.packageModules),
+        onDep: (d) => post({ dep: d.path, reason: d }),
+        onProgress: (p) => post({ progress: p }),
+      });
+      for (const u of r.unfollowed) post({ unfollowed: u });
+      post({ done: true, complete: r.complete });
+    } catch {
+      post({ done: true, complete: false, failed: true });
+    }
+    return;
+  }
   try {
     const r = await fileDeps({
       cells: s.cells,
@@ -32,11 +58,7 @@ async function run(s: any) {
       builtinModules: new Set(s.builtinModules),
       externalModules: new Set(s.externalModules),
       packageModules: new Set(s.packageModules),
-      readFile: (path) =>
-        new Promise((ok, no) => {
-          waiting.set(path, { ok, no });
-          post({ need: path });
-        }),
+      readFile,
       onDep: (path, reason) => post({ dep: path, reason }),
       onUnfollowed: (u) => post({ unfollowed: u }),
       onProgress: (p) => post({ progress: p }),
