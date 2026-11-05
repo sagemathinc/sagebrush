@@ -114,6 +114,16 @@ moved = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><i
          '</sheetData></worksheet>') % MAIN
 case("cell in another row", lambda: show(pd.read_excel(B([("S", moved)]))))
 case("cell in another row, scanner", lambda: show(pd.read_excel(B([("S", moved.replace("<sheetData>", "<sheetData >"))]))))
+# a row's number and a cell's reference in other forms, as openpyxl parses them: the row an int or an integral
+# float, the cell's letters any case before an int (the row element's row is the one used)
+def refs(row_r, cell_r):
+    xml = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="B1" t="inlineStr"><is><t>b</t></is></c></row>'
+           '<row r="%s"><c r="%s"><v>5</v></c></row></sheetData></worksheet>') % (MAIN, row_r, cell_r)
+    return show(pd.read_excel(B([("S", xml)])))
+for r in (" 3", "3 ", "+3", "03", "3.0", "3.5", "x", "", "0", "-1"):
+    case("row r=%r" % r, lambda r=r: refs(r, "B3"))
+for c in ("b3", "B03", "$B$3", "B 3", "3", "B", "AAAA3", "B3.0", " B3"):
+    case("cell r=%r" % c, lambda c=c: refs("3", c))
 
 # what isn't a workbook: pandas' errors
 case("bytes", lambda: pd.read_excel(workbook([("S", [["a"]])])))

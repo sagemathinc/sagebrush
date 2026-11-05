@@ -125,6 +125,39 @@ case("row past Excel's", lambda: read(with_sheet(sheet('<row r="1048577"><c r="A
 case("column past Excel's", lambda: read(with_sheet(sheet('<row r="1"><c r="XFE1"><v>1</v></c></row>'))))
 case("row past Excel's, scanner", lambda: read(with_sheet(sheet('<row r="1048577"><c r="A1048577"><v>1</v></c></row>', "<sheetData >"))))
 
+# the dense cells, whatever the budget (this test's is unlimited): one cell at XFD1048576 (Excel's last) is
+# refused before any range is made (_pd_excel's range is watched); with the cap lowered for the test, a sheet
+# of exactly MAX_DENSE_CELLS cells reads, and one past it is refused; Excel's last column, XFD, reads
+far = sheet('<row r="1048576"><c r="XFD1048576"><v>1</v></c></row>')
+case("max dense cells", lambda: X.MAX_DENSE_CELLS)
+def no_range(data):
+    # (a range in _pd_excel raises at once, so that without the cap this case stops there, making nothing)
+    calls = []
+
+    def spy(*a):
+        calls.append(a)
+        raise AssertionError("range%r called before the cap" % (a,))
+    X.range = spy
+    try:
+        try:
+            got = read(data)
+        except (MemoryError, AssertionError) as e:
+            got = "%s: %s" % (type(e).__name__, e)
+    finally:
+        del X.range
+    return got, calls
+case("XFD1048576", lambda: no_range(with_sheet(far)))
+def dense(cap, ref, row):
+    saved = X.MAX_DENSE_CELLS
+    X.MAX_DENSE_CELLS = cap
+    try:
+        return read(with_sheet(sheet('<row r="%d"><c r="%s"><v>1</v></c></row>' % (row, ref))))
+    finally:
+        X.MAX_DENSE_CELLS = saved
+case("dense at the cap", lambda: dense(100, "J10", 10))
+case("dense past the cap", lambda: dense(99, "J10", 10))
+case("Excel's last column", lambda: read(with_sheet(sheet('<row r="1"><c r="XFD1"><v>1</v></c></row>')))[0])
+
 # the fast path's work: sheetData found by find and rfind, so 200,000 openings and no close take one pass
 # (a quadratic search would take minutes here), and the scanner then refuses the nesting
 opens = '<worksheet xmlns="%s">' % MAIN + "<sheetData>" * 200000

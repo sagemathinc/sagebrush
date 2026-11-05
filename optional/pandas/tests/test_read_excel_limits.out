@@ -82,6 +82,16 @@ True
 !! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1, column 16385)
 == row past Excel's, scanner
 !! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1048577, column 1)
+== max dense cells
+134217728
+== XFD1048576
+("MemoryError: read_excel: the sheet's 1048576 x 16384 cells are more than Sagebrush's limit of 134217728 dense cells (pandas._pd_excel.MAX_DENSE_CELLS)", [])
+== dense at the cap
+((9, 10), ['Unnamed: 0', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8', 'Unnamed: 9'])
+== dense past the cap
+!! MemoryError: read_excel: the sheet's 10 x 10 cells are more than Sagebrush's limit of 99 dense cells (pandas._pd_excel.MAX_DENSE_CELLS)
+== Excel's last column
+(0, 16384)
 == openings, fast path
 None
 == openings, scanner

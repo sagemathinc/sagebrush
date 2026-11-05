@@ -149,9 +149,6 @@ def _from_excel(v, d1904, kind):
     return _EPOCH_1900 + timedelta(days=v)
 
 
-_REF = re.compile(r"([A-Z]{1,3})([0-9]+)")
-
-
 def _col_index(letters):
     n = 0
     for ch in letters:
@@ -319,6 +316,9 @@ _MAX_COLS = 16384
 # sheet's row, in _frame's padded row and in its column's values)
 _ROW_BYTES = 128
 _CELL_BYTES = 24
+# A memory guard, whatever the budget (the default budget is unlimited): at most 2**27 dense cells, about
+# 3 GiB at _CELL_BYTES each, under numpy's 4 GiB array limit; past it, MemoryError, as numpy's guard.
+MAX_DENSE_CELLS = 2 ** 27
 
 
 def _sheet_rows(z, path, strings, xfs, d1904, budget, file_rows):
@@ -337,12 +337,17 @@ def _sheet_rows(z, path, strings, xfs, d1904, budget, file_rows):
         rows = {i: r for i, r in rows.items() if i < cut}
     if not rows:
         return []
-    # (the dense size, from the highest row and column: bounded, then charged, before any row is made)
+    # (the dense size, from the highest row and column: bounded by Excel's sheet and MAX_DENSE_CELLS, then
+    # charged to the budget, before any row is made)
     last = max(rows)
     width = max(max(r) for r in rows.values()) + 1
     if last >= _MAX_ROWS or width > _MAX_COLS:
         raise ValueError("read_excel: the sheet has a cell past Excel's %d rows and %d columns (row %d, column %d)"
                          % (_MAX_ROWS, _MAX_COLS, last + 1, width))
+    cells = (last + 1) * width
+    if cells > MAX_DENSE_CELLS:
+        raise MemoryError("read_excel: the sheet's %d x %d cells are more than Sagebrush's limit of %d dense cells "
+                          "(pandas._pd_excel.MAX_DENSE_CELLS)" % (last + 1, width, MAX_DENSE_CELLS))
     budget.charge((last + 1) * (_ROW_BYTES + _CELL_BYTES * width), "the sheet's %d x %d cells" % (last + 1, width))
     out = []
     for i in range(last + 1):
@@ -364,7 +369,7 @@ def _scan_rows(doc, strings, xfs, d1904):
             n = local(ev[1])
             if n == "row":
                 r = ev[2].get("r")
-                row_i = int(r) - 1 if r else row_i + 1
+                row_i = _row_number(r) - 1 if r is not None else row_i + 1
                 col = -1
                 # (openpyxl's reader: a row whose number is below the next one expected is not read)
                 dropped = row_i < nxt
@@ -373,8 +378,7 @@ def _scan_rows(doc, strings, xfs, d1904):
             elif n == "c":
                 ref = ev[2].get("r")
                 if ref:
-                    m = _REF.fullmatch(ref)
-                    col = _col_index(m.group(1)) if m else col + 1
+                    col = _ref_column(ref)
                 else:
                     col += 1
                 cell = {"t": ev[2].get("t", "n"), "s": int(ev[2].get("s", "0")), "v": None, "is": []}
@@ -397,6 +401,32 @@ def _scan_rows(doc, strings, xfs, d1904):
                     rows.setdefault(row_i, {})[col] = val
                 cell = None
     return rows
+
+
+def _row_number(r):
+    # (openpyxl's parse_row: an int, or a float that is one)
+    try:
+        return int(r)
+    except ValueError:
+        val = float(r)
+        if val.is_integer():
+            return int(val)
+        raise ValueError("%s is not a valid row number" % r) from None
+
+
+def _ref_column(ref):
+    # (openpyxl's coordinate_to_tuple: the letters before the first digit, any case, and an int after them;
+    # only the column is used, the row being the row element's)
+    idx = 0
+    for idx, ch in enumerate(ref):
+        if ch in "0123456789":
+            break
+    col, row = ref[:idx], ref[idx:]
+    int(row)
+    c = col.upper()
+    if not (1 <= len(c) <= 3 and all("A" <= x <= "Z" for x in c)):
+        raise ValueError("'%s' is not a valid column name. Column names are from A to ZZZ" % col)
+    return _col_index(c)
 
 
 def _cell_value(c, strings, xfs, d1904):

@@ -179,6 +179,62 @@ d
 ([('a', 'object'), ('b', 'int64')], [['1', "'x'"], ['2', '3']],    a  b
 0  1  2
 1  x  3)
+== row r=' 3'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== row r='3 '
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== row r='+3'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== row r='03'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== row r='3.0'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== row r='3.5'
+!! ValueError: 3.5 is not a valid row number
+== row r='x'
+!! ValueError: could not convert string to float: 'x'
+== row r=''
+!! ValueError: could not convert string to float: ''
+== row r='0'
+([('a', 'object'), ('b', 'object')], [[], []], Empty DataFrame
+Columns: [a, b]
+Index: [])
+== row r='-1'
+([('a', 'object'), ('b', 'object')], [[], []], Empty DataFrame
+Columns: [a, b]
+Index: [])
+== cell r='b3'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== cell r='B03'
+([('a', 'float64'), ('b', 'float64')], [['nan', 'nan'], ['nan', '5.0']],     a    b
+0 NaN  NaN
+1 NaN  5.0)
+== cell r='$B$3'
+!! ValueError: '$B$' is not a valid column name. Column names are from A to ZZZ
+== cell r='B 3'
+!! ValueError: 'B ' is not a valid column name. Column names are from A to ZZZ
+== cell r='3'
+!! ValueError: '' is not a valid column name. Column names are from A to ZZZ
+== cell r='B'
+!! ValueError: invalid literal for int() with base 10: 'B'
+== cell r='AAAA3'
+!! ValueError: 'AAAA' is not a valid column name. Column names are from A to ZZZ
+== cell r='B3.0'
+!! ValueError: invalid literal for int() with base 10: '3.0'
+== cell r=' B3'
+!! ValueError: ' B' is not a valid column name. Column names are from A to ZZZ
 == bytes
 !! TypeError: Expected file path name or file-like object, got <class 'bytes'> type
 == not a file
