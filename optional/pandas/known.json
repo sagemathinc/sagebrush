@@ -132,9 +132,9 @@
       "reason": "pandas.concat is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.pd.to_datetime",
-      "message": "pandas.to_datetime is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.to_datetime is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.pd.Timedelta",
+      "message": "pandas.Timedelta is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Timedelta (time differences) is outside the subset: PR A brings times, not their differences; it raises before any work"
     },
     {
       "case": "name.pd.Categorical",
@@ -222,9 +222,9 @@
       "reason": "pandas.Series.str is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.Series.dt",
-      "message": "pandas.Series.dt is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Series.dt is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.Series.rolling",
+      "message": "pandas.Series.rolling is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.rolling is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.Series.groupby",
@@ -445,6 +445,121 @@
       "case": "csv.url-s3",
       "message": "read_csv from a URL isn't supported; download the file into the project first",
       "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
+    },
+    {
+      "case": "dt.series-values",
+      "message": "pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"
+    },
+    {
+      "case": "dt.series-to_numpy",
+      "message": "pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"
+    },
+    {
+      "case": "dt.series-to_numpy-copy",
+      "message": "pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"
+    },
+    {
+      "case": "dt.frame-values",
+      "message": "pandas.DataFrame.values of a frame with datetime64[us] columns (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"
+    },
+    {
+      "case": "dt.series-diff",
+      "message": "pandas.diff of a datetime64[us] column (a Timedelta column) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives a timedelta64 column; Timedelta is outside the subset, so it refuses before any work"
+    },
+    {
+      "case": "dt.timestamp-sub",
+      "message": "pandas: Timedelta (a difference of times) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives a Timedelta; Timedelta is outside the subset, so it refuses before any work"
+    },
+    {
+      "case": "dt.number-without-unit",
+      "message": "pandas: to_datetime of a number without a unit (pandas reads it as nanoseconds) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas reads a bare number as nanoseconds since 1970, a datetime64[ns] result; only microseconds are kept here, so a number needs a unit"
+    },
+    {
+      "case": "dt.timezone",
+      "message": "pandas: to_datetime's dayfirst, yearfirst and utc is not in Sagebrush's pandas 0.x subset",
+      "reason": "timezones (utc=True gives datetime64[us, UTC]) and day-first parsing are outside the subset; naive times only"
+    },
+    {
+      "case": "dt.outside-exact-years",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses rather than round"
+    },
+    {
+      "case": "dt.fraction-origin",
+      "message": "pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas 3.1 makes datetime64[ns] of a list with a fractional number; only microseconds (datetime64[us]) are kept in this subset, so it refuses rather than give another unit"
+    },
+    {
+      "case": "dt.fraction-seconds",
+      "message": "pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas 3.1 makes datetime64[ns] of a list with a fractional number; only microseconds (datetime64[us]) are kept in this subset, so it refuses rather than give another unit"
+    },
+    {
+      "case": "dt.all-nat-text",
+      "message": "pandas: to_datetime of strings that are all NaT (pandas makes datetime64[s] of them) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas 3.1 makes datetime64[s] of a list of strings that are all NaT; only datetime64[us] is kept here"
+    },
+    {
+      "case": "dt.exact-false-format",
+      "message": "pandas: to_datetime's exact=False with a format is not in Sagebrush's pandas 0.x subset",
+      "reason": "with a format, exact=False matches the format anywhere in the string and pandas 3.1 makes datetime64[ns]; only whole-string matches and datetime64[us] are kept here (exact=False without a format changes nothing, and is accepted)"
+    },
+    {
+      "case": "dt.far-december",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses before any other check rather than round or leak another error"
+    },
+    {
+      "case": "dt.far-datetime",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses rather than round"
+    },
+    {
+      "case": "dt.far-list",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses rather than round"
+    },
+    {
+      "case": "dt.far-number",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses rather than round"
+    },
+    {
+      "case": "dt.tz-list",
+      "message": "pandas: a time with a timezone is not in Sagebrush's pandas 0.x subset",
+      "reason": "timezone-aware times (datetime64[us, UTC]) are outside the subset; naive times only, refused in lists and Series as in Timestamp()"
+    },
+    {
+      "case": "dt.sub-microsecond",
+      "message": "pandas: to_datetime of a number below a microsecond (a nanosecond result) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas 3.1 gives a nanosecond Timestamp for a fraction of a microsecond; only microseconds are kept here, so it refuses rather than round"
+    },
+    {
+      "case": "dt.origin-no-unit",
+      "message": "pandas: to_datetime's origin= without a unit (nanoseconds) is not in Sagebrush's pandas 0.x subset",
+      "reason": "without a unit pandas reads the number as nanoseconds after the origin; only microseconds are kept here"
+    },
+    {
+      "case": "dt.day-of-year-past-2255",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "day 366 of 2255 runs on into 2256-01-01 (as pandas' strptime does), past the years whose int64 microseconds are exact here (to 2**53): refused rather than rounded"
+    },
+    {
+      "case": "dt.format-directive-b",
+      "message": "pandas: to_datetime's format directive '%b' is not in Sagebrush's pandas 0.x subset",
+      "reason": "a format takes only %Y %m %d %H %M %S %y %f %j and %%, the directives the corpus uses; another of strptime's directives (here the month's name) is refused rather than misread as literal text"
+    },
+    {
+      "case": "dt.format-year-0",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "with a format the year bound applies first too: year 0 is outside the years whose int64 microseconds are exact here (to 2**53), refused rather than leak the host's 'year must be in 1..9999'"
     }
   ]
 }

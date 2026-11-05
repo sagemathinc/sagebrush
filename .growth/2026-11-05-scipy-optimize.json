@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "scipy.optimize PR1 (#671, William's QRPM book corpus, 8 cells): minimize (BFGS, CG, Nelder-Mead), minimize_scalar and the fmin functions, generated from SciPy 1.18. The code is its own lazy chunk, mod-scipy-optimize (its own budgets row, 87068). The CLI carries every library module, gzipped and base64 in lib.gen and so in pyjs, with no lazy loading (lib/scipy/optimize.py is about 19 KB gzip-9, so about 26 KB in base64). The worker's +1114 is its library manifest entry for the chunk, NOTICE.md's SciPy optimize paragraph (BSD attribution, as for special) and _numpy._admit_work (+197, the combined working-memory admission optimize's steps call, astra's OPT671-WORK-1). The notebook page's +51 is its manifest entry. sci.pre +14 and sci.src +58 are scipy/__init__'s 'optimize' submodule entry and docstring line, needed before the import. Measured exactly with bun 1.4.4 and node 24.21.0 at the probe merge of d30e709b onto master a3ef5e45: lib.gen +26491, pyjs +27885 at master 3264180f (marked +64).",
+ "bytes": {
+  "cli/lib.gen.js": 26491,
+  "cli/pyjs.cjs": 27949,
+  "engine/lib/sci.pre": 14,
+  "engine/lib/sci.src": 58,
+  "engine/sagebrush-notebook.js": 51,
+  "engine/sagebrush-worker.js": 1114
+ }
+}
