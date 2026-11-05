@@ -616,7 +616,7 @@ def _spd(B):
     if M is None:
         return None
     try:
-        np.linalg.cholesky(M)
+        np.linalg._chol(M, False, False)
         return True
     except Exception:
         return False
@@ -633,7 +633,7 @@ def _dense_ritz(op, n, dt, hermitian, b_spd, A, B, sigma):
     if A is not None and hermitian and B is not None and b_spd:
         Bd = B.A if not B.sparse else np.array(_m._mat(_sp.full(B.S)))
         try:
-            L = np.linalg.cholesky((Bd + np.conj(Bd.T)) / 2)
+            L = np.linalg._chol((Bd + np.conj(Bd.T)) / 2, False, False)
         except Exception:
             # (a semidefinite B, which IsSymmetricDefinite allows with a
             # numeric sigma: the shift-invert operator's matrix instead)

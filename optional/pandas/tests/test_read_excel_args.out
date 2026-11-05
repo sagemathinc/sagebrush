@@ -1,0 +1,137 @@
+== header=-1
+!! ValueError: Passing negative integer to header is invalid. For no header, use header=None instead
+== header=0
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== header=3
+([('3', 'object'), ('z', 'object')], Empty DataFrame
+Columns: [3, z]
+Index: [])
+== header=4
+!! ValueError: Passed header=[4], len of 1, but only 4 lines in file (sheet: 0)
+== header=1.5
+!! ValueError: header must be integer or list of integers
+== header='a'
+!! ValueError: header must be integer or list of integers
+== header=True
+!! TypeError: Passing a bool to header is invalid. Use header=None for no header or header=int or list-like of ints to specify the row(s) making up the column names
+== nrows=-1
+!! ValueError: 'nrows' must be an integer >=0
+== nrows=0
+([('a', 'object'), ('b', 'object')], Empty DataFrame
+Columns: [a, b]
+Index: [])
+== nrows=1.5
+!! ValueError: 'nrows' must be an integer >=0
+== nrows=2.0
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y)
+== nrows='2'
+!! ValueError: 'nrows' must be an integer >=0
+== nrows=True
+!! ValueError: 'nrows' must be an integer >=0
+== nrows=99
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== skiprows=-1
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== skiprows=0
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== skiprows=[-1]
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== skiprows=[9]
+([('a', 'int64'), ('b', 'str')],    a  b
+0  1  x
+1  2  y
+2  3  z)
+== skiprows=4
+([], Empty DataFrame
+Columns: []
+Index: [])
+== skiprows=9
+([], Empty DataFrame
+Columns: []
+Index: [])
+== skiprows=1.5
+!! TypeError: 'float' object is not iterable (sheet: 0)
+== usecols=['missing']
+!! ValueError: Usecols do not match columns, columns expected but not found: ['missing'] (sheet: 0)
+== usecols=['a', 'missing']
+!! ValueError: Usecols do not match columns, columns expected but not found: ['missing'] (sheet: 0)
+== usecols=[5]
+!! ParserError: Defining usecols with out-of-bounds indices is not allowed. [5] are out-of-bounds. (sheet: 0)
+== usecols=[0, 5]
+!! ParserError: Defining usecols with out-of-bounds indices is not allowed. [5] are out-of-bounds. (sheet: 0)
+== usecols=[1]
+([('b', 'str')],    b
+0  x
+1  y
+2  z)
+== usecols=[0, 'b']
+!! ValueError: 'usecols' must either be list-like of all strings, all unicode, all integers or a callable. (sheet: 0)
+== usecols=[0, 0]
+([('a', 'int64')],    a
+0  1
+1  2
+2  3)
+== usecols='A:Z'
+!! ParserError: Defining usecols with out-of-bounds indices is not allowed. [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25] are out-of-bounds. (sheet: 0)
+== usecols='C'
+!! ParserError: Defining usecols with out-of-bounds indices is not allowed. [2] are out-of-bounds. (sheet: 0)
+== usecols='B'
+([('b', 'str')],    b
+0  x
+1  y
+2  z)
+== usecols='1'
+!! ValueError: Invalid column name: 1
+== usecols='b'
+([('b', 'str')],    b
+0  x
+1  y
+2  z)
+== index_col=1
+([('a', 'int64')],    a
+b   
+x  1
+y  2
+z  3)
+== index_col=2
+!! IndexError: list index out of range (sheet: 0)
+== index_col=-1
+([('a', 'int64')],    a
+b   
+x  1
+y  2
+z  3)
+== index_col=True
+!! ValueError: The value of index_col couldn't be 'True' (sheet: 0)
+== sheet_name=-1
+([('c', 'int64')],    c
+0  9)
+== sheet_name=1
+([('c', 'int64')],    c
+0  9)
+== sheet_name=1.5
+!! TypeError: list indices must be integers or slices, not float
+== sheet_name=[0, 0]
+{0: ([('a', 'int64'), ('b', 'str')], (3, 2))}
+== sheet_name=[]
+!! ValueError: Sheet name is an empty list
+== sheet_name=True
+([('c', 'int64')],    c
+0  9)

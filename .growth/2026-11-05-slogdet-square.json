@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The backend's slogdet (_nplinalg.slogdet) now refuses a non-square matrix with LinAlgError, as det, inv and solve already do: before, a 3 x 4 matrix gave a log-determinant and 256 x 257 gave (0, -inf). np.linalg.slogdet checked first, so only direct callers saw it (the grader's r684d probe on #684). The worker grows by the one check (+70); the CLI bundle carries the same code (pyjs +167).",
+ "bytes": {
+  "cli/pyjs.cjs": 167,
+  "engine/sagebrush-worker.js": 70
+ }
+}

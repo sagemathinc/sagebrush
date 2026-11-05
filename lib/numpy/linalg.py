@@ -74,6 +74,9 @@ def _stacked(f, a, *rest, empty=None):
 
 
 def _square(a):
+    # (an array of fewer than 2 dimensions first, with NumPy's error, before its shape[-2] is read)
+    if a.ndim < 2:
+        raise LinAlgError("%d-dimensional array given. Array must be at least two-dimensional" % a.ndim)
     if a.shape[-1] != a.shape[-2]:
         raise LinAlgError("Last 2 dimensions of the array must be square")
 
@@ -154,9 +157,19 @@ def matrix_power(a, n):
 
 
 def cholesky(a, *, upper=False):
+    return _chol(a, upper, True)
+
+
+def _chol(a, upper, numpy_nan):
+    # (numpy_nan: NumPy's rule, OpenBLAS potrf's, refusing only a pivot <= 0, so a NaN pivot passes and fills the
+    # rest with NaN; without it MATLAB's, refusing any pivot not > 0, NaN included: MATLAB mode calls this so)
     a = _float(a)
     _square(a)
-    L = _stacked(_L.cholesky, a, empty=lambda m, n, dt: ((n, n), dt))
+    # (upper=True reads the upper triangle, as NumPy's (LAPACK uplo='U'): the lower kernel factors the transpose,
+    # whose lower triangle it is, and its factor transposed is the upper one; the lower triangle is not read)
+    if upper:
+        a = _np.swapaxes(a, -1, -2)
+    L = _stacked(lambda m: _L.cholesky(m, False, numpy_nan), a, empty=lambda m, n, dt: ((n, n), dt))
     return _np.swapaxes(L, -1, -2) if upper else L
 
 
@@ -164,10 +177,11 @@ def _kernels():
     """Which code Sagebrush's linear algebra runs in this session: for each
     function backed by engine/nd, its path ("engine/nd", "typescript", or
     "undecided" before its first call that could use it), the kernel, why not
-    engine/nd, and the smallest n it is used for (below it, the TypeScript
-    code, which is faster there)."""
-    path, kernel, why, from_n = _L._kernels()
-    return {"cholesky": {"path": path, "kernel": kernel, "why": why, "from_n": from_n}}
+    engine/nd, and the smallest n it is used for (below it, the older code,
+    which is faster there)."""
+    path, kernel, why, chol, lu = _L._kernels()
+    k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n}
+    return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 
 class _Result(tuple):

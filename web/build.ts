@@ -97,6 +97,30 @@ mkdirSync(join(here, "dist", "lib", "tzdata"), { recursive: true });
 for (const [f, bytes] of tz.files) writeFileSync(join(here, "dist", f), bytes);
 console.log(`zone data: tzdata ${tz.ref.version}, ${tz.files.size - 1} zone files (${([...tz.files.values()].reduce((n, b) => n + b.length, 0) / 1e3).toFixed(0)} kB), index ${(tz.ref.size / 1e3).toFixed(0)} kB`);
 const LIB_CHUNKS = [...libChunkFiles.keys(), ...tz.files.keys()];
+// (background loading's table, web/preload.ts: each library group's chunk files and bytes, each mode's groups, and the
+// group of each top-level module's entry file (`a/__init__.py` or `a.py`), from this manifest, so the page fetches
+// exactly the files the worker would)
+const PRELOAD = (() => {
+  // (a group: [its bytes, its src chunk's name hash, its pre chunk's], the files being lib/<group>.<kind>.<hash>.json)
+  const groups: Record<string, [number, string, string?]> = {};
+  const hash = (g: string, k: string, f: string) => {
+    const h = f.slice(`lib/${g}.${k}.`.length, -".json".length);
+    if (!f.startsWith(`lib/${g}.${k}.`) || !f.endsWith(".json") || !/^[0-9a-f]{16}$/.test(h)) throw new Error(`background loading's table: ${f} isn't lib/${g}.${k}.<hash>.json`);
+    return h;
+  };
+  for (const [g, c] of Object.entries(libManifest.chunks)) groups[g] = [c.src.size + (c.pre?.size ?? 0), hash(g, "src", c.src.file), ...(c.pre ? [hash(g, "pre", c.pre.file)] : [])] as [number, string, string?];
+  const tops: Record<string, string> = {};
+  for (const [p, g] of Object.entries(libManifest.files)) {
+    const m = /^([A-Za-z_]\w*)(?:\/__init__\.py|\.py)$/.exec(p);
+    // (a private module (`_name`) is the library's own, never a notebook's import)
+    if (m && !m[1].startsWith("_") && !(m[1] in tops)) tops[m[1]] = g;
+  }
+  // (only the groups a mode or a module names: no other is ever prefetched)
+  const used = new Set([...Object.values(libManifest.modes).flat(), ...Object.values(tops)]);
+  for (const g of Object.keys(groups)) if (!used.has(g)) delete groups[g];
+  return { groups, modes: libManifest.modes, tops };
+})();
+console.log(`background loading's table: ${Object.keys(PRELOAD.groups).length} groups, ${Object.keys(PRELOAD.tops).length} modules, ${JSON.stringify(PRELOAD).length} B`);
 console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
 // What the runner's broker may fetch for its interpreter, exactly (G-10, web/runner-fetch.mts): every bundle is
 // built with it as __SB_RUNNER_FETCH__ (the one that uses it is web/notebook/runner-worker.js), and a bundle
@@ -185,7 +209,7 @@ const analyzeResult = await Bun.build(<any>{
   plugins: [{ name: "unames", setup(build) { build.onResolve({ filter: /unames\.gen$/ }, () => ({ path: join(here, "shims", "unames.ts") })); } }],
 });
 // A shared collection's page, /s/<id> (web/share-client/view.ts; design/sharing.md)
-const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true });
+const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true, define: { __SB_PRELOAD__: JSON.stringify(PRELOAD) } });
 // the reader's own copy from a shared collection (web/share-client/copy.ts, book links B1): the workspace, on demand
 const shareCopyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "copy.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-copy.js", target: "browser", format: "esm", minify: true });
 // the Share dialog's analysis worker (web/deps/deps-worker.ts, share-ux-plan r2 §3): its own
@@ -232,7 +256,7 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   // (SAGEBRUSH_MEASURE_IDS=keep: the size gate's identifier-stable measuring variant, never shipped: identifiers kept,
   //  so the DEV page's script is PROD's with the DEV-only code inserted; scripts/line3-measure.mjs)
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: process.env.SAGEBRUSH_MEASURE_IDS === "keep" ? { whitespace: true, syntax: true, identifiers: false } : true, define: LATEX_DEFINE });
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: process.env.SAGEBRUSH_MEASURE_IDS === "keep" ? { whitespace: true, syntax: true, identifiers: false } : true, define: { ...LATEX_DEFINE, __SB_PRELOAD__: JSON.stringify(PRELOAD) } });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);
@@ -254,7 +278,7 @@ if (LATEX) {
   // the agent tools' work, tools.ts, a third, fetched on an agent's first latex_check or latex_render; the presenter,
   // present.ts, a fourth, fetched when Present is pressed; and beamer's code, engine/beamer.mjs, the worker's, fetched
   // when a document first needs it: the class beamer, or an overlay command)
-  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["doc.ts", "sagebrush-latex-doc.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["examples.ts", "sagebrush-latex-examples.js"], ["doc.ts", "sagebrush-latex-doc.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
     const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
@@ -682,7 +706,7 @@ for (const f of SITE_FILES)
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
-if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-doc.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-examples.js", "sagebrush-latex-doc.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });

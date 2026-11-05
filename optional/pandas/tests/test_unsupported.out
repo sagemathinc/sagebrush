@@ -8,6 +8,52 @@
 !! NotImplementedError: pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset
 == c3.series-str-values
 !! NotImplementedError: pandas.Series.values of a str column is not in Sagebrush's pandas 0.x subset
+== dt.series-values
+!! NotImplementedError: pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-to_numpy
+!! NotImplementedError: pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-to_numpy-copy
+!! NotImplementedError: pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.frame-values
+!! NotImplementedError: pandas.DataFrame.values of a frame with datetime64[us] columns (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-diff
+!! NotImplementedError: pandas.diff of a datetime64[us] column (a Timedelta column) is not in Sagebrush's pandas 0.x subset
+== dt.timestamp-sub
+!! NotImplementedError: pandas: Timedelta (a difference of times) is not in Sagebrush's pandas 0.x subset
+== dt.number-without-unit
+!! NotImplementedError: pandas: to_datetime of a number without a unit (pandas reads it as nanoseconds) is not in Sagebrush's pandas 0.x subset
+== dt.timezone
+!! NotImplementedError: pandas: to_datetime's dayfirst, yearfirst and utc is not in Sagebrush's pandas 0.x subset
+== dt.outside-exact-years
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.fraction-origin
+!! NotImplementedError: pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset
+== dt.fraction-seconds
+!! NotImplementedError: pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset
+== dt.all-nat-text
+!! NotImplementedError: pandas: to_datetime of strings that are all NaT (pandas makes datetime64[s] of them) is not in Sagebrush's pandas 0.x subset
+== dt.exact-false-format
+!! NotImplementedError: pandas: to_datetime's exact=False with a format is not in Sagebrush's pandas 0.x subset
+== dt.far-december
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.far-datetime
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.far-list
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.far-number
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.tz-list
+!! NotImplementedError: pandas: a time with a timezone is not in Sagebrush's pandas 0.x subset
+== dt.sub-microsecond
+!! NotImplementedError: pandas: to_datetime of a number below a microsecond (a nanosecond result) is not in Sagebrush's pandas 0.x subset
+== dt.origin-no-unit
+!! NotImplementedError: pandas: to_datetime's origin= without a unit (nanoseconds) is not in Sagebrush's pandas 0.x subset
+== dt.day-of-year-past-2255
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.format-directive-b
+!! NotImplementedError: pandas: to_datetime's format directive '%b' is not in Sagebrush's pandas 0.x subset
+== dt.format-year-0
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy-object
 !! NotImplementedError: pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.series-object-to_numpy
@@ -50,14 +96,14 @@
 !! NotImplementedError: pandas.merge is not in Sagebrush's pandas 0.x subset
 == name.pd.concat
 !! NotImplementedError: pandas.concat is not in Sagebrush's pandas 0.x subset
-== name.pd.to_datetime
-!! NotImplementedError: pandas.to_datetime is not in Sagebrush's pandas 0.x subset
+== name.pd.Timedelta
+!! NotImplementedError: pandas.Timedelta is not in Sagebrush's pandas 0.x subset
 == name.pd.Categorical
 !! NotImplementedError: pandas.Categorical is not in Sagebrush's pandas 0.x subset
 == name.pd.MultiIndex
 !! NotImplementedError: pandas.MultiIndex is not in Sagebrush's pandas 0.x subset
-== name.pd.read_excel
-!! NotImplementedError: pandas.read_excel is not in Sagebrush's pandas 0.x subset
+== name.pd.read_parquet
+!! NotImplementedError: pandas.read_parquet is not in Sagebrush's pandas 0.x subset
 == name.pd.get_dummies
 !! NotImplementedError: pandas.get_dummies is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.groupby
@@ -86,8 +132,8 @@
 !! NotImplementedError: pandas.DataFrame.where is not in Sagebrush's pandas 0.x subset
 == name.Series.str
 !! NotImplementedError: pandas.Series.str is not in Sagebrush's pandas 0.x subset
-== name.Series.dt
-!! NotImplementedError: pandas.Series.dt is not in Sagebrush's pandas 0.x subset
+== name.Series.rolling
+!! NotImplementedError: pandas.Series.rolling is not in Sagebrush's pandas 0.x subset
 == name.Series.groupby
 !! NotImplementedError: pandas.Series.groupby is not in Sagebrush's pandas 0.x subset
 == name.Series.value_counts
@@ -174,11 +220,43 @@
 !! NotImplementedError: pandas.read_csv(a binary file object) is not in Sagebrush's pandas 0.x subset
 == csv.quotechar-sep
 !! NotImplementedError: pandas.read_csv(quotechar=',') is not in Sagebrush's pandas 0.x subset
+== xl.skiprows-list-nrows
+!! NotImplementedError: pandas: read_excel(skiprows=<a list>, nrows=) is not in Sagebrush's pandas 0.x subset
+== xl.int-past-int64
+!! NotImplementedError: pandas: read_excel of a column of integers past int64 (pandas makes uint64 or object of it) is not in Sagebrush's pandas 0.x subset
+== xl.skiprows-callable
+!! NotImplementedError: pandas: read_excel(skiprows=function) is not in Sagebrush's pandas 0.x subset
+== xl.header-list
+!! NotImplementedError: pandas: read_excel(header=[0, 1]) is not in Sagebrush's pandas 0.x subset
+== xl.usecols-callable
+!! NotImplementedError: pandas: read_excel(usecols=function) is not in Sagebrush's pandas 0.x subset
+== xl.index_col-list
+!! NotImplementedError: pandas: read_excel(index_col=[0, 1]) is not in Sagebrush's pandas 0.x subset
+== xl.engine
+!! NotImplementedError: pandas: read_excel(engine='calamine') is not in Sagebrush's pandas 0.x subset
+== xl.dtype
+!! NotImplementedError: pandas: read_excel(dtype=) is not in Sagebrush's pandas 0.x subset
+== xl.na_filter
+!! NotImplementedError: pandas: read_excel(keep_default_na=, na_filter=, decimal=) is not in Sagebrush's pandas 0.x subset
+== xl.usecols-negative
+!! NotImplementedError: pandas: read_excel(usecols=) with a negative position is not in Sagebrush's pandas 0.x subset
+== xl.usecols-none
+!! NotImplementedError: pandas: read_excel(usecols=) selecting no column is not in Sagebrush's pandas 0.x subset
+== xl.usecols-none-letters
+!! NotImplementedError: pandas: read_excel(usecols=) selecting no column is not in Sagebrush's pandas 0.x subset
+== xl.nrows-negative-float
+!! NotImplementedError: pandas: read_excel(nrows=) a negative float is not in Sagebrush's pandas 0.x subset
+== xl.xls
+!! NotImplementedError: pandas: an .xls workbook (only .xlsx and .xlsm are read) is not in Sagebrush's pandas 0.x subset
+== xl.multi-disk
+!! NotImplementedError: pandas: a zip archive spread over several disks is not in Sagebrush's pandas 0.x subset
 == csv.url-https
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
 == csv.url-http-upper
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
 == csv.url-s3
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
+== xl.url-https
+!! NotImplementedError: read_excel from a URL isn't supported; download the file into the project first
 == csv.url-nothing-opened
 []

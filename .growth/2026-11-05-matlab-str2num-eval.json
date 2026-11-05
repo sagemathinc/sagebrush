@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MATLAB str2num: text that isn't only numbers is now evaluated as MATLAB does, [text] in a workspace of its own (no caller variables), through the host's MATLAB translator as a function body; [] and false where that errors (real MATLAB R2026b o19: unknown names, syntax errors). A name Sagebrush refuses or lacks (catalog absent.json) and text that runs statements of its own are refused loudly. Before, any such text was refused. MATLAB mode's library grows by _str2num_eval (+6231 pre, +2237 src); lib.gen +1076; the CLI bundle carries it (pyjs +1084).",
+ "bytes": {
+  "cli/lib.gen.js": 1076,
+  "cli/pyjs.cjs": 1084,
+  "engine/lib/matlab.pre": 6231,
+  "engine/lib/matlab.src": 2237
+ }
+}

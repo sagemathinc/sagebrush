@@ -3058,13 +3058,13 @@ def _cat(vals, dim, narrow=True):
                 return r
             break
     cls = _cat_class(vals)
-    # empty values do not take part (but count for the class)
+    # Empty values mixed with nonempty values are omitted (but count for class).
     parts = [v for v in vals if _numel(v) != 0]
     if not parts:
-        v = vals[0]
-        if cls == "char":
-            return Char("") if type(v) is not Char else v
-        return v if cls != "cell" else Cell([], (0, 0))
+        # All-empty inputs still concatenate their dimensions. A 0-by-0 [] is
+        # omitted when another empty shape is present; all [] inputs must stay
+        # to retain, for example, cat(3, [], [])'s 0-by-0-by-2 result.
+        parts = [v for v in vals if _dims(v) != (0, 0)] or list(vals)
     if cls == "handle":
         items = [v if type(v) is HandleArr else HandleArr([v], (1, 1)) for v in parts]
         r = _cat_containers(items, dim, Cell)
@@ -5737,7 +5737,7 @@ def mean_(x, *args):
             ok = ~np.isnan(A)
             return np.sum(np.where(ok, A, 0), axis=ax) / np.sum(ok, axis=ax)
         return np.sum(A, axis=ax) / A.shape[ax]
-    return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
+    return _reduce(x, args, m, "mean", empty_value=_math.nan, out_cls="single" if cls == "single" else "double")
 
 
 def _csort(A, ax):
@@ -5800,7 +5800,7 @@ def median_(x, *args):
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
     if cls == "logical":
         R = _arr(r)
         if not np.all((R == 0) | (R == 1)):
@@ -5902,7 +5902,7 @@ def _var_impl(x, args, sq):
         den = n - 1 if (w == 0 and n > 1) else n
         r = np.sum(dev, axis=ax) / den
         return np.sqrt(r) if sq else r
-    return _reduce(x, rest, v, "var", out_cls="double")
+    return _reduce(x, rest, v, "var", empty_value=_math.nan, out_cls="double")
 
 
 @_bs("var")
@@ -6016,7 +6016,7 @@ def _fft_call(x, args, inverse, name):
     if length == 0:
         shape = list(A.shape)
         shape[ax] = 0
-        return _canon(np.zeros(tuple(shape)))
+        return _finish(np.zeros(tuple(shape)), "single" if class_(x) == "single" else "double")
     if inverse and not symmetric and A.dtype.kind == "c" and A.shape[ax] == length:
         # (MATLAB's ifft is real when X is exactly conjugate-symmetric along dim)
         B = np.moveaxis(A, ax, -1)
@@ -6313,11 +6313,12 @@ def _minmax(nargout, args, which):
             raise _err("%s: the dimension must be a positive integer or a vector of them." % which)
         dim = sorted(set(int(k) for k in v.reshape(-1))) if v.size > 1 else _int_arg(dv)
     cls = class_(x)
+    oc = "double" if cls == "char" else cls
     A = _farr(x, which)
     if dim is None:
         if d == (0, 0):
             e = np.zeros((0, 0))
-            return e if nargout <= 1 else [e, e.copy()]
+            return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
         dim = _default_dim(d)
     full = A
     if dim == "all":
@@ -6340,7 +6341,7 @@ def _minmax(nargout, args, which):
         shp = list(A2.shape)
         shp[ax] = 0
         e = np.zeros(tuple(shp))
-        return e if nargout <= 1 else [e, e.copy()]
+        return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
     key = np.abs(A2) if A2.dtype.kind == "c" else A2
     nan = np.isnan(key)
     filled = np.where(nan, -np.inf if big else np.inf, key)
@@ -6362,7 +6363,6 @@ def _minmax(nargout, args, which):
     vals = _take_along(A2, np.expand_dims(idx, ax), ax)
     vals = _canon(_contig(vals.reshape(shape)))
     # (logical stays logical, as in MATLAB; char gives double)
-    oc = "double" if cls == "char" else cls
     m = _finish(vals, oc)
     if nargout <= 1:
         return m
@@ -6973,6 +6973,21 @@ def _svd_finite(M, name):
     return M
 
 
+def _basis_spacing(s, cls):
+    """eps(norm(A)) in the input precision, for null/orth rank decisions."""
+    norm = float(s[0]) if s.size else 0.0
+    single = cls == "single"
+    if single:
+        norm = _single_scalar(norm)
+    if not _math.isfinite(norm):
+        return _math.nan
+    exponent = _math.frexp(norm)[1] - (24 if single else 53)
+    floor = -149 if single else -1074
+    if norm == 0 or exponent < floor:
+        exponent = floor
+    return _math.ldexp(1.0, exponent)
+
+
 @_bs("pinv")
 def pinv_(x):
     M = _mat(x)
@@ -7150,7 +7165,7 @@ def eig_(nargout, x, *args):
         L = None
         if np.array_equal(A, A.T) and np.array_equal(B, B.T):
             try:
-                L = np.linalg.cholesky(B)
+                L = np.linalg._chol(B, False, False)
             except Exception:
                 L = None
         if algo == "chol" and L is None:
@@ -7355,7 +7370,13 @@ def chol_(nargout, x, *args):
     if not lower:
         M = np.conj(M.T)
     if nargout <= 1:
-        L = np.linalg.cholesky(M)
+        try:
+            L = np.linalg._chol(M, False, False)
+        except np.linalg.LinAlgError as e:
+            # (MATLAB's words and identifier, real MATLAB R2026b, /scratch/matlab-tmp/o20 rows 1 and 6)
+            if "not positive definite" not in str(e):
+                raise
+            raise _err("Matrix must be positive definite.", "MATLAB:posdef")
         return _unmat(L if lower else np.conj(L.T))
     if M.dtype.kind == "c":
         raise _err("chol: complex matrices are not supported in Sagebrush.")
@@ -7371,9 +7392,13 @@ def chol_(nargout, x, *args):
 def null_(x):
     M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
-    tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
+    cls = _float_class(x)
+    tol = max(M.shape) * _basis_spacing(s, cls)
+    if cls == "single":
+        s = _single_values(s)
+        tol = _single_scalar(tol)
     r = int(np.sum(s > tol))
-    return _unmat(np.conj(Vh[r:].T))
+    return _finish(np.array(np.conj(Vh[r:])), cls)
 
 
 @_bs("expm")
@@ -8499,10 +8524,55 @@ def str2double_(x):
     return _math.nan if v is None else v
 
 
+def _str2num_eval(text, nargout):
+    """str2num of text that isn't only numbers: MATLAB evaluates [text] in str2num's own workspace,
+    so functions and constants are seen but not the caller's variables, and an error gives [] and false
+    (real MATLAB R2026b, /scratch/matlab-tmp/o19). Here the text is translated as the body of a function
+    of its own and run in an empty namespace. A name Sagebrush refuses or lacks (catalog/matlab
+    absent.json, which the undefined-name message then names) is refused loudly, never given as []:
+    MATLAB would evaluate it. A MATLAB function Sagebrush neither has nor lists gives [], quietly."""
+    import builtins
+    host = getattr(builtins, "__pyjs_host__", None)
+    if host is None:
+        raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
+    py = host("matlab_function_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    fail = np.zeros((0, 0))
+    fail = fail if nargout <= 1 else [fail, False]
+    if py is None:
+        raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
+    if "\ndef sbq__str2num(" not in py:
+        # (a syntax error: the translation only raises it)
+        if '"MATLAB:syntax"' in py:
+            return fail
+        raise _err("str2num of '%s' is not supported in Sagebrush." % text[:40])
+    # (one expression only: text that closes the brackets to run statements of its own is refused, as is
+    # text that defines functions; each statement is one `_L = ` line of the body)
+    body = [ln for ln in py.splitlines() if ln.startswith("        _L = ")]
+    if len(body) != 1 or py.count("\ndef ") != 1:
+        raise _err("str2num of '%s' is not supported in Sagebrush: only one expression is evaluated." % text[:40])
+    ns = {"__name__": "_matlab_str2num"}
+    try:
+        exec(py, ns)
+        out = paren(ns["sbq__str2num"], [], 1)
+    except MatlabError as e:
+        # (what Sagebrush refuses, or a MATLAB function it lacks, says so: MATLAB would give a value;
+        # anything that isn't a MATLAB error, an internal one or out of memory, is raised as well)
+        if "Sagebrush" in e.message:
+            raise
+        return fail
+    return out if nargout <= 1 else [out, True]
+
+
 @_bi("str2num")
 def str2num_(nargout, s):
-    """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    """str2num: numbers and matrices of numbers read directly; other text evaluated as MATLAB does"""
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
+    full = t
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
@@ -8517,10 +8587,8 @@ def str2num_(nargout, s):
                 if p.lower() in ("true", "false"):
                     v = 1.0 if p.lower() == "true" else 0.0
                 else:
-                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB; only
-                    # numbers and true/false are read here, so anything else is refused
-                    # rather than given as [])
-                    raise _err("str2num of '%s' is not supported in Sagebrush: only numbers and true/false are read." % t[:40])
+                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB)
+                    return _str2num_eval(full, nargout)
             else:
                 logical = False
             row.append(v)
@@ -10713,33 +10781,32 @@ def gcd_n(nargout, a, b):
 
 @_bi("histc")
 def histc_n(nargout, x, edges, *rest):
-    X = _farr(x).reshape(-1)
+    A = _farr(x)
     E = _farr(edges).reshape(-1)
-    n = np.zeros(E.size)
-    ind = np.zeros(X.size)
-    for i, v in enumerate(X):
-        k = int(np.searchsorted(E, v, side="right")) - 1
-        if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
-            n[k] += 1
-            ind[i] = k + 1
     d = _dims(x)
-    if len(d) == 2 and d[0] > 1 and d[1] > 1:
-        # (a matrix: each column's counts, length(edges)-by-columns, and each element's bin)
-        M = _mat(x)
-        C = np.zeros((E.size, M.shape[1]))
-        I = np.zeros(M.shape)
-        for j in range(M.shape[1]):
-            for i, v in enumerate(M[:, j]):
-                k = int(np.searchsorted(E, v, side="right")) - 1
-                if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
-                    C[k, j] += 1
-                    I[i, j] = k + 1
-        return _unmat(C) if nargout <= 1 else [_unmat(C), _unmat(I)]
-    # (a vector x: the counts in x's orientation, a column for a column x, as the histc page shows)
-    counts = _box(n.reshape((n.size, 1)) if d[0] == 1 else n.reshape((1, n.size)))
+    if len(rest) > 1:
+        raise _err("histc: too many input arguments.")
+    dim = _int_arg(rest[0], "dimension") if rest else (2 if d[0] == 1 else _default_dim(d))
+    if dim < 1:
+        raise _err("histc: the dimension must be a positive integer.")
+    # Stored axes reverse MATLAB's dimensions. Each row below is one histogram.
+    A = A.reshape((1,) * max(0, dim - A.ndim) + A.shape)
+    axis = A.ndim - dim
+    B = np.moveaxis(A, axis, -1)
+    rows = B.reshape((_prod(B.shape[:-1]), B.shape[-1]))
+    C = np.zeros((rows.shape[0], E.size))
+    I = np.zeros(rows.shape)
+    for j, row in enumerate(rows):
+        for i, v in enumerate(row):
+            k = int(np.searchsorted(E, v, side="right")) - 1
+            if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
+                C[j, k] += 1
+                I[j, i] = k + 1
+    counts = _box(_contig(np.moveaxis(C.reshape(B.shape[:-1] + (E.size,)), -1, axis)))
     if nargout <= 1:
         return counts
-    return [counts, _box(ind.reshape(_arr(x).shape))]
+    ind = np.moveaxis(I.reshape(B.shape), -1, axis).reshape(_arr(x).shape)
+    return [counts, _box(_contig(ind))]
 
 
 @_bi("meshgrid")

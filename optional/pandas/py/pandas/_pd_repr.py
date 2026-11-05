@@ -31,6 +31,7 @@ import numpy as np
 
 from . import _pd_options
 from ._pd_dtypes import STR, is_missing
+from ._pd_datetime import DT, fmt_times
 
 __all__ = ["series_repr", "frame_repr", "frame_repr_html", "index_repr", "pprint_thing"]
 
@@ -317,9 +318,12 @@ def format_column(col, na_rep="NaN", justify="right", leading_space=True, max_co
     digits = _opt("precision")
     if d == "float64":
         strs = _float_strings(col._pd_values, na_rep, leading_space, justify, digits)
-    elif d == "int64":
+    elif d in ("int64", "int32"):
         spec = "d" if leading_space is False else " d"
         strs = [format(x, spec) for x in col._pd_values.tolist()]
+    elif d is DT:
+        # (Datetime64Formatter: the dates alone when every time is midnight, no leading space, NaT as "NaT")
+        strs = fmt_times(col._pd_values.tolist())
     elif d == "bool":
         strs = _generic_strings(col._pd_values.tolist(), na_rep, leading_space)
     else:
@@ -380,13 +384,20 @@ def index_repr(index):
             attrs.append(("name", default_pprint(index.name)))
     else:
         col = index._pd_column()
-        is_justify = not _inferred_string(col)
-        data = format_object_summary(index, default_pprint, is_justify=is_justify)
+        if col.dtype is DT:
+            # (DatetimeIndex: its labels as the column shows them, quoted, and its freq, never set here)
+            from ._pd_index import Index
+            data = format_object_summary(Index(fmt_times(col._pd_values.tolist())), default_pprint, is_justify=True, name=klass_name)
+        else:
+            is_justify = not _inferred_string(col)
+            data = format_object_summary(index, default_pprint, is_justify=is_justify)
         attrs = [("dtype", "'%s'" % _dtype_str(col.dtype))]
         if index.name is not None:
             attrs.append(("name", default_pprint(index.name)))
         if len(index) > _MAX_SEQ_ITEMS:
             attrs.append(("length", len(index)))
+        if col.dtype is DT:
+            attrs.append(("freq", "None"))
     display_width = _opt("width") or 80
     indent = len(klass_name) + 1
     indent_str = " " * indent
@@ -587,7 +598,7 @@ class _FrameFormatter(object):
         fmt_columns = index_format_flat(self.tr_frame.columns, include_name=False)
         # (pandas zips the shown labels with the whole frame's dtypes)
         dtypes = [c.dtype for c in self.frame._pd_cols]
-        return [[" " + x if d in ("int64", "float64", "bool") else x]
+        return [[" " + x if d in ("int64", "float64", "bool", "int32") else x]
                 for x, d in zip(fmt_columns, dtypes)]
 
     def _strcols_without_index(self):

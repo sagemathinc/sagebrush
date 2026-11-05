@@ -3,7 +3,10 @@
 A column is a dtype and its values:
 - int64, float64, bool: a 1-D numpy array of that dtype;
 - str (StringDtype) and object: a Python list (Sagebrush's numpy has no
-  object arrays), missing values NaN (str) or as given (object).
+  object arrays), missing values NaN (str) or as given (object);
+- datetime64[us] (_pd_datetime.DT): an int64 array of microseconds since
+  1970, NaT as int64's minimum (Sagebrush's numpy has no datetime64 yet);
+- int32: a numpy int32 array (what .dt.year and an index's .year give).
 
 Columns are copied eagerly when an object is derived from another (M1's
 Copy-on-Write, §C3): a column is never shared between two pandas objects,
@@ -13,10 +16,11 @@ and never with a caller's array.
 import numpy as np
 
 from ._pd_dtypes import STR, StringDtype, infer, is_missing, resolve_dtype
+from ._pd_datetime import DT, NAT_INT, from_us, as_us, is_time, to_us
 
 __all__ = ["Column", "column_from"]
 
-_NUMERIC = ("int64", "float64", "bool")
+_NUMERIC = ("int64", "float64", "bool", "int32")
 
 
 class Column(object):
@@ -61,10 +65,11 @@ class Column(object):
 
     def value(self, i):
         """The value at position i as pandas returns it: a numpy scalar for
-        a numeric or bool column, else the stored object."""
+        a numeric or bool column, a Timestamp or NaT for a datetime one, else
+        the stored object."""
         v = self._pd_values
-        if self.is_list:
-            return v[i]
+        if self._pd_dtype is DT:
+            return from_us(v[i])
         return v[i]
 
     def isna(self):
@@ -72,14 +77,18 @@ class Column(object):
         v = self._pd_values
         if self._pd_dtype == "float64":
             return v != v
-        if self._pd_dtype in ("int64", "bool"):
+        if self._pd_dtype in ("int64", "bool", "int32"):
             return np.zeros(len(v), dtype=bool)
+        if self._pd_dtype is DT:
+            return v == NAT_INT
         return np.array([is_missing(x) for x in v], dtype=bool)
 
     def tolist(self):
         v = self._pd_values
         if self.is_list:
             return list(v)
+        if self._pd_dtype is DT:
+            return [from_us(x) for x in v.tolist()]
         return v.tolist()
 
 
@@ -124,6 +133,14 @@ def _holdable(dtype, v):
         if isinstance(v, str):
             return v
         raise _invalid(v, dtype)
+    if dtype is DT:
+        if is_missing(v):
+            return NAT_INT
+        if is_time(v):
+            return as_us(v)
+        raise TypeError("Invalid value '%s' for dtype 'datetime64[us]'" % (v,))
+    if dtype == "int32":
+        raise NotImplementedError("pandas: setting a value in an int32 column is not in Sagebrush's pandas 0.x subset")
     return v
 
 
@@ -161,6 +178,12 @@ def column_from(data, dtype=None):
     copy, never the caller's storage), with pandas 3.1's inference or the
     dtype given."""
     want = resolve_dtype(dtype)
+    from ._pd_index import Index
+    if isinstance(data, Index):
+        col = data._pd_column()
+        if want is None or want == col.dtype:
+            return col.copy()
+        data = col.tolist()
     if isinstance(data, np.ndarray):
         if data.ndim != 1:
             raise ValueError("Data must be 1-dimensional, got ndarray of shape %r instead" % (tuple(data.shape),))
@@ -205,4 +228,8 @@ def _cast_list(values, want):
         return Column("bool", np.array([bool(v) for v in values], dtype=bool))
     if want is STR or isinstance(want, StringDtype):
         return Column(STR, [float("nan") if is_missing(v) else str(v) for v in values])
+    if want is DT:
+        return Column(DT, np.array([to_us(v) for v in values], dtype=np.int64))
+    if want == "int32":
+        raise NotImplementedError("pandas: dtype int32 from values is not in Sagebrush's pandas 0.x subset")
     return Column("object", list(values))

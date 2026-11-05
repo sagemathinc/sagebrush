@@ -1,0 +1,270 @@
+{
+ "format": "sagebrush-board",
+ "version": 1,
+ "title": "Hello, board: every kind of item",
+ "images": {
+  "leaf": {
+   "w": 48,
+   "h": 48,
+   "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAACUUlEQVR42u2Y3VIaQRBGfR6eIc9p1ACCoKwxbjCKruKCEcVADEmeyPRsnaa6pvYCS6LZyXTVuVjn7/t6esZdNjZixIgRI0aMGIFE7f27p9qWsA07oM+uTfr8W4KdsA9CQ9gVWkIb9kCfW/RpMGb7jQwVmXQCmgjrCF3hQOgJiXDokdB2QN8OY5vMtfUKRgrhdbLoMruPKCfwSDgWUuEz9EGfU/ocMabHHHvMWf9LRmqbJuMqPDGincgT4VQ4EwbCuceAtlP69o2ZxBjRHdlck5GizuvUb9cIT41oJ+5CyIQrGHro3zP6DoyZ1BjpslZ9DedjKb5Nhty2fyJ7KlxFXwu5MBLGwo3HmLacvmpGjfSZ+5C12i80USr+mIydkUUVPkLkrTAR7uAe9HlCnxvGqJEL5jxhjXWYKO7vXbbUF59RFrkRroKnwoPwzeOBNjWkRnLmykpMdNGw80wDxW3T4FD1TNlo5ocm6xNEqeiZMBe+e8xpUzP3jNXdGJqd0HLqoaHxzNupyH6LbfzIIfvCbXJlMm/FzxD6KPyABejzI31mJSZy5j5nrZS199Gy6i4sa78s+xl1O6YEfPEq+if8An1WM76JW+a8NqXk78KqZ2FZPh2uNa19d1tcetmfUhJzsrvwhP8Ga2RB3zljp94uXLKWnoUELauWUWGgySA9vLZ8XL1+5SCWZd8X75so24U75hx5ZaSHuYOm/8dApUuo6oe48tdoEP/IKv8qEcTLXOVfp4P4oAnikzKIj/pgflYJ5oetYH5ajBEjRowYMWK8MP4AJTM0hlHgF0sAAAAASUVORK5CYII="
+  }
+ },
+ "pages": [
+  {
+   "title": "Items",
+   "intro": "A board is notes, code, pictures and groups on a canvas, with edges between them. This page has one of each kind of item; the next is a slide. Use **→** for the tour, or zoom in to read the details.",
+   "nodes": [
+    {
+     "id": "note",
+     "title": "A note",
+     "text": "Markdown: **bold**, *italic*, `code`, lists, and math, inline $e^{i\\pi} + 1 = 0$ or displayed:\n\n$$\\sum_{n \\ge 1} \\frac{1}{n^2} = \\frac{\\pi^2}{6}.$$",
+     "detail": "A **detail** shows only when you zoom in close.",
+     "ref": "https://sagebrush.space/",
+     "x": 0,
+     "y": 0,
+     "w": 320
+    },
+    {
+     "id": "picture",
+     "image": "leaf",
+     "x": 380,
+     "y": 10,
+     "w": 120
+    },
+    {
+     "id": "shape",
+     "title": "A shape",
+     "text": "Notes can be diamonds, circles, hexagons, …",
+     "shape": "diamond",
+     "color": "#e8f0fb",
+     "x": 560,
+     "y": 0,
+     "w": 220
+    },
+    {
+     "id": "code",
+     "title": "Code",
+     "code": "squares = [n * n for n in range(10)]\nprint(squares)",
+     "x": 0,
+     "y": 300,
+     "w": 360
+    },
+    {
+     "id": "sum",
+     "title": "Only its output",
+     "code": "print(\"The sum is\", sum(squares))",
+     "hideCode": true,
+     "x": 540,
+     "y": 300,
+     "w": 300
+    },
+    {
+     "id": "group",
+     "kind": "group",
+     "title": "A group",
+     "text": "Its items are laid out as a row.",
+     "layout": "row",
+     "x": 0,
+     "y": 520,
+     "children": [
+      {
+       "id": "one",
+       "title": "One",
+       "text": "In the group."
+      },
+      {
+       "id": "two",
+       "title": "Two",
+       "text": "Beside it."
+      }
+     ]
+    },
+    {
+     "id": "sticker",
+     "kind": "sticker",
+     "emoji": "🌿",
+     "x": 820,
+     "y": 30,
+     "w": 64
+    },
+    {
+     "id": "ink",
+     "kind": "ink",
+     "points": [
+      0,
+      18.0,
+      0.6,
+      6,
+      22.6,
+      0.6,
+      12,
+      26.7,
+      0.6,
+      18,
+      29.8,
+      0.6,
+      24,
+      31.6,
+      0.6,
+      30,
+      31.9,
+      0.6,
+      36,
+      30.7,
+      0.6,
+      42,
+      28.1,
+      0.6,
+      48,
+      24.4,
+      0.6,
+      54,
+      20.0,
+      0.6,
+      60,
+      15.3,
+      0.6,
+      66,
+      11.0,
+      0.6,
+      72,
+      7.4,
+      0.6,
+      78,
+      5.0,
+      0.6,
+      84,
+      4.0,
+      0.6,
+      90,
+      4.6,
+      0.6,
+      96,
+      6.6,
+      0.6,
+      102,
+      9.9,
+      0.6,
+      108,
+      14.1,
+      0.6,
+      114,
+      18.7,
+      0.6,
+      120,
+      23.2,
+      0.6,
+      126,
+      27.2,
+      0.6,
+      132,
+      30.1,
+      0.6,
+      138,
+      31.8,
+      0.6,
+      144,
+      31.9,
+      0.6,
+      150,
+      30.4,
+      0.6,
+      156,
+      27.6,
+      0.6,
+      162,
+      23.8,
+      0.6,
+      168,
+      19.3,
+      0.6,
+      174,
+      14.6,
+      0.6,
+      180,
+      10.4,
+      0.6
+     ],
+     "size": 4,
+     "color": "#2a6f2f",
+     "x": 800,
+     "y": 200
+    }
+   ],
+   "edges": [
+    {
+     "from": "note",
+     "to": "code",
+     "label": "explains"
+    },
+    {
+     "from": "code",
+     "to": "sum",
+     "label": "reads squares"
+    },
+    {
+     "from": "one",
+     "to": "two",
+     "arrow": "both",
+     "line": "dotted"
+    }
+   ],
+   "steps": [
+    {
+     "focus": "note",
+     "say": "A note: a title, Markdown with math, a detail for close up, and a link."
+    },
+    {
+     "focus": [
+      "code",
+      "sum"
+     ],
+     "say": "Code items run in the reader's browser, in reading order and reactively: change `squares` and the item reading it runs again. **{ }** hides an item's code."
+    },
+    {
+     "focus": [
+      "picture",
+      "shape",
+      "sticker",
+      "ink"
+     ],
+     "say": "A picture, a shaped note, a sticker and a pen stroke."
+    },
+    {
+     "focus": "group",
+     "say": "A group lays out its items: a row, a column, a grid, or a graph of their edges."
+    }
+   ]
+  },
+  {
+   "title": "A slide",
+   "slide": {
+    "x": 0,
+    "y": 0,
+    "w": 960,
+    "h": 540
+   },
+   "background": {
+    "color": "#f6f1e3"
+   },
+   "nodes": [
+    {
+     "id": "slide-title",
+     "title": "A slide",
+     "text": "A page with a card: Present shows the card full screen, a step at a time.",
+     "x": 80,
+     "y": 80,
+     "w": 800
+    },
+    {
+     "id": "slide-code",
+     "title": "Code on a slide",
+     "code": "print(sum(range(101)))",
+     "x": 80,
+     "y": 260,
+     "w": 360
+    }
+   ]
+  }
+ ]
+}

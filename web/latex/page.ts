@@ -19,9 +19,8 @@ import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
-import { EXAMPLES, type Example } from "./examples";
+import type { Example } from "./examples";
 import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
-export { EXAMPLES };
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 import { viewOf } from "./component";
@@ -40,6 +39,11 @@ const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
 // (the presenter, present.ts: a chunk of its own, /sagebrush-latex-present.js; a failed fetch is tried again by a URL of its own)
 const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
 let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
+// (the ten examples, examples.ts: a chunk of its own, /sagebrush-latex-examples.js, fetched when their list opens (or
+// earlier, by the page's background loading); a failed fetch is tried again by a URL of its own)
+const examplesUrl = new URL("sagebrush-latex-examples.js", import.meta.url).href;
+let examplesMod: Promise<Example[]> | null = null, examplesTries = 0;
+export const loadExamples = (): Promise<Example[]> => (examplesMod ??= (import(examplesTries++ ? `${examplesUrl}?try=${examplesTries}` : examplesUrl) as Promise<typeof import("./examples")>).then((m) => m.EXAMPLES).catch((e) => { examplesMod = null; throw e; }));
 const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
 // (Run's Sage session, run-core.mjs: the hosting page's kernel and runner classes (Host.sandbox), its interpreter in
 // the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
@@ -77,6 +81,9 @@ const enc = new TextEncoder();
  * "/LaTeX examples/<title>" (or "<title> (2)", ...: the first name not taken), with its files, and its main .tex
  * opened in the editor by boot.ts's hook (`open`). Escape, or the backdrop, closes it with nothing made. */
 export async function texExamples(ws: Workspace, open: (e: Entry) => unknown): Promise<void> {
+  let examples: Example[];
+  try { examples = await loadExamples(); }
+  catch { alert("The examples couldn't be loaded. Check the network, then try again."); return; }
   const d = document.createElement("dialog");
   d.className = "sb-tex-examples";
   d.setAttribute("aria-label", "LaTeX examples");
@@ -87,7 +94,7 @@ export async function texExamples(ws: Workspace, open: (e: Entry) => unknown): P
   const x = document.createElement("button"); x.textContent = "✕"; x.setAttribute("aria-label", "Close"); x.style.cssText = "min-width:44px;min-height:44px"; x.onclick = () => d.close();
   head.append(h, x);
   const list = document.createElement("div"); list.style.cssText = "display:grid;gap:8px;padding:12px";
-  for (const ex of EXAMPLES) {
+  for (const ex of examples) {
     const b = document.createElement("button");
     b.dataset.example = ex.id;
     b.style.cssText = "display:block;width:100%;text-align:left;padding:10px 12px;min-height:44px;border:1px solid #d5d9d6;border-radius:8px;background:transparent;cursor:pointer";

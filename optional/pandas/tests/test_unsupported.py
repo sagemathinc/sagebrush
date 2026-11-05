@@ -21,6 +21,32 @@ case("c3.frame-ndarray-copy-false", lambda: pd.DataFrame(np.zeros((2, 2)), copy=
 case("c3.frame-dict-ndarray-copy-false", lambda: pd.DataFrame({"a": np.arange(3)}, copy=False))
 case("c3.series-str-to_numpy", lambda: ss.to_numpy())
 case("c3.series-str-values", lambda: ss.values)
+# (a datetime column's values: pandas gives numpy datetime64, which Sagebrush's numpy lacks; PR A)
+sdt = pd.to_datetime(pd.Series(["2020-01-01", "2020-02-01"]))
+case("dt.series-values", lambda: sdt.values)
+case("dt.series-to_numpy", lambda: sdt.to_numpy())
+case("dt.series-to_numpy-copy", lambda: sdt.to_numpy(copy=True))
+case("dt.frame-values", lambda: pd.DataFrame({"d": sdt}).values)
+case("dt.series-diff", lambda: sdt.diff())
+case("dt.timestamp-sub", lambda: pd.Timestamp("2020-01-02") - pd.Timestamp("2020-01-01"))
+case("dt.number-without-unit", lambda: pd.to_datetime([1, 2]))
+case("dt.timezone", lambda: pd.to_datetime("2020-01-01", utc=True))
+case("dt.outside-exact-years", lambda: pd.Timestamp("1600-01-01"))
+case("dt.fraction-origin", lambda: pd.to_datetime([43831.5], unit="D", origin="1899-12-30"))
+case("dt.fraction-seconds", lambda: pd.to_datetime([0.0, 0.5], unit="s"))
+case("dt.all-nat-text", lambda: pd.to_datetime(["NaT", ""]))
+case("dt.exact-false-format", lambda: pd.to_datetime(["2020-01-01 extra"], format="%Y-%m-%d", exact=False))
+case("dt.far-december", lambda: pd.Timestamp("9999-12-31"))
+from datetime import datetime as _dt, timezone as _tz
+case("dt.far-datetime", lambda: pd.Timestamp(_dt(2300, 1, 1)))
+case("dt.far-list", lambda: pd.to_datetime([_dt(1600, 1, 1)]))
+case("dt.far-number", lambda: pd.to_datetime(10 ** 17, unit="us"))
+case("dt.tz-list", lambda: pd.to_datetime([_dt(2020, 1, 1, tzinfo=_tz.utc)]))
+case("dt.sub-microsecond", lambda: pd.to_datetime(0.0000015, unit="s"))
+case("dt.origin-no-unit", lambda: pd.to_datetime(1, origin="2000-01-01"))
+case("dt.day-of-year-past-2255", lambda: pd.to_datetime("2255-366", format="%Y-%j"))
+case("dt.format-directive-b", lambda: pd.to_datetime("2020-Jan", format="%Y-%b"))
+case("dt.format-year-0", lambda: pd.to_datetime("0000-01-01", format="%Y-%m-%d"))
 case("c3.series-str-to_numpy-object", lambda: ss.to_numpy(dtype=object))
 case("c3.series-object-to_numpy", lambda: so.to_numpy())
 case("c3.series-object-values", lambda: so.values)
@@ -43,11 +69,11 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "concat", "to_datetime", "Categorical", "MultiIndex", "read_excel", "get_dummies"]:
+for name in ["NA", "merge", "concat", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
 for name in ["groupby", "merge", "describe", "sort_values", "drop", "rename", "apply", "plot", "info", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
-for name in ["str", "dt", "groupby", "value_counts", "apply", "map", "astype", "plot", "unique", "quantile"]:
+for name in ["str", "rolling", "groupby", "value_counts", "apply", "map", "astype", "plot", "unique", "quantile"]:
     case("name.Series." + name, lambda name=name: getattr(s, name))
 case("name.Index.sort_values", lambda: getattr(pd.Index([1]), "sort_values"))
 case("name.pd.unknown-is-AttributeError", lambda: getattr(pd, "no_such_name"))
@@ -95,6 +121,30 @@ case("csv.usecols-mixed", lambda: rc("a,b\n1,2\n", usecols=["a", 1]))
 case("csv.binary-file", lambda: pd.read_csv(io.BytesIO(b"a\n1\n")))
 case("csv.quotechar-sep", lambda: rc("a\n1\n", quotechar=","))
 
+# read_excel's refusals (PR B), on workbooks this program writes (tests/_xlsx.py)
+from _xlsx import workbook as _wb, zip_bytes as _zb
+_x = lambda **kw: pd.read_excel(io.BytesIO(_wb([("S", [["a", "b"], [1, "x"], [2, "y"]])])), **kw)
+_long = io.BytesIO(_wb([("S", [["k"]] + [[i] for i in range(8)])]))
+case("xl.skiprows-list-nrows", lambda: pd.read_excel(_long, skiprows=[1, 3], nrows=2))
+case("xl.int-past-int64", lambda: pd.read_excel(io.BytesIO(_wb([("S", [["a"], [2 ** 63], [1]])]))))
+case("xl.skiprows-callable", lambda: _x(skiprows=lambda i: i == 1))
+case("xl.header-list", lambda: _x(header=[0, 1]))
+case("xl.usecols-callable", lambda: _x(usecols=lambda c: c == "a"))
+case("xl.index_col-list", lambda: _x(index_col=[0, 1]))
+case("xl.engine", lambda: _x(engine="calamine"))
+case("xl.dtype", lambda: _x(dtype={"a": "float64"}))
+case("xl.na_filter", lambda: _x(na_filter=False))
+case("xl.usecols-negative", lambda: _x(usecols=[-1]))
+case("xl.usecols-none", lambda: _x(usecols=[]))
+case("xl.usecols-none-letters", lambda: _x(usecols="A:"))
+case("xl.nrows-negative-float", lambda: _x(nrows=-1.0))
+case("xl.xls", lambda: pd.read_excel(io.BytesIO(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 100)))
+_ok = _wb([("S", [["a"], [1]])])
+_multi = bytearray(_ok)
+_e = _multi.rfind(b"PK\x05\x06")
+_multi[_e + 4] = 1
+case("xl.multi-disk", lambda: pd.read_excel(io.BytesIO(bytes(_multi))))
+
 # a URL is refused before any open or fetch: open() is watched
 opened = []
 real_open = builtins.open
@@ -110,6 +160,7 @@ try:
     case("csv.url-https", lambda: pd.read_csv("https://example.com/data.csv"))
     case("csv.url-http-upper", lambda: pd.read_csv("HTTP://example.com/data.csv"))
     case("csv.url-s3", lambda: pd.read_csv("s3://bucket/data.csv"))
+    case("xl.url-https", lambda: pd.read_excel("https://example.com/data.xlsx"))
 finally:
     builtins.open = real_open
 case("csv.url-nothing-opened", lambda: opened)
