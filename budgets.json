@@ -692,6 +692,13 @@
   "registry/packages": {
    "exact": true,
    "max": 4
+  },
+  "engine/lib/mod-statistics.src": {
+   "exact": false,
+   "ceiling": 71448,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
   }
  },
  "epoch": {
@@ -792,7 +799,8 @@
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-nd.wasm": 71106,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1545037
+   "engine/sagebrush-worker.js": 1545037,
+   "engine/lib/mod-statistics.src": 64953
   },
   "reset": {
    "reason": "#184 (the size gate checks a dispatch's markers, plan-size-gate-dispatch-range r2) changes scripts/size-measure.mjs, which is in the measurement key, so the epoch is reset under the new key. The new epoch also absorbs merge train 2c's growth (dbb4a0e1..0ce1121e), whose rule-6 attribution by PR is @sagebrush's ruling of Oct 26 with magma's evidence, rule6-attribution-dbb4a0e1-0ce1121e-20261026.tar (sha256 310d3b1e4ed2afdf563f1826e589ed5b6f447866304c99595335c8ec859052a7): #178 covered by its marker; #171 pyjs.cjs +368 and #164 wasm +6592, worker +547, lib.gen.js +18, pyjs.cjs +9554 unmarked, none over 1%.",
