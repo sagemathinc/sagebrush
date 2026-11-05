@@ -102,7 +102,8 @@ test("census: missing, repeated, unselected and oversized shards", () => {
 });
 
 test("paths (A1): only strict relative paths", () => {
-  for (const ok of ["main.ipynb", "data/x.csv", "a b/c-d_e.f.txt"])
+  // (a/b/c/d.ipynb is at the depth limit, 4 segments; a/b/c/d/e, below, is past it)
+  for (const ok of ["main.ipynb", "data/x.csv", "a b/c-d_e.f.txt", "a/b/c/d.ipynb"])
     assert.equal(pathProblem(ok), null, ok);
   for (const bad of [
     "",
@@ -202,6 +203,12 @@ test("SVG canonicalization: generated ids don't matter, coordinates do (no round
     '<svg id="title"/>',
     "a name, not a generated id, is kept",
   );
+  // (the render's own stamps are dropped: two renders differing only in them hash the same)
+  const stamped = (g, t) => `<svg data-generated="${g}"><g data-timestamp="${t}"><path d="M 0 0 L 1 1"/></g></svg>`;
+  assert.equal(
+    sha256(svgCanon(stamped("2026-11-05T17:00:00Z", "1"))),
+    sha256(svgCanon(stamped("2026-11-06T09:30:00Z", "1762419000"))),
+  );
 });
 
 test("normalization (A5): streams joined, HTML exact, images hashed, errors and loose outputs", () => {
@@ -259,6 +266,11 @@ test("normalization (A5): streams joined, HTML exact, images hashed, errors and 
       "the run's temporary folder (/tmp/example-XYZ)",
       "today's date (2026-11-03)",
     ],
+  );
+  // (the host's name is reported too, when an output holds it)
+  assert.deepEqual(
+    leaks([[{ stream: "stdout", text: "built on build-host-7 today" }]], { host: "build-host-7" }),
+    ["the host name (build-host-7)"],
   );
 });
 
@@ -337,6 +349,18 @@ test("the runner fails a changed output, an error, a hang (killed at the deadlin
   r = run(["run", "latex/article", "--root", root]);
   assert.equal(r.status, 1);
   assert.match(r.stdout, /preview\.html differs/);
+});
+
+test("the runner fails an output that holds the run's temporary folder", () => {
+  // (a notebook printing its working directory: the run's folder, which no committed output may hold)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  const nb = JSON.parse(readFileSync(nbFile, "utf8"));
+  nb.cells.filter((c) => c.cell_type === "code")[0].source = "import os\nprint(os.getcwd())";
+  writeFileSync(nbFile, JSON.stringify(nb));
+  const r = run(["run", "notebook/hello-python", "--root", root]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /an output holds the run's temporary folder/);
 });
 
 test("ci shards and their census, end to end", () => {

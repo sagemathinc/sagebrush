@@ -348,11 +348,15 @@ test("examples: a change selects its examples; the engines select notebooks, boa
     });
     assert.equal(r.status, 0, r.stderr);
     const o = Object.fromEntries(r.stdout.trim().split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
-    return { ids: JSON.parse(o.examples_ids), matrix: JSON.parse(o.examples_matrix) };
+    return { ids: JSON.parse(o.examples_ids), matrix: JSON.parse(o.examples_matrix), tiers: [o.modes, o.engine_smoke, o.census, o.full] };
   };
-  assert.deepEqual(run(["README.md"]), { ids: [], matrix: [] });
-  assert.deepEqual(run(["test/fixtures/examples/notebook/hello-python/main.ipynb"]).ids, [], "the fixtures are not the corpus's paths");
-  assert.deepEqual(run(["examples/latex/article/main.tex"]), { ids: ["latex/article"], matrix: [1] });
+  assert.deepEqual(run(["README.md"]), { ids: [], matrix: [], tiers: ["false", "false", "false", "false"] });
+  // (the fixture corpus is a known path too: none of the corpus's examples, and not the fallback's engine smoke and census)
+  assert.deepEqual(run(["test/fixtures/examples/notebook/hello-python/main.ipynb"]), { ids: [], matrix: [], tiers: ["true", "false", "false", "false"] }, "the fixtures are not the corpus's paths");
+  assert.deepEqual(run(["examples/latex/article/main.tex"]), { ids: ["latex/article"], matrix: [1], tiers: ["false", "false", "false", "false"] });
+  // (an examples-only change is a known path: that example alone, and not the unknown-path fallback's every job, which
+  // would turn on modes, the engine smoke and the census; examples/ is a web path on master, so node and web run)
+  assert.deepEqual(run(["examples/notebook/hello-python/main.ipynb"]), { ids: ["notebook/hello-python"], matrix: [1], tiers: ["false", "false", "false", "false"] });
   assert.deepEqual(run(["src/compile.ts"]).ids, ["board/hello", "notebook/hello-python", "notebook/sage-basics"]);
   // (a LaTeX suite selects the latex examples; a web/latex source is a full-tier change on master, so every example)
   assert.deepEqual(run(["web/latex/test-latex-page.mjs"]).ids, ["latex/article"]);
