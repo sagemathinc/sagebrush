@@ -7,7 +7,9 @@
 //   warm-up message, no execution); its Run then fetches nothing more (no second download of either file);
 // - a Sage notebook: exactly its mode's groups' files (one mode), each once;
 // - Save-Data, a 3G connection, a hidden tab, the tests' off switch: nothing fetched;
-// - a Run while sci.pre is still being fetched (the proxy serves it slowly): it is downloaded once.
+// - a Run while sci.pre is still being fetched (the proxy serves it slowly): it is downloaded once;
+// - a Run while the first of the files (sci.src) is in flight: that one finishes, the next is never asked;
+// - a plain notebook whose only import lines are in a markdown cell: nothing fetched.
 //   bun web/build.ts && node web/test-preload-page.mjs      (CHROME=... for the browser)
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:fs";
@@ -35,10 +37,12 @@ const SCI = filesOf("sci");
 const SAGE = (TABLE.modes.sage ?? []).flatMap(filesOf);
 ok(SCI.every((f) => statSync(join(dist, f)).isFile()) && SAGE.length > 0 && SAGE.every((f) => statSync(join(dist, f)).isFile()), `the table's files are the build's own (sci: 2, sage's groups: ${SAGE.length})`);
 
-const NB = (mode, cells) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: mode === "sage" ? { name: "sagemath", language: "sage" } : { name: "python3", language: "python" } }, cells: cells.map((c) => ({ cell_type: "code", source: c, metadata: {}, outputs: [], execution_count: null })) });
+const NB = (mode, cells) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: mode === "sage" ? { name: "sagemath", language: "sage" } : { name: "python3", language: "python" } }, cells: cells.map((c) => (typeof c === "object" ? { cell_type: "markdown", source: c.md, metadata: {} } : { cell_type: "code", source: c, metadata: {}, outputs: [], execution_count: null })) });
 const DOCS = {
   "plain.ipynb": NB("python", ["print(1)", "x = 2\nprint(x * 3)"]),
   "numpy.ipynb": NB("python", ["import numpy as np\nprint(np.arange(3))"]),
+  "numpy2.ipynb": NB("python", ["import numpy as np\nprint(np.arange(3))", "print(1)"]),
+  "markdown.ipynb": NB("python", [{ md: "import numpy\n\nfrom scipy import linalg" }, "print(1)"]),
   "sage.ipynb": NB("sage", ["factor(12)"]),
 };
 
@@ -165,6 +169,26 @@ try {
     ok(out.includes("[0 1 2]"), "a Run during the prefetch: " + JSON.stringify(out));
     ok(count(s.asked, PRE) === 1 && s.bytes.get(PRE) === size(PRE), `...sci.pre downloaded once (${count(s.asked, PRE)} request(s), ${s.bytes.get(PRE)} of ${size(PRE)} bytes): ` + JSON.stringify(s.asked));
   }, { slow: PRE });
+
+  // 6. a Run (of a cell that needs no file) while the FIRST file, sci.src, is in flight: it finishes, and sci.pre, next,
+  // is never asked (the page's `execute` hook stops the loop; a Run never cancels a file)
+  const SRC = SCI.find((f) => f.includes(".src."));
+  await kase("numpy2.ipynb", async (t, s) => {
+    for (let i = 0; i < 150 && !s.asked.includes(SRC); i++) await sleep(100);
+    ok(s.asked.includes(SRC) && (s.bytes.get(SRC) ?? 0) < size(SRC), "(sci.src's prefetch in flight)");
+    const out = await t.run(1);
+    ok(out.includes("1"), "a Run of a cell that needs no file, during sci.src's prefetch: " + JSON.stringify(out));
+    for (let i = 0; i < 150 && s.bytes.get(SRC) !== size(SRC); i++) await sleep(100);
+    await sleep(3000);
+    ok(count(s.asked, SRC) === 1 && s.bytes.get(SRC) === size(SRC) && !s.asked.includes(PRE), "...sci.src finishes, once, and sci.pre is never asked: " + JSON.stringify(s.asked));
+    ok(JSON.stringify(await t.ev("sagebrush.preload.fetched.map((u) => new URL(u).pathname)")) === JSON.stringify([SRC]), "...the preload's own record: sci.src only");
+  }, { slow: SRC });
+
+  // 7. import lines only in a markdown cell: not code, nothing fetched
+  await kase("markdown.ipynb", async (t, s) => {
+    await sleep(6000);
+    ok(s.asked.length === 0 && (await t.ev("sagebrush.preload.outcome")) === "nothing", "import lines only in a markdown cell: no /lib/ file fetched (outcome nothing): " + JSON.stringify([s.asked, await t.ev("sagebrush.preload.outcome")]));
+  });
 } catch (e) {
   ok(false, "the test threw: " + (e?.stack ?? e));
 }
