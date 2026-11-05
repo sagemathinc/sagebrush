@@ -8448,8 +8448,12 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    # Character-array rows are matrix rows, including brackets spanning rows.
-    t = ("\n".join(s.rows()) if type(s) is Char else _text(s)).strip()
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
