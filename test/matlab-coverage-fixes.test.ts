@@ -617,3 +617,39 @@ test("NumPy cholesky still raises for an indefinite matrix", () => {
   ].join("\n")], { encoding: "utf8" });
   assert.deepEqual(lines(out), ["[[2.0, 0.0], [1.0, 1.0]]", "positive-definite error"]);
 });
+
+// MATLAB R2026b Update 1 (26.2.0.3433840), November 5: single fft([]),
+// min(single([]),[],1), and max(int8([]),[],1) keep their input classes.
+test("empty FFT and extrema retain value classes and double index outputs", () => {
+  const out = run([
+    "A = fft(single([])); disp(class(A)); disp(mat2str(size(A)));",
+    "A = fft(single(ones(2)),0,2); disp(class(A)); disp(mat2str(size(A)));",
+    "A = ifft(single([])); disp(class(A)); disp(mat2str(size(A)));",
+    "[v,i] = min(single([]),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "[v,i] = max(int8([]),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "v = min(single([])); disp(class(v)); v = max(int8([])); disp(class(v));",
+    "[v,i] = min(single(zeros(0,3)),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "[v,i] = max(false(2,0),[],2); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "disp(class(fft([]))); disp(class(min([]))); disp(class(max([])));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), [
+    "single", "[0 0]", "single", "[2 0]", "single", "[0 0]",
+    "single", "double", "[0 0]", "int8", "double", "[0 0]", "single", "int8",
+    "single", "double", "[0 3]", "logical", "double", "[2 0]", "double", "double", "double",
+  ]);
+});
+
+// Real MATLAB R2026b Update 1, frozen run o6: nonzeros(sparse(true))
+// returns a full logical column, rather than converting its values to double.
+test("nonzeros retains sparse logical values in a full independent column", () => {
+  const out = run([
+    "S = sparse([true false;false true]); v = nonzeros(S); disp(class(v)); disp(mat2str(size(v))); disp(mat2str(double(v))); disp(issparse(v));",
+    "v(1) = false; disp(nnz(S));",
+    "v = nonzeros(sparse(true)); disp(class(v)); disp(mat2str(double(v)));",
+    "v = nonzeros(sparse([0 2;3 0])); disp(class(v)); disp(mat2str(v));",
+    "v = nonzeros([true false true]); disp(class(v)); disp(mat2str(double(v)));",
+  ].join("\n"));
+  assert.deepEqual(lines(out).map((s) => s.trim()), [
+    "logical", "[2 1]", "[1;1]", "0", "2", "logical", "1", "double", "[3;2]", "logical", "[1;1]",
+  ]);
+});
