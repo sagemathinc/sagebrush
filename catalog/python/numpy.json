@@ -350,6 +350,78 @@
     "upstream_version": "NumPy 2.5.1"
   },
   {
+    "name": "numpy.triu_indices",
+    "kind": "function",
+    "signature": "(n, k=0, m=None)",
+    "summary": "The row and column indices of the upper triangle of an n-by-m array (from diagonal k), in row-major order.",
+    "examples": [
+      {
+        "code": "np.triu_indices(3)",
+        "expected": "(array([0, 0, 0, 1, 1, 2]), array([0, 1, 2, 1, 2, 2]))\n"
+      }
+    ],
+    "differs": [
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tril_indices",
+    "kind": "function",
+    "signature": "(n, k=0, m=None)",
+    "summary": "The row and column indices of the lower triangle of an n-by-m array (up to diagonal k), in row-major order.",
+    "examples": [
+      {
+        "code": "np.tril_indices(3, -1)",
+        "expected": "(array([1, 2, 2]), array([0, 0, 1]))\n"
+      }
+    ],
+    "differs": [
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.triu_indices_from",
+    "kind": "function",
+    "signature": "(arr, k=0)",
+    "summary": "The indices of the upper triangle of a 2-d array arr.",
+    "examples": [
+      {
+        "code": "np.triu_indices_from(np.zeros((2, 3)))",
+        "expected": "(array([0, 0, 0, 1, 1]), array([0, 1, 2, 1, 2]))\n"
+      }
+    ],
+    "differs": [
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.tril_indices_from",
+    "kind": "function",
+    "signature": "(arr, k=0)",
+    "summary": "The indices of the lower triangle of a 2-d array arr.",
+    "examples": [
+      {
+        "code": "np.tril_indices_from(np.zeros((3, 2)))",
+        "expected": "(array([0, 1, 1, 2, 2]), array([0, 0, 1, 0, 1]))\n"
+      }
+    ],
+    "differs": [
+      "Accepts every argument of NumPy 2.5.1's signature, but not every value: one outside what is tested may be refused (an error, never a different answer).",
+      "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
     "name": "numpy.vander",
     "kind": "function",
     "signature": "(x, N=None, increasing=False)",
