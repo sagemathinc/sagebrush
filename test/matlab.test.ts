@@ -2694,6 +2694,21 @@ test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted b
 });
 
 
+test("empty mean median std and var retain NaN with missing-value flags (MCF-11)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf11/transcript.txt.
+  // SHA256 c3b4b49ad0e9cd05239f1c6cf1c2e59a781ca267fddafb101a9d2f182e47a2ff.
+  const expressions = [
+    "mean([],'omitnan')", "median([],'omitnan')", "std([],'omitnan')", "var([],'omitnan')",
+    "mean([],'includenan')", "median([],'includenan')", "std([],'includenan')", "var([],'includenan')",
+  ];
+  const code = expressions.map((s) => `y=${s}; disp(mat2str(size(y))); disp(class(y)); disp(mat2str(y,17));`).join("\n")
+    + "\ndisp(sum([])); disp(prod([]));";
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [...expressions.flatMap(() => ["[1 1]", "double", "NaN"]), "0", "1"]);
+});
+
 test("median and movmedian preserve infinite middle values without finite overflow (MCF-09)", () => {
   const { execFileSync } = require("node:child_process");
   // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf09/transcript.txt.
