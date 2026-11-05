@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 219922,
-  "swGzip": 54131,
-  "transition": "TRANSITION: #681 adds the pinned lazy tabulate package to the offline inventory. Measured against master 388201305 with Node v24.21.0, Bun 1.4.4 and zlib 1.3.2.1-motley-8002e91: sw.js raw is exactly 219,922 B; normalized gzip-9 is 54,067 B and swGzip is that exact measurement plus 64 B tight headroom."
+  "swRaw": 219988,
+  "swGzip": 54121,
+  "transition": "scipy.optimize (its own lazy chunk mod-scipy-optimize): sw.js raw 219924 measured at this branch's master merge bda299f7b, swRaw = exact + 64 = 219988; normalized gzip-9 54057 measured, swGzip = exact + 64 = 54121 (@sagebrush's ruling: both exact + 64; the gzip row moves with generated chunk-name hash entropy, #628 r6 measured 54012). Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
 }

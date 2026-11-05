@@ -212,6 +212,16 @@ and the formulas of `log_ndtr` (`_faddeeva.cxx`); its ufuncs' type
 resolution, poles and domains follow SciPy's behaviour. Two of its
 functions are ported from xsf, SciPy's special-function library (below).
 
+`lib/scipy/optimize.py` is SciPy 1.18's `scipy/optimize` code, docstrings
+removed and adapted to Sagebrush's NumPy (no array-API layer, dense finite
+differences only): `minimize`'s BFGS, CG and Nelder-Mead and
+`minimize_scalar`'s Brent, bounded and golden methods (`_optimize.py`), the
+Wolfe line searches (`_linesearch.py` and `_dcsrch.py`, itself a Python
+translation of MINPACK-2's dcsrch and dcstep), `ScalarFunction`
+(`_differentiable_functions.py`), the dense differences of `_numdiff.py`,
+`OptimizeResult`'s printing (`scipy/_lib/_util.py`) and `minimize` and
+`minimize_scalar` (`_minimize.py`), so that iterates and counts are SciPy's.
+
 `quad` in `lib/scipy/integrate.py` is a code translation, not only an
 implementation of the published algorithm: `_qags`, `_qk21`, `_qk15i`,
 `_qpsrt` and `_qelg` translate QUADPACK's Fortran routines dqagse/dqagie,
