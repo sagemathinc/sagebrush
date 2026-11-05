@@ -41,9 +41,10 @@ function setup({ latest = S, meta = {}, duringFetch = null } = {}) {
   const fetches = { n: 0 };
   const statusEl = { textContent: "" };
   const fetch = async () => { fetches.n++; duringFetch?.(nb); return { ok: true, json: async () => ({ id: latest }) }; };
-  const [notebookPkgset, pinUsedPkgset] = new Function("nb", "current", "LOCAL", "statusEl", "fetch", source + "\nreturn [notebookPkgset, pinUsedPkgset];")(nb, current, false, statusEl, fetch);
+  // (setAttaching: the notebook being attached to nb, as openNotebook sets it, for the attach-wait cases)
+  const [notebookPkgset, pinUsedPkgset, setAttaching] = new Function("nb", "current", "LOCAL", "statusEl", "fetch", source + "\nreturn [notebookPkgset, pinUsedPkgset, (a) => { attaching = a; }];")(nb, current, false, statusEl, fetch);
   const track = (p) => { const t = { done: false, value: undefined, error: undefined }; p.then((v) => { t.done = true; t.value = v; }, (e) => { t.done = true; t.error = e; }); return t; };
-  return { nb, current, saves, writes, fetches, statusEl, call: () => track(notebookPkgset("n")), use: (set, owner = "n") => track(pinUsedPkgset(owner, set)) };
+  return { nb, current, saves, writes, fetches, statusEl, setAttaching, call: () => track(notebookPkgset("n")), use: (set, owner = "n") => track(pinUsedPkgset(owner, set)) };
 }
 async function settle(saves, how = "resolve") {
   for (let i = 0; i < 10; i++) {
@@ -133,6 +134,51 @@ async function settle(saves, how = "resolve") {
   ok(!first.done && !second.done, "neither start resolves while the save is held");
   await settle(t.saves, "reject");
   ok(first.done && first.error !== undefined && second.done && second.error !== undefined, "a failed save rejects them, though the metadata holds S");
+}
+
+// 8b. a pin already there, replaced by another tab while its save is awaited: the winner is returned, once it too is
+// durable, never the pin read before the save (grader's G3)
+{
+  const t = setup({ meta: { pkgset: S } });
+  const first = t.call();
+  await tick(); await tick();
+  t.nb.meta.pkgset = T; // (merged in from another tab or device while the save was held)
+  t.saves.shift().resolve();
+  await tick(); await tick();
+  ok(!first.done && t.saves.length === 1, "a pin replaced during its save is saved again before use");
+  await settle(t.saves);
+  ok(first.value === T && t.writes.length === 0, "and the winning pin T is the one returned, not S; nothing written here");
+}
+
+// 8c. a first use while the notebook's document is still being attached (its interpreter starts first): it waits
+// for the attach, and pins into the notebook attached, never reads the previous document's pin (grader's G11)
+{
+  const t = setup({ meta: { pkgset: T } }); // (the previous document's metadata, still in nb)
+  let attached;
+  t.setAttaching({ id: "n", done: new Promise((r) => (attached = r)) });
+  const used = t.use(S);
+  await tick(); await tick();
+  ok(!used.done && t.writes.length === 0, "a use during the attach waits for it, writing nothing");
+  t.nb.meta = {}; // (the notebook's own document, attached: unpinned)
+  attached();
+  await settle(t.saves);
+  ok(used.done && t.nb.meta.pkgset === S && JSON.stringify(t.writes) === JSON.stringify([{ pkgset: S }]) && !/another tab/.test(t.statusEl.textContent), "once attached, it pins the set it used into that notebook");
+}
+
+// 8d. latest names something that isn't a set id: nothing used, nothing written (grader's G12)
+{
+  const t = setup({ latest: "nope" });
+  const first = t.call();
+  await settle(t.saves);
+  ok(first.value === null && t.writes.length === 0, "a latest that isn't a set id is not used");
+}
+
+// 8e. the notebook left while latest is asked: the start rejects (grader's G13)
+{
+  const t = setup({ duringFetch: () => (t.current.id = "other") });
+  const first = t.call();
+  await settle(t.saves);
+  ok(first.done && /left/.test(String(first.error?.message)) && t.writes.length === 0, "a notebook left while latest was asked rejects, pinning nothing");
 }
 
 // 9. the notebook left while its pin's save is held: the start rejects
