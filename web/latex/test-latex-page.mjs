@@ -1289,12 +1289,26 @@ try {
 
     // E3: an editor that can't save (mixed line endings), unsaved edits, a change: only Use theirs; the copy has LF
     await opened("/x/e3.tex", enc("a\r\nb\nc\n"));
+    const rv3a = await revOf("/x/e3.tex");
     await typeInto("a\nb\nc\nmine\n");
+    await sleep(1200);
+    const e3a = { ro: (await saveState()) === "Read-only", none: (await revOf("/x/e3.tex")) === rv3a,
+      noPrompt: await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`) };
+    check(Object.values(e3a).every((v) => v === true), "E3a a read-only editor, edited: Read-only, nothing written past the debounce, no prompt", e3a);
     await agentWrite("/x/e3.tex", DOC);
     const e3 = { bar: await barShows(), buttons: (await page(`[P.querySelector(".tex-theirs")?.hidden === false, P.querySelector(".tex-mine")?.hidden === false]`)).join() === "true,false" };
     await click(".tex-theirs");
     Object.assign(e3, { said: await statusIs(/^Your text is in e3 \(mine\)\.tex$/, 8000), copy: JSON.stringify(await bytesOf("/x/e3 (mine).tex").catch(() => null)) === JSON.stringify(enc("a\nb\nc\nmine\n")), src: await srcIs(DOC), save: (await saveState()) === "Saved ✓" });
     check(Object.values(e3).every((v) => v === true), "E3 an unsaveable editor: the bar offers only Use theirs; the copy LF; theirs here, saveable", e3);
+    // (U8 r6, beyond the plan (@sagebrush, Nov 5: its own pin, for SEC and ENGINE): the editor opened read-only is
+    //  saved as you type once Use theirs made it saveable: an edit, no Ctrl/Cmd+S, the file has it, Saved ✓; before,
+    //  while it was read-only, nothing was written and nothing prompted)
+    const e3b = {};
+    const rv3 = await revOf("/x/e3.tex");
+    await typeInto(DOC + "% after Use theirs\n");
+    Object.assign(e3b, { written: await until(`(async () => new TextDecoder().decode((await ${W}.read("/x/e3.tex")).content) === ${JSON.stringify(DOC + "% after Use theirs\n")})()`, 8000), saved: await savedNow(5000), once: (await revOf("/x/e3.tex")) - rv3 === 1,
+      noPrompt: await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`) });
+    check(Object.values(e3b).every((v) => v === true), "E3b read-only, then Use theirs: saveable, and an edit is saved by itself (no Ctrl/Cmd+S), Saved ✓, no prompt", e3b);
 
     // E4: a clean editor; the file made binary elsewhere: this text kept, Read-only, said; made mixed-ending: shown,
     // Read-only; nothing written after either
