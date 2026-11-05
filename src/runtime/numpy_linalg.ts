@@ -1371,6 +1371,16 @@ newBuiltinModule("_nplinalg", (m) => {
     const k0 = Math.min(r0, c0), K0 = Math.max(r0, c0);
     work(10 * r0 * c0 + 10 * k0 * k0 + (fullMatrices && computeUV ? 6 * K0 * K0 : 0) + 4 * (r0 + c0), "svd");
     const [A, r, c] = mat(a);
+    if (r === 0 || c === 0) {
+      // (an empty matrix has no singular values: S is empty; U and V^T are the identity of their full sizes, or
+      // empty in the reduced form, as NumPy gives)
+      const s0 = out(new Float64Array(0), [0]);
+      if (!computeUV) return s0;
+      const eye = (n: number) => { const I = new Float64Array(n * n); for (let i = 0; i < n; i++) I[i * n + i] = 1; return I; };
+      return fullMatrices
+        ? tuple([out(eye(r), [r, r]), s0, out(eye(c), [c, c])])
+        : tuple([out(new Float64Array(0), [r, 0]), s0, out(new Float64Array(0), [0, c])]);
+    }
     const [U, S, V] = svd(A, r, c);
     const k = Math.min(r, c);
     const s = out(S.subarray(0, k), [k]);

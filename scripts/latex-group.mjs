@@ -21,7 +21,12 @@ export const LATEX_LAZY = {
 //  priority; the group is fetched only when a .tex is opened, so the first page load is unaffected): each PR reports
 //  its delta, and what can be a lazy chunk of its own stays out of the group; was 192 / 64
 //  (2026-10-29, the ten examples and the embeddable editor), 180 / 60 before)
-export const LATEX_CAPS = { raw: 232 * 1024, gzip: 78 * 1024 };
+// (235 KiB / 79.5 KiB: @sagebrush's ruling with daybreak2's raw number, Nov 4, under William's of 1:47 PM PST ("raise
+//  limits to support functionality... under control, justified, and iterative"), for the LaTeX fidelity queue: #641
+//  (beamer's early fetch), #644 (beamer's furniture), and astra4's silent gaps, saved boxes, counters and references
+//  (cleveref's formatting kept here, as current papers use it): about 239.3K / 80,623 after all five, about 1.3K / 785 B
+//  left. The next time the group nears its cap, the answer is a lazy split, not another raise)
+export const LATEX_CAPS = { raw: 235 * 1024, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -47,8 +52,11 @@ export const LATEX_LAZY_CAPS = {
   DOC: { label: "the LaTeX read-only document's chunk", raw: 3.5 * 1024, gzip: 1.75 * 1024 },
   // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
   //  class beamer, or an overlay command). @sagebrush, 2026-11-04: make room for beamer's page furniture by moving
-  //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come)
-  BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3 * 1024 },
+  //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come.
+  //  8 KiB / 3.5 KiB: @sagebrush's ruling with daybreak2's number, Nov 4, #644 r2: the furniture (6,107 / 2,681) plus
+  //  the review-required fixes FURN644-SAGE-1, FURN644-FRAME-NO-1 and BEAMER644-FURN-1 (7,566 / 3,312), about 7.6% room
+  //  on each; lazy: no growth for other documents)
+  BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */

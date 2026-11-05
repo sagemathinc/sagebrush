@@ -339,9 +339,10 @@ export class Machine extends CoreMachine {
       ["paragraph", "paragraph"], ["subparagraph", null], ["caption", null], ["footnote", "footnote"], ["thanks", null]]) {
       P.prim(nm, function () {
         const s = this.skipSpacesRaw(); const star = s === mkChar(CAT.OTHER, 42); if (!star && s !== null) this.back(s);
-        this.readOptRaw(); const arg = this.readArgShortRaw();
+        const o = this.readOptRaw(), arg = this.readArgShortRaw();
         if (ctr && !star && this.counterReg(ctr) >= 0) this.stepCounterRef(ctr);
-        this.mark({ k: "sec", cmd: nm, star });
+        // (the short form, \section[short]{..}, as written: beamer's headlines show it)
+        this.mark({ k: "sec", cmd: nm, star, short: o ? this.toks2str(o) : null });
         this.pushList(arg.concat([this.csTok("sb@eot")]));
       });
     }

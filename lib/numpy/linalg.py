@@ -47,7 +47,7 @@ def _scaled(m):
     return _ldexp(m, k), k
 
 
-def _stacked(f, a, *rest):
+def _stacked(f, a, *rest, empty=None):
     """Apply f to each matrix of a stack (..., M, N); results are stacked back."""
     a = _float(a)
     if a.ndim < 2:
@@ -55,7 +55,18 @@ def _stacked(f, a, *rest):
     if a.ndim == 2:
         return f(a, *rest)
     lead = a.shape[:-2]
-    flat = a.reshape((-1,) + a.shape[-2:])
+    count = 1
+    for d in lead:
+        count *= d
+    # (the stack's count, not -1: a matrix axis of 0 leaves -1 undetermined)
+    flat = a.reshape((count,) + a.shape[-2:])
+    if count == 0:
+        # (an empty stack: no matrix to decompose, every output empty. empty(m, n, dtype) gives each output's
+        # per-matrix shape and dtype, from the operation's definition: O(1), whatever m and n are)
+        out = empty(a.shape[-2], a.shape[-1], a.dtype)
+        if isinstance(out, list):
+            return tuple(_np.zeros(lead + sh, dtype=dt) for sh, dt in out)
+        return _np.zeros(lead + out[0], dtype=out[1])
     res = [f(flat[i], *rest) for i in range(flat.shape[0])]
     if isinstance(res[0], tuple):
         return tuple(_np.array([r[k] for r in res]).reshape(lead + _np.asarray(res[0][k]).shape) for k in range(len(res[0])))
@@ -70,7 +81,7 @@ def _square(a):
 def det(a):
     a = _float(a)
     _square(a)
-    r = _stacked(lambda m: _L.det(m), a)
+    r = _stacked(lambda m: _L.det(m), a, empty=lambda m, n, dt: ((), dt))
     return _np.float64(r) if not isinstance(r, _np.ndarray) else r
 
 
@@ -80,7 +91,7 @@ def slogdet(a):
     if a.ndim == 2:
         s, l = _L.slogdet(a)
         return _SlogdetResult(_np.float64(s), _np.float64(l))
-    s, l = _stacked(lambda m: tuple(_L.slogdet(m)), a)
+    s, l = _stacked(lambda m: tuple(_L.slogdet(m)), a, empty=lambda m, n, dt: [((), dt), ((), _np.float64)])
     return _SlogdetResult(_np.asarray(s, _np.float64), _np.asarray(l, _np.float64))
 
 
@@ -120,7 +131,7 @@ def solve(a, b):
 def inv(a):
     a = _float(a)
     _square(a)
-    return _stacked(_L.inv, a)
+    return _stacked(_L.inv, a, empty=lambda m, n, dt: ((n, n), dt))
 
 
 def matrix_power(a, n):
@@ -145,7 +156,7 @@ def matrix_power(a, n):
 def cholesky(a, *, upper=False):
     a = _float(a)
     _square(a)
-    L = _stacked(_L.cholesky, a)
+    L = _stacked(_L.cholesky, a, empty=lambda m, n, dt: ((n, n), dt))
     return _np.swapaxes(L, -1, -2) if upper else L
 
 
@@ -198,7 +209,7 @@ def _eig(a, balance=True):
     a = _float(a)
     _square(a)
     nobalance = not balance
-    return _stacked(lambda m: _L.eig(m, nobalance), a)
+    return _stacked(lambda m: _L.eig(m, nobalance), a, empty=lambda m, n, dt: [((n,), dt), ((n, n), dt)])
 
 
 def _eigvals(a, balance=True):
@@ -221,7 +232,7 @@ def eigvals(a):
 def eigh(a, UPLO="L"):
     a = _float(a)
     _square(a)
-    w, v = _stacked(lambda m: _L.eigh(m, UPLO == "U"), a)
+    w, v = _stacked(lambda m: _L.eigh(m, UPLO == "U"), a, empty=lambda m, n, dt: [((n,), _np.float64), ((n, n), dt)])
     return EighResult(w, v)
 
 
@@ -240,8 +251,11 @@ def _svd1(m, full, uv):
 def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
     a = _float(a)
     if not compute_uv:
-        return _stacked(lambda m: _svd1(m, False, False), a)
-    u, s, vh = _stacked(lambda m: _svd1(m, full_matrices, True), a)
+        return _stacked(lambda m: _svd1(m, False, False), a, empty=lambda m, n, dt: ((min(m, n),), _np.float64))
+    def svd_empty(m, n, dt):
+        k = min(m, n)
+        return [((m, m) if full_matrices else (m, k), dt), ((k,), _np.float64), ((n, n) if full_matrices else (k, n), dt)]
+    u, s, vh = _stacked(lambda m: _svd1(m, full_matrices, True), a, empty=svd_empty)
     return SVDResult(u, s, vh)
 
 
@@ -256,16 +270,26 @@ def qr(a, mode="reduced"):
         m, k = _scaled(m)
         q, r = _L.qr(m, mode == "complete")
         return q, _ldexp(r, -k)
-    q, r = _stacked(qr1, a)
+    def qr_empty(m, n, dt):
+        k = min(m, n)
+        return [((m, m) if mode == "complete" else (m, k), dt), ((m, n) if mode == "complete" else (k, n), dt)]
+    q, r = _stacked(qr1, a, empty=qr_empty)
     if mode == "r":
         return r
     return QRResult(q, r)
 
 
 def pinv(a, rcond=None, hermitian=False, *, rtol=None):
+    a0 = _np.asarray(a)
     a = _float(a)
     if rtol is None:
         rtol = 1e-15 if rcond is None else rcond
+    if a.ndim >= 2 and (a.shape[-1] == 0 or a.shape[-2] == 0 or a.size == 0):
+        # (no singular values: the pseudoinverse of an m x n empty matrix is n x m, empty, per matrix)
+        # (the input's dtype only when the matrices themselves are empty, as NumPy's: an empty stack of
+        # nonempty matrices takes NumPy's ordinary path, and comes back float64)
+        keep = a.shape[-1] * a.shape[-2] == 0
+        return _np.zeros(a.shape[:-2] + (a.shape[-1], a.shape[-2]), dtype=a0.dtype if keep else _np.float64)
     u, s, vh = svd(a, full_matrices=False)
     cutoff = rtol * _np.max(s, axis=-1, keepdims=True)
     sinv = _np.where(s > cutoff, 1.0 / _np.where(s > cutoff, s, 1.0), 0.0)
@@ -277,6 +301,9 @@ def matrix_rank(A, tol=None, hermitian=False, *, rtol=None):
     if A.ndim < 2:
         return int(not _np.all(A == 0))
     S = svd(A, compute_uv=False)
+    if S.shape[-1] == 0:
+        # (no singular values: rank 0 for each matrix)
+        return _np.zeros(A.shape[:-2], dtype=_np.int64) if A.ndim > 2 else 0
     if tol is None:
         if rtol is None:
             rtol = max(A.shape[-2:]) * _np.finfo(_np.float64).eps
@@ -347,7 +374,13 @@ def norm(x, ord=None, axis=None, keepdims=False):
         r = _np.sum(svd(_np.moveaxis(x, axis, (-2, -1)), compute_uv=False), axis=-1)
     elif ord in (2, -2):
         s = svd(_np.moveaxis(x, axis, (-2, -1)), compute_uv=False)
-        r = _np.max(s, axis=-1) if ord == 2 else _np.min(s, axis=-1)
+        if s.shape[-1] == 0:
+            # (no singular values: NumPy's 2-norm is 0 (its maximum starts at 0); the -2 norm, a minimum, has none)
+            if ord == -2:
+                raise ValueError("zero-size array to reduction operation minimum which has no identity")
+            r = _np.zeros(s.shape[:-1]) if s.ndim > 1 else _np.float64(0.0)
+        else:
+            r = _np.max(s, axis=-1) if ord == 2 else _np.min(s, axis=-1)
     elif ord in (1, -1):
         cs = _np.sum(a, axis=r0)
         r = _np.max(cs, axis=r1 - 1 if r1 > r0 else r1) if ord == 1 else _np.min(cs, axis=r1 - 1 if r1 > r0 else r1)
@@ -376,6 +409,8 @@ def matrix_norm(x, /, *, keepdims=False, ord="fro"):
 
 def cond(x, p=None):
     x = _float(x)
+    if x.ndim >= 2 and x.shape[-1] * x.shape[-2] == 0:
+        raise LinAlgError("cond is not defined on empty arrays")
     if p is None or p in (2, -2):
         s = svd(x, compute_uv=False)
         return s[..., 0] / s[..., -1] if p != -2 else s[..., -1] / s[..., 0]
