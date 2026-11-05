@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "MCF-30 (#662): preserve str2num character-array rows and MATLAB's []/false for separately bracketed rows. Daybreak2 clean same-path Node 24.21.0/Bun 1.4.4 rebuild at merge head 2064622bb vs current master 8488b7678 measured matlab.pre +2059 B, matlab.src +345, lib.gen +144, pyjs +192. First three markers are exact; pyjs 256 includes the conventional 64-byte packaging margin. Supersedes the earlier-base pyjs measurement. Evidence: reviews/pr662-2064622b-daybreak2-SIZE-CHANGES.md. No dependencies or new chunks.",
+ "reason": "MCF-30 (#662): preserve str2num character-array rows and MATLAB's []/false for separately bracketed rows. Daybreak2 Node 24.21.0/Bun 1.4.4 measurement at merge head 4c7584f95 vs master 3264180f: matlab.pre +2067 B, matlab.src +345, lib.gen +120, pyjs +208. matlab.pre and matlab.src markers are exact; prior lib.gen 144 and pyjs 256 still fit (24/48 B headroom). No dependencies or new chunks.",
  "bytes": {
-  "engine/lib/matlab.pre": 2059,
+  "engine/lib/matlab.pre": 2067,
   "engine/lib/matlab.src": 345,
   "cli/lib.gen.js": 144,
   "cli/pyjs.cjs": 256
