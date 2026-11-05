@@ -10,8 +10,10 @@ import { join } from "node:path";
 export const KINDS = ["notebook", "board", "latex"];
 export const ID = /^(notebook|board|latex)\/[a-z0-9]+(-[a-z0-9]+)*$/;
 export const SLUG_MAX = 64;
-/** the most examples a shard runs, and the most shards a matrix has (GitHub's job limit) */
-export const SHARD_MAX = 24;
+/** the most examples a shard runs, and the most shards a matrix has (GitHub's job limit): 16, so that a shard's
+ * worst case, every example killed at its 30 s deadline, two at a time, is 4 minutes, and the job with its build
+ * stays inside PR CI's 10 minutes (William, Nov 2 and Nov 4) */
+export const SHARD_MAX = 16;
 export const MATRIX_MAX = 256;
 export const MODES = ["python", "sage", "magma", "matlab"];
 export const LEVELS = ["intro", "course", "research"];

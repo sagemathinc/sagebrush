@@ -342,7 +342,7 @@ const outputs = {
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
   files: files.length,
-  // (the examples job: the ids it runs and its shard matrix, at most 24 examples a shard; plan U7 section 2)
+  // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
