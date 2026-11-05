@@ -141,7 +141,7 @@ nothing:
 | document | `latexmk`, cold | preview, first | faster |
 |---|---:|---:|---:|
 | C3 Beamer talk | 6.26 s | 317 ms | 20× |
-| C6 pgfplots manual, 2-D plots (48 pages) | 22 s | 3.21 s | 6.9× |
+| C6 pgfplots manual, 2-D plots (48 pages) | 22 s | 3.21 s | 6.7× |
 | C0p 1,500 paragraphs of Chinese | 11 s | 1.91 s | 5.7× |
 | C5b PythonTeX gallery | 2.07 s | 307 ms | 6.8× |
 | C2 amsmath user's guide | 1.79 s | 538 ms | 3.3× |
@@ -156,7 +156,7 @@ nothing:
 | document | `latexmk`, after the edit | preview | faster |
 |---|---:|---:|---:|
 | C3 Beamer talk | 3.88 s | 32 ms | 120× |
-| C6 pgfplots manual | 21 s | 258 ms | 81× |
+| C6 pgfplots manual | 21 s | 258 ms | 83× |
 | C5b PythonTeX gallery | 2.07 s | 38 ms | 54× |
 | C0p Chinese text | 5.64 s | 194 ms | 29× |
 | C5 SageTeX example | 471 ms | 24 ms | 19× |
