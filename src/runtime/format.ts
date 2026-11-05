@@ -188,10 +188,25 @@ export function formatFixed(x: number, p: number, alt = false): string {
   return (x < 0 || Object.is(x, -0) ? "-" : "") + i + (p > 0 || alt ? "." + f : "");
 }
 
+// floor(log10(|x|)) exactly, for a finite nonzero x: log10's estimate, corrected by comparing |x| with 10^k exactly
+// (1e-7's double is just below 10^-7, where log10 gives -7: from -7, rounding to 17 digits carries to 10^16 and
+// looks right, '1e-07'; CPython's is '9.9999999999999995e-08')
+function decExp(x: number): number {
+  const [m, e] = decompose(x);
+  const xn = e >= 0 ? m << BigInt(e) : m, xd = e >= 0 ? 1n : 1n << BigInt(-e);
+  // (|x| >= 10^k)
+  const atLeast = (k: number) => (k >= 0 ? xn >= 10n ** BigInt(k) * xd : xn * 10n ** BigInt(-k) >= xd);
+  let k = Math.floor(FD.log10(Math.abs(x)));
+  while (!atLeast(k)) k--;
+  while (atLeast(k + 1)) k++;
+  return k;
+}
+
 // [digits (p+1 significant), decimal exponent]
 function sciDigits(x: number, p: number): [string, number] {
   if (x === 0) return ["0".repeat(p + 1), 0];
-  let k = Math.floor(FD.log10(Math.abs(x)));
+  // (from the exact exponent: the digits are p+1, or p+2 when rounding carries into the next power of ten)
+  let k = decExp(x);
   for (;;) {
     let digits: string;
     if (p - k >= 0) {
@@ -564,7 +579,12 @@ function signOf(neg: boolean, s: Spec): string {
 // in range(0x110000), a C long first)
 const LONG_MAX = 9223372036854775807n;
 function formatInt(v: bigint, s: Spec): string {
-  if ("eEfFgG%".includes(s.type) && s.type !== "") return formatFloat(Number(v), s);
+  if ("eEfFgG%".includes(s.type) && s.type !== "") {
+    // (as float(v): an int past the largest float is an OverflowError, never inf)
+    const x = Number(v);
+    if (!Number.isFinite(x)) raise(T.OverflowError, "int too large to convert to float");
+    return formatFloat(x, s);
+  }
   if (!"bcdoxXn".includes(s.type)) raise(T.ValueError, `Unknown format code '${s.type}' for object of type 'int'`);
   if (s.precision >= 0) raise(T.ValueError, "Precision not allowed in integer format specifier");
   if (s.z) raise(T.ValueError, "Negative zero coercion (z) not allowed in integer format specifier");
@@ -623,9 +643,12 @@ function floatBody(x: number, s: Spec, tn: string, complex = false): [boolean, s
     case "n":
       body = formatGeneral(a, p < 0 ? 6 : p, s.type === "G", s.alt, false);
       break;
-    case "%":
-      body = formatFixed(a * 100, p < 0 ? 6 : p, s.alt) + "%";
+    case "%": {
+      // (times 100 in double precision, as CPython: past the largest float that is inf, shown "inf%")
+      const h = a * 100;
+      body = (Number.isFinite(h) ? formatFixed(h, p < 0 ? 6 : p, s.alt) : "inf") + "%";
       break;
+    }
     default:
       if (!complex) body = p < 0 ? floatRepr(a) : formatGeneral(a, p, false, s.alt, true);
       else if (p >= 0) body = formatGeneral(a, p, false, s.alt, false);
