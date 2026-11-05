@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MATLAB's cross of matrices and N-D arrays (astra3's campaign MCF-15; real MATLAB R2026b Update 1 results run by @sagebrush-matlab, Nov 5): cross_ in lib/_matlab.py takes the 3-element vectors along the first dimension of size 3 (or dim) instead of the first three elements, so cross(eye(3),eye(3)) is zeros(3), not a reshape error; it refuses different sizes (MATLAB:cross:InputSizeMismatch), no dimension of size 3 and a dim of another length (MATLAB:cross:InvalidDimAorB). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 43412299 (head 6932fea9 merged onto master 6dfcbe3c): matlab.pre +7275, matlab.src +1557, lib.gen +532, pyjs +520; markers with small margins (pyjs +80 for build-specific bytes).",
+ "bytes": {
+  "engine/lib/matlab.pre": 7300,
+  "engine/lib/matlab.src": 1580,
+  "cli/lib.gen.js": 560,
+  "cli/pyjs.cjs": 600
+ }
+}
