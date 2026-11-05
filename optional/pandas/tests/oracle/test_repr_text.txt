@@ -1,5 +1,7 @@
 python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
 package numpy 2.5.1
+package openpyxl 3.1.5
 package pandas 3.1.0
 package python-dateutil 3.0.0
 package six 1.17.0
