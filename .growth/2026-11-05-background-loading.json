@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Background loading L0 (web/preload.ts; design-background-loading r1+r2, @sagebrush's OK Nov 5): the notebook page prefetches at idle the library chunks the open notebook's first Run will fetch (its mode's groups, the groups its import lines name), bytes only. Growth: web/index.html's script (the preloader, with its line-by-line, bounded import scan (astra's PRELOAD674-SCAN-1), about 1.3 KB gzip of it the build's table: 38 groups' chunk name hashes and bytes, 3 modes, 59 public modules) and nothing else; cli/pyjs.cjs embeds index.html. Figures: a CI-order size record (pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4, node 24.21.0) of the head merged onto master 8488b767: cli/pyjs.cjs +8084 (marked 8150: +66 for a later merge's churn). No other bundle row changes.",
+ "reason": "Background loading L0 (web/preload.ts; design-background-loading r1+r2, @sagebrush's OK Nov 5): the notebook page prefetches at idle the library chunks the open notebook's first Run will fetch (its mode's groups, the groups its import lines name), bytes only. Growth: web/index.html's script (the preloader, with its line-by-line, bounded import scan (astra's PRELOAD674-SCAN-1) and the LaTeX editor's host rule (latexExtra), about 1.3 KB gzip of it the build's table: 38 groups' chunk name hashes and bytes, 3 modes, 59 public modules) and nothing else; cli/pyjs.cjs embeds index.html. Figures: a CI-order size record (pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4, node 24.21.0) of the head merged onto master 8488b767: cli/pyjs.cjs +8296 (marked 8350: +54 for a later merge's churn). No other bundle row changes.",
  "bytes": {
-  "cli/pyjs.cjs": 8150
+  "cli/pyjs.cjs": 8350
  }
 }

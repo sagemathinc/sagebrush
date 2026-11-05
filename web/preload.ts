@@ -74,6 +74,14 @@ export function intentUrls(t: PreloadTable, groups: readonly string[], base: str
   return groups.flatMap((g) => { const e = t.groups[g]; return !e ? [] : [`lib/${g}.src.${e[1]}.json`, ...(e[2] ? [`lib/${g}.pre.${e[2]}.json`] : [])]; }).map((f) => new URL(f, base).href);
 }
 
+/** The LaTeX editor's two files, where the editor is on here and the workspace has a .tex; otherwise null. On here is
+ * web/latex/boot.ts latexOn's rule, the host exactly in the build's list (`latex`: a build with the editor; `hosts`:
+ * __SB_LATEX_HOSTS__): where it is off, nothing LaTeX is fetched, and the workspace isn't even listed */
+export async function latexExtra(o: { latex: boolean; hosts: readonly string[]; host: string; hasTex: () => Promise<boolean>; base: string }): Promise<{ urls: string[]; bytes: number } | null> {
+  if (!o.latex || !o.hosts.includes(o.host) || !(await o.hasTex())) return null;
+  return { urls: ["/sagebrush-latex.js", "/sagebrush-latex-worker.js"].map((f) => new URL(f, o.base).href), bytes: 300000 };
+}
+
 /** Whether background loading may run now, and why not: the user's Save-Data, a slow or offline connection, a hidden
  * tab (asked again before each file) */
 export function preloadBlocked(nav: any = navigator, doc: { visibilityState: string } = document): string | null {
