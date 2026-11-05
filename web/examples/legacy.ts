@@ -33,6 +33,13 @@ const NOTEBOOKS = [
   "matplotlib",
   "text-and-data",
 ];
+// (corpus notebooks the old menu leaves out, each with why: it carries one notebook's code and Markdown, so an
+// example that is a folder, or that needs its cells' Jupyter metadata, opens from the Examples panel instead (PR 3);
+// the test checks every corpus notebook is in NOTEBOOKS or here)
+export const NOT_IN_OLD_MENU: Record<string, string> = {
+  "helper-code": "its helper files beside it (_code/, data/): the old menu makes a notebook from cells alone",
+  "hidden-setup": "its cells' Jupyter metadata (source_hidden, outputs_hidden): the old menu keeps code and Markdown only",
+};
 const LATEX = ["article", "beamer", "sagetex", "pythontex", "matlab", "figure", "cv", "tikz", "bibliography", "homework"];
 const BOARDS = ["how-sagebrush-is-built", "infinitely-many-primes", "collatz-live", "mermaid-flowcharts", "what-is-transitive"];
 // (written into dist/board/examples by scripts/board-examples.mjs, so not in the corpus)

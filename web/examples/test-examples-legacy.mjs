@@ -7,7 +7,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { latexExamples, legacySource, notebookExamples, rawLiteral } from "./legacy.ts";
+import { latexExamples, legacySource, NOT_IN_OLD_MENU, notebookExamples, rawLiteral } from "./legacy.ts";
 
 let n = 0;
 const fails = [];
@@ -69,8 +69,10 @@ for (const [what, end] of [["a backtick", "`"], ['"${"', "${"], ["a carriage ret
 {
   const root = join(import.meta.dir, "..", "..", "examples", "notebook");
   const want = readdirSync(root).filter((d) => existsSync(join(root, d, "example.json"))).map((d) => JSON.parse(readFileSync(join(root, d, "example.json"), "utf8")).title).sort();
+  // (but those the old menu can't carry, each named with why in NOT_IN_OLD_MENU: a folder, or cells' Jupyter metadata)
+  const left = Object.keys(NOT_IN_OLD_MENU).map((slug) => JSON.parse(readFileSync(join(root, slug, "example.json"), "utf8")).title);
   const got = Object.keys(notebookExamples().cells).sort();
-  check(JSON.stringify(got) === JSON.stringify(want), `the notebook menu lists every corpus notebook (${got.length} of ${want.length})`);
+  check(JSON.stringify([...got, ...left].sort()) === JSON.stringify(want) && !left.some((t) => got.includes(t)), `the notebook menu lists every corpus notebook but those named with why in NOT_IN_OLD_MENU (${got.length} + ${left.length} of ${want.length})`);
 }
 console.log(`${n - fails.length}/${n} passed`);
 if (fails.length) process.exit(1);
