@@ -286,6 +286,46 @@ try {
     const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const cbs = await ev(state);
     check(cb && cbs.asked === 4 && cbs.at === 0 && cbs.kept, "B5-A1: Back with nothing unsaved: nothing asked", cbs);
+    // ---- (astra U8-SWITCH-2) a return to the file shown is a newer intent: A shown, an edit whose write is held,
+    // Forward to B (its switch waits for A to settle), then Back to A before it has: once A's write lands, A stays
+    // shown (its URL, editable, its edit written) and B never opens
+    {
+      await ev(`(() => { window.__failWrites = false; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% held in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await ev(`(history.forward(), true)`); await sleep(400);
+      const mid = await ev(`({ ro: document.querySelector(".tex-src").readOnly, url: new URLSearchParams(location.search).get("tex") })`);
+      await ev(`(history.back(), true)`); await sleep(400);
+      await ev(`(window.__rel(), delete window.__sbTexSaveWrite, true)`); await sleep(1500);
+      const sw2 = await ev(`({ url: new URLSearchParams(location.search).get("tex"), title: document.querySelector(".tex-title")?.textContent, a: !!document.querySelector(".tex-preview")?.textContent.includes("File A here."), ro: document.querySelector(".tex-src").readOnly, src: document.querySelector(".tex-src").value, asked: window.__asked, kept: window.__noReload === true })`);
+      const aFile = await ev(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(mid.ro === true && mid.url === fb && sw2.url === fa && sw2.title === "a.tex" && sw2.a && sw2.ro === false && sw2.src.includes("% held in A") && aFile.includes("% held in A") && sw2.asked === 4 && sw2.kept,
+        "U8-SWITCH-2: Forward to B waits for A to settle (A held read-only meanwhile); Back to A first: A stays shown, editable, its edit written; B never opens", { mid, sw2, aFile: aFile.slice(-40) });
+    }
+    // ---- (astra U8-DURABLE-CLOSE-1, the page) a single, frozen close: A's write fails, its edit durable in its draft;
+    // Forward to B, accepted; while the close's last write is held the editor is read-only, so text typed then never
+    // reaches it; the close ends with A's last edit in its draft, and B opens
+    {
+      await ev(`(() => { window.__asked = 0; window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { if (window.__k++ === 0) throw new Error("test: the write failed"); return window.__hold.then(() => { throw new Error("test: the write failed"); }); }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% OLD in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const frozen = await until(`window.__k >= 2 && document.querySelector(".tex-src")?.readOnly === true && document.querySelector(".tex-title")?.textContent === "a.tex"`, 10000);
+      await ev(`(document.querySelector(".tex-src").focus(), true)`); await send("Input.insertText", { text: "NEW" });
+      const during = await ev(`document.querySelector(".tex-src").value`);
+      await ev(`(window.__rel(), true)`);
+      const opened = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+      const drafts = await ev(`Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).map((k) => JSON.parse(localStorage.getItem(k)).text)`);
+      await ev(`(delete window.__sbTexSaveWrite, window.__answer = false, true)`);
+      // (A's left-over draft removed: the blocks after this open A again and must find only its file's text)
+      await ev(`(Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k)), true)`);
+      check(frozen && !during.includes("NEW") && during.includes("% OLD in A") && opened && drafts.some((t) => t.includes("% OLD in A")) && !drafts.some((t) => t.includes("NEW")),
+        "U8-DURABLE-CLOSE-1: a single, frozen close: held read-only through its last write, nothing typed then gets in; A's last edit durable in its draft; B opens", { frozen, during: during.slice(-30), opened, drafts: drafts.map((t) => t.slice(-30)) });
+    }
+    // (back as the blocks after these expect it: the B5-A1 write hook again, nothing failing, and A shown)
+    await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__failWrites = false, window.__answer = false, history.back(), true)`);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    await sleep(500); await ev(`(window.__asked = 4, true)`);
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it

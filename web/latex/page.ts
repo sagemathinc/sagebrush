@@ -159,7 +159,7 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promis
 
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
-let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean> } | null = null;
+let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
@@ -167,15 +167,22 @@ let mounts = 0;
 //  number taken before it waits, and only the newest mount goes on (astra U8-SWITCH-1))
 let closing: Promise<unknown> = Promise.resolve();
 // (a controlled switch waits for the editor shown to settle first (astra U8-DURABLE-CLOSE-1): its latest edit written,
-//  or durable in its draft; only the newest switch asked for meanwhile goes on)
-let leaving = 0;
+//  or durable in its draft. The editor is held read-only from the start of the wait, so the edit settled and asked
+//  about is the last one: no newer edit can come between that and the close (a single, frozen close). Only the newest
+//  intent goes on: a switch asked for meanwhile, or a return to the file shown (intent(), astra U8-SWITCH-2), makes
+//  this one do nothing (null), and the hold is let go unless a newer switch holds it)
+let leaving = 0, heldBy = 0;
+const intent = () => ++leaving;
 const leaveOk = async (): Promise<boolean | null> => {
-  const n = ++leaving;
-  const settled = await (current?.settle() ?? Promise.resolve(true));
-  // (null: a newer switch was asked for meanwhile, so this one does nothing)
-  if (n !== leaving) return null;
+  const n = intent(), cur = current;
+  heldBy = n; cur?.hold(true);
+  const release = () => { if (heldBy === n) { heldBy = 0; cur?.hold(false); } };
+  const settled = await (cur?.settle() ?? Promise.resolve(true));
+  if (n !== leaving || cur !== current) { release(); return null; }
   // (asked only when a write failed or the edit is in neither the file nor a durable draft: U8, never otherwise)
-  return (settled && !current?.dirty()) || confirm(LEAVE);
+  const ok = (settled && !cur?.dirty()) || confirm(settled ? LEAVE : LEAVE_LOST);
+  if (!ok) release();
+  return ok;
 };
 // the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
 // and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
@@ -188,6 +195,8 @@ const noteShown = () => { const st = history.state; shownAt = st.sbTex; shownId 
 // (asked only when a write has actually failed: William, Nov 2, U8: never otherwise; the edits are kept in this
 // browser's drafts either way, and offered when the file is opened again)
 const LEAVE = "Your last changes couldn't be saved. Leave this file anyway? They're kept in this browser and offered when you open it again.";
+// (and when this browser couldn't keep them either: said as it is)
+const LEAVE_LOST = "Your last changes couldn't be saved, and this browser couldn't keep a copy of them. Leave this file anyway? They will be lost.";
 
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
@@ -203,7 +212,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
-  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true };
+  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
@@ -308,7 +317,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const openHere = (fid: string) => { void mount(root, { ...host, fid }); };
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
-    if (e.fid === host.fid) return true;
+    // (the file shown, asked for again: a newer intent, so a switch still settling does nothing)
+    if (e.fid === host.fid) { intent(); return true; }
     void leaveOk().then((ok) => {
       if (!ok || !live()) return;
       const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
@@ -327,6 +337,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const st = ev.state && typeof ev.state === "object" ? ev.state : null;
     if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); return; }
     if (t === host.fid) {
+      // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
+      intent();
       // (this file's own entries: a fragment's new entry, unnumbered, is the one after the shown one)
       if (typeof st?.sbTex !== "number" || typeof st?.sbTexId !== "string") history.replaceState({ ...(st ?? {}), sbTex: shownAt + 1, sbTexId: entryId() }, "");
       noteShown();
@@ -701,7 +713,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   // (closing for another file: what is pending written first, then the editor disposed of)
-  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
+  let held = false, roSaver = false;
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 
@@ -927,7 +941,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       blocked: () => !!conflict || acting,
       adopt: (t) => { E.setText(t); edits++; },
       stale: () => showBar({ fid: host.fid, rev: docRev, theirs: true, by: "elsewhere" }),
-      readOnly: (ro) => { src.readOnly = ro; },
+      readOnly: (ro) => { roSaver = ro; src.readOnly = ro || held; },
       state: (st) => { if (live()) showSave(st); },
     }, { set: (f, ms) => setTimeout(f, ms), clear: (h) => clearTimeout(h as any) });
     const s = saver;
