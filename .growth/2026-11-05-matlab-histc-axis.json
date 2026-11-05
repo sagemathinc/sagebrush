@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "MCF-32 (#663): histc counts along the requested MATLAB dimension, preserving bin-index shape. Daybreak2 clean same-path Node 24.21.0/Bun 1.4.4 rebuild at merge head 512923b1f vs current master 8488b7678 measured lib.gen +24 B and pyjs +100. lib.gen is exact; pyjs 164 includes the conventional 64-byte packaging margin. matlab.pre -183 and matlab.src -43 shrink, so need no markers. Evidence: reviews/pr663-512923b1-daybreak2-SIZE-CHANGES.md. No dependencies or new chunks.",
+ "reason": "MCF-32 (#663): histc counts along the requested MATLAB dimension, preserving bin-index shape. Daybreak2 Node 24.21.0/Bun 1.4.4 measurement at merge head c57b71148 vs master 3264180f: lib.gen +28 B exact marker; pyjs +124 B fits the prior 164 B marker (40 B headroom). Other rows need no new growth marker. No dependencies or new chunks.",
  "bytes": {
-  "cli/lib.gen.js": 24,
+  "cli/lib.gen.js": 28,
   "cli/pyjs.cjs": 164
  }
 }
