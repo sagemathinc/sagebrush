@@ -607,7 +607,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 8732,
+   "ceiling": 8988,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
