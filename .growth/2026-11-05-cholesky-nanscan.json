@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "placeholder Re-measured with bun 1.4.4 (size-record.sh) on master f52f45f2 vs head cfbfa183: cli/pyjs.cjs +85, engine/sagebrush-worker.js +35; no other row moves. Markers: exact, except cli/pyjs.cjs 117 (+85 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/pyjs.cjs": 117,
+  "engine/sagebrush-worker.js": 35
+ }
+}
