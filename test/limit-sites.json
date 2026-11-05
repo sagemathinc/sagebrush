@@ -6284,22 +6284,12 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
  },
- "lib/fredapi.py :: Fred.get_series :: raise NotImplementedError(\"fredapi: a FRED series is a pandas Series indexed by date (a DatetimeIndex), \" #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "fredapi without pandas' DatetimeIndex: get_series refuses rather than return another type (design-data-access r3.1; 1b gives the Series)"
- },
  "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "lib/fredapi.py :: _error :: return RuntimeError(\"FRED is rate-limiting; try again in a minute\") #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
- },
- "lib/fredapi.py :: _has_dates :: except (AttributeError, NotImplementedError): #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"

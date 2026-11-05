@@ -32,7 +32,7 @@ def show(fred):
         print(sid, sorted(kw.items()))
         print(repr(s))
         print(s.dtype, type(s.index).__name__, s.index.dtype, s.name, len(s))
-        print([str(t) for t in s.index], [repr(float(v)) for v in s.values])
+        print([str(t) for t in s.index], [repr(float(v)) for v in s.tolist()])
 `;
 const ORACLE = `SYN_A []
 2020-01-01       1.50
@@ -89,7 +89,6 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
     await s.handle({ id: n, code });
     return msgs.filter((m) => m.id === n && m.stream).map((m) => m.text).join("");
   };
-  const NODATES = "NotImplementedError fredapi: a FRED series is a pandas Series indexed by date (a DatetimeIndex), which Sagebrush's pandas doesn't have yet\n";
   // (each call's outcome: its exception's type and message, or its length)
   const PRELUDE = "import fredapi, datetime\ndef get(*a, key='k', **kw):\n    try:\n        print(len(fredapi.Fred(key).get_series(*a, **kw)))\n    except Exception as e:\n        print(type(e).__name__, e)\n";
   const reset = () => ((page.requests = []), (page.upstream = 0), (page.answer = null), (page.key = "reader-key"));
@@ -97,18 +96,17 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
   // C6's notice, once for several calls; C4: exactly the parameters, no key, nothing else
   reset();
   const notice = "FRED: using your own key (Settings); the api_key in this code is not used.\n";
-  // (until pandas has a DatetimeIndex, each answer is refused plainly, never a Series of another index: @sagebrush)
   const shown = await run(`${PRELUDE}for sid, kw in [("SYN_A", {}), ("SYN_A", {"observation_start": "2020-02-01", "observation_end": datetime.date(2020, 3, 1)}), ("SYN_EMPTY", {}), ("SYN_ONE", {})]:\n    get(sid, key=${JSON.stringify(CANARY)}, **kw)`);
-  assert.equal(shown, notice + NODATES.repeat(4));
+  assert.equal(shown, notice + "4\n2\n0\n1\n");
   assert.deepEqual(page.requests.map((r) => r.params), [{ series_id: "SYN_A" }, { series_id: "SYN_A", observation_start: "2020-02-01", observation_end: "2020-03-01" }, { series_id: "SYN_EMPTY" }, { series_id: "SYN_ONE" }]);
   assert.ok(page.requests.every((r) => r.op === "fred.series_observations" && Object.keys(r).sort().join() === "id,op,params,target"));
   // C6: once per session (the run above printed it once for four calls; here not again)
-  assert.equal(await run(`get('SYN_ONE')`), NODATES);
+  assert.equal(await run(`get('SYN_ONE')`), "1\n");
 
   // C2: the key in code is neither kept nor compared; a right and a wrong key alike
   assert.equal(await run(`f = fredapi.Fred(api_key=${JSON.stringify(CANARY)})\nprint(repr(f), f.__dict__)`), "<fredapi.Fred: the reader's own key> {}\n");
   reset();
-  assert.equal(await run(`get('SYN_A', key='right')\nget('SYN_A', key='wrong')`), NODATES.repeat(2));
+  assert.equal(await run(`get('SYN_A', key='right')\nget('SYN_A', key='wrong')`), "4\n4\n");
   assert.deepEqual(page.requests[0], { ...page.requests[1], id: page.requests[0].id });
 
   // C3: no key yet: the message, nothing upstream
@@ -189,9 +187,14 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
     assert.equal(await run(`get('SYN_A')`), "RuntimeError FRED live data needs the Sagebrush web app (with your own FRED key, in Settings > Data)\n");
   }
 
+  // C5: the same Series as fredapi's (CPython's fredapi 0.5.2 with pandas 3.1.1, frozen above): its DatetimeIndex
+  // (datetime64[us]), float64 values with "." as NaN, the repr, and the empty series as fredapi makes it
+  reset();
+  assert.equal(await run(`import fredapi\n${SHOW}\nshow(fredapi.Fred('k'))`), ORACLE);
+
   // C10: FRED never goes through urllib or the replay layer: with both made unimportable, it works the same
   reset();
-  assert.equal(await run(`import sys\nsaved = {k: sys.modules.get(k) for k in ('urllib.request', '_sbdata')}\nsys.modules['urllib.request'] = None\nsys.modules['_sbdata'] = None\ntry:\n    get('SYN_A')\nfinally:\n    for k, v in saved.items():\n        if v is None: del sys.modules[k]\n        else: sys.modules[k] = v`), NODATES);
+  assert.equal(await run(`import sys\nsaved = {k: sys.modules.get(k) for k in ('urllib.request', '_sbdata')}\nsys.modules['urllib.request'] = None\nsys.modules['_sbdata'] = None\ntry:\n    get('SYN_A')\nfinally:\n    for k, v in saved.items():\n        if v is None: del sys.modules[k]\n        else: sys.modules[k] = v`), "4\n");
   assert.equal(page.upstream, 1);
 
   // C11: yfinance imports, and each of its entry points says Yahoo isn't available, asking nothing
@@ -220,12 +223,6 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
   assert.ok(!everything.includes(CANARY), "the canary reached a message or a request");
   await run(`print(${JSON.stringify(CANARY)})`);
   assert.ok(JSON.stringify(msgs).includes(CANARY), "the scan finds a planted canary");
-});
-
-// C5: the same Series as fredapi's, its DatetimeIndex and repr; needs pandas' datetime64 / DatetimeIndex /
-// to_datetime (design-pandas-xlsx-timeseries PR A); until then the dates are checked above, value for value
-test("C5: fredapi's Series, exactly", { skip: "needs pandas PR A (DatetimeIndex, to_datetime)" }, () => {
-  assert.ok(SHOW && ORACLE);
 });
 
 test("live data is unavailable with no page to ask (the command line)", () => {

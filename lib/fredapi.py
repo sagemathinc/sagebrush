@@ -54,22 +54,11 @@ class Fred:
             ok = _sbdata_live.fred_series_observations(params)
         except _sbdata_live.LiveDataError as e:
             raise _error(e.code, series_id) from None
-        if not _has_dates():
-            raise NotImplementedError("fredapi: a FRED series is a pandas Series indexed by date (a DatetimeIndex), "
-                                      "which Sagebrush's pandas doesn't have yet")
         # (as fredapi: each date a datetime, "." -- here null -- NaN, then a Series of the dict)
         data = {}
         for d, v in zip(ok["dates"], ok["values"]):
             data[datetime(int(d[:4]), int(d[5:7]), int(d[8:10]))] = float("nan") if v is None else float(v)
         return pd.Series(data)
-
-
-def _has_dates():
-    # (pandas' datetime64 index, which fredapi's Series has: never a Series of another index in its place)
-    try:
-        return pd.DatetimeIndex is not None and pd.to_datetime is not None
-    except (AttributeError, NotImplementedError):
-        return False
 
 
 def _date(v):
