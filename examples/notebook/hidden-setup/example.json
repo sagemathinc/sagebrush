@@ -1,0 +1,16 @@
+{
+ "title": "A notebook that hides its setup",
+ "summary": "Continued fractions of the square root of 2 and of pi, with the setup code hidden and a long check's output hidden (Jupyter's own flags).",
+ "tags": [
+  "number theory",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

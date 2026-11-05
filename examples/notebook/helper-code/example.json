@@ -1,0 +1,20 @@
+{
+ "title": "A notebook with its own helper code",
+ "summary": "A notebook that imports its longer functions from _code/helpers.py beside it, and reads a data file: a document is a folder.",
+ "tags": [
+  "programming",
+  "number theory",
+  "sagebrush"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb",
+  "_code/__init__.py",
+  "_code/helpers.py",
+  "data/fermat.txt"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
