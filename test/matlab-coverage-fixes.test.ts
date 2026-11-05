@@ -548,3 +548,31 @@ test("tril, triu, diag and sortrows keep every class; real, imag and conj keep i
     "int8 [1 2;2 0;3 1] [2 3 1]",
   ]);
 });
+
+// Oracle pins: MATLAB R2026b Update 1 (26.2.0.3433840), 2026-11-05.
+// MathWorks cat and Empty Arrays pages: compatible empty arrays retain the
+// concatenated dimension; mixed empty/nonempty arrays omit the empty inputs.
+// https://www.mathworks.com/help/matlab/ref/double.cat.html
+// https://www.mathworks.com/help/matlab/math/empty-arrays.html
+test("compatible empty numeric concatenations retain their dimensions and class", () => {
+  const out = run([
+    "A = zeros(0,5); disp(mat2str(size([A A]))); disp(mat2str(size([A; A])));",
+    "disp(mat2str(size(cat(2,zeros(0,1),zeros(0,2)))));",
+    "disp(mat2str(size(cat(1,zeros(1,0),zeros(2,0)))));",
+    "disp(mat2str(size(cat(3,zeros(0,2),zeros(0,2)))));",
+    "disp(mat2str(size(cat(4,zeros(2,0,3),zeros(2,0,3)))));",
+    "A = cat(2,single(zeros(0,1)),zeros(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "A = cat(1,int8(zeros(1,0)),int8(zeros(2,0))); disp(class(A)); disp(mat2str(size(A)));",
+    "A = cat(2,false(0,1),false(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "disp(mat2str([zeros(0,3) 7])); disp(mat2str([8; zeros(4,0)]));",
+    "disp(mat2str(size(cat(1,[],zeros(0,2)))));",
+    "A = cat(2,cell(0,1),cell(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "try, A = cat(1,zeros(0,1),zeros(0,2)); catch e, disp(e.identifier); end;",
+    "try, A = cat(2,zeros(1,0),zeros(2,0)); catch e, disp(e.identifier); end;",
+    "disp(mat2str(size(cat(3,[],[])))); disp(mat2str(size(cat(2,[],[]))));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), [
+    "[0 10]", "[0 5]", "[0 3]", "[3 0]", "[0 2 2]", "[2 0 3 2]",
+    "single", "[0 3]", "int8", "[3 0]", "logical", "[0 3]", "7", "8", "[0 2]", "cell", "[0 3]", "MATLAB:catenate:dimensionMismatch", "MATLAB:catenate:dimensionMismatch", "[0 0 2]", "[0 0]",
+  ]);
+});
