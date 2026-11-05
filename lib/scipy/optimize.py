@@ -18,7 +18,11 @@ from collections import namedtuple
 import numpy as np
 from numpy import asarray
 from numpy.linalg import LinAlgError, cholesky
-import _numpy
+try:
+    from _numpy import _admit_work
+except ImportError:  # (this file under CPython, for scipy-tests' memory trace: no limit to admit against)
+    def _admit_work(nbytes, what):
+        pass
 
 __all__ = ["minimize", "minimize_scalar", "OptimizeResult", "OptimizeWarning", "approx_fprime", "line_search",
            "brent", "golden", "bracket", "fminbound", "fmin", "fmin_bfgs", "fmin_cg", "rosen", "rosen_der",
@@ -32,7 +36,7 @@ def _unsupported(what):
 def _admit(nbytes, what):
     # (the working memory a step keeps at once, admitted against the array limit before its first array is made:
     # each array's own check alone would let several, each under the limit, together exceed it; MemoryError if not)
-    _numpy._admit_work(nbytes, what)
+    _admit_work(nbytes, what)
 
 
 class HessianUpdateStrategy:
@@ -191,13 +195,17 @@ def approx_derivative(fun, x0, method='3-point', rel_step=None, abs_step=None, f
 
 
 def _dense_difference(fun, x0, f0, h, use_one_sided, method, workers):
-    # (SciPy's, each difference written into the Jacobian as it is made rather than all of them kept in lists first:
-    # the same arithmetic, so the same values, with one n x m array the peak, admitted with its vectors)
+    # (SciPy's, each difference written into the Jacobian as it is made rather than all of them kept in lists first,
+    # and 3-point's steps computed as the scalars SciPy reads from a second copy of each point: the same arithmetic,
+    # so the same values, with one n x m array the peak, admitted with everything kept beside it, charged at 16
+    # bytes an element: approx_derivative's own vectors (x0, the bounds, the steps and their temporaries: 12 n),
+    # the points made (two for 3-point, and a copy the function may make: 4 n) and the function's values and the
+    # difference's temporaries (8 m); scipy-tests/test_optimize_memory.py traces the true peak against it)
     m = f0.size
     n = x0.size
     nfev = 0
     result_type = np.result_type(x0, f0, 1.0)
-    _admit(np.dtype(result_type).itemsize * n * m + 16 * (2 * n + 4 * m), "approx_derivative")
+    _admit(np.dtype(result_type).itemsize * n * m + 16 * (16 * n + 8 * m), "approx_derivative")
     J_transposed = np.empty((n, m), dtype=result_type)
     if method == '2-point':
 
@@ -226,17 +234,14 @@ def _dense_difference(fun, x0, f0, h, use_one_sided, method, workers):
                 yield x1
                 yield x2
         f_evals = iter(workers(fun, x_generator3(x0, h, use_one_sided)))
-        gen = x_generator3(x0, h, use_one_sided)
         k = 0
         for i, one_sided in enumerate(use_one_sided):
-            l = next(gen)
-            u = next(gen)
             f1 = next(f_evals)
             f2 = next(f_evals)
             if one_sided:
-                J_transposed[i] = (-3.0 * f0 + 4 * f1 - f2) / (u[i] - x0[i])
+                J_transposed[i] = (-3.0 * f0 + 4 * f1 - f2) / ((x0[i] + 2 * h[i]) - x0[i])
             else:
-                J_transposed[i] = (f2 - f1) / (u[i] - l[i])
+                J_transposed[i] = (f2 - f1) / ((x0[i] + h[i]) - (x0[i] - h[i]))
             k += 1
         nfev += 2 * k
     elif method == 'cs':
@@ -2232,7 +2237,7 @@ class _Fun_Wrapper:
         self.kwargs = kwargs
 
     def __call__(self, x):
-        if np.issubdtype(x.dtype, np.floating):
+        if np.issubdtype(x.dtype, np.floating) and x.dtype != self.x0.dtype:
             x = x.astype(self.x0.dtype)
         f = np.atleast_1d(self.fun(x, *self.args, **self.kwargs))
         if f.ndim > 1:

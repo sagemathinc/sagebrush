@@ -69,8 +69,10 @@ print(sorted(set(got)))
 // _admit_work, admitWork's message). Each pair: one byte under the step's
 // admission it is refused, with the function never called; at the admission
 // it runs (the control). The Jacobian's differences are written into it as
-// they are made, so one n x m array is its peak: astra's 32 x 32 case at a
-// 16384-byte limit is admitted, needing 8192 + 3072.
+// they are made, so one n x m array is its peak, charged with the vectors
+// beside it (scipy-tests/test_optimize_memory.py traces the true peak under
+// CPython against the same charge); a long input with one output, one-sided,
+// is astra's second case.
 test("scipy.optimize: each step's working memory is admitted at once, refused one byte under it", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const np = require("../src/runtime/numpy");
@@ -92,10 +94,15 @@ test("scipy.optimize: each step's working memory is admitted at once, refused on
       "    calls[0] += 1",
       "    return rosen(x)",
       "X32 = np.ones(32); F32 = np.ones(32); H32 = np.full(32, 1e-6); X16 = np.zeros(16); ONE = np.zeros(32, bool)",
+      "X128 = np.ones(128); F1 = np.ones(1); H128 = np.full(128, 1e-6); SIDED = np.ones(128, bool)",
+      "def first_sq(x):",
+      "    calls[0] += 1",
+      "    return x[:1] * x[:1]",
       "CASES = {",
       "    '2-point': lambda: _dense_difference(sq, X32, F32, H32, ONE, '2-point', map),",
       "    '3-point': lambda: _dense_difference(sq, X32, F32, H32, ONE, '3-point', map),",
       "    'cs': lambda: _dense_difference(sq, X32, F32, H32, ONE, 'cs', map),",
+      "    '3-point one-sided 128 x 1': lambda: _dense_difference(first_sq, X128, F1, H128, SIDED, '3-point', map),",
       "    'BFGS': lambda: minimize(ros, X16, method='BFGS', options={'maxiter': 2}),",
       "    'Nelder-Mead': lambda: minimize(ros, X16, method='Nelder-Mead', options={'maxiter': 2}),",
       "    'rosen_hess': lambda: rosen_hess(X16),",
@@ -113,9 +120,10 @@ test("scipy.optimize: each step's working memory is admitted at once, refused on
   const attempt = Obj.callObj(Obj.getattr(main, "__getitem__"), ["attempt"]);
   // (each step's admission: lib/scipy/optimize.py's _admit calls)
   const NEED: [string, number, string][] = [
-    ["2-point", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
-    ["3-point", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
-    ["cs", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
+    ["2-point", 8 * 32 * 32 + 16 * (16 * 32 + 8 * 32), "approx_derivative"],
+    ["3-point", 8 * 32 * 32 + 16 * (16 * 32 + 8 * 32), "approx_derivative"],
+    ["cs", 8 * 32 * 32 + 16 * (16 * 32 + 8 * 32), "approx_derivative"],
+    ["3-point one-sided 128 x 1", 8 * 128 * 1 + 16 * (16 * 128 + 8 * 1), "approx_derivative"],
     ["BFGS", 8 * 8 * 16 * 16, "BFGS's inverse Hessian"],
     ["Nelder-Mead", 8 * 5 * 17 * 16, "Nelder-Mead's simplex"],
     ["rosen_hess", 8 * 4 * 16 * 16, "rosen_hess"],
@@ -129,8 +137,6 @@ test("scipy.optimize: each step's working memory is admitted at once, refused on
       np.ARRAY_LIMITS.bytes = need;
       assert.match(F.str(Obj.callObj(attempt, [name])), name === "rosen_hess" ? /^ok 0$/ : /^ok [1-9]/, `${name} at ${need}`);
     }
-    np.ARRAY_LIMITS.bytes = 16384;
-    assert.match(F.str(Obj.callObj(attempt, ["2-point"])), /^ok 32$/, "astra's 32 x 32 case at 16384");
   } finally {
     Object.assign(np.ARRAY_LIMITS, saved);
   }
