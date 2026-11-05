@@ -379,7 +379,7 @@ def _parse_format(s, fmt):
         # (a day of the year: counted from 1 January, into the next year past its end, as pandas' strptime)
         if int(g["j"]) < 1:
             raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
-        d0 = _checked(t, y, 1, 1, int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
+        d0 = _checked_fmt(t, y, 1, 1, int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
         return d0 + timedelta(days=int(g["j"]) - 1)
     return _checked_fmt(t, y, int(g.get("m") or 1), int(g.get("d") or 1), int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
 
