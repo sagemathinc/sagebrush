@@ -1280,6 +1280,10 @@ newBuiltinModule("_nplinalg", (m) => {
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
   fn("cholesky", (a: NDArray) => {
+    // (square and 2-D before anything is admitted or the module loaded: np.linalg.cholesky checks this, but this
+    // backend function can be called directly; astra ND657-ADMIT-2)
+    if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
+    if (a.shape[0] !== a.shape[1]) linalgError("Last 2 dimensions of the array must be square");
     const [r0, c0] = dims(a);
     // engine/nd's blocked Cholesky, where it runs in this session (src/runtime/nd.ts: decided at the first call,
     // then fixed); else the loop below. Either way 5 n^2 (and on engine/nd its scratch): the loop's are mat's two

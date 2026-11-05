@@ -209,3 +209,30 @@ test("a module memory that can't grow is a MemoryError with its message, and the
   assert.equal(v("R"), "cholesky of a 700 x 700 matrix needs more working memory than WebAssembly can have here");
   assert.equal(v("OK"), Math.SQRT2);
 });
+
+test("the backend function refuses a non-square or non-2-D matrix before admitting or loading anything: no module memory grows (astra ND657-ADMIT-2)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const Obj = require("../src/runtime/object");
+  const nd = require("../src/runtime/nd");
+  const s = notebookSession(() => {}, { captureStreams: true });
+  await s.handle({ id: 1, code: "import numpy as np, _nplinalg as _L\nM = np.random.default_rng(6).standard_normal((60, 60))\n_L.cholesky(M @ M.T + 60 * np.eye(60))" });
+  const w0 = nd.ndMemoryBytes();
+  await s.handle({ id: 2, code: [
+    "R = []",
+    "for x in (np.zeros((1024, 1)), np.zeros((1, 1024)), np.zeros(1024), np.zeros((2, 2, 2))):",
+    "    try:",
+    "        _L.cholesky(x)",
+    "        R.append('ran')",
+    "    except Exception as e:",
+    "        R.append(type(e).__name__ + ': ' + str(e))",
+  ].join("\n") });
+  const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
+  const R = Obj.callObj(Obj.getattr(main, "__getitem__"), ["R"]);
+  assert.deepEqual(require("../src/runtime").R.toArray(R), [
+    "LinAlgError: Last 2 dimensions of the array must be square",
+    "LinAlgError: Last 2 dimensions of the array must be square",
+    "ValueError: 1-dimensional array given. Array must be two-dimensional",
+    "ValueError: 3-dimensional array given. Array must be two-dimensional",
+  ]);
+  assert.equal(nd.ndMemoryBytes(), w0, "the module's memory grew for a refused matrix");
+});
