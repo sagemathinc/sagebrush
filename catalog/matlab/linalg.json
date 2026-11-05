@@ -150,5 +150,32 @@
     "tags": [
       "linear algebra"
     ]
+  },
+  {
+    "name": "rref",
+    "kind": "function",
+    "signature": "R = rref(A)\nR = rref(A, tol)\n[R, p] = rref(A)",
+    "summary": "The reduced row echelon form of a matrix, by Gauss-Jordan elimination with partial pivoting.",
+    "doc": "A column whose largest remaining magnitude is at most `tol` (by default `max(size(A))*eps*norm(A, inf)`) is treated as zero. `p` lists the pivot columns, a row vector; `numel(p)` estimates the rank. A is double or single, real or complex.",
+    "examples": [
+      {
+        "code": "rref([1 2 3; 4 5 6; 7 8 10])",
+        "expected": "\nans =\n\n     1     0     0\n     0     1     0\n     0     0     1\n\n"
+      },
+      {
+        "code": "[R, p] = rref([1 2 1; 2 4 0; 3 6 1])",
+        "expected": "\nR =\n\n     1     2     0\n     0     0     1\n     0     0     0\n\n\np =\n\n     1     3\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "rank",
+      "lu",
+      "mldivide"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
   }
 ]

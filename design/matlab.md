@@ -16,6 +16,9 @@ and runs on a runtime library with MATLAB's semantics:
     polynomials and interpolation, numgrid and delsq (numgrid's 'S' and
     'L' only: the other regions are described only in words, which do not
     fix their shapes on the grid, so they are refused);
+  - **lib/_matlab_numeric_more.py**: rref, nextpow2, cumtrapz, unwrap, deg2rad,
+    rad2deg, cart2pol and pol2cart, loaded lazily (stubs in lib/_matlab.py import it
+    on the first call, so it is in the matlab-more chunk, not MATLAB mode's start);
   - **lib/_matlab_data.py**: data analysis and signals (filter, conv2,
     gradient, del2, detrend, cov, corrcoef, prctile, quantile and the
     moving statistics). The moving statistics' `'Endpoints'` value or

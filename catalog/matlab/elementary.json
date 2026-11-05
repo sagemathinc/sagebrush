@@ -232,5 +232,118 @@
     "tags": [
       "elementary math"
     ]
+  },
+  {
+    "name": "nextpow2",
+    "kind": "function",
+    "signature": "P = nextpow2(A)",
+    "summary": "For each element, the smallest integer power p with 2^p at least abs(A).",
+    "doc": "`nextpow2(0)` is 0, Inf gives Inf and NaN gives NaN. An integer or single A gives that class.",
+    "examples": [
+      {
+        "code": "nextpow2([1 5 1000])",
+        "expected": "\nans =\n\n     0     3    10\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "pow2",
+      "log2",
+      "fft"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "deg2rad",
+    "kind": "function",
+    "signature": "R = deg2rad(D)",
+    "summary": "Angles in degrees converted to radians, element by element.",
+    "doc": "`(pi/180)*D`. D is double or single, and keeps its class; integer input is refused.",
+    "examples": [
+      {
+        "code": "deg2rad(180)",
+        "expected": "\nans =\n\n    3.1416\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "rad2deg"
+    ],
+    "tags": [
+      "elementary math",
+      "trigonometry"
+    ]
+  },
+  {
+    "name": "rad2deg",
+    "kind": "function",
+    "signature": "D = rad2deg(R)",
+    "summary": "Angles in radians converted to degrees, element by element.",
+    "doc": "`(180/pi)*R`. R is double or single, and keeps its class; integer input is refused.",
+    "examples": [
+      {
+        "code": "rad2deg(pi/2)",
+        "expected": "\nans =\n\n    90\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "deg2rad"
+    ],
+    "tags": [
+      "elementary math",
+      "trigonometry"
+    ]
+  },
+  {
+    "name": "cart2pol",
+    "kind": "function",
+    "signature": "[theta, rho] = cart2pol(x, y)\n[theta, rho, z] = cart2pol(x, y, z)",
+    "summary": "Cartesian coordinates converted to polar or cylindrical: the angle atan2(y, x) and the distance hypot(x, y).",
+    "doc": "The inputs expand against each other implicitly; z passes through unchanged.",
+    "examples": [
+      {
+        "code": "[theta, rho] = cart2pol(1, 1)",
+        "expected": "\ntheta =\n\n    0.7854\n\n\nrho =\n\n    1.4142\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "pol2cart",
+      "atan2",
+      "hypot"
+    ],
+    "tags": [
+      "elementary math",
+      "coordinates"
+    ]
+  },
+  {
+    "name": "pol2cart",
+    "kind": "function",
+    "signature": "[x, y] = pol2cart(theta, rho)\n[x, y, z] = pol2cart(theta, rho, z)",
+    "summary": "Polar or cylindrical coordinates converted to Cartesian: rho.*cos(theta) and rho.*sin(theta).",
+    "doc": "The inputs expand against each other implicitly; z passes through unchanged.",
+    "examples": [
+      {
+        "code": "[x, y] = pol2cart(pi/2, 2)",
+        "expected": "\nx =\n\n   1.2246e-16\n\n\ny =\n\n     2\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "cart2pol"
+    ],
+    "tags": [
+      "elementary math",
+      "coordinates"
+    ]
   }
 ]

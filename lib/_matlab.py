@@ -12428,6 +12428,23 @@ for _n in _PLOT_FNS:
     _B[_n] = _lazy_plot(_n)
 
 
+def _lazy_builtin(module, name):
+    """a built-in that lives in a lazily loaded module: the first call imports it, which registers the real
+    built-in over this stub, and is then that built-in's"""
+    def g(nargout, *args):
+        __import__(module)
+        real = _B[name]
+        if real.f is g:
+            raise _err("%s: %s does not define it." % (name, module))
+        return real.call(nargout, list(args))
+    return Builtin(g, name)
+
+
+# (lib/_matlab_numeric_more.py: not imported by MATLAB mode's start, so in the lazy matlab-more chunk)
+for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
+    _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
+
+
 def _keep_single(name, data=(0,), keep=()):
     """a built-in whose results are single when an input is single (as these functions' pages
     say: a single input gives single output): when a data argument (the positions in data, not
