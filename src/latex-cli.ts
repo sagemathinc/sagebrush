@@ -234,7 +234,10 @@ function readResults(file: string): State[] {
 // the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
 // latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
-const DRIVER = `import json, io, sys, traceback
+const DRIVER = `import json, io, os, sys, traceback
+# (the document's folder first on sys.path, as real SageTeX has it: \`sage doc.sagetex.sage\`, run in the document's
+#  folder, imports a helper.py beside the .tex; this session runs there too, but its script is in a temporary folder)
+sys.path.insert(0, os.getcwd())
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 #  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
