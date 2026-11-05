@@ -49,7 +49,8 @@ def _to_front(M, axis):
         M = M.reshape(M.shape + (1,))
     W = np.moveaxis(M, axis, 0)
     rest = W.shape[1:]
-    return np.array(W).reshape((W.shape[0], -1)), (axis, rest, M.ndim)
+    # (the other axes' count written out: an empty M's -1 has no size to take)
+    return np.array(W).reshape((W.shape[0], _m._prod(rest))), (axis, rest, M.ndim)
 
 
 def _from_front(F, how):

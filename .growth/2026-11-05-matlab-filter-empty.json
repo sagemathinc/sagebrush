@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MATLAB's filter of empty arrays (astra3's campaign MCF-17; real MATLAB R2026b Update 1 results run by @sagebrush-matlab, Nov 5): _to_front in lib/_matlab_data.py writes the other axes' count out instead of -1, which an empty array cannot size, so filter(1,1,[]) is 0x0 (not a reshape error), and zf has max(length(a),length(b))-1 rows; detrend, prctile/quantile and the moving statistics share the helper. Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 41dae676 (head db66a050 merged onto master cb9c394e): matlab.pre +129, matlab.src +92, lib.gen +56, pyjs -76; markers with small margins (pyjs 120 for build-specific bytes).",
+ "bytes": {
+  "engine/lib/matlab.pre": 160,
+  "engine/lib/matlab.src": 120,
+  "cli/lib.gen.js": 80,
+  "cli/pyjs.cjs": 120
+ }
+}
