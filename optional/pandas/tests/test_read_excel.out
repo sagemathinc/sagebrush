@@ -166,6 +166,11 @@ d
 0 NaN         NaN NaN
 1 NaN         NaN NaN
 2 NaN         2.0 NaN)
+== row and column gaps, scanner
+([('a', 'float64'), ('Unnamed: 1', 'float64'), ('c', 'float64')], [['nan', 'nan', 'nan'], ['nan', 'nan', '2.0'], ['nan', 'nan', 'nan']],     a  Unnamed: 1   c
+0 NaN         NaN NaN
+1 NaN         NaN NaN
+2 NaN         2.0 NaN)
 == bytes
 !! TypeError: Expected file path name or file-like object, got <class 'bytes'> type
 == not a file

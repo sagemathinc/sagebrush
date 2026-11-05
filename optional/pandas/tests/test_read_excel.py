@@ -105,6 +105,8 @@ case("attribute orders", lambda: show(pd.read_excel(B([("S", order)]))))
 gaps = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="C1" t="inlineStr"><is><t>c</t></is></c></row>'
         '<row r="4"><c r="B4"><v>2</v></c></row><row r="2"><c r="A2"><v>1</v></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>') % MAIN
 case("row and column gaps", lambda: show(pd.read_excel(B([("S", gaps)]))))
+# (the same sheet read by the scanner: "<sheetData >" isn't the fast path's form)
+case("row and column gaps, scanner", lambda: show(pd.read_excel(B([("S", gaps.replace("<sheetData>", "<sheetData >"))]))))
 
 # what isn't a workbook: pandas' errors
 case("bytes", lambda: pd.read_excel(workbook([("S", [["a"]])])))
