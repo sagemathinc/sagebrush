@@ -8,9 +8,9 @@
    "where": "lib/_memguard.py::memory_guard"
   },
   {
-   "id": "array-limits",
+   "id": "zlib-inflater-cap",
    "kind": "memory",
-   "where": "src/runtime/numpy.ts::admitWork"
+   "where": "src/runtime/zlib.ts::run"
   }
  ]
 }
