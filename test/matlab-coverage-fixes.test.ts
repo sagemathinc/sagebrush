@@ -653,3 +653,48 @@ test("nonzeros retains sparse logical values in a full independent column", () =
     "logical", "[2 1]", "[1;1]", "0", "2", "logical", "1", "double", "[3;2]", "logical", "[1;1]",
   ]);
 });
+
+// Output-class pins from MATLAB R2026b Update 1 (26.2.0.3433840), run o6.
+// Only single-polynomial differentiation is covered; the product and quotient
+// forms retain their existing algorithm.
+test("single-polynomial differentiation and integration retain single outputs", () => {
+  const out = run([
+    "A = polyder(single([1 2 3])); disp(class(A)); disp(mat2str(A));",
+    "A = polyint(single([1 2])); disp(class(A)); disp(mat2str(A));",
+    "disp(class(polyder([1 2 3]))); disp(class(polyint([1 2])));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), ["single", "[2 2]", "single", "[0.5 2 0]", "double", "double"]);
+});
+
+// Real MATLAB R2026b Update 1, frozen o19: precision, shapes, and values.
+// Avoid exact basis-vector pins: only rank, class and subspace residuals matter.
+test("polynomial single and mixed inputs match real MATLAB o19", () => {
+  const out = run([
+    "a=polyder(single([0.1 0.2 0.3 0.4])); disp(class(a)); disp(isequal(double(a),[0.30000001192092896 0.40000000596046448 0.30000001192092896]));",
+    "a=polyder(single(1)); disp(class(a)); disp(isequal(a,single(0)));",
+    "a=polyint(single([0.1 0.2 0.3])); disp(class(a)); disp(isequal(double(a),[0.033333335071802139 0.10000000149011612 0.30000001192092896 0]));",
+    "a=polyint(single([1 2]),single(3)); disp(class(a)); disp(mat2str(a));",
+    "a=polyint([1 2],single(3)); disp(class(a)); disp(mat2str(a));",
+    "a=polyint(single([])); disp(class(a)); disp(mat2str(size(a))); disp(a);",
+  ].join("\n"));
+  assert.deepEqual(lines(out).map((s) => s.trim()), [
+    "single", "1", "single", "1", "single", "1", "single", "[0.5 2 3]",
+    "single", "[0.5 2 3]", "single", "[1 1]", "0",
+  ]);
+});
+
+test("null and orth use input precision and spacing in rank tolerance", () => {
+  const out = run([
+    "xs={single(diag([1 1e-8])),single(diag([1.5 3e-7])),diag([1 1e-8])};",
+    "for k=1:3, A=xs{k}; N=null(A); Q=orth(A); disp(class(N)); disp(mat2str(size(N))); disp(class(Q)); disp(mat2str(size(Q))); disp(norm(double(A)*double(N),'fro')<1e-6); disp(norm(double(Q)'*double(Q)-eye(size(Q,2)),'fro')<1e-6); end",
+    "N=null(single(zeros(0,2))); Q=orth(single(zeros(2,0))); disp(class(N)); disp(mat2str(size(N))); disp(class(Q)); disp(mat2str(size(Q)));",
+    "N=null(single(zeros(2))); Q=orth(single(zeros(2))); disp(class(N)); disp(mat2str(size(N))); disp(class(Q)); disp(mat2str(size(Q)));",
+  ].join("\n"));
+  assert.deepEqual(lines(out).map((s) => s.trim()), [
+    "single", "[2 1]", "single", "[2 1]", "1", "1",
+    "single", "[2 0]", "single", "[2 2]", "1", "1",
+    "double", "[2 0]", "double", "[2 2]", "1", "1",
+    "single", "[2 2]", "single", "[2 0]",
+    "single", "[2 2]", "single", "[2 0]",
+  ]);
+});

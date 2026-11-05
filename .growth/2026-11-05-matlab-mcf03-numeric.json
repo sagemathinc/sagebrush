@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MCF-03: retain single polynomial outputs, including mixed polyint inputs and empty polynomials; null/orth use eps(norm(A)) in input precision and keep single bases. Frozen real MATLAB R2026b Update 1 o19 pins verified. Paired builds of d6b3b498e vs master fe16a2ebb with Node 24.21.0 and Bun 1.4.4 in equal-length paths measure lib.gen +328, pyjs +360 (+64 metadata allowance gives 424), matlab.pre +3831, matlab.src +826; every other governed row unchanged. No dependencies or new chunks.",
+ "bytes": {
+  "cli/lib.gen.js": 328,
+  "cli/pyjs.cjs": 424,
+  "engine/lib/matlab.pre": 3831,
+  "engine/lib/matlab.src": 826
+ }
+}
