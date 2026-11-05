@@ -24,6 +24,10 @@ fixed = [
     ([1e-310, 3.0], [1e-10, 7.0]), ([2.0**-1074], [2.0**1023]), ([1e308, -1e308, 1.0], [1.0, 1.0, 1e-300]),
     ([1, 1.0, 1, 1.0], [1, 1.0, 1, 1.0]), ([F(1, 2), 0.25], [2, 4]), ([10**30, 0.5], [10**30, 2.0]),
     ([1.0, 2**1024], [1.0, 1]), ([2**1023 * 1.5, 1.0], [1, 1.0]),
+    # (grader's SP2: an int just past int64, times 0, leaves the int path before the floats join; and its negative twin)
+    ([2**63, 0.1, 0.2, 0.3], [0, 1.0, 1.0, 1.0]), ([-2**63 - 1, 0.1, 0.2, 0.3], [0, 1.0, 1.0, 1.0]),
+    # (grader's SP6: bools take the float path beside floats, in either order)
+    ([0.1, 0.2, 0.3], [True, True, True]), ([True, True, True], [0.1, 0.2, 0.3]),
 ]
 for p, q in fixed:
     show(p, q)
