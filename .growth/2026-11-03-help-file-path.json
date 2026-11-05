@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "obj? names a library file as lib/<module>.py wherever the library is read from (the bundle, or a checkout's or an install's lib/ on disk): lib/_pyjs_help.py _show_file also strips its own directory. Embedded in cli/lib.gen.js, cli/pyjs.cjs and engine/lib/mod-pyjs-help.src. Re-measured with bun 1.4.4 (size-record.sh) on master c06c8139 vs head ee12a629: cli/lib.gen.js +116, cli/pyjs.cjs +204, engine/lib/mod-pyjs-help.src +250; no other row moves. Markers: exact, except cli/pyjs.cjs 236 (+204 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 116,
+  "cli/pyjs.cjs": 236,
+  "engine/lib/mod-pyjs-help.src": 250
+ }
+}
