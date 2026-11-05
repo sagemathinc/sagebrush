@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Docs search for agents: the WebMCP search_docs tool searches every language's index, the notebook's own first, others marked (web/index.html, searchIndexes in web/docsearch.ts), with web/test-doclang.mjs checks; llms.txt says so. Measured with bun 1.4.4 (size-record.sh) on master 8ef76eb6 vs this PR's content head e1d7dc06: cli/pyjs.cjs +1956; no other row moves.",
- "bytes": {
-  "cli/pyjs.cjs": 1956
- }
-}

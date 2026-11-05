@@ -149,28 +149,37 @@ const ttySteps = (args: string[], steps: string[], prompt: string): Promise<{ st
     wake?.();
   });
   const closed = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
-  // until(done, ms): resolves once done(the output since `from`) holds, or after ms
+  // until(done, ms): true once done(the output since `from`) holds, false after ms without it
   const until = (from: number, done: (since: string) => boolean, ms: number) =>
-    new Promise<void>((resolve) => {
-      const timer = setTimeout(finish, ms);
-      function finish() {
+    new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => finish(false), ms);
+      function finish(ok: boolean) {
         clearTimeout(timer);
         wake = null;
-        resolve();
+        resolve(ok);
       }
-      wake = () => done(clean(raw.slice(from))) && finish();
+      wake = () => done(clean(raw.slice(from))) && finish(true);
       wake();
     });
   const atPrompt = (since: string) => since.endsWith(prompt);
+  // (a wait that runs out means the steps would go on out of step with the session: a step typed before its
+  // prompt lands with the next in one chunk, where readline doesn't complete a Tab. That is the Magma Tab flake
+  // seen on CI, a first prompt slower than the wait. So it ends the session and says which step, rather than
+  // typing on; the first prompt, the session's start, may take a slow runner up to a minute)
+  const lost = (what: string) => {
+    child.kill();
+    return closed.then(() => ({ status: null, out: clean(raw), err: new Error(`${what}: not seen in time`) }));
+  };
   return (async () => {
-    await until(0, atPrompt, 15000);
+    if (!(await until(0, atPrompt, 60000))) return lost("the first prompt");
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i], from = raw.length;
       child.stdin.write(step);
       if (i === steps.length - 1) break;
-      if (step.endsWith("\n")) await until(from, atPrompt, 15000);
-      else if (step === "\t") await until(from, (since) => since.length > 0, steps[i + 1] === "\t" ? 1000 : 15000);
-      else await until(from, (since) => since.includes(step), 15000);
+      // (the first of two Tabs shows nothing, by design: its wait runs out, briefly, and that's fine)
+      if (step === "\t" && steps[i + 1] === "\t") await until(from, (since) => since.length > 0, 1000);
+      else if (!(await until(from, step.endsWith("\n") ? atPrompt : step === "\t" ? (since) => since.length > 0 : (since) => since.includes(step), 15000)))
+        return lost(`step ${i} (${JSON.stringify(step)}): its ${step.endsWith("\n") ? "prompt" : step === "\t" ? "completion" : "echo"}`);
     }
     child.stdin.end();
     // (a session that doesn't end within 30 s is killed; the timer is cleared once it ends, so it holds nothing open)

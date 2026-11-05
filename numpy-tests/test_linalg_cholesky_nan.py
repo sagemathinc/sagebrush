@@ -32,7 +32,7 @@ def big(n, seed, where):
     return A
 
 
-for n, where in [(8, [(5, 3)]), (8, [(4, 4)]), (47, [(40, 40)]), (64, [(40, 40)]), (64, [(50, 20)]), (100, [(0, 0)])]:
+for n, where in [(8, [(5, 3)]), (8, [(4, 4)]), (47, [(40, 40)]), (64, [(40, 40)]), (64, [(50, 20)]), (64, [(63, 63)]), (100, [(0, 0)])]:
     r = np.linalg.cholesky(big(n, n, where))
     m = np.isnan(r)
     # (where the NaNs are, and the finite part: its first NaN row, their count, and the finite entries' sum to 9 digits)
