@@ -48,12 +48,12 @@ type Ending = "error" | "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGKILL" | "group SIG
 
 // (the profile dir is read from the stand-in's own --user-data-dir argument, not predicted from TMPDIR: a node
 // binary running in secure-exec mode, such as one with file capabilities, never sees TMPDIR)
-async function run(ending: Ending): Promise<{ exit: number | string | null; out: string }> {
+async function run(ending: Ending, extraEnv: Record<string, string> = {}): Promise<{ exit: number | string | null; out: string }> {
   const dir = mkdtempSync(join(tmpdir(), "wasm-blas-driver-"));
   try {
     writeFileSync(join(dir, "chrome"), FAKE);
     chmodSync(join(dir, "chrome"), 0o755);
-    const env = { ...process.env, SBWR_CHROME: join(dir, "chrome"), FAKE_DIR: dir, FAKE_PORT: ending === "error" ? "1" : "0" };
+    const env = { ...process.env, SBWR_CHROME: join(dir, "chrome"), FAKE_DIR: dir, FAKE_PORT: ending === "error" ? "1" : "0", ...extraEnv };
     const d = spawn(process.execPath, [DRIVER, "http://127.0.0.1:1/x.html", join(dir, "out.json"), "30"],
       { env, stdio: "ignore", detached: ending === "group SIGKILL" });
     const exited = new Promise<number | string | null>((r) => d.on("exit", (code, sig) => r(code ?? sig)));
@@ -84,6 +84,13 @@ for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] a
     assert.equal((await run(sig)).exit, code);
   });
 }
+
+// (the driver held just after it spawns Chrome: the signal lands where the handlers, if they came after the spawn,
+// would not be in place yet, and the default action would kill the driver unhandled, exit "SIGTERM"; Nov 5,
+// master CI, once by timing alone. With the handlers before the spawn it is handled: cleanup, then 128+15)
+test("wasm-blas driver: SIGTERM right after the spawn is handled (the handlers precede the spawn)", { skip: !supported }, async () => {
+  assert.equal((await run("SIGTERM", { SBWR_TEST_HOLD_MS: "1500" })).exit, 143);
+});
 
 test("wasm-blas driver: SIGKILL of the driver (no handler runs) leaves no Chrome and no profile", { skip: !supported }, async () => {
   assert.equal((await run("SIGKILL")).exit, "SIGKILL");

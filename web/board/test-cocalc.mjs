@@ -118,7 +118,8 @@ try {
   const want = { n1: [150, 200, "f1"], c1: [550, 350, "f2"], t1: [1200, 100, ""], f1: [126, 142, ""] };
   check(at.every((a) => a && Math.abs(a[1] - want[a[0]][0]) <= 1 && Math.abs(a[2] - want[a[0]][1]) <= 1 && a[3] === want[a[0]][2]), "each note is where it was on CoCalc's board, in its frame's group: " + JSON.stringify(at));
   check(await until(`[...document.querySelectorAll('.board-note')].some((e) => e.querySelector('.katex') && e.textContent.includes('A note with'))`, 5000), "its math is typeset");
-  // undo: back to the board before
+  // undo: back to the board before (in Edit: View writes nothing, web/doc-mode.ts)
+  await ev(`${B}.editing(true)`);
   await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1");
   check(await until(`!${B}.snapshot().doc.pages && ${B}.snapshot().doc.title !== "ideas"`, 3000), "undo takes the opened board back");
 

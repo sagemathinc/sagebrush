@@ -549,6 +549,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
+import { preloadSoon, preloadStop, preloadState, latexExtra, importTops, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
 const session = pageSession({
@@ -813,6 +814,17 @@ let kernel = null, journal = null; // the current notebook's
 // then rechecks the owner and the winning pin; a failed save rejects, and is
 // never taken as success because the metadata holds the pin.)
 let latestPkgset; // undefined: not asked yet; else a promise of the id or null
+// (the site's latest set, asked once per page: a notebook without a pin is given it, and background loading reads the
+// same answer, so the two never name different sets)
+function latestSet() {
+  latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
+    .then(async (r) => {
+      const j = r.ok ? await r.json() : null;
+      return j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id) ? j.id : null;
+    })
+    .catch(() => null);
+  return latestPkgset;
+}
 // (the notebook being attached to `nb`, and when it is: its interpreter starts before its document is there,
 // openNotebook's useKernel, so what reads its metadata waits for it first, never the previous document's)
 let attaching = { id: null, done: Promise.resolve() };
@@ -835,13 +847,7 @@ async function notebookPkgset(owner) {
       continue; // (another pin won meanwhile: that one, once it is durable)
     }
     if (LOCAL) return null;
-    latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
-      .then(async (r) => {
-        const j = r.ok ? await r.json() : null;
-        return j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id) ? j.id : null;
-      })
-      .catch(() => null);
-    const S = await latestPkgset;
+    const S = await latestSet();
     shown();
     if (!S) return null;
     // (unpinned: pinned at its first use; a pin that came meanwhile, another tab's, is the next round's to use)
@@ -950,6 +956,8 @@ function makeKernel(owner) {
     },
   });
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
+  // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
+  k.on("execute", preloadStop);
   if (owner !== null) {
     j = createJournal({
       kernel: k, nb, local: !!LOCAL,
@@ -3000,6 +3008,8 @@ async function openBundle(bytes) {
   return id;
 }
 window.sagebrush.bundle = makeBundle;
+// (what background loading did, web/preload.ts: why it skipped, or the files it fetched)
+window.sagebrush.preload = preloadState;
 window.sagebrush.openBundle = openBundle;
 
 // File > Open
@@ -4093,6 +4103,37 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernelsMayStart = true;
   if (current.id) startKernel(kernelFor(current.id));
+  // background loading (web/preload.ts): at the next idle moment, the library files the open notebook's first Run
+  // will fetch (its mode's groups, the groups its import lines name), and the LaTeX editor's two files where the
+  // workspace has a .tex; bytes only, nothing run, and skipped on Save-Data, a slow connection or little storage
+  preloadSoon({
+    table: __SB_PRELOAD__,
+    doc: () => { if (!current.id) return null; const s = nb.snapshot(); return { mode: s.mode ?? nb.mode, codes: s.cells.filter((c) => !c.type).map((c) => c.code ?? "") }; },
+    // the LaTeX editor's two files, where the editor is on here and the workspace has a .tex (latexExtra)
+    extra: () => latexExtra({
+      latex: typeof __SB_LATEX__ !== "undefined" && !!__SB_LATEX__ && !!ws, hosts: typeof __SB_LATEX_HOSTS__ === "undefined" ? [] : __SB_LATEX_HOSTS__, host: location.hostname,
+      hasTex: async () => (await ws.list("/", { recursive: true })).some((e) => /\.tex$/i.test(e.path)), base: location.href,
+    }),
+    // the notebook's optional package set (pandas, plan-modular-packages-r4), after the library's files: the one its
+    // interpreter is given (notebookPkgset: its pin, or else the site's latest, latestSet), its index checked against
+    // its id; the source chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given
+    // unpinned is pinned at its first use only, as before (#628)
+    later: async () => {
+      if (!current.id || LOCAL || !(nb.mode === "python" || nb.mode === "sage")) return null;
+      const codes = nb.snapshot().cells.filter((c) => !c.type).map((c) => c.code ?? ""), tops = importTops(codes);
+      // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
+      const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
+      if (!S) return null;
+      const index = await pkgIndex(await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes), S);
+      // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
+      // request for one is answered from there; fetched before it controls the page, a chunk would only be
+      // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
+      const sw = navigator.serviceWorker;
+      if (index === null || !sw || !(sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) return null;
+      const p = pkgIntent(index, tops, location.href);
+      return p.urls.length ? p : null;
+    },
+  });
   if (resumed) await replayResumed(resumed);
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {

@@ -1366,6 +1366,12 @@ try {
     await f2("/u9 brd.board.json");
     await typeName("u9 plan.board.json");
     check((await has("/u9 plan.board.json")) && !(await ev(`${W}.stat("/u9 plan.board.json.board.json").then((x) => !!x)`)), "U9: a board named with its extension gets it once");
+    // (a space before the typed extension goes with it: grader's N3)
+    await ev(`${W}.create("/u9 sp.ipynb", { mode: "python" }).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 sp.ipynb"))})`);
+    await f2("/u9 sp.ipynb");
+    await typeName("u9 spaced .ipynb");
+    check((await has("/u9 spaced.ipynb")) && !(await ev(`${W}.stat("/u9 spaced .ipynb").then((x) => !!x)`)), "U9: \"u9 spaced .ipynb\" becomes u9 spaced.ipynb (the space before the extension dropped)");
     await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 chapter1.ipynb"))})`);
     await f2("/u9 chapter1.ipynb");
     await typeName(".ipynb");

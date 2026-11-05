@@ -5844,6 +5844,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_sbdata_live.py ::  :: ERRORS = (\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
  "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6278,6 +6283,16 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
+ },
+ "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/fredapi.py :: _error :: return RuntimeError(\"FRED is rate-limiting; try again in a minute\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -6767,6 +6782,15 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
+ "lib/sage_plot3d.py :: _write_page :: except io.UnsupportedOperation: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the exception a file object without a descriptor raises (Sagebrush's), which skips the fsync; matched text that bounds nothing"
+ },
+ "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
+  "class": "coverage",
+  "owner": "python"
+ },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6791,6 +6815,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/yfinance.py ::  :: _MESSAGE = \"Yahoo Finance data isn't available in Sagebrush: automated Yahoo access is unsupported\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
@@ -7820,6 +7849,35 @@
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
+ "src/live-data.ts ::  :: export const LIVE_ERRORS = [\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\"] as const; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "src/live-data.ts :: checkAnswer :: if (dates.length !== values.length || dates.length > LIVE_MAX_POINTS) return { error: \"unavailable\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_BYTES = 8 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_POINTS = 200_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
  "src/local-gateway.ts ::  :: cellCode: MiB, // one cell's code in a wave (the client's per-cell limit) #0": {
   "class": "1",
   "disposition": {
@@ -8402,7 +8460,7 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -9733,43 +9791,247 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
- "src/runtime/zlib.ts :: compress :: m.MAX_WBITS = 15; #0": {
+ "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decode :: const opEnd = limit === Infinity ? Infinity : start + limit - 258; #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: const ml = maxLength === undefined ? 0 : Number(O.index(maxLength)); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes { #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: if (ml < 0) raise(T.ValueError, \"max_length must be non-negative\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: decompressLimited :: const [out, end] = inflateRaw(data, 2, limit); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: decompressLimited :: export function decompressLimited(data: Uint8Array, limit: number): [Uint8Array, number] { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: ensure :: if (m > start + limit) m = Math.max(this.bp + n, start + limit); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: flushCall :: m.MAX_WBITS = 15; #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"copy\", () => raise(T.NotImplementedError, \"zlib: Decompress.copy() is not in Sagebrush's zlib\")); #0": {
+  "class": "coverage",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"decompress\", (d: PyDecompress, data: any, maxLength: any = undefined) => decompressCall(d, data, maxLength), sig([\"self\", \"data\", \"max_length\"], { posonly: 2 })); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: fn :: const [out, end] = decompressLimited(bytesOf(data), Number(limit)); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: fn :: fn(\"_decompress_limited\", (data: any, limit: any) => { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
- "src/runtime/zlib.ts :: grow :: if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`); #0": {
+ "src/runtime/zlib.ts :: fn :: if (zdict !== undefined && bytesOf(zdict).length) raise(T.NotImplementedError, \"zlib: decompressobj(zdict=) is not in Sagebrush's zlib\"); #0": {
+  "class": "coverage",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: full :: if (room > cap && over) over(); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const cap = Math.min(limit, ARRAY_LIMITS.bytes); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const out = f.run(Infinity, cap, () => #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: inflateRaw :: function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
- "src/runtime/zlib.ts :: inflateRaw :: let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1)); #0": {
+ "src/runtime/zlib.ts :: inflateRaw :: raise(ZlibError, cap < limit ? `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes` : `Error -5 while decompressing data: more than ${limit} bytes`), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: left :: const left = () => limit - (this.bp - start); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: run :: const limit = Math.min(room, cap); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: run :: run(room: number, cap = Infinity, over?: () => never): Uint8Array { #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: step :: const cap = ARRAY_LIMITS.bytes; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: step :: const o = d.inf.run(room, cap, () => raise(ZlibError, `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes`)); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },

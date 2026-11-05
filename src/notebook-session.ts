@@ -59,6 +59,8 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, 
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 import { unbox } from "./runtime/object";
+import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./live-data";
+import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
 
@@ -135,9 +137,13 @@ export function exitStatus(code: unknown): { ok: boolean; text: string | null } 
 // typed, null for end of input, or {interrupted: true} if a Stop came while
 // it waited.  None: input() reads end of input, as CPython with no stdin.
 export type StdinRequest = { id: number; target: number | null; prompt: string };
+// liveData: how lib/_sbdata_live.py asks the page for data fetched live
+// (src/live-data.ts), synchronously as stdin: the page's checked answer.
+// None: every request is unavailable, as on the command line.
+export type LiveRequest = { id: number; target: number | null; op: LiveOp; params: LiveParams };
 export type StdinAnswer = string | null | { interrupted: true };
 export class LimitsError extends Error {}
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -262,6 +268,30 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
             if (current === null) return null;
             flush();
             return opts.stdin!({ id: current, target, prompt });
+          },
+        }
+      : {}),
+    // lib/_sbdata_live.py's one operation (src/live-data.ts): its parameters
+    // checked here before anything is asked, and never in a graded run
+    ...(opts.liveData
+      ? {
+          live_data(op: string, params: string) {
+            const no = JSON.stringify({ error: "unavailable" });
+            if (current === null || typeof op !== "string" || typeof params !== "string" || params.length > 4096) return no;
+            if ((Atomics.load(R.INTR as Int32Array, 0) & INTR_GRADING) !== 0) return no;
+            let p: unknown;
+            try {
+              p = JSON.parse(params);
+            } catch {
+              return no;
+            }
+            const c = checkParams(op, p);
+            if ("refused" in c) return no;
+            flush();
+            const a = opts.liveData!({ id: current, target, op: op as LiveOp, params: c.params });
+            // (a Stop came while it waited: it is this KeyboardInterrupt, not another one at the next check)
+            if (a && "error" in a && a.error === "interrupted") consumeCtrlC(R.INTR);
+            return a ? JSON.stringify(a) : no;
           },
         }
       : {}),

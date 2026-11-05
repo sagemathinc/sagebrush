@@ -19,6 +19,7 @@
     "web/workspace/agent-schema.ts",
     "web/workspace/agent-grant.ts",
     "web/workspace/agent-pair.ts",
-    "web/workspace/agent-ui.ts"
+    "web/workspace/agent-ui.ts",
+    "web/preload.ts"
   ]
 }

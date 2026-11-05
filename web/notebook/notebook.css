@@ -144,6 +144,7 @@
 .sbnb-completer { position: absolute; z-index: 15; max-height: 16em; min-width: 12em; overflow-y: auto; margin: 0; padding: 3px; list-style: none; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .sbnb-completer li { padding: 1px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .sbnb-completer li[aria-selected=true] { background: var(--accent); color: var(--on-accent); }
+.sbnb-completer li.sbnb-comp-wait { cursor: default; color: var(--muted, #888); font-style: italic; }
 .sbnb-dropline { position: absolute; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 6; }
 .sbnb-tip { position: fixed; z-index: 20; pointer-events: none; background: var(--cell); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 12px ui-monospace, Menlo, monospace; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 .sbnb-keys { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 18px; width: min(760px, 94vw); }

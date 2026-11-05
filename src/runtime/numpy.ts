@@ -3669,6 +3669,9 @@ newBuiltinModule("_numpy", (m) => {
   Ty.getset(DT, "kind", (d: DType) => d.kind);
   Ty.getset(DT, "char", (d: DType) => d.char);
   Ty.getset(DT, "itemsize", (d: DType) => d.itemsize);
+  // (no structured dtypes here: every dtype is plain, so no field names and no fields, None as NumPy's)
+  Ty.getset(DT, "names", (_d: DType) => null);
+  Ty.getset(DT, "fields", (_d: DType) => null);
   Ty.getset(DT, "type", (d: DType) => (d instanceof StrDType ? strScalar : scalarCtors[d.name] ?? null));
   // (a string dtype's '<U3'; a numeric one's is not here yet)
   Ty.getset(DT, "str", (d: DType) => (d instanceof StrDType ? d.str : raise(T.AttributeError, "'numpy.dtype' object has no attribute 'str'")));
@@ -4269,6 +4272,14 @@ newBuiltinModule("_numpy", (m) => {
     if (!(a instanceof NDArray)) raise(T.TypeError, "_own: an ndarray is required");
     a.base = null;
     return a;
+  });
+  // (a library's own combined admission, admitWork's, for what a Python step
+  // keeps at once: lib/scipy/optimize.py's differences and scratch)
+  fn("_admit_work", (nbytes: any, what: any) => {
+    const b = typeof nbytes === "bigint" ? Number(nbytes) : nbytes;
+    if (typeof b !== "number" || typeof what !== "string") raise(T.TypeError, "_admit_work: a byte count and a name are required");
+    admitWork(b, what);
+    return null;
   });
   fn("where3", (c: any, x: any, y: any) => {
     if (strArg(x) || strArg(y)) return strWhere(asarray(c), x, y);
