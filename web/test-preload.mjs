@@ -3,7 +3,7 @@
 // mode's, then those its import lines name), the exact files, the skips (Save-Data, slow, offline, hidden), the
 // storage check, and the fetch loop (one at a time; a stop never cancels the file in flight, only the next).
 //   bun web/test-preload.mjs
-import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState } from "./preload.ts";
+import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, latexExtra } from "./preload.ts";
 
 let fails = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -163,6 +163,22 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
   };
   const t1 = Date.now(), d5 = await preloadFetch(["q0", "q1"], () => null, 80), dt = Date.now() - t1;
   ok(J(d5) === "[]" && J(asked5) === '["q0"]' && dt >= 130 && dt < 1000, `a file that sends a piece at 60 ms and then nothing (stall 80 ms): abandoned ~140 ms in (${dt} ms), the next never started`);
+}
+
+// the LaTeX editor's two files: only where the editor is on (web/latex/boot.ts latexOn: the host exactly in the build's
+// list) and the workspace has a .tex; off, the workspace isn't even listed (@sagebrush-latex's pin, Nov 5)
+{
+  const hosts = ["sagebrush.space", "dev.sagebrush.space"];
+  let listed = 0;
+  const L = (o) => latexExtra({ latex: true, hosts, host: "sagebrush.space", hasTex: async () => (listed++, true), base: "https://sagebrush.space/", ...o });
+  ok(J((await L({}))?.urls) === J(["https://sagebrush.space/sagebrush-latex.js", "https://sagebrush.space/sagebrush-latex-worker.js"]), "latex: on here, a .tex: the editor's two files");
+  listed = 0;
+  const off = await Promise.all([
+    L({ host: "example.com" }), L({ host: "x.sagebrush.space" }), L({ host: "sagebrush.space.example.com" }), L({ host: "SAGEBRUSH.space" }),
+    L({ hosts: [] }), L({ latex: false }),
+  ]);
+  ok(off.every((x) => x === null) && listed === 0, `latex: a host where the editor is off (another, a subdomain, a suffix, another case, an empty list), or a build without it: nothing, the workspace never listed (${listed})`);
+  ok((await L({ hasTex: async () => false })) === null, "latex: on here, no .tex: nothing");
 }
 
 // preloadSoon, the whole path with a stub page: a stub `extra`'s files (the LaTeX editor's, say) are fetched with the

@@ -758,6 +758,9 @@ try {
   // case before leaves the editor open, and its worker's script could still be asked for after the list was cleared and
   // before the next navigation, counted against the new page; at about:blank the editor's document and worker are gone
   const fromBlank = async () => { await send("Page.navigate", { url: "about:blank" }); await until(`location.href === "about:blank"`, 10000); await sleep(200); requests.length = 0; };
+  // (background loading, web/preload.ts, prefetches the editor's two files at idle where the workspace has a .tex: off
+  // here, by the tests' switch, so this counts the page's own fetches; the case after the control has it on)
+  const preloadOff = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__sbPreloadOff = true;` });
   await fromBlank();
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
@@ -769,6 +772,36 @@ try {
     const seen = latexFetches();
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: eager.identifier });
     check(seen.length > 0, "…its control: a page that fetches a LaTeX file eagerly is caught by the same count", seen);
+  }
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: preloadOff.identifier });
+  // background loading on (@sagebrush's ruling and @sagebrush-latex's pins, Nov 5): before a .tex is opened, at idle,
+  // exactly the editor's two files, each once, and none of its lazy chunks (each fetched on its own use only, with its
+  // own budget line); nothing executed (no editor, no LaTeX worker constructed: Worker counted from before the page's
+  // own script); and used: opening a .tex then downloads neither again (from the cache, or a revalidation's few bytes).
+  // (No .tex in the workspace, no LaTeX prefetch: web/test-preload-page.mjs, a plain notebook's outcome "nothing".)
+  {
+    const counter = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { window.__latexWorkers = 0; const W0 = window.Worker; window.Worker = function (u, o) { if (String(u).includes("sagebrush-latex") || o?.name === "sagebrush-latex") window.__latexWorkers++; return new W0(u, o); }; window.Worker.prototype = W0.prototype; })();` });
+    await fromBlank();
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await until(`window.sagebrush?.preload?.outcome !== null && window.sagebrush?.preload?.outcome !== undefined`, 20000);
+    await sleep(1500);
+    const seen = latexFetches().map((u) => new URL(u).pathname), outcome = await ev(`window.sagebrush.preload.outcome`);
+    const editor = await ev(`!!document.querySelector(".tex-page")`), workers = await ev(`window.__latexWorkers`);
+    const lazy = seen.filter((p) => /sagebrush-latex-(beamer|comments|comments-doc|agent|tools|present|doc)\.js$/.test(p));
+    check(JSON.stringify([...seen].sort()) === JSON.stringify(["/sagebrush-latex-worker.js", "/sagebrush-latex.js"]) && lazy.length === 0 && outcome === "fetched" && !editor && workers === 0,
+      "background loading: before a .tex is opened, only the editor's two files, each once, at idle (none of its lazy chunks); nothing executed (no editor, no LaTeX worker)", { seen, lazy, outcome, editor, workers });
+    // (then a .tex is opened, in this tab: neither file downloaded again)
+    const two = latexFetches().filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
+    const full = Object.fromEntries(two.map((u) => [new URL(u).pathname, sizes.get(u)]));
+    const n0 = requests.length;
+    const pf = await mk("/preload-used.tex", enc("\\documentclass{article}\n\\begin{document}\nused\n\\end{document}\n"));
+    const opened = await open(pf);
+    await sleep(1500);
+    const again = requests.slice(n0).filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
+    const bytes = Object.fromEntries(again.map((u) => [new URL(u).pathname, sizes.get(u)]));
+    check(opened && Object.values(full).every((b) => b > 10_000) && again.every((u) => (sizes.get(u) ?? Infinity) < 2048),
+      "background loading: …and used: opening a .tex then downloads neither file again (asked again only as a revalidation or from the cache)", { opened, full, again: again.map((u) => new URL(u).pathname), bytes });
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: counter.identifier });
   }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
   // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
