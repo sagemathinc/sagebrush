@@ -2076,14 +2076,26 @@ class EllipticCurve_rational_field:
             (1 : -1 : 1)
             sage: E.lift_x(1, all=True)
             [(1 : -1 : 1), (1 : 0 : 1)]
+
+        A real x (a float or an element of RR) gives the points over RR, as in
+        Sage::
+
+            sage: EllipticCurve([-1, 0]).lift_x(-0.5)
+            (-0.500000000000000 : -0.612372435695794 : 1.00000000000000)
+            sage: EllipticCurve([-1, 0]).lift_x(-1/2)
+            Traceback (most recent call last):
+            ...
+            ValueError: No point with x-coordinate -1/2 on Elliptic Curve defined by y^2 = x^3 - x over Rational Field
         """
+        if isinstance(x, float):
+            return self.base_extend(_RR()).lift_x(x, all=all)
         import _sage_ec as _ec
         xf = _qfrac(x)
         pts = [EllipticCurvePoint(self, P) for P in _ec.lift_x(self._a, xf)]
         if all:
             return pts
         if not pts:
-            raise ValueError("no point with x-coordinate %s on %r" % (x, self))
+            raise ValueError("No point with x-coordinate %s on %r" % (x, self))
         return pts[0]
 
     def torsion_points(self):
@@ -2098,17 +2110,26 @@ class EllipticCurve_rational_field:
         """
         import _sage_ec as _ec
         out = [EllipticCurvePoint(self, None)]
-        T = self.torsion_order()
-        if T > 1:
-            seen = set()
-            H = 2.0
-            while len(out) < T and H < 60:
-                for P in _ec.point_search(self._a, H):
-                    if P not in seen and _ec.point_order(self._a, P):
-                        seen.add(P)
-                        out.append(EllipticCurvePoint(self, P))
-                H += 2
+        # (all of them, exactly, by Nagell-Lutz on the short model: a search on
+        # this model's own coordinates missed those of a translated model,
+        # ECTORS-ENG-1)
+        if self.torsion_order() > 1:
+            out += [EllipticCurvePoint(self, P) for P in _ec.torsion_points(tuple(self._a))]
         return sorted(out, key=lambda Q: (Q._P is not None, Q._P or ()))
+
+    def torsion_subgroup(self):
+        """The torsion subgroup, as Sage gives it: its structure, and the
+        generators PARI chooses (lib/_sage_ec_torsion.py, loaded on first use).
+
+        EXAMPLES::
+
+            sage: EllipticCurve('11a1').torsion_subgroup()
+            Torsion Subgroup isomorphic to Z/5 associated to the Elliptic Curve defined by y^2 + y = x^3 - x^2 - 10*x - 20 over Rational Field
+            sage: EllipticCurve('15a1').torsion_subgroup().invariants()
+            (2, 4)
+        """
+        import _sage_ec_torsion
+        return _sage_ec_torsion.torsion_subgroup(self)
 
     def point_search(self, height_limit, verbose=False):
         """Points with naive height log max(|r|, s^2) <= height_limit (x = r/s^2), as Sage.
@@ -2593,7 +2614,10 @@ class EllipticCurve_rational_field:
         """
         if getattr(self, "_tors", None) is None:
             import _sage_ec as _ec
-            self._tors = _ec.torsion_order(self._a, _ap.aplist(self._a, 200))
+            # (the bound from the minimal model's a_p, which every model of the
+            # curve shares: a translated model's coefficients can exceed the
+            # engine's 64-bit integers, ECTORS-ENG-1)
+            self._tors = _ec.torsion_order(self._a, _ap.aplist(_ec.minimal_model(tuple(self._a)), 200))
         return self._tors
 
     def _ap_bad(self, p):
@@ -2721,14 +2745,20 @@ class EllipticCurve_rational_field:
             Traceback (most recent call last):
             ...
             ArithmeticError: y^2 + y = x^3 + 36*x defines a singular curve
-            sage: E.base_extend(RR)  # sagebrush only
+            sage: E.base_extend(RR)
+            Elliptic Curve defined by y^2 + 1.00000000000000*y = x^3 - 1.00000000000000*x over Real Field with 53 bits of precision
+            sage: E.base_extend(CC)  # sagebrush only
             Traceback (most recent call last):
             ...
-            NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet
+            NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet
         """
         from _sage_poly import QQ, ZZ
         if R is QQ or R is ZZ:
             return EllipticCurve_rational_field(list(self._a))
+        if _is_RR(R):
+            # (the curves over RR: a module of their own, loaded on first use)
+            import _sage_ec_rr
+            return _sage_ec_rr.EllipticCurve_real_field(self._a)
         import _sage_ec_ff
         if not _sage_ec_ff._is_modp_ring(R):
             raise NotImplementedError("elliptic curves over %s are not available in Sagebrush yet" % (R,))
@@ -3360,6 +3390,47 @@ class EllipticCurvePoint:
     def __hash__(self):
         return hash(("pt", self._E._a, self._P))
 
+    def _same_curve(self, other, op):
+        # (points on different curves are not ordered, as in Sage: ECTORS-ENG-2)
+        if tuple(self._E._a) != tuple(other._E._a):
+            raise TypeError("unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'" % (op, self._E, other._E))
+
+    def _key(self):
+        # (Sage orders points by their projective coordinates [x, y, z])
+        from fractions import Fraction
+        return (Fraction(0), Fraction(1), Fraction(0)) if self._P is None else (self._P[0], self._P[1], Fraction(1))
+
+    def __lt__(self, other):
+        """Points compare by their coordinates (x : y : z), as in Sage.
+
+        EXAMPLES::
+
+            sage: sorted(EllipticCurve('14a1').torsion_subgroup().points())
+            [(0 : 1 : 0), (1 : -1 : 1), (2 : -5 : 1), (2 : 2 : 1), (9 : -33 : 1), (9 : 23 : 1)]
+        """
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        self._same_curve(other, "<")
+        return self._key() < other._key()
+
+    def __le__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        self._same_curve(other, "<=")
+        return self._key() <= other._key()
+
+    def __gt__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        self._same_curve(other, ">")
+        return self._key() > other._key()
+
+    def __ge__(self, other):
+        if not isinstance(other, EllipticCurvePoint):
+            return NotImplemented
+        self._same_curve(other, ">=")
+        return self._key() >= other._key()
+
     def is_zero(self):
         """Whether this is the point at infinity.
 
@@ -3449,6 +3520,15 @@ class EllipticCurvePoint:
         from sage_all import RR
         m = self._E.minimal_model()
         return RR(_ec.canonical_height(m._a, m._to_min(self), self._E._bad()))
+
+
+def _RR():
+    from _sage_lang import _RealField
+    return _RealField()
+
+
+def _is_RR(R):
+    return type(R).__name__ == "_RealField"
 
 
 def EllipticCurve(x, y=None):

@@ -1752,9 +1752,17 @@ export function unparse(e: Expr, prec = 0): string {
  * cells, and an error is reported (MATLAB's message on stderr) without ending
  * the session; `_matlab.cell_failed()` then says the cell failed.
  */
-export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean } = {}): string {
+export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?: boolean; file?: boolean } = {}): string {
   const p = new Parser(lex(src));
-  const stmts = p.program();
+  let stmts = p.program();
+  // (`file`: a file run as the program, as `matlab -batch name` and `run name.m` run it.  A function file, one with
+  // functions and no statement outside them, runs its first function with no arguments; without this the file only
+  // defined it and the run printed nothing, with exit status 0)
+  if (opts.file && !stmts.length && p.functions.length) {
+    stmts = new Parser(lex(p.functions[0].name)).program();
+    // (line 0: the call is no line of the file, so an error's report has no frame for it, as MATLAB's has none)
+    stmts[0].line = 0;
+  }
   return new Emitter(p.functions, filename, !!opts.cell).program(stmts, src);
 }
 

@@ -7,7 +7,7 @@
 //   pyjs -i program.py        run, then stay interactive
 //   pyjs --emit program.py    print the generated JavaScript
 
-import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
+import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFileSync, existsSync, realpathSync, mkdtempSync, rmSync, rmdirSync, unlinkSync, readdirSync, lstatSync, opendirSync, type Dirent } from "fs";
 import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
@@ -15,9 +15,9 @@ import * as readline from "readline";
 import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
-import { magmaToPython, MagmaSyntaxError, type Recover } from "./magma";
-import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, looksLikeMagma } from "./matlab";
-import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
+import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
+import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
+import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData, parentPort } from "worker_threads";
@@ -331,9 +331,9 @@ const isMagma = (f: string | null) => magma || (!matlab && f !== null && (/\.(ma
 const isMatlab = (f: string | null) => matlab || (!magma && f !== null && /\.m$/.test(f) && !mFileIsMagma(f));
 
 /** MATLAB source as Python, or null after reporting a syntax error. */
-function matlabSource(src: string, file: string): string | null {
+function matlabSource(src: string, file: string, asFile = false): string | null {
   try {
-    return matlabToPython(src, file);
+    return matlabToPython(src, file, { file: asFile });
   } catch (e) {
     if (!(e instanceof MatlabSyntaxError)) throw e;
     process.stderr.write(matlabSyntaxMessage(e, src, file));
@@ -391,8 +391,8 @@ function moduleNames(): string[] {
   return [...names];
 }
 
-function completer(main: any) {
-  return (line: string): [string[], string] => complete(main, line, moduleNames);
+function completer(main: any, mode: string) {
+  return (line: string): [string[], string] => completeIn(mode, main, line, moduleNames);
 }
 
 function historyFile(): string | null {
@@ -406,9 +406,41 @@ function historyFile(): string | null {
   }
 }
 
-function repl(main: any, quiet: boolean): Promise<number> {
+/** The interactive prompt's language: Python (or Sage, with --sage), Magma or MATLAB. */
+type ReplMode = "python" | "magma" | "matlab";
+
+/**
+ * One input typed at a Magma or MATLAB prompt, translated as the kernel's
+ * cells are (src/kernel.ts) and run in the session's __main__: Magma as a
+ * session (an error is reported and the session goes on), MATLAB in cell
+ * mode (its error message on stderr, and the session goes on).  The exit
+ * status of a quit, else null.
+ */
+function runTranslated(mode: "magma" | "matlab", src: string, main: any): number | null {
+  if (mode === "magma") {
+    const py = magmaSource(src, "<stdin>", "session");
+    return py === null ? null : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
+  }
+  let py: string;
+  try {
+    py = matlabToPython(src, "<stdin>", { cell: true });
+  } catch (e) {
+    if (!(e instanceof MatlabSyntaxError)) throw e;
+    process.stderr.write(matlabSyntaxMessage(e, src, "<stdin>"));
+    return null;
+  }
+  const code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
+  // (the error, if any, is on stderr already: forget that this input failed)
+  guarded(() => R.callObj(getattr(R.importModule("_matlab"), "cell_failed"), []));
+  return code;
+}
+
+function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
-  if (!quiet) process.stdout.write(`${VERSION}\nType help(obj) for help, exit() or Ctrl-D to leave.\n`);
+  const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
+  if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
+  // (the language's library, loaded before the first prompt rather than at the first input)
+  if (mode !== "python") guarded(() => R.importModule(mode === "magma" ? "_magma" : "_matlab"));
   const hist = historyFile();
   let history: string[] = [];
   if (hist) {
@@ -418,10 +450,13 @@ function repl(main: any, quiet: boolean): Promise<number> {
       // no history yet
     }
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main), history, historySize: 1000, terminal: process.stdin.isTTY });
+  // (completion in the prompt's language: src/interactive.ts completeIn)
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
   const sys = R.importModule("sys");
-  const ps1 = () => (typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
-  const ps2 = () => (typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
+  // (Magma's prompt and MATLAB's; neither shows one for a continued input)
+  const ps1 = () => (mode === "magma" ? "> " : mode === "matlab" ? ">> " : typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
+  const ps2 = () => (mode !== "python" ? "" : typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
+  const incomplete = (src: string) => (mode === "magma" ? magmaIsIncomplete(src) : mode === "matlab" ? matlabIsIncomplete(src) : needsMore(src, opts()));
   let buf: string[] = [];
   // (the session's own Python around each input: %autoreload's hooks)
   const host = R.newModule("__sagebrush_host__");
@@ -442,7 +477,7 @@ function repl(main: any, quiet: boolean): Promise<number> {
     rl.on("line", (line) => {
       buf.push(line);
       const src = buf.join("\n");
-      if (src.trim() !== "" && needsMore(src, opts())) {
+      if (src.trim() !== "" && incomplete(src)) {
         rl.setPrompt(ps2());
         rl.prompt();
         return;
@@ -456,12 +491,25 @@ function repl(main: any, quiet: boolean): Promise<number> {
             // read-only home: no history
           }
         }
+        // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
+        const q = mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src) : null;
+        if (q) return finish(Number(q[1] || 0));
+        // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
+        if (mode === "matlab" && /^\s*function\b/.test(src)) {
+          process.stderr.write("Function definitions are not supported in this context. Functions can only be created as local or nested functions in code files.\n");
+          rl.setPrompt(ps1());
+          rl.prompt();
+          return;
+        }
         promptSignals(true);
         let code: number | null = null;
         try {
-          guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
-          code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
-          guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
+          if (mode !== "python") code = runTranslated(mode, src, main);
+          else {
+            guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
+            code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
+            guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
+          }
           // (Python's file flushes are Python code too, and may not return:
           // still busy, astra2 CORR-PR123-1)
           flushFiles();
@@ -539,8 +587,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (argv[0] === "latex" && (["check", "run", "render", "-h", "--help", "help"].includes(argv[1]) || !existsSync("latex"))) {
     const latex = loadLatex();
     if (typeof latex === "string") { process.stderr.write(`sagebrush: ${latex}\n`); process.exitCode = 2; return; }
-    // (cli: the script this process runs, the bundle or the npm launcher, for `latex run`'s Sage session)
-    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: process.argv[1] ? resolve(process.argv[1]) : undefined });
+    // (cli: the file this process runs from, the bundle or the npm launcher, for `latex run`'s Sage session)
+    process.exitCode = await latex.latexCommand(argv.slice(1), { cli: cliEntry() ?? undefined });
     return;
   }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
@@ -665,7 +713,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       return;
     }
     if (isMatlab(file)) {
-      const py = matlabSource(readFileSync(file, "utf8"), file);
+      const py = matlabSource(readFileSync(file, "utf8"), file, true);
       if (py !== null) process.stdout.write(py);
       return;
     }
@@ -710,7 +758,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       main = execModuleAsMain(mod!);
     });
   } else if (file !== null && file !== "-" && isMatlab(file)) {
-    const py = matlabSource(readFileSync(file, "utf8"), file);
+    const py = matlabSource(readFileSync(file, "utf8"), file, true);
     code = py === null ? 1 : guarded(() => {
       main = execModule(py, file!, "__main__", false, false);
     });
@@ -749,7 +797,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   R.stderr.flush();
   if (interactive && (code === null || inspect)) {
     main ??= mainModule("<stdin>");
-    code = await repl(main, quiet || inspect);
+    // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
+    code = await repl(main, quiet || inspect, isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python");
   }
   flushFiles();
   R.stdout.flush();
@@ -819,14 +868,28 @@ else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNoteb
 // (`board run`'s interpreter, src/board-run.ts)
 else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boardRunWorker(workerData.sagebrushBoardRun));
 
+/** The file this CLI runs from, its real path (a symlink such as node_modules/.bin/sagebrush followed): the bundle the
+ * npm launcher loaded in a worker (the launcher says which: a worker's own main module and argv are none of them), or
+ * this process's main module, or its script. Null if there is none. */
+function cliEntry(): string | null {
+  try { return realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1]); } catch { return null; }
+}
+
 /** `sagebrush latex`'s module, sagebrush-latex.cjs (scripts/build-cli.mjs): beside this bundle in the npm package and in
  * build/cli; from a checkout's tsc or bun run, build/cli's. Loaded by its path, so no bundler folds it into this one.
- * Or why there is none. */
+ * Or why there is none.
+ * Looked for first where this process's entry really is (the bundle, or the npm launcher in bin/, beside dist/; a
+ * symlink such as node_modules/.bin/sagebrush followed): Bun's bundle has the build machine's folder as __dirname,
+ * which alone finds the module only on the machine that built it (or a stale build there). */
 function loadLatex(): { latexCommand: (argv: string[], opts?: { cli?: string }) => Promise<number> } | string {
+  // (cliEntry's path, written out here so that the census's pin of this function covers every place it loads from)
+  const dirs: string[] = [];
+  try { const at = dirname(realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1])); dirs.push(at, join(at, "..", "dist")); } catch {}
   const here = typeof __dirname === "string" ? __dirname : ".";
-  const req = createRequire(join(here, "x.js"));
-  for (const p of [join(here, "sagebrush-latex.cjs"), join(here, "..", "build", "cli", "sagebrush-latex.cjs"), join(here, "..", "..", "build", "cli", "sagebrush-latex.cjs")]) {
-    if (existsSync(p)) return req(p);
+  dirs.push(here, join(here, "..", "build", "cli"), join(here, "..", "..", "build", "cli"));
+  for (const d of dirs) {
+    const p = join(d, "sagebrush-latex.cjs");
+    if (existsSync(p)) return createRequire(join(d, "x.js"))(p);
   }
   return "this build of sagebrush has no LaTeX commands (sagebrush-latex.cjs isn't beside it): use the npm package, npx sagebrush latex ...";
 }

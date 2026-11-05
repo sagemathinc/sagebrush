@@ -80,6 +80,49 @@ class number(generic):
     __slots__ = ()
 
 
+class flexible(generic):
+    __slots__ = ()
+
+
+class character(flexible):
+    __slots__ = ()
+
+
+class str_(str, character):
+    """NumPy's string scalar, a string array's element: a str."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "np.str_(%s)" % str.__repr__(self)
+
+    def __str__(self):
+        return str.__str__(self)
+
+    # (int, float and complex of the text, as of a str, with NumPy's messages,
+    # which name the np.str_)
+    def __int__(self):
+        try:
+            return int(str.__str__(self))
+        except ValueError:
+            raise ValueError("invalid literal for int() with base 10: %r" % (self,)) from None
+
+    def __float__(self):
+        try:
+            return float(str.__str__(self))
+        except ValueError:
+            raise ValueError("could not convert string to float: %r" % (self,)) from None
+
+    def __complex__(self):
+        return complex(str.__str__(self))
+
+    @property
+    def dtype(self):
+        return dtype("U%d" % len(self))
+
+    def item(self):
+        return str.__str__(self)
+
+
 class integer(number):
     __slots__ = ()
 
@@ -303,6 +346,7 @@ for _name, _cls in (("float64", float64), ("float32", float32), ("complex128", c
                     ("uint8", uint8), ("uint16", uint16), ("uint32", uint32), ("uint64", uint64)):
     _np.register_scalar(_name, _cls)
 _np.register_scalar("complex64", complex64)
+_np.register_str(str_)
 
 
 
@@ -407,7 +451,7 @@ class iinfo:
 
 def issubdtype(arg1, arg2):
     kinds = {number: "biufc", integer: "iu", signedinteger: "i", unsignedinteger: "u", inexact: "fc",
-             floating: "f", complexfloating: "c", generic: "biufc", bool_: "b"}
+             floating: "f", complexfloating: "c", generic: "biufcU", bool_: "b", flexible: "U", character: "U", str_: "U"}
     k = dtype(arg1).kind
     if arg2 in kinds:
         return k in kinds[arg2]
@@ -456,6 +500,12 @@ def _asfarray(a, dtype="float64"):
 
 
 _np_dtype = dtype
+
+
+# asarray(x, float64) of data a function computes with in floats, a string
+# array refused there, as NumPy has no loop for its strings (it converts them
+# only when asked: astype, or array with a dtype); the runtime's, one call
+_floats = _np.floats
 asfarray = _removed_alias(_asfarray, "asfarray", "np.asarray(a, dtype=float)")
 
 
@@ -918,6 +968,40 @@ class ufunc:
         A, B = asarray(A), asarray(B)
         return self(A.reshape(A.shape + (1,) * B.ndim), B, **kw)
 
+    def at(self, a, indices, b=None, /):
+        """Unbuffered in place operation on a at indices: a repeated index
+        is operated on as many times, in order (np.add.at(a, [0, 0], 1) adds
+        2). The result is cast to a's dtype, as NumPy's."""
+        if not isinstance(a, ndarray):
+            raise TypeError("first operand must be array")
+        if self.nin == 1 and b is not None:
+            raise ValueError("second operand provided when ufunc is unary")
+        if self.nin == 2 and b is None:
+            raise ValueError("second operand needed for ufunc")
+        # (the flat positions that a[indices] selects, in its order and shape;
+        # an empty list selects none)
+        if isinstance(indices, list) and not indices:
+            indices = asarray([], dtype=intp)
+        pos = asarray(arange(a.size).reshape(a.shape)[indices])
+        if b is not None:
+            try:
+                b = broadcast_to(asarray(b), pos.shape)
+            except ValueError:
+                raise ValueError("array is not broadcastable to correct shape") from None
+            # (a copy: b may be a view of a, and NumPy takes its values
+            # before a changes)
+            bs = b.ravel().copy()
+        shape = a.shape
+        for k, p in enumerate(pos.ravel().tolist()):
+            # (the flat position's index in a, C order)
+            i = []
+            for n in reversed(shape):
+                p, c = divmod(p, n)
+                i.append(c)
+            i = tuple(reversed(i))
+            r = self(a[i]) if self.nin == 1 else self(a[i], bs[k])
+            a[i] = asarray(r).astype(a.dtype)[()]
+
 
 _BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
            "maximum", "minimum", "fmax", "fmin", "arctan2", "hypot", "copysign", "logaddexp",
@@ -944,7 +1028,7 @@ acosh, asinh, atanh = arccosh, arcsinh, arctanh
 
 
 def float_power(x, y):
-    return power(asarray(x, float64), y)
+    return power(_floats(x), y)
 
 
 def conjugate(x):
@@ -1049,7 +1133,8 @@ def clip(a, a_min=None, a_max=None, out=None, **kw):
         a_min = kw["min"]
     if a_max is None and "max" in kw:
         a_max = kw["max"]
-    r = asarray(a)
+    # (strings refused: NumPy has no clip loop for them, even with no bounds)
+    r = _np.numeric(a)
     if a_min is not None:
         r = maximum(r, a_min)
     if a_max is not None:
@@ -1077,12 +1162,12 @@ def isneginf(x):
 
 
 def heaviside(x1, x2):
-    x1 = asarray(x1, float64)
+    x1 = _floats(x1)
     return where(x1 < 0, 0.0, where(x1 > 0, 1.0, x2))
 
 
 def sinc(x):
-    x = asarray(x, float64)
+    x = _floats(x)
     y = pi * where(x == 0, 1.0e-20, x)
     return sin(y) / y
 
@@ -1182,18 +1267,40 @@ def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out)
 
 
+def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
+    # NumPy's maximum/minimum reduction (first: fmax/fmin's, for nanmax/nanmin: a tie keeps the accumulator):
+    # initial (in a's dtype, converted as NumPy converts it) takes part, and is the result of a reduction over no
+    # elements, which without it has no identity; a where mask needs it, and its masked elements take no part
+    a = asarray(a)
+    if initial is None:
+        if mask is not True:
+            raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                             "specify 'initial'" % ("maximum" if is_max else "minimum"))
+        return (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, first)
+    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
+    # plain float into float64 needs no array; the runtime's fold starts from it)
+    if type(initial) is float and a.dtype.name == "float64":
+        ini = initial
+    else:
+        if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
+            raise ValueError("setting an array element with a sequence.")
+        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype).item()
+    if mask is not True:
+        # (a masked element takes no part: a float one is filled with -inf for max, +inf for min, which loses to
+        # any element or initial and ties only itself, so it cannot settle a tie such as +0 against -0; an integer
+        # or bool one with initial, which then changes nothing, as its ties carry no sign. For fmax/fmin (first),
+        # a float one is NaN, which their fold skips as it skips any NaN, even past a NaN initial)
+        fill = (nan if first else -inf if is_max else inf) if a.dtype.kind == "f" else ini
+        a = _np.where3(mask, a, array(fill, dtype=a.dtype))
+    return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini, first)
+
+
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    r = _np.amax(asarray(a), axis, keepdims)
-    if initial is not None:
-        r = maximum(r, initial)
-    return _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, True), out)
 
 
 def amin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    r = _np.amin(asarray(a), axis, keepdims)
-    if initial is not None:
-        r = minimum(r, initial)
-    return _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, False), out)
 
 
 max = amax
@@ -1257,12 +1364,30 @@ def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
     return prod(_nanfill(a, 1), axis, dtype, out, keepdims)
 
 
-def nanmax(a, axis=None, out=None, keepdims=False):
-    return amax(_nanfill(a, -inf), axis, out, keepdims)
+def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
+    # (NumPy's nanmax/nanmin reduce with fmax/fmin, the names in their errors; a where mask needs initial first)
+    # (the runtime's first-wins fold skips a NaN element itself; only a complex array is filled first)
+    name = "fmax" if is_max else "fmin"
+    if initial is None and where is not True:
+        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                         "specify 'initial'" % name)
+    a = asarray(a)
+    if a.dtype.kind == "c":
+        a = _nanfill(a, -inf if is_max else inf)
+    if initial is None:
+        if a.size == 0 and _count(a, axis) == 0:
+            raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
+        r = (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, True)
+        return r if out is None else _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, is_max, True), out)
 
 
-def nanmin(a, axis=None, out=None, keepdims=False):
-    return amin(_nanfill(a, inf), axis, out, keepdims)
+def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    return _nan_minmax(a, axis, out, keepdims, initial, where, True)
+
+
+def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    return _nan_minmax(a, axis, out, keepdims, initial, where, False)
 
 
 def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
@@ -1310,7 +1435,7 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
-    qs = asarray(q, float64)
+    qs = _floats(q)
     vals = []
     for qq in qs.ravel().tolist():
         if not (0 <= qq <= 1):
@@ -1323,10 +1448,10 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         lo = int(_math.floor(virtual))
         hi = _builtins.min(lo + 1, n - 1)
         if method == "midpoint":
-            vals.append((asarray(s[..., lo], float64) + s[..., hi]) / 2)
+            vals.append((_floats(s[..., lo]) + s[..., hi]) / 2)
             continue
         t = virtual - lo
-        av, bv = asarray(s[..., lo], float64), asarray(s[..., hi], float64)
+        av, bv = _floats(s[..., lo]), _floats(s[..., hi])
         diff_b_a = bv - av
         vals.append(where(t >= 0.5, bv - diff_b_a * (1 - t), av + diff_b_a * t))  # NumPy's _lerp
     res = array(vals) if qs.ndim else asarray(vals[0])
@@ -1338,7 +1463,7 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
 
 
 def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
-    return quantile(a, asarray(q, float64) / 100, axis=axis, method=method, keepdims=keepdims)
+    return quantile(a, _floats(q) / 100, axis=axis, method=method, keepdims=keepdims)
 
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
@@ -1358,11 +1483,11 @@ def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None):
-    X = atleast_2d(asarray(m, float64))
+    X = atleast_2d(_floats(m))
     if not rowvar and X.shape[0] != 1:
         X = X.T
     if y is not None:
-        y = atleast_2d(asarray(y, float64))
+        y = atleast_2d(_floats(y))
         if not rowvar and y.shape[0] != 1:
             y = y.T
         X = concatenate((X, y), axis=0)
@@ -1474,7 +1599,8 @@ def atleast_3d(*arys):
 
 
 def concatenate(arrays, axis=0, out=None, dtype=None):
-    r = _np.concatenate([asarray(a) for a in arrays], axis)
+    # (each as given: a Python number stays one, which doesn't promote with strings)
+    r = _np.concatenate(list(arrays), axis)
     if dtype is not None:
         r = r.astype(dtype)
     return _out(r, out)
@@ -1553,10 +1679,14 @@ def vsplit(ary, n):
 
 def take(a, indices, axis=None):
     a = asarray(a)
+    ind = asarray(indices)
+    # (a scalar index takes one element, a scalar or a smaller array, as NumPy's)
+    if ind.ndim == 0 and ind.dtype.kind in "iu":
+        ind = ind.item()
     if axis is None:
-        return a.ravel()[asarray(indices)]
+        return a.ravel()[ind]
     idx = [slice(None)] * a.ndim
-    idx[axis] = asarray(indices)
+    idx[axis] = ind
     return a[tuple(idx)]
 
 
@@ -1579,7 +1709,10 @@ def tile(A, reps):
     A = A.reshape((1,) * (nd - A.ndim) + A.shape)
     reps = (1,) * (nd - len(reps)) + reps
     for ax, r in enumerate(reps):
-        if r != 1:
+        if r == 0:
+            # (no copies: the axis is empty, as NumPy's tile gives)
+            A = A[(slice(None),) * ax + (slice(0, 0),)]
+        elif r != 1:
             A = concatenate([A] * r, axis=ax)
     return A
 
@@ -1749,7 +1882,11 @@ def lexsort(keys, axis=-1):
 
 def searchsorted(a, v, side="left", sorter=None):
     import bisect
-    a = asarray(a).tolist()
+    a = asarray(a)
+    # (a sorted 1-D array, as NumPy's; any other depth refused in its words)
+    if a.ndim != 1:
+        raise ValueError("object of too small depth for desired array" if a.ndim == 0 else "object too deep for desired array")
+    a = a.tolist()
     if sorter is not None:
         a = [a[i] for i in asarray(sorter).tolist()]
     f = bisect.bisect_left if side == "left" else bisect.bisect_right
@@ -1807,7 +1944,7 @@ def intersect1d(a, b, assume_unique=False):
 
 
 def union1d(a, b):
-    return unique(concatenate([asarray(a).ravel(), asarray(b).ravel()]))
+    return unique(concatenate((a, b), axis=None))
 
 
 def setdiff1d(a, b, assume_unique=False):
@@ -1845,7 +1982,7 @@ def ediff1d(ary, to_end=None, to_begin=None):
 
 
 def gradient(f, *varargs, axis=None, edge_order=1):
-    f = asarray(f, float64)
+    f = _floats(f)
     axes = list(range(f.ndim)) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     # (NumPy's rule: no spacing, one scalar for every axis, or one per
     # axis; any other count is a TypeError, not a truncated zip)
@@ -1866,7 +2003,7 @@ def gradient(f, *varargs, axis=None, edge_order=1):
     # NumPy's; evenly spaced coordinates are a scalar spacing, CORR-CDE-1)
     steps = []
     for ax, h in zip(axes, spacing):
-        hv = asarray(h, float64)
+        hv = _floats(h)
         if hv.ndim == 0:
             steps.append(float(hv))
             continue
@@ -1943,11 +2080,11 @@ def cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def interp(x, xp, fp, left=None, right=None, period=None):
     import bisect
-    xp_l = asarray(xp, float64).tolist()
+    xp_l = _floats(xp).tolist()
     fp_a = asarray(fp)
     cplx = fp_a.dtype.kind == "c"
     fp_l = fp_a.tolist()
-    xs = asarray(x, float64)
+    xs = _floats(x)
     if period is not None:
         # (NumPy's: x and xp taken modulo the period, xp sorted, and one
         # period's continuation each side; left and right are not used)
@@ -1964,7 +2101,7 @@ def interp(x, xp, fp, left=None, right=None, period=None):
         pairs = sorted(zip([v % period for v in xp_l], fp_l), key=lambda t: t[0])
         xp_l = [pairs[-1][0] - period] + [p[0] for p in pairs] + [pairs[0][0] + period]
         fp_l = [pairs[-1][1]] + [p[1] for p in pairs] + [pairs[0][1]]
-        xs = asarray(xs % period, float64)
+        xs = _floats(xs % period)
         left = right = None
     lo_v = fp_l[0] if left is None else left
     hi_v = fp_l[-1] if right is None else right
@@ -2026,7 +2163,7 @@ def histogram(a, bins=10, range=None, density=None, weights=None):
             lo, hi = lo - 0.5, hi + 0.5
         edges = linspace(lo, hi, bins + 1)
     else:
-        edges = asarray(bins, float64)
+        edges = _floats(bins)
     nb = edges.size - 1
     if isinstance(bins, int) and weights is None:
         hist = _np.hist_uniform(a, edges[0], edges[-1], nb, edges)
@@ -2311,17 +2448,17 @@ _FLOATMODES = ("fixed", "unique", "maxprec", "maxprec_equal")
 
 def _formatter_functions(formatter):
     """formatter's functions for the kinds Sagebrush's arrays have: (bool,
-    int, float, complex), by NumPy's precedence ('all', then the *_kind
+    int, float, complex, str), by NumPy's precedence ('all', then the *_kind
     groups, then the type's own key); keys for other kinds do nothing, as in
     NumPy."""
-    out = {"bool": None, "int": None, "float": None, "complexfloat": None}
+    out = {"bool": None, "int": None, "float": None, "complexfloat": None, "numpystr": None}
     if not formatter:
         return out
     f = {k: v for k, v in formatter.items() if v is not None}
     if "all" in f:
         for k in out:
             out[k] = f["all"]
-    for group, keys in (("int_kind", ["int"]), ("float_kind", ["float"]), ("complex_kind", ["complexfloat"])):
+    for group, keys in (("int_kind", ["int"]), ("float_kind", ["float"]), ("complex_kind", ["complexfloat"]), ("str_kind", ["numpystr"])):
         if group in f:
             for k in keys:
                 out[k] = f[group]
@@ -2341,7 +2478,7 @@ def _push_printoptions():
         p = 2 ** 63 if p >= 2 ** 63 else 2 ** 31
     _np.set_printoptions(p, o["threshold"], o["edgeitems"], o["linewidth"], o["suppress"], o["sign"],
                          o["floatmode"], o["nanstr"], o["infstr"], fs["bool"], fs["int"], fs["float"],
-                         fs["complexfloat"], o["override_repr"])
+                         fs["complexfloat"], fs["numpystr"], o["override_repr"])
 
 
 def _checked_printoptions(precision=None, threshold=None, edgeitems=None, linewidth=None, suppress=None,
@@ -2608,8 +2745,9 @@ def nextafter(x1, x2, out=None, **kw):
     if kw:
         raise NotImplementedError("nextafter: %s are not implemented in Sagebrush" % ", ".join(sorted(kw)))
     dt = _nextafter_dtype(x1, x2)
-    # a weak Python int goes straight to the loop's type (70000 with an int16)
-    a, b = (asarray(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
+    # a weak Python int goes straight to the loop's type (70000 with an int16);
+    # strings refused (_np.numeric), never parsed by astype
+    a, b = (_np.numeric(float(x) if isinstance(x, int) and not isinstance(x, _builtins.bool) else x).astype(dt) for x in (x1, x2))
     a, b = broadcast_arrays(a, b)
     step = _nextafter32 if dt == float32 else _math.nextafter
     vals = [step(p, q) for p, q in zip(a.ravel().tolist(), b.ravel().tolist())]
@@ -2690,11 +2828,11 @@ def _m_argmin(self, axis=None, out=None, *, keepdims=False):
 
 
 def _m_max(self, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return amax(self, axis, out, keepdims, initial)
+    return amax(self, axis, out, keepdims, initial, where)
 
 
 def _m_min(self, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return amin(self, axis, out, keepdims, initial)
+    return amin(self, axis, out, keepdims, initial, where)
 
 
 def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
@@ -2997,7 +3135,252 @@ def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, usecol
     return a.T if unpack else a
 
 
-genfromtxt = loadtxt
+class _ConversionWarning(UserWarning):
+    """Rows genfromtxt skipped (invalid_raise=False), as NumPy's numpy.lib._iotools.ConversionWarning
+    (not a name of numpy's namespace)."""
+
+
+_ConversionWarning.__name__ = _ConversionWarning.__qualname__ = "ConversionWarning"
+
+
+def genfromtxt(fname, dtype=float, comments="#", delimiter=None, skip_header=0, skip_footer=0,
+               converters=None, missing_values=None, filling_values=None, usecols=None,
+               names=None, excludelist=None, deletechars=None, replace_space="_",
+               autostrip=False, case_sensitive=True, defaultfmt="f%i", unpack=None,
+               usemask=False, loose=True, invalid_raise=True, max_rows=None,
+               encoding=None, *, ndmin=0, like=None):
+    """An array from a text file (or a list of lines) whose fields may be
+    missing, as NumPy 2.5's genfromtxt: missing fields ('' or missing_values)
+    and fields that don't convert take filling_values (nan for floats, -1
+    for integers); a row with another number of columns is an error, or is
+    skipped with a ConversionWarning (invalid_raise=False).
+
+    Examples:
+        >>> import numpy as np, io
+        >>> np.genfromtxt(io.StringIO("1,2,3\\n4,,6\\n"), delimiter=",")
+        array([[ 1.,  2.,  3.],
+               [ 4., nan,  6.]])
+        >>> np.genfromtxt(io.StringIO("x,y\\n1,2\\n3,N/A\\n"), delimiter=",", skip_header=1, missing_values="N/A", filling_values=0)
+        array([[1., 2.],
+               [3., 0.]])
+    """
+    import numpy as _self
+    if names is not None:
+        raise NotImplementedError("genfromtxt with names=: structured arrays are not supported by sagebrush's numpy yet")
+    if usemask:
+        raise NotImplementedError("genfromtxt with usemask=True: masked arrays are not supported by sagebrush's numpy yet")
+    if ndmin not in (0, 1, 2):
+        raise ValueError("Illegal value of ndmin keyword: %s" % (ndmin,))
+    if max_rows is not None:
+        if skip_footer:
+            raise ValueError("The keywords 'skip_footer' and 'max_rows' can not be specified at the same time.")
+        if max_rows < 1:
+            raise ValueError("'max_rows' must be at least 1.")
+    # (a column name as a dictionary key: NumPy looks it up in names=, which
+    # this numpy doesn't have, so the key is refused in words, never ignored)
+    for opt in (missing_values, filling_values, converters):
+        if isinstance(opt, dict):
+            for c in opt:
+                if isinstance(c, str):
+                    raise ValueError("genfromtxt: column name key %r needs names=" % (c,))
+    # (NumPy skips no lines for a negative count)
+    # (this module's max is numpy's: plain comparisons here)
+    skip_header = skip_header if skip_header > 0 else 0
+    skip_footer = skip_footer if skip_footer > 0 else 0
+    listed = isinstance(fname, (list, tuple)) or (not hasattr(fname, "read") and not isinstance(fname, (str, bytes)) and hasattr(fname, "__iter__"))
+    if listed:
+        chunks = [l.decode() if isinstance(l, bytes) else str(l) for l in fname]
+    else:
+        chunks = [_read_text(fname)]
+    # the lines, and whether each ended with a newline
+    lines, nl = [], []
+    for chunk in chunks:
+        keep = chunk.splitlines(True)
+        for p, q in zip(chunk.splitlines(), keep):
+            lines.append(p)
+            nl.append(len(q) > len(p))
+        if not keep and listed:
+            lines.append("")
+            nl.append(False)
+    if isinstance(dtype, (list, tuple, dict)):
+        raise NotImplementedError("genfromtxt with a structured dtype: structured arrays are not supported by sagebrush's numpy yet")
+    if dtype is not None:
+        # (str, bytes, object and the like: string arrays, which this numpy doesn't have)
+        try:
+            kind = _self.dtype(dtype).kind
+        except TypeError:
+            kind = "U"
+        if kind not in "biufc":
+            raise NotImplementedError("string arrays are not supported by sagebrush's numpy yet")
+    # the splitting, as NumPy's LineSplitter: a string (empty: whitespace),
+    # widths (a list: one per field; an int: every field; 0: whitespace)
+    if delimiter is not None and not isinstance(delimiter, str) and not hasattr(delimiter, "__iter__"):
+        delimiter = int(delimiter) or None
+    if isinstance(delimiter, str):
+        delimiter = delimiter or None
+    slices = None
+    if delimiter is not None and not isinstance(delimiter, (str, int)):
+        slices, at = [], 0
+        for w in delimiter:
+            slices.append((at, at + w))
+            at += w
+    # the data rows: (line number, fields), after the header, comments and blank lines
+    rows = []
+    for k in range(skip_header, len(lines)):
+        if max_rows is not None and len(rows) >= max_rows:
+            break
+        line = lines[k]
+        cut = False
+        if comments:
+            parts = line.split(comments, 1)
+            cut = len(parts) > 1
+            line = parts[0]
+        if delimiter is None or isinstance(delimiter, str):
+            if not line.strip():
+                continue
+            fields = line.split(delimiter)
+        elif slices is None:
+            fields = [line[i:i + delimiter] for i in range(0, len(line), delimiter)]
+        else:
+            # (a blank line is a row of missing fields, as NumPy's, whose
+            # line keeps its newline: only a comment's or a bare one is nothing)
+            if not line and (cut or not nl[k]):
+                continue
+            fields = [line[a:b] for a, b in slices]
+        if not fields:
+            continue
+        rows.append((k + 1, [f.strip() for f in fields]))
+    found = bool(rows)
+    if skip_footer > 0:
+        rows = rows[:-skip_footer] if skip_footer < len(rows) else []
+    if not rows:
+        # (no data at all: NumPy's warning; data all in the footer: none)
+        if not found:
+            import warnings
+            warnings.warn('genfromtxt: Empty input file: "%s"' % (fname,), UserWarning, stacklevel=2)
+        a = array([], dtype=float if dtype is None else dtype)
+        if ndmin == 2:
+            a = a.reshape((0, 1))
+        return a.T if unpack else a
+    if isinstance(usecols, int):
+        usecols = [usecols]
+    ncols = len(rows[0][1])
+    # a row of another number of columns: an error, or skipped (invalid_raise=False)
+    errors, kept = [], []
+    for ln, fields in rows:
+        if usecols is not None:
+            try:
+                fields = [fields[c] for c in usecols]
+            except IndexError:
+                errors.append("    Line #%d (got %d columns instead of %d)" % (ln, len(fields), len(usecols)))
+                continue
+            kept.append(fields)
+        elif len(fields) != ncols:
+            errors.append("    Line #%d (got %d columns instead of %d)" % (ln, len(fields), ncols))
+        else:
+            kept.append(fields)
+    if errors:
+        msg = "Some errors were detected !\n" + "\n".join(errors)
+        if invalid_raise:
+            raise ValueError(msg)
+        import warnings
+        warnings.warn(_ConversionWarning(msg), stacklevel=2)
+    # (usecols as NumPy normalizes it: a negative column counted from the end of the first row)
+    cols = [c + ncols if c < 0 else c for c in usecols] if usecols is not None else list(range(ncols))
+    width = len(cols)
+    # a dictionary key's slot, as NumPy's: a column usecols selects is its
+    # position there; any other key is a position itself (negative from the end)
+    slot = lambda c: cols.index(c) if c in cols else c
+    # each column's missing strings: '' and missing_values (a dict: by column,
+    # None for all; a list or tuple: one per column; a string: split at commas)
+    missings = [{""} for _ in range(width)]
+    if isinstance(missing_values, bytes):
+        missing_values = missing_values.decode("latin1")
+    if isinstance(missing_values, dict):
+        for c, v in missing_values.items():
+            vals = {str(x) for x in v} if isinstance(v, (list, tuple)) else {str(v)}
+            if c is None:
+                for m in missings:
+                    m |= vals
+            else:
+                missings[slot(c)] |= vals
+    elif isinstance(missing_values, (list, tuple)):
+        for m, v in zip(missings, missing_values):
+            m.add(str(v))
+    elif isinstance(missing_values, str):
+        for m in missings:
+            m |= set(missing_values.split(","))
+    elif missing_values:
+        for m in missings:
+            m.add(str(missing_values))
+    # the column types: dtype=None infers one (each column's own would be a structured array)
+    if dtype is None:
+        def col_kind(j):
+            vals = [r[j] for r in kept if r[j] not in missings[j]]
+            def ok(conv):
+                try:
+                    for v in vals:
+                        conv(v)
+                    return True
+                except ValueError:
+                    return False
+            return "i" if ok(int) else "f" if ok(float) else "c" if ok(lambda t: complex(t.replace("i", "j"))) else "U"
+        kinds = {col_kind(j) for j in range(width)}
+        if "U" in kinds:
+            raise NotImplementedError("genfromtxt with dtype=None and text fields: string arrays are not supported by sagebrush's numpy yet")
+        if len(kinds) > 1:
+            raise NotImplementedError("genfromtxt with dtype=None and columns of different types: structured arrays are not supported by sagebrush's numpy yet")
+        dtype = {"i": int64, "f": float64, "c": complex128}[kinds.pop()]
+    kind = _self.dtype(dtype).kind
+    default_fill = False if kind == "b" else -1 if kind in "iu" else complex(float("nan"), 0) if kind == "c" else float("nan")
+    fills = [None] * width
+    if isinstance(filling_values, dict):
+        for c, v in filling_values.items():
+            j = slot(c)
+            if not -width <= j < width:
+                raise IndexError("list assignment index out of range")
+            fills[j] = v
+    elif isinstance(filling_values, (list, tuple)):
+        for j, v in enumerate(filling_values[:width]):
+            fills[j] = v
+    elif filling_values is not None:
+        fills = [filling_values] * width
+    # (None: the dtype's own default, as NumPy's)
+    fills = [default_fill if f is None else f for f in fills]
+    def str2bool(t):
+        # (NumPy's: TRUE or FALSE, in any case; nothing else is a bool)
+        if t.upper() == "TRUE":
+            return True
+        if t.upper() == "FALSE":
+            return False
+        raise ValueError("Invalid boolean")
+    conv = str2bool if kind == "b" else int if kind in "iu" else (lambda t: complex(t.replace("i", "j"))) if kind == "c" else float
+    convs = [conv] * width
+    # (a converter's column: through usecols when given, an unselected one unused, as NumPy's)
+    for c, f in (converters or {}).items():
+        if usecols:
+            if c in cols:
+                convs[cols.index(c)] = f
+        else:
+            convs[c] = f
+    out = []
+    for fields in kept:
+        row = []
+        for j, t in enumerate(fields):
+            # (as NumPy's converters: the conversion first, so a missing value that
+            # converts is that value; one that doesn't is filled, and with
+            # loose=False, so is only one of its column's missing values)
+            try:
+                row.append(convs[j](t))
+            except (ValueError, TypeError):
+                if not loose and t not in missings[j]:
+                    raise ValueError("Cannot convert string '%s'" % t)
+                row.append(fills[j])
+        out.append(row)
+    a = squeeze(array(out, dtype=dtype))
+    if a.ndim < ndmin:
+        a = atleast_1d(a) if ndmin == 1 else atleast_2d(a)
+    return a.T if unpack else a
 
 from numpy import linalg, random, fft, testing  # noqa: E402
 
@@ -3005,10 +3388,12 @@ from numpy import linalg, random, fft, testing  # noqa: E402
 # ------------------------------------------------------------------ polynomials (numpy/lib/_polynomial_impl.py)
 
 def sort_complex(a):
+    # (NumPy's: sorted along the last axis in its own dtype, then complex)
     b = array(a, copy=True)
-    vals = b.ravel().tolist()
-    vals.sort(key=lambda z: (z.real, z.imag) if isinstance(z, complex) else (z, 0))
-    return array(vals, dtype=complex128)
+    b.sort()
+    if b.dtype.kind == "c":
+        return b
+    return b.astype(complex64 if b.dtype.char in "bhBH" else complex128)
 
 
 def vander(x, N=None, increasing=False):
@@ -3039,15 +3424,15 @@ def polyval(p, x):
 
 
 def polyfit(x, y, deg, rcond=None, full=False, w=None, cov=False):
-    x = asarray(x, float64)
-    y = asarray(y, float64)
+    x = _floats(x)
+    y = _floats(y)
     order = int(deg) + 1
     if rcond is None:
         rcond = len(x) * finfo(float64).eps
     lhs = vander(x, order)
     rhs = y
     if w is not None:
-        w = asarray(w, float64)
+        w = _floats(w)
         lhs = lhs * w[:, None]
         rhs = rhs * w if rhs.ndim == 1 else rhs * w[:, None]
     scale = sqrt((lhs * lhs).sum(axis=0))
@@ -3104,7 +3489,7 @@ def polymul(a1, a2):
 
 
 def polydiv(u, v):
-    u, v = atleast_1d(asarray(u, float64)), atleast_1d(asarray(v, float64))
+    u, v = atleast_1d(_floats(u)), atleast_1d(_floats(v))
     m, n = len(u) - 1, len(v) - 1
     scale = 1.0 / v[0]
     q = zeros(_builtins.max(m - n + 1, 1), float64)
@@ -3127,7 +3512,7 @@ def polyder(p, m=1):
 
 
 def polyint(p, m=1, k=None):
-    p = asarray(p, float64)
+    p = _floats(p)
     k = [0] * m if k is None else (list(k) if isinstance(k, (list, tuple)) else [k] * m)
     for i in range(m):
         n = len(p)

@@ -199,6 +199,27 @@ try {
   ok(await ev(`T.ws.agentGrants().then((g) => Object.keys(g).length === 0)`), "after Revoke no grant is kept in the workspace");
   const reused = await ev(`T.tryPair(${JSON.stringify(CODE)}, ${PORT})`);
   ok(/^refused/.test(reused), `the used code, after Revoke: ${reused}`);
+
+  // a remembered agent, reconnected by two reloads (T1, git-proto at b72938d8a): the real server answers a session's
+  // hello without a session, so the grant kept on the first reconnect must keep the session in force, or the second
+  // reload can't reconnect
+  const fresh = await drive({ op: "code" });
+  ok(await open(`?pair=${fresh.code}&port=${fresh.port}`), "a new code's link, to remember the agent");
+  await click(".sbag-box button.primary");
+  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired again: the grant dialog");
+  await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "3600000"; s.dispatchEvent(new Event("change")); const r = [...document.querySelectorAll(".sbag-box label")].find((l) => /Remember this agent/.test(l.textContent)).querySelector("input"); if (!r.checked) r.click(); return true; })()`);
+  await click(".sbag-box button.primary");
+  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed for an hour, remembered");
+  const kept0 = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
+  ok(kept0.length === 1 && typeof kept0[0] === "string" && kept0[0].length > 0, `the remembered grant keeps the agent's session (${kept0.length} kept)`);
+  for (const n of [1, 2]) {
+    ok(await open(""), `reload ${n}`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), `reload ${n}: the remembered agent reconnects by itself, the bar shows it`);
+    const l = await drive({ op: "req", method: "workspace.list", params: { folder: "/A" } });
+    ok(!!l.ok, `reload ${n}: the agent reaches /A again (${JSON.stringify(l).slice(0, 80)})`);
+    const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
+    ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
+  }
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}

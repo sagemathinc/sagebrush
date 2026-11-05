@@ -5,6 +5,7 @@
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
+//           {fsWritable: boolean}  whether this document may change files (the page's `files` permission)
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -13,6 +14,7 @@
 //                                       accepted once; never from a document, a URL
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
+//           {fsRefused: path, what}  a change refused, the files permission off (ready's `writable`: its shared word)
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
 //           {initFailed: message}      the limits are invalid: this worker is done
@@ -44,16 +46,25 @@ const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES
 declare const __SB_RASTER_HASH__: string;
 (globalThis as any).__SAGEBRUSH_RASTER_URL__ = FILES ? FILES["sagebrush-raster.wasm"] : new URL("sagebrush-raster.wasm?h=" + __SB_RASTER_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_RASTER_SHA256__ = __SB_RASTER_HASH__;
+// engine/nd's numerics module likewise, the first time np.linalg.cholesky runs
+// (src/runtime/nd.ts; the runner's broker may fetch it, web/runner-fetch.mts);
+// not one of the files a downloaded file's runner carries (files mode), where
+// the TypeScript code then runs for the session
+declare const __SB_ND_HASH__: string;
+(globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
-import { __hooks, load as loadFiles, mount, put as putFile } from "./shims/fs";
-import { R } from "../src/compile";
+import { fetchMoving } from "./stall-fetch.js";
+import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
+import { startDirOf } from "./start-dir";
+import { R, onOptionalUse } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
-import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
+import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
 
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
@@ -106,6 +117,16 @@ __hooks.changed = (path, data) => {
   if (mine(path)) writes.add(path);
   postMessage({ fsChanged: path, data });
 };
+// (a change refused, its files permission off: the page shows "This notebook wants to change files")
+__hooks.refused = (path, what) => postMessage({ fsRefused: path, what });
+// Whether this document may change files (the page's `files` permission): one word shared with whoever holds this
+// worker (the page, or the runner's frame), as the interrupt flag is, so a change of it reaches a run in flight at
+// its next write; else (no SharedArrayBuffer: files mode) the {fsWritable} message, between runs. The page sends it
+// before anything runs; writable until then (a board's interpreter, which the page keeps no files of)
+const writableWord = typeof SharedArrayBuffer === "function" && (globalThis as any).crossOriginIsolated ? new Int32Array(new SharedArrayBuffer(4)) : null;
+if (writableWord) Atomics.store(writableWord, 0, 1);
+let writableNow = true;
+setWritable(() => (writableWord ? Atomics.load(writableWord, 0) === 1 : writableNow));
 __hooks.read = (path, origin) => {
   if (mine(path)) reads.add(path);
   // (the versions of the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
@@ -157,9 +178,8 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer | Uint8Array> => {
     await brokered;
     return fetchSync(url).slice();
   }
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.arrayBuffer();
+  // (bounded between pieces of data: a request that stops never holds a run, web/stall-fetch.js)
+  return fetchMoving(url);
 };
 const libLoading = (what: string | null) => postMessage({ libLoading: what });
 onChunkInstalled((file) => postMessage({ libChunk: file }));
@@ -167,9 +187,21 @@ onOfflineMissing((m) => postMessage({ offlineMissing: m }));
 
 // This interpreter's optional package set (web/pkgset-browser.ts): its index
 // is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
-// can't be used is said once, and imports from it then fail saying why.
+// can't be used is said once, and imports from it then fail saying why.  An
+// index that couldn't be fetched (offline, its first visit's copy not kept) is
+// not one that can't be used: it is asked for again at the next run, quietly.
 let pkgsetReady: Promise<void> = Promise.resolve();
+let pkgsetUnfetched: string | null = null;
+const loadSet = (S: string) => {
+  pkgsetUnfetched = null;
+  pkgsetReady = useSet(S, fetchBytes).catch((e) => {
+    if (e instanceof SetUnfetched) pkgsetUnfetched = S;
+    else postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) });
+  });
+};
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
+// (the set's first use by an import: the page pins it in the notebook then, web/index.html)
+onOptionalUse((S) => postMessage({ pkgsetUsed: S }));
 
 /** The init message's limits, or the reason they are refused before any
  * parsing (the validator, lib/_limits.py, checks the rest). */
@@ -218,7 +250,23 @@ self.onmessage = async (ev: MessageEvent) => {
     return;
   }
   if (m.pkgset !== undefined) {
-    pkgsetReady = useSet(String(m.pkgset), fetchBytes).catch((e) => postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) }));
+    loadSet(String(m.pkgset));
+    return;
+  }
+  if (typeof m.fsWritable === "boolean") {
+    writableNow = m.fsWritable;
+    if (writableWord) Atomics.store(writableWord, 0, m.fsWritable ? 1 : 0);
+    return;
+  }
+  if (m.startDir !== undefined) {
+    // (the notebook's own folder: the working folder and sys.path[0], as Jupyter runs a notebook (Nov 4 ruling), so it
+    // opens and imports what is beside it; set as it arrives: the page sends it in onStart, which every run and
+    // question waits for (web/notebook/worker-kernel.js), and it holds even sent before the init)
+    const d = startDirOf(m.startDir);
+    if (d === null) return;
+    startIn(d);
+    const sys = R.importModule("sys");
+    if (sys.path[0] !== d) sys.path.unshift(d);
     return;
   }
   if (m.files) return loadFiles(m.files);
@@ -229,9 +277,21 @@ self.onmessage = async (ev: MessageEvent) => {
     const p = prefetchMode(mode, fetchBytes, libLoading);
     // (a run, and the questions that load the language first: Tab, check, a
     // warm-up, X1; the session's admission comes after this await)
-    if (m.code !== undefined || m.complete !== undefined || m.check !== undefined || m.warm !== undefined) await p;
+    if (m.code !== undefined || m.complete !== undefined || m.check !== undefined || m.warm !== undefined) {
+      try {
+        await p;
+      } catch (e: any) {
+        // (its library didn't load, a chunk's fetch having stalled: a run says so and ends, a question is answered
+        // as not asked; nothing waits for good)
+        if (m.id === undefined) return;
+        if (m.code === undefined) return postMessage({ id: m.id, skipped: true });
+        postMessage({ id: m.id, stream: "stderr", target: null, text: `${String(e?.message ?? e)}\n` });
+        return postMessage({ id: m.id, done: true, ms: 0, error: true });
+      }
+    } else p.catch(() => {});
   }
   if (m.code !== undefined) {
+    if (pkgsetUnfetched !== null) loadSet(pkgsetUnfetched);
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }
@@ -259,7 +319,7 @@ session.ready.then(
     if (gate === "failed") return;
     gate = "ready";
     // (context: what this worker itself sees, for the app's self-test report)
-    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, writable: writableWord?.buffer ?? null, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
   },
   (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );

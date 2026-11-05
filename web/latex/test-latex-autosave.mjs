@@ -1,8 +1,9 @@
 // ci: none (new with U8, #551: a wiring candidate for the web-latex follow-up, runner=bun, no browser, about 1 s)
-// The LaTeX editor's autosave (autosave.ts; plan U8 r5, astra's DATA PLAN CLEAR 089b329b), without a browser: a fake
-// file (revisions, compare-and-swap, writes that can be held or made to fail), fake drafts (per fid and writer) and
-// manual timers. Each case is one of the plan's: snapshots, echoes, conflicts and their choices, two writers, recovery,
-// failures, a write that lands after the editor was closed.
+// The LaTeX editor's autosave (autosave.ts; plan U8 r6, on top of #599), without a browser: a fake file (revisions,
+// writes that can be held or made to fail), a fake page modelling page.ts's writeText (#599: compare-and-swap on the
+// revision its saved text came from; a change made elsewhere opens its bar, and nothing is written while it asks),
+// fake drafts (per fid and writer) and manual timers. Each case is one of the plan's: snapshots, one write at a time,
+// the bar, settling, failures, two writers, recovery, closing.
 //   bun web/latex/test-latex-autosave.mjs
 import { AutoSaver, DEBOUNCE_MS } from "./autosave.ts";
 
@@ -10,37 +11,47 @@ const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
-const dec = (b) => new TextDecoder().decode(b);
 
 // (one file, shared by every editor of a test: its text, revision and versions)
 function fakeFile(text = "start") {
-  const f = { text, rev: 1, versions: [], writes: 0, hold: null, holdAfter: null, failNext: null, keepHold: null, keepFail: null };
-  f.io = () => ({
-    async write(bytes, base) {
-      if (f.hold) await f.hold;
-      if (f.failNext) { const e = f.failNext; f.failNext = null; throw e; }
-      if (base !== f.rev) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" });
-      f.versions.push(f.text); f.text = dec(bytes); f.rev++; f.writes++;
-      if (f.onWrite) f.onWrite(f.rev);
-      // (committed, its promise not yet resolved: an echo can come now)
-      if (f.holdAfter) await f.holdAfter;
-      return f.rev;
-    },
-    async current() { return { text: f.text, rev: f.rev }; },
-    async keepVersion(text) { if (f.keepHold) await f.keepHold; if (f.keepFail) throw f.keepFail; f.versions.push(text); },
-    encode: (t) => new TextEncoder().encode(t),
-  });
+  const f = { text, rev: 1, versions: [], writes: 0, hold: null, failNext: null, keepFail: null, inFlight: 0, maxInFlight: 0 };
   f.outside = (t) => { f.versions.push(f.text); f.text = t; f.rev++; };
   return f;
 }
+// (the page's side, as page.ts: its baseline (savedText, docRev), its bar (conflict) and a choice under way (acting))
+function fakePage(f) {
+  const p = { savedText: f.text, docRev: f.rev, conflict: false, acting: false, bars: 0 };
+  p.io = {
+    async write(text) {
+      if (p.conflict || p.acting) return "blocked";
+      const base = p.docRev;
+      f.inFlight++; f.maxInFlight = Math.max(f.maxInFlight, f.inFlight);
+      try {
+        if (f.hold) await f.hold;
+        if (f.failNext) { const e = f.failNext; f.failNext = null; throw e; }
+        if (base !== f.rev) { p.conflict = true; p.bars++; return "blocked"; }
+        f.versions.push(f.text); f.text = text; f.rev++; f.writes++;
+        p.savedText = text; p.docRev = f.rev;
+        return "saved";
+      } finally { f.inFlight--; }
+    },
+    async keepVersion(text) { if (f.keepFail) throw f.keepFail; f.versions.push(text); },
+  };
+  return p;
+}
 function fakeDrafts() {
   const m = new Map();
-  return {
-    m,
-    put(d) { m.set(d.fid + "|" + d.writerId, { ...d }); return true; },
-    async drop(fid, w, upTo) { const k = fid + "|" + w, d = m.get(k); if (d && d.gen <= upTo) m.delete(k); },
-    async all(fid) { return [...m.values()].filter((d) => d.fid === fid); },
+  const d = {
+    m, putFail: null, putAsync: null,
+    put(x) {
+      if (d.putFail) throw d.putFail;
+      if (d.putAsync) { const p = d.putAsync; return p.then(() => { m.set(x.fid + "|" + x.writerId, { ...x }); }); }
+      m.set(x.fid + "|" + x.writerId, { ...x }); return true;
+    },
+    async drop(fid, w, upTo) { const k = fid + "|" + w, r = m.get(k); if (r && r.gen <= upTo) m.delete(k); },
+    async all(fid) { if (d.allHold) await d.allHold; return [...m.values()].filter((r) => r.fid === fid); },
   };
+  return d;
 }
 function fakeTimers() {
   const t = { q: [] };
@@ -50,185 +61,226 @@ function fakeTimers() {
   return t;
 }
 let wid = 0;
-function editor(file, drafts, timers, init) {
-  const ed = { text: init?.text ?? file.text, ro: false, states: [], set: [] };
+function editor(f, drafts, timers, page = fakePage(f)) {
+  const ed = { text: page.savedText, ro: [], states: [], adopted: [], stale: 0, page };
   const writerId = (++wid).toString(16).padStart(32, "0");
-  ed.saver = new AutoSaver(file.io(), drafts, { fid: "F", writerId, path: () => "/a.tex" }, { text: ed.text, rev: init?.rev ?? file.rev }, {
-    text: () => ed.text, setText: (t) => { ed.text = t; ed.set.push(t); }, readOnly: (on) => { ed.ro = on; }, state: (s) => ed.states.push(s),
+  ed.saver = new AutoSaver(page.io, drafts, { fid: "F", writerId, path: () => "/a.tex" }, {
+    text: () => ed.text, dirty: () => ed.text !== page.savedText, rev: () => page.docRev,
+    blocked: () => page.conflict || page.acting,
+    adopt: (t) => { ed.text = t; ed.adopted.push(t); }, stale: () => { ed.stale++; page.conflict = true; },
+    readOnly: (on) => ed.ro.push(on), state: (s) => ed.states.push(s),
   }, timers, () => 0);
   ed.type = (t) => { ed.text = t; ed.saver.edited(); };
   ed.writerId = writerId;
+  ed.draft = () => drafts.m.get("F|" + writerId);
   return ed;
 }
 
-// ---- 1. an edit: its draft at once, the write after the debounce; acknowledged: Saved, the draft gone
+// ---- 1. an edit: its draft at once, the write after the debounce; acknowledged: Saved ✓, the draft gone
 {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
   e.type("one");
-  check("edit-draft-now", d.m.get("F|" + e.writerId)?.text === "one" && d.m.get("F|" + e.writerId).gen === 1 && f.writes === 0 && t.q.length === 1 && t.q[0].ms === DEBOUNCE_MS, [...d.m.values()]);
+  check("edit-draft-now", e.draft()?.text === "one" && e.draft().gen === 1 && e.draft().baseRev === 1 && f.writes === 0 && t.q.length === 1 && t.q[0].ms === DEBOUNCE_MS && e.saver.state.k === "edited", { d: [...d.m.values()], st: e.saver.state });
   t.fire(); await settle();
-  check("edit-written-then-saved", f.text === "one" && e.saver.state.k === "saved" && !d.m.has("F|" + e.writerId) && e.saver.ackGen === 1, { f: f.text, st: e.saver.state, d: [...d.m.keys()] });
+  check("edit-written-then-saved", f.text === "one" && e.saver.state.k === "saved" && !e.draft() && e.states.some((s) => s.k === "saving"), { f: f.text, st: e.saver.state });
 }
 
-// ---- 2. U8-SNAPSHOT-1: typing during a held write: its ack covers its snapshot only; the newer text the next write's
+// ---- 2. U8-SNAPSHOT-1: typing during a held write: its ack removes its own gen's draft only; the newer text gets the
+// next write, scheduled as after any edit
 {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
   let release; f.hold = new Promise((r) => (release = r));
   e.type("first"); t.fire(); await tick();
   e.type("second");
   release(); f.hold = null; await settle();
-  check("snapshot-ack-own-gen-only", f.text === "first" && e.saver.ackGen === 1 && e.saver.pending && e.saver.state.k !== "saved" && d.m.get("F|" + e.writerId)?.gen === 2, { f: f.text, st: e.saver.state, ack: e.saver.ackGen });
+  check("snapshot-ack-own-gen-only", f.text === "first" && e.draft()?.gen === 2 && e.draft().text === "second" && e.saver.state.k !== "saved" && t.q.length === 1, { f: f.text, st: e.saver.state, d: e.draft() });
   t.fire(); await settle();
-  check("snapshot-next-write-newer", f.text === "second" && e.saver.state.k === "saved" && !d.m.has("F|" + e.writerId), { f: f.text, st: e.saver.state });
+  check("snapshot-next-write", f.text === "second" && !e.draft() && e.saver.state.k === "saved", { f: f.text, st: e.saver.state });
 }
 
-// ---- 3. an echo of this editor's own write, delivered before the write resolves: no conflict, no reload
+// ---- 3. Ctrl/Cmd+S (flush): written at once, the debounce cancelled; nothing pending: Saved ✓, nothing written
 {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
-  let release; f.holdAfter = new Promise((r) => (release = r));
-  e.type("mine"); t.fire(); await tick();
-  check("echo-file-committed", f.text === "mine" && f.rev === 2, f.rev);
-  const ext = e.saver.external();
-  await tick(); release(); f.holdAfter = null; await ext; await settle();
-  check("echo-before-resolve", f.text === "mine" && !e.saver.conflict && e.set.length === 0 && e.saver.state.k === "saved", { st: e.saver.state, set: e.set });
+  e.type("now");
+  const ok = await e.saver.flush();
+  check("flush-at-once", ok && f.text === "now" && f.writes === 1 && t.q.length === 0 && e.saver.state.k === "saved", { ok, f: f.text, q: t.q.length });
+  const ok2 = await e.saver.flush();
+  check("flush-nothing-pending", ok2 && f.writes === 1 && e.saver.state.k === "saved", { ok2, w: f.writes });
 }
 
-// ---- 4. changed elsewhere with nothing pending: the editor takes the new text
-{
-  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
-  f.outside("theirs"); await e.saver.external();
-  check("outside-clean-reload", e.text === "theirs" && e.saver.rev === f.rev && !e.saver.conflict, { text: e.text });
-}
-
-// ---- 5. U8-CONFLICT-1: changed elsewhere with edits pending: nothing written; Keep mine on the exact revision shown;
-// a third writer since: a new conflict, never an overwrite
-{
-  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
-  e.type("mine"); f.outside("theirs"); await e.saver.external();
-  check("conflict-opened", e.saver.conflict?.text === "theirs" && e.saver.state.k === "conflict" && f.text === "theirs" && t.q.length === 0, { st: e.saver.state });
-  t.fire(); await e.saver.flush();
-  check("conflict-nothing-written", f.text === "theirs" && d.m.get("F|" + e.writerId)?.text === "mine", f.text);
-  f.outside("third");
-  const ok1 = await e.saver.keepMine();
-  check("keepmine-third-writer-new-conflict", !ok1 && f.text === "third" && e.saver.conflict?.text === "third", { f: f.text, c: e.saver.conflict });
-  const ok2 = await e.saver.keepMine();
-  check("keepmine-written", ok2 && f.text === "mine" && f.versions.includes("third") && !e.saver.conflict && e.saver.state.k === "saved" && !d.m.has("F|" + e.writerId), { f: f.text, st: e.saver.state });
-}
-
-// ---- 6. U8-CONFLICT-2: Use theirs keeps mine as a version first, read-only meanwhile; typing that got through anyway,
-// or a failure keeping mine: nothing replaced, the conflict stays
-{
-  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
-  e.type("mine"); f.outside("theirs"); await e.saver.external();
-  let release; f.keepHold = new Promise((r) => (release = r));
-  const p = e.saver.useTheirs(); await tick();
-  check("usetheirs-readonly-meanwhile", e.ro === true && e.saver.state.k === "preserving", { ro: e.ro, st: e.saver.state });
-  e.type("mine, newer");
-  release(); f.keepHold = null; const ok = await p;
-  check("usetheirs-typed-meanwhile-kept", !ok && e.text === "mine, newer" && e.saver.conflict && f.versions.includes("mine") && d.m.get("F|" + e.writerId)?.text === "mine, newer" && e.ro === false, { text: e.text, v: f.versions });
-  f.keepFail = new Error("quota");
-  const ok2 = await e.saver.useTheirs();
-  check("usetheirs-keep-failed-nothing-replaced", !ok2 && e.text === "mine, newer" && e.saver.conflict && /couldn't be kept/.test(e.saver.state.why ?? ""), e.saver.state);
-  f.keepFail = null;
-  const ok3 = await e.saver.useTheirs();
-  check("usetheirs-done", ok3 && e.text === "theirs" && f.versions.includes("mine, newer") && !e.saver.conflict && !d.m.has("F|" + e.writerId) && e.saver.state.k === "saved", { text: e.text, d: [...d.m.keys()] });
-}
-
-// ---- 7. U8-DURABLE-2: two editors (tabs) of one file: their own drafts, equal gens; an ack removes only its writer's
-{
-  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), a = editor(f, d, t), b = editor(f, d, t);
-  a.type("from a"); b.type("from b");
-  check("two-writers-own-drafts", d.m.get("F|" + a.writerId)?.text === "from a" && d.m.get("F|" + b.writerId)?.text === "from b" && d.m.get("F|" + a.writerId).gen === d.m.get("F|" + b.writerId).gen, [...d.m.values()]);
-  await a.saver.flush();
-  check("two-writers-ack-own", !d.m.has("F|" + a.writerId) && d.m.get("F|" + b.writerId)?.text === "from b", [...d.m.keys()]);
-  await b.saver.flush();
-  check("two-writers-second-conflicts", b.saver.conflict?.text === "from a" && d.m.get("F|" + b.writerId)?.text === "from b", b.saver.state);
-}
-
-// ---- 8. recovery on open: one draft another (closed) tab left: in the editor and written; several: each kept as a
-// version, none chosen; drafts equal to the file dropped
-{
-  const f = fakeFile("base"), d = fakeDrafts(), t = fakeTimers();
-  d.put({ fid: "F", writerId: "a".repeat(32), gen: 3, path: "/a.tex", baseRev: f.rev, text: "lost edit", t: 0 });
-  const e = editor(f, d, t);
-  const r = await e.saver.recover();
-  check("recover-one", r.recovered === 1 && e.text === "lost edit" && f.text === "lost edit" && !d.m.has("F|" + "a".repeat(32)), { r, f: f.text, d: [...d.m.keys()] });
-  const f2 = fakeFile("base"), d2 = fakeDrafts(), t2 = fakeTimers();
-  d2.put({ fid: "F", writerId: "b".repeat(32), gen: 2, path: "/a.tex", baseRev: 1, text: "tab b", t: 0 });
-  d2.put({ fid: "F", writerId: "c".repeat(32), gen: 2, path: "/a.tex", baseRev: 1, text: "tab c", t: 0 });
-  d2.put({ fid: "F", writerId: "d".repeat(32), gen: 9, path: "/a.tex", baseRev: 1, text: "base", t: 0 });
-  const e2 = editor(f2, d2, t2);
-  const r2 = await e2.saver.recover();
-  check("recover-several-versioned-none-chosen", r2.kept === 2 && e2.text === "base" && f2.text === "base" && f2.versions.includes("tab b") && f2.versions.includes("tab c") && d2.m.size === 0, { r2, v: f2.versions, d: [...d2.m.keys()] });
-  // (a draft made on an older revision: recovered into the editor, then a conflict, nothing overwritten)
-  const f3 = fakeFile("base"), d3 = fakeDrafts(), t3 = fakeTimers();
-  d3.put({ fid: "F", writerId: "e".repeat(32), gen: 1, path: "/a.tex", baseRev: 0, text: "old base edit", t: 0 });
-  const e3 = editor(f3, d3, t3);
-  await e3.saver.recover();
-  check("recover-older-base-conflict", e3.text === "old base edit" && f3.text === "base" && e3.saver.conflict?.text === "base", { st: e3.saver.state });
-}
-
-// ---- 9. a failed write: the failed state (the one that may prompt on leaving), the edits kept; written on the next edit
-{
-  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
-  f.failNext = new Error("QuotaExceededError");
-  e.type("x"); await e.saver.flush();
-  check("failed-state", e.saver.failed && /Quota/.test(e.saver.state.why) && d.m.get("F|" + e.writerId)?.text === "x" && f.text === "start", e.saver.state);
-  e.type("xy"); await e.saver.flush();
-  check("failed-then-written", !e.saver.failed && f.text === "xy" && e.saver.state.k === "saved", { st: e.saver.state, f: f.text });
-  // (a draft store that refuses: also the failed state)
-  const d2 = fakeDrafts(); d2.put = () => { throw new Error("storage full"); };
-  const e2 = editor(fakeFile(), d2, fakeTimers());
-  e2.type("y");
-  check("draft-refused-failed", e2.saver.failed && /couldn't keep a copy/.test(e2.saver.state.why), e2.saver.state);
-}
-
-// ---- 10. closed with edits pending: written after, its own draft dropped; nothing of the UI touched after closing
+// ---- 4. one write at a time: flushes asked for during a held write wait for it, then write the newest text once
 {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
   let release; f.hold = new Promise((r) => (release = r));
-  e.type("closing"); t.q = [];
-  const p = e.saver.dispose(); const n = e.states.length;
-  e.text = "the next file's text";
-  release(); f.hold = null; const ok = await p;
-  check("dispose-flushes-no-ui", ok && f.text === "closing" && !d.m.has("F|" + e.writerId) && e.states.length === n, { f: f.text, states: e.states.slice(n) });
+  e.type("a"); const p1 = e.saver.flush(); await tick();
+  e.type("ab"); const p2 = e.saver.flush(), p3 = e.saver.flush();
+  release(); f.hold = null;
+  const r = await Promise.all([p1, p2, p3]); await settle();
+  check("one-write-at-a-time", f.maxInFlight === 1 && f.text === "ab" && f.writes === 2 && r.every(Boolean) && !e.draft(), { max: f.maxInFlight, f: f.text, w: f.writes, r });
 }
 
-// ---- 11. astra U8-RECOVERY-1: typing while recovery reads the drafts: the editor read-only meanwhile, and an edit
-// that got through anyway is never replaced by the old draft (that draft kept as a version instead)
+// ---- 5. #599's bar: the file changed elsewhere before the write: nothing written, "blocked"; edits made while it
+// asks are durable in the draft, and nothing is scheduled
 {
-  const f = fakeFile("base"), d = fakeDrafts(), t = fakeTimers();
-  d.put({ fid: "F", writerId: "a".repeat(32), gen: 7, path: "/a.tex", baseRev: f.rev, text: "OLD draft", t: 0 });
-  let release; const all0 = d.all.bind(d); d.all = async (fid) => { await new Promise((r) => (release = r)); return all0(fid); };
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("mine");
+  f.outside("theirs");
+  t.fire(); await settle();
+  check("changed-elsewhere-blocked", f.text === "theirs" && f.writes === 0 && e.saver.state.k === "blocked" && e.page.bars === 1 && e.draft()?.text === "mine", { f: f.text, st: e.saver.state });
+  e.type("mine 2");
+  check("blocked-edit-draft-only", e.draft()?.text === "mine 2" && t.q.length === 0 && e.saver.state.k === "blocked", { q: t.q.length, st: e.saver.state });
+  const ok = await e.saver.flush();
+  check("blocked-flush-writes-nothing", !ok && f.text === "theirs" && f.writes === 0, { ok, f: f.text });
+}
+
+// ---- 6. held(): the bar shown by a check (not a write): the scheduled write cancelled, "blocked"
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("x");
+  e.page.conflict = true; e.saver.held();
+  check("held-cancels-write", t.q.length === 0 && e.saver.state.k === "blocked", { q: t.q.length });
+  // (a choice under way (acting) blocks a write as the bar does)
+  e.page.conflict = false; e.page.acting = true;
+  const ok = await e.saver.flush();
+  check("acting-blocks-write", !ok && f.writes === 0 && e.saver.state.k === "blocked", { ok, w: f.writes });
+}
+
+// ---- 7. settled(): Keep mine written by the page at gen g, typed since: drafts up to g removed, the newer pending
+// text scheduled and written; Use theirs taken: drafts removed, Saved ✓
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("mine"); f.outside("theirs"); t.fire(); await settle();
+  // (Keep mine: the page writes the text at gen 1 over the bar's revision)
+  const g = e.saver.gen; e.page.acting = true;
+  f.versions.push(f.text); f.text = e.text; f.rev++; e.page.savedText = e.text; e.page.docRev = f.rev;
+  e.type("mine+");
+  e.page.acting = false; e.page.conflict = false;
+  e.saver.settled(g);
+  await settle();
+  check("settled-keep-mine-newer-pending", e.draft()?.gen === 2 && t.q.length === 1 && e.saver.state.k === "edited", { d: e.draft(), q: t.q.length, st: e.saver.state });
+  t.fire(); await settle();
+  check("settled-then-written", f.text === "mine+" && !e.draft() && e.saver.state.k === "saved", { f: f.text });
+}
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("mine"); f.outside("theirs"); t.fire(); await settle();
+  // (Use theirs: the page installs their text as its baseline)
+  e.text = f.text; e.page.savedText = f.text; e.page.docRev = f.rev; e.page.conflict = false;
+  e.saver.settled(); await settle();
+  check("settled-use-theirs", !e.draft() && e.saver.state.k === "saved" && t.q.length === 0 && f.text === "theirs", { d: e.draft(), st: e.saver.state });
+}
+
+// ---- 8. a failed write: Not saved with its reason, kept (failed: the one state that keeps the leave prompt), the
+// draft kept; the next edit writes again; written, Saved ✓
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  f.failNext = new Error("storage is full");
+  e.type("lost?"); t.fire(); await settle();
+  check("failed-shown-and-kept", e.saver.failed && e.saver.state.why === "storage is full" && e.draft()?.text === "lost?" && f.text === "start", { st: e.saver.state });
+  e.type("lost? no"); 
+  check("failed-stays-until-written", e.saver.failed && t.q.length === 1, { st: e.saver.state });
+  t.fire(); await settle();
+  check("failed-then-saved", !e.saver.failed && e.saver.state.k === "saved" && f.text === "lost? no" && !e.draft(), { st: e.saver.state, f: f.text });
+}
+
+// ---- 9. the draft can't be kept: Not saved, said (a draft store that throws; a large draft's write that fails)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  d.putFail = new Error("QuotaExceededError");
+  e.type("x");
+  check("draft-put-throws-failed", e.saver.failed && /couldn't keep a copy of your edits \(QuotaExceededError\)/.test(e.saver.state.why), e.saver.state);
+}
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  d.putAsync = Promise.reject(new Error("idb aborted")); d.putAsync.catch(() => {});
+  e.type("big"); await settle();
+  check("draft-large-put-fails-failed", e.saver.failed && /idb aborted/.test(e.saver.state.why), e.saver.state);
+}
+
+// ---- 10. two editors of one file (two tabs): each its own draft, never replacing the other's
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), a = editor(f, d, t), b = editor(f, d, t);
+  a.type("from a"); b.type("from b");
+  check("two-writers-two-drafts", a.draft()?.text === "from a" && b.draft()?.text === "from b" && d.m.size === 2, [...d.m.keys()]);
+}
+
+// ---- 11. recovery on open (the editors that left drafts are gone: their timers cleared): one draft another editor left, made on this revision: put in the editor (read-only
+// meanwhile), written, the old draft removed
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const old = editor(f, d, t); old.type("unsaved before close"); t.q = [];
   const e = editor(f, d, t);
-  const p = e.saver.recover(); await tick();
-  const roDuring = e.ro;
-  e.type("NEW typed");
-  release(); const r = await p; await settle();
-  check("recovery-1-readonly-while-pending", roDuring === true && e.ro === false, { roDuring, ro: e.ro });
-  check("recovery-1-new-text-kept", e.text === "NEW typed" && r.recovered === 0 && f.versions.includes("OLD draft") && d.m.get("F|" + e.writerId)?.text === "NEW typed" && !d.m.has("F|" + "a".repeat(32)), { text: e.text, r, v: f.versions, d: [...d.m.values()].map((x) => [x.writerId.slice(0, 4), x.text]) });
+  const r = await e.saver.recover(e.page.savedText);
+  check("recover-one-adopted", r.recovered === 1 && e.text === "unsaved before close" && e.ro[0] === true && e.ro.at(-1) === false && !old.draft() && e.draft()?.text === "unsaved before close" && e.stale === 0, { r, ro: e.ro, d: [...d.m.values()] });
+  t.fire(); await settle();
+  check("recover-one-written", f.text === "unsaved before close" && !e.draft(), { f: f.text });
 }
-
-// ---- 12. astra U8-RECOVERY-2: a draft made on an older revision: no write can go out before the person chooses,
-// even with the file's read held and a flush (a timer, blur) meanwhile
+// (made on an older revision: the page's bar first, nothing written)
 {
-  const f = fakeFile("base"), d = fakeDrafts(), t = fakeTimers();
-  f.rev = 2;
-  d.put({ fid: "F", writerId: "b".repeat(32), gen: 1, path: "/a.tex", baseRev: 1, text: "stale draft", t: 0 });
-  const io = f.io(); let release; const cur0 = io.current;
-  const e = { text: "base", ro: false, states: [], set: [] };
-  const held = { ...io, current: async () => { await new Promise((r) => (release = r)); return cur0(); } };
-  e.saver = new AutoSaver(held, d, { fid: "F", writerId: "c".repeat(32), path: () => "/a.tex" }, { text: "base", rev: 2 }, {
-    text: () => e.text, setText: (x) => { e.text = x; }, readOnly: (on) => { e.ro = on; }, state: (st) => e.states.push(st) }, t, () => 0);
-  const p = e.saver.recover(); await tick(); await tick();
-  t.fire(); await e.saver.flush(); await tick();
-  const writesWhileHeld = f.writes;
-  release(); await p; await settle();
-  check("recovery-2-no-write-before-choice", writesWhileHeld === 0 && f.writes === 0 && f.text === "base" && e.text === "stale draft" && e.saver.conflict?.text === "base" && e.saver.state.k === "conflict", { writesWhileHeld, writes: f.writes, st: e.saver.state });
-  const ok = await e.saver.keepMine();
-  check("recovery-2-keep-mine-then", ok && f.text === "stale draft" && f.versions.includes("base"), { f: f.text });
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const old = editor(f, d, t); old.type("old edits"); t.q = [];
+  f.outside("changed since");
+  const e = editor(f, d, t);
+  const r = await e.saver.recover(e.page.savedText);
+  t.fire(); await settle();
+  check("recover-stale-bar-first", r.recovered === 1 && e.stale === 1 && e.text === "old edits" && f.text === "changed since" && f.writes === 0 && e.draft()?.text === "old edits" && e.saver.state.k === "blocked", { r, st: e.saver.state, f: f.text });
+}
+// (several: each kept as a version, none chosen; equal to the file: dropped)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const a = editor(f, d, t), b = editor(f, d, t), c = editor(f, d, t);
+  a.type("draft a"); b.type("draft b"); c.type("start"); t.q = [];
+  const e = editor(f, d, t);
+  const r = await e.saver.recover(e.page.savedText);
+  check("recover-several-kept-as-versions", r.recovered === 0 && r.kept === 2 && f.versions.includes("draft a") && f.versions.includes("draft b") && e.text === "start" && d.m.size === 0 && f.writes === 0, { r, v: f.versions, n: d.m.size });
+}
+// (an edit made while the drafts were read: the draft never replaces it; kept as a version)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const old = editor(f, d, t); old.type("left behind"); t.q = [];
+  const e = editor(f, d, t);
+  let release; d.allHold = new Promise((r) => (release = r));
+  const p = e.saver.recover(e.page.savedText);
+  e.type("typed now"); d.allHold = null; release();
+  const r = await p;
+  check("recover-never-replaces-typing", r.recovered === 0 && r.kept === 1 && e.text === "typed now" && f.versions.includes("left behind"), { r, t: e.text });
+}
+// (the adopted draft's own record not durable (a large one whose write failed): the old writer's draft kept)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const old = editor(f, d, t); old.type("only copy"); t.q = [];
+  const e = editor(f, d, t);
+  d.putAsync = Promise.reject(new Error("idb aborted")); d.putAsync.catch(() => {});
+  await e.saver.recover(e.page.savedText);
+  check("recover-old-draft-kept-until-durable", old.draft()?.text === "only copy", [...d.m.values()]);
+}
+// (keeping a version fails: the draft stays, for the next open)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const a = editor(f, d, t), b = editor(f, d, t); a.type("A"); b.type("B"); t.q = [];
+  f.keepFail = new Error("no space");
+  const e = editor(f, d, t);
+  const r = await e.saver.recover(e.page.savedText);
+  check("recover-keep-fails-draft-stays", r.kept === 0 && a.draft()?.text === "A" && b.draft()?.text === "B", { r });
 }
 
-const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
-console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's autosave, ${results.length} checks`);
-process.exit(failed.length ? 1 : 0);
+// ---- 12. closing (a switch to another file, the page going away): what is pending written first; after it, no UI
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("closing");
+  const ok = await e.saver.dispose();
+  const n = e.states.length;
+  e.type("after"); e.saver.settled(); e.saver.held();
+  check("dispose-flushes", ok && f.text === "closing" && !e.draft(), { ok, f: f.text });
+  check("dispose-then-no-ui", e.states.length === n && t.q.length === 0, { n, now: e.states.length });
+}
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.type("mine"); f.outside("theirs"); t.fire(); await settle();
+  const ok = await e.saver.dispose();
+  check("dispose-blocked-writes-nothing-draft-kept", !ok && f.text === "theirs" && e.draft()?.text === "mine", { ok, f: f.text });
+}
+
+const failed = results.filter(([, ok]) => !ok);
+console.log(`${results.length - failed.length}/${results.length} autosave checks passed`);
+if (failed.length) process.exit(1);

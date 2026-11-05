@@ -288,6 +288,16 @@ export const STALE_FAILS_CAP = 1000;
 /** The old copies that cleanups keep leaving (migrator.ts, after a full lap): how many, a few of them, and why. */
 export type StaleStuck = { count: number; paths: { path: string; why: StaleWhy; folder?: string }[]; reasons: Partial<Record<StaleWhy, number>> };
 const STUCK_KEY = "staleStuck";
+/** A folder's share (Share folder, book links B2): the collection it was shared as, or a first upload's attempt
+ * whose share isn't known yet (one of the two, never both), in meta by the folder's fid, which a rename keeps.  Per
+ * browser: not exported or synced; a reset forgets it with the folder (@sagebrush's ruling on B2 design r1, Q1). */
+export type FolderShare = { share_id: string; share_attempt: null } | { share_id: null; share_attempt: string };
+const FOLDER_SHARE = "folder-share:";
+const isFolderShare = (x: any): x is FolderShare => !!x && typeof x === "object" && Object.keys(x).length === 2
+  && ((typeof x.share_id === "string" && /^[\w-]{1,64}$/.test(x.share_id) && x.share_attempt === null)
+    || (x.share_id === null && typeof x.share_attempt === "string" && /^[0-9a-f]{32}$/.test(x.share_attempt)));
+const sameShare = (a: FolderShare | undefined, b: FolderShare | undefined) => a === undefined || b === undefined ? a === b : a.share_id === b.share_id && a.share_attempt === b.share_attempt;
+const fidOk = (fid: unknown): fid is string => typeof fid === "string" && /^[\w-]{1,128}$/.test(fid);
 /** The most a value kept the old way can be (design/capabilities.md §2b, LIMIT-CAP1A-1): the page's
  * writes were bounded by FILE_QUEUE_MAX (256 MiB) and uploads by maxFileBytes (200 MB).  Its size isn't
  * known until it is read, so reading one reserves this × COPIES, exclusively, first. */
@@ -311,6 +321,8 @@ const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "str
 const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
 /** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
 type Collect = { collect?: number[] };
+/** What a rename was asked for: the entry by its identity, and optionally the revision read (rename's `expect`). */
+export type RenameExpect = Pick<Entry, "kind" | "ref" | "fid" | "created"> & { rev?: number };
 function sinkOf(c: unknown): number[] | undefined {
   if (c === undefined) return undefined;
   if (!Array.isArray(c)) throw new WorkspaceError("invalid", "collect is a list the call appends its op seqs to");
@@ -482,6 +494,28 @@ export class Workspace {
   async setStaleStuck(s: StaleStuck | null) {
     await inTx(this.ws, "meta", "readwrite", async (tx) => { if (s && s.count) tx.objectStore("meta").put(s, STUCK_KEY); else tx.objectStore("meta").delete(STUCK_KEY); });
     for (const f of this.stuckSubs) try { f(); } catch (e) { console.warn("workspace onStaleStuck:", e); }
+  }
+  /** A folder's share, by its fid: undefined if it has none; a row that isn't one is refused (an upload must stop,
+   * never take it as none: a second share could be made beside the first). */
+  async folderShare(fid: string): Promise<FolderShare | undefined> {
+    if (!fidOk(fid)) throw new WorkspaceError("invalid", "a folder's id");
+    const v = await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(FOLDER_SHARE + fid)));
+    if (v === undefined || isFolderShare(v)) return v;
+    throw new WorkspaceError("invalid", "this folder's share record couldn't be read");
+  }
+  /** Sets a folder's share to `next` (undefined: none) if it is still `expect`, in one transaction: whether it did.
+   * A row that isn't a share is never replaced. */
+  async setFolderShare(fid: string, expect: FolderShare | undefined, next: FolderShare | undefined): Promise<boolean> {
+    if (!fidOk(fid)) throw new WorkspaceError("invalid", "a folder's id");
+    if ((expect !== undefined && !isFolderShare(expect)) || (next !== undefined && !isFolderShare(next))) throw new WorkspaceError("invalid", "a folder's share is a share id or an attempt");
+    return inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta"), k = FOLDER_SHARE + fid, v = await req(st.get(k));
+      if (v !== undefined && !isFolderShare(v)) return false;
+      if (!sameShare(v, expect)) return false;
+      if (next === undefined) st.delete(k);
+      else st.put({ share_id: next.share_id, share_attempt: next.share_attempt }, k);
+      return true;
+    });
   }
   /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;
    * the mark as written, or undefined if it went) */
@@ -1351,6 +1385,15 @@ export class Workspace {
       return this.readNow(p, admit);
     });
   }
+  /** An entry's revision as readNow gives it (a notebook's record's, a board's record's, a data file's), its contents
+   * not there: undefined. */
+  private async revNow(e: Entry): Promise<number | undefined> {
+    if (e.kind === "folder") return 0;
+    if (e.kind === "file") return e.rev ?? 0;
+    const c = await this.contents(e);
+    if (c === undefined) return undefined;
+    return e.kind === "notebook" ? c.rev ?? 0 : (c as BoardRecord).rev;
+  }
   private async readNow(p: string, admit?: (c: AdmitCheck) => void): Promise<{ entry: Entry; content: any; rev: number; tag?: string }> {
     const e = await this.mustStat(p);
     if (e.kind === "folder") return { entry: e, content: await this.list(e.path, admit ? { admit } : {}), rev: 0 };
@@ -1648,12 +1691,14 @@ export class Workspace {
   /** `opts.expect`: the entry the rename was asked for, by its identity
    * (a document's ref, a data file's fid, and when it was made): checked
    * holding the lock, a WorkspaceError("conflict") if what is at `from` now
-   * is another (moved away meanwhile, something else put there: CORR-4B2-1). */
+   * is another (moved away meanwhile, something else put there: CORR-4B2-1).  `expect.rev`: also the revision read
+   * (read's `rev`), checked holding the lock: written since, a WorkspaceError("conflict"), nothing moved (a rename
+   * decided on what was read, never applied to what another wrote after: astra's BOARD-RENAME-1 on #531). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, after `expect` and before anything moves, about
    * both ends: `from` (role "source") and `to` (role "destination"). */
-  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry>;
-  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted): Promise<Entry | undefined>;
-  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> } & Collect & Admitted = {}): Promise<Entry | undefined> {
+  async rename(from: string, to: string, opts?: { retitle?: boolean; expect?: RenameExpect } & Collect & Admitted): Promise<Entry>;
+  async rename(from: string, to: string, opts: { still: () => boolean; retitle?: boolean; expect?: RenameExpect } & Collect & Admitted): Promise<Entry | undefined>;
+  async rename(from: string, to: string, opts: { still?: () => boolean; retitle?: boolean; expect?: RenameExpect } & Collect & Admitted = {}): Promise<Entry | undefined> {
     const a = path(from), b = path(to), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (a === "/" || b === "/") throw new WorkspaceError("invalid", "the top folder can't be moved");
     if (within(a, TRASH) || within(b, TRASH)) throw new WorkspaceError("invalid", "use remove and restore for Trash");
@@ -1663,6 +1708,7 @@ export class Workspace {
       if (opts.expect) {
         const x = opts.expect, cur = await this.stat(a);
         if (!cur || cur.kind !== x.kind || cur.created !== x.created || cur.fid !== x.fid || (cur.kind !== "file" && cur.ref !== x.ref)) throw new WorkspaceError("conflict", `${a} was moved or replaced meanwhile`);
+        if (x.rev !== undefined && (await this.revNow(cur)) !== x.rev) throw new WorkspaceError("conflict", `${a} was changed meanwhile`);
       }
       await this.admitAt(admit, "rename", "source", a);
       await this.admitAt(admit, "rename", "destination", b);
@@ -2299,11 +2345,11 @@ export class Workspace {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
   }
 
-  /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through. */
-  async putFile(p: string, bytes: unknown, opts: { keepEmpty?: boolean } = {}): Promise<Entry> {
-    const q = path(p);
+  /** A data file written at `p`: made if it isn't there, else written over (its old bytes kept as a version, §2.5).  What Python's writes and the Files panel's uploads go through.  `opts.admit` (the host's, AdmitCheck): asked holding the lock by whichever verb makes the change, create's or write's, the race's write included. */
+  async putFile(p: string, bytes: unknown, opts: { keepEmpty?: boolean } & Admitted = {}): Promise<Entry> {
+    const q = path(p), admit = admitOf(opts.admit);
     const e = await this.stat(q);
-    if (!e) return this.create(q, { content: bytes }).catch(async (err) => {
+    if (!e) return this.create(q, { content: bytes, ...(admit ? { admit } : {}) }).catch(async (err) => {
       // (made meanwhile, by another tab: written over instead)
       if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return (await this.write(q, bytes, opts)).entry;
       throw err;

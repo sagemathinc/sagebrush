@@ -59,7 +59,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
-import { freePath, nameOf, splitExt, safeName } from "../workspace/paths";
+import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG;
@@ -684,6 +684,48 @@ let wsEpoch = 0, wsCopy: { epoch: number; ref: string; rev: number } | null = nu
 // view is kept: the board journal's load bridge)
 let wsBridge: { header: string; epoch: number } | null = null;
 /** `bridge`: the original header of the pending copy `d` is (the board journal's load bridge): the save's tag. */
+// A board's title is its file's name, as a notebook's is (William's B2, the notebook page's wsRenameSoon): a title
+// changed by an edit on this page (mount.ts titleEdited; never a change from elsewhere) renames its file in the workspace, after the saves before it, to a free name beside it (never over
+// another), only this board (its identity checked holding the lock). A rename in the file browser retitles the board
+// instead (renamed, below), which then matches its file and renames nothing.
+let boardRenameTimer: ReturnType<typeof setTimeout> | undefined, boardRenameGen = 0;
+function boardRenameSoon(id: string, title: unknown) {
+  clearTimeout(boardRenameTimer);
+  const gen = ++boardRenameGen, base = safeTitle(title);
+  boardRenameTimer = setTimeout(async () => {
+    const w = ws;
+    if (!w) return;
+    // (a conflict: the board written, moved or replaced since it was read; asked again from the start, at most three
+    // times, so a save of this page's own in between still renames, and another's newer title renames nothing)
+    for (let tries = 0; tries < 3; tries++) {
+      try {
+        await wsWriting;
+        if (gen !== boardRenameGen) return;
+        const from = await w.pathOf("board", id);
+        if (!from || splitExt(nameOf(from))[0] === base) return;
+        const e = await w.stat(from);
+        if (!e || e.kind !== "board" || e.ref !== id) return;
+        // (only if this board's file holds the edited title: one saved into a conflict's copy instead, or written over
+        // by another since, renames nothing: CI on #531, test-workspace-pages' CORR-0FC-1 sequence.  Its revision is
+        // the rename's too, checked holding the lock: anything written after this read stops it, astra's BOARD-RENAME-1)
+        const now = await w.read(from).catch(() => null);
+        if (!now || safeTitle((now.content as BoardDoc | undefined)?.title) !== base) return;
+        const folder = parentOf(from), taken = new Set((await w.list(folder)).map((x) => x.path));
+        const to = freePath(folder, base, ".board.json", (x) => taken.has(x) && x !== from);
+        if (!to || to === from) return;
+        // (tests: a write between the read and the rename)
+        await (globalThis as any).__SB_BOARD_TEST__?.beforeRename?.(from);
+        await w.rename(from, to, { still: () => gen === boardRenameGen, expect: { kind: "board", ref: id, fid: e.fid, created: e.created, rev: now.rev } });
+        return;
+      } catch (err: any) {
+        if (err?.code === "conflict") continue;
+        // (moved meanwhile, or another put at its path: left as it is; the next title change tries again)
+        if (err?.code !== "missing" && err?.code !== "exists") console.warn("workspace: a board's rename:", err);
+        return;
+      }
+    }
+  }, 800);
+}
 function wsSave(id: string, d: BoardDoc, bridge?: string) {
   // (a board that can't be written here: this edit isn't kept, said, and so leaving is held back from now on)
   if (wsBlocked) { wsRefused = wsBlocked; throw wsBlocked; }
@@ -1117,12 +1159,13 @@ const host: BoardHost = {
         const conv = [takeNotice(), takeConverted(id)].filter(Boolean).join("\n\n");
         if (conv) notice = conv + (notice ? "\n\n" + notice : "");
         const path = await ws.pathOf("board", id);
-        // (listed from another device, its content not here yet (sync brings it): nothing to show or write; said, with
-        // the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
+        // (listed from another device, its content not here: boards' contents don't sync (board/journal.ts sync.on false),
+        // so it won't arrive, and the page says so, not that it's on its way (William's M9 (g)); nothing to show or
+        // write; said, with the way back to the files, Edit not offered; nothing here holds the page (DEV sync bug #4))
         const entry = path ? await ws.stat(path).catch(() => undefined) : undefined;
         if (path && entry?.remote) {
-          const why = "**This board's content isn't in this browser yet.** It's in your files from another device, and it appears here once sync brings it; until then it can't be shown or changed here.";
-          blockBoard(new Error(`${path}'s content isn't in this browser yet`), why, "This board's content isn't in this browser yet.");
+          const why = "**This board was made on another device.** Boards don't sync yet, so its content isn't in this browser and it can't be opened here. Open it on the device that made it.";
+          blockBoard(new Error(`${path}'s content isn't in this browser: boards don't sync yet`), why, "This board was made on another device. Boards don't sync yet.");
           return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
         }
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
@@ -1363,6 +1406,9 @@ const host: BoardHost = {
     return v.version || v.build || v.engine ? v : null;
   },
   exportHtml: (d, o) => exportHtml(d, o),
+  // (a title changed by an edit on this page: its file renamed to follow; a change from elsewhere, an agent's write
+  // or another tab's, is never a rename: CI on #531)
+  titleEdited: (t) => { if (local && ws) boardRenameSoon(source.slice(6), t); },
   // (an exported file is itself the saved board: Ctrl/Cmd+S is the browser's, CORR-2C4-1)
   saveKey: !file,
   // (the engine's parts, compressed, with the Sage library: every language

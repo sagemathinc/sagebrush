@@ -8,21 +8,26 @@
 // render says so and still writes the HTML.
 // Built as its own file, sagebrush-latex.cjs, beside the CLI's bundle (scripts/build-cli.mjs). src/cli.ts loads it
 // only for `latex`, so other commands don't carry the engine, KaTeX and its fonts.
-import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, mkdtempSync, rmSync } from "fs";
-import { basename, dirname, join, resolve, delimiter } from "path";
+import { readFileSync, writeFileSync, existsSync, statSync, realpathSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from "path";
 import { tmpdir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
-import { setKatex } from "../web/latex/engine/render.mjs";
+import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
+import * as beamerCode from "../web/latex/engine/beamer.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
-import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
+import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
+import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
 import { applyStep } from "../web/latex/overlay";
+import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
 setKatex(katex.renderToString);
+// (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
+installBeamer(beamerCode);
 
 /** The largest .tex read (the editor's own bound on a document is far below it). */
 const TEX_MAX = 4 * 2 ** 20;
@@ -117,38 +122,92 @@ function fail(why: string): number { process.stderr.write(`sagebrush latex: ${wh
 
 /** The preview of a .tex file: what check reports, and the self-contained HTML page. */
 export function renderTex(file: string, text: string): { result: CheckResult; html: string } {
-  // (a first pass finds the images the document names; the second has them, read from the file's own folder
-  //  as the editor reads them from the workspace: imageCandidates, never outside it)
-  const first = new Engine({}).update(text, { cold: true });
+  // (a first pass finds the images the document names; the second has them, read as the editor reads them from the
+  //  workspace and as TeX would: the file's folder, then \graphicspath's, imageCandidates. The workspace is the folder
+  //  the command runs in (its real path): its top is "/", so no name, relative, \graphicspath's or with a leading "/",
+  //  reaches outside it, and a file that is a link (or in a linked folder) is read only if its real path is inside
+  //  too (astra L2-BOUND-1, -2); a .tex outside that folder has no images)
   const images: Record<string, string | { why: string }> = {};
   const imgReport: ImageReport[] = [];
+  const root = realpathSync(process.cwd());
+  const inRoot = (p: string) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
+  let docReal: string | null = null;
+  try { docReal = realpathSync(resolve(file)); } catch {}
+  const toWs = (p: string) => "/" + relative(root, p).split(sep).join("/"), toDisk = (w: string) => join(root, ...w.slice(1).split("/"));
+  const doc = docReal && inRoot(docReal) ? toWs(docReal) : null, dirs = graphicsPathOf(text);
+  // (\input and \include, inputs.ts: the files the document asks for, read from the same folder by the same rules (inside
+  //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
+  const known = new Map<string, Known>();
+  let inputBytes = 0;
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), version: known.size } }; };
+  let first: any;
+  for (let round = 0; ; round++) {
+    const { ei, opt } = inputsNow();
+    first = new Engine({}).update(text, { cold: true, inputs: opt });
+    const want = doc && round < 64 ? ei.wanted(first.inputRefs as string[]) : [];
+    if (!want.length) break;
+    for (const w of want) {
+      const disk = toDisk(w);
+      let real = "";
+      try { real = realpathSync(disk); } catch {}
+      let k: Known;
+      if (!real) k = { absent: true };
+      else if (!inRoot(real)) k = { why: "a link to outside the folder the command runs in" };
+      else if (!statSync(real).isFile()) k = { absent: true };
+      else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: "too large" };
+      else { const b = readFileSync(real); k = admitInput(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), inputBytes, [...known.values()].filter((x) => "text" in x).length); if ("text" in k) inputBytes += b.length; }
+      known.set(w, k);
+    }
+  }
   let kept = 0;
   for (const name of first.imageRefs as string[]) {
-    const c = imageCandidates(name, "/" + basename(file));
+    const c = doc ? imageCandidates(name, doc, dirs) : { ok: false as const, why: "the .tex is outside the folder the command runs in: run it from a folder that holds it" };
     if (!c.ok) { images[name] = { why: c.why }; imgReport.push({ name, found: false, why: c.why }); continue; }
-    let got: { path: string; url: string } | { why: string } = { why: "no such file in this folder" };
-    for (const p of c.paths) {
-      const local = join(dirname(file), p.slice(1));
-      if (!existsSync(local) || !statSync(local).isFile()) continue;
-      const size = statSync(local).size;
+    let got: { path: string; url: string } | { why: string } | null = null;
+    for (const local of c.paths.map(toDisk)) {
+      if (!existsSync(local)) continue;
+      let real: string;
+      try { real = realpathSync(local); } catch { continue; }
+      if (!inRoot(real)) { got = { why: "a link to outside the folder the command runs in" }; break; }
+      if (!statSync(real).isFile()) continue;
+      const size = statSync(real).size;
       const why = admitImageBytes(size, size, kept);
       if (why) { got = { why }; break; }
-      const b = readFileSync(local);
+      const b = readFileSync(real);
+      if (b.length !== size) { got = { why: "changed while it was read" }; break; }
       const s = sniffImage(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
       if (!s.ok) { got = { why: s.why }; break; }
       kept += size;
-      got = { path: p.slice(1), url: `data:${s.mime};base64,${b.toString("base64")}` };
+      got = { path: relative(dirname(resolve(file)), local).split(sep).join("/"), url: `data:${s.mime};base64,${b.toString("base64")}` };
       break;
+    }
+    // (not found: a file of that name in a folder above, up to the top, named from this one)
+    if (!got) {
+      const leaf = basename(name), up: string[] = [];
+      for (let d = posix.dirname(posix.dirname(doc!)); up.length === 0; d = posix.dirname(d)) {
+        for (const x of /\.[A-Za-z0-9]+$/.test(leaf) ? [leaf] : IMAGE_EXTS.map((e) => leaf + e)) {
+          const w = (d === "/" ? "" : d) + "/" + x, disk = toDisk(w);
+          let real = "";
+          try { real = realpathSync(disk); } catch {}
+          if (real && inRoot(real) && statSync(real).isFile()) { up.push(w); break; }
+        }
+        if (d === "/") break;
+      }
+      got = { why: notFoundWhy(doc!, c.searched, up, true, name) };
     }
     if ("url" in got) { images[name] = got.url; imgReport.push({ name, found: true, path: got.path }); }
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
   // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
-  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true });
+  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true, inputs: inputsNow().opt });
   const states = r.sageStates as State[];
-  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
+  // (the page as the editor's preview shows it, split once as its worker splits it, web/latex/split.ts: a placeholder
+  //  where the preview has one, and check's warning for it)
+  const tooLarge: { kind: string; name: string; at: number }[] = [];
+  const pieces = (r.chunks as string[]).map((c, g) => splitChunk(c, (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g]))).join(""));
+  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge), frames: r.frames,
     sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
-  return { result, html: pageHtml(basename(file), r.chunks.join("\n"), !!r.beamer) };
+  return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
 
 // ---- running the code: `sagebrush latex run`
@@ -466,16 +525,21 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
 /** The browser started headless with its DevTools on a port of its choosing, or why it didn't start. */
 async function launch(browser: string, profile: string, extra: string[]): Promise<{ proc: ChildProcess; port: number } | { why: string }> {
   const proc = spawn(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: "ignore" });
+    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  // (the browser's own last words, its stderr's last 2 KB, kept for every "why" below: a start that fails in CI
+  //  then says what the browser said, not only that it failed; read for its whole life, so it never blocks on a full pipe)
+  let said = "";
+  proc.stderr?.on("data", (d) => { said = (said + d).slice(-2048); });
+  const tail = () => (said.trim() ? `; it said: ${said.trim().slice(-2048)}` : "");
   let exited: string | null = null;
   proc.on("exit", (c, s) => { exited = `the browser (${browser}) exited (${s ?? c}) before it could take the pictures`; });
   proc.on("error", (e) => { exited = `the browser (${browser}) didn't start: ${e.message}`; });
   const portFile = join(profile, "DevToolsActivePort");
   for (let i = 0; i < 300; i++) {
-    if (exited) return { why: exited };
+    if (exited) { await sleep(100); return { why: exited + tail() }; }
     if (existsSync(portFile)) { const port = parseInt(readFileSync(portFile, "utf8").split("\n")[0], 10) || 0; if (port) return { proc, port }; }
     await sleep(100);
   }
   proc.kill();
-  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` };
+  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` + tail() };
 }

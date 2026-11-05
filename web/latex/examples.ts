@@ -72,9 +72,9 @@ const beamer = String.raw`\documentclass{beamer}
 \end{frame}
 
 \begin{frame}{In this preview}
-  The preview shows each frame as a slide, with its title. It doesn't draw the theme or page through
-  overlays: every \texttt{\textbackslash pause} and \texttt{<2->} step is shown at once. A full LaTeX
-  run makes the PDF slides.
+  The preview shows each frame as a slide, with its title and the theme's headline and footline (not its
+  colors). Every \texttt{\textbackslash pause} and \texttt{<2->} step is shown at once here; Present
+  steps through them. A full LaTeX run makes the PDF slides.
 \end{frame}
 
 \begin{frame}{Overlays}
@@ -112,9 +112,9 @@ const sagetex = String.raw`\documentclass{article}
 \begin{document}
 \section*{SageTeX}
 
-\emph{In this preview:} SageTeX code is found and listed; each \texttt{\textbackslash sage\{...\}} shows as a
-placeholder until the code is run. \texttt{sagebrush latex run} runs it with Sagebrush's Sage, in order, and
-keeps the results beside this file; the preview then shows them, with the plot.
+\emph{In this preview:} press \textbf{Run} to run the code with Sagebrush's Sage, in this browser, in page
+order; until then each \texttt{\textbackslash sage\{...\}} shows as a placeholder. The results are kept beside
+this file (\texttt{sagebrush latex run} on a computer makes the same file); after an edit, press Run again.
 
 \begin{sagesilent}
 f(x) = x^3 - 2*x + 1
@@ -126,7 +126,13 @@ $\int_0^1 f(x)\,dx = \sage{integral(f(x), x, 0, 1)}$.
 
 The 10th prime is $\sage{nth_prime(10)}$, and $2^{100} = \sage{2^100}$.
 
-\sageplot[width=0.5\textwidth]{plot(sin(x), (x, 0, 2*pi))}
+\begin{sagesilent}
+f(x) = sin(x)
+\end{sagesilent}
+
+Code runs in page order, so a name can be defined again: from here on $f(x) = \sage{f(x)}$.
+
+\sageplot[width=0.5\textwidth]{plot(f(x), (x, 0, 2*pi))}
 \end{document}
 `;
 

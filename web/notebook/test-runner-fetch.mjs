@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTzIndex } from "./runner-worker.js";
+import { parseTzIndex, parsePkgsetIndex } from "./runner-worker.js";
 import { checkRunnerDefine } from "../runner-fetch.mts";
 import { tamperedIndex } from "../test-tz-fixture.mjs";
 
@@ -99,16 +99,16 @@ ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
   ok(none === null, "G7: a bundle with the list, and one without the runner, pass the check");
 }
 
-// G9: dist/runner-fetch.json is exactly what the built worker can ask for (the static half: the two wasm ?h=, the
+// G9: dist/runner-fetch.json is exactly what the built worker can ask for (the static half: the three wasm ?h=, the
 // ordinary chunks, the index by name and SHA-256), and each built bundle with the runner carries it
 {
   const list = JSON.parse(readFileSync(join(dist, "runner-fetch.json"), "utf8"));
   const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
-  const engine = sha(join(here, "..", "..", "wasm", "sagebrush-engine.wasm")), raster = sha(join(here, "..", "..", "wasm", "sagebrush-raster.wasm"));
+  const engine = sha(join(here, "..", "..", "wasm", "sagebrush-engine.wasm")), raster = sha(join(here, "..", "..", "wasm", "sagebrush-raster.wasm")), nd = sha(join(here, "..", "..", "wasm", "sagebrush-nd.wasm"));
   const chunks = readdirSync(join(dist, "lib")).filter((f) => /\.[0-9a-f]{16}\.json$/.test(f)).map((f) => `lib/${f}`);
   // (made here, from the files themselves, not by web/runner-fetch.mts: a list the build dropped a chunk from must
   // differ from this one, C-G9)
-  const want = { files: [`sagebrush-engine.wasm?h=${engine.slice(0, 16)}`, `sagebrush-raster.wasm?h=${raster.slice(0, 16)}`, ...chunks], tzIndex: { file: `lib/tzdata/${indexFile}`, sha256: sha(join(tzDir, indexFile)) } };
+  const want = { files: [`sagebrush-engine.wasm?h=${engine.slice(0, 16)}`, `sagebrush-raster.wasm?h=${raster.slice(0, 16)}`, `sagebrush-nd.wasm?h=${nd.slice(0, 16)}`, ...chunks], tzIndex: { file: `lib/tzdata/${indexFile}`, sha256: sha(join(tzDir, indexFile)) } };
   const same = (a, b) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
   ok(same(list.files, want.files) && list.tzIndex?.file === want.tzIndex.file && list.tzIndex?.sha256 === want.tzIndex.sha256, `G9: dist/runner-fetch.json is exactly the built worker's files (${list.files.length} URLs and the index)`);
   // (the bundles that contain runner-worker.js: those with its NOT_RUN text; each must carry every URL of the list,
@@ -122,8 +122,40 @@ ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
   ok(carriers.length >= 3 && bad.length === 0, `G9: each of the ${carriers.length} built bundles with the runner carries exactly the list${bad.length ? ": not " + bad.map((p) => p.slice(dist.length + 1)).join(", ") : ""}`);
 }
 
+// PKu (QRPM 1b): the package set index's grammar for the broker (parsePkgsetIndex): the site's notebooks' set
+// (pkgset/latest.json) admits exactly the chunks its Python packages pin, and a pin that isn't one refuses the
+// whole index.  The index's own grammar and bounds (format, 256 KiB, 32 packages, 4 builds) are the worker's
+// (src/pkgset.ts admitIndex), not the broker's: only bytes with the SHA-256 the page pinned reach this parser,
+// so these only check it never admits a file the bytes don't pin
+{
+  const S = JSON.parse(readFileSync(join(dist, "pkgset", "latest.json"), "utf8")).id;
+  const bytes = new Uint8Array(readFileSync(join(dist, "pkgset", S + ".json")));
+  const ix = JSON.parse(new TextDecoder().decode(bytes));
+  const pins = Object.values(ix.packages).flatMap((p) => [p.src.sha256, ...Object.values(p.pre).map((r) => r.sha256)]).map((h) => `pkg/${h}.json`);
+  const set = parsePkgsetIndex(bytes);
+  ok(set !== null && set.size === pins.length && pins.every((x) => set.has(x)), `PKu-real: the site's notebooks' set admits exactly its ${pins.length} pinned chunk(s)`);
+  const [id0] = Object.keys(ix.packages);
+  const p0 = ix.packages[id0];
+  const with0 = (p) => enc({ ...ix, packages: { ...ix.packages, [id0]: p } });
+  const no = (name, what, b) => ok(parsePkgsetIndex(b) === null, `${name}: ${what}: refused`);
+  const only = (name, what, b, want) => {
+    const got = parsePkgsetIndex(b);
+    ok(got !== null && got.size === want.length && want.every((x) => got.has(x)), `${name}: ${what}: only the chunks its bytes pin (${want.length})`);
+  };
+  only("PKu-format", "another format", enc({ ...ix, format: "sagebrush-tzdata" }), pins);
+  only("PKu-packages", "packages an empty array", enc({ ...ix, packages: [] }), []);
+  no("PKu-src", "a src sha256 not 64 lowercase hex", with0({ ...p0, src: { ...p0.src, sha256: p0.src.sha256.toUpperCase() } }));
+  no("PKu-pre", "a pre entry with no sha256", with0({ ...p0, pre: { "0123456789abcdef": { size: 1 } } }));
+  only("PKu-pre-builds", "5 precompiled builds, each the src chunk", with0({ ...p0, pre: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`${i}`.repeat(16), p0.src])) }), [`pkg/${p0.src.sha256}.json`]);
+  only("PKu-count", "33 packages, each the first", enc({ ...ix, packages: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`@sagebrush/p${i}@0.1.0`, p0])) }), [p0.src, ...Object.values(p0.pre)].map((r) => `pkg/${r.sha256}.json`));
+  only("PKu-bytes", "262,145 bytes (the real index padded with spaces)", enc(JSON.stringify(ix) + " ".repeat(262145 - bytes.length)), pins);
+  no("PKu-json", "not JSON", enc("{"));
+  const js = parsePkgsetIndex(enc({ ...ix, packages: { ...ix.packages, "@sagebrush/bash@0.3.0": { dir: "bash", js: { sha256: "a".repeat(64), size: 1 } } } }));
+  ok(js !== null && js.size === pins.length && !js.has(`pkg/${"a".repeat(64)}.json`), "PKu-js: a js package's chunk is not one the runner may fetch");
+}
+
 // (every case of this file, by id: one not reported is NOT RUN, which counts as a failure)
-const CASES = ["G13u", "G11u", "G12a", "G12a's edge", "G12b's fixture", "G12b", "G12c", "G12d", "G12e1", "G12e2", "G12f", "G12g", "G12h", "G12h's edge", "G12i", "G12j", "G12k", "G12l", "G12m", "real", "G7", "G9"];
+const CASES = ["G13u", "G11u", "G12a", "G12a's edge", "G12b's fixture", "G12b", "G12c", "G12d", "G12e1", "G12e2", "G12f", "G12g", "G12h", "G12h's edge", "G12i", "G12j", "G12k", "G12l", "G12m", "real", "G7", "G9", "PKu-real", "PKu-format", "PKu-packages", "PKu-src", "PKu-pre", "PKu-pre-builds", "PKu-count", "PKu-bytes", "PKu-json", "PKu-js"];
 const notRun = CASES.filter((c) => !seen.has(c));
 failures += notRun.length;
 console.log(`unit: ${CASES.length} cases, ${CASES.length - notRun.length} run; NOT RUN: ${notRun.length ? notRun.join(", ") : "none"}`);
