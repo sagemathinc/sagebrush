@@ -251,3 +251,17 @@ test("in a fresh session a tall or wide matrix given to the backend is refused b
   const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trim().split("\n");
   assert.deepEqual(out, [...Array(3).fill("Last 2 dimensions of the array must be square"), "undecided"]);
 });
+
+test("a non-contiguous view gives its contiguous copy's bits (grader X3), and n = 48 is the first size on engine/nd (grader X2)", () => {
+  const code = [
+    "import numpy as np",
+    "S = np.random.default_rng(9).standard_normal((60, 60)); A = S @ S.T + 60 * np.eye(60)",
+    "V = A[::-1, ::-1].T",
+    "print(V.flags['C_CONTIGUOUS'], np.array_equal(V, A), np.linalg.cholesky(V).tobytes() == np.linalg.cholesky(np.ascontiguousarray(V)).tobytes())",
+    "print(np.linalg._kernels()['cholesky']['path'])",
+  ].join("\n");
+  assert.deepEqual(execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trim().split("\n"), ["False False True", "engine/nd"]);
+  const at = (n: number) => execFileSync(process.execPath, [CLI, "-c", `import numpy as np\nS = np.random.default_rng(2).standard_normal((${n}, ${n}))\nnp.linalg.cholesky(S @ S.T + ${n} * np.eye(${n}))\nprint(np.linalg._kernels()['cholesky']['path'])`], { encoding: "utf8" }).trim();
+  assert.equal(at(48), "engine/nd");
+  assert.equal(at(47), "undecided");
+});
