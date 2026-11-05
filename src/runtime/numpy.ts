@@ -3669,6 +3669,9 @@ newBuiltinModule("_numpy", (m) => {
   Ty.getset(DT, "kind", (d: DType) => d.kind);
   Ty.getset(DT, "char", (d: DType) => d.char);
   Ty.getset(DT, "itemsize", (d: DType) => d.itemsize);
+  // (no structured dtypes here: every dtype is plain, so no field names and no fields, None as NumPy's)
+  Ty.getset(DT, "names", (_d: DType) => null);
+  Ty.getset(DT, "fields", (_d: DType) => null);
   Ty.getset(DT, "type", (d: DType) => (d instanceof StrDType ? strScalar : scalarCtors[d.name] ?? null));
   // (a string dtype's '<U3'; a numeric one's is not here yet)
   Ty.getset(DT, "str", (d: DType) => (d instanceof StrDType ? d.str : raise(T.AttributeError, "'numpy.dtype' object has no attribute 'str'")));
