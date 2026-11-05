@@ -167,6 +167,11 @@ check("magma error longer than a line's bound: still MagmaError", r["status"] ==
 r, m = run(kc, "print x + 1;\nquit;")
 s = "".join(c["text"] for c in of(m, "stream"))
 check("magma quit: no error", r["status"] == "ok" and s == "1025\n" and not of(m, "error"), (r, s))
+# (completion in Magma: its intrinsics and the session's variables, never Python's names; the word before the cursor)
+c = kc.complete("y := Fac", 8, reply=True)["content"]
+check("magma complete", "Factorization" in c["matches"] and c["cursor_start"] == 5 and not {"raise", "range", "False"} & set(c["matches"]), c)
+c = kc.complete("x", 1, reply=True)["content"]
+check("magma complete: a variable", "x" in c["matches"] and not {"xrange"} & set(c["matches"]), c)
 km.shutdown_kernel(now=True)
 
 # ---- MATLAB mode
@@ -197,6 +202,12 @@ check("matlab is_complete (complete)", c["status"] == "complete", c)
 kc.is_complete("x = 1 ...")
 c = kc.get_shell_msg(timeout=10)["content"]
 check("matlab is_complete (a line ending in ...: incomplete)", c["status"] == "incomplete", c)
+# (completion in MATLAB: its built-ins, keywords and the workspace's variables, never Python's names)
+run(kc, "radius = 3;")
+c = kc.complete("y = ra", 6, reply=True)["content"]
+check("matlab complete", {"rand", "randi", "randn", "radius"} <= set(c["matches"]) and c["cursor_start"] == 4 and not {"raise", "range"} & set(c["matches"]), c)
+c = kc.complete("disp('ra", 8, reply=True)["content"]
+check("matlab complete: nothing inside a character vector", c["matches"] == [], c)
 km.shutdown_kernel(now=True)
 
 out = subprocess.run(cmd + ["--uninstall-jupyter-kernel", "--mode", "all"], capture_output=True, text=True).stdout

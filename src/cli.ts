@@ -17,7 +17,7 @@ import { initParser, compile, execModule, R, libDir, findModuleSource, packageMo
 import { prepareSet } from "./pkgcache";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
-import { needsMore, complete, helpSyntax, ipythonSyntax } from "./interactive";
+import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData, parentPort } from "worker_threads";
@@ -391,8 +391,8 @@ function moduleNames(): string[] {
   return [...names];
 }
 
-function completer(main: any) {
-  return (line: string): [string[], string] => complete(main, line, moduleNames);
+function completer(main: any, mode: string) {
+  return (line: string): [string[], string] => completeIn(mode, main, line, moduleNames);
 }
 
 function historyFile(): string | null {
@@ -450,8 +450,8 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
       // no history yet
     }
   }
-  // (completion is Python's: none at a Magma or MATLAB prompt, as in their kernels)
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: mode === "python" ? completer(main) : undefined, history, historySize: 1000, terminal: process.stdin.isTTY });
+  // (completion in the prompt's language: src/interactive.ts completeIn)
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
   const sys = R.importModule("sys");
   // (Magma's prompt and MATLAB's; neither shows one for a continued input)
   const ps1 = () => (mode === "magma" ? "> " : mode === "matlab" ? ">> " : typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");

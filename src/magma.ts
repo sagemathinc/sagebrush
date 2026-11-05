@@ -22,7 +22,7 @@ export class MagmaSyntaxError extends Error {
 
 type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
 
-const KEYWORDS = new Set(
+export const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
     "if then elif else end for to by do while repeat until break continue function procedure func proc return " +
     "case when print printf error assert true false select where forward local quit exit vprint require delete assigned " +
@@ -118,7 +118,7 @@ export function lex(src: string): Tok[] {
 
 // ------------------------------------------------------------------ parser -> Python
 
-const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
+export const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
   "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split(" "));
 
 // Python's builtins (CPython 3.14's): a Magma name never reaches them.  An
