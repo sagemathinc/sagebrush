@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "An interactive sagebrush --magma or --matlab speaks its language at the prompt (#648): src/cli.ts repl() takes the mode (Magma: > prompt, each input a session, waiting for its ; via magmaIsIncomplete in src/magma.ts; MATLAB: >> prompt, cell mode as the kernel's cells, continued with matlabIsIncomplete, exit/quit). The CLI only: no engine, worker or notebook bundle moves. Measured with CI's size-gate build order (bun 1.4.4, build-cli after bun web/build.ts) on a merge of the head with the MATLAB prompt fixes (exit/quit with a % comment; a function definition refused) onto master 4e43dee0: cli/pyjs.cjs +1873. Marker: +27 B of margin.",
+ "bytes": {
+  "cli/pyjs.cjs": 1900
+ }
+}

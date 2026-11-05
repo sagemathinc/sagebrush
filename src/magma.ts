@@ -1831,3 +1831,23 @@ export type Recover = "file" | "session";
 export function magmaToPython(src: string, filename = "<magma>", opts: { recover?: Recover } = {}): string {
   return new Parser(lex(src), filename, src, opts.recover ?? null).program();
 }
+
+/**
+ * Whether interactive input needs more lines before it runs, as Magma's
+ * prompt waits: input runs once it ends with a `;` (every Magma statement
+ * does, `end for;` too) and its only syntax error, if any, is not at its end
+ * (an open `for ... do` or `function`).  Only comments: nothing to wait for.
+ */
+export function magmaIsIncomplete(src: string): boolean {
+  if (src.trim() === "") return false;
+  const toks = lex(src);
+  if (toks.length === 1) return false;
+  if (toks[toks.length - 2].v !== ";") return true;
+  const eof = toks[toks.length - 1];
+  try {
+    new Parser(toks, "<stdin>", src, null).program();
+    return false;
+  } catch (e) {
+    return e instanceof MagmaSyntaxError && e.line === eof.line && e.col === eof.col;
+  }
+}
