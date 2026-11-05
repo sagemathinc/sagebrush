@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { slowSkip } from "./slow-tests";
 import { createHash, generateKeyPairSync, randomBytes, sign as edSign } from "node:crypto";
 import { PairServer, PAIR_LIMITS } from "../src/notebook-pair";
 import { GATEWAY_LIMITS, SYNTHETIC_BASE, BODY_MAX, RESPONSE_MAX, workerPort, type SessionPort, type WorkerHandle } from "../src/local-gateway";
@@ -965,7 +966,8 @@ test("L28 a run while one runs: 409 busy", async () => {
     r.finish();
   } finally { await t.s.close(); }
 });
-test("L29a the 10,000th record admitted (L29a+), the 10,001st 429 runs; L29b restarts at the cap: still 429, the count unchanged; L29c recordBytes <= 5,120,000", async () => {
+// (268 s on master: a slow test, test/slow-tests.ts)
+test("L29a the 10,000th record admitted (L29a+), the 10,001st 429 runs; L29b restarts at the cap: still 429, the count unchanged; L29c recordBytes <= 5,120,000", { skip: slowSkip }, async () => {
   const t = await setup();
   try {
     const b = await bind(t.page);

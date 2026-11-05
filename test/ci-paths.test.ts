@@ -377,3 +377,22 @@ test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on
   }
   assert.deepEqual([...listed].sort(), gated.sort());
 });
+
+test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci label, a dispatch, the schedule and the paths they test, not on a master push or another change", () => {
+  for (const f of ["tsconfig.json", "package.json", "pnpm-lock.yaml", "scripts/arraybuffer-sites.mjs", "scripts/arraybuffer-sites-parity.mjs",
+    "test/arraybuffer-sites.json", "test/arraybuffer-sites-parity.test.ts", "test/arraybuffer-sites.test.ts",
+    "lib/_sage_padic_lseries.py", "test/kedlaya_cases.py", "test/kedlaya.test.ts", "src/local-gateway.ts", "test/local-gateway.test.ts",
+    "wasm/sagebrush-engine.wasm", "engine/web/src/nmod_ops.rs", "engine/arith/src/nmod_mat.rs", "engine/bigint/src/nmod.rs", "test/nmod-fp-wasm.test.ts",
+    "lib/zoneinfo/_zoneinfo.py", "lib/_zoneinfo.py", "lib/_tzrules.py", "lib/tzdata/__init__.py", "tzdata/zoneinfo/Europe/London",
+    "test/zoneinfo_sweep_cases.py", "test/stdlib-zoneinfo.test.ts", "test/slow-tests.ts"])
+    assert.equal(classify([f]).slow_tests, "true", f);
+  for (const f of ["src/runtime/numpy.ts", "lib/_matlab.py", "web/index.html", "README.md", "test/kernels.test.ts", "engine/web/src/lib.rs"])
+    assert.equal(classify([f]).slow_tests, "false", f);
+  assert.equal(classify(["lib/_matlab.py"], "full-ci").slow_tests, "true");
+  assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "schedule" }).slow_tests, "true");
+  assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "workflow_dispatch" }).slow_tests, "true");
+  // (a master push runs the full tier, but not the slow tests: the nightly run is their master check)
+  const push = classify(["lib/_sage_padic_lseries.py"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" });
+  assert.equal(push.full, "true");
+  assert.equal(push.slow_tests, "false");
+});

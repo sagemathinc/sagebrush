@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { slowSkip } from "./slow-tests";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -111,7 +112,8 @@ function fillBytes(e: any) {
   assert.deepEqual(stats(e).slice(1), [8, 1 << 28], "the shared cache at its 2^28-byte policy");
 }
 
-test("the nmod ops' largest requests stay within their peaks in wasm, after a large reply and a filled cache", (t) => {
+// (175 s on master: a slow test, test/slow-tests.ts)
+test("the nmod ops' largest requests stay within their peaks in wasm, after a large reply and a filled cache", { skip: slowSkip }, (t) => {
   const e0 = instance();
   if (call(e0, preq("gcd", 7n, "1,1", "1")).includes("unknown fn")) return t.skip("this engine build predates the nmod ops");
   const grew: Record<string, number> = {};
