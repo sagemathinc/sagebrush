@@ -6928,9 +6928,26 @@ def inv_(x):
     return _unmat(Mi)
 
 
+def _svd_finite(M, name):
+    """M for rank, null or orth (`name`): one with a NaN or Inf is refused, with MATLAB's identifier and message,
+    rather than given a plausible-looking answer (real MATLAB, Nov 4: MATLAB:rank:matrixWithNaNInf, likewise null
+    and orth)"""
+    if not np.all(np.isfinite(M)):
+        raise _err("Input matrix must not contain NaN or Inf values.", "MATLAB:%s:matrixWithNaNInf" % name)
+    return M
+
+
 @_bs("pinv")
 def pinv_(x):
-    return _unmat(np.linalg.pinv(_mat(x)))
+    M = _mat(x)
+    # (real MATLAB: a NaN or Inf gives NaN throughout, of the transposed shape and M's precision; complex stays
+    # complex, NaN + 0i)
+    if not np.all(np.isfinite(M)):
+        # (made single here when x is: _keep_single's conversion would drop the zero imaginary part)
+        dt = M.dtype if class_(x) != "single" else np.complex64 if M.dtype.kind == "c" else np.float32
+        P = np.full(M.shape[::-1], np.nan, dtype=dt)
+        return _canon(_contig(P.T)) if P.dtype.kind == "c" else _unmat(P)
+    return _unmat(np.linalg.pinv(M))
 
 
 @_bs("det")
@@ -6965,7 +6982,7 @@ def det_(x):
 
 @_bs("rank")
 def rank_(x, tol=None):
-    M = _mat(x)
+    M = _svd_finite(_mat(x), "rank")
     if M.size == 0:
         return 0.0
     s = np.linalg.svd(M, compute_uv=False)
@@ -7163,10 +7180,16 @@ def _left_vectors(A, B, w, balance=True):
 @_bi("svd")
 def svd_(nargout, x, *args):
     M = _mat(x)
+    # (real MATLAB: a NaN or Inf anywhere makes the singular values, U and V all NaN, S 0 off its diagonal: a
+    # zero matrix's shapes, filled with NaN)
+    nan = 0.0
+    if not np.all(np.isfinite(M)):
+        M, nan = np.zeros(M.shape, dtype=M.real.dtype), np.nan
     if nargout <= 1:
-        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)))
+        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)) + nan)
     econ = bool(args)
     U, s, Vh = np.linalg.svd(M, full_matrices=not econ)
+    U, s, Vh = U + nan, s + nan, Vh + nan
     S = np.zeros((U.shape[1], Vh.shape[0]))
     for k in range(s.size):
         S[k, k] = s[k]
@@ -7292,7 +7315,7 @@ def chol_(nargout, x, *args):
 
 @_bs("null")
 def null_(x):
-    M = _mat(x)
+    M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
     tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
     r = int(np.sum(s > tol))
