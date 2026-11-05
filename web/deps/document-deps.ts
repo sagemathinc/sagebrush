@@ -72,7 +72,7 @@ const NONE: ReadonlySet<string> = new Set();
 // (LaTeX's references: a command, an optional [...] and its {argument}; or \input followed by a bare name; and
 // \graphicspath, which sets where later \includegraphics look)
 const TEX_REF = /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\}|\\input\s+([^\s{}\\%]+)|\\graphicspath\s*\{(?:\s*\{[^{}]*\})*\s*\}/g;
-const VERBATIM = /\\begin\s*\{(verbatim\*?|lstlisting|minted|comment|Verbatim)\}[\s\S]*?\\end\s*\{\1\}/g;
+const VERBATIM = /\\begin\s*\{(verbatim\*?|lstlisting|minted|comment|Verbatim)\}/y;
 
 /** A LaTeX text as its references see it: comments, verbatim environments and the code blocks' spans blanked
  * (to spaces, keeping each newline, so line numbers stay true). */
@@ -82,19 +82,34 @@ function texSkeleton(text: string, spans: { start: number; end: number }[]): str
     for (let i = a; i < b && i < chars.length; i++) if (chars[i] !== "\n") chars[i] = " ";
   };
   for (const s of spans) blank(s.start, s.end);
-  const t = chars.join("").replace(VERBATIM, (m) => m.replace(/[^\n]/g, " ")).split("");
-  // (a % after an even run of backslashes, none or \\ (a line break), runs to the end of its line; after an odd
-  // run it is \%, a percent sign)
+  // (one pass, in TeX's order: a % after an even run of backslashes, none or \\ (a line break), runs to the end of
+  // its line, and after an odd run it is \%, a percent sign; a verbatim environment that isn't in a comment runs to
+  // its \end, or to the end of the file, % and all)
+  const t = chars.join("");
   let run = 0;
-  for (let i = 0; i < t.length; i++) {
-    if (t[i] === "\\") {
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] === "\\" && run % 2 === 0) {
+      VERBATIM.lastIndex = i;
+      const v = VERBATIM.exec(t);
+      if (v) {
+        const close = new RegExp(String.raw`\\end\s*\{` + v[1].replace("*", String.raw`\*`) + String.raw`\}`, "g");
+        close.lastIndex = i + v[0].length;
+        const e = close.exec(t);
+        const stop = e ? e.index + e[0].length : chars.length;
+        blank(i, stop);
+        i = stop - 1;
+        run = 0;
+        continue;
+      }
+    }
+    if (chars[i] === "\\") {
       run++;
       continue;
     }
-    if (t[i] === "%" && run % 2 === 0) while (i < t.length && t[i] !== "\n") t[i++] = " ";
+    if (chars[i] === "%" && run % 2 === 0) while (i < chars.length && chars[i] !== "\n") chars[i++] = " ";
     run = 0;
   }
-  return t.join("");
+  return chars.join("");
 }
 
 export async function dependencies(path: string, text: string, kind: DocKind, ctx: DocDepsContext): Promise<{ deps: Dep[]; unfollowed: DocUnfollowed[]; complete: boolean }> {
@@ -116,6 +131,8 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
   const cellName = new Map<number, string>();
   // (a LaTeX code block's file, when it isn't the document: an \input file's pycode)
   const cellFrom = new Map<number, string>();
+  // (and the lines before its code in that file: an unfollowed line in it is the file's line)
+  const cellLine = new Map<number, number>();
   if (kind === "tex") {
     if (!(await latex(path, text))) complete = false;
   } else if (kind === "md") {
@@ -159,7 +176,8 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
         }
         else add({ path: p, via, exists: true, certain: true, from: reason.by, why: `${verb} in ${label(reason.by)}` });
       },
-      onUnfollowed: (u) => unfollowed.push({ at: "cell" in u.where ? (cellName.get(u.where.cell) ?? nth(u.where.cell)) : label(u.where.file), line: u.line, why: u.why }),
+      onUnfollowed: (u) =>
+        unfollowed.push("cell" in u.where ? { at: cellName.get(u.where.cell) ?? nth(u.where.cell), line: u.line + (cellLine.get(u.where.cell) ?? 0), why: u.why } : { at: label(u.where.file), line: u.line, why: u.why }),
       onProgress: (p) => ctx.onProgress?.(p),
       signal: ctx.signal ?? new AbortController().signal,
     });
@@ -167,25 +185,49 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
   }
   return { deps, unfollowed, complete: complete && !ctx.signal?.aborted };
 
-  // ---- LaTeX: the main file, each \input/\include/\subfile file read where it is named (TeX's order), once
+  // ---- LaTeX: the main file, each \input/\include/\subfile file read where it is named (TeX's order), each
+  // time it is named (its \graphicspath counts again), but never inside itself (TeX would loop)
   async function latex(main: string, mainText: string): Promise<boolean> {
     let ok = true;
     // (\graphicspath as TeX keeps it: set where it's met, in whichever file, for every later \includegraphics)
     let dirs: string[] = [];
-    const read = new Set<string>([main]);
+    const texts = new Map<string, string | null>([[main, mainText]]);
+    const active = new Set<string>();
+    // (a file read again with the same \graphicspath does the same: its \graphicspath after it, by file and path)
+    const replay = new Map<string, string[]>();
+    const missed = new Set<string>();
+    const miss = (u: DocUnfollowed) => {
+      const k = JSON.stringify(u);
+      if (!missed.has(k)) missed.add(k), unfollowed.push(u);
+    };
+    // (a file's code blocks and skeleton, scanned once; a file read again is walked again from its skeleton)
+    const scans = new Map<string, { items: ReturnType<typeof scanItems>; skel: string }>();
     const walk = async (file: string, t: string): Promise<void> => {
       if (ctx.signal?.aborted) return;
+      const key = file + "\n" + JSON.stringify(dirs);
+      const after = replay.get(key);
+      if (after) {
+        dirs = after;
+        return;
+      }
+      active.add(file);
       const by = file === main ? undefined : file;
       const at = label(file);
-      // (its code blocks: cells of their language, analysed by fileDeps as the document's code)
-      const items = scanItems(t);
-      for (const it of items) {
-        const index = cells.length;
-        cells.push({ index, kind: LANG[it.kind], source: it.code });
-        cellName.set(index, at);
-        if (by) cellFrom.set(index, by);
+      // (its code blocks: cells of their language, analysed by fileDeps as the document's code; once per file)
+      let scan = scans.get(file);
+      if (!scan) {
+        const items = scanItems(t);
+        scan = { items, skel: texSkeleton(t, items) };
+        scans.set(file, scan);
+        for (const it of items) {
+          const index = cells.length;
+          cells.push({ index, kind: LANG[it.kind], source: it.code });
+          cellName.set(index, at);
+          if (by) cellFrom.set(index, by);
+          cellLine.set(index, t.slice(0, Math.max(it.start, t.indexOf(it.code, it.start))).split("\n").length - 1);
+        }
       }
-      const skel = texSkeleton(t, items);
+      const skel = scan.skel;
       for (const m of skel.matchAll(TEX_REF)) {
         if (ctx.signal?.aborted) return;
         if (m[0].startsWith("\\graphicspath")) {
@@ -196,7 +238,7 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
         const line = skel.slice(0, m.index).split("\n").length;
         if (!arg) continue;
         if (/[\\#]/.test(arg)) {
-          unfollowed.push({ at, line, why: `\\${cmd}{${arg}}: a name made by a macro, only known when TeX runs` });
+          miss({ at, line, why: `\\${cmd}{${arg}}: a name made by a macro, only known when TeX runs` });
           continue;
         }
         const names = cmd === "bibliography" ? arg.split(",").map((s) => s.trim()).filter(Boolean) : [arg];
@@ -210,7 +252,7 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
                   ? texCandidates(name, main)
                   : texCandidates(cmd === "include" && !/\.tex$/i.test(name) ? name + ".tex" : name, main);
           if (!c.ok) {
-            unfollowed.push({ at, line, why: `\\${cmd}{${name}}: ${c.why}` });
+            miss({ at, line, why: `\\${cmd}{${name}}: ${c.why}` });
             continue;
           }
           // (LaTeX's own picture formats too, for a name without an extension: .pdf and .eps after the editor's)
@@ -228,20 +270,27 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
             continue;
           }
           add({ path: found, via, exists: true, certain: true, ...(by ? { from: by } : {}), why });
-          if ((via === "input" || via === "include") && !read.has(found)) {
-            read.add(found);
-            let sub: string;
-            try {
-              sub = await ctx.readFile(found);
-            } catch {
-              ok = false;
-              unfollowed.push({ at: label(found), line: 0, why: "couldn't be read" });
+          if (via === "input" || via === "include") {
+            if (active.has(found)) {
+              miss({ at, line, why: `\\${cmd}{${name}}: read inside itself, where TeX would loop` });
               continue;
             }
-            await walk(found, sub);
+            if (!texts.has(found)) {
+              try {
+                texts.set(found, await ctx.readFile(found));
+              } catch {
+                texts.set(found, null);
+                ok = false;
+                miss({ at: label(found), line: 0, why: "couldn't be read" });
+              }
+            }
+            const sub = texts.get(found);
+            if (sub != null) await walk(found, sub);
           }
         }
       }
+      active.delete(file);
+      replay.set(key, dirs);
     };
     await walk(main, mainText);
     return ok && !ctx.signal?.aborted;

@@ -167,6 +167,26 @@ y\\\\% \input{even4}
   eq(r.paths, ["/c/odd1.tex", "/c/odd3.tex"], "after %, \\\\% and \\\\\\\\% (even) a comment; after \\% and \\\\\\% (odd) a percent sign");
 }
 
+// ---- comments and verbatim in TeX's order: a commented \begin{verbatim} opens nothing; inside a verbatim
+// environment a % is text, so its \end still closes it; an unclosed one runs to the end (ENGINE, #731 b3d9e944)
+{
+  const main = String.raw`% \begin{verbatim}
+\input{real}
+\end{verbatim}
+\begin{verbatim} 50% \end{verbatim} \input{after}
+\begin{verbatim}
+\input{inside}
+\end{verbatim}
+x\\begin{verbatim}\input{escaped}
+y\\\begin{verbatim}\input{hidden}\end{verbatim}
+\begin{lstlisting}
+\input{open}
+`;
+  const files = { "/v/main.tex": main, "/v/real.tex": "", "/v/after.tex": "", "/v/inside.tex": "", "/v/escaped.tex": "", "/v/hidden.tex": "", "/v/open.tex": "" };
+  const r = await run(files, "/v/main.tex", "tex");
+  eq(r.paths, ["/v/real.tex", "/v/after.tex", "/v/escaped.tex"], "a commented opener; a % inside verbatim; \\\\begin is \\\\ and text, \\\\\\begin is \\\\ and a real \\begin; an unclosed listing");
+}
+
 // ---- \graphicspath set in a followed \input file: for its pictures, and (TeX keeps it) for the main file's after it;
 // a code block in a followed file: its deps come from that file (ENGINE, #731 a2af0f87)
 {
@@ -193,6 +213,55 @@ import helper
     ["/t/helper.py", "import", true, true, "/t/part.tex", "imported in part.tex"],
   ], "\\graphicspath from where it is set on (not before), across files; a followed file's code block has from");
   ok(r.complete, "complete");
+}
+
+// ---- a file \input again is read again (TeX runs it each time: its \graphicspath counts again), but never inside
+// itself, where TeX would loop; each file is read from the workspace once (ENGINE, #731 b3d9e944)
+{
+  const main = String.raw`\input{part}
+\graphicspath{{other/}}
+\input{part}
+\includegraphics{b}
+`;
+  const files = { "/t/main.tex": main, "/t/part.tex": "\\graphicspath{{figs/}}\n", "/t/figs/b.png": "x", "/t/other/b.png": "x" };
+  const r = await run(files, "/t/main.tex", "tex");
+  eq(r.paths, ["/t/part.tex", "/t/figs/b.png"], "the second \\input{part} sets figs/ again: figs/b.png, never other/b.png");
+}
+{
+  // (the second \input{part} starts from the same \graphicspath as the first, so it isn't walked again: what it
+  // leaves, figs/, is set all the same)
+  const main = "\\input{part}\n\\graphicspath{}\n\\input{part}\n\\includegraphics{c}\n";
+  const r = await run({ "/t/main.tex": main, "/t/part.tex": "\\graphicspath{{figs/}}\n", "/t/figs/c.png": "x" }, "/t/main.tex", "tex");
+  eq(r.paths, ["/t/part.tex", "/t/figs/c.png"], "a file read again from the same state leaves the state it left before");
+}
+{
+  // (read twice with different \graphicspath, so walked twice: its unfollowed and its code once each)
+  const main = "\\input{part}\n\\graphicspath{{other/}}\n\\input{part}\n";
+  const part = "\\input{\\name}\n\\begin{pycode}\nopen(name)\n\\end{pycode}\n";
+  const r = await run({ "/t/main.tex": main, "/t/part.tex": part }, "/t/main.tex", "tex");
+  eq(r.unfollowed.map((u) => [u.at, u.line]), [["part.tex", 1], ["part.tex", 3]], "a file read twice: each unfollowed once: " + JSON.stringify(r.unfollowed));
+}
+{
+  // (f0 reads f1 twice, f1 reads f2 twice, ...: 2^18 readings for TeX, but one walk per file and \graphicspath here;
+  // the walks are counted by how often they look at the signal)
+  const files = { "/d/main.tex": "\\input{f0}\n" };
+  for (let i = 0; i < 18; i++) files[`/d/f${i}.tex`] = `\\input{f${i + 1}}\n\\input{f${i + 1}}\n`;
+  files["/d/f18.tex"] = "\\graphicspath{{g/}}\n";
+  let looks = 0;
+  const signal = { get aborted() { return looks++, false; } };
+  const r = await run(files, "/d/main.tex", "tex", { signal });
+  ok(r.deps.length === 19 && looks < 500, `a doubling chain: one walk per file and state (${looks} looks at the signal)`);
+}
+{
+  // (a reads b twice, and b reads a and itself: each a loop TeX would never leave)
+  const files = { "/l/main.tex": "\\input{a}\n", "/l/a.tex": "\\input{b}\n\\input{b}\n\\includegraphics{p}\n", "/l/b.tex": "\\input{a}\n\\input{b}\n", "/l/p.png": "x" };
+  const reads = [];
+  const meta = new Map(Object.keys(files).map((k) => [k, {}]));
+  const r = await dependencies("/l/main.tex", files["/l/main.tex"], "tex", { files: meta, readFile: async (k) => (reads.push(k), files[k]) });
+  eq(r.deps.map((d) => d.path), ["/l/a.tex", "/l/b.tex", "/l/p.png"], "loops: each file listed once, and what comes after them still found");
+  eq(reads, ["/l/a.tex", "/l/b.tex"], "each file read from the workspace once");
+  eq(r.unfollowed.map((u) => [u.at, u.line, /loop/.test(u.why)]), [["b.tex", 1, true], ["b.tex", 2, true]], "each loop unfollowed once, where it is: " + JSON.stringify(r.unfollowed));
+  ok(r.complete, "complete (a loop is TeX's error, not a file we couldn't read)");
 }
 
 // ---- \include always adds .tex; \bibliography{x.bib} as written; \subfile read and followed; an already-aborted
