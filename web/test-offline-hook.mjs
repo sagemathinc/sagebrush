@@ -345,6 +345,8 @@ await listenStops();
   const pkgRows = `new Promise((res, rej) => { const o = indexedDB.open("sb-pkg-ledger", 2); o.onupgradeneeded = () => o.result.objectStoreNames.contains("e") || o.result.createObjectStore("e", { keyPath: "digest" }); o.onsuccess = () => { const q = o.result.transaction("e").objectStore("e").getAll(); q.onsuccess = () => (o.result.close(), res(q.result.map((r) => ({ ...r, pinIn: r.pin ? Math.round((r.pin - Date.now()) / 1000) : null })))); }; o.onerror = () => rej(o.error); })`;
   const pre = { keys: await evx(pkgKeys), rows: await evx(pkgRows), after: lastCheck };
   if (pre.keys.error || pre.rows.error || pre.keys.value?.length || pre.rows.value?.length) console.log("  (info) N19: before its setup the package cache holds what it didn't make: " + J(pre));
+  // (the counting below depends on that reading: a failed one is a failed check, not an empty cache)
+  ok(Array.isArray(pre.keys.value) && Array.isArray(pre.rows.value), "N19 (setup): the package cache and its ledger read before the setup: " + J({ keys: pre.keys.error ?? pre.keys.value?.length, rows: pre.rows.error ?? pre.rows.value?.length }));
   // (the page's own interpreter may have used the site's package set by now and pinned its index for 10 min, its
   // heartbeat (worker-kernel.js pkgPin), r705's base2: so N19 counts what was there. An entry pinned before stays, as
   // N19's own pinned one does; one not pinned is removed, as N19's stale one is)
