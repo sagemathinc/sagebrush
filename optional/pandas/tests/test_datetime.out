@@ -1,0 +1,378 @@
+== ts.str
+Timestamp('2020-01-01 00:00:00')
+== ts.datetime
+Timestamp('2021-06-30 12:00:01.000250')
+== ts.date
+Timestamp('2019-02-28 00:00:00')
+== ts.parts
+Timestamp('2020-03-04 00:00:00')
+== ts.fields
+[2020, 3, 4, 5, 6, 7]
+== ts.strftime
+'2020/03/04 05-06-07'
+== ts.str-of
+['2020-03-04 00:00:00', '2020-03-04 05:06:07.500000']
+== ts.isoformat
+'2020-03-04T05:06:00'
+== ts.compare
+[True, True, False]
+== ts.to_pydatetime
+datetime.datetime(2020, 1, 1, 3, 0)
+== ts.nat
+[NaT, 'NaT', False, True, True]
+== to.str
+Timestamp('2020-01-01 00:00:00')
+== to.str-time
+Timestamp('2020-01-01 12:30:05')
+== to.str-T
+Timestamp('2020-01-01 12:30:00')
+== to.mdy
+Timestamp('2020-03-01 00:00:00')
+== to.compact
+Timestamp('2020-03-01 00:00:00')
+== to.list
+DatetimeIndex(['2020-01-01', '2020-02-15'], dtype='datetime64[us]', freq=None)
+== to.list-none
+DatetimeIndex(['2020-01-01', 'NaT'], dtype='datetime64[us]', freq=None)
+== to.list-datetimes
+DatetimeIndex(['2020-01-01 06:00:00', '2020-01-02 00:00:00'],
+              dtype='datetime64[us]', freq=None)
+== to.series
+
+0   2020-01-01
+1          NaT
+2   2021-06-30
+dtype: datetime64[us]
+== to.series-named
+
+7   2020-01-01
+Name: when, dtype: datetime64[us]
+== to.format
+DatetimeIndex(['2020-02-01', '2021-02-28'], dtype='datetime64[us]', freq=None)
+== to.format-mismatch
+!! ValueError: time data "2020-01-01" doesn't match format "%d.%m.%Y". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== to.unit-s
+DatetimeIndex(['1970-01-01', '1970-01-02'], dtype='datetime64[us]', freq=None)
+== to.unit-D-origin
+DatetimeIndex(['2020-01-01', '2020-01-02'], dtype='datetime64[us]', freq=None)
+== to.unit-D-float
+DatetimeIndex(['1970-01-02', '1970-01-03'], dtype='datetime64[us]', freq=None)
+== to.unit-float-origin
+DatetimeIndex(['2020-01-01'], dtype='datetime64[us]', freq=None)
+== to.unit-scalar
+Timestamp('1970-01-02 12:00:00')
+== to.mixed-formats
+!! ValueError: time data "3/1/2020" doesn't match format "%Y-%m-%d". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== to.extra-time
+!! ValueError: unconverted data remains when parsing with format "%Y-%m-%d %H:%M": ":59". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== to.time-then-date
+!! ValueError: time data "2020-01-02" doesn't match format "%Y-%m-%d %H:%M". You might want to try:
+    - passing `format` if your strings have a consistent format;
+    - passing `format='ISO8601'` if your strings are all ISO8601 but not necessarily in exactly the same format;
+    - passing `format='mixed'`, and the format will be inferred for each element individually. You might want to use `dayfirst` alongside this.
+== to.unparseable
+!! DateParseError: Unknown datetime string format, unable to parse: not a date
+== to.unparseable-list
+!! DateParseError: Unknown datetime string format, unable to parse: not a date
+== to.bad-month
+!! DateParseError: month must be in 1..12, not 13: 2020-13-01
+== to.errors-ignore
+!! ValueError: errors must be one of 'raise', or 'coerce'.
+== to.nat-text
+DatetimeIndex(['2020-01-01', 'NaT', 'NaT'], dtype='datetime64[us]', freq=None)
+== to.coerce
+DatetimeIndex(['2020-01-01', 'NaT'], dtype='datetime64[us]', freq=None)
+== to.bad-day
+!! DateParseError: day 30 must be in range 1..29 for month 2 in year 2020: 2020-02-30
+== to.none
+NaT
+== to.timestamp
+Timestamp('2020-01-01 00:00:00')
+== series.dict
+
+2020-01-01    1.50
+2020-02-01     NaN
+2020-03-01   -2.25
+dtype: float64
+== series.dict-index
+DatetimeIndex(['2020-01-01', '2020-02-01'], dtype='datetime64[us]', freq=None)
+== series.dict-dtype
+[dtype('<M8[us]'), 'datetime64[us]']
+== series.values-of-times
+
+0   2020-01-01
+1   2020-02-01
+2   2020-03-01
+dtype: datetime64[us]
+== series.times-with-time
+
+0   2020-01-01 00:00:00
+1   2020-01-02 03:04:05
+dtype: datetime64[us]
+== series.times-with-fraction
+
+0   2020-01-01 00:00:00.000000
+1   2020-01-02 03:04:05.000006
+dtype: datetime64[us]
+== series.times-nat
+
+0   2020-01-01
+1          NaT
+dtype: datetime64[us]
+== series.dtype
+[dtype('<M8[us]'), 'datetime64[us]', True]
+== series.dates-are-object
+
+0    2020-01-01
+dtype: object
+== series.mixed-is-object
+
+0    2020-01-01 00:00:00
+1                      3
+dtype: object
+== series.isna
+
+0    False
+1     True
+dtype: bool
+== series.tolist
+[Timestamp('2020-01-01 00:00:00'), NaT]
+== series.dtype-arg
+
+0   2020-01-01
+1   2020-02-01
+2   2020-03-01
+dtype: datetime64[us]
+== index.of-times
+DatetimeIndex(['2020-01-01', '2020-02-01', '2020-03-01'],
+              dtype='datetime64[us]', freq=None)
+== index.named
+DatetimeIndex(['2020-01-01', '2020-01-02'], dtype='datetime64[us]', name='d',
+              freq=None)
+== index.item
+Timestamp('2020-02-01 00:00:00')
+== index.slice
+DatetimeIndex(['2020-02-01', '2020-03-01'], dtype='datetime64[us]', freq=None)
+== index.year
+Index([2020, 2021], dtype='int32')
+== index.month-day
+[Index([1, 12], dtype='int32'), Index([1, 31], dtype='int32')]
+== index.strftime
+Index(['Jan 2020', 'Dec 2021'], dtype='str')
+== index.contains
+[True, True, True]
+== index.long
+DatetimeIndex(['2020-01-01', '2020-01-02', '2020-01-03', '2020-01-04',
+               '2020-01-05', '2020-01-06', '2020-01-07', '2020-01-08',
+               '2020-01-09', '2020-01-10',
+               ...
+               '2020-04-21', '2020-04-22', '2020-04-23', '2020-04-24',
+               '2020-04-25', '2020-04-26', '2020-04-27', '2020-04-28',
+               '2020-04-29', '2020-04-30'],
+              dtype='datetime64[us]', length=118, freq=None)
+== lookup.iloc
+np.float64(1.0)
+== lookup.loc-str
+np.float64(2.0)
+== lookup.loc-timestamp
+np.float64(4.0)
+== lookup.loc-datetime
+np.float64(1.0)
+== lookup.missing
+!! KeyError: '2020-04-01'
+== lookup.series
+
+2020-01-01    1.0
+2020-02-01    2.0
+2020-03-01    4.0
+dtype: float64
+== lookup.index-repr
+DatetimeIndex(['2020-01-01', '2020-02-01', '2020-03-01'],
+              dtype='datetime64[us]', freq=None)
+== dt.year
+
+0    2020
+1    2021
+dtype: int32
+== dt.month-day
+[0     1
+1    12
+dtype: int32, 0     1
+1    31
+dtype: int32]
+== dt.hour-minute-second
+[0     6
+1    23
+dtype: int32, 0    30
+1    59
+dtype: int32, 0     0
+1    59
+dtype: int32]
+== dt.strftime
+
+0    2020-01
+1    2021-12
+dtype: str
+== dt.year-nat
+
+0    2020.0
+1       NaN
+dtype: float64
+== dt.strftime-nat
+
+0    2020
+1     NaN
+dtype: str
+== dt.not-times
+!! AttributeError: Can only use .dt accessor with datetimelike values
+== frame.repr
+
+           d  x
+0 2020-01-01  1
+1 2020-01-03  2
+== frame.dtypes
+
+d    datetime64[us]
+x             int64
+dtype: object
+== frame.set_index
+
+            x
+d            
+2020-01-01  1
+2020-01-03  2
+== frame.set_index-keep
+
+                    d  x
+d                       
+2020-01-01 2020-01-01  1
+2020-01-03 2020-01-03  2
+== frame.set_index-index
+DatetimeIndex(['2020-01-01', '2020-01-03'], dtype='datetime64[us]', name='d',
+              freq=None)
+== frame.column
+
+0   2020-01-01
+1   2020-01-03
+Name: d, dtype: datetime64[us]
+== frame.iloc-row
+
+d    2020-01-01 00:00:00
+x                      1
+Name: 0, dtype: object
+== frame.loc-cell
+Timestamp('2020-01-03 00:00:00')
+== diff.float
+
+0    NaN
+1    2.0
+2    3.0
+dtype: float64
+== diff.int
+
+0    NaN
+1    NaN
+2    5.0
+dtype: float64
+== diff.negative
+
+0   -2.0
+1   -3.0
+2   -4.0
+3    NaN
+dtype: float64
+== diff.nan
+
+0    NaN
+1    NaN
+2    NaN
+3    4.0
+dtype: float64
+== diff.too-far
+
+0   NaN
+1   NaN
+dtype: float64
+== diff.zero
+
+0    0.0
+1    0.0
+dtype: float64
+== diff.indexed
+
+2020-01-01    NaN
+2020-02-01    1.0
+2020-03-01    2.0
+dtype: float64
+== diff.frame
+
+     a     b
+0  NaN   NaN
+1  3.0 -0.25
+2  5.0  1.75
+== diff.bad-periods
+!! ValueError: periods must be an integer
+== dropna.any
+
+     a    b  c
+2  3.0  6.0  z
+== dropna.all
+
+     a    b  c
+0  1.0  NaN  x
+2  3.0  6.0  z
+3  NaN  7.0  w
+== dropna.thresh
+
+     a    b  c
+0  1.0  NaN  x
+2  3.0  6.0  z
+3  NaN  7.0  w
+== dropna.subset
+
+     a    b  c
+2  3.0  6.0  z
+3  NaN  7.0  w
+== dropna.subset-str
+
+     a    b  c
+0  1.0  NaN  x
+2  3.0  6.0  z
+== dropna.subset-missing
+!! KeyError: ['zz']
+== dropna.both
+!! TypeError: You cannot set both the how and thresh arguments at the same time.
+== dropna.bad-how
+!! ValueError: invalid how option: some
+== dropna.inplace
+[None,      a    b  c
+0  1.0  NaN  x
+2  3.0  6.0  z
+3  NaN  7.0  w]
+== dropna.series
+
+0    1.0
+2    3.0
+dtype: float64
+== dropna.series-times
+
+0   2020-01-01
+dtype: datetime64[us]
+== dropna.series-inplace
+[None, 1    2.0
+dtype: float64]
+== warn.inplace
+[('Pandas4Warning', 'The inplace keyword in Series.dropna is deprecated and will be removed in a future version (PDEP-8).\nSee https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#deprecation-inplace for more details.', ['Pandas4Warning', 'PandasDeprecationWarning', 'PandasChangeWarning', 'DeprecationWarning', 'Warning']), ('Pandas4Warning', 'The inplace keyword in DataFrame.dropna is deprecated and will be removed in a future version (PDEP-8).\nSee https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#deprecation-inplace for more details.', ['Pandas4Warning', 'PandasDeprecationWarning', 'PandasChangeWarning', 'DeprecationWarning', 'Warning']), ('Pandas4Warning', 'The inplace keyword in DataFrame.set_index is deprecated and will be removed in a future version (PDEP-8).\nSee https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#deprecation-inplace for more details.', ['Pandas4Warning', 'PandasDeprecationWarning', 'PandasChangeWarning', 'DeprecationWarning', 'Warning'])]
+== frame.set_index-inplace
+[None,             x
+d            
+2020-01-01  1]

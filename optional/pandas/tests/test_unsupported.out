@@ -8,6 +8,30 @@
 !! NotImplementedError: pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset
 == c3.series-str-values
 !! NotImplementedError: pandas.Series.values of a str column is not in Sagebrush's pandas 0.x subset
+== dt.series-values
+!! NotImplementedError: pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-to_numpy
+!! NotImplementedError: pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-to_numpy-copy
+!! NotImplementedError: pandas.Series.to_numpy() of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.frame-values
+!! NotImplementedError: pandas.DataFrame.values of a frame with datetime64[us] columns (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
+== dt.series-diff
+!! NotImplementedError: pandas.diff of a datetime64[us] column (a Timedelta column) is not in Sagebrush's pandas 0.x subset
+== dt.timestamp-sub
+!! NotImplementedError: pandas: Timedelta (a difference of times) is not in Sagebrush's pandas 0.x subset
+== dt.number-without-unit
+!! NotImplementedError: pandas: to_datetime of a number without a unit (pandas reads it as nanoseconds) is not in Sagebrush's pandas 0.x subset
+== dt.timezone
+!! NotImplementedError: pandas: to_datetime's dayfirst, yearfirst and utc is not in Sagebrush's pandas 0.x subset
+== dt.outside-exact-years
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
+== dt.fraction-origin
+!! NotImplementedError: pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset
+== dt.fraction-seconds
+!! NotImplementedError: pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset
+== dt.all-nat-text
+!! NotImplementedError: pandas: to_datetime of strings that are all NaT (pandas makes datetime64[s] of them) is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy-object
 !! NotImplementedError: pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.series-object-to_numpy
@@ -50,8 +74,8 @@
 !! NotImplementedError: pandas.merge is not in Sagebrush's pandas 0.x subset
 == name.pd.concat
 !! NotImplementedError: pandas.concat is not in Sagebrush's pandas 0.x subset
-== name.pd.to_datetime
-!! NotImplementedError: pandas.to_datetime is not in Sagebrush's pandas 0.x subset
+== name.pd.Timedelta
+!! NotImplementedError: pandas.Timedelta is not in Sagebrush's pandas 0.x subset
 == name.pd.Categorical
 !! NotImplementedError: pandas.Categorical is not in Sagebrush's pandas 0.x subset
 == name.pd.MultiIndex
@@ -86,8 +110,8 @@
 !! NotImplementedError: pandas.DataFrame.where is not in Sagebrush's pandas 0.x subset
 == name.Series.str
 !! NotImplementedError: pandas.Series.str is not in Sagebrush's pandas 0.x subset
-== name.Series.dt
-!! NotImplementedError: pandas.Series.dt is not in Sagebrush's pandas 0.x subset
+== name.Series.rolling
+!! NotImplementedError: pandas.Series.rolling is not in Sagebrush's pandas 0.x subset
 == name.Series.groupby
 !! NotImplementedError: pandas.Series.groupby is not in Sagebrush's pandas 0.x subset
 == name.Series.value_counts
