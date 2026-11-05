@@ -97,6 +97,16 @@ else {
   for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
+  //  one left off that list is a 404 on sagebrush.space only, grader #685 E6; as web/site-dir.mts decides the site)
+  const site = join(web, "site", "public");
+  if (process.env.SAGEBRUSH_NO_SITE === "1" || !existsSync(join(web, "site"))) console.log("skip the site's copies: this build has no web/site (SAGEBRUSH_NO_SITE=1, or no web/site)");
+  else {
+    const ours = [...g.js, ...Object.values(LATEX_LAZY)].map((n) => n.slice("dist/".length));
+    const bad = ours.filter((f) => !existsSync(join(site, f)) || !readFileSync(join(site, f)).equals(readFileSync(join(web, "dist", f))));
+    const stale = readdirSync(site).filter((f) => f.startsWith("sagebrush-latex") && !existsSync(join(web, "dist", f)));
+    check(ours.length === g.js.length + 8 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
+  }
 }
 
 // ---- every input of the LaTeX editor's bundles selects the full tier on a pull request (scripts/ci-paths.mjs fullTierPaths), so

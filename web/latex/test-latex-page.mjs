@@ -48,7 +48,9 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [], sizes = new Map(), reqUrl = new Map();
+let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [], dialogText = [], sizes = new Map(), reqUrl = new Map();
+// (a request held by the Fetch domain, while a case enables it: given to that case's handler)
+let onPaused = null;
 // (each request by its id, in order: its URL, whether it was answered from the cache, its bytes over the network)
 const byId = [], idInfo = new Map();
 ws.onmessage = (ev) => {
@@ -60,7 +62,8 @@ ws.onmessage = (ev) => {
   if (m.method === "Network.responseReceived" && idInfo.has(m.params.requestId)) { const x = idInfo.get(m.params.requestId); x.status = m.params.response.status; if (m.params.response.fromDiskCache || m.params.response.fromPrefetchCache) x.cached = true; }
   if (m.method === "Network.loadingFinished" && idInfo.has(m.params.requestId)) idInfo.get(m.params.requestId).bytes = m.params.encodedDataLength;
   if (m.method === "Network.loadingFinished") sizes.set(reqUrl.get(m.params.requestId) ?? m.params.requestId, m.params.encodedDataLength);
-  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.type); send("Page.handleJavaScriptDialog", { accept: true }); }
+  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.type); dialogText.push(m.params.message); send("Page.handleJavaScriptDialog", { accept: true }); }
+  if (m.method === "Fetch.requestPaused" && onPaused) onPaused(m.params);
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -158,6 +161,34 @@ try {
     check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
+  }
+  // ---- the examples' chunk fails to load (grader #685 E1, E2, E4): the first request for it refused (the Fetch
+  // domain), File > New > LaTeX example says so in an alert, and the list isn't shown; asked again, the list loads, by
+  // a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
+  {
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    let refused = 0;
+    onPaused = (p) => { if (!refused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-examples.js*" }] });
+    const exUrls = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u));
+    const askExamples = async () => {
+      await ev(`(document.getElementById("filebtn").click(), true)`);
+      await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
+      await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
+      await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX example").click(), true)`);
+    };
+    const r0 = exUrls().length, d0 = dialogText.length;
+    await askExamples();
+    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
+    const fail = { refused, said, listed: await ev(`!!document.querySelector("dialog.sb-tex-examples[open]")`), urls: exUrls().slice(r0) };
+    check(refused === 1 && said.length === 1 && said[0] === "The examples couldn't be loaded. Check the network, then try again." && !fail.listed && fail.urls.length === 1 && !/\?try=/.test(fail.urls[0]),
+      "the examples' chunk refused: an alert says so (check the network, try again), no list", fail);
+    await askExamples();
+    const again = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000), urls: exUrls().slice(r0), alerts: dialogText.length - d0 };
+    check(again.listed && again.urls.length === 2 && /sagebrush-latex-examples\.js\?try=2$/.test(again.urls[1]) && again.alerts === 1,
+      "…asked again: the list of 10, loaded by a new URL (?try=2), no second alert", again);
+    await send("Fetch.disable"); onPaused = null;
+    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
   }
   // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
   // workspace handle has create, not the page's createByPerson): each renders in the preview,

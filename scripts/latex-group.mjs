@@ -52,7 +52,7 @@ export const LATEX_LAZY_CAPS = {
   //  2026-11-05: 3.5 / 1.75 KiB, about 340 / 165 B over its first build's 3,246 / 1,627, as the beamer chunk's margin)
   DOC: { label: "the LaTeX read-only document's chunk", raw: 3.5 * 1024, gzip: 1.75 * 1024 },
   // (the ten examples, examples.ts: fetched when their list opens, out of the group (@sagebrush, 2026-11-05, the group near
-  //  its cap: a lazy split, not another raise); its cap, proposed, pending daybreak2's number)
+  //  its cap: a lazy split, not another raise); its cap approved by daybreak2, Nov 5)
   EXAMPLES: { label: "the LaTeX examples' chunk", raw: 13 * 1024, gzip: 6 * 1024 },
   // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
   //  class beamer, or an overlay command). @sagebrush, 2026-11-04: make room for beamer's page furniture by moving
