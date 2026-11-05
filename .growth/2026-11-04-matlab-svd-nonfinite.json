@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "MATLAB's svd, pinv, rank, null and orth on NaN and Inf as real MATLAB treats them (William's MATLAB session, Nov 4; astra3 batch 1 MCF-01): svd and pinv give NaN of their usual shapes (svd from a zero matrix's shapes, filled with NaN); rank, null and orth refuse with MATLAB:<name>:matrixWithNaNInf, 'Input matrix must not contain NaN or Inf values.' (_svd_finite in lib/_matlab.py; orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 180d7900 (head 8dfe251d merged onto master b09d0c24): matlab.pre +4059, matlab.src +1062, lib.gen +480, pyjs +368; markers exact, except pyjs +64 for build-specific bytes.",
+ "reason": "MATLAB's svd, pinv, rank, null and orth on NaN and Inf as real MATLAB treats them (William's MATLAB session, Nov 4; astra3 batch 1 MCF-01): svd and pinv give NaN of their usual shapes (svd from a zero matrix's shapes, filled with NaN; pinv of a complex input stays complex, NaN + 0i, double or single); rank, null and orth refuse with MATLAB:<name>:matrixWithNaNInf, 'Input matrix must not contain NaN or Inf values.' (_svd_finite in lib/_matlab.py; orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 044610c0 (head 9a886787 merged onto master b09d0c24): matlab.pre +5200, matlab.src +1368, lib.gen +640, pyjs +512; markers exact, except pyjs +64 for build-specific bytes.",
  "bytes": {
-  "engine/lib/matlab.pre": 4059,
-  "engine/lib/matlab.src": 1062,
-  "cli/lib.gen.js": 480,
-  "cli/pyjs.cjs": 432
+  "engine/lib/matlab.pre": 5200,
+  "engine/lib/matlab.src": 1368,
+  "cli/lib.gen.js": 640,
+  "cli/pyjs.cjs": 576
  }
 }
