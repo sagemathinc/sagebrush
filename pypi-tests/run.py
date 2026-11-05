@@ -6,7 +6,8 @@
 - CPython, with the committed package sources on its path, must print
   expected.out (pypi-tests/harness.py: one line per test);
 - Sagebrush (build/cli/pyjs.cjs, which finds the package through its
-  registry) must print exactly the same.
+  registry) must print exactly the same. An optional excluded.json is applied
+  identically by the harness under both interpreters.
 
 A package whose tests do not all agree is not listed: Sagebrush raising an
 error where CPython passes is a difference too.

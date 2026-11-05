@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -61,6 +61,7 @@ function runner(args: string[], env: Record<string, string> = {}): { status: num
   return { status: r.status, out: r.stdout + r.stderr };
 }
 const expected = join(tests, "demo", "expected.out");
+const excluded = join(tests, "demo", "excluded.json");
 
 test("pypi-tests/run.py: --refresh writes CPython's records, and only from a clean exit", () => {
   const bad = runner(["--refresh", "demo"], { FAKE_CP_EXIT: "23", FAKE_CP_STDERR: "Fatal Python error: simulated" });
@@ -73,6 +74,24 @@ test("pypi-tests/run.py: --refresh writes CPython's records, and only from a cle
   assert.equal(noisy.status, 1, noisy.out);
   assert.match(noisy.out, /CPython wrote to stderr: Fatal: simulated/);
   assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+});
+
+test("pypi-tests/run.py: named exclusions apply to both interpreters and stale names fail closed", () => {
+  const reason = "this synthetic test stands in for an explicitly unsupported optional surface";
+  known("module 'gc' has no attribute 'get_objects'");
+  writeFileSync(excluded, JSON.stringify({ tests: [{ test: "test_demo.test_ok", reason }] }));
+  const refresh = runner(["--refresh", "demo"]);
+  assert.equal(refresh.status, 0, refresh.out);
+  assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: excluded\n");
+  const ok = runner(["demo"]);
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /demo 1\.0\.0: 2 tests, CPython and Sagebrush identical/);
+
+  writeFileSync(excluded, JSON.stringify({ tests: [{ test: "test_demo.test_gone", reason }] }));
+  const stale = runner(["demo"]);
+  assert.equal(stale.status, 1, stale.out);
+  assert.match(stale.out, /excluded\.json names tests that were not run: test_demo\.test_gone/);
+  unlinkSync(excluded);
 });
 
 test("pypi-tests/run.py: a known difference passes only as exactly its recorded failure, type and message (TEST-DB4-1)", () => {
