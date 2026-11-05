@@ -345,6 +345,12 @@ await listenStops();
   const pkgRows = `new Promise((res, rej) => { const o = indexedDB.open("sb-pkg-ledger", 2); o.onupgradeneeded = () => o.result.objectStoreNames.contains("e") || o.result.createObjectStore("e", { keyPath: "digest" }); o.onsuccess = () => { const q = o.result.transaction("e").objectStore("e").getAll(); q.onsuccess = () => (o.result.close(), res(q.result.map((r) => ({ ...r, pinIn: r.pin ? Math.round((r.pin - Date.now()) / 1000) : null })))); }; o.onerror = () => rej(o.error); })`;
   const pre = { keys: await evx(pkgKeys), rows: await evx(pkgRows), after: lastCheck };
   if (pre.keys.error || pre.rows.error || pre.keys.value?.length || pre.rows.value?.length) console.log("  (info) N19: before its setup the package cache holds what it didn't make: " + J(pre));
+  // (the page's own interpreter may have used the site's package set by now and pinned its index for 10 min, its
+  // heartbeat (worker-kernel.js pkgPin), r705's base2: so N19 counts what was there. An entry pinned before stays, as
+  // N19's own pinned one does; one not pinned is removed, as N19's stale one is)
+  const t0 = Date.now(), prePinned = (pre.rows.value ?? []).filter((x) => x.state === "kept" && x.pin > t0).map((x) => x.digest);
+  const preOther = (pre.rows.value ?? []).filter((x) => !prePinned.includes(x.digest)).length;
+  const prePinnedKeys = (pre.keys.value ?? []).filter((k) => prePinned.some((dg) => k.endsWith("/" + dg + ".json")));
   await ev(`(async () => {
     const c = await caches.open("sb-pkg-v1");
     for (const s of ["pinned", "stale"]) {
@@ -364,9 +370,9 @@ await listenStops();
     });
   })()`);
   let r = await api({ offline: "pkgClear", build: A }, 15000);
-  ok(r.last?.removed?.entries === 1 && r.last.keptPinned === 1, "N19: pkgClear removes the entry pinned 11 min ago and keeps the one pinned 5 min ago: " + J(r.last));
+  ok(r.last?.removed?.entries === 1 + preOther && r.last.keptPinned === 1 + prePinned.length, "N19: pkgClear removes the entry pinned 11 min ago and keeps the one pinned 5 min ago" + (prePinned.length + preOther ? ` (and the ${prePinned.length} pinned, ${preOther} not pinned, there before)` : "") + ": " + J(r.last));
   const left = await evx(pkgKeys);
-  ok(J(left.value) === J(["/pkg/" + d("pinned") + ".json"]), "N19: the pinned entry is the one left: " + J(left));
+  ok(Array.isArray(left.value) && J([...left.value].sort()) === J([...prePinnedKeys, "/pkg/" + d("pinned") + ".json"].sort()), "N19: the pinned entry is the one left (with any pinned before it): " + J(left));
   // (an install held at its put: pkgClear answers only after it is resumed)
   const file = join(tmp, "pkg-new.json");
   writeFileSync(file, body("new"));
