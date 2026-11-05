@@ -390,7 +390,7 @@
     <button id="add" title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
-    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -711,6 +711,15 @@ const MAGMA_EXAMPLES = new Set(["Magma"]);
 const MATLAB_EXAMPLES = new Set(["MATLAB"]);
 const $ = (s) => document.querySelector(s);
 const statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme");
+// (the language menu's tooltip says what the selected language does: sage's n8 walkthrough found the Sage line shown
+// with Python selected)
+const MODE_TITLE = {
+  python: "Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…",
+  sage: "Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in",
+  magma: "Magma mode: Magma's language, 2^3 is 8 and statements end with ;",
+  matlab: "MATLAB mode: MATLAB's language, 2^3 is 8 and [1 2; 3 4] is a matrix",
+};
+function showMode(m) { modeEl.value = m; modeEl.title = MODE_TITLE[modeEl.value] ?? ""; }
 const announce = (text) => ($("#announce").textContent = text);
 const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2));
 
@@ -1180,9 +1189,9 @@ $("#cells").addEventListener("input", () => askToKeep(), { once: true });
 // a change made in another tab: its name and language too
 nb.on("remote", (d) => {
   if (typeof d.name === "string" && d.name !== nbName.value && document.activeElement !== nbName) showName(d.name);
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
 });
-nb.on("mode", (m) => { modeEl.value = m; try { localStorage.setItem("sagebrush-mode", m); } catch {} });
+nb.on("mode", (m) => { showMode(m); try { localStorage.setItem("sagebrush-mode", m); } catch {} });
 const cells = () => nb.cells();
 // for tests and in-page agents: the notebook and its kernel
 window.sagebrush = {
@@ -1360,7 +1369,7 @@ $("#ttrevert").onclick = async () => {
   const cells = old.cells.map((c) => { const k = now.get(c.id); return k && c.type !== "markdown" && !k.type && k.code === c.code ? { ...c, outputs: k.outputs, n: k.n } : c; });
   ttShow(false);
   nb.replace({ mode: old.mode, cells });
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
   announce(`Reverted to version ${v.index + 1}`);
   statusEl.textContent = `reverted to version ${v.index + 1} of ${vs.length}`;
   // the reactive notebook: the session at that version is computed again
@@ -1538,7 +1547,7 @@ modeEl.onchange = (e) => {
   const to = modeEl.value, from = nb.mode;
   if (to === from) return;
   if (hasCode() && !confirm(`Change this notebook's language from ${LANG_NAME[from] ?? from} to ${LANG_NAME[to] ?? to}?\n\nIts code is written in ${LANG_NAME[from] ?? from}: it won't run as ${LANG_NAME[to] ?? to} until it is rewritten.`)) {
-    modeEl.value = from;
+    showMode(from);
     return;
   }
   setMode(to);
@@ -1769,7 +1778,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   }
   showName(doc.name);
   showWriter(store, id);
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
   $("#ttrepro").checked = nb.meta.reproducible !== false;
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;

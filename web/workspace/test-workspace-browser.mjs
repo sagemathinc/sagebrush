@@ -1308,6 +1308,22 @@ try {
     const b3 = await f2("/u9 dir");
     const n3 = await typeName("u9 folder.v2");
     check(b3 && b3.value === "u9 dir" && b3.sel[1] === "u9 dir".length && !n3 && (await has("/u9 folder.v2")), "U9: a folder's name is all name (all selected, no extension rule): " + JSON.stringify({ b3, n3 }));
+    // (a notebook's or board's name typed with its own extension gets it once: sage's n8 walkthrough,
+    // "chapter1.ipynb.ipynb"; the extension alone leaves the old name)
+    await ev(`${W}.create("/u9 nb.ipynb", { mode: "python" }).then(() => ${W}.create("/u9 brd.board.json")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 nb.ipynb"))}) && !!document.querySelector(${JSON.stringify(treeRow("/u9 brd.board.json"))})`);
+    await f2("/u9 nb.ipynb");
+    await typeName("u9 chapter1.IPYNB");
+    const once = await has("/u9 chapter1.ipynb"), twice = await ev(`${W}.stat("/u9 chapter1.IPYNB.ipynb").then((x) => !!x)`);
+    check(once && !twice, "U9: a notebook named with its extension gets it once (u9 chapter1.IPYNB -> u9 chapter1.ipynb): " + JSON.stringify({ once, twice }));
+    await f2("/u9 brd.board.json");
+    await typeName("u9 plan.board.json");
+    check((await has("/u9 plan.board.json")) && !(await ev(`${W}.stat("/u9 plan.board.json.board.json").then((x) => !!x)`)), "U9: a board named with its extension gets it once");
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 chapter1.ipynb"))})`);
+    await f2("/u9 chapter1.ipynb");
+    await typeName(".ipynb");
+    await new Promise((r) => setTimeout(r, 500));
+    check((await ev(`${W}.stat("/u9 chapter1.ipynb").then((x) => !!x)`)) && !(await ev(`${W}.stat("/.ipynb").then((x) => !!x)`)), "U9: the extension alone is no name: the old one stays");
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
