@@ -5737,7 +5737,7 @@ def mean_(x, *args):
             ok = ~np.isnan(A)
             return np.sum(np.where(ok, A, 0), axis=ax) / np.sum(ok, axis=ax)
         return np.sum(A, axis=ax) / A.shape[ax]
-    return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
+    return _reduce(x, args, m, "mean", empty_value=_math.nan, out_cls="single" if cls == "single" else "double")
 
 
 def _csort(A, ax):
@@ -5755,6 +5755,17 @@ def _csort(A, ax):
         return (0, abs(z), _math.pi if ph == -_math.pi else ph)
     out = np.array([sorted((complex(z) for z in row), key=key) for row in flat], dtype=np.complex128).reshape(shp)
     return np.moveaxis(out, -1, ax)
+
+
+def _median_middle(lo, hi):
+    # Preserve infinities: inf - inf is NaN, although the mean of two
+    # equal infinities is that infinity. Opposite finite signs use a sum
+    # so their difference cannot overflow; equal signs use a difference.
+    with np.errstate(invalid="ignore", over="ignore"):
+        if lo.dtype.kind == "c":
+            return lo + (hi - lo) / 2
+        same = np.isfinite(lo) & np.isfinite(hi) & (np.signbit(lo) == np.signbit(hi))
+        return np.where(same, lo + (hi - lo) / 2, (lo + hi) / 2)
 
 
 @_bs("median")
@@ -5779,17 +5790,17 @@ def median_(x, *args):
             hi = _take_along(S, np.maximum(m // 2, 0), ax)
             lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
             with np.errstate(invalid="ignore"):
-                r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
+                r = np.where(m % 2 == 0, _median_middle(lo, hi), lo)
             return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
         S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
-        r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
+        r = _median_middle(lo, hi) if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
     if cls == "logical":
         R = _arr(r)
         if not np.all((R == 0) | (R == 1)):
@@ -5891,7 +5902,7 @@ def _var_impl(x, args, sq):
         den = n - 1 if (w == 0 and n > 1) else n
         r = np.sum(dev, axis=ax) / den
         return np.sqrt(r) if sq else r
-    return _reduce(x, rest, v, "var", out_cls="double")
+    return _reduce(x, rest, v, "var", empty_value=_math.nan, out_cls="double")
 
 
 @_bs("var")
@@ -6541,11 +6552,33 @@ def _isvec(v):
 
 
 @_bs("cross")
-def cross_(a, b):
-    A = _farr(a).reshape(-1)
-    B = _farr(b).reshape(-1)
+def cross_(a, b, dim=None):
+    """cross(A, B[, dim]): the cross products of A's and B's 3-element vectors, along dim (by default the
+    first dimension of size 3); two 3-element vectors in any orientation give a result shaped as A"""
+    if dim is None and _isvec(a) and _isvec(b) and _numel(a) == 3 and _numel(b) == 3:
+        A = _farr(a).reshape(-1)
+        B = _farr(b).reshape(-1)
+        r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
+        return _box(r.reshape(_arr(a).shape))
+    d = _dims(a)
+    if d != _dims(b):
+        raise _err("A and B must be same size.", "MATLAB:cross:InputSizeMismatch")
+    if dim is not None:
+        v = _farr(dim).reshape(-1) if _isnumlike(dim) else np.zeros(0)
+        if v.size != 1 or v.dtype.kind == "c" or not (_math.isfinite(v[0]) and v[0] >= 1 and v[0] == _math.floor(v[0])):
+            raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
+        k = int(v[0]) - 1
+        if (d[k] if k < len(d) else 1) != 3:
+            raise _err("A and B must be of length 3 in the dimension in which the cross product is taken.", "MATLAB:cross:InvalidDimAorBForCrossProd")
+    else:
+        k = next((i for i, s in enumerate(d) if s == 3), -1)
+        if k < 0:
+            raise _err("A and B must have at least one dimension of length 3.", "MATLAB:cross:InvalidDimAorB")
+    # (in MATLAB's axis order, the cross product's axis first)
+    A = np.moveaxis(np.transpose(_farr(a)), k, 0)
+    B = np.moveaxis(np.transpose(_farr(b)), k, 0)
     r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
-    return _box(r.reshape(_arr(a).shape))
+    return _box(_contig(np.transpose(np.moveaxis(r, 0, k))))
 
 
 @_bs("dot")
@@ -6880,7 +6913,10 @@ def ndgrid_(nargout, *vs):
     if not vs:
         raise _err("Not enough input arguments.")
     if len(vs) == 1:
-        vs = vs * max(2, nargout)
+        if nargout <= 1:
+            # (one grid vector and one output: a 1-D grid, numel(x1)-by-1)
+            return _unmat(_farr(vs[0]).reshape((-1, 1)))
+        vs = vs * nargout
     vecs = [_farr(v).reshape(-1) for v in vs]
     if len(vecs) == 2:
         xv, yv = vecs
@@ -7306,11 +7342,29 @@ def qr_(nargout, x, *args):
 
 @_bi("chol")
 def chol_(nargout, x, *args):
-    L = np.linalg.cholesky(_mat(x))
-    if args and _istext(args[0]) and _text(args[0]) == "lower":
-        return _unmat(L)
-    R = np.conj(L.T)
-    return _unmat(R) if nargout <= 1 else [_unmat(R), 0.0]
+    if nargout > 2:
+        raise _err("chol: permutation outputs are not supported in Sagebrush.")
+    if len(args) > 1 or (args and (not _istext(args[0]) or _text(args[0]) not in ("lower", "upper"))):
+        raise _err("chol: triangle must be 'upper' or 'lower'.")
+    lower = bool(args and _text(args[0]) == "lower")
+    M = _mat(x)
+    if M.shape[0] != M.shape[1]:
+        raise _err("chol: input matrix must be square.")
+    # The kernel reads the lower triangle. Default MATLAB chol reads the
+    # upper triangle, even when the unused half is nonsymmetric.
+    if not lower:
+        M = np.conj(M.T)
+    if nargout <= 1:
+        L = np.linalg.cholesky(M)
+        return _unmat(L if lower else np.conj(L.T))
+    if M.dtype.kind == "c":
+        raise _err("chol: complex matrices are not supported in Sagebrush.")
+    import _nplinalg
+    L, flag = _nplinalg.cholesky(M, True)
+    if flag:
+        q = int(flag) - 1
+        L = L[:q, :q]
+    return [_unmat(L if lower else np.conj(L.T)), float(flag)]
 
 
 @_bs("null")
@@ -8448,7 +8502,12 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
@@ -9935,9 +9994,11 @@ def nthroot_(x, n):
     X = _farr(x)
     N = _farr(n)
     with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.sign(X) * np.abs(X) ** (1.0 / N)
-        r = np.where((X < 0) & (np.mod(N, 2) == 0), _math.nan, r)
-    return _box(r)
+        if np.any((X < 0) & (np.mod(N, 2) != 1)):
+            raise _err("If X is negative, N must be an odd integer.", "MATLAB:nthroot:NegXNotOddIntegerN")
+        r = np.abs(X) ** (1.0 / N)
+        r = np.where(X < 0, -r, r)
+    return _finish(r, _float_class(x, n))
 
 
 def _bitop(f):
