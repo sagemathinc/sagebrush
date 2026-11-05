@@ -42,9 +42,9 @@ export const LATEX_LAZY_CAPS = {
   TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
-  // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles'; proposed with
-  //  it, Nov 5, at about 1.25x its first build (3,246 / 1,627), pending @sagebrush's ruling with daybreak2's number)
-  DOC: { label: "the LaTeX read-only document's chunk", raw: 4 * 1024, gzip: 2 * 1024 },
+  // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles'; @sagebrush,
+  //  2026-11-05: 3.5 / 1.75 KiB, about 340 / 165 B over its first build's 3,246 / 1,627, as the beamer chunk's margin)
+  DOC: { label: "the LaTeX read-only document's chunk", raw: 3.5 * 1024, gzip: 1.75 * 1024 },
   // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
   //  class beamer, or an overlay command). @sagebrush, 2026-11-04: make room for beamer's page furniture by moving
   //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come)
