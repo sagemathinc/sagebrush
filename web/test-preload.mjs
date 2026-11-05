@@ -3,7 +3,8 @@
 // mode's, then those its import lines name), the exact files, the skips (Save-Data, slow, offline, hidden), the
 // storage check, and the fetch loop (one at a time; a stop never cancels the file in flight, only the next).
 //   bun web/test-preload.mjs
-import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, pkgIntent } from "./preload.ts";
+import { PKGSET_LIMITS } from "../src/pkgset.ts";
+import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, pkgIntent, preloadBytes, PKG_LIMITS } from "./preload.ts";
 
 let fails = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -113,8 +114,59 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
   ok(J(pkgIntent(IX, ["bad"], base).urls) === "[]", "pkg: an entry whose source isn't a SHA-256, requiring one the set lacks: nothing");
   ok(J(pkgIntent(null, ["pandas"], base).urls) === "[]" && J(pkgIntent({ packages: 3 }, ["pandas"], base).urls) === "[]", "pkg: not an index: nothing");
   ok(J(pkgIntent(IX, ["core"], base).urls) === "[]", "pkg: a module's dotted name never matches by its tail (pandas.core is pandas's)");
-  const many = { packages: Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`p${i}`, { modules: [`m${i}`], src: { sha256: (i % 16).toString(16).repeat(64), size: 1 }, requires: [`p${i + 1}`] }])) };
-  ok(pkgIntent(many, ["m0"], base).urls.length === 64, "pkg: a chain of 100 requirements: at most 64 packages");
+  // (the limits, the interpreter's own; an index past any is refused whole, before any other work: PKGPRE678-QUEUE-1)
+  ok(J(PKG_LIMITS) === J({ indexBytes: PKGSET_LIMITS.indexBytes, packages: PKGSET_LIMITS.packages, modules: PKGSET_LIMITS.modules, requiresEdges: PKGSET_LIMITS.requiresEdges }), "pkg: the limits are src/pkgset.ts's: " + J(PKG_LIMITS));
+  const chain = (n, extra = {}) => ({ packages: Object.fromEntries(Array.from({ length: n }, (_, i) => [`p${i}`, { modules: [`m${i}`], src: { sha256: (i % 16).toString(16).repeat(64), size: 1 }, requires: i + 1 < n ? [`p${i + 1}`] : [], ...extra }])) });
+  ok(pkgIntent(chain(PKG_LIMITS.packages), ["m0"], base).urls.length === PKG_LIMITS.packages, `pkg: (control) a chain of ${PKG_LIMITS.packages} packages, the limit: all of them`);
+  ok(J(pkgIntent(chain(PKG_LIMITS.packages + 1), ["m0"], base)) === J({ urls: [], bytes: 0 }), `pkg: ${PKG_LIMITS.packages + 1} packages: nothing`);
+  const wide = (k) => ({ packages: { a: { modules: Array.from({ length: k }, (_, i) => `m${i}`), src: { sha256: h("a"), size: 1 }, requires: [] } } });
+  ok(pkgIntent(wide(PKG_LIMITS.modules), ["m0"], base).urls.length === 1 && pkgIntent(wide(PKG_LIMITS.modules + 1), ["m0"], base).urls.length === 0, `pkg: ${PKG_LIMITS.modules} modules: found; ${PKG_LIMITS.modules + 1}: nothing`);
+  const fan = (k) => ({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: Array.from({ length: k }, () => "b") }, b: { modules: ["b"], src: { sha256: h("b"), size: 1 }, requires: [] } } });
+  ok(J(pkgIntent(fan(PKG_LIMITS.requiresEdges), ["a"], base).urls) === J([P("a"), P("b")]) && pkgIntent(fan(PKG_LIMITS.requiresEdges + 1), ["a"], base).urls.length === 0, `pkg: ${PKG_LIMITS.requiresEdges} requires edges (one package named ${PKG_LIMITS.requiresEdges} times, queued once): both; ${PKG_LIMITS.requiresEdges + 1}: nothing`);
+  // (astra's: one package requiring 20,000 missing ones, a 200 KB index under the byte cap)
+  const missing = { packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: Array.from({ length: 20_000 }, (_, i) => `missing${i}`) } } };
+  const t0 = performance.now(), r0 = pkgIntent(missing, ["a"], base), ms0 = performance.now() - t0;
+  ok(J(r0.urls) === "[]" && ms0 < 50, `pkg: one package requiring 20,000 missing ones: nothing, in ${ms0.toFixed(1)} ms`);
+  ok(J(pkgIntent({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: "b" } } }, ["a"], base).urls) === "[]" && J(pkgIntent({ packages: { a: { modules: "a", src: { sha256: h("a"), size: 1 } } } }, ["a"], base).urls) === "[]" && J(pkgIntent({ packages: [] }, ["a"], base).urls) === "[]", "pkg: malformed metadata (requires or modules not a list, packages a list): nothing");
+  ok(J(pkgIntent({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: ["constructor", "__proto__", "toString"] } } }, ["a"], base).urls) === J([P("a")]), "pkg: requires naming an object's properties: never a package");
+}
+
+// the package set's index, read in full only up to its cap (PKGPRE678-INDEX-1): an advertised length over it refused
+// unread, a body growing past it cancelled, a stalled one abandoned; within it, the exact bytes; a redirect refused
+{
+  const served = new Map();
+  const big = new Uint8Array(4096).fill(65);
+  const site = Bun.serve({
+    port: 0, hostname: "127.0.0.1",
+    fetch: (q) => {
+      const p = new URL(q.url).pathname;
+      served.set(p, (served.get(p) ?? 0) + 1);
+      if (p === "/exact") return new Response(big.slice(0, 1000));
+      if (p === "/long") return new Response(big);
+      if (p === "/grows") return new Response(new ReadableStream({ async pull(c) { c.enqueue(big.slice(0, 512)); await new Promise((r) => setTimeout(r, 5)); } }));
+      if (p === "/drip") { let i = 0; return new Response(new ReadableStream({ async pull(c) { await new Promise((r) => setTimeout(r, 40)); if (i++ < 8) c.enqueue(big.slice(0, 10)); else c.close(); } })); }
+      if (p === "/stalls") return new Response(new ReadableStream({ start(c) { c.enqueue(big.slice(0, 10)); } }));
+      if (p === "/moved") return Response.redirect(new URL("/exact", q.url).href, 302);
+      return new Response("", { status: 404 });
+    },
+  });
+  globalThis.fetch = realFetch;
+  const at = (p) => `http://127.0.0.1:${site.port}${p}`;
+  try {
+    const e = await preloadBytes(at("/exact"), 1000);
+    ok(e?.length === 1000, "index: (control) exactly the cap: its bytes");
+    ok((await preloadBytes(at("/long"), 1000)) === null, "index: an advertised length over the cap: refused");
+    const t0 = Date.now(), g = await Promise.race([preloadBytes(at("/grows"), 3000), new Promise((r) => setTimeout(() => r("hung"), 3000))]);
+    ok(g === null && Date.now() - t0 < 2000, `index: a body without a length growing past the cap: cancelled (${Date.now() - t0} ms)`);
+    const d = await preloadBytes(at("/drip"), 1000, 80);
+    ok(d?.length === 80, "index: (control) a body sending a piece every 40 ms for ~360 ms (stall 80 ms): its bytes");
+    const t1 = Date.now(), st = await preloadBytes(at("/stalls"), 1000, 80);
+    ok(st === null && Date.now() - t1 >= 70 && Date.now() - t1 < 2000, `index: a body that stops sending: abandoned after the stall time (${Date.now() - t1} ms)`);
+    ok((await preloadBytes(at("/moved"), 1000)) === null && served.get("/exact") === 1, "index: a redirect: refused, its target never asked");
+    ok((await preloadBytes(at("/nothing"), 1000)) === null, "index: a 404: null");
+  } finally {
+    site.stop(true);
+  }
 }
 
 // redirects are refused, never followed (PRELOAD674-REDIRECT-1), as the runner broker's: real servers on two origins

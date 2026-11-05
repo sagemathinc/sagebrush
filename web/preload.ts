@@ -156,31 +156,72 @@ export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string;
   else setTimeout(() => void go(), o.wait ?? 2000);
 }
 
+/** The package-set index's limits background loading holds to: src/pkgset.ts PKGSET_LIMITS's (indexBytes, packages,
+ * modules, requiresEdges), copied so the page doesn't take that module in; web/test-preload.mjs checks they are equal.
+ * An index past any of them is one the interpreter would refuse: it contributes nothing. */
+export const PKG_LIMITS = Object.freeze({ indexBytes: 256 * 1024, packages: 32, modules: 1024, requiresEdges: 64 });
+
 /** An optional package set's files a document's imports need (web/pkgset-browser.ts fetches the same ones at the
  * import): each package one of whose modules' top-level names `tops` has, with the packages it requires, by its
  * source chunk, pkg/<sha256>.json (a set's precompiled chunks are per core build, and the notebooks' set has none),
- * and their bytes. Anything that isn't an index's shape contributes nothing. */
+ * and their bytes. Anything that isn't an index's shape, or is over PKG_LIMITS (counted before anything else, so the
+ * work is bounded by them: PKGPRE678-QUEUE-1), contributes nothing. */
 export function pkgIntent(index: unknown, tops: readonly string[], base: string): { urls: string[]; bytes: number } {
+  const none = { urls: [], bytes: 0 };
   const pk = (index as any)?.packages;
-  if (!pk || typeof pk !== "object" || !tops.length) return { urls: [], bytes: 0 };
-  const want: string[] = [], queue: string[] = [], named = new Set(tops);
-  for (const [id, p] of Object.entries<any>(pk)) if (Array.isArray(p?.modules) && p.modules.some((m: unknown) => typeof m === "string" && named.has(m.split(".")[0]))) queue.push(id);
-  // (the packages they require, at most 64 in all)
-  const seen = new Set<string>();
-  while (queue.length && want.length < 64) {
-    const id = queue.shift()!;
-    if (seen.has(id) || !Object.hasOwn(pk, id)) continue;
-    seen.add(id);
-    want.push(id);
-    for (const r of Array.isArray(pk[id].requires) ? pk[id].requires : []) if (typeof r === "string") queue.push(r);
+  if (!pk || typeof pk !== "object" || Array.isArray(pk) || !tops.length) return none;
+  const ids = Object.keys(pk);
+  if (ids.length > PKG_LIMITS.packages) return none;
+  let modules = 0, edges = 0;
+  for (const id of ids) {
+    const p = pk[id];
+    if (!p || typeof p !== "object" || !Array.isArray(p.modules) || (p.requires !== undefined && !Array.isArray(p.requires))) return none;
+    if ((modules += p.modules.length) > PKG_LIMITS.modules || (edges += p.requires?.length ?? 0) > PKG_LIMITS.requiresEdges) return none;
   }
+  // (each package queued once, when first named: at most `packages` in the queue, `requiresEdges` edges looked at)
+  const named = new Set(tops), queued = new Set<string>(), queue: string[] = [];
+  const enqueue = (id: unknown) => { if (typeof id === "string" && Object.hasOwn(pk, id) && !queued.has(id)) (queued.add(id), queue.push(id)); };
+  for (const id of ids) if (pk[id].modules.some((m: unknown) => typeof m === "string" && named.has(m.split(".")[0]))) enqueue(id);
+  for (let i = 0; i < queue.length; i++) for (const r of pk[queue[i]].requires ?? []) enqueue(r);
   const urls: string[] = [];
   let bytes = 0;
-  for (const id of want) {
-    const s = pk[id]?.src;
+  for (const id of queue) {
+    const s = pk[id].src;
     if (typeof s?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(s.sha256)) continue;
     urls.push(new URL(`pkg/${s.sha256}.json`, base).href);
     bytes += Number.isSafeInteger(s.size) && s.size > 0 ? s.size : 0;
   }
   return { urls, bytes };
+}
+
+/** One file's bytes, in the broker's request shape (as preloadFetch's), at most `max` of them: an advertised length
+ * over it is refused before reading, and a body that grows past it is cancelled; a body that sends nothing for
+ * `stallMs` is abandoned (PKGPRE678-INDEX-1). Null when refused, failed or abandoned. */
+export async function preloadBytes(url: string, max: number, stallMs = 30_000): Promise<Uint8Array | null> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
+  try {
+    arm();
+    const r = await fetch(url, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", signal: ac.signal } as RequestInit);
+    if (!r.ok || !r.body) return null;
+    if (Number(r.headers?.get?.("content-length") ?? 0) > max) return void ac.abort(), null;
+    const reader = r.body.getReader(), parts: Uint8Array[] = [];
+    let n = 0;
+    for (;;) {
+      arm();
+      const { done, value } = await reader.read();
+      if (done) break;
+      if ((n += value.length) > max) return void ac.abort(), null;
+      parts.push(value);
+    }
+    const out = new Uint8Array(n);
+    let at = 0;
+    for (const p of parts) (out.set(p, at), (at += p.length));
+    return out;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

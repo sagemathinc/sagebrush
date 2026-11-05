@@ -549,7 +549,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
-import { preloadSoon, preloadStop, preloadState, importTops, pkgIntent } from "./preload.ts";
+import { preloadSoon, preloadStop, preloadState, importTops, pkgIntent, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
 const session = pageSession({
@@ -4110,8 +4110,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
         // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
         const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
         if (S) {
-          const r = await fetch(`pkgset/${S}.json`, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" }).catch(() => null);
-          const b = r?.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+          const b = await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes);
           const hex = b && [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
           // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
           // request for one is answered from there; fetched before it controls the page, a chunk would only be
