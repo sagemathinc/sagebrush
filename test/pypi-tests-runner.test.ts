@@ -24,7 +24,7 @@ const upstream: Record<string, string> = {
   "test_demo.py": [
     "import os",
     "def test_ok():",
-    "    print('diagnostic output from inside a test')",
+    "    print('fake.test: ok')",
     "    assert 1 + 1 == 2",
     "def test_known():",
     "    if os.environ.get('FAKE_SB'):",
@@ -63,7 +63,7 @@ function runner(args: string[], env: Record<string, string> = {}): { status: num
 }
 const expected = join(tests, "demo", "expected.out");
 const excluded = join(tests, "demo", "excluded.json");
-const cleanExpected = "test_demo.test_known: ok\ndiagnostic output from inside a test\ntest_demo.test_ok: ok\n";
+const cleanExpected = "test_demo.test_known: ok\nfake.test: ok\ntest_demo.test_ok: ok\n";
 
 test("pypi-tests/run.py: --refresh writes CPython's records, and only from a clean exit", () => {
   const bad = runner(["--refresh", "demo"], { FAKE_CP_EXIT: "23", FAKE_CP_STDERR: "Fatal Python error: simulated" });

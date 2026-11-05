@@ -4,7 +4,8 @@
 - its upstream test files must be the ones SOURCE.json pins (each file's
   SHA-256; with --fetch, also re-derived from the pinned archive);
 - CPython, with the committed package sources on its path, must print
-  expected.out (pypi-tests/harness.py: one line per test);
+  expected.out (pypi-tests/harness.py: one status record per pinned upstream
+  test function, plus any stdout that test emits);
 - Sagebrush (build/cli/pyjs.cjs, which finds the package through its
   registry) must print exactly the same. An optional excluded.json is applied
   identically by the harness under both interpreters.
@@ -15,6 +16,7 @@ error where CPython passes is a difference too.
     python3 pypi-tests/run.py [-v] [--fetch] [NAME...]
     python3 pypi-tests/run.py --refresh NAME    write expected.out from CPython
 """
+import ast
 import hashlib
 import io
 import re
@@ -75,20 +77,39 @@ def normal(out, name):
     return "".join(pre.sub('"<package>/', l) for l in out.splitlines(True) if not re.match(r"^\s+[~^]+\s*$", l))
 
 
-def record_counts(out):
-    """Count harness status records, not arbitrary lines printed by tests."""
+def upstream_tests(up, files):
+    """The closed set the harness discovers: top-level test_* functions."""
+    names = set()
+    for filename in files:
+        module = filename[:-3]
+        tree = ast.parse(open(os.path.join(up, filename), encoding="utf-8").read(), filename=filename)
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                names.add(module + "." + node.name)
+    return names
+
+
+def record_counts(out, test_names):
+    """Count exactly one harness record for every pinned upstream test."""
     counts = {"ok": 0, "skipped": 0, "excluded": 0, "FAIL": 0}
-    record = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*: (ok|skipped|excluded|FAIL(?: |$))")
+    seen = set()
+    record = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*): (ok|skipped|excluded|FAIL(?: |$))")
     for line in out.splitlines():
         hit = record.match(line)
-        if hit:
-            status = hit.group(1).strip()
+        if hit and hit.group(1) in test_names:
+            name, status = hit.group(1), hit.group(2).strip()
+            if name in seen:
+                raise ValueError("duplicate harness record for %s" % name)
+            seen.add(name)
             counts["FAIL" if status == "FAIL" else status] += 1
+    missing = sorted(test_names - seen)
+    if missing:
+        raise ValueError("missing harness records for %s" % ", ".join(missing))
     return counts
 
 
-def summary(out):
-    counts = record_counts(out)
+def summary(out, test_names):
+    counts = record_counts(out, test_names)
     total = sum(counts.values())
     return "%d tests (%d passed, %d skipped, %d excluded)" % (
         total, counts["ok"], counts["skipped"], counts["excluded"]
@@ -101,6 +122,7 @@ for name in names:
     src = json.load(open(os.path.join(d, "SOURCE.json")))
     # (the test files are the pinned ones, and only those)
     up = os.path.join(d, "upstream")
+    test_names = upstream_tests(up, src["files"])
     have = sorted(f for f in os.listdir(up) if f != "__pycache__")
     problems = ["SOURCE.json pins %r, not a plain .py name" % f for f in src["files"] if not FILE_NAME.match(f)]
     if problems:
@@ -166,7 +188,7 @@ for name in names:
         continue
     if "--refresh" in sys.argv:
         open(os.path.join(d, "expected.out"), "w").write(cp)
-        print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp), record_counts(cp)["FAIL"]))
+        print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp, test_names), record_counts(cp, test_names)["FAIL"]))
         continue
     want = open(os.path.join(d, "expected.out")).read()
     # (its known differences, packages/pypi-<name>/known.json: each test may
@@ -211,5 +233,5 @@ for name in names:
         for p in problems:
             print("  " + p)
     else:
-        print("%s %s: %s, CPython and Sagebrush identical%s" % (name, src["version"], summary(want), "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
+        print("%s %s: %s, CPython and Sagebrush identical%s" % (name, src["version"], summary(want, test_names), "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
 sys.exit(1 if bad else 0)
