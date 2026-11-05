@@ -2210,7 +2210,7 @@ def nonzeros_(nargout, x):
         a = _m._arr(x).reshape(-1)
         v = a[a != 0]
         return _m._box(np.array(v.reshape((1, -1))))
-    return _m._box(np.array(S_vals(x).reshape((1, -1))))
+    return _m._box(np.array(x.pr.reshape((1, -1))))
 
 
 def S_vals(S):
