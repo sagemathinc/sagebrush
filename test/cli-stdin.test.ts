@@ -138,7 +138,8 @@ const tty = (args: string[], input: string) => {
 // assertions then see the transcript.
 const ttySteps = (args: string[], steps: string[], prompt: string): Promise<{ status: number | null; out: string; err?: Error }> => {
   const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-  const child = spawn("script", ["-qec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"] });
+  // (TERM set: readline doesn't complete on a dumb terminal, and a CI runner's TERM may be dumb or unset)
+  const child = spawn("script", ["-qec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, TERM: "xterm" } });
   const clean = (t: string) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
   let raw = "";
   let wake: (() => void) | null = null;
