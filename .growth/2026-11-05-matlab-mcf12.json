@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "MCF-12 (#669): return real Cholesky failed-pivot status and completed leading factors in the existing factorization pass, and honor the selected triangle. Measured by daybreak2 against master cb9c394e7 with Bun 1.4.4 and Node 24.21.0: lib.gen +324, pyjs +380 (+64 build-metadata allowance gives marker 444), matlab.pre +3165, matlab.src +834, worker +127. No dependencies or new chunks.",
+ "bytes": {
+  "cli/lib.gen.js": 324,
+  "cli/pyjs.cjs": 444,
+  "engine/lib/matlab.pre": 3165,
+  "engine/lib/matlab.src": 834,
+  "engine/sagebrush-worker.js": 127
+ }
+}
