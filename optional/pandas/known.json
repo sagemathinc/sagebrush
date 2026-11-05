@@ -147,9 +147,9 @@
       "reason": "pandas.MultiIndex is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.pd.read_excel",
-      "message": "pandas.read_excel is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.read_excel is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.pd.read_parquet",
+      "message": "pandas.read_parquet is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.read_parquet is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.pd.get_dummies",
@@ -550,6 +550,66 @@
       "case": "dt.day-of-year-past-2255",
       "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
       "reason": "day 366 of 2255 runs on into 2256-01-01 (as pandas' strptime does), past the years whose int64 microseconds are exact here (to 2**53): refused rather than rounded"
+    },
+    {
+      "case": "xl.skiprows-list-nrows",
+      "message": "pandas: read_excel(skiprows=<a list>, nrows=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "with a list of rows to skip and nrows, which rows pandas reads depends on its parser's read-ahead past the header; refused rather than read a different count"
+    },
+    {
+      "case": "xl.int-past-int64",
+      "message": "pandas: read_excel of a column of integers past int64 (pandas makes uint64 or object of it) is not in Sagebrush's pandas 0.x subset",
+      "reason": "an all-integer column with an integer past int64 is uint64 or object in pandas; Sagebrush's numpy has neither for it, so it refuses rather than round"
+    },
+    {
+      "case": "xl.skiprows-callable",
+      "message": "pandas: read_excel(skiprows=function) is not in Sagebrush's pandas 0.x subset",
+      "reason": "skiprows as a function: only an int or a list of row numbers are read here"
+    },
+    {
+      "case": "xl.header-list",
+      "message": "pandas: read_excel(header=[0, 1]) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a MultiIndex header (header as a list) is outside the subset, as for read_csv"
+    },
+    {
+      "case": "xl.usecols-callable",
+      "message": "pandas: read_excel(usecols=function) is not in Sagebrush's pandas 0.x subset",
+      "reason": "usecols as a function: only letters, a list of positions or a list of names are read here"
+    },
+    {
+      "case": "xl.index_col-list",
+      "message": "pandas: read_excel(index_col=[0, 1]) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a MultiIndex (index_col as a list) is outside the subset"
+    },
+    {
+      "case": "xl.engine",
+      "message": "pandas: read_excel(engine='calamine') is not in Sagebrush's pandas 0.x subset",
+      "reason": "only the openpyxl engine's reading of .xlsx is reproduced (written from the format, no engine is imported)"
+    },
+    {
+      "case": "xl.dtype",
+      "message": "pandas: read_excel(dtype=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "read_excel's dtype=, converters= and the parser's other per-column options are outside the subset; the default inference is pandas'"
+    },
+    {
+      "case": "xl.na_filter",
+      "message": "pandas: read_excel(keep_default_na=, na_filter=, decimal=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "only the default NA strings and decimal point are read here"
+    },
+    {
+      "case": "xl.xls",
+      "message": "pandas: an .xls workbook (only .xlsx and .xlsm are read) is not in Sagebrush's pandas 0.x subset",
+      "reason": "the binary .xls format (pandas reads it with xlrd or calamine) is not read: only the zip-based .xlsx"
+    },
+    {
+      "case": "xl.multi-disk",
+      "message": "pandas: a zip archive spread over several disks is not in Sagebrush's pandas 0.x subset",
+      "reason": "an archive whose end record names another disk: pandas' zipfile reads past that field; refused here rather than guess which bytes are the archive"
+    },
+    {
+      "case": "xl.url-https",
+      "message": "read_excel from a URL isn't supported; download the file into the project first",
+      "reason": "pandas fetches a URL itself; Sagebrush's read_excel does no network I/O (data-access design: the reader downloads third-party files from the source), as read_csv"
     }
   ]
 }

@@ -116,7 +116,8 @@ class ZipArchive(object):
         if ent is None:
             raise KeyError("There is no item named %r in the archive" % name)
         if ent.flags & 1:
-            raise _subset("an encrypted workbook")
+            # (zipfile's error, which pandas' openpyxl reader gives: a password is never asked for)
+            raise RuntimeError("File %r is encrypted, password required for extraction" % name)
         if ent.method not in (0, 8):
             raise _subset("a zip entry compressed with method %d" % ent.method)
         bound = min(MAX_ENTRY, max(MAX_RATIO * ent.csize, SMALL))

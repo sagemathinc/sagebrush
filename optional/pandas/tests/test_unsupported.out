@@ -98,8 +98,8 @@
 !! NotImplementedError: pandas.Categorical is not in Sagebrush's pandas 0.x subset
 == name.pd.MultiIndex
 !! NotImplementedError: pandas.MultiIndex is not in Sagebrush's pandas 0.x subset
-== name.pd.read_excel
-!! NotImplementedError: pandas.read_excel is not in Sagebrush's pandas 0.x subset
+== name.pd.read_parquet
+!! NotImplementedError: pandas.read_parquet is not in Sagebrush's pandas 0.x subset
 == name.pd.get_dummies
 !! NotImplementedError: pandas.get_dummies is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.groupby
@@ -216,11 +216,35 @@
 !! NotImplementedError: pandas.read_csv(a binary file object) is not in Sagebrush's pandas 0.x subset
 == csv.quotechar-sep
 !! NotImplementedError: pandas.read_csv(quotechar=',') is not in Sagebrush's pandas 0.x subset
+== xl.skiprows-list-nrows
+!! NotImplementedError: pandas: read_excel(skiprows=<a list>, nrows=) is not in Sagebrush's pandas 0.x subset
+== xl.int-past-int64
+!! NotImplementedError: pandas: read_excel of a column of integers past int64 (pandas makes uint64 or object of it) is not in Sagebrush's pandas 0.x subset
+== xl.skiprows-callable
+!! NotImplementedError: pandas: read_excel(skiprows=function) is not in Sagebrush's pandas 0.x subset
+== xl.header-list
+!! NotImplementedError: pandas: read_excel(header=[0, 1]) is not in Sagebrush's pandas 0.x subset
+== xl.usecols-callable
+!! NotImplementedError: pandas: read_excel(usecols=function) is not in Sagebrush's pandas 0.x subset
+== xl.index_col-list
+!! NotImplementedError: pandas: read_excel(index_col=[0, 1]) is not in Sagebrush's pandas 0.x subset
+== xl.engine
+!! NotImplementedError: pandas: read_excel(engine='calamine') is not in Sagebrush's pandas 0.x subset
+== xl.dtype
+!! NotImplementedError: pandas: read_excel(dtype=) is not in Sagebrush's pandas 0.x subset
+== xl.na_filter
+!! NotImplementedError: pandas: read_excel(keep_default_na=, na_filter=, decimal=) is not in Sagebrush's pandas 0.x subset
+== xl.xls
+!! NotImplementedError: pandas: an .xls workbook (only .xlsx and .xlsm are read) is not in Sagebrush's pandas 0.x subset
+== xl.multi-disk
+!! NotImplementedError: pandas: a zip archive spread over several disks is not in Sagebrush's pandas 0.x subset
 == csv.url-https
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
 == csv.url-http-upper
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
 == csv.url-s3
 !! NotImplementedError: read_csv from a URL isn't supported; download the file into the project first
+== xl.url-https
+!! NotImplementedError: read_excel from a URL isn't supported; download the file into the project first
 == csv.url-nothing-opened
 []

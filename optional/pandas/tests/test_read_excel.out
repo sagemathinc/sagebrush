@@ -1,0 +1,174 @@
+== basic
+([('n', 'int64'), ('f', 'float64'), ('s', 'str'), ('b', 'bool'), ('d', 'datetime64[us]')], [['1', '2', '3'], ['1.5', '-2.25', '1e+300'], ["'x'", "'y'", "'zz z'"], ['True', 'False', 'True'], ["Timestamp('2020-01-31 00:00:00')", "Timestamp('1999-12-31 00:00:00')", "Timestamp('2021-06-01 12:30:15')"]],    n              f     s      b                   d
+0  1   1.500000e+00     x   True 2020-01-31 00:00:00
+1  2  -2.250000e+00     y  False 1999-12-31 00:00:00
+2  3  1.000000e+300  zz z   True 2021-06-01 12:30:15)
+== basic.index
+RangeIndex(start=0, stop=3, step=1)
+== basic.columns
+Index(['n', 'f', 's', 'b', 'd'], dtype='str')
+== numbers
+([('a', 'int64'), ('b', 'float64'), ('c', 'int64')], [['1', '2', '1000000000000000'], ['0.1', '3.0', '2.5e-10'], ['123456789012345', '-7', '0']],                   a             b                c
+0                 1  1.000000e-01  123456789012345
+1                 2  3.000000e+00               -7
+2  1000000000000000  2.500000e-10                0)
+== missing
+([('a', 'float64'), ('b', 'float64'), ('c', 'str')], [['1.0', 'nan', '3.0'], ['nan', 'nan', '4.0'], ["'x'", 'nan', 'nan']],      a    b    c
+0  1.0  NaN    x
+1  NaN  NaN  NaN
+2  3.0  4.0  NaN)
+== bools
+([('a', 'bool'), ('b', 'float64'), ('c', 'int64')], [['True', 'False', 'True'], ['1.0', 'nan', '0.0'], ['1', '1', '2']],        a    b  c
+0   True  1.0  1
+1  False  NaN  1
+2   True  0.0  2)
+== cell types
+([('e', 'float64'), ('i', 'str'), ('f', 'object')], [['nan', 'nan'], ["'in line'", "'two'"], ["'ab'", '2']],     e        i   f
+0 NaN  in line  ab
+1 NaN      two   2)
+== dates 1900
+([('d', 'datetime64[us]')], [["Timestamp('1900-02-28 00:00:00')", "Timestamp('1900-03-01 00:00:00')", "Timestamp('1900-01-01 00:00:00')", "Timestamp('2021-01-01 18:00:00')"]],                     d
+0 1900-02-28 00:00:00
+1 1900-03-01 00:00:00
+2 1900-01-01 00:00:00
+3 2021-01-01 18:00:00)
+== dates 1904
+([('d', 'datetime64[us]'), ('t', 'object')], [["Timestamp('2020-02-29 00:00:00')", "Timestamp('1904-01-02 00:00:00')"], ['datetime.time(6, 30)', 'datetime.time(23, 59, 59)']],            d         t
+0 2020-02-29  06:30:00
+1 1904-01-02  23:59:59)
+== times
+([('t', 'object'), ('p', 'float64')], [['datetime.time(0, 0, 1)', 'datetime.time(12, 0)'], ['0.125', '1.0']],           t      p
+0  00:00:01  0.125
+1  12:00:00  1.000)
+== date gap
+([('d', 'datetime64[us]')], [["Timestamp('2020-01-01 00:00:00')", 'NaT', "Timestamp('2020-01-03 00:00:00')"]],            d
+0 2020-01-01
+1        NaT
+2 2020-01-03)
+== inference
+([('empty', 'float64'), ('numstr', 'float64'), ('mixnum', 'float64'), ('na', 'float64'), ('mixna', 'float64'), ('bad', 'str'), ('boolstr', 'bool'), ('strtext', 'object'), ('spaces', 'str'), ('onena', 'float64'), ('intstr', 'int64'), ('boolmix', 'float64'), ('numbool', 'float64'), ('nanstr', 'float64'), ('infs', 'float64'), ('points', 'float64')], [['nan', 'nan', 'nan', 'nan'], ['1.5', '2.0', '3.0', '1000.0'], ['1.0', '2.5', '3.0', '4.0'], ['nan', 'nan', 'nan', 'nan'], ['1.0', 'nan', '2.0', 'nan'], ["'1,000'", "'0x10'", "'inf'", "'1_000'"], ['True', 'False', 'True', 'True'], ["'1'", "'abc'", '2', 'nan'], ["' '", "'  '", 'nan', "'1'"], ['nan', 'nan', 'nan', 'nan'], ['1', '2', '3', '-4'], ['1.0', 'nan', '0.0', 'nan'], ['1.0', '1.0', '2.5', 'nan'], ['nan', 'nan', 'nan', 'nan'], ['inf', '-inf', 'inf', '1.0'], ['1.0', '0.5', '3.0', '100000.0']],    empty  numstr  mixnum  na  ...  numbool  nanstr  infs    points
+0    NaN     1.5     1.0 NaN  ...      1.0     NaN   inf       1.0
+1    NaN     2.0     2.5 NaN  ...      1.0     NaN  -inf       0.5
+2    NaN     3.0     3.0 NaN  ...      2.5     NaN   inf       3.0
+3    NaN  1000.0     4.0 NaN  ...      NaN     NaN   1.0  100000.0
+
+[4 rows x 16 columns])
+== header
+['a', 'Unnamed: 1', 'a.2', 7, 'a.1', 2.5]
+== header=None
+([('0', 'object'), ('1', 'float64'), ('2', 'object'), ('3', 'int64'), ('4', 'object'), ('5', 'float64')], [["'a'", '1', '7'], ['nan', '2.0', '8.0'], ["'a'", '3', '9'], ['7', '4', '10'], ["'a.1'", '5', '11'], ['2.5', '6.0', '12.0']],    0    1  2   3    4     5
+0  a  NaN  a   7  a.1   2.5
+1  1  2.0  3   4    5   6.0
+2  7  8.0  9  10   11  12.0)
+== header=1
+([('1', 'int64'), ('2', 'int64'), ('3', 'int64'), ('4', 'int64'), ('5', 'int64'), ('6', 'int64')], [['7'], ['8'], ['9'], ['10'], ['11'], ['12']],    1  2  3   4   5   6
+0  7  8  9  10  11  12)
+== header-only
+([('a', 'object'), ('b', 'object')], [[], []], Empty DataFrame
+Columns: [a, b]
+Index: [])
+== empty sheet
+([], [], Empty DataFrame
+Columns: []
+Index: [])
+== header gap
+([('a', 'object'), ('Unnamed: 1', 'object'), ('c', 'object')], [[], [], []], Empty DataFrame
+Columns: [a, Unnamed: 1, c]
+Index: [])
+== nrows
+([('k', 'int64'), ('v', 'float64'), ('w', 'str')], [['0', '1', '2'], ['0.0', '1.5', '3.0'], ["'r0'", "'r1'", "'r2'"]],    k    v   w
+0  0  0.0  r0
+1  1  1.5  r1
+2  2  3.0  r2)
+== nrows=0
+([('k', 'object'), ('v', 'object'), ('w', 'object')], [[], [], []], Empty DataFrame
+Columns: [k, v, w]
+Index: [])
+== skiprows int
+([('3', 'int64'), ('4.5', 'float64'), ('r3', 'str')], [['4', '5'], ['6.0', '7.5'], ["'r4'", "'r5'"]],    3  4.5  r3
+0  4  6.0  r4
+1  5  7.5  r5)
+== skiprows list
+([('k', 'int64'), ('v', 'float64'), ('w', 'str')], [['1', '3', '5', '6', '7', '8', '9', '10', '11'], ['1.5', '4.5', '7.5', '9.0', '10.5', '12.0', '13.5', '15.0', '16.5'], ["'r1'", "'r3'", "'r5'", "'r6'", "'r7'", "'r8'", "'r9'", "'r10'", "'r11'"]],     k     v    w
+0   1   1.5   r1
+1   3   4.5   r3
+2   5   7.5   r5
+3   6   9.0   r6
+4   7  10.5   r7
+5   8  12.0   r8
+6   9  13.5   r9
+7  10  15.0  r10
+8  11  16.5  r11)
+== usecols letters
+([('k', 'int64'), ('w', 'str')], [['0', '1'], ["'r0'", "'r1'"]],    k   w
+0  0  r0
+1  1  r1)
+== usecols range
+([('v', 'float64'), ('w', 'str')], [['0.0', '1.5'], ["'r0'", "'r1'"]],      v   w
+0  0.0  r0
+1  1.5  r1)
+== usecols ints
+([('k', 'int64'), ('w', 'str')], [['0', '1'], ["'r0'", "'r1'"]],    k   w
+0  0  r0
+1  1  r1)
+== usecols names
+([('k', 'int64'), ('w', 'str')], [['0', '1'], ["'r0'", "'r1'"]],    k   w
+0  0  r0
+1  1  r1)
+== index_col
+([('v', 'float64'), ('w', 'str')], [['0.0', '1.5', '3.0'], ["'r0'", "'r1'", "'r2'"]],      v   w
+k         
+0  0.0  r0
+1  1.5  r1
+2  3.0  r2)
+== index_col dates
+
+            x
+d            
+2020-01-01  1
+2020-02-01  2
+== sheet_name int
+([('b', 'str')], [["'x'", "'y'"]],    b
+0  x
+1  y)
+== sheet_name str
+([('b', 'str')], [["'x'", "'y'"]],    b
+0  x
+1  y)
+== sheet_name list
+{0: ([('a', 'int64')], [['1']],    a
+0  1), 'Second': ([('b', 'str')], [["'x'", "'y'"]],    b
+0  x
+1  y)}
+== sheet_name None
+[('First', (1, 1)), ('Second', (2, 1)), ('Third', (0, 0))]
+== sheet_name missing
+!! ValueError: Worksheet named 'Nope' not found
+== sheet_name past
+!! ValueError: Worksheet index 5 is invalid, 3 worksheets found
+== strings
+([('h', 'str')], [["'rich'", "'ph'", "'a & b <c> é中'", "'line1\\nline2\\nline3'", "'  pad  '", "'\\rcr'"]],                      h
+0                 rich
+1                   ph
+2         a & b <c> é中
+3  line1\nline2\nline3
+4                pad  
+5                 \rcr)
+== prefixed
+([('k', 'int64'), ('v', 'float64')], [['1'], ['2.5']],    k    v
+0  1  2.5)
+== attribute orders
+([('k', 'int64'), ('v', 'float64')], [['1', '3'], ['2.5', '4.0']],    k    v
+0  1  2.5
+1  3  4.0)
+== row and column gaps
+([('a', 'float64'), ('Unnamed: 1', 'float64'), ('c', 'float64')], [['nan', 'nan', 'nan'], ['nan', 'nan', '2.0'], ['nan', 'nan', 'nan']],     a  Unnamed: 1   c
+0 NaN         NaN NaN
+1 NaN         NaN NaN
+2 NaN         2.0 NaN)
+== bytes
+!! TypeError: Expected file path name or file-like object, got <class 'bytes'> type
+== not a file
+!! ValueError: Invalid file path or buffer object type: <class 'int'>
+== encrypted
+!! RuntimeError: File 'xl/worksheets/sheet1.xml' is encrypted, password required for extraction

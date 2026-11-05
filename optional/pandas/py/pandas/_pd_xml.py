@@ -72,6 +72,8 @@ def events(text):
             raise _bad("an unterminated XML declaration")
         pos = end + 2
     n = len(text)
+    # (one document element, as XML has: none, or a second, is refused)
+    roots = 0
     while pos < n:
         if text.startswith("<!--", pos):
             end = text.find("-->", pos + 4)
@@ -103,6 +105,10 @@ def events(text):
         s = _START.fullmatch(tok)
         if not s:
             raise _bad("a malformed tag")
+        if not stack:
+            roots += 1
+            if roots > 1:
+                raise _bad("a second document element")
         attrs = {}
         for a in _ATTR.finditer(s.group(2)):
             v = a.group(2) if a.group(2) is not None else a.group(3)
@@ -114,3 +120,5 @@ def events(text):
             stack.append(s.group(1))
     if stack:
         raise _bad("an element with no end")
+    if not roots:
+        raise _bad("no document element")

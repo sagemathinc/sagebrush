@@ -192,6 +192,7 @@ def _fast_rows(text, strings, xfs, d1904):
     cols = {}
     row = None
     nx = len(xfs)
+    nxt, dropped = 0, False
     while pos < n:
         q = plain(body, pos) if open_row else None
         if q is not None:
@@ -203,7 +204,7 @@ def _fast_rows(text, strings, xfs, d1904):
                 col = cols[letters] = _col_index(letters)
             pos = q.end()
             v = q.group(5)
-            if v is None:
+            if v is None or dropped:
                 continue
             ct = q.group(4)
             if ct is None or ct == "n":
@@ -242,6 +243,10 @@ def _fast_rows(text, strings, xfs, d1904):
             col = -1
             row = None
             open_row = not t.group(2)
+            # (openpyxl's reader: a row whose number is below the next one expected is not read)
+            dropped = row_i < nxt
+            if not dropped:
+                nxt = row_i + 1
             continue
         if tok == "</row>":
             if not open_row:
@@ -286,7 +291,7 @@ def _fast_rows(text, strings, xfs, d1904):
                             cell["is"].append("".join(text_))
                             text_ = None
         val = _cell_value(cell, strings, xfs, d1904)
-        if val != "":
+        if val != "" and not dropped:
             rows.setdefault(row_i, {})[col] = val
     if open_row:
         return None
@@ -315,6 +320,7 @@ def _sheet_rows(z, path, strings, xfs, d1904):
 def _scan_rows(doc, strings, xfs, d1904):
     """The sheet's cells as {row: {col: value}}, by the scanner's events."""
     rows = {}
+    nxt, dropped = 0, False
     row_i = -1
     cell = None
     text = None
@@ -326,6 +332,10 @@ def _scan_rows(doc, strings, xfs, d1904):
                 r = ev[2].get("r")
                 row_i = int(r) - 1 if r else row_i + 1
                 col = -1
+                # (openpyxl's reader: a row whose number is below the next one expected is not read)
+                dropped = row_i < nxt
+                if not dropped:
+                    nxt = row_i + 1
             elif n == "c":
                 ref = ev[2].get("r")
                 if ref:
@@ -349,7 +359,7 @@ def _scan_rows(doc, strings, xfs, d1904):
                 text = None
             elif n == "c" and cell is not None:
                 val = _cell_value(cell, strings, xfs, d1904)
-                if val != "":
+                if val != "" and not dropped:
                     rows.setdefault(row_i, {})[col] = val
                 cell = None
     return rows
@@ -407,7 +417,7 @@ _INT64 = 1 << 63
 def _numeric(vals):
     """maybe_convert_numeric: the column as numbers (bool, int64 or float64), or None when a value isn't one."""
     out = []
-    null = flt = num = False
+    null = flt = num = big = False
     for v in vals:
         if isinstance(v, str):
             if v in _NA:
@@ -425,7 +435,7 @@ def _numeric(vals):
             out.append(v)
         elif isinstance(v, int):
             if not -_INT64 <= v < _INT64:
-                raise _subset("read_excel of a column of integers past int64 (pandas makes uint64 or object of it)")
+                big = True
             num = True
             out.append(v)
         elif isinstance(v, float):
@@ -439,6 +449,9 @@ def _numeric(vals):
             return None
     if null or flt:
         return "float64", [float("nan") if v is None else float(v) for v in out]
+    if big:
+        # (all integers, one past int64: pandas makes uint64 or object of it)
+        raise _subset("read_excel of a column of integers past int64 (pandas makes uint64 or object of it)")
     if num:
         return "int64", [int(v) for v in out]
     return "bool", out
@@ -472,21 +485,18 @@ def _infer_column(vals):
 def _frame(rows, header, skiprows, nrows, usecols, index_col):
     from ._pd_frame import DataFrame
     from ._pd_index import Index, RangeIndex
+    # (a sheet with no rows at all: pandas' read_excel gives DataFrame() for it, before its parser)
+    if not rows:
+        return DataFrame()
     if nrows is not None:
-        # (pandas asks the sheet for only the rows it needs, the header and nrows past the rows skipped: the width
-        # is theirs)
-        need = (0 if header is None else int(header) + 1) + int(nrows)
+        # (pandas asks the sheet for only the rows it needs, the header (one row with header=None too) and nrows
+        # past the rows skipped (_calc_rows): the width is theirs)
+        need = (1 if header is None else int(header) + 1) + int(nrows)
         if isinstance(skiprows, int) and not isinstance(skiprows, bool):
             rows = rows[:skiprows + need]
         elif skiprows is not None:
-            drop, kept, cut = set(skiprows), 0, len(rows)
-            for i in range(len(rows)):
-                if i not in drop:
-                    kept += 1
-                    if kept == need:
-                        cut = i + 1
-                        break
-            rows = rows[:cut]
+            # (its parser's read-ahead past the header then decides which rows count: not followed here)
+            raise _subset("read_excel(skiprows=<a list>, nrows=)")
         else:
             rows = rows[:need]
     width = max((len(r) for r in rows), default=0)
@@ -507,13 +517,20 @@ def _frame(rows, header, skiprows, nrows, usecols, index_col):
             raise ValueError("Passed header=%d, len of %d, but only %d lines in file" % (header, len(rows), len(rows)))
         head = rows[header]
         body = rows[header + 1:]
-        names, seen = [], {}
-        for j, h in enumerate(head):
-            if h == "":
-                h = "Unnamed: %d" % j
-            k = seen.get(h, 0)
-            seen[h] = k + 1
-            names.append(h if k == 0 else "%s.%d" % (h, k))
+        names = ["Unnamed: %d" % j if h == "" else h for j, h in enumerate(head)]
+        # (pandas' Python parser: duplicates numbered, the named columns before the unnamed ones, a number taken
+        # only if no column has that name already)
+        unnamed = [j for j, h in enumerate(head) if h == ""]
+        counts = {}
+        for j in [j for j in range(len(names)) if head[j] != ""] + unnamed:
+            col = old = names[j]
+            cur = counts.get(col, 0)
+            while cur > 0:
+                counts[old] = cur + 1
+                col = "%s.%d" % (old, cur)
+                cur = cur + 1 if col in names else counts.get(col, 0)
+            names[j] = col
+            counts[col] = cur + 1
     else:
         raise _subset("read_excel(header=%r)" % (header,))
     if nrows is not None:
@@ -595,14 +612,19 @@ def read_excel(io, sheet_name=0, *, header=0, names=None, index_col=None, usecol
 
 def _read_bytes(io):
     if isinstance(io, (bytes, bytearray)):
-        raise _subset("read_excel of bytes (pass a path or a file-like object)")
+        # (pandas' own errors for what isn't a path or a file)
+        raise TypeError("Expected file path name or file-like object, got %r type" % type(io))
     if isinstance(io, str):
+        # (as read_csv: pandas fetches a URL itself; here the file must be in the project first, nothing fetched)
+        if re.match(r"(?i)(https?|ftp|s3|gs)://", io):
+            raise NotImplementedError("read_excel from a URL isn't supported; download the file into the project first")
         with open(io, "rb") as f:
             return f.read()
     try:
-        data = io.read()
+        read = io.read
     except AttributeError:
-        raise _subset("read_excel(%s)" % type(io).__name__)
+        raise ValueError("Invalid file path or buffer object type: %r" % type(io)) from None
+    data = read()
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("read_excel needs a binary file")
     return bytes(data)

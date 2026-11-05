@@ -9,7 +9,7 @@
 == unique
 True
 == count
-(110, 110)
+(122, 122)
 == missing
 []
 == extra
@@ -17,7 +17,7 @@ True
 == message
 []
 == sagebrush-only
-['test_budget.py', 'test_budget_map.py', 'test_budget_order.py', 'test_known.py', 'test_repr_escape.py', 'test_unsupported.py']
+['test_budget.py', 'test_budget_map.py', 'test_budget_order.py', 'test_known.py', 'test_read_excel_limits.py', 'test_repr_escape.py', 'test_unsupported.py']
 == sagebrush-only-unknown
 []
 == oracle-and-sagebrush-only
