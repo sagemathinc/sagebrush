@@ -1720,13 +1720,28 @@ def tile(A, reps):
     nd = _builtins.max(len(reps), A.ndim)
     A = A.reshape((1,) * (nd - A.ndim) + A.shape)
     reps = (1,) * (nd - len(reps)) + reps
+    if reps and _builtins.min(reps) < 0:
+        # (A has no elements: NumPy only reshapes it to the product shape, where a negative length is its one
+        # "unknown" dimension: two are refused, and one, as no 0-size array fills it, with the shape printed
+        # as NumPy does, leading unknowns dropped and the others "newaxis")
+        shape = ()
+        text = ""
+        unknown = 0
+        for s, r in zip(A.shape, reps):
+            shape += (s * r,)
+            if s * r >= 0:
+                text += ",%d" % (s * r)
+            else:
+                unknown += 1
+                if text:
+                    text += ",newaxis"
+        if unknown > 1:
+            raise ValueError("can only specify one unknown dimension")
+        if unknown:
+            raise ValueError("cannot reshape array of size 0 into shape (%s)" % text[1:])
+        return A.reshape(shape)
     for ax, r in enumerate(reps):
-        if r < 0:
-            # (A has no elements: NumPy only reshapes it, so a negative count is refused only on an axis of
-            # nonzero length, where it would make a negative one)
-            if A.shape[ax]:
-                raise ValueError("negative dimensions are not allowed")
-        elif r == 0:
+        if r == 0:
             # (no copies: the axis is empty, as NumPy's tile gives)
             A = A[(slice(None),) * ax + (slice(0, 0),)]
         elif r != 1:

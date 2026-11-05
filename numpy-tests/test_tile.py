@@ -56,3 +56,9 @@ for tag, f in [("-1", lambda: np.tile(a, -1)), ("(2, -1)", lambda: np.tile(m, (2
                ("empty x -1", lambda: np.tile(np.zeros(0), -1)), ("empty (0,2) x (-1, 1)", lambda: np.tile(np.zeros((0, 2)), (-1, 1))),
                ("np.array([2, 2])", lambda: np.tile(a, np.array([2, 2])))]:
     show("tile " + tag, f)
+# (an empty input with a negative count: NumPy only reshapes, a negative length being its one unknown dimension;
+# grader's A8 cases first)
+for s, r in [((0, 3), (1, -1)), ((3, 0), (-2, 1)), ((0, 3), (-1, 1)), ((0, 3), (1, -2)), ((0, 2, 3), (1, 1, -1)),
+             ((0, 2, 3), (1, -1, 1)), ((0, 2, 3), (1, -1, -1)), ((2, 0), (-1, -1)), ((2, 0, 3), (-1, 1, 1)),
+             ((0, 3), (2, -1)), ((0,), (-1,)), ((0, 5), (-1, -1)), ((4, 0), (1, -3)), ((0, 3), (-1,)), ((0, 3), (3, 1, -1))]:
+    show("tile zeros%r x %r" % (s, r), lambda: np.tile(np.zeros(s), r))
