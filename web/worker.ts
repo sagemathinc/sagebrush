@@ -46,6 +46,13 @@ const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES
 declare const __SB_RASTER_HASH__: string;
 (globalThis as any).__SAGEBRUSH_RASTER_URL__ = FILES ? FILES["sagebrush-raster.wasm"] : new URL("sagebrush-raster.wasm?h=" + __SB_RASTER_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_RASTER_SHA256__ = __SB_RASTER_HASH__;
+// engine/nd's numerics module likewise, the first time np.linalg.cholesky runs
+// (src/runtime/nd.ts; the runner's broker may fetch it, web/runner-fetch.mts);
+// not one of the files a downloaded file's runner carries (files mode), where
+// the TypeScript code then runs for the session
+declare const __SB_ND_HASH__: string;
+(globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
@@ -53,11 +60,11 @@ import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
 import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
 import { startDirOf } from "./start-dir";
-import { R } from "../src/compile";
+import { R, onOptionalUse } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
-import { useSet, prefetchFor, onPkgUse } from "./pkgset-browser";
+import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
 
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
@@ -180,9 +187,21 @@ onOfflineMissing((m) => postMessage({ offlineMissing: m }));
 
 // This interpreter's optional package set (web/pkgset-browser.ts): its index
 // is fetched when the page sends {pkgset: S}, and runs wait for it; a set that
-// can't be used is said once, and imports from it then fail saying why.
+// can't be used is said once, and imports from it then fail saying why.  An
+// index that couldn't be fetched (offline, its first visit's copy not kept) is
+// not one that can't be used: it is asked for again at the next run, quietly.
 let pkgsetReady: Promise<void> = Promise.resolve();
+let pkgsetUnfetched: string | null = null;
+const loadSet = (S: string) => {
+  pkgsetUnfetched = null;
+  pkgsetReady = useSet(S, fetchBytes).catch((e) => {
+    if (e instanceof SetUnfetched) pkgsetUnfetched = S;
+    else postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) });
+  });
+};
 onPkgUse((digests) => postMessage({ pkgUsed: digests }));
+// (the set's first use by an import: the page pins it in the notebook then, web/index.html)
+onOptionalUse((S) => postMessage({ pkgsetUsed: S }));
 
 /** The init message's limits, or the reason they are refused before any
  * parsing (the validator, lib/_limits.py, checks the rest). */
@@ -231,7 +250,7 @@ self.onmessage = async (ev: MessageEvent) => {
     return;
   }
   if (m.pkgset !== undefined) {
-    pkgsetReady = useSet(String(m.pkgset), fetchBytes).catch((e) => postMessage({ pkgsetError: String(e?.message ?? e).slice(0, 1024) }));
+    loadSet(String(m.pkgset));
     return;
   }
   if (typeof m.fsWritable === "boolean") {
@@ -272,6 +291,7 @@ self.onmessage = async (ev: MessageEvent) => {
     } else p.catch(() => {});
   }
   if (m.code !== undefined) {
+    if (pkgsetUnfetched !== null) loadSet(pkgsetUnfetched);
     await pkgsetReady;
     await prefetchFor(m.code, fetchBytes);
   }

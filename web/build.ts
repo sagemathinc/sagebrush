@@ -45,6 +45,7 @@ const engineHash = engineSha256.slice(0, 16);
 // and the PNG module's (src/runtime/raster.ts), fetched the same way, the
 // first time a PNG is written or read
 const rasterSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-raster.wasm"))).digest("hex");
+const ndSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-nd.wasm"))).digest("hex");
 // The bundled compiler and library (build/cli, scripts/build-cli.mjs) must be
 // the current sources': the library's chunks below hold that library, and
 // its modules compiled ahead by that bundle.
@@ -102,7 +103,7 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 // containing runner-worker.js without it fails the build; the list is also dist/runner-fetch.json
 {
   const { runnerFetchList, checkRunnerDefine } = await import("./runner-fetch.mts");
-  const list = runnerFetchList(engineSha256, rasterSha256, libChunkFiles.keys(), tz.ref);
+  const list = runnerFetchList(engineSha256, rasterSha256, ndSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   const build0 = Bun.build.bind(Bun);
   (Bun as any).build = async (o: any) => {
@@ -125,7 +126,7 @@ const result = await Bun.build(<any>{
   // engine worker, and so its hash, the engine id and sw.js, depend on where the checkout is.  The worker's
   // only use is a Node-only fallback that looks for wasm/ beside the source (src/runtime/engine.ts, raster.ts),
   // unreachable in a browser; undefined sends it to process.cwd(), as when __dirname doesn't exist)
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_ND_HASH__: JSON.stringify(ndSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -253,7 +254,7 @@ if (LATEX) {
   // the agent tools' work, tools.ts, a third, fetched on an agent's first latex_check or latex_render; the presenter,
   // present.ts, a fourth, fetched when Present is pressed; and beamer's code, engine/beamer.mjs, the worker's, fetched
   // when a document first needs it: the class beamer, or an overlay command)
-  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["doc.ts", "sagebrush-latex-doc.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
     const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
@@ -285,6 +286,9 @@ copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist
 // the PNG module (savefig's PNG, imread), fetched by the worker on first use;
 // not in the service worker's shell, which every visitor downloads
 copyFileSync(join(here, "..", "wasm", "sagebrush-raster.wasm"), join(here, "dist", "sagebrush-raster.wasm"));
+// engine/nd's numerics module (np.linalg.cholesky, CHOL-1), fetched by the worker
+// on first use; likewise not in the shell
+copyFileSync(join(here, "..", "wasm", "sagebrush-nd.wasm"), join(here, "dist", "sagebrush-nd.wasm"));
 // The documentation indexes for the page's search box, one per language that
 // has one: Sage's library (lib/_pyjs_docsearch.py), Python's numpy, scipy and
 // standard library (lib/_python_docsearch.py), MATLAB's built-ins
@@ -339,7 +343,7 @@ const MIME: Record<string, string> = { tzif: "application/octet-stream", html: "
 // (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
 const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-myst.js", "runner/index.html", ...LIB_CHUNKS];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-myst.js", "runner/index.html", ...LIB_CHUNKS];
 // (each one's name as the site's Worker serves engine files: web/engines.ts)
 for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
@@ -596,6 +600,14 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
   if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the terminal preview's package set: not an id: ${JSON.stringify(S)}`);
   mkdirSync(join(here, "dist", "shell"), { recursive: true });
   writeFileSync(join(here, "dist", "shell", "preview-set.json"), JSON.stringify({ S }) + "\n");
+  // the notebooks' package set (QRPM 1b): pandas, source only, so its id changes only when the package does,
+  // never with the core's build; named in pkgset/latest.json, which a notebook without a pin resolves once and
+  // pins (index.html notebookPkgset, plan-modular-packages-r4 §4.4).  Nothing is fetched until a cell imports
+  // it (web/pkgset-browser.ts).  For notebooks only: no grading context admits pandas yet (src/pkgset.ts
+  // gradingExcluded).
+  const N = execFileSync("node", [join(here, "..", "scripts", "optional-packages.mjs"), "build", "--out", join(here, "dist"), "pandas"], { encoding: "utf8" }).trim().split("\n").pop()!;
+  if (!/^[0-9a-f]{64}$/.test(N)) throw new Error(`the notebooks' package set: not an id: ${JSON.stringify(N)}`);
+  writeFileSync(join(here, "dist", "pkgset", "latest.json"), JSON.stringify({ id: N }) + "\n");
   if (hasSite) {
     for (const d of ["pkg", "pkgset", "pkgmeta"]) {
       rmSync(join(siteDir, "public", d), { recursive: true, force: true });
@@ -659,7 +671,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {
@@ -670,7 +682,7 @@ for (const f of SITE_FILES)
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
-if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-doc.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });

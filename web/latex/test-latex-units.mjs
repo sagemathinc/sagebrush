@@ -16,7 +16,8 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes } from "./engine/render.mjs";
+import { itemKey } from "./engine/sagetex.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
 const results = [];
@@ -220,6 +221,265 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   installBeamer(beamerCode);
   const after = e.update(beamerDoc);
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
+}
+
+// ---- saved boxes (astra4's fidelity digest, gap 3: \sbox, \savebox and \usebox were dropped, with no problem said). The
+//      first is astra4's M14 as is; TeX's text for it: "VisibleText"
+{
+  setKatex((src) => src);
+  const run = (body, pre = "") => new Engine().update("\\documentclass{article}\n" + pre + "\\begin{document}\n" + body + "\n\\end{document}\n");
+  const text = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const m14 = run("\\newsavebox{\\saved}\\sbox{\\saved}{VisibleText}\\usebox{\\saved}");
+  check("savebox-m14", text(m14) === "VisibleText" && !m14.problems.length, [text(m14), m14.problems]);
+  // (each \usebox shows it again; saved in the preamble, shown in the body; nothing where it's saved)
+  const twice = run("A \\usebox{\\bx} B \\usebox{\\bx}", "\\newsavebox{\\bx}\\sbox{\\bx}{\\textbf{Kept}}\n");
+  check("savebox-reused-from-preamble", text(twice) === "A Kept B Kept", text(twice));
+  // (\savebox's width and position as \makebox's; lrbox's body; a box never saved: nothing shown, a problem said)
+  const sb = run("\\newsavebox{\\w}\\savebox{\\w}[3cm][r]{Wide}[\\usebox{\\w}]").chunks.join("");
+  const lr = run("\\newsavebox{\\l}\\begin{lrbox}{\\l}Inside \\emph{it}\\end{lrbox}Out: \\usebox{\\l}");
+  const none = run("X \\usebox{\\nothere} Y");
+  check("savebox-width-lrbox-unsaved", /<span class="mkbox" style="width:[^"]*;text-align:right">Wide<\/span>/.test(sb) && /\[<span class="mkbox"/.test(sb) && text(lr) === "Out: Inside it"
+    && text(none) === "X Y" && none.problems.some((p) => p.kind === "box" && p.name.includes("\\nothere")), [sb.slice(0, 300), text(lr), text(none), none.problems]);
+  // (a minipage, and beamer's column (which shares its code), still show their content: lrbox is a case of its own)
+  const mp = text(run("\\begin{minipage}{3cm}InMini\\end{minipage}"));
+  const col = new Engine().update("\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{F}\\begin{columns}\\begin{column}{0.5\\textwidth}InColumn\\end{column}\\end{columns}\\end{frame}\n\\end{document}\n").chunks.join("");
+  check("savebox-minipage-column-unchanged", mp === "InMini" && /class="minipage[^"]*"[^>]*>[\s\S]*InColumn/.test(col), [mp, col.slice(0, 300)]);
+  // (a box's SageTeX: shown where the box is used, hidden (as before) if it never is)
+  const sageBox = (use) => run("\\newsavebox{\\sb}\\sbox{\\sb}{\\sage{1+1}}" + (use ? "\\usebox{\\sb}" : "Z"), "\\usepackage{sagetex}\n").sageItems.map((x) => x.err ?? "ok");
+  check("savebox-sage", sageBox(true).join() === "ok" && sageBox(false).join() === "hidden", [sageBox(true), sageBox(false)]);
+  // (a box's SageTeX is shown only where the box is: not by a \usebox inside a box never used, nor in a title never
+  //  printed, nor in the preamble (daybreak3 BOX653-SAGE-CAPTURE-1, astra BOX653-HIDDEN-2); controls: used in the body,
+  //  in a printed title)
+  const sageOf = (pre, body) => run(body, "\\usepackage{sagetex}\n\\newsavebox{\\a}\\newsavebox{\\b}\\sbox{\\a}{\\sage{1+1}}\n" + pre).sageItems.map((x) => x.err ?? "ok").join();
+  const capture = { nested: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}Z"), nestedUsed: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}\\usebox{\\b}"),
+    title: sageOf("\\title{\\usebox{\\a}}\n", "Z"), titlePrinted: sageOf("\\title{\\usebox{\\a}}\n", "\\maketitle Z"), preamble: sageOf("\\usebox{\\a}\n", "Z") };
+  // (a box saved again holds its new content, as in TeX, and the old content's SageTeX isn't shown by its use (grader
+  //  X7); the name as written, spaces around it aside (X3))
+  const redef = run("\\newsavebox{\\s}\\sbox{\\s}{\\sage{1+1}A}\\sbox{\\s}{B}\\usebox{\\s}", "\\usepackage{sagetex}\n");
+  const trim = text(run("\\newsavebox{\\saved}\\sbox{\\saved}{T}\\usebox{ \\saved }"));
+  const body = (r) => r.chunks.filter((c) => !c.includes('class="sagestate"')).join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("savebox-redefined-and-trimmed", body(redef) === "B" && redef.sageItems.map((x) => x.err).join() === "hidden" && trim === "T", [body(redef), redef.sageItems.map((x) => x.err), trim]);
+  check("savebox-sage-where-shown", capture.nested === "hidden" && capture.nestedUsed === "ok" && capture.title === "hidden" && capture.titlePrinted === "ok" && capture.preamble === "hidden", capture);
+  // (the copies' budget (astra BOX653-EXPAND-1): exactly BOX_MAX fits, one over doesn't; a box doubled into itself 12
+  //  times (16.8M characters before) stops within it, said once; repeated uses count too)
+  check("savebox-budget-edge", fitsBoxes(BOX_MAX - 10, 10) && !fitsBoxes(BOX_MAX - 10, 11) && fitsBoxes(0, BOX_MAX) && !fitsBoxes(0, BOX_MAX + 1));
+  const dbl = run("\\newsavebox{\\s}\\sbox{\\s}{" + "x".repeat(4096) + "}" + "\\sbox{\\s}{\\usebox{\\s}\\usebox{\\s}}".repeat(12) + "\\usebox{\\s}");
+  const many = run("\\newsavebox{\\s}\\sbox{\\s}{" + "y".repeat(4096) + "}" + "\\usebox{\\s} ".repeat(300) + "End.");
+  const dblH = dbl.chunks.join(""), manyH = many.chunks.join(""), over = (r) => r.problems.filter((p) => p.kind === "box" && /over the budget/.test(p.name)).length;
+  check("savebox-budget-copies", dbl.stats.outcome === "ok" && dblH.length < 2 * 2 ** 20 && over(dbl) === 1 && manyH.length < 2 * 2 ** 20 && over(many) === 1 && manyH.includes("End.") && (manyH.match(/y{4096}/g) || []).length === Math.floor(BOX_MAX / 4096),
+    { dbl: dblH.length, many: manyH.length, copies: (manyH.match(/y{4096}/g) || []).length, overs: [over(dbl), over(many)] });
+  // (a box's SageTeX items count too, each once in the box (astra, BOX653-EXPAND-1's residual): a box with no HTML, a
+  //  completed sagesilent in an lrbox, doubled into itself 18 times held 262,144 keys before, and now holds 1. A key
+  //  costs BOX_KEY: 256 completed items in a box, no HTML, cost exactly 4,096, so 256 uses fit BOX_MAX exactly and a 257th
+  //  is left out, said once)
+  check("savebox-key-cost", BOX_KEY === 16 && boxCost({ h: "ab", keys: [1, 2, 3] }) === 2 + 3 * BOX_KEY && boxCost({ h: "", keys: [] }) === 0);
+  const sdoc = (body) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\newsavebox{\\kb}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  // (the items run, as a Run leaves them: their states from the box used once, before any copies)
+  const okRun = (box, uses) => {
+    const d = sdoc(box + uses), states = new Engine().update(sdoc(box + "\\usebox{\\kb}Z")).sageItems.map((it) => ({ s: "ok", key: itemKey(it) })), kept = [], set = Map.prototype.set;
+    // (each box as saved, seen as the renderer's map stores it: its HTML and its keys' count)
+    Map.prototype.set = function (k, v) { if (v && typeof v.h === "string" && Array.isArray(v.keys)) kept.push([v.h.length, v.keys.length]); return set.call(this, k, v); };
+    try { return { r: new Engine({ sage: { states } }).update(d), kept }; } finally { Map.prototype.set = set; }
+  };
+  const silent = (i) => "\\begin{sagesilent}\nx" + i + " = " + i + "\n\\end{sagesilent}\n";
+  const zero = okRun("\\begin{lrbox}{\\kb}" + silent(0) + "\\end{lrbox}", "\\sbox{\\kb}{\\usebox{\\kb}\\usebox{\\kb}}".repeat(18) + "\\usebox{\\kb}Z");
+  const keysAt = (n) => okRun("\\begin{lrbox}{\\kb}" + Array.from({ length: 256 }, (_, i) => silent(i)).join("") + "\\end{lrbox}", "\\usebox{\\kb}".repeat(n) + "Z");
+  const fit = keysAt(256), past = keysAt(257);
+  check("savebox-keys-zero-html-doubling", zero.r.stats.outcome === "ok" && zero.kept.length === 19 && zero.kept.every(([h, k]) => h === 0 && k === 1)
+    && zero.r.sageItems.every((x) => !x.err) && over(zero.r) === 0, { kept: zero.kept.slice(-3), n: zero.kept.length, items: zero.r.sageItems.map((x) => x.err), overs: over(zero.r) });
+  check("savebox-keys-budget-edge", fit.kept.length === 1 && fit.kept[0][0] === 0 && fit.kept[0][1] === 256 && over(fit.r) === 0 && over(past.r) === 1
+    && fit.r.sageItems.length === 256 && fit.r.sageItems.every((x) => !x.err), { kept: [fit.kept, past.kept], overs: [over(fit.r), over(past.r)], errs: [...new Set(fit.r.sageItems.map((x) => x.err))] });
+}
+
+// ---- beamer's furniture (engine/beamer.mjs): what each theme draws around a frame, against TeX Live's beamer. The
+//      words of frame 2's headline, sidebar and footline in the probe deck below are those of TeX's page 2 (pdftotext),
+//      for a theme of each kind (probed 2026-11-04, all 27 themes the chunk knows of, TeX Live 2025)
+{
+  const deck = (pre, frames) => "\\documentclass{beamer}\n" + pre + "\\title[ShortTitle]{LongTitleWords}\n\\author[ShortAuthor]{LongAuthorName}\n" +
+    "\\institute[ShortInst]{LongInstituteName}\n\\date[ShortDate]{LongDateText}\n\\begin{document}\n" + (frames ?? "\\begin{frame}\\titlepage\\end{frame}\n" +
+    "\\section[SecOneShort]{SectionOneLong}\n\\subsection{SubOneA}\n\\begin{frame}{FrameTwo}BodyTwo\\end{frame}\n\\section{SectionTwo}\n" +
+    "\\subsection{SubTwoA}\n\\begin{frame}{FrameThree}BodyThree\\end{frame}\n") + "\\end{document}\n";
+  const html = (src) => new Engine().update(src).chunks.join("");
+  const frameOf = (h, k) => (new RegExp('<section class="slide[^"]*" data-frame="' + k + '"[\\s\\S]*?</section>').exec(h) ?? [""])[0];
+  const words = (h) => (h.replace(/<header class="slide-title">[\s\S]*?<\/header>|<div class="slide-body">[\s\S]*?<\/div><\/div>(?=<div class="slide-foot|<\/section>)/g, " ").replace(/<[^>]+>/g, " ").match(/[A-Za-z0-9]+|\//g) ?? []).sort().join(" ");
+  const tex = { // (TeX's page 2, less FrameTwo and BodyTwo)
+    Madrid: "/ 2 3 ShortAuthor ShortDate ShortInst ShortTitle", AnnArbor: "/ 2 3 SecOneShort ShortAuthor ShortDate ShortInst ShortTitle SubOneA",
+    Antibes: "SecOneShort ShortTitle SubOneA", Berkeley: "SecOneShort SectionTwo ShortAuthor ShortTitle SubOneA SubTwoA",
+    Berlin: "SecOneShort SectionTwo ShortAuthor ShortInst ShortTitle SubOneA", Darmstadt: "SecOneShort SectionTwo SubOneA",
+    Szeged: "SecOneShort SectionTwo ShortInst ShortTitle SubOneA", Frankfurt: "SecOneShort SectionTwo",
+    Warsaw: "SecOneShort SectionTwo ShortAuthor ShortTitle SubOneA", default: "", Rochester: "" };
+  const got = Object.fromEntries(Object.keys(tex).map((t) => [t, words(frameOf(html(deck("\\usetheme{" + t + "}\n")), 2))]));
+  check("beamer-furniture-as-tex", Object.keys(tex).every((t) => got[t] === tex[t]), Object.fromEntries(Object.keys(tex).filter((t) => got[t] !== tex[t]).map((t) => [t, got[t]])));
+  // (the current section and subsection marked; the sidebar's room; an outer theme by name; frame 3 in its own section)
+  const darm = html(deck("\\usetheme{Darmstadt}\n")), berk = html(deck("\\usetheme{Berkeley}\n"));
+  check("beamer-furniture-current", /<span class="cur">SecOneShort<\/span> <span>SectionTwo<\/span>/.test(frameOf(darm, 2)) && /<span>SecOneShort<\/span> <span class="cur">SectionTwo<\/span>/.test(frameOf(darm, 3))
+    && frameOf(berk, 2).startsWith('<section class="slide sbar"') && !frameOf(darm, 2).includes("sbar"), [frameOf(darm, 3).slice(0, 400), frameOf(berk, 2).slice(0, 80)]);
+  const outer = words(frameOf(html(deck("\\useoutertheme{infolines}\n")), 3));
+  check("beamer-furniture-outer-theme", outer === "/ 3 3 SectionTwo ShortAuthor ShortDate ShortInst ShortTitle SubTwoA", outer);
+  // (the title page: the long forms, the short ones only in the furniture; \title[..] once showed "[")
+  const tp = frameOf(html(deck("\\usetheme{Madrid}\n")), 1);
+  check("beamer-short-forms-title-page", /<div class="title">LongTitleWords<\/div>/.test(tp) && tp.includes("LongAuthorName") && tp.includes("LongInstituteName") && tp.includes("LongDateText") && !/>\[</.test(tp) && tp.includes("ShortAuthor (ShortInst)"), tp.slice(0, 600));
+  // (none on a plain frame; none of ours where the document sets the template; [frame number]: the number)
+  const one = "\\begin{frame}[plain]{P}Q\\end{frame}\n\\begin{frame}{R}S\\end{frame}\n";
+  const plain = html(deck("\\usetheme{Warsaw}\n", one));
+  check("beamer-furniture-plain-frame", !/slide-(head|foot)/.test(frameOf(plain, 1)) && /slide-head/.test(frameOf(plain, 2)) && /slide-foot/.test(frameOf(plain, 2)), frameOf(plain, 1).slice(0, 300));
+  const own = html(deck("\\usetheme{Warsaw}\n\\setbeamertemplate{footline}{mine}\n\\setbeamertemplate{headline}{mine too}\n", one)), num = html(deck("\\usetheme{Madrid}\n\\setbeamertemplate{footline}[frame number]\n", one));
+  check("beamer-furniture-own-templates", !/slide-(head|foot)/.test(frameOf(own, 2)) && !own.includes("mine") && words(frameOf(num, 2)) === "/ 2 2", [frameOf(own, 2).slice(0, 300), words(frameOf(num, 2))]);
+  const side = html(deck("\\usetheme{Berkeley}\n\\setbeamertemplate{sidebar left}{}\n", one));
+  check("beamer-furniture-own-sidebar", !/slide-side|sbar/.test(frameOf(side, 2)), frameOf(side, 2).slice(0, 200));
+  // (starred sections listed too, as TeX's beamer lists them (not in the contents); a short form's markup dropped, as
+  //  TeX's text of it; a frame before any section: every section, none marked. TeX's: "Hidden Sh ort" on both frames)
+  const secs = html(deck("\\usetheme{Frankfurt}\n", "\\begin{frame}{A}a\\end{frame}\n\\section*{Hidden}\n\\section[Sh \\emph{ort}]{Long}\n\\begin{frame}{B}b\\end{frame}\n"));
+  check("beamer-furniture-sections", words(frameOf(secs, 1)) === "Hidden Sh ort" && !frameOf(secs, 1).includes('class="cur"') && /<span>Hidden<\/span> <span class="cur">Sh ort<\/span>/.test(frameOf(secs, 2)), [frameOf(secs, 1).slice(0, 300), frameOf(secs, 2).slice(0, 300)]);
+  // (a section's second subsection: the current one, and split's list of them; a frame before the first: none current)
+  const two = "\\section{A}\n\\begin{frame}{F0}x\\end{frame}\n\\subsection{A1}\n\\begin{frame}{F1}x\\end{frame}\n\\subsection{A2}\n\\begin{frame}{F2}x\\end{frame}\n";
+  const dar2 = html(deck("\\usetheme{Darmstadt}\n", two)), war2 = html(deck("\\usetheme{Warsaw}\n", two));
+  check("beamer-furniture-subsections", words(frameOf(dar2, 1)) === "A" && words(frameOf(dar2, 3)) === "A A2" && words(frameOf(war2, 3)) === "A A1 A2 ShortAuthor ShortTitle"
+    && /<span>A1<\/span> <span class="cur">A2<\/span>/.test(frameOf(war2, 3)), [words(frameOf(dar2, 1)), words(frameOf(dar2, 3)), words(frameOf(war2, 3))]);
+  // (the names read as words, as the page's text and a copy read them (innerText): spaced, not only apart)
+  const text = (h) => h.replace(/<\/?(div|section|header)\b[^>]*>/g, "\n").replace(/<[^>]+>/g, "");   // (blocks a line apart, as innerText)
+  check("beamer-furniture-words-spaced", text(frameOf(darm, 2)).includes("SecOneShort SectionTwo") && text(frameOf(berk, 2)).includes("SubOneA") && !/SubOneASectionTwo|SecOneShortSectionTwo/.test(text(frameOf(berk, 2) + frameOf(war2, 3))) && text(frameOf(war2, 3)).includes("A1 A2")
+    && text(frameOf(html(deck("\\usetheme{Berkeley}\n", two)), 3)).includes("A1 A2"), [text(frameOf(darm, 2)), text(frameOf(berk, 2))]);
+  // (a template set in the document's body: its argument read, not shown)
+  const body = html(deck("\\usetheme{Warsaw}\n", "\\setbeamertemplate{footline}{mine}\n" + one));
+  check("beamer-furniture-template-in-body", !body.includes("mine") && !/slide-foot/.test(frameOf(body, 2)), frameOf(body, 2).slice(0, 300));
+  // (SageTeX in the furniture's fields (daybreak3, FURN644-SAGE-1): a field the furniture shows, long or short, is shown,
+  //  not hidden, and its saved result drawn; one the theme doesn't draw stays hidden, as before)
+  const sageDeck = (theme, title) => "\\documentclass{beamer}\n\\usetheme{" + theme + "}\n\\usepackage{sagetex}\n" + title + "\n\\begin{document}\n\\begin{frame}{F}x\\end{frame}\n\\end{document}\n";
+  const sageRun = (src) => { const it = new Engine().update(src).sageItems; return new Engine({ sage: { saved: it.map((x) => ({ key: itemKey(x), s: "ok", latex: "42" })) } }).update(src); };
+  const longF = sageRun(sageDeck("Madrid", "\\title{Long \\sage{6*7}}")), shortF = sageRun(sageDeck("Madrid", "\\title[Short \\sage{6*7}]{Long}")), unused = sageRun(sageDeck("Rochester", "\\title{Long \\sage{6*7}}"));
+  const hiddenNote = (r) => /class="sagestate"><span class="sagechip s-error">\d+ Sage code item/.test(r.chunks.join(""));
+  check("beamer-furniture-sage-shown", !hiddenNote(longF) && !hiddenNote(shortF) && /slide-foot[\s\S]*42/.test(frameOf(longF.chunks.join(""), 1)) && /slide-foot[\s\S]*Short[\s\S]*42/.test(frameOf(shortF.chunks.join(""), 1))
+    && longF.sageItems.every((x) => x.err !== "hidden") && shortF.sageItems.every((x) => x.err !== "hidden") && hiddenNote(unused) && unused.sageItems.every((x) => x.err === "hidden"),
+    { long: [hiddenNote(longF), longF.sageItems.map((x) => x.err)], short: [hiddenNote(shortF), shortF.sageItems.map((x) => x.err)], unused: [hiddenNote(unused), unused.sageItems.map((x) => x.err)] });
+  // (the frame number is beamer's counter, which [noframenumbering] doesn't step (daybreak3, FURN644-FRAME-NO-1): TeX's
+  //  1/2, 1/2, 2/2; a plain frame steps it, unless [noframenumbering] too; data-frame stays the frame's index)
+  const nums = (src) => [...html(src).matchAll(/<span class="fno">([^<]*)<\/span>/g)].map((m) => m[1]);
+  const nf = nums(deck("\\usetheme{Madrid}\n", "\\begin{frame}{A}a\\end{frame}\n\\begin{frame}[noframenumbering]{B}b\\end{frame}\n\\begin{frame}{C}c\\end{frame}\n"));
+  const pf = nums(deck("\\usetheme{Madrid}\n", "\\begin{frame}[plain]{A}a\\end{frame}\n\\begin{frame}[plain,noframenumbering]{B}b\\end{frame}\n\\begin{frame}{C}c\\end{frame}\n"));
+  const ids = html(deck("\\usetheme{Madrid}\n", "\\begin{frame}{A}a\\end{frame}\n\\begin{frame}[noframenumbering]{B}b\\end{frame}\n")).match(/data-frame="\d+"/g);
+  check("beamer-furniture-frame-numbers", nf.join(",") === "1 / 2,1 / 2,2 / 2" && pf.join(",") === "2 / 2" && ids.join(",") === 'data-frame="1",data-frame="2"', { nf, pf, ids });
+  // (the furniture's budget (astra, BEAMER644-FURN-1): exactly FURN_MAX fits, one byte over doesn't; a deck whose full
+  //  headlines would be frames x sections of long names gets the short form, a problem saying so, its HTML bounded)
+  check("beamer-furniture-budget-edge", beamerCode.fitsFurniture(beamerCode.FURN_MAX / 4, 4) && !beamerCode.fitsFurniture(beamerCode.FURN_MAX / 4 + 1, 4) && beamerCode.fitsFurniture(1, beamerCode.FURN_MAX) && !beamerCode.fitsFurniture(1, beamerCode.FURN_MAX + 1));
+  const big = Array.from({ length: 384 }, (_, k) => "\\section{" + ("Section" + k + " ").padEnd(128, "x") + "}\n\\begin{frame}{F" + k + "}b\\end{frame}\n").join("");
+  const bigR = new Engine().update(deck("\\usetheme{Berlin}\n", big)), bigH = bigR.chunks.join(""), small = html(deck("\\usetheme{Berlin}\n"));
+  const f1 = frameOf(bigH, 1).match(/<div class="slide-head[^"]*"><div>([\s\S]*?)<\/div>/)?.[1] ?? "";
+  check("beamer-furniture-budget-short-form", bigR.stats.outcome === "ok" && bigH.length < 3 * 2 ** 20 && (f1.match(/<span/g) || []).length === 1 && /Section0 x+\u2026/.test(f1)
+    && bigR.problems.some((p) => p.kind === "furniture") && !new Engine().update(deck("\\usetheme{Berlin}\n")).problems.some((p) => p.kind === "furniture") && /SecOneShort<\/span> <span>SectionTwo/.test(small),
+    { len: bigH.length, f1: f1.slice(0, 300), problems: bigR.problems.filter((p) => p.kind === "furniture") });
+  // (the furniture's budget is for all of it, as built, escaping included (astra, FURN-1 residual): 10,000 Madrid frames
+  //  with four fields of 80 "&" each was 19 MB; now the furniture stops within FURN_MAX, one problem saying from which
+  //  frame. And SageTeX in a field the short form cuts stays hidden, the notice said (daybreak3, FURN644-SAGE-CUT-1); one
+  //  within the cut is shown)
+  const amp = "&".repeat(80), tenK = "\\title{" + amp + "}\\author{" + amp + "}\\institute{" + amp + "}\\date{" + amp + "}\n";
+  const huge = new Engine().update(deck("\\usetheme{Madrid}\n" + tenK, "\\begin{frame}{F}Body\\end{frame}\n".repeat(10000))), hugeH = huge.chunks.join("");
+  const furnBytes = (hugeH.match(/<div class="slide-foot">[\s\S]*?<\/div><\/div>/g) || []).join("").length, left = huge.problems.filter((p) => p.kind === "furniture" && /left out from frame \d+ on/.test(p.name));
+  check("beamer-furniture-budget-all", huge.stats.outcome === "ok" && furnBytes <= beamerCode.FURN_MAX && left.length === 1 && hugeH.length < 4 * 2 ** 20 && /slide-foot/.test(frameOf(hugeH, 1)) && !/slide-foot/.test(frameOf(hugeH, 10000)),
+    { furnBytes, html: hugeH.length, left });
+  const bigSecs = Array.from({ length: 384 }, (_, k) => "\\section{" + ("S" + k).padEnd(128, "x") + "}\n\\begin{frame}{F}b\\end{frame}\n").join("");
+  const cutDeck = (title) => "\\documentclass{beamer}\n\\usetheme{Madrid}\n\\usepackage{sagetex}\n" + title + "\n\\begin{document}\n" + bigSecs + "\\end{document}\n";
+  // (a plain frame's furniture isn't drawn, so its fields' SageTeX stays hidden)
+  const plainOnly = sageRun("\\documentclass{beamer}\n\\usetheme{Madrid}\n\\usepackage{sagetex}\n\\title{T \\sage{6*7}}\n\\begin{document}\n\\begin{frame}[plain]{F}x\\end{frame}\n\\end{document}\n");
+  check("beamer-furniture-sage-plain", plainOnly.sageItems.every((x) => x.err === "hidden") && !/slide-foot/.test(plainOnly.chunks.join("")), plainOnly.sageItems.map((x) => x.err));
+  const cutR = sageRun(cutDeck("\\title{" + "A".repeat(100) + " \\sage{6*7}}")), inR = sageRun(cutDeck("\\title{Short \\sage{6*7}}"));
+  check("beamer-furniture-sage-cut", cutR.problems.some((p) => p.kind === "furniture") && cutR.sageItems.every((x) => x.err === "hidden") && hiddenNote(cutR) && !/42/.test(frameOf(cutR.chunks.join(""), 1)) && /A{70,}\u2026/.test(frameOf(cutR.chunks.join(""), 1))
+    && inR.sageItems.every((x) => x.err !== "hidden") && !hiddenNote(inR) && /slide-foot[\s\S]*Short[\s\S]*42/.test(frameOf(inR.chunks.join(""), 1)),
+    { cut: [cutR.sageItems.map((x) => x.err), hiddenNote(cutR)], within: [inR.sageItems.map((x) => x.err), hiddenNote(inR)], f1: frameOf(cutR.chunks.join(""), 1).slice(-300) });
+  // (the footline templates' numbers as TeX's (TeX Live 2025): [frame number] "0/1" then "1/1" after a [noframenumbering]
+  //  frame; [page number] each overlay step a page: "1/4", "2/4", "4/4" for frames of 1, 2 and 1 steps)
+  const fnums = (src) => [...html(src).matchAll(/<div class="fno">([^<]*)<\/div>/g)].map((m) => m[1]).join(",");
+  const fno = fnums(deck("\\setbeamertemplate{footline}[frame number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b\\end{frame}\n"));
+  // ([page number] on a frame of 2 steps: "2/4" on step 1 and "3/4" on step 2, each an overlay of its step, as Present
+  //  and each step's picture show them (daybreak3, PAGE644-OVERLAY-1))
+  const pnoH = html(deck("\\setbeamertemplate{footline}[page number]\n", "\\begin{frame}[noframenumbering]{A}a\\end{frame}\n\\begin{frame}{B}b \\pause c\\end{frame}\n\\begin{frame}{C}d\\end{frame}\n"));
+  const pno = [...pnoH.matchAll(/<div class="fno">([\s\S]*?)<\/div>/g)].map((m) => m[1]).join(",");
+  check("beamer-furniture-number-templates", fno === "0/1,1/1" && pno === '1/4,<span class="ov" data-ov="1" data-ovm="only">2/4</span> <span class="ov" data-ov="2" data-ovm="only">3/4</span>,4/4', { fno, pno });
+  // (the pages counted once a render, not once a frame (astra): 10,000 frames of [page number] take about as long as of
+  //  [frame number]; counted per frame they took about 3 times as long)
+  const tenKFrames = "\\begin{frame}{F}b\\end{frame}\n".repeat(10000), timeOf = (tpl) => { const t0 = performance.now(); new Engine().update(deck("\\setbeamertemplate{footline}[" + tpl + "]\n", tenKFrames)); return performance.now() - t0; };
+  timeOf("frame number");
+  const msFrame = timeOf("frame number"), msPage = timeOf("page number");
+  check("beamer-furniture-page-numbers-linear", msPage < 1.6 * msFrame + 100, { frameMs: Math.round(msFrame), pageMs: Math.round(msPage) });
+  // (the short form's cut text is escaped (grader F8: a field over the cut, decoded to measure it, is never HTML again)
+  //  and cut to exactly 80 characters, the last "\u2026" (F10))
+  const evil = "\\title{<img src=x onerror=alert(1)> \\& " + "B".repeat(100) + "}\\author{" + "C".repeat(100) + "}\n";
+  const evilH = new Engine().update("\\documentclass{beamer}\n\\usetheme{Madrid}\n" + evil + "\\begin{document}\n" + bigSecs + "\\end{document}\n").chunks.join(""), evilF = frameOf(evilH, 1);
+  const cells = [...(evilF.match(/<div class="slide-foot">([\s\S]*?)<\/div><\/div>/)?.[1] ?? "").matchAll(/<div>([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+  const visible = (h) => h.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  check("beamer-furniture-short-form-escaped", !/<img/.test(evilH) && /&lt;img src=x onerror=alert\(1\)&gt; &amp; B+\u2026/.test(evilF) && visible(cells[1] ?? "").length === 80 && visible(cells[0] ?? "") === "C".repeat(79) + "\u2026",
+    { title: cells[1], author: cells[0], lens: cells.map((c) => visible(c).length) });
+  // (in another class: \usetheme's and \setbeamertemplate's arguments read and dropped, \title[..] as TeX reads it there:
+  //  its argument the "[")
+  const art = new Engine().update("\\documentclass{article}\n\\usetheme{Madrid}\\setbeamertemplate{footline}{F}\n\\title[S]{T}\n\\begin{document}\n\\maketitle X \\only<2>{Y}\n\\end{document}\n").chunks.join("");
+  check("beamer-furniture-other-class", !/Madrid|>F</.test(art) && !/slide-(head|foot)/.test(art) && art.includes("X") && /<div class="title">\[<\/div>/.test(art), art.slice(0, 300));
+}
+
+// ---- counters (astra4's fidelity digest, gap 1: the renderer's numbering ignored \setcounter and \footnote[n], silently).
+//      M01..M06 as astra4 reduced them, with TeX Live's text for each; then \addtocounter, enumii, a footnote after [n]
+{
+  setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src + "</span>");
+  const text = (body) => new Engine().update("\\documentclass{article}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const cases = [
+    ["ctr-m01-footnote-optional", "X\\footnote[7]{NoteText.}", (t) => /^X 7 .*7 NoteText\.$/.test(t)],
+    ["ctr-m02-footnote-counter", "\\setcounter{footnote}{4}X\\footnote{NoteText.}", (t) => /^X 5 .*5 NoteText\.$/.test(t)],
+    ["ctr-m03-figure", "\\setcounter{figure}{7}\\begin{figure}\\caption{CaptionText.}\\end{figure}", (t) => t.includes("Figure 8: CaptionText.")],
+    ["ctr-m04-equation", "\\setcounter{equation}{9}\\begin{equation}1=1\\end{equation}", (t) => /\\tag\{10\}/.test(t) && !/\\tag\{1\}/.test(t)],
+    ["ctr-m05-section", "\\setcounter{section}{4}\\section{HeadingText}", (t) => t === "5 HeadingText"],
+    ["ctr-m06-enumerate", "\\begin{enumerate}\\setcounter{enumi}{3}\\item EntryText.\\end{enumerate}", (t) => t === "4. EntryText."],
+    ["ctr-addtocounter", "\\section{A}\\addtocounter{section}{2}\\section{B}", (t) => t === "1 A 4 B"],
+    ["ctr-enumii", "\\begin{enumerate}\\item P\\begin{enumerate}\\setcounter{enumii}{2}\\item Q\\end{enumerate}\\end{enumerate}", (t) => t === "1. P (c) Q"],
+    ["ctr-enumi-from-inner", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\setcounter{enumi}{5}\\end{enumerate}\\item R\\end{enumerate}", (t) => /^1\. P .*Q .*6\. R$/.test(t) && !/2\. Q/.test(t)],
+    ["ctr-footnote-after-optional", "A\\footnote[7]{N7.}B\\footnote{N1.}", (t) => /A 7 B 1 .*7 N7\. .*1 N1\./.test(t)],
+  ];
+  for (const [name, body, ok] of cases) { const t = text(body); check(name, ok(t), t); }
+  // (#673 r2, each against TeX Live 2025's text for it: daybreak3 CTR673-FOOTNOTE-SIGNED-1, a signed \footnote[n] and the
+  //  ordinary one after it, not stepped by it; CTR673-SECNUMDEPTH-1, secnumdepth both ways; grader's R7, enumi from an
+  //  enumerate inside an itemize; enumiii and enumiv; TeX's limit: 99999999999 is "Number too big", 2147483647, and the
+  //  \section's step after it wraps as TeX's does)
+  const texCases = [
+    ["ctr-footnote-signed", "A\\footnote[-2]{Neg}B\\footnote{Next}", "A -2 B 1 -2 Neg 1 Next"],
+    ["ctr-secnumdepth-0", "\\setcounter{secnumdepth}{0}\\section{Sec}\\subsection{Sub}", "Sec Sub"],
+    ["ctr-secnumdepth-4", "\\setcounter{secnumdepth}{4}\\section{Sec}\\subsection{Sub}\\subsubsection{SubSub}\\paragraph{Para} text", "1 Sec 1.1 Sub 1.1.1 SubSub 1.1.1.1 Para text"],
+    ["ctr-secnumdepth-5", "\\setcounter{secnumdepth}{5}\\section{S}\\subsection{T}\\subsubsection{U}\\paragraph{P} x \\subparagraph{Q} y", "1 S 1.1 T 1.1.1 U 1.1.1.1 P x 1.1.1.1.1 Q y"],
+    ["ctr-secnumdepth-default", "\\section{A}\\paragraph{P} x", "1 A P x"],
+    ["ctr-secnumdepth-add", "\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}", "1 A B"],
+    ["ctr-enumi-in-itemize", "\\begin{itemize}\\item A\\begin{enumerate}\\setcounter{enumi}{3}\\item B\\end{enumerate}\\end{itemize}", "\u2022 A 4. B"],
+    ["ctr-enumiii", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\setcounter{enumiii}{3}\\item R\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q iv. R"],
+    ["ctr-enumiv", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\item R\\begin{enumerate}\\setcounter{enumiv}{1}\\item S\\end{enumerate}\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q i. R B. S"],
+    ["ctr-number-too-big", "\\setcounter{section}{99999999999}\\section{Big}", "-2147483648 Big"],
+    ["ctr-number-too-big-negative", "\\setcounter{section}{-99999999999}\\section{BigNeg}", "-2147483646 BigNeg"],
+  ];
+  for (const [name, body, want] of texCases) { const t = text(body); check(name, t === want, [t, want]); }
+  // (#673 r3, against TeX Live 2025: daybreak3 CTR673-CLASS-DEPTH-2, secnumdepth from the class (book, report 2, memoir
+  //  1), so \addtocounter on it starts there; CTR673-PART-STEP-2, \part's step wraps as TeX's, and a part numbered 0 or
+  //  less says "Part" with no numeral)
+  const clsText = (cls, body) => new Engine().update("\\documentclass{" + cls + "}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const clsCases = [
+    ["ctr-class-depth-book-add", "book", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-report-add", "report", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-book", "book", "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}", "Chapter 1 C 1.1 S 1.1.1 T U"],
+    ["ctr-class-depth-memoir", "memoir", "\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-part-wrap", "article", "\\setcounter{part}{2147483647}\\part{P}", "Part P"],
+    ["ctr-part-negative", "article", "\\setcounter{part}{-1}\\part{Q}", "Part Q"],
+    ["ctr-part-too-big", "article", "\\setcounter{part}{99999999999}\\part{R}", "Part R"],
+    ["ctr-part-starred", "article", "\\part{One}\\part*{Star}", "Part I One Star"],
+  ];
+  for (const [name, cls, body, want] of clsCases) { const t = clsText(cls, body); check(name, t === want, [t, want]); }
+  // (grader's r2 pins: \footnote[n] past TeX's limit is "Number too big", clamped both ways, as TeX Live 2025 sets it; and a
+  //  fragment with no \documentclass starts from article's secnumdepth, 3)
+  check("ctr-footnote-too-big", text("A\\footnote[99999999999]{Big.}") === "A 2147483647 2147483647 Big.", text("A\\footnote[99999999999]{Big.}"));
+  check("ctr-footnote-too-big-negative", text("A\\footnote[-99999999999]{Neg.}") === "A -2147483647 -2147483647 Neg.", text("A\\footnote[-99999999999]{Neg.}"));
+  const frag = new Engine().update("\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-secnumdepth-no-class", frag === "1 A B", frag);
+  // (grader K6: KOMA's scrbook and scrreprt are 2 deep too: TeX's "1 C 1.1 S 1.1.1 T U". The numbering only: KOMA's chapter
+  //  heading has no "Chapter" word, which the preview still prints, a separate gap)
+  for (const c of ["scrbook", "scrreprt"]) { const t = clsText(c, "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}"); check("ctr-class-depth-" + c, t.endsWith("1 C 1.1 S 1.1.1 T U"), t); }
+  // (grader's R6: an optional argument that isn't a whole signed number is the counter, as before, and check says so; TeX
+  //  would read its leading digits, \footnote[2a] as 2, and set the "a" as text)
+  const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
+  const notNumT = notNum.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-footnote-not-a-number", notNumT === "A 1 B 1 X" && notNum.problems.filter((p) => p.kind === "footnote" && /\\footnote\[2a\]: not a number/.test(p.name)).length === 1, [notNumT, notNum.problems]);
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
@@ -620,6 +880,35 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   }
   check("envclose-percent-inside-verbatim-is-text", ac("\\begin{verbatim}\n% \\end{verbatim}\n\\begin{x}|") === "\n\\end{x}", null);
   check("envclose-only-on-brace", autoClose("\\begin{x", 8) === null && ac("\\begin{x}{cc}|") === null && ac("\\end{x}|") === null, null);
+}
+
+// ---- doc.ts's readCapped (#656, astra DOC656-FETCH-1): a published document's body read at most `max` bytes, chunk by
+//      chunk, cancelled at the chunk that crosses it, never read whole first; Content-Length an early refusal only.
+//      Each case: what it returns, how many chunks were pulled, and whether the stream was cancelled
+{
+  const { readCapped } = await import("./doc.ts");
+  // (a body of `chunks` chunks of `size` bytes, its pulls counted, its cancel seen; `len`: a Content-Length to claim)
+  const body = (chunks, size, len) => {
+    const st = { pulled: 0, cancelled: false };
+    const stream = new ReadableStream({
+      pull(c) { if (st.pulled === chunks) return c.close(); st.pulled++; c.enqueue(new Uint8Array(size).fill(65)); },
+      cancel() { st.cancelled = true; },
+    }, { highWaterMark: 0 });
+    return { st, r: new Response(stream, len === undefined ? {} : { headers: { "content-length": String(len) } }) };
+  };
+  const at = async (chunks, size, max, len) => { const b = body(chunks, size, len), got = await readCapped(b.r, max); return { n: got ? got.length : null, ...b.st }; };
+  const exact = await at(4, 256, 1024), over = await at(4, 256, 1023);
+  check("doc-read-capped-exact-and-one-over", exact.n === 1024 && exact.pulled === 4 && !exact.cancelled && over.n === null && over.pulled === 4 && over.cancelled, { exact, over });
+  // (16 chunks of 1 MiB with no Content-Length, against 4 MiB: stopped at the 5th, cancelled, the rest never pulled)
+  const chunked = await at(16, 2 ** 20, 4 * 2 ** 20);
+  check("doc-read-capped-chunked-no-length", chunked.n === null && chunked.pulled === 5 && chunked.cancelled, chunked);
+  // (a header that understates the body: counted, not trusted; one over the cap: refused before any pull; one exactly at
+  //  it: read (grader C5))
+  const lies = await at(16, 2 ** 20, 4 * 2 ** 20, 1000), says = await at(16, 2 ** 20, 4 * 2 ** 20, 16 * 2 ** 20), atCap = await at(4, 256, 1024, 1024);
+  check("doc-read-capped-false-and-oversize-header", lies.n === null && lies.pulled === 5 && lies.cancelled && says.n === null && says.pulled === 0 && says.cancelled && atCap.n === 1024 && !atCap.cancelled, { lies, says, atCap });
+  // (the bytes kept, in order, across chunks; an empty body)
+  const two = await readCapped(new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2])); c.enqueue(new Uint8Array([3])); c.close(); } })), 3), none = await readCapped(new Response(null), 3);
+  check("doc-read-capped-bytes", JSON.stringify(Array.from(two ?? [])) === "[1,2,3]" && none?.length === 0, [two, none]);
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

@@ -5757,6 +5757,17 @@ def _csort(A, ax):
     return np.moveaxis(out, -1, ax)
 
 
+def _median_middle(lo, hi):
+    # Preserve infinities: inf - inf is NaN, although the mean of two
+    # equal infinities is that infinity. Opposite finite signs use a sum
+    # so their difference cannot overflow; equal signs use a difference.
+    with np.errstate(invalid="ignore", over="ignore"):
+        if lo.dtype.kind == "c":
+            return lo + (hi - lo) / 2
+        same = np.isfinite(lo) & np.isfinite(hi) & (np.signbit(lo) == np.signbit(hi))
+        return np.where(same, lo + (hi - lo) / 2, (lo + hi) / 2)
+
+
 @_bs("median")
 def median_(x, *args):
     if class_(x) == "char":
@@ -5779,12 +5790,12 @@ def median_(x, *args):
             hi = _take_along(S, np.maximum(m // 2, 0), ax)
             lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
             with np.errstate(invalid="ignore"):
-                r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
+                r = np.where(m % 2 == 0, _median_middle(lo, hi), lo)
             return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
         S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
-        r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
+        r = _median_middle(lo, hi) if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
@@ -6541,11 +6552,33 @@ def _isvec(v):
 
 
 @_bs("cross")
-def cross_(a, b):
-    A = _farr(a).reshape(-1)
-    B = _farr(b).reshape(-1)
+def cross_(a, b, dim=None):
+    """cross(A, B[, dim]): the cross products of A's and B's 3-element vectors, along dim (by default the
+    first dimension of size 3); two 3-element vectors in any orientation give a result shaped as A"""
+    if dim is None and _isvec(a) and _isvec(b) and _numel(a) == 3 and _numel(b) == 3:
+        A = _farr(a).reshape(-1)
+        B = _farr(b).reshape(-1)
+        r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
+        return _box(r.reshape(_arr(a).shape))
+    d = _dims(a)
+    if d != _dims(b):
+        raise _err("A and B must be same size.", "MATLAB:cross:InputSizeMismatch")
+    if dim is not None:
+        v = _farr(dim).reshape(-1) if _isnumlike(dim) else np.zeros(0)
+        if v.size != 1 or v.dtype.kind == "c" or not (_math.isfinite(v[0]) and v[0] >= 1 and v[0] == _math.floor(v[0])):
+            raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
+        k = int(v[0]) - 1
+        if (d[k] if k < len(d) else 1) != 3:
+            raise _err("A and B must be of length 3 in the dimension in which the cross product is taken.", "MATLAB:cross:InvalidDimAorBForCrossProd")
+    else:
+        k = next((i for i, s in enumerate(d) if s == 3), -1)
+        if k < 0:
+            raise _err("A and B must have at least one dimension of length 3.", "MATLAB:cross:InvalidDimAorB")
+    # (in MATLAB's axis order, the cross product's axis first)
+    A = np.moveaxis(np.transpose(_farr(a)), k, 0)
+    B = np.moveaxis(np.transpose(_farr(b)), k, 0)
     r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
-    return _box(r.reshape(_arr(a).shape))
+    return _box(_contig(np.transpose(np.moveaxis(r, 0, k))))
 
 
 @_bs("dot")
@@ -6928,9 +6961,26 @@ def inv_(x):
     return _unmat(Mi)
 
 
+def _svd_finite(M, name):
+    """M for rank, null or orth (`name`): one with a NaN or Inf is refused, with MATLAB's identifier and message,
+    rather than given a plausible-looking answer (real MATLAB, Nov 4: MATLAB:rank:matrixWithNaNInf, likewise null
+    and orth)"""
+    if not np.all(np.isfinite(M)):
+        raise _err("Input matrix must not contain NaN or Inf values.", "MATLAB:%s:matrixWithNaNInf" % name)
+    return M
+
+
 @_bs("pinv")
 def pinv_(x):
-    return _unmat(np.linalg.pinv(_mat(x)))
+    M = _mat(x)
+    # (real MATLAB: a NaN or Inf gives NaN throughout, of the transposed shape and M's precision; complex stays
+    # complex, NaN + 0i)
+    if not np.all(np.isfinite(M)):
+        # (made single here when x is: _keep_single's conversion would drop the zero imaginary part)
+        dt = M.dtype if class_(x) != "single" else np.complex64 if M.dtype.kind == "c" else np.float32
+        P = np.full(M.shape[::-1], np.nan, dtype=dt)
+        return _canon(_contig(P.T)) if P.dtype.kind == "c" else _unmat(P)
+    return _unmat(np.linalg.pinv(M))
 
 
 @_bs("det")
@@ -6965,7 +7015,7 @@ def det_(x):
 
 @_bs("rank")
 def rank_(x, tol=None):
-    M = _mat(x)
+    M = _svd_finite(_mat(x), "rank")
     if M.size == 0:
         return 0.0
     s = np.linalg.svd(M, compute_uv=False)
@@ -7163,10 +7213,16 @@ def _left_vectors(A, B, w, balance=True):
 @_bi("svd")
 def svd_(nargout, x, *args):
     M = _mat(x)
+    # (real MATLAB: a NaN or Inf anywhere makes the singular values, U and V all NaN, S 0 off its diagonal: a
+    # zero matrix's shapes, filled with NaN)
+    nan = 0.0
+    if not np.all(np.isfinite(M)):
+        M, nan = np.zeros(M.shape, dtype=M.real.dtype), np.nan
     if nargout <= 1:
-        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)))
+        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)) + nan)
     econ = bool(args)
     U, s, Vh = np.linalg.svd(M, full_matrices=not econ)
+    U, s, Vh = U + nan, s + nan, Vh + nan
     S = np.zeros((U.shape[1], Vh.shape[0]))
     for k in range(s.size):
         S[k, k] = s[k]
@@ -7292,7 +7348,7 @@ def chol_(nargout, x, *args):
 
 @_bs("null")
 def null_(x):
-    M = _mat(x)
+    M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
     tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
     r = int(np.sum(s > tol))
@@ -9912,9 +9968,11 @@ def nthroot_(x, n):
     X = _farr(x)
     N = _farr(n)
     with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.sign(X) * np.abs(X) ** (1.0 / N)
-        r = np.where((X < 0) & (np.mod(N, 2) == 0), _math.nan, r)
-    return _box(r)
+        if np.any((X < 0) & (np.mod(N, 2) != 1)):
+            raise _err("If X is negative, N must be an odd integer.", "MATLAB:nthroot:NegXNotOddIntegerN")
+        r = np.abs(X) ** (1.0 / N)
+        r = np.where(X < 0, -r, r)
+    return _finish(r, _float_class(x, n))
 
 
 def _bitop(f):
@@ -12426,6 +12484,23 @@ _PLOT_FNS = ("figure gcf gca groot clf cla close hold ishold subplot plot plot3 
              "histcounts discretize zticks zticklabels camlight lighting material light").split()
 for _n in _PLOT_FNS:
     _B[_n] = _lazy_plot(_n)
+
+
+def _lazy_builtin(module, name):
+    """a built-in that lives in a lazily loaded module: the first call imports it, which registers the real
+    built-in over this stub, and is then that built-in's"""
+    def g(nargout, *args):
+        __import__(module)
+        real = _B[name]
+        if real.f is g:
+            raise _err("%s: %s does not define it." % (name, module))
+        return real.call(nargout, list(args))
+    return Builtin(g, name)
+
+
+# (lib/_matlab_numeric_more.py: not imported by MATLAB mode's start, so in the lazy matlab-more chunk)
+for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
+    _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
 
 
 def _keep_single(name, data=(0,), keep=()):

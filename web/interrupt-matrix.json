@@ -38,8 +38,8 @@
    }
   },
   "libModules": {
-   "count": 150,
-   "sha": "818bfb9c5d324dac"
+   "count": 151,
+   "sha": "928cf121d2254939"
   }
  },
  "entries": [
@@ -1421,6 +1421,14 @@
    "exception": "XK",
    "family": "P3f NumPy kernels",
    "owner": "numerics (python)"
+  },
+  {
+   "id": "wasm:nd.ts",
+   "transport": "wasm:nd.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "numerics-core engine/nd",
+   "owner": "numerics-core"
   }
  ]
 }
