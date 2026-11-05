@@ -1290,7 +1290,9 @@ export function createNotebook(root, opts = {}) {
     // 300 ms that wait is shown at the caret, in the list's place, until the answer replaces it)
     const asked = ++tabAsked;
     const waiting = setTimeout(() => {
-      if (comp || ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return;
+      // (a later Tab's question is its own, its list or note already shown or still to come: this older one stays
+      // quiet; only the latest Tab sets a list, after its own timer is cleared, so no list is open here)
+      if (asked !== tabAsked || ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return;
       completer.innerHTML = `<li class="sbnb-comp-wait" aria-disabled="true">loading ${esc(LANG_NAME[mode] ?? mode)}…</li>`;
       completer.hidden = false;
       const r = caretBox(ta);

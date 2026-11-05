@@ -5,7 +5,9 @@
 // place, and the answer then replaces it; a quick answer shows no note; a key
 // pressed meanwhile takes the note away, and a stale answer then shows
 // nothing; an answer with no names takes it away too; an older Tab's answer
-// leaves a newer Tab's note alone.  On the embed page (web/embed), its kernel's questions delayed
+// leaves a newer Tab's note alone, and an older Tab's timer leaves a newer Tab's
+// answer alone; a text, caret or focus change before 300 ms shows no note; the
+// list's own keys still choose.  On the embed page (web/embed), its kernel's questions delayed
 // here.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/notebook/test-tab-loading.mjs
 import { spawn } from "node:child_process";
@@ -106,13 +108,71 @@ try {
   check((await shown())?.[0]?.[1] === true, "...and stays when the older, stale answer arrives");
   // (prin has one name: the answer completes it in the cell rather than listing it)
   check(await until(`(() => { const c = document.querySelector(".sbnb-completer"), ta = [...document.querySelectorAll("#nb .cell textarea")].at(-1); return !c.querySelector(".sbnb-comp-wait") && (ta.value === "print" || [...c.children].some((li) => li.textContent === "print")); })()`, 5000), "...until its own answer replaces it");
+  await key("Escape", 27);
+
+  // the list's own keys: ↓ then Enter inserts the second name
+  await ev("window.__delay = 50; window.__delays = []");
+  await fresh("pri");
+  await key("Tab", 9);
+  check(await until(`(() => { const c = document.querySelector(".sbnb-completer"); return !c.hidden && c.children.length > 1 && !c.querySelector(".sbnb-comp-wait"); })()`, 5000), "a quick answer lists several names");
+  const second = (await shown())?.[1]?.[0];
+  await key("ArrowDown", 40);
+  await key("Enter", 13);
+  await sleep(100);
+  check(second && (await ev(`[...document.querySelectorAll("#nb .cell textarea")].at(-1).value`)) === second, `↓ then Enter inserts the second name (${second})`);
+  check((await shown()) === null, "...and closes the list");
+
+  // no note when the 300 ms come after the wait ended or no longer applies: sampled every 50 ms to 900 ms
+  const quiet = async (what, during) => {
+    await fresh("zqzqzq");
+    await key("Tab", 9);
+    await during();
+    let seen = false;
+    for (let i = 0; i < 18; i++) { if ((await shown())?.some(([, w]) => w)) seen = true; await sleep(50); }
+    check(!seen, what);
+    await key("Escape", 27);
+  };
+  await ev("window.__delay = 50");
+  await quiet("a quick answer with no names shows no note later", () => sleep(0));
+  await ev("window.__delay = 1500");
+  // (the last character replaced: the text changes, the caret is back where it was)
+  await quiet("the text changed before 300 ms: no note", () => sleep(100).then(() => ev(`(() => { const ta = document.activeElement; ta.setSelectionRange(ta.value.length - 1, ta.value.length); return true; })()`)).then(() => send("Input.insertText", { text: "x" })));
+  await quiet("the caret moved before 300 ms: no note", () => sleep(100).then(() => key("ArrowLeft", 37)));
+  await quiet("focus gone before 300 ms: no note", () => sleep(100).then(() => ev(`document.activeElement.blur(), true`)));
+  await sleep(1600); // (the slow answers above, all stale, come back)
+
+  // an older Tab's timer firing after a newer Tab answered quickly (daybreak3's TAB689-TIMER-2):
+  // with no names, it shows no note; with a list open, it doesn't cover it
+  await ev("window.__delays = [1000, 50]");
+  await fresh("zqzqzq");
+  await key("Tab", 9);
+  await sleep(100);
+  await key("Tab", 9);
+  let resurrected = false;
+  for (let i = 0; i < 30; i++) { if ((await shown())?.some(([, w]) => w)) resurrected = true; await sleep(50); }
+  check(!resurrected, "an older timer after a newer empty answer: no note");
+  check((await shown()) === null, "...and none after the older answer arrives");
+  await ev("window.__delays = [1000, 50]");
+  await fresh("pri");
+  await key("Tab", 9);
+  await sleep(100);
+  await key("Tab", 9);
+  // (the older timer fires before or after the newer list opens: no note either way)
+  let covered = false;
+  for (let i = 0; i < 30; i++) { if ((await shown())?.some(([, w]) => w)) covered = true; await sleep(50); }
+  const kept = await shown();
+  check(kept?.length > 1 && !kept.some(([, w]) => w), `a newer quick answer's list opens: ${JSON.stringify(kept)}`);
+  check(!covered, "...and the older timer shows no note, over it or before it");
+  await key("Escape", 27);
   check(errors.length === 0, `no page exceptions: ${errors.slice(0, 2).join(" | ")}`);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {
   ws.close();
   chrome.kill();
-  setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500);
+  // (Chromium may still be writing its profile as it exits)
+  await sleep(500);
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
