@@ -13,7 +13,8 @@ STREAMS = {
 }
 S = {k: base64.b64decode(v) for k, v in STREAMS.items()}
 W = {"zlib6": 15, "zlib1": 15, "zlib0": 15, "raw9": -15, "gzip": 31, "gzipname": 31, "empty": 15, "bomb": 15}
-h = lambda b: hashlib.sha256(b).hexdigest()[:16]
+# (a fingerprint of the bytes: their CRC-32 and length; Sagebrush's hashlib is slow on megabytes, its crc32 isn't)
+h = lambda b: "%08x:%d" % (zlib.crc32(b) & 0xFFFFFFFF, len(b))
 
 def loop(stream, wbits, n):
     # CPython's idiom: give back unconsumed_tail until eof
@@ -30,17 +31,19 @@ def loop(stream, wbits, n):
     return d, outs, tails
 
 for name in S:
-    for n in (0, 1, 7, 4096):
+    # (the 3 MB bomb in 1-byte calls is 200,000 calls, too slow for the harness's bound: its stops at 0, 7 and 4096)
+    for n in ((0, 7, 4096) if name == "bomb" else (0, 1, 7, 4096)):
         d = zlib.decompressobj(W[name])
-        buf, total, lens, tails = S[name], b"", [], []
+        buf, parts, lens, tails = S[name], [], [], []
         for _ in range(200000):
             chunk = d.decompress(buf, n)
-            total += chunk
+            parts.append(chunk)
             lens.append(len(chunk))
             buf = d.unconsumed_tail
             tails.append(len(buf))
             if d.eof or (not chunk and not buf):
                 break
+        total = b"".join(parts)
         # (unconsumed_tail's length at a stop may differ from CPython's by the one byte in progress, which
         # CPython's zlib holds in its bit accumulator: its last value and its bound are compared, not every value)
         print(name, n, len(total), h(total), d.eof, len(d.unused_data), len(lens), h(repr(lens).encode()), tails[-1], all(t <= len(S[name]) for t in tails), max(lens))
