@@ -7,7 +7,7 @@
 //   node --test scripts/test-examples.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -74,6 +74,8 @@ test("select: each row of the trigger table", () => {
     "latex/plain",
     "latex/sage-doc",
   ]);
+  // (examples/shared/: the LaTeX previews' one stylesheet, so the LaTeX examples; grader's C2)
+  assert.deepEqual(ids(["examples/shared/katex-preview.css"]), ["latex/plain", "latex/sage-doc"]);
   assert.deepEqual(ids(["README.md"]), []);
   assert.deepEqual(
     ids(["README.md"], { all: true }),
@@ -449,6 +451,29 @@ test("the runner fails an output that holds the run's temporary folder", () => {
   const r = run(["run", "notebook/hello-python", "--root", root]);
   assert.equal(r.status, 1, r.stdout);
   assert.match(r.stdout, /an output holds the run's temporary folder/);
+});
+
+test("the runner fails an output that holds the checkout's own path", () => {
+  // (a notebook printing the checkout's path, as help's "File:" line once did: another machine's differs; grader's L2)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  const nb = JSON.parse(readFileSync(nbFile, "utf8"));
+  const checkout = realpathSync(join(here, ".."));
+  nb.cells.filter((c) => c.cell_type === "code")[0].source = `print(${JSON.stringify(join(checkout, "lib", "x.py"))})`;
+  writeFileSync(nbFile, JSON.stringify(nb, null, 1) + "\n");
+  const r = run(["run", "notebook/hello-python", "--root", root]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /an output holds the checkout's path/);
+});
+
+test("validate refuses a notebook that isn't in the runner's own form", () => {
+  // (the same notebook minified: its outputs would churn on the next --update; grader's N2)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  writeFileSync(nbFile, JSON.stringify(JSON.parse(readFileSync(nbFile, "utf8"))));
+  const r = run(["validate", "--root", root]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /notebook\/hello-python: .*not in the runner's form/);
 });
 
 test("ci shards and their census, end to end", () => {
