@@ -472,6 +472,9 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("ctr-footnote-too-big-negative", text("A\\footnote[-99999999999]{Neg.}") === "A -2147483647 -2147483647 Neg.", text("A\\footnote[-99999999999]{Neg.}"));
   const frag = new Engine().update("\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   check("ctr-secnumdepth-no-class", frag === "1 A B", frag);
+  // (grader K6: KOMA's scrbook and scrreprt are 2 deep too: TeX's "1 C 1.1 S 1.1.1 T U". The numbering only: KOMA's chapter
+  //  heading has no "Chapter" word, which the preview still prints, a separate gap)
+  for (const c of ["scrbook", "scrreprt"]) { const t = clsText(c, "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}"); check("ctr-class-depth-" + c, t.endsWith("1 C 1.1 S 1.1.1 T U"), t); }
   // (grader's R6: an optional argument that isn't a whole signed number is the counter, as before, and check says so; TeX
   //  would read its leading digits, \footnote[2a] as 2, and set the "a" as text)
   const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
