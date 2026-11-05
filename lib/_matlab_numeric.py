@@ -370,12 +370,16 @@ def funm_(x, f):
 def orth_(x):
     """an orthonormal basis of the range: the left singular vectors of the nonzero singular values"""
     A = _m._svd_finite(_mat(x), "orth")
+    cls = _m._float_class(x)
     if A.size == 0:
-        return _unmat(np.zeros((A.shape[0], 0)))
+        return _m._finish(np.zeros((0, A.shape[0])), cls)
     U, s, _ = np.linalg.svd(A, full_matrices=False)
-    tol = max(A.shape) * float(s[0]) * 2.220446049250313e-16 if s.size else 0.0
+    tol = max(A.shape) * _m._basis_spacing(s, cls)
+    if cls == "single":
+        s = _m._single_values(s)
+        tol = _m._single_scalar(tol)
     r = int(np.sum(s > tol))
-    return _unmat(U[:, :r])
+    return _m._finish(np.array(U[:, :r].T), cls)
 
 
 @_bs("rcond")
@@ -466,7 +470,7 @@ def polyder_(nargout, a, b=None):
     """polyder(p); polyder(a, b): the derivative of a*b; [q, d] = polyder(b, a): of b/a"""
     A = _poly_row(a)
     if b is None:
-        return _row_value(_trim(_deriv(A)))
+        return _m._finish(_trim(_deriv(A)).reshape((-1, 1)), _m._float_class(a))
     B = _poly_row(b)
     if nargout < 2:
         # (the product a*b: a' b + a b')
@@ -492,7 +496,7 @@ def polyint_(p, k=0.0):
     r = np.zeros(n + 1, dtype=c.dtype)
     r[:n] = c / np.arange(n, 0, -1)
     r[n] = _scalar(k) if not (isinstance(k, complex)) else k
-    return _row_value(r)
+    return _m._finish(r.reshape((-1, 1)), _m._float_class(p, k))
 
 
 @_bs("polyvalm")

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -336,6 +336,64 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   assert.deepEqual(pick(["README.md"]), { groups: [], runner: "false", export: "false", lookalike: "false" });
 });
 
+// The examples job (plan U7 section 2): its ids and shard matrix, here on the fixture corpus
+test("examples: a change selects its examples; the engines select notebooks, boards and executable latex; the full tier all", () => {
+  const root = join(__dirname, "..", "..", "test", "fixtures", "examples");
+  const run = (files: string[], labels = "") => {
+    const list = join(dir, "examples-files.txt");
+    writeFileSync(list, files.join("\n") + "\n");
+    const r = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: { ...process.env, CI_PATHS_FILES: list, CI_EXAMPLES_ROOT: root, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const o = Object.fromEntries(r.stdout.trim().split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+    return { ids: JSON.parse(o.examples_ids), matrix: JSON.parse(o.examples_matrix), tiers: [o.modes, o.engine_smoke, o.census, o.full] };
+  };
+  assert.deepEqual(run(["README.md"]), { ids: [], matrix: [], tiers: ["false", "false", "false", "false"] });
+  // (the fixture corpus is a known path too: none of the corpus's examples, and not the fallback's engine smoke and census)
+  assert.deepEqual(run(["test/fixtures/examples/notebook/hello-python/main.ipynb"]), { ids: [], matrix: [], tiers: ["true", "false", "false", "false"] }, "the fixtures are not the corpus's paths");
+  assert.deepEqual(run(["examples/latex/article/main.tex"]), { ids: ["latex/article"], matrix: [1], tiers: ["false", "false", "false", "false"] });
+  // (an examples-only change is a known path: that example alone, and not the unknown-path fallback's every job, which
+  // would turn on modes, the engine smoke and the census; examples/ is a web path on master, so node and web run)
+  assert.deepEqual(run(["examples/notebook/hello-python/main.ipynb"]), { ids: ["notebook/hello-python"], matrix: [1], tiers: ["false", "false", "false", "false"] });
+  assert.deepEqual(run(["src/compile.ts"]).ids, ["board/hello", "notebook/hello-python", "notebook/sage-basics"]);
+  // (a LaTeX suite selects the latex examples; a web/latex source is a full-tier change on master, so every example)
+  assert.deepEqual(run(["web/latex/test-latex-page.mjs"]).ids, ["latex/article"]);
+  assert.deepEqual(run(["web/latex/engine/expand.ts"]).ids, ["board/hello", "latex/article", "notebook/hello-python", "notebook/sage-basics"]);
+  assert.deepEqual(run(["README.md"], "full-ci").ids, ["board/hello", "latex/article", "notebook/hello-python", "notebook/sage-basics"]);
+});
+
+// (the corpus is found by its real path: a checkout whose path has a space, read as a URL's percent-encoded
+// pathname, found no corpus and skipped both examples jobs; grader B1)
+test("examples: ci-paths finds the corpus beside it in a checkout whose path has a space", () => {
+  const top = mkdtempSync(join(tmpdir(), "ci paths "));
+  mkdirSync(join(top, "scripts"));
+  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
+  cpSync(join(__dirname, "..", "..", "test", "fixtures", "examples"), join(top, "examples"), { recursive: true });
+  const list = join(top, "files.txt");
+  writeFileSync(list, "examples/latex/article/main.tex\n");
+  const env: NodeJS.ProcessEnv = { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" };
+  delete env.CI_EXAMPLES_ROOT;
+  const r = spawnSync(process.execPath, [join(top, "scripts", "ci-paths.mjs")], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^examples_ids=\["latex\/article"\]$/m);
+  assert.match(r.stdout, /^examples_matrix=\[1\]$/m);
+});
+
+
+// (a job reading an output the changes job doesn't export gets '': the examples jobs once ran on it, one dying on
+// fromJSON('') and the census passing with nothing run; grader, #538)
+test("ci.yml: every needs.changes.outputs.X a job reads is among the changes job's outputs", () => {
+  const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const job = yml.slice(yml.indexOf("\n  changes:\n"));
+  const block = job.slice(job.indexOf("\n    outputs:\n"), job.indexOf("\n    steps:\n"));
+  const exported = new Set([...block.matchAll(/^      ([a-z_]+): /gm)].map((m) => m[1]));
+  // (the examples jobs and their two outputs come with William's patch, /scratch/sagebrush-reviews/examples-ci-jobs:
+  // agents never push workflow files; until then no job reads them, and this holds either way)
+  const read = new Set([...yml.matchAll(/needs\.changes\.outputs\.([a-z_]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...read].filter((k) => !exported.has(k)), []);
+});
 
 test("a changed suite runs on its own pull request: its `// ci:` job, and the full tier for a full-tier-only job (#565)", () => {
   // #565's pair: the service worker and a new web-sync.2 suite (the suite is not on master: a checkout of its own)

@@ -1337,7 +1337,10 @@ newBuiltinModule("_nplinalg", (m) => {
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
-  fn("cholesky", (a: NDArray, reportFailure = false) => {
+  // nanPivots: NumPy's rule (OpenBLAS potrf), refusing a pivot only when it is <= 0, so a NaN pivot passes and the
+  // rest of the factor fills with NaN; without it, MATLAB's (and reference LAPACK's), refusing any pivot that is not
+  // > 0, NaN included (real MATLAB R2026b: chol of a NaN pivot is MATLAB:posdef, an Inf pivot passes)
+  fn("cholesky", (a: NDArray, reportFailure = false, nanPivots = false) => {
     // (square and 2-D before anything is admitted or the module loaded: np.linalg.cholesky checks this, but this
     // backend function can be called directly; astra ND657-ADMIT-2)
     if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
@@ -1363,15 +1366,17 @@ newBuiltinModule("_nplinalg", (m) => {
         if (e instanceof RangeError) raise(T.MemoryError, `cholesky of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
         throw e;
       }
-      if (typeof F === "number") linalgError("Matrix is not positive definite");
-      return out(F, [n, n]);
+      if (typeof F !== "number") return out(F, [n, n]);
+      // (engine/nd refuses a NaN pivot; NumPy's rule passes it: the loop below then gives OpenBLAS's NaN pattern, the
+      // trailing triangle from that pivot. Only a refused matrix with a NaN in it takes this path)
+      if (!(nanPivots && c.data.subarray(0, n * n).some((v) => v !== v))) linalgError("Matrix is not positive definite");
     }
     const [A, n] = mat(a);
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
       for (let k = 0; k < j; k++) s -= L[j * n + k] * L[j * n + k];
-      if (!(s > 0)) {
+      if (nanPivots ? s <= 0 : !(s > 0)) {
         // MATLAB's two-output chol needs the completed leading block and the
         // first failed pivot. NumPy's ordinary call retains its exception.
         if (reportFailure) return tuple([out(L, [n, n]), j + 1]);

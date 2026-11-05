@@ -69,7 +69,7 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "concat", "Timedelta", "Categorical", "MultiIndex", "read_excel", "get_dummies"]:
+for name in ["NA", "merge", "concat", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
 for name in ["groupby", "merge", "describe", "sort_values", "drop", "rename", "apply", "plot", "info", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
@@ -121,6 +121,30 @@ case("csv.usecols-mixed", lambda: rc("a,b\n1,2\n", usecols=["a", 1]))
 case("csv.binary-file", lambda: pd.read_csv(io.BytesIO(b"a\n1\n")))
 case("csv.quotechar-sep", lambda: rc("a\n1\n", quotechar=","))
 
+# read_excel's refusals (PR B), on workbooks this program writes (tests/_xlsx.py)
+from _xlsx import workbook as _wb, zip_bytes as _zb
+_x = lambda **kw: pd.read_excel(io.BytesIO(_wb([("S", [["a", "b"], [1, "x"], [2, "y"]])])), **kw)
+_long = io.BytesIO(_wb([("S", [["k"]] + [[i] for i in range(8)])]))
+case("xl.skiprows-list-nrows", lambda: pd.read_excel(_long, skiprows=[1, 3], nrows=2))
+case("xl.int-past-int64", lambda: pd.read_excel(io.BytesIO(_wb([("S", [["a"], [2 ** 63], [1]])]))))
+case("xl.skiprows-callable", lambda: _x(skiprows=lambda i: i == 1))
+case("xl.header-list", lambda: _x(header=[0, 1]))
+case("xl.usecols-callable", lambda: _x(usecols=lambda c: c == "a"))
+case("xl.index_col-list", lambda: _x(index_col=[0, 1]))
+case("xl.engine", lambda: _x(engine="calamine"))
+case("xl.dtype", lambda: _x(dtype={"a": "float64"}))
+case("xl.na_filter", lambda: _x(na_filter=False))
+case("xl.usecols-negative", lambda: _x(usecols=[-1]))
+case("xl.usecols-none", lambda: _x(usecols=[]))
+case("xl.usecols-none-letters", lambda: _x(usecols="A:"))
+case("xl.nrows-negative-float", lambda: _x(nrows=-1.0))
+case("xl.xls", lambda: pd.read_excel(io.BytesIO(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 100)))
+_ok = _wb([("S", [["a"], [1]])])
+_multi = bytearray(_ok)
+_e = _multi.rfind(b"PK\x05\x06")
+_multi[_e + 4] = 1
+case("xl.multi-disk", lambda: pd.read_excel(io.BytesIO(bytes(_multi))))
+
 # a URL is refused before any open or fetch: open() is watched
 opened = []
 real_open = builtins.open
@@ -136,6 +160,7 @@ try:
     case("csv.url-https", lambda: pd.read_csv("https://example.com/data.csv"))
     case("csv.url-http-upper", lambda: pd.read_csv("HTTP://example.com/data.csv"))
     case("csv.url-s3", lambda: pd.read_csv("s3://bucket/data.csv"))
+    case("xl.url-https", lambda: pd.read_excel("https://example.com/data.xlsx"))
 finally:
     builtins.open = real_open
 case("csv.url-nothing-opened", lambda: opened)
