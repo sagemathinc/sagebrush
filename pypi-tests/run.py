@@ -75,6 +75,26 @@ def normal(out, name):
     return "".join(pre.sub('"<package>/', l) for l in out.splitlines(True) if not re.match(r"^\s+[~^]+\s*$", l))
 
 
+def record_counts(out):
+    """Count harness status records, not arbitrary lines printed by tests."""
+    counts = {"ok": 0, "skipped": 0, "excluded": 0, "FAIL": 0}
+    record = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*: (ok|skipped|excluded|FAIL(?: |$))")
+    for line in out.splitlines():
+        hit = record.match(line)
+        if hit:
+            status = hit.group(1).strip()
+            counts["FAIL" if status == "FAIL" else status] += 1
+    return counts
+
+
+def summary(out):
+    counts = record_counts(out)
+    total = sum(counts.values())
+    return "%d tests (%d passed, %d skipped, %d excluded)" % (
+        total, counts["ok"], counts["skipped"], counts["excluded"]
+    )
+
+
 bad = 0
 for name in names:
     d = os.path.join(here, name)
@@ -146,7 +166,7 @@ for name in names:
         continue
     if "--refresh" in sys.argv:
         open(os.path.join(d, "expected.out"), "w").write(cp)
-        print("%s: expected.out written (%d tests, %d not ok under CPython)" % (name, cp.count("\n"), cp.count(": FAIL")))
+        print("%s: expected.out written (%s, %d failed under CPython)" % (name, summary(cp), record_counts(cp)["FAIL"]))
         continue
     want = open(os.path.join(d, "expected.out")).read()
     # (its known differences, packages/pypi-<name>/known.json: each test may
@@ -185,12 +205,11 @@ for name in names:
         w, s = want.splitlines(), sp.splitlines()
         diff = [l for l in w if l not in s]
         problems.append("Sagebrush differs from expected.out in %d of %d lines:\n" % (len(diff) + abs(len(w) - len(s)) * 0, len(w)) + "".join("    expected %s\n" % l for l in diff[:30]) + "".join("    got      %s\n" % l for l in s if l not in w)[:4000] + (serr[-2000:] if verbose else ""))
-    n = want.count("\n")
     if problems:
         bad += 1
         print("%s %s: FAIL" % (name, src["version"]))
         for p in problems:
             print("  " + p)
     else:
-        print("%s %s: %d tests, CPython and Sagebrush identical%s" % (name, src["version"], n, "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
+        print("%s %s: %s, CPython and Sagebrush identical%s" % (name, src["version"], summary(want), "".join("; %s fails here as known (%s)" % (k, t["error"]) for k, t in known.items())))
 sys.exit(1 if bad else 0)

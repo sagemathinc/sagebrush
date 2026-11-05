@@ -24,6 +24,7 @@ const upstream: Record<string, string> = {
   "test_demo.py": [
     "import os",
     "def test_ok():",
+    "    print('diagnostic output from inside a test')",
     "    assert 1 + 1 == 2",
     "def test_known():",
     "    if os.environ.get('FAKE_SB'):",
@@ -62,6 +63,7 @@ function runner(args: string[], env: Record<string, string> = {}): { status: num
 }
 const expected = join(tests, "demo", "expected.out");
 const excluded = join(tests, "demo", "excluded.json");
+const cleanExpected = "test_demo.test_known: ok\ndiagnostic output from inside a test\ntest_demo.test_ok: ok\n";
 
 test("pypi-tests/run.py: --refresh writes CPython's records, and only from a clean exit", () => {
   const bad = runner(["--refresh", "demo"], { FAKE_CP_EXIT: "23", FAKE_CP_STDERR: "Fatal Python error: simulated" });
@@ -69,11 +71,11 @@ test("pypi-tests/run.py: --refresh writes CPython's records, and only from a cle
   assert.match(bad.out, /CPython exited with 23: Fatal Python error: simulated/);
   const ok = runner(["--refresh", "demo"]);
   assert.equal(ok.status, 0, ok.out);
-  assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  assert.equal(readFileSync(expected, "utf8"), cleanExpected);
   const noisy = runner(["--refresh", "demo"], { FAKE_CP_STDERR: "Fatal: simulated" });
   assert.equal(noisy.status, 1, noisy.out);
   assert.match(noisy.out, /CPython wrote to stderr: Fatal: simulated/);
-  assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  assert.equal(readFileSync(expected, "utf8"), cleanExpected);
 });
 
 test("pypi-tests/run.py: named exclusions apply to both interpreters and stale names fail closed", () => {
@@ -85,7 +87,7 @@ test("pypi-tests/run.py: named exclusions apply to both interpreters and stale n
   assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: excluded\n");
   const ok = runner(["demo"]);
   assert.equal(ok.status, 0, ok.out);
-  assert.match(ok.out, /demo 1\.0\.0: 2 tests, CPython and Sagebrush identical/);
+  assert.match(ok.out, /demo 1\.0\.0: 2 tests \(1 passed, 0 skipped, 1 excluded\), CPython and Sagebrush identical/);
 
   writeFileSync(excluded, JSON.stringify({ tests: [{ test: "test_demo.test_gone", reason }] }));
   const stale = runner(["demo"]);
@@ -95,11 +97,11 @@ test("pypi-tests/run.py: named exclusions apply to both interpreters and stale n
 });
 
 test("pypi-tests/run.py: a known difference passes only as exactly its recorded failure, type and message (TEST-DB4-1)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   const ok = runner(["demo"]);
   assert.equal(ok.status, 0, ok.out);
-  assert.match(ok.out, /demo 1\.0\.0: 2 tests, CPython and Sagebrush identical; test_demo\.test_known fails here as known \(AttributeError\)/);
+  assert.match(ok.out, /demo 1\.0\.0: 2 tests \(2 passed, 0 skipped, 0 excluded\), CPython and Sagebrush identical; test_demo\.test_known fails here as known \(AttributeError\)/);
   // (the same type, another message: not the recorded failure)
   const other = runner(["demo"], { FAKE_MESSAGE: "SortedDict missing invented_bug" });
   assert.equal(other.status, 1, other.out);
@@ -112,7 +114,7 @@ test("pypi-tests/run.py: a known difference passes only as exactly its recorded 
 });
 
 test("pypi-tests/run.py: a child that exits nonzero, or writes to stderr, after every expected record fails the run (TEST-DB4-2)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   for (const [env, why] of [
     [{ FAKE_SB_EXIT: "23", FAKE_SB_STDERR: "FATAL ERROR: simulated" }, /Sagebrush exited with 23: FATAL ERROR: simulated/],
@@ -157,7 +159,7 @@ function pinArchive(a: { url: string; sha256: string }) {
 }
 
 test("pypi-tests/run.py --fetch: the pinned files from the pinned archive, a member count past its ceiling refused in one pass, links not followed (HARD-PYPI-2)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   pinArchive(archive("good.tar.gz", "good"));
   const ok = runner(["--fetch", "demo"]);
