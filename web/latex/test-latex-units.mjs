@@ -415,6 +415,73 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("beamer-furniture-other-class", !/Madrid|>F</.test(art) && !/slide-(head|foot)/.test(art) && art.includes("X") && /<div class="title">\[<\/div>/.test(art), art.slice(0, 300));
 }
 
+// ---- counters (astra4's fidelity digest, gap 1: the renderer's numbering ignored \setcounter and \footnote[n], silently).
+//      M01..M06 as astra4 reduced them, with TeX Live's text for each; then \addtocounter, enumii, a footnote after [n]
+{
+  setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src + "</span>");
+  const text = (body) => new Engine().update("\\documentclass{article}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const cases = [
+    ["ctr-m01-footnote-optional", "X\\footnote[7]{NoteText.}", (t) => /^X 7 .*7 NoteText\.$/.test(t)],
+    ["ctr-m02-footnote-counter", "\\setcounter{footnote}{4}X\\footnote{NoteText.}", (t) => /^X 5 .*5 NoteText\.$/.test(t)],
+    ["ctr-m03-figure", "\\setcounter{figure}{7}\\begin{figure}\\caption{CaptionText.}\\end{figure}", (t) => t.includes("Figure 8: CaptionText.")],
+    ["ctr-m04-equation", "\\setcounter{equation}{9}\\begin{equation}1=1\\end{equation}", (t) => /\\tag\{10\}/.test(t) && !/\\tag\{1\}/.test(t)],
+    ["ctr-m05-section", "\\setcounter{section}{4}\\section{HeadingText}", (t) => t === "5 HeadingText"],
+    ["ctr-m06-enumerate", "\\begin{enumerate}\\setcounter{enumi}{3}\\item EntryText.\\end{enumerate}", (t) => t === "4. EntryText."],
+    ["ctr-addtocounter", "\\section{A}\\addtocounter{section}{2}\\section{B}", (t) => t === "1 A 4 B"],
+    ["ctr-enumii", "\\begin{enumerate}\\item P\\begin{enumerate}\\setcounter{enumii}{2}\\item Q\\end{enumerate}\\end{enumerate}", (t) => t === "1. P (c) Q"],
+    ["ctr-enumi-from-inner", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\setcounter{enumi}{5}\\end{enumerate}\\item R\\end{enumerate}", (t) => /^1\. P .*Q .*6\. R$/.test(t) && !/2\. Q/.test(t)],
+    ["ctr-footnote-after-optional", "A\\footnote[7]{N7.}B\\footnote{N1.}", (t) => /A 7 B 1 .*7 N7\. .*1 N1\./.test(t)],
+  ];
+  for (const [name, body, ok] of cases) { const t = text(body); check(name, ok(t), t); }
+  // (#673 r2, each against TeX Live 2025's text for it: daybreak3 CTR673-FOOTNOTE-SIGNED-1, a signed \footnote[n] and the
+  //  ordinary one after it, not stepped by it; CTR673-SECNUMDEPTH-1, secnumdepth both ways; grader's R7, enumi from an
+  //  enumerate inside an itemize; enumiii and enumiv; TeX's limit: 99999999999 is "Number too big", 2147483647, and the
+  //  \section's step after it wraps as TeX's does)
+  const texCases = [
+    ["ctr-footnote-signed", "A\\footnote[-2]{Neg}B\\footnote{Next}", "A -2 B 1 -2 Neg 1 Next"],
+    ["ctr-secnumdepth-0", "\\setcounter{secnumdepth}{0}\\section{Sec}\\subsection{Sub}", "Sec Sub"],
+    ["ctr-secnumdepth-4", "\\setcounter{secnumdepth}{4}\\section{Sec}\\subsection{Sub}\\subsubsection{SubSub}\\paragraph{Para} text", "1 Sec 1.1 Sub 1.1.1 SubSub 1.1.1.1 Para text"],
+    ["ctr-secnumdepth-5", "\\setcounter{secnumdepth}{5}\\section{S}\\subsection{T}\\subsubsection{U}\\paragraph{P} x \\subparagraph{Q} y", "1 S 1.1 T 1.1.1 U 1.1.1.1 P x 1.1.1.1.1 Q y"],
+    ["ctr-secnumdepth-default", "\\section{A}\\paragraph{P} x", "1 A P x"],
+    ["ctr-secnumdepth-add", "\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}", "1 A B"],
+    ["ctr-enumi-in-itemize", "\\begin{itemize}\\item A\\begin{enumerate}\\setcounter{enumi}{3}\\item B\\end{enumerate}\\end{itemize}", "\u2022 A 4. B"],
+    ["ctr-enumiii", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\setcounter{enumiii}{3}\\item R\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q iv. R"],
+    ["ctr-enumiv", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\item R\\begin{enumerate}\\setcounter{enumiv}{1}\\item S\\end{enumerate}\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q i. R B. S"],
+    ["ctr-number-too-big", "\\setcounter{section}{99999999999}\\section{Big}", "-2147483648 Big"],
+    ["ctr-number-too-big-negative", "\\setcounter{section}{-99999999999}\\section{BigNeg}", "-2147483646 BigNeg"],
+  ];
+  for (const [name, body, want] of texCases) { const t = text(body); check(name, t === want, [t, want]); }
+  // (#673 r3, against TeX Live 2025: daybreak3 CTR673-CLASS-DEPTH-2, secnumdepth from the class (book, report 2, memoir
+  //  1), so \addtocounter on it starts there; CTR673-PART-STEP-2, \part's step wraps as TeX's, and a part numbered 0 or
+  //  less says "Part" with no numeral)
+  const clsText = (cls, body) => new Engine().update("\\documentclass{" + cls + "}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const clsCases = [
+    ["ctr-class-depth-book-add", "book", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-report-add", "report", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-book", "book", "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}", "Chapter 1 C 1.1 S 1.1.1 T U"],
+    ["ctr-class-depth-memoir", "memoir", "\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-part-wrap", "article", "\\setcounter{part}{2147483647}\\part{P}", "Part P"],
+    ["ctr-part-negative", "article", "\\setcounter{part}{-1}\\part{Q}", "Part Q"],
+    ["ctr-part-too-big", "article", "\\setcounter{part}{99999999999}\\part{R}", "Part R"],
+    ["ctr-part-starred", "article", "\\part{One}\\part*{Star}", "Part I One Star"],
+  ];
+  for (const [name, cls, body, want] of clsCases) { const t = clsText(cls, body); check(name, t === want, [t, want]); }
+  // (grader's r2 pins: \footnote[n] past TeX's limit is "Number too big", clamped both ways, as TeX Live 2025 sets it; and a
+  //  fragment with no \documentclass starts from article's secnumdepth, 3)
+  check("ctr-footnote-too-big", text("A\\footnote[99999999999]{Big.}") === "A 2147483647 2147483647 Big.", text("A\\footnote[99999999999]{Big.}"));
+  check("ctr-footnote-too-big-negative", text("A\\footnote[-99999999999]{Neg.}") === "A -2147483647 -2147483647 Neg.", text("A\\footnote[-99999999999]{Neg.}"));
+  const frag = new Engine().update("\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-secnumdepth-no-class", frag === "1 A B", frag);
+  // (grader K6: KOMA's scrbook and scrreprt are 2 deep too: TeX's "1 C 1.1 S 1.1.1 T U". The numbering only: KOMA's chapter
+  //  heading has no "Chapter" word, which the preview still prints, a separate gap)
+  for (const c of ["scrbook", "scrreprt"]) { const t = clsText(c, "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}"); check("ctr-class-depth-" + c, t.endsWith("1 C 1.1 S 1.1.1 T U"), t); }
+  // (grader's R6: an optional argument that isn't a whole signed number is the counter, as before, and check says so; TeX
+  //  would read its leading digits, \footnote[2a] as 2, and set the "a" as text)
+  const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
+  const notNumT = notNum.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-footnote-not-a-number", notNumT === "A 1 B 1 X" && notNum.problems.filter((p) => p.kind === "footnote" && /\\footnote\[2a\]: not a number/.test(p.name)).length === 1, [notNumT, notNum.problems]);
+}
+
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
 {
   setKatex((src, o) => '<span class="K' + (o.displayMode ? "D" : "I") + '">' + src.replace(/[&<>]/g, "") + "</span>");
