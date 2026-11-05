@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "MCF13: correct nthroot of zero with negative degrees, preserve single results and validate negative bases. TIGHT growth measured by SIZE against master 8488b7678 using Node 24.21.0 and Bun 1.4.4: exact lib.gen and MATLAB rows; pyjs measured 164 bytes plus the conventional 64-byte packaging allowance.",
+  "bytes": {
+    "cli/lib.gen.js": 64,
+    "cli/pyjs.cjs": 228,
+    "engine/lib/matlab.pre": 501,
+    "engine/lib/matlab.src": 142
+  }
+}
