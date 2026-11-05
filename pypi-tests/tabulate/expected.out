@@ -1,0 +1,2237 @@
+test_api.test_simple_separated_format_signature: skipped
+tabulate_formats = ['fancy_grid', 'fancy_outline', 'github', 'grid', 'html', 'jira', 'latex', 'latex_booktabs', 'latex_longtable', 'latex_raw', 'mediawiki', 'moinmoin', 'orgtbl', 'pipe', 'plain', 'presto', 'pretty', 'psql', 'rst', 'simple', 'textile', 'tsv', 'unsafehtml', 'youtrack']
+test_api.test_tabulate_formats: ok
+test_api.test_tabulate_signature: skipped
+Keys' order: dict_keys(['a', 'b'])
+Expected 1:
+  a    b
+---  ---
+  0  101
+  1  102
+  2  103
+     104
+
+Expected 2:
+  b    a
+---  ---
+101    0
+102    1
+103    2
+104
+
+Got:
+  a    b
+---  ---
+  0  101
+  1  102
+  2  103
+     104
+
+test_input.test_dict_like: ok
+Expected:
+-  -  -  -  -
+0  1  2  3  4
+5  4  3  2  1
+-  -  -  -  -
+
+Got:
+-  -  -  -  -
+0  1  2  3  4
+5  4  3  2  1
+-  -  -  -  -
+
+test_input.test_iterable_of_iterables: ok
+Expected:
+  a    b    c    d    e
+---  ---  ---  ---  ---
+  0    1    2    3    4
+  5    4    3    2    1
+
+Got:
+  a    b    c    d    e
+---  ---  ---  ---  ---
+  0    1    2    3    4
+  5    4    3    2    1
+
+test_input.test_iterable_of_iterables_firstrow: ok
+Expected:
+  a    b    c    d    e
+---  ---  ---  ---  ---
+  0    1    2    3    4
+  5    4    3    2    1
+
+Got:
+  a    b    c    d    e
+---  ---  ---  ---  ---
+  0    1    2    3    4
+  5    4    3    2    1
+
+test_input.test_iterable_of_iterables_headers: ok
+Expected 1:
+-  -
+1  2
+3  4
+-  -
+
+Expected 2:
+-  -
+2  1
+4  3
+-  -
+
+Got:
+-  -
+1  2
+3  4
+-  -
+
+test_input.test_list_of_dicts: ok
+Expected 1:
+  FOO    BAR    baz
+-----  -----  -----
+    3      4      5
+
+Expected 2:
+  BAR    FOO    baz
+-----  -----  -----
+    4      3      5
+
+Got:
+  FOO    BAR    baz
+-----  -----  -----
+    3      4      5
+
+test_input.test_list_of_dicts_firstrow: ok
+Expected 1:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+Expected 2:
+  bar    foo
+-----  -----
+    2      1
+    4      3
+
+Got:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+test_input.test_list_of_dicts_keys: ok
+Expected 1:
+  DIGITS  LETTERS
+--------  ---------
+   12345  ABCDE
+
+Expected 2:
+LETTERS      DIGITS
+---------  --------
+ABCDE         12345
+
+Got:
+LETTERS      DIGITS
+---------  --------
+ABCDE         12345
+
+test_input.test_list_of_dicts_with_dict_of_headers: ok
+test_input.test_list_of_dicts_with_list_of_headers: ok
+Expected:
+  foo    bar    baz
+-----  -----  -----
+    1
+           2
+    4             3
+
+Got:
+  foo    bar    baz
+-----  -----  -----
+    1
+           2
+    4             3
+
+test_input.test_list_of_dicts_with_missing_keys: ok
+Expected:
+    string      number
+--  --------  --------
+a   one              1
+b   two
+
+Got:
+    string      number
+--  --------  --------
+a   one              1
+b   two
+
+test_input.test_list_of_lists: ok
+Expected:
+    string      number
+--  --------  --------
+a   one              1
+b   two
+
+Got:
+    string      number
+--  --------  --------
+a   one              1
+b   two
+
+test_input.test_list_of_lists_firstrow: ok
+Expected:
+0    1      2
+---  ---  ---
+a    one    1
+b    two
+
+Got:
+0    1      2
+---  ---  ---
+a    one    1
+b    two
+
+test_input.test_list_of_lists_keys: ok
+Expected:
+-  -
+1  2
+3  4
+-  -
+
+Got:
+-  -
+1  2
+3  4
+-  -
+
+test_input.test_list_of_namedtuples: ok
+Expected:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+Got:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+test_input.test_list_of_namedtuples_keys: ok
+Expected 1:
+-  -
+1  2
+3  4
+-  -
+
+Expected 2:
+-  -
+2  1
+4  3
+-  -
+
+Got:
+-  -
+1  2
+3  4
+-  -
+
+test_input.test_list_of_userdicts: ok
+Expected 1:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+Expected 2:
+  bar    foo
+-----  -----
+    2      1
+    4      3
+
+Got:
+  foo    bar
+-----  -----
+    1      2
+    3      4
+
+test_input.test_list_of_userdicts_keys: ok
+Expected:
+    a      b      c
+-----  -----  -----
+  0.5    4     13.5
+ 32     62.5  108
+171.5  256    364.5
+
+Got:
+    a      b      c
+-----  -----  -----
+  0.5    4     13.5
+ 32     62.5  108
+171.5  256    364.5
+
+test_input.test_numpy_2d: ok
+Expected:
+  1    8    27
+---  ---  ----
+ 64  125   216
+343  512   729
+
+Got:
+  1    8    27
+---  ---  ----
+ 64  125   216
+343  512   729
+
+test_input.test_numpy_2d_firstrow: ok
+test_input.test_numpy_2d_keys: excluded
+test_input.test_numpy_record_array: excluded
+test_input.test_numpy_record_array_headers: excluded
+test_input.test_numpy_record_array_keys: excluded
+test_input.test_pandas: skipped
+test_input.test_pandas_firstrow: skipped
+test_input.test_pandas_keys: skipped
+Expected:
+  b    a
+---  ---
+  1    2
+  1    2
+
+Got:
+  b    a
+---  ---
+  1    2
+  1    2
+
+test_input.test_py27orlater_list_of_ordereddicts: ok
+test_input.test_sqlite3: excluded
+test_input.test_sqlite3_keys: excluded
+Expected:
+['   12.345  ', '-1234.5    ', '    1.23   ', ' 1234.5    ', '    1e+234 ', '    1.0e234']
+
+Got:
+['   12.345  ', '-1234.5    ', '    1.23   ', ' 1234.5    ', '    1e+234 ', '    1.0e234']
+
+test_internal.test_align_column_decimal: ok
+Expected:
+['  1  ', ' 123 ', '12345\n  6  ']
+
+Got:
+['  1  ', ' 123 ', '12345\n  6  ']
+
+test_internal.test_align_column_multiline: ok
+Expected:
+['123.4', '56.7890']
+
+Got:
+['123.4', '56.7890']
+
+test_internal.test_align_column_none: ok
+Expected:
+6
+
+Got:
+6
+
+Expected:
+5
+
+Got:
+5
+
+test_internal.test_multiline_width: ok
+Expected:
+  one  two
+three  four
+
+Got:
+  one  two
+three  four
+
+test_output.test_colalign_multi: ok
+Expected:
+-----  ---
+Alice   1
+  Bob  333
+-----  ---
+
+Got:
+-----  ---
+Alice   1
+  Bob  333
+-----  ---
+
+test_output.test_column_alignment: ok
+Expected:
+      b
+--  ---
+ 0  101
+ 1  102
+ 2  103
+
+Got:
+      b
+--  ---
+ 0  101
+ 1  102
+ 2  103
+
+test_output.test_dict_like_with_index: ok
+Expected:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+Got:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+Expected:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+Got:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+test_output.test_disable_numparse_default: ok
+Expected:
+h1    h2    h3
+----  ----  -------
+foo   bar   42992e1
+
+Got:
+h1    h2    h3
+----  ----  -------
+foo   bar   42992e1
+
+Expected:
+h1    h2        h3
+----  ----  ------
+foo   bar   429920
+
+Got:
+h1    h2        h3
+----  ----  ------
+foo   bar   429920
+
+test_output.test_disable_numparse_list: ok
+Expected:
+strings    numbers
+---------  ---------
+spam       41.9999
+eggs       451.0
+
+Got:
+strings    numbers
+---------  ---------
+spam       41.9999
+eggs       451.0
+
+test_output.test_disable_numparse_true: ok
+Expected:
+strings    numbers
+---------  ---------
+
+Got:
+strings    numbers
+---------  ---------
+
+test_output.test_empty_data: ok
+Expected:
+
+
+Got:
+
+
+test_output.test_empty_data_without_headers: ok
+Expected:
+╒═══════════╤═══════════╕
+│ strings   │   numbers │
+╞═══════════╪═══════════╡
+│ spam      │   41.9999 │
+├───────────┼───────────┤
+│ eggs      │  451      │
+╘═══════════╧═══════════╛
+
+Got:
+╒═══════════╤═══════════╕
+│ strings   │   numbers │
+╞═══════════╪═══════════╡
+│ spam      │   41.9999 │
+├───────────┼───────────┤
+│ eggs      │  451      │
+╘═══════════╧═══════════╛
+
+test_output.test_fancy_grid: ok
+Expected:
+╒══════╤══════════╕
+│ spam │  41.9999 │
+├──────┼──────────┤
+│ eggs │ 451      │
+╘══════╧══════════╛
+
+Got:
+╒══════╤══════════╕
+│ spam │  41.9999 │
+├──────┼──────────┤
+│ eggs │ 451      │
+╘══════╧══════════╛
+
+test_output.test_fancy_grid_headerless: ok
+Expected:
+╒═════════════╤═════════════╕
+│        more │ more spam   │
+│   spam [31meggs[0m │ & eggs      │
+╞═════════════╪═════════════╡
+│           2 │ foo         │
+│             │ bar         │
+╘═════════════╧═════════════╛
+
+Got:
+╒═════════════╤═════════════╕
+│        more │ more spam   │
+│   spam [31meggs[0m │ & eggs      │
+╞═════════════╪═════════════╡
+│           2 │ foo         │
+│             │ bar         │
+╘═════════════╧═════════════╛
+
+test_output.test_fancy_grid_multiline: ok
+Expected:
+╒═════════╤═══════════╕
+│ foo bar │   hello   │
+│   baz   │           │
+│   bau   │           │
+├─────────┼───────────┤
+│         │ multiline │
+│         │   world   │
+╘═════════╧═══════════╛
+
+Got:
+╒═════════╤═══════════╕
+│ foo bar │   hello   │
+│   baz   │           │
+│   bau   │           │
+├─────────┼───────────┤
+│         │ multiline │
+│         │   world   │
+╘═════════╧═══════════╛
+
+test_output.test_fancy_grid_multiline_headerless: ok
+Expected:
+╒═══════╤════════════════╤════════╕
+│   hdr │ data           │ fold   │
+╞═══════╪════════════════╪════════╡
+│     1 │                │        │
+├───────┼────────────────┼────────┤
+│     2 │ very long data │ fold   │
+│       │                │ this   │
+╘═══════╧════════════════╧════════╛
+
+Got:
+╒═══════╤════════════════╤════════╕
+│   hdr │ data           │ fold   │
+╞═══════╪════════════════╪════════╡
+│     1 │                │        │
+├───────┼────────────────┼────────┤
+│     2 │ very long data │ fold   │
+│       │                │ this   │
+╘═══════╧════════════════╧════════╛
+
+test_output.test_fancy_grid_multiline_with_empty_cells: ok
+Expected:
+╒═══╤════════════════╤══════╕
+│ 0 │                │      │
+├───┼────────────────┼──────┤
+│ 1 │                │      │
+├───┼────────────────┼──────┤
+│ 2 │ very long data │ fold │
+│   │                │ this │
+╘═══╧════════════════╧══════╛
+
+Got:
+╒═══╤════════════════╤══════╕
+│ 0 │                │      │
+├───┼────────────────┼──────┤
+│ 1 │                │      │
+├───┼────────────────┼──────┤
+│ 2 │ very long data │ fold │
+│   │                │ this │
+╘═══╧════════════════╧══════╛
+
+test_output.test_fancy_grid_multiline_with_empty_cells_headerless: ok
+Expected:
++-------+-------------+--------------+------------+------------+-------------+
+| str   | bad_float   |   just_float |   with_inf |   with_nan |     neg_inf |
++=======+=============+==============+============+============+=============+
+| spam  | 41.9999     |     123.345  |       12.2 |    nan     |    0.123123 |
++-------+-------------+--------------+------------+------------+-------------+
+| eggs  | 451.0       |      66.2222 |      inf   |    123.123 | -inf        |
++-------+-------------+--------------+------------+------------+-------------+
+| asd   | 437e6548    |     123.4    |      inf   |    nan     |    2.2e+22  |
++-------+-------------+--------------+------------+------------+-------------+
+
+Got:
++-------+-------------+--------------+------------+------------+-------------+
+| str   | bad_float   |   just_float |   with_inf |   with_nan |     neg_inf |
++=======+=============+==============+============+============+=============+
+| spam  | 41.9999     |     123.345  |       12.2 |    nan     |    0.123123 |
++-------+-------------+--------------+------------+------------+-------------+
+| eggs  | 451.0       |      66.2222 |      inf   |    123.123 | -inf        |
++-------+-------------+--------------+------------+------------+-------------+
+| asd   | 437e6548    |     123.4    |      inf   |    nan     |    2.2e+22  |
++-------+-------------+--------------+------------+------------+-------------+
+
+test_output.test_float_conversions: ok
+Expected:
+1.235
+1.000
+
+Got:
+1.235
+1.000
+
+test_output.test_floatfmt: ok
+Expected:
+0.1  0.123  0.12345
+
+Got:
+0.1  0.123  0.12345
+
+test_output.test_floatfmt_multi: ok
+Expected:
+| strings   |   numbers |
+|-----------|-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+Got:
+| strings   |   numbers |
+|-----------|-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+test_output.test_github: ok
+Expected:
++-----------+-----------+
+| strings   |   numbers |
++===========+===========+
+| spam      |   41.9999 |
++-----------+-----------+
+| eggs      |  451      |
++-----------+-----------+
+
+Got:
++-----------+-----------+
+| strings   |   numbers |
++===========+===========+
+| spam      |   41.9999 |
++-----------+-----------+
+| eggs      |  451      |
++-----------+-----------+
+
+test_output.test_grid: ok
+Expected:
++------+----------+
+| spam |  41.9999 |
++------+----------+
+| eggs | 451      |
++------+----------+
+
+Got:
++------+----------+
+| spam |  41.9999 |
++------+----------+
+| eggs | 451      |
++------+----------+
+
+test_output.test_grid_headerless: ok
+Expected:
++-------------+-------------+
+|        more | more spam   |
+|   spam [31meggs[0m | & eggs      |
++=============+=============+
+|           2 | foo         |
+|             | bar         |
++-------------+-------------+
+
+Got:
++-------------+-------------+
+|        more | more spam   |
+|   spam [31meggs[0m | & eggs      |
++=============+=============+
+|           2 | foo         |
+|             | bar         |
++-------------+-------------+
+
+test_output.test_grid_multiline: ok
+Expected:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
++---------+-----------+
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+Got:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
++---------+-----------+
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+test_output.test_grid_multiline_headerless: ok
+Expected:
++-------+----------------+--------+
+|   hdr | data           | fold   |
++=======+================+========+
+|     1 |                |        |
++-------+----------------+--------+
+|     2 | very long data | fold   |
+|       |                | this   |
++-------+----------------+--------+
+
+Got:
++-------+----------------+--------+
+|   hdr | data           | fold   |
++=======+================+========+
+|     1 |                |        |
++-------+----------------+--------+
+|     2 | very long data | fold   |
+|       |                | this   |
++-------+----------------+--------+
+
+test_output.test_grid_multiline_with_empty_cells: ok
+Expected:
++---+----------------+------+
+| 0 |                |      |
++---+----------------+------+
+| 1 |                |      |
++---+----------------+------+
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+Got:
++---+----------------+------+
+| 0 |                |      |
++---+----------------+------+
+| 1 |                |      |
++---+----------------+------+
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+test_output.test_grid_multiline_with_empty_cells_headerless: ok
+test_output.test_grid_wide_characters: excluded
+Expected:
+<table>
+<thead>
+<tr><th>&lt;strings&gt;  </th><th style="text-align: right;">  &lt;&amp;numbers&amp;&gt;</th></tr>
+</thead>
+<tbody>
+<tr><td>spam &gt;     </td><td style="text-align: right;">      41.9999</td></tr>
+<tr><td>eggs &amp;     </td><td style="text-align: right;">     451     </td></tr>
+</tbody>
+</table>
+
+Got:
+<table>
+<thead>
+<tr><th>&lt;strings&gt;  </th><th style="text-align: right;">  &lt;&amp;numbers&amp;&gt;</th></tr>
+</thead>
+<tbody>
+<tr><td>spam &gt;     </td><td style="text-align: right;">      41.9999</td></tr>
+<tr><td>eggs &amp;     </td><td style="text-align: right;">     451     </td></tr>
+</tbody>
+</table>
+
+test_output.test_html: ok
+Expected:
+<table>
+<tbody>
+<tr><td>spam &gt;</td><td style="text-align: right;"> 41.9999</td></tr>
+<tr><td>eggs &amp;</td><td style="text-align: right;">451     </td></tr>
+</tbody>
+</table>
+
+Got:
+<table>
+<tbody>
+<tr><td>spam &gt;</td><td style="text-align: right;"> 41.9999</td></tr>
+<tr><td>eggs &amp;</td><td style="text-align: right;">451     </td></tr>
+</tbody>
+</table>
+
+test_output.test_html_headerless: ok
+Expected:
+|| strings   ||   numbers ||
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+Got:
+|| strings   ||   numbers ||
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+test_output.test_jira: ok
+Expected:
+| spam |  41.9999 |
+| eggs | 451      |
+
+Got:
+| spam |  41.9999 |
+| eggs | 451      |
+
+test_output.test_jira_headerless: ok
+Expected:
+\begin{tabular}{lr}
+\hline
+ strings   &   numbers (\$N\_0\$) \\
+\hline
+ spam      &           41.9999 \\
+ eggs      &          451      \\
+\hline
+\end{tabular}
+
+Got:
+\begin{tabular}{lr}
+\hline
+ strings   &   numbers (\$N\_0\$) \\
+\hline
+ spam      &           41.9999 \\
+ eggs      &          451      \\
+\hline
+\end{tabular}
+
+test_output.test_latex: ok
+Expected:
+\begin{tabular}{lr}
+\toprule
+ strings   &   numbers \\
+\midrule
+ spam      &   41.9999 \\
+ eggs      &  451      \\
+\bottomrule
+\end{tabular}
+
+Got:
+\begin{tabular}{lr}
+\toprule
+ strings   &   numbers \\
+\midrule
+ spam      &   41.9999 \\
+ eggs      &  451      \\
+\bottomrule
+\end{tabular}
+
+test_output.test_latex_booktabs: ok
+Expected:
+\begin{tabular}{lr}
+\toprule
+ spam &  41.9999 \\
+ eggs & 451      \\
+\bottomrule
+\end{tabular}
+
+Got:
+\begin{tabular}{lr}
+\toprule
+ spam &  41.9999 \\
+ eggs & 451      \\
+\bottomrule
+\end{tabular}
+
+test_output.test_latex_booktabs_headerless: ok
+Expected:
+\begin{tabular}{lr}
+\hline
+ spam &  41.9999 \\
+ eggs & 451      \\
+\hline
+\end{tabular}
+
+Got:
+\begin{tabular}{lr}
+\hline
+ spam &  41.9999 \\
+ eggs & 451      \\
+\hline
+\end{tabular}
+
+test_output.test_latex_headerless: ok
+[['spam$_1$', 41.9999], ['\\emph{eggs}', '451.0']]
+Expected:
+\begin{tabular}{lr}
+\hline
+ strings     &   numbers ($N_0$) \\
+\hline
+ spam$_1$    &           41.9999 \\
+ \emph{eggs} &          451      \\
+\hline
+\end{tabular}
+
+Got:
+\begin{tabular}{lr}
+\hline
+ strings     &   numbers ($N_0$) \\
+\hline
+ spam$_1$    &           41.9999 \\
+ \emph{eggs} &          451      \\
+\hline
+\end{tabular}
+
+test_output.test_latex_raw: ok
+Expected:
+      a    b
+--  ---  ---
+ 0    0  101
+ 1    1  102
+ 2    2  103
+
+Got:
+      a    b
+--  ---  ---
+ 0    0  101
+ 1    1  102
+ 2    2  103
+
+test_output.test_list_of_lists_with_index: ok
+Expected:
+      a    b
+--  ---  ---
+ 0    0  101
+ 1    1  102
+ 2    2  103
+
+Got:
+      a    b
+--  ---  ---
+ 0    0  101
+ 1    1  102
+ 2    2  103
+
+index= [1, 2]
+rows= []
+test_output.test_list_of_lists_with_index_firstrow: ok
+Expected:
+      a    b
+--  ---  ---
+ 1    0  101
+ 2    1  102
+ 3    2  103
+
+Got:
+      a    b
+--  ---  ---
+ 1    0  101
+ 2    1  102
+ 3    2  103
+
+index= [1, 2]
+rows= []
+test_output.test_list_of_lists_with_supplied_index: ok
+Expected:
+{| class="wikitable" style="text-align: left;"
+|+ <!-- caption -->
+|-
+! strings   !! align="right"|   numbers
+|-
+| spam      || align="right"|   41.9999
+|-
+| eggs      || align="right"|  451
+|}
+
+Got:
+{| class="wikitable" style="text-align: left;"
+|+ <!-- caption -->
+|-
+! strings   !! align="right"|   numbers
+|-
+| spam      || align="right"|   41.9999
+|-
+| eggs      || align="right"|  451
+|}
+
+test_output.test_mediawiki: ok
+Expected:
+{| class="wikitable" style="text-align: left;"
+|+ <!-- caption -->
+|-
+| spam || align="right"|  41.9999
+|-
+| eggs || align="right"| 451
+|}
+
+Got:
+{| class="wikitable" style="text-align: left;"
+|+ <!-- caption -->
+|-
+| spam || align="right"|  41.9999
+|-
+| eggs || align="right"| 451
+|}
+
+test_output.test_mediawiki_headerless: ok
+Expected:
+Alice   10
+Bob    n/a
+
+Got:
+Alice   10
+Bob    n/a
+
+test_output.test_missingval: ok
+Expected:
+Alice  Bob  Charlie
+n/a    ?
+
+Got:
+Alice  Bob  Charlie
+n/a    ?
+
+test_output.test_missingval_multi: ok
+Expected:
+|| ''' strings   ''' ||<style="text-align: right;"> '''   numbers ''' ||
+||  spam       ||<style="text-align: right;">    41.9999  ||
+||  eggs       ||<style="text-align: right;">   451       ||
+
+Got:
+|| ''' strings   ''' ||<style="text-align: right;"> '''   numbers ''' ||
+||  spam       ||<style="text-align: right;">    41.9999  ||
+||  eggs       ||<style="text-align: right;">   451       ||
+
+test_output.test_moinmoin: ok
+Expected:
+||  spam  ||<style="text-align: right;">   41.9999  ||
+||  eggs  ||<style="text-align: right;">  451       ||
+
+Got:
+||  spam  ||<style="text-align: right;">   41.9999  ||
+||  eggs  ||<style="text-align: right;">  451       ||
+
+test_output.test_moinmoin_headerless: ok
+Expected:
+strings    numbers
+---------  ---------
+
+Got:
+strings    numbers
+---------  ---------
+
+test_output.test_no_data: ok
+Expected:
+
+
+Got:
+
+
+test_output.test_no_data_without_headers: ok
+Expected:
+| strings   |   numbers |
+|-----------+-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+Got:
+| strings   |   numbers |
+|-----------+-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+test_output.test_orgtbl: ok
+Expected:
+| spam |  41.9999 |
+| eggs | 451      |
+
+Got:
+| spam |  41.9999 |
+| eggs | 451      |
+
+test_output.test_orgtbl_headerless: ok
+test_output.test_pandas_rst_with_index: skipped
+test_output.test_pandas_rst_with_named_index: skipped
+test_output.test_pandas_with_index: skipped
+test_output.test_pandas_without_index: skipped
+Expected:
+| strings   |   numbers |
+|:----------|----------:|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+Got:
+| strings   |   numbers |
+|:----------|----------:|
+| spam      |   41.9999 |
+| eggs      |  451      |
+
+test_output.test_pipe: ok
+Expected:
+|:-----|---------:|
+| spam |  41.9999 |
+| eggs | 451      |
+
+Got:
+|:-----|---------:|
+| spam |  41.9999 |
+| eggs | 451      |
+
+test_output.test_pipe_headerless: ok
+Expected:
+strings      numbers
+spam         41.9999
+eggs        451
+
+Got:
+strings      numbers
+spam         41.9999
+eggs        451
+
+test_output.test_plain: ok
+Expected:
+spam   41.9999
+eggs  451
+
+Got:
+spam   41.9999
+eggs  451
+
+test_output.test_plain_headerless: ok
+Expected:
+       more  more spam
+  spam [31meggs[0m  & eggs
+          2  foo
+             bar
+
+Got:
+       more  more spam
+  spam [31meggs[0m  & eggs
+          2  foo
+             bar
+
+test_output.test_plain_multiline: ok
+Expected:
+foo bar    hello
+  baz
+  bau
+         multiline
+           world
+
+Got:
+foo bar    hello
+  baz
+  bau
+         multiline
+           world
+
+test_output.test_plain_multiline_headerless: ok
+Expected:
+  hdr  data            fold
+    1
+    2  very long data  fold
+                       this
+
+Got:
+  hdr  data            fold
+    1
+    2  very long data  fold
+                       this
+
+test_output.test_plain_multiline_with_empty_cells: ok
+Expected:
+0
+1
+2  very long data  fold
+                   this
+
+Got:
+0
+1
+2  very long data  fold
+                   this
+
+test_output.test_plain_multiline_with_empty_cells_headerless: ok
+Expected:
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+          2  foo
+             bar
+
+Got:
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+          2  foo
+             bar
+
+test_output.test_plain_multiline_with_links: ok
+Expected:
+h1     h2       h3
+-----  -------  ----
+  foo   bar     foo
+
+Got:
+h1     h2       h3
+-----  -------  ----
+  foo   bar     foo
+
+Expected:
+h1    h2    h3
+----  ----  ----
+foo   bar   foo
+
+Got:
+h1    h2    h3
+----  ----  ----
+foo   bar   foo
+
+test_output.test_preserve_whitespace: ok
+Expected:
+ strings   |   numbers
+-----------+-----------
+ spam      |   41.9999
+ eggs      |  451
+
+Got:
+ strings   |   numbers
+-----------+-----------
+ spam      |   41.9999
+ eggs      |  451
+
+test_output.test_presto: ok
+Expected:
+ spam |  41.9999
+ eggs | 451
+
+Got:
+ spam |  41.9999
+ eggs | 451
+
+test_output.test_presto_headerless: ok
+Expected:
+        more | more spam
+   spam [31meggs[0m | & eggs
+-------------+-------------
+           2 | foo
+             | bar
+
+Got:
+        more | more spam
+   spam [31meggs[0m | & eggs
+-------------+-------------
+           2 | foo
+             | bar
+
+test_output.test_presto_multiline: ok
+Expected:
+ foo bar |   hello
+   baz   |
+   bau   |
+         | multiline
+         |   world
+
+Got:
+ foo bar |   hello
+   baz   |
+   bau   |
+         | multiline
+         |   world
+
+test_output.test_presto_multiline_headerless: ok
+Expected:
+   hdr | data           | fold
+-------+----------------+--------
+     1 |                |
+     2 | very long data | fold
+       |                | this
+
+Got:
+   hdr | data           | fold
+-------+----------------+--------
+     1 |                |
+     2 | very long data | fold
+       |                | this
+
+test_output.test_presto_multiline_with_empty_cells: ok
+Expected:
+ 0 |                |
+ 1 |                |
+ 2 | very long data | fold
+   |                | this
+
+Got:
+ 0 |                |
+ 1 |                |
+ 2 | very long data | fold
+   |                | this
+
+test_output.test_presto_multiline_with_empty_cells_headerless: ok
+Expected:
++---------+---------+
+| strings | numbers |
++---------+---------+
+|  spam   | 41.9999 |
+|  eggs   |  451.0  |
++---------+---------+
+
+Got:
++---------+---------+
+| strings | numbers |
++---------+---------+
+|  spam   | 41.9999 |
+|  eggs   |  451.0  |
++---------+---------+
+
+test_output.test_pretty: ok
+Expected:
++------+---------+
+| spam | 41.9999 |
+| eggs |  451.0  |
++------+---------+
+
+Got:
++------+---------+
+| spam | 41.9999 |
+| eggs |  451.0  |
++------+---------+
+
+test_output.test_pretty_headerless: ok
+Expected:
++-----------+-----------+
+|   more    | more spam |
+| spam [31meggs[0m |  & eggs   |
++-----------+-----------+
+|     2     |    foo    |
+|           |    bar    |
++-----------+-----------+
+
+Got:
++-----------+-----------+
+|   more    | more spam |
+| spam [31meggs[0m |  & eggs   |
++-----------+-----------+
+|     2     |    foo    |
+|           |    bar    |
++-----------+-----------+
+
+test_output.test_pretty_multiline: ok
+Expected:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+Got:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+test_output.test_pretty_multiline_headerless: ok
+Expected:
++-----+----------------+------+
+| hdr |      data      | fold |
++-----+----------------+------+
+|  1  |                |      |
+|  2  | very long data | fold |
+|     |                | this |
++-----+----------------+------+
+
+Got:
++-----+----------------+------+
+| hdr |      data      | fold |
++-----+----------------+------+
+|  1  |                |      |
+|  2  | very long data | fold |
+|     |                | this |
++-----+----------------+------+
+
+test_output.test_pretty_multiline_with_empty_cells: ok
+Expected:
++---+----------------+------+
+| 0 |                |      |
+| 1 |                |      |
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+Got:
++---+----------------+------+
+| 0 |                |      |
+| 1 |                |      |
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+test_output.test_pretty_multiline_with_empty_cells_headerless: ok
+Expected:
++-----------+-----------+
+|   more    | more spam |
+| spam ]8;;target\eggs]8;;\ |  & eggs   |
++-----------+-----------+
+|     2     |    foo    |
+|           |    bar    |
++-----------+-----------+
+
+Got:
++-----------+-----------+
+|   more    | more spam |
+| spam ]8;;target\eggs]8;;\ |  & eggs   |
++-----------+-----------+
+|     2     |    foo    |
+|           |    bar    |
++-----------+-----------+
+
+test_output.test_pretty_multiline_with_links: ok
+Expected:
++-----------+-----------+
+| strings   |   numbers |
+|-----------+-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
++-----------+-----------+
+
+Got:
++-----------+-----------+
+| strings   |   numbers |
+|-----------+-----------|
+| spam      |   41.9999 |
+| eggs      |  451      |
++-----------+-----------+
+
+test_output.test_psql: ok
+Expected:
++------+----------+
+| spam |  41.9999 |
+| eggs | 451      |
++------+----------+
+
+Got:
++------+----------+
+| spam |  41.9999 |
+| eggs | 451      |
++------+----------+
+
+test_output.test_psql_headerless: ok
+Expected:
++-------------+-------------+
+|        more | more spam   |
+|   spam [31meggs[0m | & eggs      |
+|-------------+-------------|
+|           2 | foo         |
+|             | bar         |
++-------------+-------------+
+
+Got:
++-------------+-------------+
+|        more | more spam   |
+|   spam [31meggs[0m | & eggs      |
+|-------------+-------------|
+|           2 | foo         |
+|             | bar         |
++-------------+-------------+
+
+test_output.test_psql_multiline: ok
+Expected:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+Got:
++---------+-----------+
+| foo bar |   hello   |
+|   baz   |           |
+|   bau   |           |
+|         | multiline |
+|         |   world   |
++---------+-----------+
+
+test_output.test_psql_multiline_headerless: ok
+Expected:
++-------+----------------+--------+
+|   hdr | data           | fold   |
+|-------+----------------+--------|
+|     1 |                |        |
+|     2 | very long data | fold   |
+|       |                | this   |
++-------+----------------+--------+
+
+Got:
++-------+----------------+--------+
+|   hdr | data           | fold   |
+|-------+----------------+--------|
+|     1 |                |        |
+|     2 | very long data | fold   |
+|       |                | this   |
++-------+----------------+--------+
+
+test_output.test_psql_multiline_with_empty_cells: ok
+Expected:
++---+----------------+------+
+| 0 |                |      |
+| 1 |                |      |
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+Got:
++---+----------------+------+
+| 0 |                |      |
+| 1 |                |      |
+| 2 | very long data | fold |
+|   |                | this |
++---+----------------+------+
+
+test_output.test_psql_multiline_with_empty_cells_headerless: ok
+Expected:
+=========  =========
+strings      numbers
+=========  =========
+spam         41.9999
+eggs        451
+=========  =========
+
+Got:
+=========  =========
+strings      numbers
+=========  =========
+spam         41.9999
+eggs        451
+=========  =========
+
+test_output.test_rst: ok
+Expected:
+====  ========
+spam   41.9999
+eggs  451
+====  ========
+
+Got:
+====  ========
+spam   41.9999
+eggs  451
+====  ========
+
+test_output.test_rst_headerless: ok
+Expected:
+===========  ===========
+       more  more spam
+  spam [31meggs[0m  & eggs
+===========  ===========
+          2  foo
+             bar
+===========  ===========
+
+Got:
+===========  ===========
+       more  more spam
+  spam [31meggs[0m  & eggs
+===========  ===========
+          2  foo
+             bar
+===========  ===========
+
+test_output.test_rst_multiline: ok
+Expected:
+=====  ==============  ======
+  hdr  data            fold
+=====  ==============  ======
+    1
+    2  very long data  fold
+                       this
+=====  ==============  ======
+
+Got:
+=====  ==============  ======
+  hdr  data            fold
+=====  ==============  ======
+    1
+    2  very long data  fold
+                       this
+=====  ==============  ======
+
+test_output.test_rst_multiline_with_empty_cells: ok
+Expected:
+=  ==============  ====
+0
+1
+2  very long data  fold
+                   this
+=  ==============  ====
+
+Got:
+=  ==============  ====
+0
+1
+2  very long data  fold
+                   this
+=  ==============  ====
+
+test_output.test_rst_multiline_with_empty_cells_headerless: ok
+Expected:
+===========  ===========
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+===========  ===========
+          2  foo
+             bar
+===========  ===========
+
+Got:
+===========  ===========
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+===========  ===========
+          2  foo
+             bar
+===========  ===========
+
+test_output.test_rst_multiline_with_links: ok
+Expected:
+====  ======
+..    what
+====  ======
+..    spam
+..    eggs
+====  ======
+
+Got:
+====  ======
+..    what
+====  ======
+..    spam
+..    eggs
+====  ======
+
+test_output.test_rst_with_empty_values_in_first_column: ok
+Expected:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+Got:
+strings      numbers
+---------  ---------
+spam         41.9999
+eggs        451
+
+test_output.test_simple: ok
+Expected:
+----  --------
+spam   41.9999
+eggs  451
+----  --------
+
+Got:
+----  --------
+spam   41.9999
+eggs  451
+----  --------
+
+test_output.test_simple_headerless: ok
+Expected:
+       more  more spam
+  spam [31meggs[0m  & eggs
+-----------  -----------
+          2  foo
+             bar
+
+Got:
+       more  more spam
+  spam [31meggs[0m  & eggs
+-----------  -----------
+          2  foo
+             bar
+
+test_output.test_simple_multiline: ok
+Expected:
+ key     value
+-----  ---------
+ foo      bar
+spam   multiline
+         world
+
+Got:
+ key     value
+-----  ---------
+ foo      bar
+spam   multiline
+         world
+
+test_output.test_simple_multiline_2: ok
+Expected:
+-------  ---------
+foo bar    hello
+  baz
+  bau
+         multiline
+           world
+-------  ---------
+
+Got:
+-------  ---------
+foo bar    hello
+  baz
+  bau
+         multiline
+           world
+-------  ---------
+
+test_output.test_simple_multiline_headerless: ok
+Expected:
+  hdr  data            fold
+-----  --------------  ------
+    1
+    2  very long data  fold
+                       this
+
+Got:
+  hdr  data            fold
+-----  --------------  ------
+    1
+    2  very long data  fold
+                       this
+
+test_output.test_simple_multiline_with_empty_cells: ok
+Expected:
+-  --------------  ----
+0
+1
+2  very long data  fold
+                   this
+-  --------------  ----
+
+Got:
+-  --------------  ----
+0
+1
+2  very long data  fold
+                   this
+-  --------------  ----
+
+test_output.test_simple_multiline_with_empty_cells_headerless: ok
+Expected:
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+-----------  -----------
+          2  foo
+             bar
+
+Got:
+       more  more spam
+  spam ]8;;target\eggs]8;;\  & eggs
+-----------  -----------
+          2  foo
+             bar
+
+test_output.test_simple_multiline_with_links: ok
+Expected:
+|<. spam  |>.  41.9999 |
+|<. eggs  |>. 451      |
+
+Got:
+|<. spam  |>.  41.9999 |
+|<. eggs  |>. 451      |
+
+test_output.test_textile: ok
+Expected:
+|=. spam  |>.  41.9999 |
+|=. eggs  |>. 451      |
+
+Got:
+|=. spam  |>.  41.9999 |
+|=. eggs  |>. 451      |
+
+test_output.test_textile_with_center_align: ok
+Expected:
+|_.  strings   |_.   numbers |
+|<. spam       |>.   41.9999 |
+|<. eggs       |>.  451      |
+
+Got:
+|_.  strings   |_.   numbers |
+|<. spam       |>.   41.9999 |
+|<. eggs       |>.  451      |
+
+test_output.test_textile_with_header: ok
+Expected:
+name|score
+Alice|1
+Bob|333
+
+Got:
+name|score
+Alice|1
+Bob|333
+
+test_output.test_unaligned_separated: ok
+Expected:
+<table>
+<thead>
+<tr><th>strings  </th><th>numbers                         </th></tr>
+</thead>
+<tbody>
+<tr><td>spam     </td><td><font color="red">41.9999</font></td></tr>
+<tr><td>eggs     </td><td><font color="red">451.0</font>  </td></tr>
+</tbody>
+</table>
+
+Got:
+<table>
+<thead>
+<tr><th>strings  </th><th>numbers                         </th></tr>
+</thead>
+<tbody>
+<tr><td>spam     </td><td><font color="red">41.9999</font></td></tr>
+<tr><td>eggs     </td><td><font color="red">451.0</font>  </td></tr>
+</tbody>
+</table>
+
+test_output.test_unsafehtml: ok
+Expected:
+<table>
+<tbody>
+<tr><td>spam</td><td><font color="red">41.9999</font></td></tr>
+<tr><td>eggs</td><td><font color="red">451.0</font>  </td></tr>
+</tbody>
+</table>
+
+Got:
+<table>
+<tbody>
+<tr><td>spam</td><td><font color="red">41.9999</font></td></tr>
+<tr><td>eggs</td><td><font color="red">451.0</font>  </td></tr>
+</tbody>
+</table>
+
+test_output.test_unsafehtml_headerless: ok
+Expected:
+||  strings    ||    numbers  ||
+|  spam       |    41.9999  |
+|  eggs       |   451       |
+
+Got:
+||  strings    ||    numbers  ||
+|  spam       |    41.9999  |
+|  eggs       |   451       |
+
+test_output.test_youtrack: ok
+expected: '| background   | foreground   |\n|:-------------|:-------------|\n| \x1b[48;5;196mred\x1b[49m          | \x1b[38;5;196mred\x1b[39m          |'
+
+got:      '| background   | foreground   |\n|:-------------|:-------------|\n| \x1b[48;5;196mred\x1b[49m          | \x1b[38;5;196mred\x1b[39m          |'
+
+Expected:
+| background   | foreground   |
+|:-------------|:-------------|
+| [48;5;196mred[49m          | [38;5;196mred[39m          |
+
+Got:
+| background   | foreground   |
+|:-------------|:-------------|
+| [48;5;196mred[49m          | [38;5;196mred[39m          |
+
+test_regression.test_88_256_ANSI_color_codes: ok
+Expected:
+  1
+234
+
+Got:
+  1
+234
+
+test_regression.test_align_long_integers: ok
+expected: '+--------+--------+--------+\n| test   |   \x1b[34mtest\x1b[0m |   test |\n+========+========+========+\n| test   |     42 |     \x1b[31m42\x1b[0m |\n+--------+--------+--------+\n| test   |    101 |    \x1b[32m101\x1b[0m |\n+--------+--------+--------+'
+
+got:      '+--------+--------+--------+\n| test   |   \x1b[34mtest\x1b[0m |   test |\n+========+========+========+\n| test   |     42 |     \x1b[31m42\x1b[0m |\n+--------+--------+--------+\n| test   |    101 |    \x1b[32m101\x1b[0m |\n+--------+--------+--------+'
+
+Expected:
++--------+--------+--------+
+| test   |   [34mtest[0m |   test |
++========+========+========+
+| test   |     42 |     [31m42[0m |
++--------+--------+--------+
+| test   |    101 |    [32m101[0m |
++--------+--------+--------+
+
+Got:
++--------+--------+--------+
+| test   |   [34mtest[0m |   test |
++========+========+========+
+| test   |     42 |     [31m42[0m |
++--------+--------+--------+
+| test   |    101 |    [32m101[0m |
++--------+--------+--------+
+
+test_regression.test_alignment_of_colored_cells: ok
+Expected:
+[95m12.34[0m
+ [95m1.23456[0m
+
+Got:
+[95m12.34[0m
+ [95m1.23456[0m
+
+test_regression.test_alignment_of_decimal_numbers_with_ansi_color: ok
+test_regression.test_alignment_of_decimal_numbers_with_commas: skipped
+expected: '+--------+--------+--------+\n| test   |   \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\ | test   |\n+========+========+========+\n| test   |     42 | \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\   |\n+--------+--------+--------+\n| test   |    101 | \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\   |\n+--------+--------+--------+'
+
+got:      '+--------+--------+--------+\n| test   |   \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\ | test   |\n+========+========+========+\n| test   |     42 | \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\   |\n+--------+--------+--------+\n| test   |    101 | \x1b]8;;target\x1b\\test\x1b]8;;\x1b\\   |\n+--------+--------+--------+'
+
+Expected:
++--------+--------+--------+
+| test   |   ]8;;target\test]8;;\ | test   |
++========+========+========+
+| test   |     42 | ]8;;target\test]8;;\   |
++--------+--------+--------+
+| test   |    101 | ]8;;target\test]8;;\   |
++--------+--------+--------+
+
+Got:
++--------+--------+--------+
+| test   |   ]8;;target\test]8;;\ | test   |
++========+========+========+
+| test   |     42 | ]8;;target\test]8;;\   |
++--------+--------+--------+
+| test   |    101 | ]8;;target\test]8;;\   |
++--------+--------+--------+
+
+test_regression.test_alignment_of_link_cells: ok
+expected: '+--------+----------+--------+\n| test   |   5\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\6 | test   |\n+========+==========+========+\n| test   |       42 | 1\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\2 |\n+--------+----------+--------+\n| test   |      101 | 3\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\4 |\n+--------+----------+--------+'
+
+got:      '+--------+----------+--------+\n| test   |   5\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\6 | test   |\n+========+==========+========+\n| test   |       42 | 1\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\2 |\n+--------+----------+--------+\n| test   |      101 | 3\x1b]8;;target\x1b\\test\x1b]8;;\x1b\\4 |\n+--------+----------+--------+'
+
+Expected:
++--------+----------+--------+
+| test   |   5]8;;target\test]8;;\6 | test   |
++========+==========+========+
+| test   |       42 | 1]8;;target\test]8;;\2 |
++--------+----------+--------+
+| test   |      101 | 3]8;;target\test]8;;\4 |
++--------+----------+--------+
+
+Got:
++--------+----------+--------+
+| test   |   5]8;;target\test]8;;\6 | test   |
++========+==========+========+
+| test   |       42 | 1]8;;target\test]8;;\2 |
++--------+----------+--------+
+| test   |      101 | 3]8;;target\test]8;;\4 |
++--------+----------+--------+
+
+test_regression.test_alignment_of_link_text_cells: ok
+Expected:
++---+---+---+
+| 1 | 2 | 3 |
++---+---+---+
+| 4 | [1;31m5[1;m | 6 |
++---+---+---+
+| 7 | 8 | 9 |
++---+---+---+
+
+Got:
++---+---+---+
+| 1 | 2 | 3 |
++---+---+---+
+| 4 | [1;31m5[1;m | 6 |
++---+---+---+
+| 7 | 8 | 9 |
++---+---+---+
+
+test_regression.test_ansi_color_bold_and_fgcolor: ok
+Expected:
+-------  ---
+Magenta  [95m1.1[0m
+-------  ---
+
+Got:
+-------  ---
+Magenta  [95m1.1[0m
+-------  ---
+
+test_regression.test_ansi_color_for_decimal_numbers: ok
+expected: '| test   | test   | test   |\n|:-------|:-------|:-------|\n| test   | \x1b[31mtest\x1b[0m   | \x1b[32mtest\x1b[0m   |'
+
+got:      '| test   | test   | test   |\n|:-------|:-------|:-------|\n| test   | \x1b[31mtest\x1b[0m   | \x1b[32mtest\x1b[0m   |'
+
+Expected:
+| test   | test   | test   |
+|:-------|:-------|:-------|
+| test   | [31mtest[0m   | [32mtest[0m   |
+
+Got:
+| test   | test   | test   |
+|:-------|:-------|:-------|
+| test   | [31mtest[0m   | [32mtest[0m   |
+
+test_regression.test_ansi_color_in_table_cells: ok
+Expected:
+False  True
+True   False
+
+Got:
+False  True
+True   False
+
+test_regression.test_boolean_columns: ok
+Expected:
+[35m3.14[39m
+
+Got:
+[35m3.14[39m
+
+test_regression.test_colorclass_colors: ok
+Expected:
+<class 'bytes'>
+
+Got:
+<class 'bytes'>
+
+test_regression.test_column_type_of_bytestring_columns: ok
+Expected:
+-----
+
+a
+я
+0
+False
+-----
+
+Got:
+-----
+
+a
+я
+0
+False
+-----
+
+test_regression.test_column_with_mixed_value_types: ok
+Expected:
+A    B
+---  ---
+foo  bar
+baz  qux
+
+Got:
+A    B
+---  ---
+foo  bar
+baz  qux
+
+test_regression.test_custom_tablefmt: ok
+expected: '-------------------  ----------  --------\n1991-02-19 17:35:26  1991-02-19  17:35:26\n-------------------  ----------  --------'
+
+got:      '-------------------  ----------  --------\n1991-02-19 17:35:26  1991-02-19  17:35:26\n-------------------  ----------  --------'
+
+Expected:
+-------------------  ----------  --------
+1991-02-19 17:35:26  1991-02-19  17:35:26
+-------------------  ----------  --------
+
+Got:
+-------------------  ----------  --------
+1991-02-19 17:35:26  1991-02-19  17:35:26
+-------------------  ----------  --------
+
+test_regression.test_datetime_values: ok
+Expected:
+| Col1   | Col2   |
+|--------|--------|
+
+Got:
+| Col1   | Col2   |
+|--------|--------|
+
+test_regression.test_empty_pipe_table_with_columns: ok
+Expected:
+
+
+Got:
+
+
+test_regression.test_empty_table_with_keys_as_header: ok
+Expected:
+====  =====
+..      val
+====  =====
+foo       1
+..        2
+bar       3
+====  =====
+
+Got:
+====  =====
+..      val
+====  =====
+foo       1
+..        2
+bar       3
+====  =====
+
+test_regression.test_escape_empty_cell_in_first_column_in_rst: ok
+Expected 1:
+a    b
+---  -------
+Foo  set([])
+
+Expected 2:
+a    b
+---  -----
+Foo  set()
+
+Got:
+a    b
+---  -----
+Foo  set()
+
+test_regression.test_isconvertible_on_set_values: ok
+expected: '  a    b    c\n---  ---  ---\n  0    1    2\n  0    1    2\n  0    1    2'
+
+got:      '  a    b    c\n---  ---  ---\n  0    1    2\n  0    1    2\n  0    1    2'
+
+Expected:
+  a    b    c
+---  ---  ---
+  0    1    2
+  0    1    2
+  0    1    2
+
+Got:
+  a    b    c
+---  ---  ---
+  0    1    2
+  0    1    2
+  0    1    2
+
+test_regression.test_iter_of_iters_with_headers: ok
+Expected:
+\begin{tabular}{l}
+\hline
+ foo\^{}bar     \\
+\hline
+ \&\%\^{}\_\$\#\{\}\ensuremath{<}\ensuremath{>}\textasciitilde{} \\
+\hline
+\end{tabular}
+
+Got:
+\begin{tabular}{l}
+\hline
+ foo\^{}bar     \\
+\hline
+ \&\%\^{}\_\$\#\{\}\ensuremath{<}\ensuremath{>}\textasciitilde{} \\
+\hline
+\end{tabular}
+
+test_regression.test_latex_escape_special_chars: ok
+Expected:
+18446744073709551614
+
+Got:
+18446744073709551614
+
+test_regression.test_long_integers: ok
+test_regression.test_mix_normal_and_wide_characters: excluded
+test_regression.test_multiline_with_wide_characters: excluded
+Expected:
+  42
+----
+   1
+   2
+
+Got:
+  42
+----
+   1
+   2
+
+Expected:
+  0    1    2    3    4
+---  ---  ---  ---  ---
+  0    0    0    0    0
+  1    1    1    1    1
+  2    2    2    2    2
+  3    3    3    3    3
+  4    4    4    4    4
+
+Got:
+  0    1    2    3    4
+---  ---  ---  ---  ---
+  0    0    0    0    0
+  1    1    1    1    1
+  2    2    2    2    2
+  3    3    3    3    3
+  4    4    4    4    4
+
+test_regression.test_numeric_column_headers: ok
+Expected:
+foo    bar
+
+Got:
+foo    bar
+
+test_regression.test_numpy_array_as_headers: ok
+Expected:
+-  -  -  -
+1  2  3
+1  2
+1  2  3  4
+-  -  -  -
+
+Got:
+-  -  -  -
+1  2  3
+1  2
+1  2  3  4
+-  -  -  -
+
+test_regression.test_ragged_rows: ok
+expected: 'spam!eggs'
+
+got:      'spam!eggs'
+
+Expected:
+spam!eggs
+
+Got:
+spam!eggs
+
+test_regression.test_simple_separated_format: ok
+Expected:
+  a|  b
+  1|  2
+
+Got:
+  a|  b
+  1|  2
+
+test_regression.test_simple_separated_format_with_headers: ok
+Expected:
+126,000
+
+Got:
+126,000
+
+test_regression.test_string_with_comma_between_digits_without_floatfmt_grouping_option: ok

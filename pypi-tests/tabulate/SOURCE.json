@@ -1,0 +1,17 @@
+{
+ "version": "0.8.9",
+ "archive": {
+  "url": "https://files.pythonhosted.org/packages/ae/3d/9d7576d94007eaf3bb685acbaaec66ff4cdeb0b18f1bf1f17edbeebffb0a/tabulate-0.8.9.tar.gz",
+  "sha256": "eb1d13f25760052e8931f2ef80aaf6045a6cceb47514db8beab24cded16f13a7",
+  "root": "tabulate-0.8.9/test"
+ },
+ "files": {
+  "common.py": "9010728d27dda3e64645eee7f1aee5808f492c38967b40deab51b50dbbe48d27",
+  "test_api.py": "320fa177da111a072cab7f64925b45d1e184ed1e074177462b1fdc4da71ac83b",
+  "test_input.py": "0a01fe262d37a5bbea679989c4b2bdb33fec749028c756762472ab9c2a2c1d6c",
+  "test_internal.py": "6871c8d5abfbd79323d6d081a89f747bdd85e90002962aa0a8ed78a6bc5206f0",
+  "test_output.py": "471ce1dcb2a9db300fce01f92147eeb00e4561083cd18609672ff88072c6c59f",
+  "test_regression.py": "f281fd6de2d94a88ebf3102d14c250897e0c1f3cd66cae149b90e3192cbc2c44"
+ },
+ "note": "Upstream's library test suite from the PyPI sdist, copied unchanged. test_cli.py is left out because curated Sagebrush packages expose importable Python modules, not installed console scripts."
+}

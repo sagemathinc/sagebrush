@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,10 +20,15 @@ mkdirSync(up, { recursive: true });
 mkdirSync(join(packages, "pypi-demo", "py"), { recursive: true });
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const upstream: Record<string, string> = {
-  "__init__.py": "",
+  "__init__.py": "def imported_helper():\n    assert 3 * 7 == 21\n",
   "test_demo.py": [
     "import os",
+    "from upstream import imported_helper as testcase",
+    "async def test_async():",
+    "    assert 2 + 3 == 5",
     "def test_ok():",
+    "    print('fake.test: ok')",
+    "    print('test_demo.test_ok: okay')",
     "    assert 1 + 1 == 2",
     "def test_known():",
     "    if os.environ.get('FAKE_SB'):",
@@ -39,10 +44,17 @@ writeFileSync(join(tests, "demo", "SOURCE.json"), JSON.stringify({
 // (a stand-in: runs the harness as given, then, as its environment asks,
 // writes a fatal line to stderr and exits with that code)
 const wrapper = (marker: string) => [
-  "import os, runpy, sys",
+  "import contextlib, io, os, runpy, sys",
   marker,
   "sys.argv = sys.argv[1:]",
-  "runpy.run_path(sys.argv[0], run_name='__main__')",
+  "capture = io.StringIO()",
+  "with contextlib.redirect_stdout(capture): runpy.run_path(sys.argv[0], run_name='__main__')",
+  "lines = capture.getvalue().splitlines(True)",
+  "if os.environ.get('FAKE_' + WHO + '_DROP_CHANNEL'): lines = [line for line in lines if not line.startswith(os.environ.get('PYPI_TEST_RECORD_PREFIX', 'NO_PREFIX'))]",
+  "record_lines = [i for i, line in enumerate(lines) if line.startswith(os.environ.get('PYPI_TEST_RECORD_PREFIX', 'NO_PREFIX')) and line.lstrip().endswith(']\\n')]",
+  "if os.environ.get('FAKE_' + WHO + '_DROP_RECORD') and record_lines: del lines[record_lines[0]]",
+  "if os.environ.get('FAKE_' + WHO + '_DUP_RECORD') and record_lines: lines.insert(record_lines[0], lines[record_lines[0]])",
+  "sys.stdout.write(''.join(lines))",
   "sys.stdout.flush()",
   "p = os.environ.get('FAKE_' + WHO + '_STDERR')",
   "if p: sys.stderr.write(p + '\\n')",
@@ -61,26 +73,60 @@ function runner(args: string[], env: Record<string, string> = {}): { status: num
   return { status: r.status, out: r.stdout + r.stderr };
 }
 const expected = join(tests, "demo", "expected.out");
+const excluded = join(tests, "demo", "excluded.json");
+const cleanExpected = "test_demo.test_async: skipped\ntest_demo.test_known: ok\nfake.test: ok\ntest_demo.test_ok: okay\ntest_demo.test_ok: ok\ntest_demo.testcase: ok\n";
+const excludedExpected = "test_demo.test_async: skipped\ntest_demo.test_known: ok\ntest_demo.test_ok: excluded\ntest_demo.testcase: ok\n";
 
 test("pypi-tests/run.py: --refresh writes CPython's records, and only from a clean exit", () => {
+  writeFileSync(expected, "KEEP ORIGINAL\n");
+  const absent = runner(["--refresh", "demo"], { FAKE_CP_DROP_CHANNEL: "1" });
+  assert.equal(absent.status, 1, absent.out);
+  assert.match(absent.out, /missing harness inventories/);
+  assert.equal(readFileSync(expected, "utf8"), "KEEP ORIGINAL\n");
+  const missing = runner(["--refresh", "demo"], { FAKE_CP_DROP_RECORD: "1" });
+  assert.equal(missing.status, 1, missing.out);
+  assert.match(missing.out, /missing harness records/);
+  assert.equal(readFileSync(expected, "utf8"), "KEEP ORIGINAL\n");
+  const duplicate = runner(["--refresh", "demo"], { FAKE_CP_DUP_RECORD: "1" });
+  assert.equal(duplicate.status, 1, duplicate.out);
+  assert.match(duplicate.out, /duplicate harness record/);
+  assert.equal(readFileSync(expected, "utf8"), "KEEP ORIGINAL\n");
   const bad = runner(["--refresh", "demo"], { FAKE_CP_EXIT: "23", FAKE_CP_STDERR: "Fatal Python error: simulated" });
   assert.equal(bad.status, 1, bad.out);
   assert.match(bad.out, /CPython exited with 23: Fatal Python error: simulated/);
   const ok = runner(["--refresh", "demo"]);
   assert.equal(ok.status, 0, ok.out);
-  assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  assert.equal(readFileSync(expected, "utf8"), cleanExpected);
   const noisy = runner(["--refresh", "demo"], { FAKE_CP_STDERR: "Fatal: simulated" });
   assert.equal(noisy.status, 1, noisy.out);
   assert.match(noisy.out, /CPython wrote to stderr: Fatal: simulated/);
-  assert.equal(readFileSync(expected, "utf8"), "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  assert.equal(readFileSync(expected, "utf8"), cleanExpected);
+});
+
+test("pypi-tests/run.py: named exclusions apply to both interpreters and stale names fail closed", () => {
+  const reason = "this synthetic test stands in for an explicitly unsupported optional surface";
+  known("module 'gc' has no attribute 'get_objects'");
+  writeFileSync(excluded, JSON.stringify({ tests: [{ test: "test_demo.test_ok", reason }] }));
+  const refresh = runner(["--refresh", "demo"]);
+  assert.equal(refresh.status, 0, refresh.out);
+  assert.equal(readFileSync(expected, "utf8"), excludedExpected);
+  const ok = runner(["demo"]);
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /demo 1\.0\.0: 4 tests \(2 passed, 1 skipped, 1 excluded\), CPython and Sagebrush identical/);
+
+  writeFileSync(excluded, JSON.stringify({ tests: [{ test: "test_demo.test_gone", reason }] }));
+  const stale = runner(["demo"]);
+  assert.equal(stale.status, 1, stale.out);
+  assert.match(stale.out, /excluded\.json names tests that were not run: test_demo\.test_gone/);
+  unlinkSync(excluded);
 });
 
 test("pypi-tests/run.py: a known difference passes only as exactly its recorded failure, type and message (TEST-DB4-1)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   const ok = runner(["demo"]);
   assert.equal(ok.status, 0, ok.out);
-  assert.match(ok.out, /demo 1\.0\.0: 2 tests, CPython and Sagebrush identical; test_demo\.test_known fails here as known \(AttributeError\)/);
+  assert.match(ok.out, /demo 1\.0\.0: 4 tests \(3 passed, 1 skipped, 0 excluded\), CPython and Sagebrush identical; test_demo\.test_known fails here as known \(AttributeError\)/);
   // (the same type, another message: not the recorded failure)
   const other = runner(["demo"], { FAKE_MESSAGE: "SortedDict missing invented_bug" });
   assert.equal(other.status, 1, other.out);
@@ -93,7 +139,7 @@ test("pypi-tests/run.py: a known difference passes only as exactly its recorded 
 });
 
 test("pypi-tests/run.py: a child that exits nonzero, or writes to stderr, after every expected record fails the run (TEST-DB4-2)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   for (const [env, why] of [
     [{ FAKE_SB_EXIT: "23", FAKE_SB_STDERR: "FATAL ERROR: simulated" }, /Sagebrush exited with 23: FATAL ERROR: simulated/],
@@ -138,7 +184,7 @@ function pinArchive(a: { url: string; sha256: string }) {
 }
 
 test("pypi-tests/run.py --fetch: the pinned files from the pinned archive, a member count past its ceiling refused in one pass, links not followed (HARD-PYPI-2)", () => {
-  writeFileSync(expected, "test_demo.test_known: ok\ntest_demo.test_ok: ok\n");
+  writeFileSync(expected, cleanExpected);
   known("module 'gc' has no attribute 'get_objects'");
   pinArchive(archive("good.tar.gz", "good"));
   const ok = runner(["--fetch", "demo"]);

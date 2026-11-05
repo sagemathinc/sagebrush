@@ -1,0 +1,29 @@
+{
+  "name": "@sagebrush/pypi-tabulate",
+  "version": "0.8.9",
+  "sagebrush": ">=0.5 <0.6",
+  "modes": [
+    "python"
+  ],
+  "python": {
+    "root": "py",
+    "modules": [
+      "tabulate"
+    ]
+  },
+  "files": {
+    "py/tabulate.py": "07dcb90a263d4c461791e5c6fe744a91e4ef7e5ec0603f182903a25b101634ee"
+  },
+  "requires": [],
+  "catalog": null,
+  "source": {
+    "pypi": {
+      "project": "tabulate",
+      "version": "0.8.9",
+      "filename": "tabulate-0.8.9-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/ca/80/7c0cad11bd99985cfe7c09427ee0b4f9bd6b048bd13d4ffb32c6db237dfb/tabulate-0.8.9-py3-none-any.whl",
+      "sha256": "d7c013fe7abbc5e491394e10fa845f8f32fe54f8dc60c6622c6cf482d25d47e4",
+      "license": "MIT"
+    }
+  }
+}

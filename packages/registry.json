@@ -3,7 +3,8 @@
   "modules": {
     "_cremona_small": "@sagebrush/cremona-small@0.1.0",
     "scipy.io": "@sagebrush/scipy-io@0.1.0",
-    "sortedcontainers": "@sagebrush/pypi-sortedcontainers@2.4.0"
+    "sortedcontainers": "@sagebrush/pypi-sortedcontainers@2.4.0",
+    "tabulate": "@sagebrush/pypi-tabulate@0.8.9"
   },
   "packages": {
     "@sagebrush/cremona-small@0.1.0": {
@@ -35,6 +36,19 @@
             "reason": "gc.get_objects is not available: Sagebrush runs on a JavaScript engine, whose heap cannot be listed; the test counts CPython references, not what sortedcontainers computes"
           }
         ]
+      }
+    },
+    "@sagebrush/pypi-tabulate@0.8.9": {
+      "dir": "pypi-tabulate",
+      "root": "py",
+      "manifest_sha256": "ee8b6f5b27208d433639973f3bd0062921a22a7d9bb093f857fbcb1c2f01b0ad",
+      "files": {
+        "py/tabulate.py": "07dcb90a263d4c461791e5c6fe744a91e4ef7e5ec0603f182903a25b101634ee"
+      },
+      "pypi": {
+        "project": "tabulate",
+        "version": "0.8.9",
+        "known": []
       }
     },
     "@sagebrush/scipy-io@0.1.0": {

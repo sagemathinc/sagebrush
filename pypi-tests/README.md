@@ -42,6 +42,12 @@ Sagebrush with pypi-tests/harness.py, one line per test:
 **A package whose tests do not all agree is not listed.** Unimplemented means
 an error, never a wrong answer.
 
+An optional `excluded.json` names upstream tests that are outside the package's
+declared supported surface, with a plain-language reason for each. The harness
+excludes exactly those names under both CPython and Sagebrush and refuses stale,
+duplicate, malformed or unexplained entries. Exclusions therefore do not count
+as parity results and cannot hide a Sagebrush-only failure.
+
 ## Known differences
 
 Sometimes a test cannot pass anywhere but CPython, whatever Sagebrush does.
