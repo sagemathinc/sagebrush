@@ -1,10 +1,6 @@
 {
   "tests": [
     {
-      "test": "test_input.test_numpy_2d_keys",
-      "reason": "Sagebrush NumPy does not yet expose dtype.names on an ordinary array; this is owned by the NumPy compatibility lane"
-    },
-    {
       "test": "test_input.test_numpy_record_array",
       "reason": "Sagebrush NumPy does not yet implement dictionary-specified structured dtypes and record arrays"
     },
