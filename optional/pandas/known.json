@@ -550,6 +550,16 @@
       "case": "dt.day-of-year-past-2255",
       "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
       "reason": "day 366 of 2255 runs on into 2256-01-01 (as pandas' strptime does), past the years whose int64 microseconds are exact here (to 2**53): refused rather than rounded"
+    },
+    {
+      "case": "dt.format-directive-b",
+      "message": "pandas: to_datetime's format directive '%b' is not in Sagebrush's pandas 0.x subset",
+      "reason": "a format takes only %Y %m %d %H %M %S %y %f %j and %%, the directives the corpus uses; another of strptime's directives (here the month's name) is refused rather than misread as literal text"
+    },
+    {
+      "case": "dt.format-year-0",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "with a format the year bound applies first too: year 0 is outside the years whose int64 microseconds are exact here (to 2**53), refused rather than leak the host's 'year must be in 1..9999'"
     }
   ]
 }

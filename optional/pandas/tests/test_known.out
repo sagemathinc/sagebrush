@@ -9,7 +9,7 @@
 == unique
 True
 == count
-(110, 110)
+(112, 112)
 == missing
 []
 == extra
