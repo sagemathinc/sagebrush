@@ -20,6 +20,10 @@ export type LiveOp = (typeof LIVE_OPS)[number];
 export type LiveParams = { series_id: string; observation_start?: string; observation_end?: string };
 // The closed error codes; anything else an answer says is `unavailable`
 export const LIVE_ERRORS = ["no_key", "not_in_catalog", "rate_limited", "unavailable", "timeout", "interrupted"] as const;
+const isError = (e: unknown): e is LiveError => {
+  for (const x of LIVE_ERRORS) if (x === e) return true;
+  return false;
+};
 export type LiveError = (typeof LIVE_ERRORS)[number];
 export type LiveAnswer = { ok: { dates: string[]; values: (number | null)[] } } | { error: LiveError };
 
@@ -34,12 +38,13 @@ const PARAM_NAMES = new Set(["series_id", "observation_start", "observation_end"
 
 const plain = (o: unknown): o is Record<string, unknown> => o !== null && typeof o === "object" && !Array.isArray(o) && Object.getPrototypeOf(o) === Object.prototype;
 
-/** A real calendar date, YYYY-MM-DD. */
+const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/** A real calendar date, YYYY-MM-DD (the Gregorian calendar's days in each month). */
 function isDate(s: unknown): s is string {
   if (typeof s !== "string" || !DATE.test(s)) return false;
-  const [y, m, d] = s.split("-").map(Number);
-  const t = new Date(Date.UTC(y, m - 1, d));
-  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+  const y = +s.slice(0, 4), m = +s.slice(5, 7), d = +s.slice(8, 10);
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  return m >= 1 && m <= 12 && d >= 1 && d <= DAYS[m - 1] + (m === 2 && leap ? 1 : 0);
 }
 
 /** The operation's parameters, checked and copied (own fields only), or the
@@ -65,7 +70,7 @@ export function checkAnswer(a: unknown): LiveAnswer {
   if (!plain(a)) return { error: "unavailable" };
   const keys = Object.keys(a);
   if (keys.length !== 1) return { error: "unavailable" };
-  if (keys[0] === "error") return (LIVE_ERRORS as readonly unknown[]).includes(a.error) ? { error: a.error as LiveError } : { error: "unavailable" };
+  if (keys[0] === "error") return isError(a.error) ? { error: a.error as LiveError } : { error: "unavailable" };
   if (keys[0] !== "ok" || !plain(a.ok)) return { error: "unavailable" };
   const ok = a.ok;
   if (Object.keys(ok).length !== 2 || !Array.isArray(ok.dates) || !Array.isArray(ok.values)) return { error: "unavailable" };
