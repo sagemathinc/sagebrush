@@ -48,6 +48,8 @@
 !! NotImplementedError: pandas: to_datetime of a number below a microsecond (a nanosecond result) is not in Sagebrush's pandas 0.x subset
 == dt.origin-no-unit
 !! NotImplementedError: pandas: to_datetime's origin= without a unit (nanoseconds) is not in Sagebrush's pandas 0.x subset
+== dt.day-of-year-past-2255
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy-object
 !! NotImplementedError: pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.series-object-to_numpy

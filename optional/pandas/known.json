@@ -545,6 +545,11 @@
       "case": "dt.origin-no-unit",
       "message": "pandas: to_datetime's origin= without a unit (nanoseconds) is not in Sagebrush's pandas 0.x subset",
       "reason": "without a unit pandas reads the number as nanoseconds after the origin; only microseconds are kept here"
+    },
+    {
+      "case": "dt.day-of-year-past-2255",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "day 366 of 2255 runs on into 2256-01-01 (as pandas' strptime does), past the years whose int64 microseconds are exact here (to 2**53): refused rather than rounded"
     }
   ]
 }
