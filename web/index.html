@@ -549,6 +549,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
+import { preloadSoon, preloadStop, preloadState } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
 const session = pageSession({
@@ -941,6 +942,8 @@ function makeKernel(owner) {
     },
   });
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
+  // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
+  k.on("execute", preloadStop);
   if (owner !== null) {
     j = createJournal({
       kernel: k, nb, local: !!LOCAL,
@@ -2989,6 +2992,8 @@ async function openBundle(bytes) {
   return id;
 }
 window.sagebrush.bundle = makeBundle;
+// (what background loading did, web/preload.ts: why it skipped, or the files it fetched)
+window.sagebrush.preload = preloadState;
 window.sagebrush.openBundle = openBundle;
 
 // File > Open
@@ -4082,6 +4087,18 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernelsMayStart = true;
   if (current.id) startKernel(kernelFor(current.id));
+  // background loading (web/preload.ts): at the next idle moment, the library files the open notebook's first Run
+  // will fetch (its mode's groups, the groups its import lines name), and the LaTeX editor's two files where the
+  // workspace has a .tex; bytes only, nothing run, and skipped on Save-Data, a slow connection or little storage
+  preloadSoon({
+    table: __SB_PRELOAD__,
+    doc: () => { if (!current.id) return null; const s = nb.snapshot(); return { mode: s.mode ?? nb.mode, codes: s.cells.filter((c) => !c.type).map((c) => c.code ?? "") }; },
+    extra: async () => {
+      if (typeof __SB_LATEX__ === "undefined" || !__SB_LATEX__ || !__SB_LATEX_HOSTS__.includes(location.hostname) || !ws) return null;
+      const tex = (await ws.list("/", { recursive: true })).some((e) => /\.tex$/i.test(e.path));
+      return tex ? { urls: ["/sagebrush-latex.js", "/sagebrush-latex-worker.js"].map((f) => new URL(f, location.href).href), bytes: 300000 } : null;
+    },
+  });
   if (resumed) await replayResumed(resumed);
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
