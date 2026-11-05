@@ -60,13 +60,15 @@ const DOCS = {
 };
 
 // web/dist behind a recording proxy; /t/<name> serves the notebooks above; `slow`: a path served at 256 KB/s
-async function site(slow = null) {
+async function site(slow = null, alter = null) {
   const upstream = await freePort();
   const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
   const asked = [], bytes = new Map();
   const front = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     if (path.startsWith("/t/")) { res.writeHead(200, { "content-type": "application/json" }); return res.end(DOCS[path.slice(3)] ?? "{}"); }
+    // (`alter`: this path served with its bytes changed, still JSON, so they no longer have their SHA-256)
+    if (path === alter) { const b = readFileSync(join(dist, path.slice(1)), "utf8") + " "; asked.push(path); res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(b) }); return res.end(b); }
     const rec = path.startsWith("/lib/") || path.startsWith("/pkg/");
     if (rec) asked.push(path);
     const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => {
@@ -128,8 +130,8 @@ async function chromium(init = "") {
 const count = (asked, f) => asked.filter((p) => p === f).length;
 const size = (f) => statSync(join(dist, f)).size;
 // (a case: a fresh site and browser, the notebook opened, `body` given them)
-async function kase(doc, body, { init = "", slow = null } = {}) {
-  const s = await site(slow), { t, close } = await chromium(init);
+async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
+  const s = await site(slow, alter), { t, close } = await chromium(init);
   try {
     ok(await t.open(`${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`), `(${doc}: the page is ready)`);
     await body(t, s);
@@ -217,6 +219,15 @@ try {
     ok(PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "...fetched none of them again: " + JSON.stringify(s.asked.filter((p) => p.startsWith("/pkg/"))));
     ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S, "...and pinned the set it used at the Run: the latest, the one prefetched");
   });
+
+  // 9. the set's index served with other bytes than its id's (the grader's H1, on 3803c922): refused, so no chunk of it
+  // is fetched at idle
+  await kase("pandas.ipynb", async (t, s) => {
+    for (let i = 0; i < 200 && (await t.ev("sagebrush.preload.outcome")) === null; i++) await sleep(100);
+    await sleep(12000);
+    const pkg = s.asked.filter((p) => p.startsWith("/pkg/")), index = s.asked.filter((p) => p === `/pkgset/${S}.json`);
+    ok(index.length >= 1 && pkg.length === 0, "the set's index with other bytes than its id's: no chunk of it fetched at idle: " + JSON.stringify({ index: index.length, pkg, outcome: await t.ev("sagebrush.preload.outcome") }));
+  }, { alter: `/pkgset/${S}.json` });
 } catch (e) {
   ok(false, "the test threw: " + (e?.stack ?? e));
 }

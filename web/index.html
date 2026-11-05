@@ -549,7 +549,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
-import { preloadSoon, preloadStop, preloadState, importTops, pkgIntent, preloadBytes, PKG_LIMITS } from "./preload.ts";
+import { preloadSoon, preloadStop, preloadState, importTops, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
 const session = pageSession({
@@ -4111,13 +4111,13 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
         const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
         if (S) {
           const b = await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes);
-          const hex = b && [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+          const index = await pkgIndex(b, S);
           // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
           // request for one is answered from there; fetched before it controls the page, a chunk would only be
           // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
           const sw = navigator.serviceWorker;
-          if (hex === S && sw && (sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) {
-            const p = pkgIntent(JSON.parse(new TextDecoder().decode(b)), tops, location.href);
+          if (index !== null && sw && (sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) {
+            const p = pkgIntent(index, tops, location.href);
             urls.push(...p.urls);
             bytes += p.bytes;
           }

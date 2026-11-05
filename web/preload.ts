@@ -194,6 +194,19 @@ export function pkgIntent(index: unknown, tops: readonly string[], base: string)
   return { urls, bytes };
 }
 
+/** A package set's index from its bytes: parsed only if they have the SHA-256 its id `S` is, and are JSON; otherwise
+ * null (an index with other bytes than its name's is never read) */
+export async function pkgIndex(bytes: Uint8Array | null, S: string): Promise<unknown | null> {
+  if (!bytes || !/^[0-9a-f]{64}$/.test(S)) return null;
+  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  if (hex !== S) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
+
 /** One file's bytes, in the broker's request shape (as preloadFetch's), at most `max` of them: an advertised length
  * over it is refused before reading, and a body that grows past it is cancelled; a body that sends nothing for
  * `stallMs` is abandoned (PKGPRE678-INDEX-1). Null when refused, failed or abandoned. */

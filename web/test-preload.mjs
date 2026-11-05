@@ -4,7 +4,8 @@
 // storage check, and the fetch loop (one at a time; a stop never cancels the file in flight, only the next).
 //   bun web/test-preload.mjs
 import { PKGSET_LIMITS } from "../src/pkgset.ts";
-import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, pkgIntent, preloadBytes, PKG_LIMITS } from "./preload.ts";
+import { createServer } from "node:net";
+import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 
 let fails = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -129,6 +130,24 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
   ok(J(r0.urls) === "[]" && ms0 < 50, `pkg: one package requiring 20,000 missing ones: nothing, in ${ms0.toFixed(1)} ms`);
   ok(J(pkgIntent({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: "b" } } }, ["a"], base).urls) === "[]" && J(pkgIntent({ packages: { a: { modules: "a", src: { sha256: h("a"), size: 1 } } } }, ["a"], base).urls) === "[]" && J(pkgIntent({ packages: [] }, ["a"], base).urls) === "[]", "pkg: malformed metadata (requires or modules not a list, packages a list): nothing");
   ok(J(pkgIntent({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: ["constructor", "__proto__", "toString"] } } }, ["a"], base).urls) === J([P("a")]), "pkg: requires naming an object's properties: never a package");
+  // (the grader's K12 and K10, on 3803c922: packages as a list of package objects; sizes that aren't a positive safe
+  // integer count nothing)
+  ok(J(pkgIntent({ packages: [{ modules: ["a"], src: { sha256: h("a"), size: 1 }, requires: [] }] }, ["a"], base)) === J({ urls: [], bytes: 0 }), "pkg: packages as a list of package objects (not an index's shape): nothing");
+  for (const size of [-5, "100", 1e300, 2 ** 53, 0, 1.5, null])
+    ok(J(pkgIntent({ packages: { a: { modules: ["a"], src: { sha256: h("a"), size }, requires: [] } } }, ["a"], base)) === J({ urls: [P("a")], bytes: 0 }), `pkg: a size of ${J(size)}: its file, and no bytes counted`);
+}
+
+// the package set's index is read only if its bytes have its id's SHA-256 (the grader's H1, on 3803c922)
+{
+  const text = JSON.stringify({ packages: { a: { modules: ["a"], src: { sha256: "a".repeat(64), size: 1 }, requires: [] } } });
+  const bytes = new TextEncoder().encode(text);
+  const S = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  ok(J(await pkgIndex(bytes, S)) === text, "index: (control) bytes with their id's SHA-256: read");
+  ok((await pkgIndex(new TextEncoder().encode(text + " "), S)) === null, "index: the same JSON with one byte more (another SHA-256): not read");
+  ok((await pkgIndex(bytes, "b".repeat(64))) === null && (await pkgIndex(bytes, S.toUpperCase())) === null && (await pkgIndex(bytes, "")) === null, "index: an id that isn't its SHA-256 (another, upper case, none): not read");
+  const junk = new TextEncoder().encode("not json");
+  const J2 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", junk))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  ok((await pkgIndex(junk, J2)) === null && (await pkgIndex(null, S)) === null, "index: bytes with their SHA-256 but not JSON, or none: null");
 }
 
 // the package set's index, read in full only up to its cap (PKGPRE678-INDEX-1): an advertised length over it refused
@@ -156,6 +175,13 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
     const e = await preloadBytes(at("/exact"), 1000);
     ok(e?.length === 1000, "index: (control) exactly the cap: its bytes");
     ok((await preloadBytes(at("/long"), 1000)) === null, "index: an advertised length over the cap: refused");
+    // (the grader's B1: the length alone refuses it, before any body comes, well inside the stall time: a raw server
+    // that sends its headers, a length over the cap, and then nothing)
+    const raw = createServer((sock) => { sock.on("data", () => sock.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999999\r\n\r\n")); sock.on("error", () => {}); });
+    await new Promise((r) => raw.listen(0, "127.0.0.1", r));
+    const t9 = Date.now(), cl = await Promise.race([preloadBytes(`http://127.0.0.1:${raw.address().port}/claims`, 1000, 5000), new Promise((r) => setTimeout(() => r("hung"), 3000))]);
+    ok(cl === null && Date.now() - t9 < 1000, `index: an advertised length over the cap and no body sent: refused at once (${Date.now() - t9} ms)`);
+    raw.close();
     const t0 = Date.now(), g = await Promise.race([preloadBytes(at("/grows"), 3000), new Promise((r) => setTimeout(() => r("hung"), 3000))]);
     ok(g === null && Date.now() - t0 < 2000, `index: a body without a length growing past the cap: cancelled (${Date.now() - t0} ms)`);
     const d = await preloadBytes(at("/drip"), 1000, 80);
