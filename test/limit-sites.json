@@ -5844,6 +5844,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_sbdata_live.py ::  :: ERRORS = (\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
  "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6278,6 +6283,26 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
+ },
+ "lib/fredapi.py :: Fred.get_series :: raise NotImplementedError(\"fredapi: a FRED series is a pandas Series indexed by date (a DatetimeIndex), \" #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "fredapi without pandas' DatetimeIndex: get_series refuses rather than return another type (design-data-access r3.1; 1b gives the Series)"
+ },
+ "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/fredapi.py :: _error :: return RuntimeError(\"FRED is rate-limiting; try again in a minute\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/fredapi.py :: _has_dates :: except (AttributeError, NotImplementedError): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -6791,6 +6816,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/yfinance.py ::  :: _MESSAGE = \"Yahoo Finance data isn't available in Sagebrush: automated Yahoo access is unsupported\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
@@ -7820,6 +7850,35 @@
   "owner": "CLI/runtime configuration",
   "row": "src-16"
  },
+ "src/live-data.ts ::  :: export const LIVE_ERRORS = [\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\"] as const; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "src/live-data.ts :: checkAnswer :: if (dates.length !== values.length || dates.length > LIVE_MAX_POINTS) return { error: \"unavailable\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_BYTES = 8 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_POINTS = 200_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
  "src/local-gateway.ts ::  :: cellCode: MiB, // one cell's code in a wave (the client's per-cell limit) #0": {
   "class": "1",
   "disposition": {
@@ -8402,7 +8461,7 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
