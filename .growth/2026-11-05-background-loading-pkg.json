@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Background loading L0, PR 2 (pandas; design-background-loading r2, @sagebrush's OK Nov 5; stacked on #674): a notebook whose import lines name a package of the notebook's set (pandas) prefetches at idle that package's source chunk and those it requires, from the set its interpreter is given (notebookPkgset), its index checked against its id, only once the service worker controls the page; nothing pinned. Growth: web/index.html's script (pkgIntent, the set's index check and the wait for the service worker; latestSet moved, not added) and nothing else; cli/pyjs.cjs embeds index.html. Figures: CI-order size records (bun 1.4.4, node 24.21.0), the head merged onto master 8488b767 against #674's own merge onto it: cli/pyjs.cjs +2052 (marked 2100: +48 for a later merge's churn); against master alone +10136, of which #674's marker covers 8150. No other bundle row changes.",
+ "reason": "Background loading L0, PR 2 (pandas; design-background-loading r2, @sagebrush's OK Nov 5; stacked on #674): a notebook whose import lines name a package of the notebook's set (pandas) prefetches at idle that package's source chunk and those it requires, from the set its interpreter is given (notebookPkgset), its index checked against its id, only once the service worker controls the page; nothing pinned. Growth: web/index.html's script (pkgIntent with its limits counted first, the set's capped index read and check, and the wait for the service worker; latestSet moved, not added) and nothing else; cli/pyjs.cjs embeds index.html. Figures: CI-order size records (bun 1.4.4, node 24.21.0), the head merged onto master 8488b767 against #674's own merge onto it: cli/pyjs.cjs +3088 (marked 3150: +62 for a later merge's churn); against master alone +11172, of which #674's marker covers 8150. No other bundle row changes.",
  "bytes": {
-  "cli/pyjs.cjs": 2100
+  "cli/pyjs.cjs": 3150
  }
 }
