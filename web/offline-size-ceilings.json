@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 220305,
-  "swGzip": 54230,
-  "transition": "live data 1a (its own lazy chunk mod-live-data): sw.js raw 220241 measured at this branch's merge of master f6368f37, swRaw = exact + 64 = 220305; normalized gzip-9 54166 measured there, swGzip = exact + 64 = 54230 (@sagebrush's ruling for 1a: offline exact + 64)"
+  "swRaw": 220619,
+  "swGzip": 54283,
+  "transition": "pinned tabulate 0.8.9 support (its own lazy chunk pkg-pypi-tabulate): sw.js raw 220555 measured at exact merged head 998be6fc6 against master 32f186824, swRaw = exact + 64 = 220619; normalized gzip-9 54219 measured, swGzip = exact + 64 = 54283 (Node v24.21.0, Bun 1.4.4, zlib 1.3.2.1-motley-8002e91; both rows follow the active exact + 64 transition rule). Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
 }
