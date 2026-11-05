@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // np.linalg.solve, det, slogdet and inv on engine/nd's LU (nd_solve's gesv mode, src/runtime/nd.ts ndLu): where
-// the module runs, from n = 32 (inv from 64), the public calls give the module's bits (engine/nd/src/lu.rs
+// the module runs, from n = 256, the public calls give the module's bits (engine/nd/src/lu.rs
 // SOLVE_FNV, the no-FMA family: Wasm SIMD128); below those sizes, where it can't run (SAGEBRUSH_NO_WASM here) and
 // for an A or B with an Inf or NaN (which the module doesn't compute), the older LU runs, as before. Both meet the
 // oracle and give NumPy's errors.
@@ -33,12 +33,13 @@ function fnv(c: Float64Array): bigint {
 const run = (code: string, env: Record<string, string> = {}, cwd?: string) =>
   execFileSync(process.execPath, [CLI, "-c", code], { cwd, encoding: "utf8", env: { ...process.env, ...env } }).trim().split("\n");
 
-// the seeded column-major 120 x 120 A and 120 x 3 B of nd-solve-wasm.test.ts, through the public calls in a fresh
-// process: X = solve(A, B) column-major, inv(A), solve(A, I), slogdet(A) and det(A), and the _kernels() report
-function seededCalls(env: Record<string, string> = {}) {
+// a seeded column-major n x n A and n x 3 B (at n = 120, those of nd-solve-wasm.test.ts), through the public calls
+// in a fresh process: X = solve(A, B) column-major, inv(A), solve(A, I), slogdet(A) and det(A), and _kernels()
+const N = 256;
+function seededCalls(env: Record<string, string> = {}, n = N) {
   const d = mkdtempSync(join(tmpdir(), "sb-lu-"));
   try {
-    const n = 120, r = 3;
+    const r = 3;
     writeFileSync(join(d, "a.bin"), seeded(n * n, { s: 2027 }));
     writeFileSync(join(d, "b.bin"), seeded(n * r, { s: 2028 }));
     const out = run([
@@ -61,8 +62,8 @@ function seededCalls(env: Record<string, string> = {}) {
 }
 
 // the normwise backward error of each column of the column-major X for the seeded system
-function eta(X: Float64Array): number {
-  const n = 120, r = 3, A = seeded(n * n, { s: 2027 }), B = seeded(n * r, { s: 2028 });
+function eta(X: Float64Array, n = N): number {
+  const r = 3, A = seeded(n * n, { s: 2027 }), B = seeded(n * r, { s: 2028 });
   let worst = 0;
   for (let j = 0; j < r; j++) {
     let an = 0, res = 0, xn = 0, bn = 0;
@@ -79,13 +80,33 @@ function eta(X: Float64Array): number {
   return worst;
 }
 
-test("np.linalg.solve on engine/nd: the module's bits (SOLVE_FNV), the oracle; inv is solve(A, I)'s bits; _kernels() says so", () => {
-  const { X, inv, det, kernels } = seededCalls();
+// X = A \\ B by the loader itself (src/runtime/nd.ts ndLu) for the seeded system, column-major, in this process
+function loaderX(n: number): Float64Array {
+  const nd = require("../src/runtime/nd");
+  assert.ok(nd.useNd(), "engine/nd doesn't run here");
+  const r = 3, Ac = seeded(n * n, { s: 2027 }), Bc = seeded(n * r, { s: 2028 });
+  // (ndLu takes row-major A and B: the transposes of the column-major seeds)
+  const A = new Float64Array(n * n), B = new Float64Array(n * r);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) A[i * n + j] = Ac[i + j * n];
+  for (let i = 0; i < n; i++) for (let j = 0; j < r; j++) B[i * r + j] = Bc[i + j * n];
+  const x = nd.ndLu(A, n, B, r).x, X = new Float64Array(n * r);
+  for (let i = 0; i < n; i++) for (let j = 0; j < r; j++) X[i + j * n] = x[i * r + j];
+  return X;
+}
+
+test("the loader gives the module's bits: ndLu on the seeded 120 x 120 system is lu.rs SOLVE_FNV", () => {
+  const X = loaderX(120);
   assert.equal(fnv(X), SOLVE_FNV, `X's bits: 0x${fnv(X).toString(16)}`);
-  assert.ok(eta(X) <= 10 * 120 * U);
+  assert.ok(eta(X, 120) <= 10 * 120 * U);
+});
+
+test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; inv is solve(A, I)'s bits; _kernels() says so", () => {
+  const { X, inv, det, kernels } = seededCalls();
+  assert.equal(fnv(X), fnv(loaderX(N)), "the public solve's bits differ from the loader's");
+  assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
   const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n });
-  assert.deepEqual(kernels, { cholesky: k(48), solve: k(32), det: k(32), slogdet: k(32), inv: k(64) });
+  assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
   assert.equal(Math.abs(det[0]), 1);
@@ -96,16 +117,16 @@ test("np.linalg.solve on engine/nd: the module's bits (SOLVE_FNV), the oracle; i
 
 test("without WebAssembly: the older LU, within the oracle, and _kernels() saying why", () => {
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
-  assert.ok(eta(X) <= 10 * 120 * U);
+  assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 32 });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 64 });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256 });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256 });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
   const code = [
     "import numpy as np",
-    "for M in (np.ones((64, 64)), np.diag(np.arange(64.0)), np.vstack([np.eye(70)[:69], np.eye(70)[:1]])):",
+    "for M in (np.ones((256, 256)), np.diag(np.arange(256.0)), np.vstack([np.eye(260)[:259], np.eye(260)[:1]])):",
     "    for f in (np.linalg.inv, lambda M: np.linalg.solve(M, np.ones(len(M))), lambda M: np.linalg.solve(M, np.ones((len(M), 2)))):",
     "        try:",
     "            f(M)",
@@ -114,14 +135,14 @@ test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, de
     "            print('LinAlgError:', e)",
     "    print(np.linalg.det(M), tuple(map(float, np.linalg.slogdet(M))))",
     // (the reversal of n rows is floor(n / 2) interchanges)
-    "print([float(np.linalg.det(np.eye(n)[::-1] * 2)) for n in (32, 33, 34, 35, 64, 65)])",
-    "print([float(np.linalg.slogdet(np.eye(n)[::-1])[0]) for n in (32, 33, 34, 35)])",
-    "print(np.linalg.inv(np.eye(64)[::-1]).tobytes() == np.eye(64)[::-1].tobytes(), np.linalg.solve(np.eye(40)[::-1] * 4, np.arange(40.0)).tolist() == (np.arange(40.0)[::-1] / 4).tolist())",
+    "print([float(np.linalg.det(np.eye(n)[::-1] * 2)) for n in (256, 257, 258, 259)])",
+    "print([float(np.linalg.slogdet(np.eye(n)[::-1])[0]) for n in (256, 257, 258, 259)])",
+    "print(np.linalg.inv(np.eye(256)[::-1]).tobytes() == np.eye(256)[::-1].tobytes(), np.linalg.solve(np.eye(260)[::-1] * 4, np.arange(260.0)).tolist() == (np.arange(260.0)[::-1] / 4).tolist())",
   ].join("\n");
   const singular = [...Array(3).fill("LinAlgError: Singular matrix"), "0.0 (0.0, -inf)"];
   const want = [...singular, ...singular, ...singular,
     // (NumPy 2.5.1's own values: det is sign * exp(sum of log|u_ii|), so not the exact power of two)
-    "[4294967295.9999356, 8589934591.999857, -17179869183.999685, -34359738367.999313, 1.8446744073709394e+19, 3.6893488147418853e+19]",
+    "[1.15792089237355e+77, 2.3158417847471045e+77, -4.631683569494217e+77, -9.26336713898845e+77]",
     "[1.0, 1.0, -1.0, -1.0]", "True True"];
   for (const env of [{}, { SAGEBRUSH_NO_WASM: "1" }] as Record<string, string>[]) assert.deepEqual(run(code, env), want, JSON.stringify(env));
 });
@@ -130,7 +151,7 @@ test("an Inf or NaN in A or B: the module computes nothing, so the older LU runs
   const code = [
     "import numpy as np",
     "rng = np.random.default_rng(8)",
-    "A = rng.standard_normal((70, 70)) + 70 * np.eye(70); b = rng.standard_normal(70)",
+    "A = rng.standard_normal((260, 260)) + 260 * np.eye(260); b = rng.standard_normal(260)",
     "An = A.copy(); An[3, 4] = np.nan; Ai = A.copy(); Ai[5, 5] = np.inf; bn = b.copy(); bn[7] = np.nan",
     "print(bool(np.isnan(np.linalg.det(An))), bool(np.isnan(np.linalg.slogdet(An)[1])), bool(np.isnan(np.linalg.solve(An, b)).all()), bool(np.isnan(np.linalg.inv(An)).any()))",
     "print(bool(np.isnan(np.linalg.solve(A, bn)).any()), bool(np.isnan(np.linalg.inv(Ai)).any()))",
@@ -140,27 +161,26 @@ test("an Inf or NaN in A or B: the module computes nothing, so the older LU runs
   assert.deepEqual(run(code), ["True True True True", "True False", "engine/nd True"]);
 });
 
-test("below n = 32 (inv: 64) the older LU runs, without loading the module: a session of small matrices stays undecided", () => {
+test("below n = 256 the older LU runs, without loading the module: a session of smaller matrices stays undecided", () => {
   const code = [
     "import numpy as np",
     "rng = np.random.default_rng(5)",
-    "for n in (1, 2, 12, 31):",
-    "    M = rng.standard_normal((n, n)) + n * np.eye(n); np.linalg.solve(M, np.ones(n)); np.linalg.det(M); np.linalg.slogdet(M)",
-    "np.linalg.inv(rng.standard_normal((63, 63)) + 63 * np.eye(63))",
+    "for n in (1, 2, 12, 32, 64, 255):",
+    "    M = rng.standard_normal((n, n)) + n * np.eye(n); np.linalg.solve(M, np.ones(n)); np.linalg.det(M); np.linalg.slogdet(M); np.linalg.inv(M)",
     "print(np.linalg._kernels()['solve']['path'])",
   ].join("\n");
   assert.deepEqual(run(code), ["undecided"]);
-  const at = (call: string) => run(`import numpy as np\nM = np.random.default_rng(2).standard_normal((N, N)) + 64 * np.eye(N)\n${call}\nprint(np.linalg._kernels()['solve']['path'])`.replace(/N/g, call.includes("inv") ? "64" : "32"))[0];
+  const at = (call: string) => run(`import numpy as np\nM = np.random.default_rng(2).standard_normal((N, N)) + 64 * np.eye(N)\n${call}\nprint(np.linalg._kernels()['solve']['path'])`.replace(/N/g, "256"))[0];
   for (const call of ["np.linalg.solve(M, np.ones(len(M)))", "np.linalg.det(M)", "np.linalg.slogdet(M)", "np.linalg.inv(M)"]) assert.equal(at(call), "engine/nd", call);
 });
 
 test("a non-contiguous view or an integer matrix gives its contiguous float64 copy's bits", () => {
   const code = [
     "import numpy as np",
-    "A = np.random.default_rng(9).standard_normal((80, 80)) + 80 * np.eye(80); b = np.arange(80.0)",
+    "A = np.random.default_rng(9).standard_normal((260, 260)) + 260 * np.eye(260); b = np.arange(260.0)",
     "V = A[::-1, ::-1].T; C = np.ascontiguousarray(V)",
     "print(V.flags['C_CONTIGUOUS'], np.linalg.solve(V, b).tobytes() == np.linalg.solve(C, b).tobytes(), np.linalg.inv(V).tobytes() == np.linalg.inv(C).tobytes(), np.linalg.det(V) == np.linalg.det(C))",
-    "I = (np.arange(6400).reshape(80, 80) % 7) + 50 * np.eye(80, dtype=np.int64)",
+    "I = (np.arange(67600).reshape(260, 260) % 7) + 300 * np.eye(260, dtype=np.int64)",
     "print(np.linalg.solve(I, b).tobytes() == np.linalg.solve(I.astype(float), b).tobytes(), np.linalg.det(I) == np.linalg.det(I.astype(float)))",
     "print(np.linalg._kernels()['solve']['path'])",
   ].join("\n");
@@ -174,7 +194,7 @@ test("a module memory that can't grow is a MemoryError with its message, and the
   await s.ready;
   const proto = WebAssembly.Memory.prototype as any, grow = proto.grow;
   try {
-    await s.handle({ id: 1, code: "import numpy as np\nnp.linalg.solve(np.eye(40) * 2, np.ones(40))\nB = np.eye(700) * 2.0" });
+    await s.handle({ id: 1, code: "import numpy as np\nnp.linalg.solve(np.eye(256) * 2, np.ones(256))\nB = np.eye(700) * 2.0" });
     proto.grow = () => {
       throw new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded");
     };

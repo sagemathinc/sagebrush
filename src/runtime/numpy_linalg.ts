@@ -42,12 +42,12 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
 // (the public call, Node: n = 40 0.026 vs 0.028 ms, n = 48 0.038 vs 0.035; daybreak2's VM1 PERF, n = 16 slower on
 // engine/nd; /scratch/matlab-speed/chol1b-xover). Per input, so a given matrix always takes the same path.
 const CHOL_ND_MIN = 48;
-// The smallest n at which solve, det and slogdet (LU_ND_MIN) and inv (INV_ND_MIN) run on engine/nd's LU, where
-// that runs; below them, and for an A or B with an Inf or NaN (which the module doesn't compute), lu() and
-// luSolve() run, as before. The cores with their copies, one right-hand side or the identity, Node, three runs
-// (/scratch/matlab-speed/lu-nd-xover): solve today / engine/nd at n = 24 0.77-0.95, 32 1.04-1.12, 64 1.13-1.19,
-// 128 1.40-1.43; inv at 48 0.86-0.88, 64 0.99-1.00, 128 1.28-1.29 (its transposes in and out cost more below).
-const LU_ND_MIN = 32, INV_ND_MIN = 64;
+// The smallest n at which solve, det, slogdet and inv run on engine/nd's LU, where that runs; below it, and for an
+// A or B with an Inf or NaN (which the module doesn't compute), lu() and luSolve() run, as before. Steady calls win
+// from n = 32 (solve) and 64 (det, slogdet, inv), but a session's first call there also pays the module's
+// instantiation, about 2 ms: first calls are slower until about n = 256 and clearly faster from 512 (daybreak4's
+// cold PERF on #684; @sagebrush's ruling: one threshold, never slower cold). A preload at idle would let it come down.
+const LU_ND_MIN = 256;
 
 // A 2-D float64 matrix's elements, row-major: its own data when contiguous float64, else a copy
 function view(a: NDArray): Float64Array {
@@ -1308,7 +1308,7 @@ newBuiltinModule("_nplinalg", (m) => {
     // module's memory, X and the output)
     const [r0, c0] = dims(a);
     if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
-    const nd = r0 >= INV_ND_MIN && useNd();
+    const nd = r0 >= LU_ND_MIN && useNd();
     work(10 * r0 * c0 + (nd ? ndScratch() : 0), "inv");
     const N = nd ? luNd(view(a), r0, null, r0, "inv") : null;
     if (N) {
@@ -1378,7 +1378,7 @@ newBuiltinModule("_nplinalg", (m) => {
   // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, INV_ND_MIN]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

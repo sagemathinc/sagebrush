@@ -166,9 +166,9 @@ def _kernels():
     "undecided" before its first call that could use it), the kernel, why not
     engine/nd, and the smallest n it is used for (below it, the older code,
     which is faster there)."""
-    path, kernel, why, chol, lu, inv = _L._kernels()
+    path, kernel, why, chol, lu = _L._kernels()
     k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n}
-    return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(inv)}
+    return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 
 class _Result(tuple):
