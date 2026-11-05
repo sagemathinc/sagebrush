@@ -5757,6 +5757,17 @@ def _csort(A, ax):
     return np.moveaxis(out, -1, ax)
 
 
+def _median_middle(lo, hi):
+    # Preserve infinities: inf - inf is NaN, although the mean of two
+    # equal infinities is that infinity. Opposite finite signs use a sum
+    # so their difference cannot overflow; equal signs use a difference.
+    with np.errstate(invalid="ignore", over="ignore"):
+        if lo.dtype.kind == "c":
+            return lo + (hi - lo) / 2
+        same = np.isfinite(lo) & np.isfinite(hi) & (np.signbit(lo) == np.signbit(hi))
+        return np.where(same, lo + (hi - lo) / 2, (lo + hi) / 2)
+
+
 @_bs("median")
 def median_(x, *args):
     if class_(x) == "char":
@@ -5779,12 +5790,12 @@ def median_(x, *args):
             hi = _take_along(S, np.maximum(m // 2, 0), ax)
             lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
             with np.errstate(invalid="ignore"):
-                r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
+                r = np.where(m % 2 == 0, _median_middle(lo, hi), lo)
             return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
         S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
-        r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
+        r = _median_middle(lo, hi) if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)

@@ -59,7 +59,7 @@ export function buildTree(events, items = []) {
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
       case "be": { const n = { t: "e", env: e.env, user: !!e.user, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "ee": { let i = st.length - 1; while (i > 0 && !(st[i].t === "e" && st[i].env === e.env)) i--; if (i > 0) st.length = i; break; }
-      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, kids: [] }; top().kids.push(n); st.push(n); break; }
+      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
       case "verbenv": {
@@ -183,12 +183,17 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
   ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
+// (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
+//  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+export const BOX_MAX = 1 << 20, BOX_KEY = 16;
+export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
+export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
   DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
-  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], savebox: [1, 2], sbox: [0, 2], usebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
+  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
   bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1],
   usetheme: [1, 1], usecolortheme: [1, 1], usefonttheme: [1, 1], useinnertheme: [1, 1], useoutertheme: [1, 1], setbeamertemplate: [0, 2],
@@ -212,6 +217,7 @@ class Renderer {
     // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
     this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
+    this.boxes = new Map(); this.boxUsed = 0;   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox, BOX_MAX for the copies)
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
     this.secnumdepth = 3;
@@ -533,6 +539,7 @@ class Renderer {
       }
       // (beamer: columns side by side, each a minipage of its width)
       case "columns": { const b = flow.open("div", ' class="bcols" style="display:flex;gap:1em;align-items:flex-start"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "lrbox": { const [a, j] = this.arg(n.kids, -1); this.saveBox(a, () => this.inline(n.kids.slice(j + 1), c2)); return; }
       case "column":
       case "minipage": {
         let j = -1; let pos = "c"; let o;
@@ -808,6 +815,10 @@ class Renderer {
   // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
   sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
   /** fn's result, and the SageTeX items it rendered (a title field's) */
+  // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
+  // shown too (a box never used is never shown, as in TeX)
+  boxName(a) { return this.str(a).trim(); }
+  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys: [...new Set(keys)] }); }
   captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
@@ -846,6 +857,8 @@ class Renderer {
       const m = this.meta, printed = { title: !!m.title, author: !!m.author, institute: !!m.institute, date: m.date === null || !!m.date, thanks: m.thanks.length > 0 };
       for (const f of Object.keys(printed)) if (printed[f]) for (const k of this.metaSage[f]) this.sageShown.add(k);
     }
+    // (and those beamer's furniture shows: engine/beamer.mjs)
+    if (this.furnishShown) this.furnishShown();
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
     if (hidden.length) this.chunkPos.unshift(-1);
@@ -853,7 +866,9 @@ class Renderer {
     // resolve references, the table of contents and the title block
     const toc = this.tocHtml(), title = this.titleHtml();
     // eslint-disable-next-line no-control-regex
-    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false)));
+    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false))
+      // (beamer's headline (h), footline (f) or sidebar (s) of frame k: engine/beamer.mjs, once every section is known)
+      .replace(/\u0001B([hfs])(\d+)\u0002/g, (_, w, k) => this.furnish(w, +k)));
     return chunks;
   }
 }
@@ -919,6 +934,25 @@ const CMDS = {
   ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
+  // saved boxes (astra4's digest, gap 3: they were dropped, silently): \sbox{\name}{text}, \savebox{\name}[width][pos]{text}
+  // (as \makebox), and lrbox (the environments) kept, and \usebox{\name} shows the box; one never saved shows nothing,
+  // as TeX's empty box, and check says so
+  sbox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i), [b, j] = this.arg(nodes, j0); this.saveBox(a, () => this.inline(b, ctx)); return j; },
+  savebox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i); let j = j0; this.saveBox(a, () => { const f = new Flow(true); j = this.makebox(nodes, j0, ctx, f, false); return f.inlineHtml(); }); return j; },
+  usebox: function (nodes, i, ctx, flow) {
+    const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
+    if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
+    // (every copy within one budget, BOX_MAX, checked before it's made: a box copied into a box, again and again, would
+    //  double each time (astra, BOX653-EXPAND-1); its SageTeX items too, each once in the box (a box doubled into itself
+    //  with no HTML still doubled them, BOX653-EXPAND-1's residual); past it, left out, said once)
+    const cost = boxCost(b);
+    if (!fitsBoxes(this.boxUsed, cost)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
+    this.boxUsed += cost;
+    // (its SageTeX seen as where it's used is: shown in the body, held in a field or another box until those are, never
+    //  in the preamble (daybreak3, BOX653-SAGE-CAPTURE-1))
+    for (const k of b.keys) this.sageSeen(k);
+    flow.html(b.h, ctx.st); return j;
+  },
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
     let j = i, o, pos = "c", h = null, ipos = null;

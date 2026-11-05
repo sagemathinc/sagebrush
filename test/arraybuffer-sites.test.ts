@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { slowSkip } from "./slow-tests";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -89,7 +90,8 @@ const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, 
   ["a chain of 40 links (the most the OS follows) into build/", { ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`web/l${i}.ts`, link(i === 39 ? "../build/t.ts" : `l${i + 1}.ts`)])), "web/worker.ts": 'import { a } from "./l0";\nexport const y = a;\n' }, { "build/t.ts": STORE }, Array.from({ length: 40 }, (_, i) => `web/l${i}.ts`)],
 ];
 const generatedKeys = (c: any) => G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
-test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", () => {
+// (128 s on master: a slow test, test/slow-tests.ts)
+test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", { skip: slowSkip }, () => {
   for (const [name, tracked, built, want] of REFERENCE_CASES) {
     const without = fixture(tracked);
     const withBuild = fixture({ ...tracked, ...built });

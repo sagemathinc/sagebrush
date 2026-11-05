@@ -2694,6 +2694,27 @@ test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted b
 });
 
 
+test("median and movmedian preserve infinite middle values without finite overflow (MCF-09)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf09/transcript.txt.
+  // SHA256 33232a341ba37a60ae62e7950c1200e0189c31d5c488998656a45a9447fd7030.
+  const expressions = [
+    "median([Inf Inf])", "median([-Inf 1])", "median([-Inf -Inf])",
+    "median([-Inf Inf])", "median([1 Inf])", "median([Inf Inf NaN],'omitnan')",
+    "median([-Inf 1 NaN],'omitnan')", "median([1e308 1e308])",
+    "median([-1e308 1e308])", "median(single([Inf Inf]))", "movmedian([-Inf 1],2)",
+  ];
+  const code = expressions.map((s) => `y=${s}; disp(mat2str(size(y))); disp(class(y)); disp(mat2str(y,17));`).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[1 1]", "double", "Inf", "[1 1]", "double", "-Inf", "[1 1]", "double", "-Inf",
+    "[1 1]", "double", "NaN", "[1 1]", "double", "Inf", "[1 1]", "double", "Inf",
+    "[1 1]", "double", "-Inf", "[1 1]", "double", "1e+308", "[1 1]", "double", "0",
+    "[1 1]", "single", "Inf", "[1 2]", "double", "[-Inf -Inf]",
+  ]);
+});
+
 test("str2num preserves character-array rows (MCF-30)", () => {
   const { execFileSync } = require("node:child_process");
   // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf30/transcript.txt:
