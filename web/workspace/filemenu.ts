@@ -10,9 +10,10 @@
 // exported files and frames too; the Open… dialog and Recent are fileopen.ts)
 
 /** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups. */
-export type FileItem = "newNotebook" | "newBoard" | "newFolder" | "fromExample" | "open" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newFolder" | "fromExample" | "open" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
+  newMatlab: "MATLAB notebook",
   newBoard: "Board",
   newFolder: "Folder",
   fromExample: "From an example…",
@@ -25,6 +26,7 @@ const LABELS: Record<FileItem, string> = {
   delete: "Delete",
 };
 const TITLES: Partial<Record<FileItem, string>> = {
+  newMatlab: "A new notebook in MATLAB's language",
   open: "Your notebooks, boards and files in this browser",
   upload: "Files from this computer: notebooks and boards become documents, anything else is kept as a file",
   saveCopy: "A copy of this document, under a name you give",
@@ -115,7 +117,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   // (New's items and Download's are in the page from the start, though their
   // group is closed: the page's handlers and tests find them)
   const nw = group("New", "new", () => {});
-  for (const id of ["newNotebook", "newBoard", "newFolder", "fromExample"] as FileItem[]) item(id, nw);
+  for (const id of ["newNotebook", "newMatlab", "newBoard", "newFolder", "fromExample"] as FileItem[]) item(id, nw);
   item("open", menu);
   group("Recent", "recent", async (box) => {
     box.replaceChildren();

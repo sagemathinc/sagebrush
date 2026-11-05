@@ -134,6 +134,88 @@ try {
   check(await until(`!!document.querySelector("#wssidebar .frow input")`), "New board: named in place");
   await typeInto("Course plan");
   check(await until(`${W}.stat("/Course plan.board.json").then((e) => !!e)`), "…as Course plan.board.json");
+  // (…and opened once named, as a click on its row opens it: sage's n8 walkthrough; then back to the notebook page)
+  check(await until(`location.pathname.startsWith("/board/") && /Course plan/.test(document.title)`, 30000), "…and opened once named: " + JSON.stringify(await ev("location.pathname + ' ' + document.title").catch(() => null)));
+  await go(base);
+  await until(`!!${W}`, 60000);
+  if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+  // N8 (sage's n8 walkthrough): a new notebook is opened once named (Enter, or Esc keeping Untitled), from the
+  // top New and from a folder's menu; MATLAB notebook makes one in MATLAB; what is typed then goes into it, never into
+  // the notebook that was open
+  {
+    const was = await ev(`document.querySelector("#nbname").value`);
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 fresh");
+    const opened = await until(`document.querySelector("#nbname").value === "N8 fresh"`, 30000);
+    check(opened, "N8: New ▸ Notebook, named: opened once named (was " + JSON.stringify(was) + ")");
+    await until(`window.sagebrush.notebook.cells().length > 0`);
+    await ev(`(window.sagebrush.notebook.cells()[0].ta.focus(), 1)`);
+    await send("Input.insertText", { text: "n8_typed = 1" });
+    await ev(`window.sagebrush.notebook.saved?.()`);
+    const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
+    check(into, "N8: what is typed then goes into the new notebook");
+    check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
+    // (a folder's menu, MATLAB notebook, Esc keeping Untitled)
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+    await click(rowSel("/Algebra") + " .more");
+    await menu("New MATLAB notebook here");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    const m = await until(`document.querySelector("#nbname").value === "Untitled" && window.sagebrush.notebook.mode === "matlab"`, 30000);
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New MATLAB notebook here, Esc: Untitled, in MATLAB, opened: " + JSON.stringify(await ev(`[document.querySelector("#nbname").value, window.sagebrush.notebook.mode]`)));
+    // (the top New's MATLAB notebook)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("MATLAB notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 matlab");
+    check(await until(`document.querySelector("#nbname").value === "N8 matlab" && window.sagebrush.notebook.mode === "matlab"`, 30000), "N8: New ▸ MATLAB notebook, named: opened, in MATLAB");
+    // (a folder: made and named, nothing opened)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Folder");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 folder");
+    await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
+    await sleep(500);
+    check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+    // (grader's B2-B5 on #704: what is opened when naming goes otherwise)
+    const nbname = () => ev(`document.querySelector("#nbname").value`);
+    const toastText = () => ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    const newRowPath = () => ev(`document.querySelector("#wssidebar .frow input")?.closest(".frow")?.dataset.path ?? null`);
+    // B5: a search shown that the new item doesn't match: it has no row to name, and is opened at once
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "zzq-no-such"; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    let before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    check(await until(`/^Untitled/.test(document.querySelector("#nbname").value)`, 30000) && !(await ev(`!!document.querySelector("#wssidebar .frow input")`)), "N8 (B5): a new notebook with no row to name it in (a search shown): opened at once (before " + JSON.stringify(before) + ")");
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    // B3 (and B2): put in Trash while being named (another tab, an agent): said, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const goneAt = await newRowPath();
+    // (moved to Trash meanwhile, as another tab or an agent would: found by its ref, but in Trash)
+    const deletedProbe = await ev(`${W}.remove(${JSON.stringify(goneAt)}).then((e) => e.path)`);
+    await typeInto("N8 gone");
+    const saidGone = await until(`/was moved or deleted meanwhile: not renamed/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10000);
+    await sleep(1000);
+    check(saidGone && (await nbname()) === before && !(await ev(`${W}.stat("/Trash/N8 gone.ipynb").then((x) => !!x)`)), "N8 (B3): put in Trash while being named: said not renamed, nothing renamed in Trash, and nothing opened: " + JSON.stringify({ goneAt, saidGone, now: await nbname(), before, toast: await toastText(), goneStat: await ev(`${W}.stat(${JSON.stringify(goneAt)}).then((x) => !!x)`), renamed: await ev(`${W}.stat("/N8 gone.ipynb").then((x) => !!x)`), inTrash: await ev(`${W}.list("/Trash").then((l) => l.map((e) => e.path))`), boxOpen: await ev(`!!document.querySelector("#wssidebar .frow input")`), deletedProbe }));
+    // B4 (and B2): the name typed taken meanwhile: not renamed, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const keptAt = await newRowPath();
+    await ev(`${W}.create("/N8 taken.ipynb", { mode: "python" }).then(() => 1)`);
+    await typeInto("N8 taken");
+    await sleep(1500);
+    check((await nbname()) === before && (await ev(`${W}.stat(${JSON.stringify(keptAt)}).then((x) => !!x)`)), "N8 (B4): the name typed taken meanwhile: not renamed, and nothing opened: " + JSON.stringify({ keptAt, now: await nbname(), before, toast: await toastText() }));
+  }
   // a folder, and files dropped on it
   await click("#wssidebar .fh button[aria-label=New]");
   await menu("Folder");
