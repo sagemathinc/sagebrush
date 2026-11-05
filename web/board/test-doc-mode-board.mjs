@@ -202,12 +202,58 @@ try {
   await ev("window.__b.agent.editing(true), 1");
   ok(!(await editing()), "…the page's API asking for Edit: still View (the host's say)");
   ok((await ev("JSON.stringify(window.__kept)")) === "[]", `…and nothing kept (${await ev("JSON.stringify(window.__kept)")})`);
+
+  // (a host that offers no Edit at all, `hidden` (grader's A2), though it says allowed: the same, every way)
+  const remount = async (state) => {
+    await go("?doc=examples/sagebrush.json");
+    await ev("import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)");
+    await ev(`import('/board/board.js').then((m) => { window.__kept = []; window.__setEditing = null; const store = { ...m.host.store, editing: (f) => { window.__setEditing = f; f(${JSON.stringify(state)}); return () => {}; } }; window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, store, mode: { start: true, toggled: (on) => window.__kept.push(on) } }); return 1; })`);
+    await until("!!window.__b?.agent && !!document.querySelector('[data-sbb=edit]')", 20000);
+    await sleep(500);
+  };
+  await remount({ allowed: true, hidden: true });
+  ok(!(await editing()), "a host that offers no Edit (hidden), a board remembered in Edit: View");
+  await ev("document.activeElement?.blur?.(), 1");
+  await press("e");
+  ok(!(await editing()), "…E: still View");
+  await ev("window.__b.agent.editing(true), 1");
+  ok(!(await editing()), "…the page's API asking for Edit: still View");
+  ok((await ev("JSON.stringify(window.__kept)")) === "[]", `…and nothing kept (${await ev("JSON.stringify(window.__kept)")})`);
+
+  // (a host that takes Edit away while the board is in Edit (grader's A4): View, Edit disabled; then a menu's edit
+  // (grader's I2) changes nothing, and doesn't move the board to another page)
+  await remount({ allowed: true });
+  ok(await until("document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true'", 5000), "(Edit allowed, a remembered Edit: in Edit)");
+  await ev("window.__b.agent.edit((d) => { if (!d.pages) { const { nodes, edges } = d; delete d.nodes; delete d.edges; d.pages = [{ title: 'One', nodes: nodes ?? [], edges: edges ?? [] }]; } d.pages.push({ title: 'Two', nodes: [{ id: 'p2n', title: 'on page two' }] }); }).then(() => 1)");
+  await ev("Promise.resolve(window.__b.agent.page(1)).then(() => 1)");
+  ok(await until("window.__b.agent.snapshot().page === 1", 5000), "(a board of pages, on its second)");
+  await ev("window.__setEditing({ allowed: false, why: 'Taken back' }), 1");
+  await sleep(200);
+  ok(!(await editing()) && (await ev("document.querySelector('[data-sbb=edit]').hasAttribute('disabled')")), "the host takes Edit away while the board is in Edit: View, Edit disabled");
+  const docBefore = await ev("JSON.stringify(window.__b.agent.snapshot().doc)");
+  await ev("document.querySelector('[data-sbb=addpage]').click(), 1");
+  await sleep(600);
+  await ev("document.querySelector('[data-sbb=tidy]').click(), 1");
+  await sleep(600);
+  ok((await ev("JSON.stringify(window.__b.agent.snapshot().doc)")) === docBefore && (await ev("window.__b.agent.snapshot().page")) === 1 && !(await editing()), `…Add page and Tidy chosen then: the board unchanged, still on its page, in View (page ${await ev("window.__b.agent.snapshot().page")})`);
+
+  // (an HTML download in View with another engine (grader's G1): the download uses it, the board is left as it is)
+  await remount({ allowed: true });
+  await ev("document.activeElement?.blur?.(), 1");
+  await press("Escape");
+  ok(!(await editing()), "(a board in View)");
+  await send("Browser.setDownloadBehavior", { behavior: "deny" });
+  const engineBefore = await ev("JSON.stringify(window.__b.agent.snapshot().doc.engine ?? null)");
+  await ev("(() => { for (const r of document.querySelectorAll('[data-sbb=htmlform] input[name=engine]')) r.checked = r.value === 'latest'; document.querySelector('[data-sbb=html-go]').click(); return 1; })()");
+  await sleep(1500);
+  ok(engineBefore === "null" && (await ev("JSON.stringify(window.__b.agent.snapshot().doc.engine ?? null)")) === "null" && !(await editing()), `an HTML download in View choosing another engine: the board's engine unchanged (${engineBefore} -> ${await ev("JSON.stringify(window.__b.agent.snapshot().doc.engine ?? null)")})`);
 } catch (e) {
   ok(false, "the test ran: " + String(e?.stack ?? e).slice(0, 500));
 } finally {
   chrome.kill();
   await sleep(300);
-  rmSync(profile, { recursive: true, force: true });
+  // (Chromium may still be writing its profile as it exits: retried, and never the test's verdict, as web/test-board.mjs)
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

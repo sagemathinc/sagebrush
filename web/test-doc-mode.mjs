@@ -52,6 +52,9 @@ try { rememberMode(modeKey("board", "arr1"), "edit"); } catch (e) { threwArr = e
 ok(threwArr === null && modeOf(modeKey("board", "arr1")) === "edit" && !Array.isArray(JSON.parse(store.get("sagebrush-doc-modes"))), `…an Array store: keeping over it doesn't throw, and writes a record (grader's V7) (${threwArr})`);
 store.set("sagebrush-doc-modes", JSON.stringify({ [K]: "yes" }));
 ok(modeOf(K) === "view", "…nor a value that isn't a time");
+// (a time past what a number holds, as raw JSON text: 1e999 parses to Infinity, which is no time: grader's V2b)
+store.set("sagebrush-doc-modes", '{"board:inf":1e999,"board:ninf":-1e999}');
+ok(modeOf("board:inf") === "view" && modeOf("board:ninf") === "view", "…nor a time past any number's (1e999 in the stored text: Infinity): View");
 // (astra's MODE658-SHAPE-1: more than 1000 entries that aren't times, objects among them, in a store written by
 // another page: View, nothing thrown, and they go as the store is written)
 const bad = {};
