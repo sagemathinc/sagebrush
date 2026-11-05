@@ -81,7 +81,7 @@ function factors(env: Record<string, string> = {}) {
 
 test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), the oracle, and _kernels() saying so", () => {
   const { kernels, L } = factors();
-  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "" });
+  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n: 48 });
   const r: number[] = [];
   for (const [n, F] of L) {
     // L's strict upper part is 0; R's upper triangle, column by column, is L's lower one, row by row
@@ -95,7 +95,7 @@ test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), t
 
 test("np.linalg.cholesky without WebAssembly: the TypeScript loop, within the oracle, and _kernels() saying why", () => {
   const { kernels, L } = factors({ SAGEBRUSH_NO_WASM: "1" });
-  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here" });
+  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 48 });
   for (const [n, F] of L) assert.ok(residual(spd(n, 2029), F, n) <= 10 * U, `n=${n}`);
 });
 
@@ -106,7 +106,7 @@ test("the path is chosen at the first call and kept: turning WebAssembly off mid
   await s.ready;
   const g = globalThis as any, saved = g.__SAGEBRUSH_NO_WASM__;
   try {
-    await s.handle({ id: 1, code: "import numpy as np\nP0 = np.linalg._kernels()['cholesky']['path']\nA = np.array([[4.0, 2.0, 0.4], [2.0, 5.0, 1.0], [0.4, 1.0, 3.0]])\nL1 = np.linalg.cholesky(A)\nP1 = np.linalg._kernels()['cholesky']['path']" });
+    await s.handle({ id: 1, code: "import numpy as np\nP0 = np.linalg._kernels()['cholesky']['path']\nM = np.random.default_rng(3).standard_normal((60, 60))\nA = M @ M.T + 60 * np.eye(60)\nL1 = np.linalg.cholesky(A)\nP1 = np.linalg._kernels()['cholesky']['path']" });
     g.__SAGEBRUSH_NO_WASM__ = true;
     await s.handle({ id: 2, code: "L2 = np.linalg.cholesky(A)\nP2 = np.linalg._kernels()['cholesky']['path']\nSAME = L2.tobytes() == L1.tobytes()" });
   } finally {
@@ -148,4 +148,64 @@ test("both paths: NumPy's error for a matrix that isn't positive definite, empty
     const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", env: { ...process.env, ...env } });
     assert.deepEqual(out.trim().split("\n"), want, JSON.stringify(env));
   }
+});
+
+test("below n = 48 the TypeScript loop runs, without loading the module: a session of small matrices stays undecided, and gives the loop's bits", () => {
+  const code = [
+    "import numpy as np",
+    "rng = np.random.default_rng(5)",
+    "out = []",
+    "for n in (1, 2, 8, 16, 47):",
+    "    M = rng.standard_normal((n, n)); out.append(np.linalg.cholesky(M @ M.T + n * np.eye(n)).tobytes().hex())",
+    "print(np.linalg._kernels()['cholesky']['path'])",
+    "print(hash(tuple(out)) % 1000003, len(''.join(out)))",
+  ].join("\n");
+  const nd = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trim().split("\n");
+  const ts = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } }).trim().split("\n");
+  assert.equal(nd[0], "undecided", "the module was loaded for a small matrix");
+  assert.equal(nd[1], ts[1], "a small matrix's bits differ from the loop's");
+});
+
+// a fresh process's loader, with globals set as a host would set them, then one cholesky of a 60 x 60 matrix
+function loaderIn(setup: string): { path: string; why: string; fetches: number } {
+  const js = [
+    `const g = globalThis; g.__fetches = 0; ${setup}`,
+    `const nd = require(${JSON.stringify(join(__dirname, "..", "src", "runtime", "nd"))});`,
+    "nd.useNd();",
+    "const p = nd.ndPath();",
+    "console.log(JSON.stringify({ path: p.path, why: p.why, fetches: g.__fetches }));",
+  ].join("\n");
+  return JSON.parse(execFileSync(process.execPath, ["-e", js], { encoding: "utf8" }).trim());
+}
+
+test("a URL with no hash, or a malformed one, is never fetched: the session runs the TypeScript loop, saying why (grader N1b)", () => {
+  const stub = "g.__SAGEBRUSH_FETCH_SYNC__ = () => { g.__fetches++; return new Uint8Array(8); };";
+  for (const hash of ["", "g.__SAGEBRUSH_ND_SHA256__ = 'abc';", "g.__SAGEBRUSH_ND_SHA256__ = '" + "A".repeat(64) + "';", "g.__SAGEBRUSH_ND_SHA256__ = 42;"]) {
+    const r = loaderIn(`g.__SAGEBRUSH_ND_URL__ = "https://example.invalid/sagebrush-nd.wasm"; ${stub} ${hash}`);
+    assert.deepEqual(r, { path: "typescript", why: "the numerics module could not be loaded (the numerics module has no SHA-256 to check, so it is not loaded)", fetches: 0 }, hash || "no hash");
+  }
+  // (the control: a well-formed hash is fetched, once, and refused when the bytes aren't the module's)
+  const c = loaderIn(`g.__SAGEBRUSH_ND_URL__ = "https://example.invalid/sagebrush-nd.wasm"; ${stub} g.__SAGEBRUSH_ND_SHA256__ = '${"a".repeat(64)}';`);
+  assert.deepEqual(c, { path: "typescript", why: "the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)", fetches: 1 });
+});
+
+test("a module memory that can't grow is a MemoryError with its message, and the session goes on (grader N12)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const s = notebookSession(() => {}, { captureStreams: true });
+  await s.ready;
+  const proto = WebAssembly.Memory.prototype as any, grow = proto.grow;
+  try {
+    await s.handle({ id: 1, code: "import numpy as np\nM = np.random.default_rng(4).standard_normal((60, 60))\nnp.linalg.cholesky(M @ M.T + 60 * np.eye(60))\nB = np.eye(700) * 2.0" });
+    proto.grow = () => {
+      throw new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded");
+    };
+    await s.handle({ id: 2, code: "try:\n    np.linalg.cholesky(B)\n    R = 'ran'\nexcept MemoryError as e:\n    R = str(e)" });
+  } finally {
+    proto.grow = grow;
+  }
+  await s.handle({ id: 3, code: "OK = float(np.linalg.cholesky(B)[0, 0])" });
+  const main = require("../src/runtime/object").getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
+  const v = (name: string) => require("../src/runtime/object").callObj(require("../src/runtime/object").getattr(main, "__getitem__"), [name]);
+  assert.equal(v("R"), "cholesky of a 700 x 700 matrix needs more working memory than WebAssembly can have here");
+  assert.equal(v("OK"), Math.SQRT2);
 });

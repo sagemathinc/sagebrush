@@ -51,9 +51,11 @@ test("each widening operation is refused one byte under the typed buffers it all
       "C2 = rng.standard_normal((50, 40)) + 1j * rng.standard_normal((50, 40))",
       "S = rng.standard_normal((40, 40)); SPD = S @ S.T + 40 * np.eye(40); V = rng.standard_normal(40); BM = rng.standard_normal((40, 5))",
       "TALL = rng.standard_normal((90, 12)); WIDE = TALL.T.copy(); ROT = np.array([[0.0, -1.0], [1.0, 0.0]])",
-      // (cholesky's engine/nd module is loaded once, at the session's first call (src/runtime/nd.ts), as the PNG
-      // module is: that load is not the operation's work)
-      "L.cholesky(SPD)",
+      // (cholesky's engine/nd module is loaded once, at the session's first call that uses it (src/runtime/nd.ts;
+      // from n = 48), as the PNG module is: that load is not the operation's work)
+      "S6 = rng.standard_normal((60, 60)); L.cholesky(S6 @ S6.T + 60 * np.eye(60))",
+      "SPDI = 2 * np.eye(1024, dtype=np.int64)",
+      "SPDT = (2.0 * np.eye(900))[::-1, ::-1].T",
     ].join("\n"),
   });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
@@ -84,6 +86,11 @@ test("each widening operation is refused one byte under the typed buffers it all
     ["qr", () => call("L", "qr", [g("TALL"), false])],
     ["qr complete", () => call("L", "qr", [g("TALL"), true])],
     ["cholesky", () => call("L", "cholesky", [g("SPD")])],
+    // (an int64 matrix, converted, and a reversed transposed view, copied contiguous; large enough that n^2
+    // dominates the module's scratch, and the int64 one larger than any before, so that engine/nd's memory grows,
+    // which is counted too, below: astra ND657-ADMIT-1, at astra's n = 1024)
+    ["cholesky int64", () => call("L", "cholesky", [g("SPDI")])],
+    ["cholesky of a view", () => call("L", "cholesky", [g("SPDT")])],
     ["eigh", () => call("L", "eigh", [g("SPD"), false])],
     ["eig", () => call("L", "eig", [g("S"), false])],
     ["eig complex", () => call("L", "eig", [g("ROT"), false])],
@@ -93,10 +100,28 @@ test("each widening operation is refused one byte under the typed buffers it all
   ];
   const saved = { ...np.ARRAY_LIMITS };
   try {
+    const nd = require("../src/runtime/nd");
     for (const [name, f] of CASES) {
       counter.bytes = 0;
+      const w0 = nd.ndMemoryBytes();
       f();
       const A = counter.bytes;
+      // (cholesky on engine/nd: its typed buffers and the growth of the module's memory together within what it
+      // admits, 5 n^2 + scratch float64s)
+      if (name.startsWith("cholesky") && nd.ndPath().path === "engine/nd") {
+        const n = { cholesky: 40, "cholesky int64": 1024, "cholesky of a view": 900 }[name]!, grew = nd.ndMemoryBytes() - w0;
+        assert.ok(name !== "cholesky int64" || grew > 0, `${name}: the module's memory grew`);
+        assert.ok(A + grew <= 8 * (5 * n * n + nd.ndScratch()), `${name}: ${A} typed + ${grew} grown > admitted ${8 * (5 * n * n + nd.ndScratch())}`);
+        // (the admitted figure exactly, the scratch included: refused one byte under it, run at it; grader N11)
+        if (n >= 48) {
+          const exact = 8 * (5 * n * n + nd.ndScratch());
+          np.ARRAY_LIMITS.bytes = exact - 1;
+          assert.throws(f, (e: any) => Obj.isinstance(e, Obj.T.MemoryError), `${name}: not refused one byte under ${exact}`);
+          np.ARRAY_LIMITS.bytes = exact;
+          f();
+          np.ARRAY_LIMITS.bytes = saved.bytes;
+        }
+      }
       assert.ok(A > 0, `${name}: allocates something`);
       np.ARRAY_LIMITS.bytes = A - 1;
       counter.bytes = 0;

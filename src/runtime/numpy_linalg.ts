@@ -38,6 +38,11 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
   r.data.set(data);
   return r;
 }
+// The smallest n at which cholesky runs on engine/nd, where that runs: below it the TypeScript loop is faster
+// (the public call, Node: n = 40 0.026 vs 0.028 ms, n = 48 0.038 vs 0.035; daybreak2's VM1 PERF, n = 16 slower on
+// engine/nd; /scratch/matlab-speed/chol1b-xover). Per input, so a given matrix always takes the same path.
+const CHOL_ND_MIN = 48;
+
 function linalgError(msg: string): never {
   const E = (globalThis as any).__npLinAlgError;
   if (E) throw Obj.markRaised(Obj.callObj(E, [msg]));
@@ -1277,15 +1282,19 @@ newBuiltinModule("_nplinalg", (m) => {
   fn("cholesky", (a: NDArray) => {
     const [r0, c0] = dims(a);
     // engine/nd's blocked Cholesky, where it runs in this session (src/runtime/nd.ts: decided at the first call,
-    // then fixed); else the loop below. (mat's copy, L and the output: 3 n^2; in the module's memory, A and the
-    // work: 2 n^2 and its scratch)
-    const nd = useNd();
+    // then fixed); else the loop below. Either way 5 n^2 (and on engine/nd its scratch): the loop's are mat's two
+    // copies, L and the output; engine/nd's are A as contiguous float64 (a copy only when it isn't one already),
+    // A and the work in the module's memory, L and the output (astra ND657-ADMIT-1). Below CHOL_ND_MIN rows the
+    // loop is faster than the module's fixed cost, so it runs there, without loading the module.
+    const nd = r0 >= CHOL_ND_MIN && useNd();
     work(5 * r0 * c0 + (nd ? ndScratch() : 0), "cholesky");
-    const [A, n] = mat(a);
     if (nd) {
+      if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
+      const n = a.shape[0];
+      const c = ascontig(a.dt.name === "float64" ? a : npcopy(a, F64()));
       let F: Float64Array | number;
       try {
-        F = ndCholesky(A, n);
+        F = ndCholesky(c.data.subarray(0, n * n), n);
       } catch (e) {
         if (e instanceof RangeError) raise(T.MemoryError, `cholesky of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
         throw e;
@@ -1293,6 +1302,7 @@ newBuiltinModule("_nplinalg", (m) => {
       if (typeof F === "number") linalgError("Matrix is not positive definite");
       return out(F, [n, n]);
     }
+    const [A, n] = mat(a);
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
@@ -1311,7 +1321,7 @@ newBuiltinModule("_nplinalg", (m) => {
   // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

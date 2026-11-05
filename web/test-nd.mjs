@@ -57,16 +57,17 @@ handlers.push((m) => {
   send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/wasm" }], body });
 });
 const fetched = () => requests.some((u) => /\/sagebrush-nd\.wasm\?h=[0-9a-f]{16}$/.test(u));
-const A = "A = np.array([[4.0, 2.0, 0.4], [2.0, 5.0, 1.0], [0.4, 1.0, 3.0]])";
+// (60 x 60: cholesky uses engine/nd from n = 48; a 3 x 3 one, the TypeScript loop, which fetches nothing)
+const A = "M = np.random.default_rng(7).standard_normal((60, 60)); A = M @ M.T + 60 * np.eye(60); S = np.array([[4.0, 2.0], [2.0, 5.0]])";
 
 await send("Network.setCacheDisabled", { cacheDisabled: true });
 await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-nd.wasm*" }] });
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
 ok(await ready(), "the notebook is ready");
-let out = await runCode(`import numpy as np\n${A}\nprint(np.linalg.solve(A, np.ones(3)).round(6), np.linalg._kernels()['cholesky']['path'])`);
-ok(out.includes("undecided") && !fetched(), "NumPy runs without fetching the numerics module: " + JSON.stringify(out));
-out = await runCode("L = np.linalg.cholesky(A)\nk = np.linalg._kernels()['cholesky']\nprint(L.round(6).tolist(), k['path'], k['kernel'], np.abs(L @ L.T - A).max() < 1e-15)");
-ok(out.includes("[[2.0, 0.0, 0.0], [1.0, 2.0, 0.0], [0.2, 0.4, 1.67332]] engine/nd wasm-simd128-4x4 True"), "cholesky runs on engine/nd: " + JSON.stringify(out));
+let out = await runCode(`import numpy as np\n${A}\nprint(np.linalg.solve(A, np.ones(60)).shape, np.linalg.cholesky(S).tolist(), np.linalg._kernels()['cholesky']['path'])`);
+ok(out.includes("(60,) [[2.0, 0.0], [1.0, 2.0]] undecided") && !fetched(), "NumPy, and cholesky of a small matrix, run without fetching the numerics module: " + JSON.stringify(out));
+out = await runCode("L = np.linalg.cholesky(A)\nk = np.linalg._kernels()['cholesky']\nprint(k['path'], k['kernel'], k['from_n'], np.abs(L @ L.T - A).max() / (60 * np.abs(A).sum(axis=1).max()) < 1e-15, np.all(np.triu(L, 1) == 0))");
+ok(out.includes("engine/nd wasm-simd128-4x4 48 True True"), "cholesky runs on engine/nd: " + JSON.stringify(out));
 ok(fetched() && requests.length === 1, "...the module fetched then, once, by its content hash");
 
 // a module other than the one the page was built with: refused, and the session runs the TypeScript code
@@ -75,9 +76,9 @@ requests = [];
 await send("Page.reload", { ignoreCache: true });
 await sleep(500);
 ok(await ready(), "the notebook is ready again");
-out = await runCode(`import numpy as np\n${A}\nL = np.linalg.cholesky(A)\nk = np.linalg._kernels()['cholesky']\nprint(L.round(6).tolist(), k['path'], '|', k['why'])`);
+out = await runCode(`import numpy as np\n${A}\nL = np.linalg.cholesky(A)\nk = np.linalg._kernels()['cholesky']\nprint(np.abs(L @ L.T - A).max() / (60 * np.abs(A).sum(axis=1).max()) < 1e-15, k['path'], '|', k['why'])`);
 ok(fetched(), "(the module's request was answered with other bytes)");
-ok(out.includes("[[2.0, 0.0, 0.0], [1.0, 2.0, 0.0], [0.2, 0.4, 1.67332]] typescript | the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)"), "...which are refused, and cholesky runs the TypeScript code, saying why: " + JSON.stringify(out));
+ok(out.includes("True typescript | the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)"), "...which are refused, and cholesky runs the TypeScript code, saying why: " + JSON.stringify(out));
 out = await runCode("L2 = np.linalg.cholesky(2 * A)\nprint('again', np.linalg._kernels()['cholesky']['path'])");
 ok(out.includes("again typescript") && requests.length === 1, "...for the whole session, with no second fetch: " + JSON.stringify(out));
 

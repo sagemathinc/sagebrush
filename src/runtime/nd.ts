@@ -117,6 +117,11 @@ export function ndPath(): { path: "engine/nd" | "typescript" | "undecided"; kern
   return ex ? { path: "engine/nd", kernel, why: "" } : { path: "typescript", kernel: "", why };
 }
 
+/** The module's memory in bytes (0 before it is made), for the admission tests. */
+export function ndMemoryBytes(): number {
+  return mem ? mem.buffer.byteLength : 0;
+}
+
 /** The work's scratch beyond n^2, in float64s (0 where engine/nd doesn't run). */
 export function ndScratch(): number {
   return ex ? ex.nd_info(0) : 0;
