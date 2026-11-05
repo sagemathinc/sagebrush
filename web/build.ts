@@ -190,6 +190,8 @@ const shareCopyResult = await Bun.build(<any>{ metafile: true, entrypoints: [joi
 // the Share dialog's analysis worker (web/deps/deps-worker.ts, share-ux-plan r2 §3): its own
 // chunk with the parser, loaded only when Share opens
 const shareDepsResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "deps", "deps-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-deps.js", target: "browser", format: "iife", minify: true });
+// (Share folder…, book links B2: its dialog, loaded when chosen from a folder's ⋯)
+const shareFolderResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "folder-dialog.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-folder.js", target: "browser", format: "esm", minify: true });
 // The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1.  Wherever
 // the page goes, it goes too (the site; the CLI's embedded page, scripts/build-cli.mjs and src/notebook.ts; the
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
@@ -209,8 +211,8 @@ const gitShims = { name: "gitpush-shims", setup(b: any) {
   b.onResolve({ filter: /^(diff3|clean-git-ref|isomorphic-textencoder)$/ }, shim("unused.ts"));
 } };
 const gitpushWorkerResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "gitpush", "git-worker.ts")], outdir: join(here, "dist"), naming: "sagebrush-gitpush-worker.js", target: "browser", format: "esm", minify: true, plugins: [gitShims] });
-const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the reader's own copy", shareCopyResult], ["the Share dialog's analysis", shareDepsResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
-for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareCopyResult, shareDepsResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
+const builds: [string, any][] = [["the worker", result], ["the console", consoleResult], ["math", mathResult], ["MyST", mystResult], ["the graph view", graphResult], ["the notebook component", notebookResult], ["TimeTravel", historyResult], ["the analyzer", analyzeResult], ["the shared collection page", shareResult], ["the reader's own copy", shareCopyResult], ["the Share dialog's analysis", shareDepsResult], ["Share folder's dialog", shareFolderResult], ["the GPU kernel's preview", remoteResult], ["the app self-test's COI diagnosis", selftestResult], ["the export", exportResult], ["the export's worker", exportWorkerResult], ["Push to GitHub", gitpushResult], ["Push to GitHub's worker", gitpushWorkerResult]];
+for (const r of [result, consoleResult, mathResult, mystResult, graphResult, notebookResult, historyResult, analyzeResult, shareResult, shareCopyResult, shareDepsResult, shareFolderResult, remoteResult, selftestResult, exportResult, exportWorkerResult, gitpushResult, gitpushWorkerResult]) {
   if (!r.success) {
     for (const m of r.logs) console.error(m);
     process.exit(1);
@@ -251,7 +253,7 @@ if (LATEX) {
   // the agent tools' work, tools.ts, a third, fetched on an agent's first latex_check or latex_render; the presenter,
   // present.ts, a fourth, fetched when Present is pressed; and beamer's code, engine/beamer.mjs, the worker's, fetched
   // when a document first needs it: the class beamer, or an overlay command)
-  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
+  for (const [entry, name] of [["page.ts", "sagebrush-latex.js"], ["doc.ts", "sagebrush-latex-doc.js"], ["worker.ts", "sagebrush-latex-worker.js"], ["comments.ts", "sagebrush-latex-comments.js"], ["comments-doc.ts", "sagebrush-latex-comments-doc.js"], ["agent.ts", "sagebrush-latex-agent.js"], ["tools.ts", "sagebrush-latex-tools.js"], ["present.ts", "sagebrush-latex-present.js"], ["engine/beamer.mjs", "sagebrush-latex-beamer.js"]]) {
     const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "latex", entry)], outdir: join(here, "dist"), naming: name, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
     builds.push([`the LaTeX editor (${name})`, r]);
     if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
@@ -594,6 +596,14 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
   if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the terminal preview's package set: not an id: ${JSON.stringify(S)}`);
   mkdirSync(join(here, "dist", "shell"), { recursive: true });
   writeFileSync(join(here, "dist", "shell", "preview-set.json"), JSON.stringify({ S }) + "\n");
+  // the notebooks' package set (QRPM 1b): pandas, source only, so its id changes only when the package does,
+  // never with the core's build; named in pkgset/latest.json, which a notebook without a pin resolves once and
+  // pins (index.html notebookPkgset, plan-modular-packages-r4 §4.4).  Nothing is fetched until a cell imports
+  // it (web/pkgset-browser.ts).  For notebooks only: no grading context admits pandas yet (src/pkgset.ts
+  // gradingExcluded).
+  const N = execFileSync("node", [join(here, "..", "scripts", "optional-packages.mjs"), "build", "--out", join(here, "dist"), "pandas"], { encoding: "utf8" }).trim().split("\n").pop()!;
+  if (!/^[0-9a-f]{64}$/.test(N)) throw new Error(`the notebooks' package set: not an id: ${JSON.stringify(N)}`);
+  writeFileSync(join(here, "dist", "pkgset", "latest.json"), JSON.stringify({ id: N }) + "\n");
   if (hasSite) {
     for (const d of ["pkg", "pkgset", "pkgmeta"]) {
       rmSync(join(siteDir, "public", d), { recursive: true, force: true });
@@ -657,7 +667,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {
@@ -668,7 +678,7 @@ for (const f of SITE_FILES)
   if (hasSite) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the LaTeX editor's files, in a LaTeX build only; a stale copy from an earlier one is removed either way)
 if (hasSite) for (const f of readdirSync(join(siteDir, "public"))) if (f.startsWith("sagebrush-latex")) rmSync(join(siteDir, "public", f));
-if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
+if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-doc.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-beamer.js"]) copyFileSync(join(here, "dist", f), join(siteDir, "public", f));
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });

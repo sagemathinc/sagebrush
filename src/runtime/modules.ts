@@ -4,7 +4,7 @@ import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, se
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, dictDelete, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
-import { INTR } from "./interrupt";
+import { INTR, INTR_GRADING } from "./interrupt";
 import { fullGc } from "./gc";
 import * as Ty from "./types";
 import { builtins, stdout, stderr, stdin, sysRef } from "./builtins";
@@ -18,10 +18,17 @@ export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
 
 // Set by the driver: find and execute a Python source module, or return
-// null; compile and run source text for exec/eval/compile.
-export const loader: { load: (name: string) => any | null; exec: (src: string, g: any, mode: string, filename: string, opts?: { sage?: boolean }) => any } = {
+// null; compile and run source text for exec/eval/compile; and, while a
+// grading allowance is armed, check a module sys.modules already holds
+// before an import returns it (raises to refuse: src/compile.ts).
+export const loader: {
+  load: (name: string) => any | null;
+  exec: (src: string, g: any, mode: string, filename: string, opts?: { sage?: boolean }) => any;
+  graded: (name: string, m: any) => void;
+} = {
   load: () => null,
   exec: () => null,
+  graded: () => {},
 };
 
 export function builtinModuleNames(): string[] {
@@ -118,7 +125,13 @@ export function importModule(name: string): any {
     throw e;
   }
   const existing = dictGet(sysModules, name);
-  if (existing !== undefined) return existing === null ? halted(name) : existing;
+  if (existing !== undefined) {
+    if (existing === null) halted(name);
+    // (an import while a grading allowance is armed: a module already loaded is checked too, not only one
+    // being loaded; bit 3 read as src/compile.ts reads it, not an interrupt poll; daybreak3's Q7 ruling on #628)
+    if (Atomics.load(INTR, 0) & INTR_GRADING) loader.graded(name, existing);
+    return existing;
+  }
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
     // (a parent that is None in sys.modules is not imported again: as

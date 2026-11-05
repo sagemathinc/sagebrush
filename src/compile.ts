@@ -13,7 +13,8 @@ import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
 import { cwdPath, isBuiltinModule } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
-import { admitIndex, checkChunk, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
+import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
+import { INTR, INTR_GRADING } from "./runtime/interrupt";
 import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
@@ -242,9 +243,13 @@ const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = ru
 );
 
 // Execute `source` as module `name`, registering it in sys.modules first.
+// (`made`: told the new module object before any of its code runs, so
+// whatever its code does with it, aliases included, even if it then raises,
+// the module is already known as what it is: execFile's optional-set tag)
 let moduleRuns = 0;
-export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage")): any {
+export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void): any {
   const m = R.newModule(name);
+  made?.(m);
   m.__file__ = filename;
   m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
   if (isPackage) m.__path__ = [dirname(filename)];
@@ -413,14 +418,43 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   for (const d of dirs) {
     const pkg = join(d, leaf, "__init__.py");
-    if (fileExists(pkg)) return execModule(fileRead(pkg), pkg, name, true);
+    if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
     const file = join(d, leaf + ".py");
-    if (fileExists(file)) return execModule(fileRead(file), file, name);
+    if (fileExists(file)) return execFile(fileRead(file), file, name, false);
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  return found === null ? null : execModule(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  return found === null ? null : execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+};
+// Every module the loader runs from a file goes through here.  A file of the
+// optional set (optKeys, by its mounted path, whatever name or sys.path entry
+// found it) is refused before any of it runs while a grading allowance is armed
+// (astra's Q7 residual on #628: its directory on sys.path, a fresh name); else
+// the module made from it is remembered as the set's, by identity, as soon as
+// it is made, for R.loader.graded's check when an import finds it in
+// sys.modules under any name.
+function execFile(text: string, file: string, name: string, isPackage: boolean): any {
+  const k = optKeys.get(file);
+  if (k === undefined) return execModule(text, file, name, isPackage);
+  gradedFile(k.id, name);
+  // (tagged as it is made, before its code runs: a module that puts itself in sys.modules under another name and
+  // then raises is still the set's, astra's partial-alias case on #628 r5)
+  return execModule(text, file, name, isPackage, file.endsWith(".sage"), (m) => {
+    if (m !== null && typeof m === "object") optModules.set(m, k.id);
+  });
+}
+// (refuseGraded when a grading allowance is armed: package `id`'s file, asked for as `name`)
+function gradedFile(id: string, name: string): void {
+  if (Atomics.load(INTR, 0) & INTR_GRADING) refuseGraded(id, name);
+}
+// A module of the optional set that sys.modules already holds, imported again
+// while a grading allowance is armed: refused as a first import is
+// (mountOptional), whatever name it is imported by (daybreak3's Q7 ruling on #628).
+R.loader.graded = (name: string, m: any) => {
+  if (m === null || typeof m !== "object") return;
+  const id = optModules.get(m);
+  if (id !== undefined) refuseGraded(id, name);
 };
 
 // Packages (packages/<name>/sagebrush.json; scripts/packages.mjs): modules
@@ -569,13 +603,19 @@ export function findModuleSource(name: string): [string, string] | null {
     dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
   }
   const leaf = parts[parts.length - 1];
+  let found: [string, string] | null = null;
   for (const d of dirs) {
     const main = join(d, leaf, "__main__.py");
-    if (fileExists(main)) return [fileRead(main), main];
     const file = join(d, leaf + ".py");
-    if (fileExists(file)) return [fileRead(file), file];
+    if (fileExists(main)) found = [fileRead(main), main];
+    else if (fileExists(file)) found = [fileRead(file), file];
+    if (found !== null) break;
   }
-  return packageModule(name, true) ?? optionalModule(name, true);
+  found ??= packageModule(name, true) ?? optionalModule(name, true);
+  // (an optional set's file, however found, is refused as an import is while grading is armed: execFile)
+  const k = found === null ? undefined : optKeys.get(found[1]);
+  if (k !== undefined) gradedFile(k.id, name);
+  return found;
 }
 
 // Optional packages (optional/<name>/; src/pkgset.ts; plan-modular-packages-r4):
@@ -593,6 +633,17 @@ let optional: { plan: SetPlan; fetch: ChunkFetch } | null = null;
 const optKeys = new Map<string, { id: string; path: string }>(); // mounted file -> its package and path in it
 const optPre = new Map<string, { module: string; code: string; lineMap: unknown[] }>(); // file + "\0py"/"\0sage"
 const optMounted = new Map<string, string>(); // package id -> its Python root
+const optModules = new WeakMap<object, string>(); // a module object the set's files made -> its package id
+// The set's first use, said once: the first time any of its packages is
+// mounted (an import, not the index's install), for the page to pin the set
+// in the notebook then (web/index.html, plan-modular-packages-r4 §4.4 as
+// amended Nov 4: pinned at first use of the set, to the same S that import used).
+let onUse: ((S: string) => void) | null = null;
+let useSaid = false;
+/** Called once with the set's id, the first time one of its packages is mounted (web/worker.ts). */
+export function onOptionalUse(f: (S: string) => void): void {
+  onUse = f;
+}
 /** This core's build id, as optional sets' precompiled code and costs are keyed (an unbundled build has none: 0s, which no set uses). */
 export function coreBuildId(): string {
   const b = (globalThis as any).__SAGEBRUSH_BUILD_ID__;
@@ -636,12 +687,26 @@ export function optionalModuleNames(): string[] {
 export function packageSetId(): string | null {
   return optional === null ? null : optional.plan.S;
 }
+// An ImportError for `name` if package `id` or any of its dependencies is one
+// no grade may use yet (src/pkgset.ts gradingExcluded); the caller has seen
+// that a grading allowance is armed.
+function refuseGraded(id: string, name: string): void {
+  for (const dep of optional!.plan.closure.get(id)!) {
+    const why = gradingExcluded(dep);
+    if (why === null) continue;
+    const err = (R.T as any).ImportError(`No module named '${name}' in a graded run: ${dep} is ${why}`);
+    err.name = name;
+    throw err;
+  }
+}
 // Mount package `id` and its dependencies (each once): all of a package's
 // chunks are fetched and checked before any of it is mounted.
 function mountOptional(id: string, name: string): string {
+  const { plan, fetch } = optional!;
+  // (a package no grade may use yet, while a grading allowance is armed: refused, mounted or not; src/pkgset.ts)
+  if (Atomics.load(INTR, 0) & INTR_GRADING) refuseGraded(id, name);
   const done = optMounted.get(id);
   if (done !== undefined) return done;
-  const { plan, fetch } = optional!;
   for (const dep of plan.closure.get(id)!) {
     if (optMounted.has(dep)) continue;
     const p = plan.packages.get(dep)!;
@@ -664,6 +729,10 @@ function mountOptional(id: string, name: string): string {
     if (pre !== null) for (const e of pre.entries) optPre.set(join(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
     mountedBases.push(base);
     optMounted.set(dep, join(base, p.root));
+  }
+  if (!useSaid) {
+    useSaid = true;
+    onUse?.(plan.S);
   }
   return optMounted.get(id)!;
 }
