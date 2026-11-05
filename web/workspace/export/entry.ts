@@ -94,13 +94,16 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
   // (the refusal, a stop, a Cancel), or by writing's own cleanup once it has them; Cancel at ready shows no panel, and
   // lets the page go first (below); Ready and a closed picker keep them, for the Save… that follows)
   const rows = new Spool(`${id}-rows`, opfs ? worker : null, Number.MAX_SAFE_INTEGER, true, ac.signal);
+  // (the entries' metadata as preflight's name check saw them, which its measuring pass reads (EXPORT-ZIPNAME-1,
+  // TOCTOU-1): owned as the rows are, removed by preflight when it is done and on every exit here)
+  const meta = new Spool(`${id}-meta`, opfs ? worker : null, Number.MAX_SAFE_INTEGER, false, ac.signal);
   // (each way out of the work below breaks out of `work`, never returns: the end panel is shown after `finally`)
   try { work: {
     await host.saveOpen?.();
     show(line, " ", cancel);
     // (tests only: the r2d heap baselines are taken here, the worker started and preflight not begun)
     await (globalThis as any).__SB_EXPORT_TEST__?.beforePreflight?.();
-    const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs);
+    const plan: Plan = await preflight(w, ac.signal, progress, rows, opfs, meta);
     await (globalThis as any).__SB_EXPORT_TEST__?.onPlan?.(plan);
     for (;;) {
       // (Cancel at ready: the panel cleared and the flow over at once, so the panel's button is back, a new export can
@@ -131,6 +134,7 @@ async function flow(w: Workspace, host: ExportHost, box: HTMLElement, free: () =
       break work;
     }
   } } catch (e) {
+    await meta.remove();
     await rows.remove();
     end = () => stopped(e);
   } finally {

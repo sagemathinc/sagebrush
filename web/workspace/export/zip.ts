@@ -16,6 +16,8 @@
 // and the late reply is ignored.
 
 /** 1 MiB: the slice every step works in (the sink's chunks, the CRC's, the spool's), so no task runs long. */
+import { unsafeMemberBytes } from "./names";
+
 export const SLICE = 1 << 20;
 /** 256 KiB: the archive's own output slices, each one sink.write (E1 r2e: a 1 MiB write to the sink was one ~50 ms
  * task); the spools keep SLICE, and their record and segment rules are unchanged. */
@@ -204,8 +206,9 @@ export class Spool {
   get buffered() { return this.a?.used ?? 0; }
   /** `signal`: the export's Cancel, after which nothing more is handed to the worker */
   constructor(private name: string, readonly wk: ExportWorker | null, private cap: number, readonly segmented = false, private signal?: AbortSignal) {}
-  async open() {
-    const fail = (globalThis as any).__SB_EXPORT_TEST__?.failOpen;
+  /** (`failable`: whether the tests' failOpen applies, which names the writing phase's spools; preflight's own isn't one) */
+  async open(failable = true) {
+    const fail = failable ? (globalThis as any).__SB_EXPORT_TEST__?.failOpen : undefined;
     if (this.wk) await this.wk.ask("open", { name: this.name, fail: fail === (this.segmented ? "rows" : "spool") ? "truncate" : undefined });
     // (O-2: the rows spool's open failing after its file exists, as a late failure or a Cancel would leave it: its
     // owner must remove it)
@@ -381,13 +384,19 @@ export class ZipWriter {
   private nameOf(name: string): number {
     const r = enc.encodeInto(name, this.nameBuf);
     if (r.read < name.length) throw new ExportStopped(`a name is too long to export: ${name.slice(0, 80)}…`);
-    return r.written;
+    return this.safe(r.written, false);
   }
   /** A name's UTF-8 bytes (a record's) into the name buffer, by an index loop. */
-  private nameFrom(src: Uint8Array, from: number, to: number): number {
+  private nameFrom(src: Uint8Array, from: number, to: number, folder = false): number {
     if (to - from > NAME_MAX) throw new ExportStopped(`a name is too long to export: ${new TextDecoder().decode(src.subarray(from, from + 80))}…`);
     for (let i = from; i < to; i++) this.nameBuf[i - from] = src[i];
-    return to - from;
+    return this.safe(to - from, folder);
+  }
+  /** (the writer's own check of every name it writes, files' and folders', as preflight's: EXPORT-ZIPNAME-1) */
+  private safe(n: number, folder: boolean): number {
+    const why = unsafeMemberBytes(this.nameBuf, n, folder);
+    if (why) throw new ExportStopped(`a name can't go safely into a .zip (${why}): ${new TextDecoder().decode(this.nameBuf.subarray(0, Math.min(n, 80)))}`);
+    return n;
   }
   /** The local header, with the name buffer's first `n` bytes, in the header buffer; its length. */
   private local(n: number, flags: number, method: number, time: number, date: number): number {
@@ -417,7 +426,7 @@ export class ZipWriter {
    * No string, view or promise unless a slice is due (r2c §1, §4). */
   folderAt(src: Uint8Array, from: number, to: number, time: number, date: number): Promise<void> | undefined {
     this.check();
-    const n = this.nameFrom(src, from, to), offset = this.offset;
+    const n = this.nameFrom(src, from, to, true), offset = this.offset;
     this.members++;
     // (the header buffer holds the local header until emit has copied it, then the central record)
     const p = this.emit(this.hdr, this.local(n, 0x0800, 0, time, date));
