@@ -95,6 +95,7 @@ for name, xml in [
     ("below surrogates", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#xD7FF;</t></is></c></row></sheetData></worksheet>' % MAIN),
     ("a BOM", '\ufeff<?xml version="1.0"?><worksheet xmlns="%s"><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>' % MAIN),
     ("no element", "   "),
+    ("ends open", '<worksheet xmlns="%s"><sheetData/>' % MAIN),
     ("two roots", '<worksheet xmlns="%s"><sheetData/></worksheet><worksheet/>' % MAIN),
     ("bad attribute", '<worksheet xmlns="%s"><sheetData><row r="1"><c r=A1><v>1</v></c></row></sheetData></worksheet>' % MAIN),
 ]:
@@ -137,6 +138,8 @@ nest = lambda n: "<a>" * n + "</a>" * n
 case("max depth", lambda: XML.MAX_DEPTH)
 case("depth at", lambda: len(list(XML.events(nest(XML.MAX_DEPTH)))))
 case("depth past", lambda: len(list(XML.events(nest(XML.MAX_DEPTH + 1)))))
+case("ends open, scanner", lambda: len(list(XML.events("<a><b></b>"))))
+case("ends open, fast path", lambda: X._fast_rows('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' % MAIN, strings, xfs, d1904))
 case("depth 10000", lambda: len(list(XML.events(nest(10000)))))
 
 # the attributes: a reference in a row's or a cell's attribute, even one read nowhere, is decided by the

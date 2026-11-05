@@ -64,6 +64,8 @@
 ((0, 1), [7])
 == xml no element
 !! ValueError: read_excel: the workbook's XML has no document element, which Sagebrush doesn't read
+== xml ends open
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
 == xml two roots
 !! ValueError: read_excel: the workbook's XML has a second document element, which Sagebrush doesn't read
 == xml bad attribute
@@ -92,6 +94,10 @@ None
 128
 == depth past
 !! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== ends open, scanner
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== ends open, fast path
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
 == depth 10000
 !! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
 == row entity, fast path
