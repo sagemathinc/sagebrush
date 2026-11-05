@@ -409,6 +409,37 @@ test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart:
   ]);
 });
 
+test("each of the eight runs as the first call of a fresh session (their lazy stubs, grader S1 on #650); nextpow2's up-correction, unwrap's tolerance, rref's row swap and three refusals (R4, R17, R18, R26, R3, R16, R21)", () => {
+  const first: [string, string][] = [
+    ["disp(mat2str(rref([0 1; 1 0])))", "[1 0;0 1]"],
+    ["disp(nextpow2(5))", "3"],
+    ["disp(mat2str(cumtrapz([1 2 3])))", "[0 1.5 4]"],
+    ["disp(mat2str(unwrap([0 4 8]), 6))", "[0 -2.28319 -4.56637]"],
+    ["fprintf('%g\\n', deg2rad(180))", "3.14159"],
+    ["disp(rad2deg(pi))", "180"],
+    ["[t, r] = cart2pol(0, 1); disp(r)", "1"],
+    ["[x, y] = pol2cart(0, 2); disp(x)", "2"],
+  ];
+  for (const [code, want] of first) assert.deepEqual(lines(run(code)).map((x) => x.trim()), [want], code);
+  const out = lines(run([
+    // (log2(1024 * (1 + eps)) rounds to exactly 10: the exact correction must still give 11)
+    "fprintf('%d %d\\n', nextpow2(1024*(1+eps)), log2(1024*(1+eps)) == 10);",
+    "fprintf('%s %s\\n', mat2str(unwrap([0 4 8], 5)), mat2str(unwrap([0 3], 2)));",
+    "disp(mat2str(rref([0 1; 1 0])));",
+    "try, rad2deg(int8(1)), catch e, disp(e.message), end",
+    "try, cumtrapz([1 2], [1 2 3]), catch e, disp(e.message), end",
+    "try, unwrap([1i 2]), catch e, disp(e.message), end",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "11 1",
+    "[0 4 8] [0 3]",
+    "[1 0;0 1]",
+    "rad2deg: the input must be double or single, not int8.",
+    "Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.",
+    "unwrap: the angles must be real.",
+  ]);
+});
+
 test("cart2pol and pol2cart's z output is a value of its own: changing it, or the input z, leaves the other unchanged (astra CART650-Z-ALIAS)", () => {
   const out = lines(run([
     "z = [1 2; 3 4]; [t, r, q] = cart2pol(1, 2, z); q(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
