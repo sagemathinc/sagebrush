@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "sagebrush latex render: its scratch folders (the browser's profile, a run's folder) removed by removeTemp, retried (Node's maxRetries) and never an error, so a finished render isn't reported failed because a helper process still wrote into the profile (a CI flake on #672's checks, png_error ENOTEMPTY). src/latex-cli.ts is bundled into the CLI. Measured with bun 1.4.4 at the exact probe merge onto master 535e16b2: pyjs +108.",
+ "bytes": {
+  "cli/pyjs.cjs": 108
+ }
+}

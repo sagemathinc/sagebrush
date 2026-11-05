@@ -308,7 +308,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   });
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
-  rmSync(tmp, { recursive: true, force: true });
+  removeTemp(tmp);
   const states: State[] = [];
   let failed = false;
   // (a traceback without the session script's own frames: the item's code is the "<string>" one)
@@ -464,7 +464,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
       profile = mkdtempSync(join(tmpdir(), "sb-latex-"));
       const r = await launch(browser, profile, extra);
       if ("port" in r) { proc = r.proc; port = r.port; noSandbox = extra.length > 0; break; }
-      rmSync(profile, { recursive: true, force: true }); profile = "";
+      removeTemp(profile); profile = "";
       if (extra.length) throw new Error(r.why);
     }
     const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json() as any[];
@@ -518,8 +518,15 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }
-    if (profile) rmSync(profile, { recursive: true, force: true });
+    if (profile) removeTemp(profile);
   }
+}
+
+/** A temporary folder removed, retried a while (Node's maxRetries: ENOTEMPTY, EBUSY, EPERM, ...), and never an error:
+ * the browser's helper processes can still be writing into its profile just after it exits, and a render that worked
+ * must not become a failure because its scratch folder lingered (a CI flake, #672's checks: png_error ENOTEMPTY). */
+export function removeTemp(dir: string, rm: typeof rmSync = rmSync): boolean {
+  try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; }
 }
 
 /** The browser started headless with its DevTools on a port of its choosing, or why it didn't start. */
