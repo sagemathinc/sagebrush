@@ -21,16 +21,24 @@ export type PreloadTable = { groups: Record<string, [number, string, string?]>; 
  * only, anywhere in a cell (inside a function too): `import a, b.c as d` and `from a.b import c`; a string or a comment
  * that looks like one costs a prefetch, never a run. A linear scan, line by line, with no regular expression that
  * could backtrack (PRELOAD674-SCAN-1: the notebook's text is anyone's, and this runs on the page before a Run); a
- * line longer than SCAN_LINE characters is skipped (no import line is that long) */
+ * line longer than SCAN_LINE characters is skipped (no import line is that long), and the names are kept in a set, so
+ * the work is linear in the text; only the first SCAN_TOTAL characters of a document are scanned (best effort: what is
+ * past them is fetched by its import, as without background loading). `known`: only the names it accepts are kept
+ * (intentGroups: the table's) */
 export const SCAN_LINE = 1000;
-export function importTops(codes: readonly string[]): string[] {
-  const out: string[] = [];
-  const add = (n: string) => { const t = n.split(".")[0]; if (/^[A-Za-z_]\w*$/.test(t) && !out.includes(t)) out.push(t); };
+export const SCAN_TOTAL = 1_000_000;
+export function importTops(codes: readonly string[], known: (name: string) => boolean = () => true): string[] {
+  const out = new Set<string>();
+  const add = (n: string) => { const t = n.split(".")[0]; if (/^[A-Za-z_]\w*$/.test(t) && known(t)) out.add(t); };
   const sp = (c: string) => c === " " || c === "\t";
   // (the words of `s` split at spaces and tabs)
   const words = (s: string) => s.split(" ").flatMap((w) => w.split("\t")).filter((w) => w !== "");
-  for (const code of codes)
-    for (const raw of code.split("\n")) {
+  let budget = SCAN_TOTAL;
+  for (const code of codes) {
+    if (budget <= 0) break;
+    const text = code.length > budget ? code.slice(0, budget) : code;
+    budget -= text.length;
+    for (const raw of text.split("\n")) {
       if (raw.length > SCAN_LINE) continue;
       let i = 0;
       while (i < raw.length && sp(raw[i])) i++;
@@ -47,7 +55,8 @@ export function importTops(codes: readonly string[]): string[] {
         if (w.length >= 2 && w[1] === "import" && /^[\w.]+$/.test(w[0])) add(w[0]);
       }
     }
-  return out;
+  }
+  return [...out];
 }
 
 /** The groups a document's first Run will fetch, in order: its mode's, then those its import lines name (at most one
@@ -56,7 +65,7 @@ export function intentGroups(t: PreloadTable, mode: string, codes: readonly stri
   const out: string[] = [];
   const add = (g: string | undefined) => { if (g && t.groups[g] && !out.includes(g)) out.push(g); };
   for (const g of t.modes[mode] ?? []) add(g);
-  if (mode === "python" || mode === "sage") for (const n of importTops(codes)) add(t.tops[n]);
+  if (mode === "python" || mode === "sage") for (const n of importTops(codes, (n) => Object.hasOwn(t.tops, n))) add(t.tops[n]);
   return out;
 }
 

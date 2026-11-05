@@ -3,7 +3,7 @@
 // mode's, then those its import lines name), the exact files, the skips (Save-Data, slow, offline, hidden), the
 // storage check, and the fetch loop (one at a time; a stop never cancels the file in flight, only the next).
 //   bun web/test-preload.mjs
-import { importTops, SCAN_LINE, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState } from "./preload.ts";
+import { importTops, SCAN_LINE, SCAN_TOTAL, intentGroups, intentUrls, preloadBlocked, preloadRoom, preloadFetch, preloadStop, preloadSoon, preloadState } from "./preload.ts";
 
 let fails = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -64,11 +64,31 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
     ["(control) 'from ' + spaces + 'numpy import x'", ["from " + pad + "numpy import x"], '["numpy"]'],
     ["(control) 'import numpy' + spaces", ["import numpy" + pad], '["numpy"]'],
     ["a 200,000-space import line: skipped", ["import " + big + "numpy"], "[]"],
-    ["2,000 malformed lines, then an import", [("import " + pad + "!\n").repeat(2000) + "import numpy"], '["numpy"]'],
+    ["900 malformed lines (0.9 MB), then an import", [("import " + pad + "!\n").repeat(900) + "import numpy"], '["numpy"]'],
   ]) {
     const [r, ms] = time(codes);
     ok(J(r) === want && ms < 250, `scan: ${what}: ${J(r)} in ${ms.toFixed(1)} ms`);
   }
+  // (many distinct names, none in the table: linear, not quadratic in their number; the table's names still found)
+  const distinct = (n) => Array.from({ length: n }, (_, i) => (i % 2 ? `from unknown_${i}.x import y` : `import unknown_${i}`)).join("\n");
+  for (const n of [10_000, 30_000]) {
+    const lines = distinct(n);
+    const t0 = performance.now(), r = importTops([lines + "\nimport numpy"]), ms = performance.now() - t0;
+    ok(r.length === n + 1 && r[n] === "numpy" && ms < 250, `scan: ${n.toLocaleString()} distinct unknown imports, then numpy (${(lines.length / 1e6).toFixed(2)} MB): ${r.length} names in ${ms.toFixed(1)} ms`);
+    const t1 = performance.now(), g = intentGroups(T, "python", [lines, "import scipy"]), ms1 = performance.now() - t1;
+    ok(J(g) === '["sci"]' && ms1 < 250, `scan: ...as intent (another cell imports scipy): ${J(g)} in ${ms1.toFixed(1)} ms`);
+  }
+  // (80,000 of them, 2 MB, as many cells: the scan stops at SCAN_TOTAL, quickly)
+  const many = distinct(80_000).split("\n");
+  const t3 = performance.now(), r3 = importTops(many), ms3 = performance.now() - t3;
+  ok(r3.length > 0 && r3.length < 80_000 && ms3 < 250, `scan: 80,000 distinct unknown imports as 80,000 cells: ${r3.length.toLocaleString()} names (the budget's) in ${ms3.toFixed(1)} ms`);
+  // (a document past SCAN_TOTAL: what comes after it isn't scanned; across cells too)
+  const filler = ("x = 1" + " ".repeat(90) + "\n").repeat(Math.ceil(SCAN_TOTAL / 96));
+  const t2 = performance.now(), past = importTops(["import csv\n" + filler + "import numpy", "import scipy"]), ms2 = performance.now() - t2;
+  ok(J(past) === '["csv"]' && ms2 < 250, `scan: only the first ${SCAN_TOTAL.toLocaleString()} characters: ${J(past)} in ${ms2.toFixed(1)} ms`);
+  ok(J(importTops(["import csv", "x".repeat(10) + "\nimport numpy"])) === '["csv","numpy"]', "scan: (control) a small document: every cell scanned");
+  ok(J(importTops(["import csv, nosuch, numpy", "from constructor import x", "import __proto__"], (n) => Object.hasOwn(T.tops, n))) === '["csv","numpy"]', "scan: `known`: only the names it accepts (the table's, never an object's own properties)");
+  ok(J(intentGroups(T, "python", ["import constructor, toString, __proto__, hasOwnProperty"])) === "[]", "scan: names that are an object's properties, not the table's: no group");
   ok(J(importTops(["import a.b as c, d", "from e.f import g", "from . import h", "from .i import j", "import k l", "import m;", "xfrom n import o", "importp"])) === '["a","d","e"]', "scan: the forms it takes, and those it doesn't (relative, malformed, not a statement start)");
 }
 
