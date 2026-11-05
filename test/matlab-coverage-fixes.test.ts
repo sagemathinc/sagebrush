@@ -376,6 +376,46 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
   ]);
 });
 
+test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null and orth refuse (astra3 batch 1: MCF-01; William's MATLAB session, Nov 4)", () => {
+  // (before: pinv(NaN) and rank(NaN) were 0, null(NaN) was 1, orth(NaN) empty; svd of a 2x2 with a NaN failed to
+  // converge. Real MATLAB, /scratch/matlab-speed/matlab-nan-oracle: svd's values and U, S, V are NaN, S's
+  // off-diagonal 0; pinv is NaN of the transposed shape; rank, null and orth refuse with their own identifiers; a
+  // NaN or Inf imaginary part counts too)
+  const out = lines(run([
+    "c = {@() rank(NaN), @() rank([1 2; 3 Inf]), @() rank(complex(0, Inf)), @() null(NaN), @() null([1 NaN; 2 3]), @() orth([NaN 1]), @() orth([1 NaN; 2 3])};",
+    "for k = 1:numel(c), try, y = c{k}(); disp('no error'), catch e, fprintf('%s | %s\\n', e.identifier, e.message); end, end",
+    "fprintf('%s %s %s %s %s\\n', mat2str(svd(NaN)), mat2str(svd([1 NaN; 2 3])), mat2str(svd([1 Inf; 2 3])), mat2str(svd(NaN(2))), mat2str(svd([1 complex(1, NaN)])));",
+    "fprintf('%s %s %s %s\\n', mat2str(pinv(NaN)), mat2str(pinv(Inf)), mat2str(pinv([1 NaN; 2 3])), mat2str(pinv([NaN 1])));",
+    "[U, S, V] = svd([1 NaN; 2 3]); fprintf('%s %s %s\\n', mat2str(U), mat2str(S), mat2str(V));",
+    "[U, S, V] = svd([1 NaN; 2 3; 4 5]); fprintf('%s %s %s\\n', mat2str(size(U)), mat2str(S), mat2str(size(V)));",
+    "[U, S, V] = svd([1 NaN; 2 3; 4 5], 'econ'); fprintf('%s %s %s\\n', mat2str(size(U)), mat2str(S), mat2str(size(V)));",
+    "[U, S, V] = svd(NaN); fprintf('%s %s %s %s %s\\n', mat2str(U), mat2str(S), mat2str(V), class(svd(single(NaN))), class(pinv(single([NaN 1]))));",
+    // (complex: svd's U, S and V are real NaN; pinv stays complex, NaN + 0i; single stays single: real MATLAB)
+    "A = complex([1 NaN; 2 3], [4 5; 6 7]); [U, S, V] = svd(A); P = pinv(A); Q = pinv(single(A));",
+    "fprintf('%d %d %d %d %d %d %s %d %s\\n', isreal(U), isreal(S), isreal(V), isreal(P), all(isnan(real(P(:)))), all(imag(P(:)) == 0), class(P), isreal(Q), class(Q));",
+    "[U1, S1, V1] = svd(single(A)); fprintf('%d %d %d %s %s %s\\n', isreal(U1), isreal(S1), isreal(V1), class(U1), class(S1), class(V1));",
+    // (a non-square complex one: the transposed shape, as for real input; grader C5)
+    "P1 = pinv(complex([NaN 1 2], [0 1 0])); P2 = pinv(single(complex([NaN; 1], [0; 1]))); fprintf('%s %d %s %d %s\\n', mat2str(size(P1)), isreal(P1), mat2str(size(P2)), isreal(P2), class(P2));",
+    "fprintf('%g %g %g %g\\n', rank(magic(4)), svd([3 0; 0 4]), pinv(2));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    ...Array(3).fill("MATLAB:rank:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    ...Array(2).fill("MATLAB:null:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    ...Array(2).fill("MATLAB:orth:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    "NaN [NaN;NaN] [NaN;NaN] [NaN;NaN] NaN",
+    "NaN NaN [NaN NaN;NaN NaN] [NaN;NaN]",
+    "[NaN NaN;NaN NaN] [NaN 0;0 NaN] [NaN NaN;NaN NaN]",
+    "[3 3] [NaN 0;0 NaN;0 0] [2 2]",
+    "[3 2] [NaN 0;0 NaN] [2 2]",
+    "NaN NaN NaN single single",
+    "1 1 1 0 1 1 double 0 single",
+    "1 1 1 single single single",
+    "[3 1] 0 [1 2] 0 single",
+    "3 4 3 0.5",
+  ]);
+});
+
+
 test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart: the pages' forms, Octave 11.1's values (astra3 batch 1: missing functions)", () => {
   const out = lines(run([
     "[R, p] = rref([1 2 1; 2 4 0; 3 6 1]); fprintf('%s %s\\n', mat2str(R), mat2str(p));",
