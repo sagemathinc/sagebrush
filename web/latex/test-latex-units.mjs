@@ -622,6 +622,34 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("envclose-only-on-brace", autoClose("\\begin{x", 8) === null && ac("\\begin{x}{cc}|") === null && ac("\\end{x}|") === null, null);
 }
 
+// ---- doc.ts's readCapped (#656, astra DOC656-FETCH-1): a published document's body read at most `max` bytes, chunk by
+//      chunk, cancelled at the chunk that crosses it, never read whole first; Content-Length an early refusal only.
+//      Each case: what it returns, how many chunks were pulled, and whether the stream was cancelled
+{
+  const { readCapped } = await import("./doc.ts");
+  // (a body of `chunks` chunks of `size` bytes, its pulls counted, its cancel seen; `len`: a Content-Length to claim)
+  const body = (chunks, size, len) => {
+    const st = { pulled: 0, cancelled: false };
+    const stream = new ReadableStream({
+      pull(c) { if (st.pulled === chunks) return c.close(); st.pulled++; c.enqueue(new Uint8Array(size).fill(65)); },
+      cancel() { st.cancelled = true; },
+    }, { highWaterMark: 0 });
+    return { st, r: new Response(stream, len === undefined ? {} : { headers: { "content-length": String(len) } }) };
+  };
+  const at = async (chunks, size, max, len) => { const b = body(chunks, size, len), got = await readCapped(b.r, max); return { n: got ? got.length : null, ...b.st }; };
+  const exact = await at(4, 256, 1024), over = await at(4, 256, 1023);
+  check("doc-read-capped-exact-and-one-over", exact.n === 1024 && exact.pulled === 4 && !exact.cancelled && over.n === null && over.pulled === 4 && over.cancelled, { exact, over });
+  // (16 chunks of 1 MiB with no Content-Length, against 4 MiB: stopped at the 5th, cancelled, the rest never pulled)
+  const chunked = await at(16, 2 ** 20, 4 * 2 ** 20);
+  check("doc-read-capped-chunked-no-length", chunked.n === null && chunked.pulled === 5 && chunked.cancelled, chunked);
+  // (a header that understates the body: counted, not trusted; one that overstates the cap: refused before any pull)
+  const lies = await at(16, 2 ** 20, 4 * 2 ** 20, 1000), says = await at(16, 2 ** 20, 4 * 2 ** 20, 16 * 2 ** 20);
+  check("doc-read-capped-false-and-oversize-header", lies.n === null && lies.pulled === 5 && lies.cancelled && says.n === null && says.pulled === 0 && says.cancelled, { lies, says });
+  // (the bytes kept, in order, across chunks; an empty body)
+  const two = await readCapped(new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2])); c.enqueue(new Uint8Array([3])); c.close(); } })), 3), none = await readCapped(new Response(null), 3);
+  check("doc-read-capped-bytes", JSON.stringify(Array.from(two ?? [])) === "[1,2,3]" && none?.length === 0, [two, none]);
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);

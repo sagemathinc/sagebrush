@@ -8,7 +8,8 @@
 //   - "Edit a copy": /LaTeX articles/doc.tex made with the document's bytes, and opened in the editor by its fid; a
 //     second copy is "doc (2).tex";
 //   - refused, each without a request for it: a path outside /articles/, "..", another origin; and, with its reason,
-//     a redirect (never followed) and a 404.
+//     a redirect (never followed), a body that isn't UTF-8, and a 404. (The size bound, read chunk by chunk and
+//     cancelled past it, is pinned in test-latex-units.mjs, doc-read-capped-*.)
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-doc.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -22,11 +23,14 @@ const tmp = mkdtempSync(join(tmpdir(), "sb-latex-doc-"));
 const DOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome DocWord text with $x^2$.\n\\end{document}\n";
 const TALK = "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{First}\nSlideWord \\pause more\n\\end{frame}\n\\end{document}\n";
 writeFileSync(join(tmp, "doc.tex"), DOC); writeFileSync(join(tmp, "talk.tex"), TALK);
+// (not UTF-8: a Latin-1 "é" in the text)
+writeFileSync(join(tmp, "latin1.tex"), Buffer.concat([Buffer.from("\\documentclass{article}\n\\begin{document}\nCaf"), Buffer.from([0xe9]), Buffer.from("\n\\end{document}\n")]));
 const overrides = join(tmp, "overrides.json");
 writeFileSync(overrides, JSON.stringify({
   "/articles/tst/doc.tex": { file: join(tmp, "doc.tex") },
   "/articles/tst/talk.tex": { file: join(tmp, "talk.tex") },
   "/articles/tst/moved.tex": { status: 302, location: "/articles/tst/doc.tex" },
+  "/articles/tst/latin1.tex": { file: join(tmp, "latin1.tex") },
 }));
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, SB_SERVE_OVERRIDES: overrides } });
 const sport = await new Promise((res, rej) => { let acc = ""; server.stdout.on("data", (b) => { acc += b; const m = /(\d{2,5})/.exec(acc); if (m) res(+m[1]); }); setTimeout(() => rej(new Error("no server port")), 15000); });
@@ -107,6 +111,10 @@ try {
   await until(`!!document.querySelector(".tex-doc .tex-gone")`);
   const moved = await gone(), docAfterMove = await ev(`document.querySelector(".tex-doc .tex-src")?.value ?? null`);
   check(/^The document couldn't be read/.test(moved ?? "") && docAfterMove === null, "a redirect: not followed, said", { moved, docAfterMove });
+  await shown("/articles/tst/latin1.tex");
+  await until(`!!document.querySelector(".tex-doc .tex-gone")`);
+  const latin = await gone(), latinSrc = await ev(`document.querySelector(".tex-doc .tex-src")?.value ?? null`);
+  check(/^The document couldn't be read: /.test(latin ?? "") && latinSrc === null, "not UTF-8: refused, said, nothing shown", { latin, latinSrc });
   await shown("/articles/tst/none.tex");
   await until(`!!document.querySelector(".tex-doc .tex-gone")`);
   check((await gone()) === "The document couldn't be read (404).", "a 404: said", await gone());

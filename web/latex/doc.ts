@@ -31,7 +31,7 @@ export async function openDoc(kit: Kit, root: HTMLElement, path: string, ws: Wor
   const head = el("div", "tex-head"), name = path.slice(path.lastIndexOf("/") + 1);
   const title = el("span", "tex-title", name), ro = el("span", "tex-ro", "Read only");
   ro.style.cssText = "font-size:12px;padding:2px 8px;border:1px solid #c8ccc9;border-radius:10px;opacity:.8";
-  const edit = el("button", "tex-edit", "Edit a copy"); edit.title = "Make your own copy of this document, in /LaTeX articles, and edit that";
+  const edit = el("button", "tex-edit", "Edit a copy"); edit.title = "Your own copy, in /LaTeX articles, to edit";
   const toggle = el("button", "tex-toggle", "Preview");
   const printBtn = el("button", "tex-printbtn", "Print / Save as PDF"); printBtn.onclick = () => kit.printPreview();
   const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Escape stops)"; presentBtn.hidden = true;
@@ -47,8 +47,8 @@ export async function openDoc(kit: Kit, root: HTMLElement, path: string, ws: Wor
   try {
     const r = await fetch(path, { redirect: "error", credentials: "same-origin" });
     if (!r.ok) return fail("The document couldn't be read (" + r.status + ").");
-    const b = new Uint8Array(await r.arrayBuffer());
-    if (b.length > kit.editMax) return fail("The document is too large to open here.");
+    const b = await readCapped(r, kit.editMax);
+    if (!b) return fail("The document is too large to open here.");
     text = new TextDecoder("utf-8", { fatal: true }).decode(b);
   } catch (e) { return fail("The document couldn't be read: " + String((e as Error)?.message ?? e)); }
   document.title = name + " (read only)";
@@ -66,6 +66,24 @@ export async function openDoc(kit: Kit, root: HTMLElement, path: string, ws: Wor
     try { open(await copyDoc(ws, name, text)); }
     catch (e) { edit.disabled = false; say("The copy couldn't be made: " + String((e as Error)?.message ?? e)); }
   };
+}
+
+/** A response's body, at most `max` bytes: null past it. Read chunk by chunk, and cancelled at the chunk that crosses
+ * `max`, so an oversized body is never kept or copied whole (astra, DOC656-FETCH-1); a Content-Length over `max` refuses
+ * it before any read, but is only that early hint: a body without one, or longer than its header says, is counted. */
+export async function readCapped(r: Response, max: number): Promise<Uint8Array | null> {
+  if (Number(r.headers.get("content-length")) > max) { await r.body?.cancel().catch(() => {}); return null; }
+  const parts: Uint8Array[] = [], rd = r.body?.getReader();
+  let n = 0;
+  for (let c; rd && !(c = await rd.read()).done; ) {
+    n += c.value.length;
+    if (n > max) { await rd.cancel().catch(() => {}); return null; }
+    parts.push(c.value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
 }
 
 /** The visitor's copy of a published document (Edit a copy): "/LaTeX articles/<name>.tex", or "<name> (2).tex", ... */
