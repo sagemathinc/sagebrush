@@ -27,8 +27,21 @@ class Purpose:
 class SSLContext:
     def __init__(self, protocol):
         self.protocol = protocol
-        self.check_hostname = protocol == PROTOCOL_TLS_CLIENT
-        self._verify_mode = CERT_REQUIRED if self.check_hostname else CERT_NONE
+        self._check_hostname = False
+        self._verify_mode = CERT_NONE
+        if protocol == PROTOCOL_TLS_CLIENT:
+            self.check_hostname = True
+
+    @property
+    def check_hostname(self):
+        return self._check_hostname
+
+    @check_hostname.setter
+    def check_hostname(self, value):
+        value = bool(value)
+        if value and self._verify_mode == CERT_NONE:
+            self._verify_mode = CERT_REQUIRED
+        self._check_hostname = value
 
     @property
     def verify_mode(self):
