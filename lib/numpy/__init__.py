@@ -1703,11 +1703,43 @@ def repeat(a, repeats, axis=None):
 
 
 def tile(A, reps):
+    # (as NumPy's: reps is a sequence or one count. Every count 1 gives a COPY of an array, never A itself or a
+    # view of it, so writing to the result leaves A alone. A negative count is refused while A has elements, as
+    # NumPy's repeat refuses it; a count that is no integer (past the all-1 check, which 1.0 passes) as NumPy's
+    # final reshape refuses it)
+    try:
+        reps = tuple(reps)
+    except TypeError:
+        reps = (reps,)
+    if isinstance(A, ndarray) and reps.count(1) == len(reps):
+        return array(A, copy=True, ndmin=len(reps))
     A = asarray(A)
-    reps = (reps,) if isinstance(reps, int) else tuple(reps)
+    if A.size and reps and _builtins.min(reps) < 0:
+        raise ValueError("negative dimensions are not allowed")
+    reps = tuple(map(_index, reps))
     nd = _builtins.max(len(reps), A.ndim)
     A = A.reshape((1,) * (nd - A.ndim) + A.shape)
     reps = (1,) * (nd - len(reps)) + reps
+    if reps and _builtins.min(reps) < 0:
+        # (A has no elements: NumPy only reshapes it to the product shape, where a negative length is its one
+        # "unknown" dimension: two are refused, and one, as no 0-size array fills it, with the shape printed
+        # as NumPy does, leading unknowns dropped and the others "newaxis")
+        shape = ()
+        text = ""
+        unknown = 0
+        for s, r in zip(A.shape, reps):
+            shape += (s * r,)
+            if s * r >= 0:
+                text += ",%d" % (s * r)
+            else:
+                unknown += 1
+                if text:
+                    text += ",newaxis"
+        if unknown > 1:
+            raise ValueError("can only specify one unknown dimension")
+        if unknown:
+            raise ValueError("cannot reshape array of size 0 into shape (%s)" % text[1:])
+        return A.reshape(shape)
     for ax, r in enumerate(reps):
         if r == 0:
             # (no copies: the axis is empty, as NumPy's tile gives)
