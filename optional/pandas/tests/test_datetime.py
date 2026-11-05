@@ -181,3 +181,12 @@ case("pin.T26-bool", lambda: pd.to_datetime(True, unit="s"))
 case("pin.T11-minute", lambda: pd.to_datetime("2020-01-01 23:60"))
 case("pin.T11-second", lambda: pd.to_datetime("2020-01-01 23:59:60"))
 case("pin.T20-whole-us", lambda: [pd.to_datetime(0.000002, unit="s"), pd.to_datetime(1.5, unit="ms")])
+
+# a format's fields as pandas' strptime takes them (CPython's patterns): J1/J2's day-of-year bounds, a month of 13,
+# a day past its month, the leap seconds 60 and 61
+def fmt(a, f):
+    try:
+        return pd.to_datetime(a, format=f)
+    except Exception as e:
+        return "%s: %s" % (type(e).__name__, str(e).split(". You")[0])
+case("fmt.fields", lambda: [fmt(a, f) for a, f in [("2020-000", "%Y-%j"), ("2020-367", "%Y-%j"), ("2020-13-01", "%Y-%m-%d"), ("2020-02-30", "%Y-%m-%d"), ("2020-1-5", "%Y-%m-%d"), ("2020-01-01 24:00", "%Y-%m-%d %H:%M"), ("2020-01-01 7:5:9", "%Y-%m-%d %H:%M:%S"), ("2020-01-01 23:59:60", "%Y-%m-%d %H:%M:%S"), ("2020-01-01 23:59:61", "%Y-%m-%d %H:%M:%S"), ("2020-01-01 23:59:62", "%Y-%m-%d %H:%M:%S"), ("2020-01-01.5", "%Y-%m-%d.%f"), ("20-01-01", "%y-%m-%d")]])

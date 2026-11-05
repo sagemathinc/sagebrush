@@ -343,7 +343,10 @@ def _parse_like(s, rx, fmt):
     raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
 
 
-_FMT = {"%Y": r"(?P<Y>\d{4})", "%m": r"(?P<m>\d{1,2})", "%d": r"(?P<d>\d{1,2})", "%H": r"(?P<H>\d{1,2})", "%M": r"(?P<M>\d{1,2})", "%S": r"(?P<S>\d{1,2})", "%y": r"(?P<y>\d{2})", "%f": r"(?P<f>\d{1,6})", "%j": r"(?P<j>\d{1,3})", "%%": "%"}
+# (CPython's _strptime patterns, which pandas 3.1's array_strptime uses: a month of 13 or a day-of-year of 367 doesn't match)
+_FMT = {"%Y": r"(?P<Y>\d\d\d\d)", "%m": r"(?P<m>1[0-2]|0[1-9]|[1-9])", "%d": r"(?P<d>3[0-1]|[1-2]\d|0[1-9]|[1-9]| [1-9])",
+        "%H": r"(?P<H>2[0-3]|[0-1]\d|\d| \d)", "%M": r"(?P<M>[0-5]\d|\d)", "%S": r"(?P<S>6[0-1]|[0-5]\d|\d)", "%y": r"(?P<y>\d\d)",
+        "%f": r"(?P<f>[0-9]{1,6})", "%j": r"(?P<j>36[0-6]|3[0-5]\d|[1-2]\d\d|0[1-9]\d|00[1-9]|[1-9]\d|0[1-9]|[1-9])", "%%": "%"}
 
 
 def _parse_format(s, fmt):
@@ -378,7 +381,18 @@ def _parse_format(s, fmt):
             raise ValueError("time data \"%s\" doesn't match format \"%s\"" % (s, fmt) + _TRY)
         d0 = _checked(t, y, 1, 1, int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
         return d0 + timedelta(days=int(g["j"]) - 1)
-    return _checked(t, y, int(g.get("m") or 1), int(g.get("d") or 1), int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
+    return _checked_fmt(t, y, int(g.get("m") or 1), int(g.get("d") or 1), int(g.get("H") or 0), int(g.get("M") or 0), int(g.get("S") or 0), int((g.get("f") or "0").ljust(6, "0")))
+
+
+def _checked_fmt(t, y, mo, d, h, mi, sec, us):
+    # (a format's fields, as pandas 3.1's strptime takes them: a day past its month is a ValueError, and the
+    # seconds 60 and 61 run on into the next minute)
+    if not 1685 <= y <= 2255:
+        raise _subset("a time outside the years 1685 to 2255")
+    last = (date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)).day
+    if d > last:
+        raise ValueError("day %d must be in range 1..%d for month %d in year %d" % (d, last, mo, y))
+    return datetime(y, mo, d, h, mi, min(sec, 59), us) + timedelta(seconds=max(0, sec - 59))
 
 
 _UNITS = {"D": 86400 * 10 ** 6, "s": 10 ** 6, "ms": 10 ** 3, "us": 1}
