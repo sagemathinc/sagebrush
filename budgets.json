@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 278556
+   "max": 347715
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -423,6 +423,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-live-data.src": {
+   "exact": false,
+   "ceiling": 7240,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-scipy-optimize.src": {
+   "exact": false,
+   "ceiling": 95774,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-scipy-special.src": {
    "exact": false,
    "ceiling": 46064,
@@ -440,6 +454,13 @@
   "engine/lib/mod-scipy-stats-py.src": {
    "exact": false,
    "ceiling": 25411,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-ssl.src": {
+   "exact": false,
+   "ceiling": 4306,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -535,6 +556,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/pkg-pypi-tabulate.src": {
+   "exact": false,
+   "ceiling": 75776,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/pkg-scipy-io.pre": {
    "exact": false,
    "ceiling": 67239,
@@ -551,7 +579,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 375956,
+   "ceiling": 395999,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -593,7 +621,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 6530,
+   "ceiling": 8988,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -628,7 +656,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 235870,
+   "ceiling": 239412,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -636,6 +664,13 @@
   "engine/sagebrush-raster.wasm": {
    "exact": false,
    "ceiling": 889713,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-nd.wasm": {
+   "exact": false,
+   "ceiling": 78216,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -656,7 +691,7 @@
   },
   "registry/packages": {
    "exact": true,
-   "max": 3
+   "max": 4
   }
  },
  "epoch": {
@@ -720,9 +755,12 @@
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-live-data.src": 6582,
+   "engine/lib/mod-scipy-optimize.src": 87068,
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
    "engine/lib/mod-scipy-stats-py.src": 23101,
+   "engine/lib/mod-ssl.src": 3915,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
@@ -736,6 +774,7 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
+   "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61203,
    "engine/lib/pkg-scipy-io.src": 12835,
    "engine/lib/sage-more.src": 326946,
@@ -751,6 +790,7 @@
    "engine/sagebrush-myst.js": 10788,
    "engine/sagebrush-notebook.js": 208117,
    "engine/sagebrush-raster.wasm": 825569,
+   "engine/sagebrush-nd.wasm": 71106,
    "engine/sagebrush-viewer3d.js": 88151,
    "engine/sagebrush-worker.js": 1545037
   },

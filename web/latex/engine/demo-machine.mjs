@@ -4,7 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
-import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK } from "../core/machine.mjs";
+import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
 
@@ -37,6 +37,8 @@ class RunawayArg extends Error { constructor(text) { super("runaway argument"); 
 //   \newcommand{\cs}[n][default]{body}: \new@command#1 and \@newcommand#1[#2] are short, \@xargdef's [#3] long
 //   (\newenvironment{name}[n][default]{begin}{end}: name, [n] and [default] short (\@newenvb), so not listed)
 const L = true, S = false;
+// (secnumdepth and tocdepth by class, as TeX Live 2025's classes set them)
+export const depthOf = (cls) => (/^(book|report|scrbook|scrreprt)$/.test(cls) ? 2 : cls === "memoir" ? 1 : 3);
 const ARG_MODES = new Map([["footnote", [S, L]], ["caption", [L, L]], ["thanks", [L, L]],
   ...["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand"].map((n) => [n, [S, S, L]])]);
 function guardRunaway(name, fn) {
@@ -50,6 +52,14 @@ function guardRunaway(name, fn) {
 }
 let POS_EPOCH = 0;
 export function setPosEpoch(n) { POS_EPOCH = n; }
+// \input, \include (William's L4, Nov 2: they were silently ignored): each name given to the host's resolver
+// (setInputResolver: as TeX finds a file, from the .tex's folder, images.ts texCandidates) for a key of the files
+// snapshot, or why there is none; read from the snapshot, never fetched here. Each \input marks {k:"inref", name} (the
+// host gathers the files to read from them) and, when nothing is read, a visible note {k:"err", code:"input"}: a
+// file not found or refused, or nested deeper than INPUT_NEST (a cycle)
+let INPUT_RESOLVE = null;
+export function setInputResolver(f) { INPUT_RESOLVE = f; }
+const INPUT_NEST = 16;
 
 export class Machine extends CoreMachine {
   constructor(opts) {
@@ -84,6 +94,20 @@ export class Machine extends CoreMachine {
     if (f.path !== this.mainPath) return;
     const ls = f.lineStart ?? 0;
     if (ls > this.posFrontier) { this.posFrontier = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+  }
+  doInput(name) {
+    name = String(name).trim();
+    this.mark({ k: "inref", name });
+    let r;
+    if (INPUT_RESOLVE) r = INPUT_RESOLVE(name);
+    else { const k = [this.mainDir + name + ".tex", this.mainDir + name].find((c) => this.files.has(c)); r = k ? { key: k } : { why: "not found" }; }
+    const miss = (why) => this.mark({ k: "err", code: "input", name, text: why });
+    if (!r || !r.key) return miss(r?.why || "not found");
+    if (!this.files.has(r.key)) return miss(r.why || "not read yet");
+    const open = this.stack.filter((f) => f.kind === "file");
+    // (a file may \input itself, guarded by a conditional, as TeX allows; one that never stops is a cycle, stopped here)
+    if (open.length > INPUT_NEST) return miss(open.some((f) => f.path === r.key) ? "an \\input cycle: stopped " + INPUT_NEST + " deep" : "nested more than " + INPUT_NEST + " deep");
+    this.openFile(r.key);
   }
   // push "{s}" back as an argument, for a core primitive that reads it again
   pushArg(s) {
@@ -229,10 +253,25 @@ export class Machine extends CoreMachine {
       const env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
       if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env); return; }
-      if (env === "document") this.mark({ k: "doc" });
+      if (env === "document") { this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls")); }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
       coreBegin.call(this, t);
+      if (env === "document") { this.setS("sb:indoc", 1, true); const h = this.getS("m:sb@bdhook"); if (h) this.pushList(h.body); }
+    });
+    // \AtBeginDocument: its tokens kept, globally, in \sb@bdhook (LaTeX's \@begindocumenthook) and read at \begin{document}
+    // (as doc's \AtBeginDocument{\MakeShortVerb{\|}}: run at once, "|" was \verb in the preamble that follows, #622);
+    // in the document, read at once. The hook is one token list: bounded as one (limits.tokenList), its copy charged and
+    // reserved before it replaces the one before, which a refusal leaves as it was (astra, #631 LATEX631-HOOK-1): so its
+    // memory is checked first, setS's own 64 bytes included
+    P.prim("AtBeginDocument", function () {
+      const a = this.readArgRaw();
+      if (this.getS("sb:indoc")) { this.pushList(a); return; }
+      const h = this.getS("m:sb@bdhook"), old = h ? h.body : [], n = old.length + a.length;
+      if (n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
+      if (this.memBytes + n * 4 + 128 > this.limits.memBytes) throw new BoundError("E-BOUND-MEMORY");
+      this.charge(n); this.reserve(n * 4 + 64);
+      this.defineMacro("sb@bdhook", meaning("macro", { pre: [], delims: [], body: old.concat(a), long: true, prot: false }), true);
     });
     P.prim("end", function (t) {
       const env = this.readArgString();
@@ -245,7 +284,10 @@ export class Machine extends CoreMachine {
     // the document class (the core reads and drops it)
     P.prim("documentclass", function (t) {
       const opt = this.readOptRaw(); const cls = this.readArgString();
-      this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" });
+      this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" }); this.setS("sb:cls", cls, true);
+      // (the class's secnumdepth and tocdepth, as TeX Live's classes set them: book, report and KOMA's two 2, memoir 1, the
+      //  rest (article) 3; so an \addtocounter on them starts from the class's value)
+      { const d = depthOf(cls); for (const c of ["secnumdepth", "tocdepth"]) { const r = this.counterReg(c); if (r >= 0) this.regSet(r, d, true); } }
       this.pushArg(cls);
       coreClass.call(this, t);
     });
@@ -302,13 +344,23 @@ export class Machine extends CoreMachine {
       ["paragraph", "paragraph"], ["subparagraph", null], ["caption", null], ["footnote", "footnote"], ["thanks", null]]) {
       P.prim(nm, function () {
         const s = this.skipSpacesRaw(); const star = s === mkChar(CAT.OTHER, 42); if (!star && s !== null) this.back(s);
-        this.readOptRaw(); const arg = this.readArgShortRaw();
+        const o = this.readOptRaw(), arg = this.readArgShortRaw();
         if (ctr && !star && this.counterReg(ctr) >= 0) this.stepCounterRef(ctr);
-        this.mark({ k: "sec", cmd: nm, star });
+        // (the short form, \section[short]{..}, as written: beamer's headlines show it)
+        this.mark({ k: "sec", cmd: nm, star, short: o ? this.toks2str(o) : null });
         this.pushList(arg.concat([this.csTok("sb@eot")]));
       });
     }
     P.prim("sb@eot", function () { this.mark({ k: "eot" }); });
+    // \setcounter and \addtocounter: the core's, and the counter's new value marked for the renderer, whose own numbering
+    // (sections, figures, tables, equations, footnotes, enumerate's items) follows it (astra4's fidelity digest, gap 1)
+    for (const nm of ["setcounter", "addtocounter"]) {
+      const f = core(nm);
+      P.prim(nm, function (t) {
+        const name = this.readArgString(); this.pushArg(name); f.call(this, t);
+        const r = this.counterReg(name); if (r >= 0) this.mark({ k: "ctr", name, v: this.regGet(r) });
+      });
+    }
     // inline verbatim: the text is kept
     for (const nm of ["verb", "lstinline", "Verb"]) P.prim(nm, function () {
       const f = this.stack[this.stack.length - 1];
@@ -323,5 +375,64 @@ export class Machine extends CoreMachine {
       this.charge(Math.ceil((e - f.li) / 8)); f.li = e + 1; f.st = 1;
       this.mark({ k: "verb", text, star });
     });
+    // short verbatim (#622: amsldoc's |\begin{aligned}| opened an environment that took the rest of the document): a
+    // character made active as \verb with itself as the delimiter, by \MakeShortVerb (doc, shortvrb; its * read and shown as \verb, as the preview shows \verb*),
+    // \DefineShortVerb (fancyvrb), or the class at \begin{document} (SHORTVERB_CLASSES), undone by \DeleteShortVerb and
+    // \UndefineShortVerb. Global, as doc's are; "sv:<code>" is 1 while it is, kept with the catcode before ("svcat:<code>", stale once deleted: the next \MakeShortVerb sets it)
+    // and the active character's meaning before (\sb@sv@<char>), both from the first \MakeShortVerb (a second mustn't
+    // keep the short verb as the one to restore), and in "svchars" (for \index below; kept after \DeleteShortVerb, harmless there)
+    const shortVerb = (m, cp) => {
+      const ch = String.fromCodePoint(cp);
+      if (m.getS("sv:" + cp) === undefined) {
+        m.setS("svcat:" + cp, m.cat(cp), true); m.letTo(m.csTok("sb@sv@" + ch), m.csTok("\u0001" + ch), true);
+        m.setS("svchars", (m.getS("svchars") ?? "") + ch, true);
+      }
+      m.setS("sv:" + cp, 1, true); m.setS("cat:" + cp, CAT.ACTIVE, true);
+      m.letTo(m.csTok("\u0001" + ch), m.csTok("sb@shortverb"), true);
+    };
+    const shortVerbArg = (m) => {       // {\|} or \|: the character's code, or null
+      const cs = m.csArg(); if (cs === null) return null;
+      const ch = m.intern.name(cs);
+      if ([...ch].length !== 1) { m.d("E-SHORTVERB-ARG"); return null; }
+      return ch.codePointAt(0);
+    };
+    for (const nm of ["MakeShortVerb", "DefineShortVerb"]) P.prim(nm, function () {
+      if (nm === "MakeShortVerb") { const s = this.skipSpacesRaw(); if (s !== null && s !== mkChar(CAT.OTHER, 42)) this.back(s); }
+      else this.readOptRaw();
+      const cp = shortVerbArg(this); if (cp !== null) shortVerb(this, cp);
+    });
+    for (const nm of ["DeleteShortVerb", "UndefineShortVerb"]) P.prim(nm, function () {
+      const cp = shortVerbArg(this); if (cp === null || this.getS("sv:" + cp) === undefined) return;
+      this.setS("cat:" + cp, this.getS("svcat:" + cp), true); this.setS("sv:" + cp, undefined, true);
+      const ch = String.fromCodePoint(cp); this.letTo(this.csTok("\u0001" + ch), this.csTok("sb@sv@" + ch), true);
+    });
+    const verb = core("verb");
+    P.prim("sb@shortverb", function (t) {
+      const f = this.stack[this.stack.length - 1];
+      // (in the source: \verb, with the reader put back on this character, its delimiter; in an argument, already
+      //  tokens: to the same active character, stopping at a blank line, as \verb's text can't span one, or at the
+      //  list's end: no bound of its own, as a list is at most limits.tokenList long)
+      if (f && f.kind === "file" && f.line !== null) { f.li -= this.intern.name(t).length - 1; return verb.call(this); }
+      const out = [];
+      for (;;) {
+        const u = this.nextRaw();
+        if (u === null || u === t) break;
+        if (isCs(u) && this.intern.name(u) === "par") { this.back(u); break; }
+        out.push(u); this.charge(1);
+      }
+      this.mark({ k: "verb", text: this.toks2str(out) });
+    });
+    // \index and \glossary read their argument with the short verbatim characters as other characters, as LaTeX's
+    // \@sanitize does (makeindex's "|" in \index{x|(}, amsldoc's first index entry, was a \verb to the end of the line
+    // that took the closing brace); then the command and its argument go on as before (render.mjs GOBBLE drops them)
+    for (const nm of ["index", "glossary"]) P.prim(nm, function (t) {
+      const cps = [...(this.getS("svchars") ?? "")].map((c) => c.codePointAt(0));
+      const saved = cps.map((cp) => this.cat(cp)); for (const cp of cps) this.setS("cat:" + cp, CAT.OTHER, true);
+      let arg; try { arg = this.readArgRaw(); } finally { cps.forEach((cp, k) => this.setS("cat:" + cp, saved[k], true)); }
+      this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
+    });
+    // (the classes that make "|" (and l3doc also '"') short verbatim at \begin{document})
+    P.shortVerbAtBegin = (cls) => { for (const ch of SHORTVERB_CLASSES.get(cls) ?? "") shortVerb(this, ch.codePointAt(0)); };
   }
 }
+const SHORTVERB_CLASSES = new Map([["amsldoc", "|"], ["ltxdoc", "|"], ["l3doc", '"|']]);

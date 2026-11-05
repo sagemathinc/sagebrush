@@ -51,6 +51,8 @@ export type BrowserHost = {
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
+  /** Share folder… on a folder's ⋯ (book links B2): the page's dialog; without it, not offered */
+  shareFolder?: (e: Entry) => void;
   saveOpen?: () => Promise<void>;
   /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
    * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
@@ -606,6 +608,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
+    if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
     items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
@@ -703,7 +706,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
     // Enter (or leaving the box) renames. A folder's name is all name)
     const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
-    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
+    // (a notebook's or board's name typed with its own extension gets it once, not twice: sage's n8 walkthrough,
+    // "chapter1.ipynb.ipynb"; the extension alone is no name, and leaves the old one)
+    const stem = (v: string) => (ext && v.toLowerCase().endsWith(ext.toLowerCase()) ? v.slice(0, -ext.length).trimEnd() : v);
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : !stem(v) ? full : stem(v) + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
     const note = h("span", { className: "extnote" });

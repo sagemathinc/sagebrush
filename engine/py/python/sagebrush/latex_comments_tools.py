@@ -181,7 +181,7 @@ def call(link, name, args, timeout=60.0):
     except WS.Invalid as e:
         return _err("invalid", "Invalid arguments: %s" % e)
     if link is None:
-        return _err("not_connected", "no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (Connect an agent)")
+        return _err("not_connected", "no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (%s)" % WS.WHERE_TO_CONNECT)
     path = args["path"]
     if not path.endswith(".tex"):
         return _err("invalid", "path must be a .tex file")

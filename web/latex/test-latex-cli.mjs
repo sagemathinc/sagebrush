@@ -1,4 +1,4 @@
-// ci: none (its PNG cases need $CHROME as a path on the runner, not google-chrome: the web-latex follow-up wires it)
+// ci: checks.3 order=95 chrome env=LATEX_CLI_PNG=1
 // `sagebrush latex check|render` (src/latex-cli.ts, built as build/cli/sagebrush-latex.cjs) on real files in a temp
 // folder, through the CLI's own bundle: what an agent runs to verify a .tex and see it. Check's problems and their
 // lines, frames, images and exit codes; render's HTML (self-contained, no script); beamer frames as slides (titles,
@@ -6,9 +6,9 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
@@ -16,8 +16,11 @@ if (!existsSync(CLI) || !existsSync(new URL("../../build/cli/sagebrush-latex.cjs
   console.log("FAIL: no build/cli/pyjs.cjs and sagebrush-latex.cjs: run node scripts/build-cli.mjs first");
   process.exit(1);
 }
-const run = (cwd, ...a) => new Promise((res) => {
-  const p = spawn(process.execPath, [CLI, "latex", ...a], { cwd });
+const run = (cwd, ...a) => runWith(CLI, cwd, ...a);
+const runWith = (cli, cwd, ...a) => runOpts({}, cli, cwd, ...a);
+// (opts.node: node's own options before the script; opts.env: more environment)
+const runOpts = (opts, cli, cwd, ...a) => new Promise((res) => {
+  const p = spawn(process.execPath, [...(opts.node ?? []), cli, "latex", ...a], { cwd, env: opts.env ? { ...process.env, ...opts.env } : process.env });
   let o = "", e = "";
   p.stdout.on("data", (d) => (o += d)); p.stderr.on("data", (d) => (e += d));
   p.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, out: o, err: e, json }); });
@@ -98,7 +101,7 @@ try {
     && j.frames[1].line === lineOf(TALK, "\\begin{frame}{Overlays}") && j.frames[0].line === lineOf(TALK, "\\frame{\\titlepage}"), j.frames);
   const p = (kind, name) => j.problems.find((x) => x.kind === kind && (name === undefined || x.name === name));
   check("check-missing-image-error-with-line", p("image", "missing.png")?.severity === "error" && p("image", "missing.png").line === lineOf(TALK, "{missing.png}"), j.problems);
-  check("check-outside-image-refused", p("image", "../outside.png")?.severity === "error" && /outside this folder/.test(p("image", "../outside.png").message), j.problems);
+  check("check-parent-image-looked-for", p("image", "../outside.png")?.severity === "error" && /: above the workspace's top folder$/.test(p("image", "../outside.png").message), j.problems);
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
@@ -112,6 +115,90 @@ try {
   check("check-clean-exit-0", cc.code === 0 && cc.out.startsWith("clean.tex: beamer, 1 frame; no problems"), cc);
   const ca = await run(dir, "check", "article.tex", "--json");
   check("check-article-has-no-frames", ca.code === 0 && ca.json.class === "other" && ca.json.frames.length === 0 && ca.json.problems.some((x) => x.kind === "environment" && x.name === "frame"), ca.json);
+  // (a frame the editor's preview shows as a placeholder, over 128 KiB of markup: a warning at its line, exit 0; a
+  //  frame with an image over 128 KiB, inlined as a data: URL, none: the preview shows it, sim run 8)
+  const BIGSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` + `<circle cx="5" cy="5" r="4"/>`.repeat(6000) + "</svg>";
+  const LARGE = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{Picture}
+\includegraphics{big.svg}
+\end{frame}
+\begin{frame}{Long}
+${"many words ".repeat(14000)}
+\end{frame}
+\end{document}
+`;
+  writeFileSync(join(dir, "large.tex"), LARGE); writeFileSync(join(dir, "big.svg"), BIGSVG);
+  const cl = await run(dir, "check", "large.tex", "--json");
+  const tl = (cl.json?.problems ?? []).filter((x) => x.kind === "toolarge");
+  check("check-frame-too-large-warning-with-line", cl.code === 0 && BIGSVG.length > 128 * 1024 && cl.json.frames.length === 2 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === lineOf(LARGE, "\\begin{frame}{Long}")
+    && /^this slide is too large \(\d+ KiB, over 128 KiB\): the preview and Present show a placeholder instead/.test(tl[0].message), { code: cl.code, problems: cl.json?.problems });
+  // (render shows what check says: that frame's placeholder, inside its own slide, the picture's frame whole; and a
+  //  frame over CHUNK_MAX, 2 MiB, still a slide too: the deck's frames all kept)
+  const HUGE = LARGE.replace("\\end{document}", "\\begin{frame}{Huge}\n" + "more words ".repeat(200000) + "\n\\end{frame}\n\\end{document}");
+  writeFileSync(join(dir, "huge.tex"), HUGE);
+  const rl = await run(dir, "render", "huge.tex", "-o", "huge.html", "--json");
+  const hh = existsSync(join(dir, "huge.html")) ? readFileSync(join(dir, "huge.html"), "utf8") : "";
+  const frameOf = (k) => { const i = hh.indexOf(`<section class="slide" data-frame="${k}"`); return i < 0 ? "" : hh.slice(i, hh.indexOf("</section>", i) + 10); };
+  const ch = await run(dir, "check", "huge.tex", "--json");
+  check("render-too-large-frames-placeholders-in-their-slides", rl.code === 0 && (hh.match(/<section class="slide"/g) || []).length === 3 && frameOf(1).includes('src="data:image/svg+xml;base64,')
+    && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(2)) && /^<section[^>]*><div class="placeholder toolarge">\[this slide is too large[^\]]*\]<\/div><\/section>$/.test(frameOf(3))
+    && !hh.includes("many words many words") && !hh.includes("more words more words"), { code: rl.code, slides: (hh.match(/<section class="slide"/g) || []).length, f2: frameOf(2).slice(0, 300), f3: frameOf(3).slice(0, 300) });
+  check("check-frame-over-2MiB-warning", ch.json?.frames?.length === 3 && (ch.json?.problems ?? []).some((x) => x.kind === "toolarge" && x.line === lineOf(HUGE, "\\begin{frame}{Huge}") && /over 2048 KiB/.test(x.message)), ch.json?.problems);
+
+  // ---- images as TeX finds them (William's L2, Nov 2): the file's folder, a parent (../), \graphicspath, a leading /
+  // (the folder the command runs in); when not found, the folders searched and the name to write. Never outside the
+  // folder the command runs in (astra L2-BOUND-1: relative, \graphicspath's and the not-found probe too; a .tex outside
+  // it has no images) nor through a link out of it (L2-BOUND-2: a linked folder, a linked file; a link inside is read)
+  {
+    const { mkdirSync, symlinkSync } = await import("node:fs");
+    const w = join(dir, "w"), ex = join(w, "ex"), out = join(dir, "outside");
+    mkdirSync(join(ex, "figs"), { recursive: true }); mkdirSync(out, { recursive: true });
+    const SECRET = SVG.replace("#c00", "#0c0");
+    writeFileSync(join(w, "top.svg"), SVG); writeFileSync(join(ex, "here.svg"), SVG); writeFileSync(join(ex, "figs", "deep.svg"), SVG);
+    writeFileSync(join(out, "secret.svg"), SECRET); writeFileSync(join(out, "top2.svg"), SECRET);
+    symlinkSync(out, join(ex, "jump")); symlinkSync(join(out, "secret.svg"), join(ex, "leaf.svg")); symlinkSync(join(w, "top.svg"), join(ex, "inlink.svg"));
+    const refs = ["here.svg", "../top.svg", "deep", "top.svg", "nowhere.png", "/ex/here.svg", "/../top.svg", "../../outside/secret.svg", "secret.svg", "jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg", "inlink.svg", "top2.svg"];
+    writeFileSync(join(ex, "cv.tex"), "\\documentclass{article}\n\\graphicspath{{figs/}{../../outside/}}\n\\begin{document}\n" + refs.map((r) => "\\includegraphics{" + r + "}\n").join("") + "\\end{document}\n");
+    const ci = (await run(w, "check", "ex/cv.tex", "--json")).json;
+    const im = (n) => ci?.images.find((x) => x.name === n);
+    check("images: same folder, parent (../), \\graphicspath and a link inside the folder: found", im("here.svg")?.found && im("../top.svg")?.found && im("../top.svg").path === "../top.svg" && im("deep")?.found && im("deep").path === "figs/deep.svg" && im("inlink.svg")?.found, ci?.images);
+    check("images: a file in a parent folder named without ../: where it is, and what to write", im("top.svg")?.found === false && im("top.svg").why === 'not found in this file\'s folder, "figs/"; it is in "../": write {../top.svg}, or move the file into this file\'s folder', im("top.svg"));
+    check("images: a leading / is the folder the command runs in, never the computer's top, never above it", im("/ex/here.svg")?.found && im("/ex/here.svg").path === "here.svg" && im("/../top.svg")?.found === false && /above the workspace's top folder/.test(im("/../top.svg").why), [im("/ex/here.svg"), im("/../top.svg")]);
+    check("images: missing everywhere: the folders searched, no suggestion", im("nowhere.png")?.found === false && im("nowhere.png").why === 'not found in this file\'s folder, "figs/"', im("nowhere.png"));
+    check("images: ../ and \\graphicspath never reach outside the folder the command runs in (L2-BOUND-1), nor does the not-found probe",
+      im("../../outside/secret.svg")?.found === false && im("secret.svg")?.found === false && !/outside/.test(im("secret.svg").why)
+      && im("top2.svg")?.found === false && !/it is in/.test(im("top2.svg").why), [im("../../outside/secret.svg"), im("secret.svg"), im("top2.svg")]);
+    check("images: a linked folder or a linked file pointing outside is refused (L2-BOUND-2)", ["jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg"].every((n) => im(n)?.found === false && im(n).why === "a link to outside the folder the command runs in"), ["jump/secret.svg", "leaf.svg", "/ex/jump/secret.svg"].map(im));
+    const rh = await run(w, "render", "ex/cv.tex", "-o", "cv.html");
+    const page = existsSync(join(w, "cv.html")) ? readFileSync(join(w, "cv.html"), "utf8") : "";
+    check("images: the outside SVG's bytes are nowhere in the page", page.length > 1000 && !page.includes(Buffer.from(SECRET).toString("base64")) && page.includes(Buffer.from(SVG).toString("base64")), { code: rh.code, n: page.length });
+    const co = (await run(ex, "check", "../top-doc.tex", "--json"));
+    writeFileSync(join(w, "top-doc.tex"), "\\documentclass{article}\n\\begin{document}\n\\includegraphics{top.svg}\n\\end{document}\n");
+    const co2 = (await run(ex, "check", "../top-doc.tex", "--json")).json;
+    check("images: a .tex outside the folder the command runs in has no images (not widened)", co2?.images?.[0]?.found === false && /outside the folder the command runs in/.test(co2.images[0].why), co2?.images ?? co);
+  }
+
+  // ---- \input and \include (William's L4, Nov 2): read from the folder the command runs in as TeX finds them (with
+  // .tex added, ../, a leading /), never through a link out of it; macros from them apply; one not read is an error
+  // naming where it was looked for
+  {
+    const w = join(dir, "w"), ex = join(w, "ex");
+    const { mkdirSync, symlinkSync } = await import("node:fs");
+    mkdirSync(join(w, "shared"), { recursive: true });
+    writeFileSync(join(w, "shared", "macros.tex"), "\\newcommand{\\RR}{\\mathbb{R}}\n\\newcommand{\\hello}{Hello from macros}\n");
+    writeFileSync(join(ex, "part.tex"), "Included part with $\\RR$.\n");
+    writeFileSync(join(dir, "outside", "evil.tex"), "\\newcommand{\\hello}{OUTSIDE TEXT}\n");
+    symlinkSync(join(dir, "outside", "evil.tex"), join(ex, "evil.tex"));
+    writeFileSync(join(ex, "talk2.tex"), "\\documentclass{article}\n\\input{../shared/macros}\n\\input{evil}\n\\begin{document}\n\\hello: $\\RR$.\n\\include{part}\n\\input{/shared/macros.tex}\n\\input{missing}\n\\end{document}\n");
+    const ch = (await run(w, "check", "ex/talk2.tex", "--json")).json;
+    const ip = (n) => ch?.problems.find((x) => x.kind === "input" && x.name === n);
+    check("input: a missing file is an error at its line, naming where it was looked for", ip("missing")?.severity === "error" && ip("missing").line === 8 && /\\input\{missing\}: not found in this file's folder/.test(ip("missing").message), ch?.problems);
+    check("input: a link to outside the folder is refused", /a link to outside the folder the command runs in/.test(ip("evil")?.message ?? ""), ip("evil"));
+    const rr = await run(w, "render", "ex/talk2.tex", "-o", "t2.html");
+    const hh = existsSync(join(w, "t2.html")) ? readFileSync(join(w, "t2.html"), "utf8") : "";
+    check("input: the macros file's macros apply (../ and a leading /), \\include's text is there, nothing from outside", hh.includes("Hello from macros") && hh.includes("Included part with") && /mathbb/.test(hh) && !hh.includes("OUTSIDE TEXT"), { code: rr.code, err: rr.err, n: hh.length });
+  }
 
   // ---- render: one self-contained HTML file
   const r = await run(dir, "render", "talk.tex", "-o", "out.html", "--json");
@@ -119,7 +206,7 @@ try {
   check("render-writes-html", r.code === 0 && r.json?.html === "out.html" && html.startsWith("<!doctype html>"), r);
   check("render-html-no-script-and-csp", !/<script/i.test(html) && html.includes(`content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:"`), html.slice(0, 400));
   check("render-html-fonts-inlined", /@font-face\{[^}]*url\(data:font\/woff2;base64,/.test(html) && !/url\(fonts\//.test(html), html.match(/@font-face\{[^}]{0,200}/)?.[0]);
-  check("render-image-inlined", html.includes('src="data:image/svg+xml;base64,') && html.includes("[image: missing.png: no such file in this folder]"), null);
+  check("render-image-inlined", html.includes('src="data:image/svg+xml;base64,') && html.includes("[image: missing.png: not found in this file&#39;s folder]") || html.includes("[image: missing.png: not found in this file's folder]"), html.match(/\[image: missing[^\]]*\]/)?.[0]);
   const slides = [...html.matchAll(/<section class="slide([^"]*)" data-frame="(\d+)"[^>]*style="([^"]*)"/g)];
   check("render-slides", slides.length === 5 && slides.every((m) => m[3].startsWith("aspect-ratio:160/90;--sfs:")) && slides[2][1] === " va-t", slides.map((m) => m.slice(1)));
   check("render-frame-titles", html.includes('<header class="slide-title">Overlays</header>') && html.includes('<header class="slide-title">A block and a picture<div class="slide-subtitle">with a subtitle</div></header>')
@@ -131,6 +218,29 @@ try {
 
   // ---- render --png: what the agent looks at
   // (CHROME as CI sets it, a command's name (CHROME=google-chrome), is the CLI's to look up on PATH: passed as it is)
+  // (a browser that fails to start: what it said is in png_error, not only that it failed; a fake one, on any box)
+  {
+    const fake = join(dir, "fake-chrome");
+    writeFileSync(fake, "#!/bin/sh\necho 'fake-chrome: Missing X server or $DISPLAY' >&2\nexit 1\n", { mode: 0o755 });
+    const fk = await new Promise((res) => {
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--png", "fkpng", "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+      let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+    });
+    check("png: a browser that exits at once, its own words in png_error", fk.code === 1 && /exited \(1\) before it could take the pictures; it said: fake-chrome: Missing X server or \$DISPLAY/.test(fk.json?.png_error ?? ""), { code: fk.code, png_error: fk.json?.png_error });
+    const fakeRun = (script, out) => new Promise((res) => {
+      writeFileSync(fake, script, { mode: 0o755 });
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--png", out, "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+      let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+    });
+    // (grader D5: the tail is the END of what it said, at most 2048 characters)
+    const fl = await fakeRun("#!/bin/sh\nprintf 'FIRST' >&2\nhead -c 3000 /dev/zero | tr '\\0' x >&2\necho 'LAST' >&2\nexit 1\n", "flpng");
+    const said = /; it said: ([\s\S]*)$/.exec(fl.json?.png_error ?? "")?.[1] ?? "";
+    check("png: a long stderr, its last 2048 characters kept (the end, not the start)", fl.code === 1 && said.endsWith("LAST") && !said.includes("FIRST") && said.length <= 2048 && said.length > 2000, { code: fl.code, n: said.length, head: said.slice(0, 20), tail: said.slice(-10) });
+    // (grader D4: the CI sighting's path: a browser that says something and never opens its DevTools port; the CLI
+    //  gives up at 30 s, with what it said)
+    const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
+    check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
+  }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
     if (process.env.LATEX_CLI_PNG === "1") check("png-browser-found", false, "no Chromium-family browser (CHROME=...)");
@@ -143,7 +253,7 @@ try {
     });
     const pages = g.json?.png?.pages ?? [];
     const files = existsSync(join(dir, "png")) ? readdirSync(join(dir, "png")).sort() : [];
-    check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, pages, files });
+    check("png-one-per-frame", g.code === 0 && pages.length === 5 && files.join(",") === "frame-01.png,frame-02.png,frame-03.png,frame-04.png,frame-05.png", { code: g.code, err: g.err, png_error: g.json?.png_error, pages, files });
     const dims = files.map((f) => { const b = readFileSync(join(dir, "png", f)); return b.subarray(0, 8).toString("hex") === "89504e470d0a1a0a" ? [b.readUInt32BE(16), b.readUInt32BE(20)] : null; });
     check("png-slide-size-16-9", dims.length === 5 && dims.every((x) => x && x[0] === 1024 && Math.abs(x[1] - 576) <= 1), dims);
     // (--steps: each frame at each overlay step)
@@ -151,14 +261,14 @@ try {
     const st = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "ov.tex", "--png", "ovpng", "--steps", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
     const sp = st.json?.png?.pages ?? [];
     const ovFiles = existsSync(join(dir, "ovpng")) ? readdirSync(join(dir, "ovpng")).sort() : [];
-    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { files: ovFiles, pages: sp });
+    check("png --steps: a PNG per frame and step", st.code === 0 && st.json.check.frames.map((f) => f.steps).join(",") === "3,1" && ovFiles.join(",") === "frame-01-1.png,frame-01-2.png,frame-01-3.png,frame-02-1.png" && sp.map((x) => x.frame + "." + x.step).join(",") === "1.1,1.2,1.3,2.1", { code: st.code, png_error: st.json?.png_error, files: ovFiles, pages: sp });
     const bytes = ovFiles.map((f) => readFileSync(join(dir, "ovpng", f)).toString("base64"));
     check("png --steps: the steps' pictures differ", bytes[0] !== bytes[1] && bytes[1] !== bytes[2], null);
     // (--pdf: printed by the same browser, a beamer document one page per frame, of the slide's size)
     const pd = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--pdf", "talk.pdf", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
     const pdfBytes = existsSync(join(dir, "talk.pdf")) ? readFileSync(join(dir, "talk.pdf")) : Buffer.alloc(0);
     const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
-    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
+    check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf_error: pd.json?.pdf_error, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
   }
 
@@ -203,6 +313,31 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
   check("run --timeout: stopped, earlier results kept", slow.code === 1 && slow.json.items.map((x) => x.state).join(",") === "ok,error,blocked" && /timeout/.test(slow.json.items[1].message), slow.json?.items ?? slow.err);
+  // (William's L1, Nov 3: \title{$\sage{factor(2026)}$} "doesn't work": an item in a title field is shown where
+  //  \maketitle prints it, so it runs and its result is in the title block; with no \maketitle it is still hidden)
+  const TITLED = "\\documentclass{article}\n\\usepackage{sagetex}\n\\title{$\\sage{factor(2026)}$}\n\\author{A $\\sage{2+3}$\\thanks{t $\\sage{6*7}$}}\n\\date{$\\sage{2025+1}$}\n\\begin{document}\n\\maketitle\nBody $\\sage{1+1}$.\n\\end{document}\n";
+  writeFileSync(join(dir, "titled.tex"), TITLED);
+  const tr = await run(dir, "run", "titled.tex", "--json");
+  await run(dir, "render", "titled.tex", "-o", "titled.html");
+  const th = existsSync(join(dir, "titled.html")) ? readFileSync(join(dir, "titled.html"), "utf8") : "";
+  const tblock = th.slice(th.indexOf('<div class="titleblock">'), th.indexOf('<div class="titleblock">') + 20000);
+  check("run: items in \\title, \\author, \\thanks and \\date run and are shown in the title block", tr.code === 0 && tr.json?.items?.length === 5 && tr.json.items.every((x) => x.state === "ok")
+    && /<div class="title">[\s\S]*1013/.test(tblock) && /<div class="author">[\s\S]*<mn>5<\/mn>/.test(tblock) && /<div class="date">[\s\S]*2026/.test(tblock) && /<div class="thanks">[\s\S]*42/.test(tblock), { code: tr.code, items: tr.json?.items, block: tblock.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 300) });
+  writeFileSync(join(dir, "untitled.tex"), TITLED.replace("\\maketitle\n", ""));
+  const ut = await run(dir, "check", "untitled.tex", "--json");
+  check("check: a \\title item with no \\maketitle is still hidden (refused, an error at its line)", ut.code === 1 && ut.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 3 && /can't be run/.test(x.message)), ut.json?.problems);
+  // (grader E6: \institute on a beamer \titlepage; E7: a \sage in the preamble outside every title field, with
+  //  \maketitle there, is still hidden: refused at its line, S1E01-A3)
+  const INST = "\\documentclass{beamer}\n\\usepackage{sagetex}\n\\title{T}\n\\institute{Inst $\\sage{3*3}$}\n\\begin{document}\n\\frame{\\titlepage}\n\\end{document}\n";
+  writeFileSync(join(dir, "inst.tex"), INST);
+  const ir = await run(dir, "run", "inst.tex", "--json");
+  await run(dir, "render", "inst.tex", "-o", "inst.html");
+  const ih = existsSync(join(dir, "inst.html")) ? readFileSync(join(dir, "inst.html"), "utf8") : "";
+  check("run: an item in \\institute runs and is shown on the \\titlepage", ir.code === 0 && ir.json?.items?.length === 1 && ir.json.items[0].state === "ok" && /<div class="institute">Inst [\s\S]*<mn>9<\/mn>/.test(ih), { code: ir.code, items: ir.json?.items });
+  const PRE = "\\documentclass{article}\n\\usepackage{sagetex}\n\\title{T}\nPreamble text $\\sage{5}$\n\\begin{document}\n\\maketitle\nBody $\\sage{1+1}$.\n\\end{document}\n";
+  writeFileSync(join(dir, "pre.tex"), PRE);
+  const pc = await run(dir, "check", "pre.tex", "--json");
+  check("check: a \\sage in the preamble outside the title fields is still refused at its line (\\maketitle there)", pc.code === 1 && pc.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 4 && /can't be run/.test(x.message)), pc.json?.problems);
   const none = await run(dir, "run", "clean.tex");
   check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
 
@@ -212,6 +347,52 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
   check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
   rmSync(join(dir, "latex"));
+
+  // ---- the bundle moved to another folder: `sagebrush latex` loads the sagebrush-latex.cjs beside where the bundle,
+  //  or the npm launcher, really is. (Bun bakes the build machine's folder into the bundle as __dirname: a copy loaded
+  //  the build's own module here, and on any other machine found none.) A stub module in each copy says it was the one.
+  {
+    const away = mkdtempSync(join(tmpdir(), "sb-latex-moved-"));
+    try {
+      const STUB = 'exports.latexCommand = async () => { process.stdout.write("THE MOVED MODULE\\n"); return 0; };\n';
+      // the bundle alone, the stub beside it
+      mkdirSync(join(away, "cli"));
+      copyFileSync(CLI, join(away, "cli", "pyjs.cjs")); writeFileSync(join(away, "cli", "sagebrush-latex.cjs"), STUB);
+      const alone = await runWith(join(away, "cli", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: the bundle in another folder loads the module beside it", alone.code === 0 && alone.out === "THE MOVED MODULE\n", alone);
+      // the npm package's layout (bin/sagebrush.cjs, dist/sagebrush.cjs and the module), run through a symlink as
+      // node_modules/.bin/sagebrush is
+      for (const d of ["pkg/bin", "pkg/dist", ".bin"]) mkdirSync(join(away, d), { recursive: true });
+      copyFileSync(new URL("../../packages/sagebrush/bin/sagebrush.cjs", import.meta.url).pathname, join(away, "pkg", "bin", "sagebrush.cjs"));
+      copyFileSync(CLI, join(away, "pkg", "dist", "sagebrush.cjs")); writeFileSync(join(away, "pkg", "dist", "sagebrush-latex.cjs"), STUB);
+      symlinkSync(join(away, "pkg", "bin", "sagebrush.cjs"), join(away, ".bin", "sagebrush"));
+      const npm = await runWith(join(away, ".bin", "sagebrush"), dir, "check", "clean.tex");
+      check("moved: the npm layout, through a .bin symlink, loads dist/'s module", npm.code === 0 && npm.out === "THE MOVED MODULE\n", npm);
+      // (grader, #625: the launcher without its worker requires the bundle in this thread, so the entry is bin/'s
+      //  launcher, and dist/ is found as bin/../dist)
+      const inproc = await runOpts({ env: { SAGEBRUSH_NO_WORKER: "1" } }, join(away, ".bin", "sagebrush"), dir, "check", "clean.tex");
+      check("moved: the npm layout without the launcher's worker (SAGEBRUSH_NO_WORKER) loads dist/'s module", inproc.code === 0 && inproc.out === "THE MOVED MODULE\n", inproc);
+      // (grader, #625: a symlink to the moved bundle, run with --preserve-symlinks-main: the entry's real path is the
+      //  bundle's folder, not the symlink's)
+      mkdirSync(join(away, "links"));
+      symlinkSync(join(away, "cli", "pyjs.cjs"), join(away, "links", "pyjs.cjs"));
+      const preserved = await runOpts({ node: ["--preserve-symlinks-main"] }, join(away, "links", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: a symlink to the moved bundle, with --preserve-symlinks-main, loads the module beside the real bundle", preserved.code === 0 && preserved.out === "THE MOVED MODULE\n", preserved);
+      // the npm layout with the real module: `latex run` starts its Sage session from the bundle the launcher loaded
+      // (in the launcher's worker, process.argv[1] is "[worker eval]": before, "can't find this sagebrush's own bundle")
+      for (const d of ["real-pkg/bin", "real-pkg/dist", "doc"]) mkdirSync(join(away, d), { recursive: true });
+      copyFileSync(join(away, "pkg", "bin", "sagebrush.cjs"), join(away, "real-pkg", "bin", "sagebrush.cjs"));
+      copyFileSync(CLI, join(away, "real-pkg", "dist", "sagebrush.cjs")); copyFileSync(join(dirname(CLI), "sagebrush-latex.cjs"), join(away, "real-pkg", "dist", "sagebrush-latex.cjs"));
+      writeFileSync(join(away, "doc", "one.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{2+3}$\n\\end{document}\n");
+      const nrun = await runWith(join(away, "real-pkg", "bin", "sagebrush.cjs"), join(away, "doc"), "run", "one.tex", "--json");
+      check("moved: latex run through the npm launcher runs its code", nrun.code === 0 && nrun.json?.items?.length === 1 && nrun.json.items[0].state === "ok", { code: nrun.code, err: nrun.err.slice(0, 300), items: nrun.json?.items });
+      // and the real module beside a moved bundle checks a file
+      mkdirSync(join(away, "real"));
+      copyFileSync(CLI, join(away, "real", "pyjs.cjs")); copyFileSync(join(dirname(CLI), "sagebrush-latex.cjs"), join(away, "real", "sagebrush-latex.cjs"));
+      const real = await runWith(join(away, "real", "pyjs.cjs"), dir, "check", "clean.tex");
+      check("moved: the real module beside a moved bundle checks the file", real.code === 0 && real.out.startsWith("clean.tex: beamer, 1 frame; no problems"), real);
+    } finally { rmSync(away, { recursive: true, force: true }); }
+  }
 
   // ---- usage
   const u = await run(dir, "render");

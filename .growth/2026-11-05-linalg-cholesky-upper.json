@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "numpy.linalg: cholesky(upper=True) reads the upper triangle (it factored the lower one and transposed), and det, slogdet, solve, inv, matrix_power, cholesky, eig, eigvals, eigh and eigvalsh refuse an array of fewer than 2 dimensions with NumPy's LinAlgError (they raised IndexError) (lib/numpy/linalg.py). Re-measured with bun 1.4.4 (size-record.sh) on master 3264180f vs head 37f1ae7c: cli/lib.gen.js +132, cli/pyjs.cjs +192, engine/lib/sci.pre +602, engine/lib/sci.src +507; no other row moves. Markers: exact, except cli/pyjs.cjs 224 (+192 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 132,
+  "cli/pyjs.cjs": 224,
+  "engine/lib/sci.pre": 602,
+  "engine/lib/sci.src": 507
+ }
+}

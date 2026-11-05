@@ -20,7 +20,7 @@
 //   3. the DEV bootstrap: its own bytes, measured on the identifier-stable measuring pages and cross-checked against
 //      index.html's shipped growth over PROD (scripts/line3-measure.mjs, line-3 case r4); without the measuring pages
 //      line 3 FAILs as not measured;
-//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most 224 KiB minified and 76 KiB gzip; no CSS
+//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most LATEX_CAPS (scripts/latex-group.mjs: 235 KiB minified, 79.5 KiB gzip); no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
 //      LaTeX bundle and KaTeX's inputs in exactly one output (the math module).
@@ -31,6 +31,7 @@ import { gzipSync } from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { checkLine3 } from "./line3-measure.mjs";
+import { latexGroup, latexLazy, LATEX_CAPS } from "./latex-group.mjs";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const BASE = arg("--base-prod"), PROD = arg("--prod"), DEV = arg("--dev"), META = arg("--meta"), OUT = arg("--out"), CHANGED = arg("--changed");
@@ -169,33 +170,13 @@ if (measGiven === 5) {
 check("DEV bootstrap (line 3): the DEV-only bytes on the measuring pages, exact to the frozen block, cross-checked with the shipped delta, under the cap",
   line3 !== null && line3.reasons.length === 0, line3 ? (line3.metrics ? { reasons: line3.reasons, ...line3.metrics } : { reasons: line3.reasons }) : { notMeasured: "no measuring pages given" });
 // 4. the LaTeX group
-// (the comments' chunk, sagebrush-latex-comments.js, loaded only for comments: its own line below, not in the group)
-const COMMENTS = "dist/sagebrush-latex-comments.js", COMMENTS_DOC = "dist/sagebrush-latex-comments-doc.js", AGENT = "dist/sagebrush-latex-agent.js", TOOLS = "dist/sagebrush-latex-tools.js", PRESENT = "dist/sagebrush-latex-present.js";
-const group = [...dev.keys()].filter((n) => n.startsWith("dist/") && /(^|\/)sagebrush-latex/.test(n) && n !== COMMENTS && n !== COMMENTS_DOC && n !== AGENT && n !== TOOLS && n !== PRESENT);
-const js = group.filter((n) => n.endsWith(".js")), css = group.filter((n) => n.endsWith(".css")), fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
-const jsRaw = js.reduce((s, n) => s + statSync(dev.get(n)).size, 0), jsGz = js.reduce((s, n) => s + gz(readFileSync(dev.get(n))), 0);
-// (224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
-//  priority; the group is fetched only when a .tex is opened, so the first page load is unaffected): each PR reports
-//  its delta, and what can be a lazy chunk of its own stays out of the group; was 192 / 64
-//  (2026-10-29, the ten examples and the embeddable editor), 180 / 60 before)
-check("the LaTeX group's JS: at most 224 KiB minified, 76 KiB gzip", js.length > 0 && jsRaw <= 224 * 1024 && jsGz <= 76 * 1024, { files: js, raw: jsRaw, gzip: jsGz });
-// 4b. the comments' chunk: at most 16 KiB minified, 6 KiB gzip (@sagebrush, 2026-10-29: comments in a lazy chunk of
-//     their own, so a document without comments never pays for them)
-if (dev.has(COMMENTS)) { const b = readFileSync(dev.get(COMMENTS)); check("the LaTeX comments' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
-// 4c. a document's live comments' chunk (comments-doc.ts and the format's core, comments-core.mjs): at most 40 KiB
-//     minified, 14 KiB gzip, fetched only when a .tex has a comments file or someone comments in it
-// 4d. the agent pairing's chunk (web/workspace/agent-ui.ts, the shared module, through web/latex/agent.ts): at most
-//     40 KiB minified, 14 KiB gzip, fetched only to connect an agent (the Agent button, a ?pair= link, a remembered one)
-if (dev.has(AGENT)) { const b = readFileSync(dev.get(AGENT)); check("the LaTeX agent pairing's chunk: at most 40 KiB minified, 14 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 14 * 1024, { raw: b.length, gzip: gz(b) }); }
-// 4e. the agent tools' work (web/latex/tools.ts: latex_check's report, latex_render's pictures): at most 16 KiB
-//     minified, 6 KiB gzip, fetched only on an agent's first call
-if (dev.has(TOOLS)) { const b = readFileSync(dev.get(TOOLS)); check("the LaTeX agent tools' chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
-// 4f. the presenter (web/latex/present.ts with overlay.ts): at most 16 KiB minified, 6 KiB gzip, fetched only when
-//     Present is pressed
-if (dev.has(PRESENT)) { const b = readFileSync(dev.get(PRESENT)); check("the LaTeX presenter's chunk: at most 16 KiB minified, 6 KiB gzip", b.length <= 16 * 1024 && gz(b) <= 6 * 1024, { raw: b.length, gzip: gz(b) }); }
-// (16 KiB gzip, was 14: @sagebrush's ruling, Oct 31, for the shared pass in the comments' core, measured 35,707 / 14,289
-//  at master 7ff6d103 -> 39,564 / 15,774 at its head; it holds only with the pass's measured benefit on VM3)
-if (dev.has(COMMENTS_DOC)) { const b = readFileSync(dev.get(COMMENTS_DOC)); check("the LaTeX document comments' chunk: at most 40 KiB minified, 16 KiB gzip", b.length <= 40 * 1024 && gz(b) <= 16 * 1024, { raw: b.length, gzip: gz(b) }); }
+// (the lazy chunks, each fetched only on its own use: their own lines below, not in the group)
+// (the group, its measure and its cap: scripts/latex-group.mjs, shared with CI's web-artifacts check)
+const lg = latexGroup(dev), js = lg.js, css = lg.css, jsRaw = lg.raw, jsGz = lg.gzip;
+const fonts = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(woff2?|ttf|otf)$/.test(n) && !prod.has(n));
+check(`the LaTeX group's JS: at most ${LATEX_CAPS.raw / 1024} KiB minified, ${LATEX_CAPS.gzip / 1024} KiB gzip`, lg.ok, { files: js, raw: jsRaw, gzip: jsGz });
+// 4b-4f. each lazy chunk under its own cap (scripts/latex-group.mjs LATEX_LAZY_CAPS, shared with CI), when DEV has it
+for (const c of latexLazy(dev)) if (c.present) check(`${c.label}: at most ${c.cap.raw / 1024} KiB minified, ${c.cap.gzip / 1024} KiB gzip`, c.ok, { raw: c.raw, gzip: c.gzip });
 // (the test build's holds on image and file reads and its comments write, web/latex/page.ts: folded away in the DEV build, so named in none of its files)
 const testHooks = [...dev.keys()].filter((n) => n.startsWith("dist/") && /\.(js|html)$/.test(n) && /__sbTex(ImageRead|MountRead|CommentsWrite|SaveWrite)/.test(readFileSync(dev.get(n), "latin1")));
 check("DEV: the test build's hooks folded away (no file names __sbTexImageRead, __sbTexMountRead, __sbTexCommentsWrite or __sbTexSaveWrite)", testHooks.length === 0, { testHooks });

@@ -304,16 +304,10 @@ def _int_roots_cubic(A, C):
     return roots
 
 
-def torsion_order(a, aps):
-    """#E(Q)_tors: bounded by #E(F_p) at good primes, then Nagell-Lutz on
-    y^2 = x^3 - 27 c4 x - 54 c6."""
-    D = _disc(a)
-    bound = 0
-    for p, ap in aps:
-        if ap is not None and p > 2:
-            bound = _m.gcd(bound, p + 1 - ap)
-            if bound == 1:
-                return 1
+def _nl_torsion(a):
+    """The points of finite order but O, exactly: Nagell-Lutz on
+    y^2 = x^3 - 27 c4 x - 54 c6 (whose c4, c6 and discriminant a translated
+    model shares with its minimal one), as (A, [(X, Y), ...])."""
     c4, c6 = _c(a)
     A, B = -27 * c4, -54 * c6
     disc = 4 * A ** 3 + 27 * B * B
@@ -340,7 +334,7 @@ def torsion_order(a, aps):
             cands.append((_F(x), _F(y)))
             if y:
                 cands.append((_F(x), _F(-y)))
-    count = 1
+    out = []
     for P in cands:
         Q = P
         for n in range(1, 13):
@@ -351,9 +345,37 @@ def torsion_order(a, aps):
                 Q = "not torsion"
                 break
         if Q is None:
-            count += 1
+            out.append(P)
+    return A, out
+
+
+def torsion_order(a, aps):
+    """#E(Q)_tors: bounded by #E(F_p) at good primes, then Nagell-Lutz on
+    y^2 = x^3 - 27 c4 x - 54 c6."""
+    D = _disc(a)
+    bound = 0
+    for p, ap in aps:
+        if ap is not None and p > 2:
+            bound = _m.gcd(bound, p + 1 - ap)
+            if bound == 1:
+                return 1
+    count = 1 + len(_nl_torsion(a)[1])
     assert bound % count == 0, "torsion bound"
     return count
+
+
+def torsion_points(a):
+    """The points of finite order but O, in the model's own coordinates
+    (Fractions), exactly: _nl_torsion's, by X = 36 x + 3 b2,
+    Y = 108 (2 y + a1 x + a3).  However large the model's coefficients (a
+    translated one: ECTORS-ENG-1), as its short model's are its minimal one's."""
+    a1, a2, a3, a4, a6 = a
+    b2 = a1 * a1 + 4 * a2
+    out = []
+    for X, Y in _nl_torsion(a)[1]:
+        x = (X - 3 * b2) / 36
+        out.append((x, (Y / 108 - a1 * x - a3) / 2))
+    return out
 
 
 # ------------------------------------------------------------------ periods

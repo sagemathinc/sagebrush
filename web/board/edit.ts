@@ -15,6 +15,7 @@ import { EMOJI } from "./stickers";
 import { prepare, type ImageStore, type ImageInfo } from "./images";
 import { InPlace, type InPlaceHost } from "./inplace";
 import type { DocEntry } from "../docsearch";
+import { answerOnly } from "./answer-only";
 
 interface Found { node: DocNode; parent: DocGroup | null; siblings: DocNode[] }
 
@@ -184,20 +185,32 @@ export class Editor {
     for (const f of [...this.offs.splice(0), ...this.effects.splice(0)]) f();
   }
 
+  /** whether Edit may be on, as the host says (a board its host doesn't let edit stays in View, whoever asks: the
+   * Edit control, E, a remembered mode, a dropped picture, the page's API) */
+  allowed = true;
   setOn(on: boolean) {
+    if (on && !this.allowed) return;
     this.editing.value = on;
   }
 
   /** Apply a change made to a copy of the document; undoable (with `merge`,
    * one step with the change before it: a new note and its first text).
    * Whether there is now an undo step holding it (false: merged back to
-   * where its step started, so none), or null if nothing changed. */
-  async commit(f: (d: BoardDoc) => void, merge = false, record = true): Promise<boolean | null> {
+   * where its step started, so none), or null if nothing changed.
+   * View writes nothing (documents open in View, web/doc-mode.ts; William, Nov 4): outside Edit a change is refused
+   * (null), whatever asks for it (a person's edit, slow code's output previews), unless `outside` says whose it is:
+   * "page", the page's own (a document loaded or made, its file renamed, an agent's edit through the page's API under
+   * its own grants); "inplace", what was typed in Edit, kept as Edit ends; "answer", a reader's answer to a question
+   * and its checked attempt (answering is not editing the board's design). */
+  async commit(f: (d: BoardDoc) => void, merge = false, record = true, outside?: "page" | "inplace" | "answer"): Promise<boolean | null> {
     if (this.leaving) return null;
+    if (!this.on && !outside) return null;
     const cur = this.doc();
     if (!cur) return null;
     const before = JSON.stringify(cur), d = JSON.parse(before) as BoardDoc;
     f(d);
+    // (an answer in View: the answer state of one question only, never its design, another item, or the pages)
+    if (!this.on && outside === "answer" && !answerOnly(cur, d)) return null;
     const after = JSON.stringify(d);
     if (after === before) return null;
     let stepped = record;
@@ -233,11 +246,12 @@ export class Editor {
     if (this.inplace && !this.board.item(this.inplace.id)) this.inplace.abandon();
   }
   async undo() {
-    // (not while the page is leaving: astra's CORR-59D-1)
-    if (this.leaving) return;
-    // (what is being written is kept first: it is what undo takes back)
+    // (not while the page is leaving: astra's CORR-59D-1; nor in View, which writes nothing)
+    if (this.leaving || !this.on) return;
+    // (what is being written is kept first: it is what undo takes back; and View again after that wait, if the board
+    // left Edit meanwhile: astra's MODE658-UNDO-1)
     await this.inplace?.end();
-    if (this.leaving) return;
+    if (this.leaving || !this.on) return;
     const cur = this.doc(), prev = this.undos.pop();
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
@@ -246,9 +260,9 @@ export class Editor {
     this.gone();
   }
   async redo() {
-    if (this.leaving) return;
+    if (this.leaving || !this.on) return;
     await this.inplace?.end();
-    if (this.leaving) return;
+    if (this.leaving || !this.on) return;
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
@@ -1114,7 +1128,7 @@ export class Editor {
         if (v === null || v === undefined) delete n[k];
         else (n as any)[k] = v;
       }
-    });
+    }, false, true, "answer");
   }
 
   /** A question's answer checked: the answer kept, with its attempt counted
@@ -1129,7 +1143,7 @@ export class Editor {
       if (result !== "error") n.attempts = (n.attempts ?? 0) + 1;
       if (result === "wrong") n.wrongAttempts = (n.wrongAttempts ?? 0) + 1;
       n.result = result;
-    });
+    }, false, true, "answer");
   }
 
   /** Show or hide a code item's code (its output stays). */
@@ -1174,7 +1188,7 @@ export class Editor {
       board: this.board,
       doc: () => this.doc(),
       node: (d, id) => (find(this.pg(d), id)?.node as DocNote | DocGroup | undefined) ?? null,
-      commit: (f, merge) => this.commit(f, merge),
+      commit: (f, merge) => this.commit(f, merge, true, "inplace"),
       remove: (d, id) => remove(this.pg(d), id),
       run: (id) => this.onRun?.(id),
       highlight: (id) => this.highlight?.(id) ?? null,
@@ -1288,7 +1302,7 @@ export class Editor {
   private key(e: KeyboardEvent) {
     if (!this.isActive()) return;
     if (this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    // (undo and redo also outside Edit: opening or importing a board replaces it)
+    // (undo and redo: in Edit only, as undo() and redo() say: View writes nothing, web/doc-mode.ts)
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();

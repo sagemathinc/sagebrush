@@ -22,7 +22,7 @@ export class MagmaSyntaxError extends Error {
 
 type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
 
-const KEYWORDS = new Set(
+export const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
     "if then elif else end for to by do while repeat until break continue function procedure func proc return " +
     "case when print printf error assert true false select where forward local quit exit vprint require delete assigned " +
@@ -118,7 +118,7 @@ export function lex(src: string): Tok[] {
 
 // ------------------------------------------------------------------ parser -> Python
 
-const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
+export const PYKW = new Set(("False None True and as assert async await break class continue def del elif else except finally for from global " +
   "if import in is lambda nonlocal not or pass raise return try while with yield print exec match case type").split(" "));
 
 // Python's builtins (CPython 3.14's): a Magma name never reaches them.  An
@@ -1830,4 +1830,24 @@ export type Recover = "file" | "session";
 /** Magma source -> Python source (for lib/_magma.py). */
 export function magmaToPython(src: string, filename = "<magma>", opts: { recover?: Recover } = {}): string {
   return new Parser(lex(src), filename, src, opts.recover ?? null).program();
+}
+
+/**
+ * Whether interactive input needs more lines before it runs, as Magma's
+ * prompt waits: input runs once it ends with a `;` (every Magma statement
+ * does, `end for;` too) and its only syntax error, if any, is not at its end
+ * (an open `for ... do` or `function`).  Only comments: nothing to wait for.
+ */
+export function magmaIsIncomplete(src: string): boolean {
+  if (src.trim() === "") return false;
+  const toks = lex(src);
+  if (toks.length === 1) return false;
+  if (toks[toks.length - 2].v !== ";") return true;
+  const eof = toks[toks.length - 1];
+  try {
+    new Parser(toks, "<stdin>", src, null).program();
+    return false;
+  } catch (e) {
+    return e instanceof MagmaSyntaxError && e.line === eof.line && e.col === eof.col;
+  }
 }

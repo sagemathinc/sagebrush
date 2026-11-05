@@ -232,5 +232,33 @@
     "tags": [
       "numbers"
     ]
+  },
+  {
+    "name": "cumtrapz",
+    "kind": "function",
+    "signature": "Q = cumtrapz(Y)\nQ = cumtrapz(X, Y)\nQ = cumtrapz(___, dim)",
+    "summary": "The running integral of sampled data by the trapezoidal rule, the same size as Y and starting at 0.",
+    "doc": "Along the first non-singleton dimension, or `dim`. `X` is a scalar spacing or the sample points along that dimension. A single input gives a single result.",
+    "examples": [
+      {
+        "code": "cumtrapz([1 2 3 4])",
+        "expected": "\nans =\n\n         0    1.5000    4.0000    7.5000\n\n"
+      },
+      {
+        "code": "cumtrapz([0 1 3], [1 2 3])",
+        "expected": "\nans =\n\n         0    1.5000    6.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Arrays of more than 2 dimensions are refused."
+    ],
+    "status": "full",
+    "see_also": [
+      "trapz",
+      "cumsum"
+    ],
+    "tags": [
+      "integration"
+    ]
   }
 ]

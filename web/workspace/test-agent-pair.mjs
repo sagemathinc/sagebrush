@@ -134,6 +134,27 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(S.got[0].params.session === "SECRET" && !("code" in S.got[0].params) && P.id === "abc123", "a remembered agent: the hello carries the session, not a code");
   S.srv.stop(true);
 }
+// ---- a remembered agent reconnected twice: its session kept across the reconnect (T1, found by git-proto at
+// b72938d8a). sagebrush-mcp gives a session only for a code's hello (pairing.py: result["session"] only when it made
+// one), so a session's hello is answered without one; the grant kept on Allow must still hold the session in force,
+// or the next reconnect has none.
+{
+  const pairBySession = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false } } }));
+  const S = server(pairBySession), W = fakeWs();
+  const P = mk(S, W, { session: "SECRET", pairingId: "abc123" });
+  await P.paired();
+  ok(P.hello && P.hello.session === undefined, "a session's hello is answered without a session, as sagebrush-mcp answers it");
+  await P.allow({ folders: ["/A"], write: true, expires: Date.now() + 3_600_000 }, true);
+  const kept = W.store.get("abc123");
+  ok(kept?.session === "SECRET", `remembered again on a reconnect: the session in force is kept, not lost (${JSON.stringify(kept?.session)})`);
+  await P.revoke("test");
+  // (the second reconnect, from what was kept)
+  W.store.set("abc123", kept);
+  const S2 = server(pairBySession), P2 = mk(S2, W, { session: kept.session, pairingId: "abc123" });
+  await P2.paired();
+  ok(S2.got[0].params.session === "SECRET", `…so the next reconnect sends it, and pairs (${JSON.stringify(S2.got[0].params.session)})`);
+  S.srv.stop(true); S2.srv.stop(true);
+}
 // ---- frames
 {
   const S = server((ws) => ws.send("x".repeat(9 * 1024))), W = fakeWs(), P = mk(S, W);

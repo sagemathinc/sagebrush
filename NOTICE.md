@@ -212,6 +212,16 @@ and the formulas of `log_ndtr` (`_faddeeva.cxx`); its ufuncs' type
 resolution, poles and domains follow SciPy's behaviour. Two of its
 functions are ported from xsf, SciPy's special-function library (below).
 
+`lib/scipy/optimize.py` is SciPy 1.18's `scipy/optimize` code, docstrings
+removed and adapted to Sagebrush's NumPy (no array-API layer, dense finite
+differences only): `minimize`'s BFGS, CG and Nelder-Mead and
+`minimize_scalar`'s Brent, bounded and golden methods (`_optimize.py`), the
+Wolfe line searches (`_linesearch.py` and `_dcsrch.py`, itself a Python
+translation of MINPACK-2's dcsrch and dcstep), `ScalarFunction`
+(`_differentiable_functions.py`), the dense differences of `_numdiff.py`,
+`OptimizeResult`'s printing (`scipy/_lib/_util.py`) and `minimize` and
+`minimize_scalar` (`_minimize.py`), so that iterates and counts are SciPy's.
+
 `quad` in `lib/scipy/integrate.py` is a code translation, not only an
 implementation of the published algorithm: `_qags`, `_qk21`, `_qk15i`,
 `_qpsrt` and `_qelg` translate QUADPACK's Fortran routines dqagse/dqagie,
@@ -648,10 +658,13 @@ from Tavmjong Bah. For further information, contact: tavmjong @ free
 
 ### smalljac (used with the author's permission)
 
-The a_p engine (`engine/ap`) follows the genus-1 strategy of Andrew V.
-Sutherland's smalljac (with Kiran Kedlaya). On 2026-10-02 Andrew Sutherland
-gave explicit permission for this port to be licensed however Sagebrush
-chooses; see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
+The a_p engine (`engine/ap`) is an independent Rust implementation of
+standard methods (baby-step giant-step and related techniques), following
+the genus-1 strategy of Andrew V. Sutherland's smalljac (with Kiran
+Kedlaya). On 2026-10-02 Andrew Sutherland gave permission to read
+smalljac's source and port it under any license Sagebrush chooses. No
+smalljac code is copied or shared, and smalljac 4.1.3 was run as an oracle;
+see [engine/ap/PROVENANCE.md](engine/ap/PROVENANCE.md).
 
 ### PSAGE (used with the author's permission)
 
@@ -699,6 +712,33 @@ https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12
 The Apache License 2.0's full text is LICENSE-APACHE, in the repository and in each package
 that carries this code.
 
+### tabulate 0.8.9 (MIT), from PyPI
+
+`packages/pypi-tabulate/py/` is the Python source of tabulate 0.8.9's wheel, unchanged:
+https://files.pythonhosted.org/packages/ca/80/7c0cad11bd99985cfe7c09427ee0b4f9bd6b048bd13d4ffb32c6db237dfb/tabulate-0.8.9-py3-none-any.whl
+(SHA-256 d7c013fe7abbc5e491394e10fa845f8f32fe54f8dc60c6622c6cf482d25d47e4). Its license:
+
+    Copyright (c) 2011-2020 Sergey Astanin and contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining
+    a copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 <!-- /pypi-packages -->
 
 ## Time zone data
@@ -732,6 +772,10 @@ https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10
 ## Used only by tests and benchmarks (not distributed in any package)
 
 - `upstream/micropython/`: MicroPython's test suite (MIT; its `LICENSE`).
+- `upstream/numbl/`: the MATLAB test scripts of numbl (Flatiron Institute),
+  `numbl_test_scripts/` at commit e2396e2f, unchanged, minus the scripts listed
+  in its `README.md` (Apache-2.0; its `LICENSE`; numbl has no NOTICE file).
+  Run only by `scripts/numbl-ratchet.py`, on CI's full tier.
 - `conformance/upstream/`: the test suites of CPython, PyPy, GraalPy,
   IronPython and RustPython, each under its own license (the `LICENSE` file
   in its directory).

@@ -256,8 +256,10 @@ export class AgentPairing {
   }
   private async keep() {
     if (!this.grant || !this.pairingId) return;
-    // (only a remembered grant outlives the page: "until this page closes" is never kept)
-    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.hello?.session, port: this.port } satisfies Kept);
+    // (only a remembered grant outlives the page: "until this page closes" is never kept. The session kept is the one in
+    //  force: the hello's after a code, the remembered one after a reconnect, whose hello carries none; the hello's alone
+    //  lost it on the first reconnect, and the next had nothing to send (T1, found by git-proto at b72938d8a))
+    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.sessionSecret, port: this.port } satisfies Kept);
   }
 
   /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),

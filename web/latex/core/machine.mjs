@@ -960,6 +960,10 @@ export class Machine {
     // standard counters (LaTeX's article)
     for (const c of ["part", "section", "subsection", "subsubsection", "paragraph", "equation", "figure", "table", "footnote", "page", "enumi", "enumii"]) this.newCounter(c, null);
     this.newCounter("chapter", null);
+    // (and the rest of LaTeX's: \subparagraph's, enumerate's third and fourth levels, and secnumdepth and tocdepth, 3 as in
+    //  article, so \setcounter and \addtocounter reach them)
+    for (const c of ["subparagraph", "enumiii", "enumiv", "secnumdepth", "tocdepth"]) this.newCounter(c, null);
+    for (const c of ["secnumdepth", "tocdepth"]) this.regSet(this.counterReg(c), 3, true);
     { const k = "cl:section"; this.setS(k, meaning("data", { data: ["subsection"] }), true); this.setS("cl:subsection", meaning("data", { data: ["subsubsection"] }), true); }
     this.setS("m:@empty", meaning("macro", { pre: [], delims: [], body: [], long: false, prot: false }), true);
     this.setS("cat:64", CAT.OTHER, true);
@@ -1047,4 +1051,4 @@ const KNOWN_ENVS = new Set(["itemize", "enumerate", "description", "center", "fl
 function roman(n) { if (n <= 0 || n > 100000) return ""; const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; }
 function arrEq(a, b) { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; }
 export function normPath(p) { const out = []; for (const s of p.split("/")) { if (s === "" || s === ".") continue; if (s === "..") { if (!out.length) return "\u0000escape"; out.pop(); } else out.push(s); } return out.join("/"); }
-export { mkChar, isCs, catOf, codeOf, SPACE_TOK };
+export { mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning };

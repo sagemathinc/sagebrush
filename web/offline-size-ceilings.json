@@ -1,5 +1,5 @@
 {
-  "note": "The offline size gate's sw.js ceilings (scripts/offline-size-gate.mjs; daybreak3's rulings on plan-b8-offline §3). The exact base plus B8's growth: raw +32000 (the provisional envelope); gzip-9 of the normalized sw.js (Rule A / V3) the measured landing growth +9462 plus 10% = +10409 (@sagebrush's B8 ruling 2: a raise is the landing + 10%; the provisional +9500 left 5 B, and the base's sw.js grows with each lazy chunk master adds). Raw is exact bytes. gzip-9 is node:zlib gzipSync level 9, under the Node and zlib named here, of sw.js with VERSION's 16 declaration bytes and the DIGESTS sha256 of docs-index-python.json and offline-inventory.json zeroed after authentication (the base predates offline-inventory.json: its spans are VERSION and docs-index-python.json's). Another runtime or method fails closed. Remeasured when the base changes.",
+  "note": "The offline size gate's sw.js ceilings (scripts/offline-size-gate.mjs; daybreak3's rulings on plan-b8-offline §3). The exact base plus B8's growth: raw +32000 (the provisional envelope); gzip-9 of the normalized sw.js (Rule A / V3) the measured landing growth +9462 plus 10% = +10409 (@sagebrush's B8 ruling 2: a raise is the landing + 10%; the provisional +9500 left 5 B, and the base's sw.js grows with each lazy chunk master adds). Raw is exact bytes. gzip-9 is node:zlib gzipSync level 9, under the Node and zlib named here, of sw.js with VERSION's 16 declaration bytes and the DIGESTS sha256 of docs-index-python.json and offline-inventory.json zeroed after authentication (the base predates offline-inventory.json: its spans are VERSION and docs-index-python.json's). Another runtime or method fails closed. Remeasured when the base changes. #565 (sw.js read-stall bound and stalled-key skip): raw +2474 over #560's c18b043b (217002 -> 219476, bun 1.4.4, node v24.21.0, zlib 1.3.2.1-motley-8002e91), swRaw 217839 -> 219600 (124 B over the measured head; daybreak2's approval, the rule's comments kept per @sagebrush); gzip-9 53061 -> 53945, swGzip 54011 unchanged.",
   "base": "9aaa53abb993c1984d4c761bffa98bcf19b6a6d1",
   "toolchain": "node v24.21.0, bun 1.4.4",
   "method": "node:zlib gzipSync level 9",
@@ -10,6 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 217839,
-  "swGzip": 54011
+  "swRaw": 220936,
+  "swGzip": 54356,
+  "transition": "live data step 1 (its own lazy chunk mod-live-data): measured at this branch's merge of master 2f50b30f: sw.js raw 220872, within 220936 (kept); normalized gzip-9 54292, over master's 54283, so swGzip = exact + 64 = 54356 (@sagebrush: a ceiling is renewed only when over)"
 }
