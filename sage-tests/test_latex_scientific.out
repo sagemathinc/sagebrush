@@ -33,3 +33,25 @@ nan | NaN
 123.0 | 123.0
 \left[1.00000000000000 \times 10^{20}, 2.5 \times 10^{-07}\right]
 2.667641891 \times 10^{-7}
++infinity | +\infty
+-infinity | -\infty
++infinity*I | +\inftyi
+-infinity*I | -\inftyi
++infinity + 1.00000000000000*I | +\infty + 1.00000000000000i
+1.00000000000000 + +infinity*I | 1.00000000000000 + +\inftyi
++infinity + +infinity*I | +\infty + +\inftyi
+-infinity - +infinity*I | -\infty - +\inftyi
+NaN | NaN
+NaN*I | NaNi
+NaN + 1.00000000000000e20*I | NaN + 1.00000000000000 \times 10^{20}i
++infinity + 2.00000000000000e-7*I | +\infty + 2.00000000000000 \times 10^{-7}i
+1.00000000000000e20 + +infinity*I | 1.00000000000000 \times 10^{20} + +\inftyi
++infinity | +\infty
+-infinity*I | -\inftyi
++infinity + 2.5000000000000000000000000000e-7*I | +\infty + 2.5000000000000000000000000000 \times 10^{-7}i
++infinity | +infinity
++infinity*I | +infinityi
++infinity + 1e+20*I | +infinity + 1 \times 10^{20}i
++infinity | +infinity
+-infinity | -infinity
+-2.00000000000000*I -2.0000000000000000000000000000*I -0.500000000000000*I -3.00000000000000*I

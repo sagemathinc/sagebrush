@@ -3987,15 +3987,15 @@ class ComplexNumber(complex):
     """
 
     def _latex_(self):
-        """As Sage's latex() of an element of CC: i for I, an exponent as a power of ten.
+        """As Sage's latex() of an element of CC: i for I, an exponent as a power of ten, an infinity \\infty.
 
         EXAMPLES::
 
-            sage: latex(CC(1e20, 2e-7)), latex(CC(2, 0))
-            (1.00000000000000 \\times 10^{20} + 2.00000000000000 \\times 10^{-7}i, 2.00000000000000)
+            sage: latex(CC(1e20, 2e-7)), latex(CC(2, 0)), latex(CC(oo, 1))
+            (1.00000000000000 \\times 10^{20} + 2.00000000000000 \\times 10^{-7}i, 2.00000000000000, +\\infty + 1.00000000000000i)
         """
         import _sage_real
-        return _sage_real._sci_latex(repr(self).replace("*I", "i"))
+        return _sage_real._sci_latex(repr(self).replace("*I", "i")).replace("infinity", "\\infty")
 
     def conjugate(self):
         """The complex conjugate, an element of CC (complex's own gave a
@@ -4042,9 +4042,10 @@ class ComplexNumber(complex):
         re, im = self.real, self.imag
         if im == 0:
             return repr(RN(re))
-        si = repr(RN(abs(im))) + "*I"
         if re == 0:
-            return ("-" if im < 0 else "") + si
+            # (the imaginary part as it prints, its sign with it: -infinity*I, as Sage)
+            return repr(RN(im)) + "*I"
+        si = repr(RN(abs(im))) + "*I"
         return "%s %s %s" % (repr(RN(re)), "-" if im < 0 else "+", si)
 
     __str__ = __repr__

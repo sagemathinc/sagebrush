@@ -3966,15 +3966,17 @@ class ComplexNumberMP:
         re, im = self._re, self._im
         if im.is_zero():
             return repr(re)
-        si = repr(abs(im)) + "*I"
         if re.is_zero():
-            return ("-" if im._m < 0 else "") + si
+            # (the imaginary part as it prints, its sign with it: -infinity*I, as Sage)
+            return repr(im) + "*I"
+        si = repr(abs(im)) + "*I"
         return "%r %s %s" % (re, "-" if im._m < 0 else "+", si)
 
     __str__ = __repr__
 
     def _latex_(self):
-        return _sci_latex(repr(self).replace("*I", "i"))
+        # (as Sage's ComplexField: its infinities are \infty, unlike RealField's and CDF's +infinity)
+        return _sci_latex(repr(self).replace("*I", "i")).replace("infinity", "\\infty")
 
     def __float__(self):
         # (as Sage: NaN for a NaN real part, the real part for a zero
