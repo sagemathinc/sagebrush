@@ -170,6 +170,12 @@ export class WorkerKernel {
     this.targetSink = () => null;
   }
 
+  /** Hold the current worker's later messages until `p` settles (whatever it settles to), then deliver them in order. */
+  holdMessages(p) {
+    const h = (this.held = (this.held ?? Promise.resolve()).then(() => p).then(() => {}, () => {}));
+    h.then(() => { if (this.held === h) this.held = null; });
+  }
+
   on(event, f) { (this.listeners[event] ??= []).push(f); return () => { this.listeners[event] = this.listeners[event].filter((g) => g !== f); }; }
   emit(event, ...args) { for (const f of this.listeners[event] ?? []) f(...args); }
 
@@ -192,7 +198,7 @@ export class WorkerKernel {
       w.postMessage({ init: { limits: { uncloneable: typeof this.limits } } });
     }
     // (a barrier: every run, interact, question and check waits for onStart,
-    // e.g. the notebook's package set resolved and durably pinned (index.html);
+    // e.g. the notebook's package set resolved, and durable if pinned (index.html);
     // if it fails, what waits is stopped, and the next one starts a new
     // worker: nothing ever runs in one whose start failed, astra's CORR-PR68-3)
     this.startError = null;
@@ -224,7 +230,7 @@ export class WorkerKernel {
       this.modeClaims.clear();
       for (const p of pending) p.stopped(message);
     });
-    w.onmessage = (ev) => {
+    const handle = (ev) => {
       const m = ev.data;
       if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
@@ -311,6 +317,14 @@ export class WorkerKernel {
         else this.interrupted.delete(m.id);
         p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
+    };
+    // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
+    // done is then not settled before, e.g., the package set pin its import made is durable)
+    this.held = null;
+    w.onmessage = (ev) => {
+      if (this.held === null) return handle(ev);
+      const h = (this.held = this.held.then(() => handle(ev)).catch((e) => setTimeout(() => { throw e; })));
+      h.then(() => { if (this.held === h) this.held = null; });
     };
     // (a worker that failed may never answer: what waits on it is told, and a
     // new one starts, rather than waiting forever)

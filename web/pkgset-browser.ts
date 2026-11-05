@@ -25,6 +25,9 @@ function pkgUrl(path: string): string | null {
   return new URL(path, g.__SB_BASE__ ?? self.location.href).href;
 }
 
+/** A set's file that couldn't be fetched now (offline, say, or an HTTP error), not one refused: worth asking again. */
+export class SetUnfetched extends Error {}
+
 // (async: the bytes, at most `max`, as they arrive)
 async function boundedFetch(url: string, max: number, fetchBytes: (url: string) => Promise<ArrayBuffer | Uint8Array>): Promise<Uint8Array> {
   if (g.__SB_BROKERED__) {
@@ -35,7 +38,7 @@ async function boundedFetch(url: string, max: number, fetchBytes: (url: string) 
     return u;
   }
   const r = await fetch(url, { redirect: "error" });
-  if (r.status !== 200) throw new PkgsetError(`${url}: HTTP ${r.status}`);
+  if (r.status !== 200) throw new SetUnfetched(`${url}: HTTP ${r.status}`);
   if (Number(r.headers.get("content-length") ?? 0) > max) throw new PkgsetError(`${url}: over ${max} bytes`);
   const reader = r.body!.getReader();
   const parts: Uint8Array[] = [];
@@ -93,7 +96,13 @@ export async function useSet(S: string, fetchBytes: (url: string) => Promise<Arr
   if (!/^[0-9a-f]{64}$/.test(S)) throw new PkgsetError("a package set id is 64 lowercase hex digits");
   const url = pkgUrl(`pkgset/${S}.json`);
   if (url === null) throw new PkgsetError("package sets are not available in a downloaded file's runner");
-  const index = await boundedFetch(url, PKGSET_LIMITS.indexBytes, fetchBytes);
+  let index: Uint8Array;
+  try {
+    index = await boundedFetch(url, PKGSET_LIMITS.indexBytes, fetchBytes);
+  } catch (e: any) {
+    // (only an index that came and was refused, over its bound, is final; one not fetched is asked for again)
+    throw e instanceof PkgsetError ? e : new SetUnfetched(`${url}: ${String(e?.message ?? e)}`);
+  }
   plan = installPackageSet(S, index, chunk);
   used.add(S);
   onUse?.([...used]);

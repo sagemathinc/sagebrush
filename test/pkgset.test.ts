@@ -215,9 +215,34 @@ test("the grader's admission: measured costs for this build only, summed over th
   assert.match(other.reason, /no measured cost for build fedcba9876543210/);
 });
 
+test("no grading context admits pandas yet: graderAdmission refuses it, itself or as a dependency, within budget and with measured costs", () => {
+  // (plan-pandas r7 §E: until M2's memory gate and LIMIT-PANDAS-M1-1 §E 1b and M1-2 are measured and enforced;
+  // daybreak3's condition for publishing pandas to notebooks, Nov 4)
+  const pd: Pkg = { name: "pandas", modules: ["pandas"], files: { "py/pandas/__init__.py": "X = 1\n" } };
+  const uses: Pkg = { name: "uses", modules: ["uses"], files: { "py/uses.py": "import pandas\n" }, requires: ["@sagebrush/pandas@0.1.0"] };
+  const other: Pkg = { name: "other", modules: ["other"], files: { "py/other.py": "" } };
+  const later: Pkg = { name: "pandas", version: "9.9.9", modules: ["pandas"], files: { "py/pandas/__init__.py": "" } };
+  const s1 = makeSet([pd, uses, other]);
+  const plan = P.admitIndex(s1.S, s1.index, BUILD, reserved);
+  const base = { cpu_ms: 10, peak_mb: 1 };
+  const itself = P.graderAdmission(plan, ["@sagebrush/pandas@0.1.0"], BUILD, base);
+  assert.equal(itself.ok, false);
+  assert.match(itself.reason, /^@sagebrush\/pandas@0\.1\.0 is not admitted for grading yet/);
+  const dep = P.graderAdmission(plan, ["@sagebrush/uses@0.1.0"], BUILD, base);
+  assert.equal(dep.ok, false);
+  assert.match(dep.reason, /^@sagebrush\/pandas@0\.1\.0 is not admitted for grading yet/);
+  assert.equal(P.graderAdmission(plan, ["@sagebrush/other@0.1.0"], BUILD, base).ok, true);
+  // any version: by package name
+  const s2 = makeSet([later]);
+  assert.equal(P.graderAdmission(P.admitIndex(s2.S, s2.index, BUILD, reserved), ["@sagebrush/pandas@9.9.9"], BUILD, base).ok, false);
+  assert.equal(P.gradingExcluded("@sagebrush/pandas@0.1.0") !== null, true);
+  assert.equal(P.gradingExcluded("@sagebrush/pandasx@0.1.0"), null);
+  assert.equal(P.gradingExcluded("@sagebrush/hello@0.1.0"), null);
+});
+
 // A fresh runtime with set `s` installed (chunks served from memory, counting
 // fetches); the output of `code`, or the exception's last line
-function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string, Uint8Array> }, opts: { build?: string; second?: { S: string; index: Uint8Array } } = {}): Promise<string> {
+function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string, Uint8Array> }, opts: { build?: string; second?: { S: string; index: Uint8Array }; grading?: boolean; armThen?: string } = {}): Promise<string> {
   const w = new Worker(
     `
     const { parentPort, workerData } = require("node:worker_threads");
@@ -236,17 +261,27 @@ function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string
         try { c.installPackageSet(workerData.second.S, new Uint8Array(workerData.second.index), () => { throw new Error("no"); }); }
         catch (e) { parentPort.postMessage("second: " + e.message); return; }
       }
+      // (a grading allowance armed: INTR bit 3, as item G sets it)
+      if (workerData.grading) Atomics.or(require(workerData.dist + "/src/runtime/interrupt.js").INTR, 0, 8);
       const path = c.R.importModule("sys").path;
       path.push(c.libDir());
-      const code = "import io as _io, sys as _sys\\n_buf = _sys.stdout = _io.StringIO()\\n" + workerData.code + "\\n_out = _buf.getvalue()\\n";
-      try {
-        parentPort.postMessage(c.execModule(code, "<test>", "__main__")._out);
-      } catch (e) {
-        parentPort.postMessage(c.R.formatException(e).trim().split("\\n").pop());
+      const once = (src) => {
+        try {
+          return c.execModule("import io as _io, sys as _sys\\n_buf = _sys.stdout = _io.StringIO()\\n" + src + "\\n_out = _buf.getvalue()\\n", "<test>", "__main__")._out;
+        } catch (e) {
+          return c.R.formatException(e).trim().split("\\n").pop();
+        }
+      };
+      let out = once(workerData.code);
+      // (armThen: the allowance armed after the code ran, in the same runtime, then this code; the outputs joined by a bar)
+      if (workerData.armThen !== undefined) {
+        Atomics.or(require(workerData.dist + "/src/runtime/interrupt.js").INTR, 0, 8);
+        out += " | " + once(workerData.armThen);
       }
+      parentPort.postMessage(out);
     });
     `,
-    { eval: true, workerData: { dist: DIST, code, S: s.S, index: s.index, chunks: [...s.chunks], build: opts.build, second: opts.second } },
+    { eval: true, workerData: { dist: DIST, code, S: s.S, index: s.index, chunks: [...s.chunks], build: opts.build, second: opts.second, grading: !!opts.grading, armThen: opts.armThen } },
   );
   return new Promise((resolve, reject) => {
     w.once("message", (m) => (w.terminate(), resolve(m)));
@@ -257,6 +292,72 @@ function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string
 test("an optional package imports after sys.path, the library and bundled packages; its submodules too", async () => {
   const s = makeSet([hello]);
   assert.equal(await run("import hello, hello.sub\nprint(hello.GREETING, hello.sub.X, hello.__file__.startswith('/$pyjs/optional/'))", s), "hi 2 True\n");
+});
+
+test("while a grading allowance is armed, pandas doesn't import, itself or through a package that requires it; other packages do, and without the allowance pandas does", async () => {
+  const pd: Pkg = { name: "pandas", modules: ["pandas", "pandas.sub"], files: { "py/pandas/__init__.py": "X = 1\n", "py/pandas/sub.py": "Y = 2\n" } };
+  const uses: Pkg = { name: "uses", modules: ["uses"], files: { "py/uses.py": "import pandas\nZ = pandas.X\n" }, requires: ["@sagebrush/pandas@0.1.0"] };
+  const s = makeSet([pd, uses, hello]);
+  assert.equal(await run("import pandas, uses\nprint(pandas.X, uses.Z)", s), "1 1\n");
+  const refused = /^ImportError: No module named '(pandas|uses)' in a graded run: @sagebrush\/pandas@0\.1\.0 is not admitted for grading yet/;
+  assert.match(await run("import pandas", s, { grading: true }), refused);
+  assert.match(await run("import pandas.sub", s, { grading: true }), refused);
+  assert.match(await run("import uses", s, { grading: true }), refused);
+  assert.match(await run("from pandas import X", s, { grading: true }), refused);
+  assert.equal(await run("import hello\nprint(hello.GREETING)", s, { grading: true }), "hi\n");
+});
+
+test("pandas imported before a grading allowance is armed doesn't import after it: by its name, a submodule, a package that requires it, or another name for the same module (Q7)", async () => {
+  const pd: Pkg = { name: "pandas", modules: ["pandas", "pandas.sub"], files: { "py/pandas/__init__.py": "X = 1\n", "py/pandas/sub.py": "Y = 2\n" } };
+  const uses: Pkg = { name: "uses", modules: ["uses"], files: { "py/uses.py": "import pandas\nZ = pandas.X\n" }, requires: ["@sagebrush/pandas@0.1.0"] };
+  const s = makeSet([pd, uses, hello]);
+  const before = "import pandas, pandas.sub, uses, hello, sys\nsys.modules['alias'] = pandas\nprint(pandas.X, uses.Z)";
+  const refused = (name: string) => new RegExp(`^1 1\\n \\| ImportError: No module named '${name.replace(".", "\\.")}' in a graded run: @sagebrush/pandas@0\\.1\\.0 is not admitted for grading yet`);
+  assert.match(await run(before, s, { armThen: "import pandas" }), refused("pandas"));
+  assert.match(await run(before, s, { armThen: "import pandas.sub" }), refused("pandas.sub"));
+  assert.match(await run(before, s, { armThen: "from pandas import X" }), refused("pandas"));
+  assert.match(await run(before, s, { armThen: "import uses" }), refused("uses"));
+  assert.match(await run(before, s, { armThen: "import alias" }), refused("alias"));
+  // (the controls: another package of the set and a library module, both loaded before, still import)
+  assert.equal(await run(before, s, { armThen: "import hello, json\nprint(hello.GREETING)" }), "1 1\n | hi\n");
+});
+
+test("a module of the set that puts itself in sys.modules under another name and then raises is still the set's: refused under that name once grading is armed (astra's partial-alias case)", async () => {
+  const pd: Pkg = {
+    name: "pandas",
+    modules: ["pandas"],
+    files: { "py/pandas/__init__.py": "import sys\nsys.modules['escaped'] = sys.modules[__name__]\nX = 42\nraise RuntimeError('half made')\n" },
+  };
+  const s = makeSet([pd, hello]);
+  const before = "try:\n    import pandas\nexcept RuntimeError as e:\n    print('raised', e)";
+  // (before arming, the alias is there and imports: the case is real)
+  assert.equal(await run(before + "\nimport escaped\nprint(escaped.X)", s), "raised half made\n42\n");
+  assert.match(await run(before, s, { armThen: "import escaped\nprint(escaped.X)" }), /^raised half made\n \| ImportError: No module named 'escaped' in a graded run: @sagebrush\/pandas@0\.1\.0 is not admitted for grading yet/);
+});
+
+test("pandas's mounted files are refused under a fresh name once a grading allowance is armed, its directory on sys.path: a submodule loaded before and one never loaded, before any of it runs (Q7 residual, astra)", async () => {
+  const pd: Pkg = {
+    name: "pandas",
+    modules: ["pandas", "pandas.sub", "pandas.side", "pandas.core"],
+    files: {
+      "py/pandas/__init__.py": "X = 1\n",
+      "py/pandas/sub.py": "Y = 2\n",
+      "py/pandas/side.py": "import builtins\nbuiltins.SIDE = 1\nZ = 3\n",
+      "py/pandas/core/__init__.py": "import builtins\nbuiltins.SIDE = 1\nW = 4\n",
+    },
+  };
+  const s = makeSet([pd, hello]);
+  const before = "import pandas, pandas.sub, sys\nsys.path.insert(0, pandas.__path__[0])\nprint(pandas.X)";
+  const tryImport = (name: string) =>
+    `import builtins\ntry:\n    import ${name}\n    print('imported', ${name}.__name__)\nexcept ImportError as e:\n    print('refused', str(e).startswith("No module named '${name}' in a graded run: @sagebrush/pandas@0.1.0"))\nprint('ran', hasattr(builtins, 'SIDE'))`;
+  // (the alias path works before arming: the bypass is real, not a missing file)
+  assert.equal(await run(before + "\nimport sub, side, core\nprint(sub.Y, side.Z, core.W)", s), "1\n2 3 4\n");
+  assert.equal(await run(before, s, { armThen: tryImport("sub") }), "1\n | refused True\nran False\n");
+  assert.equal(await run(before, s, { armThen: tryImport("side") }), "1\n | refused True\nran False\n");
+  // (a subpackage's __init__.py under a fresh name, never loaded: grader's Q7b)
+  assert.equal(await run(before, s, { armThen: tryImport("core") }), "1\n | refused True\nran False\n");
+  // (the control: an allowed package's mounted file under a fresh name still imports while grading)
+  assert.equal(await run("import hello, sys\nsys.path.insert(0, hello.__path__[0])\nprint(1)", s, { armThen: "import sub\nprint(sub.X)" }), "1\n | 2\n");
 });
 
 test("dependencies mount first; a module the set doesn't have is not found", async () => {

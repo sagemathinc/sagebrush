@@ -786,12 +786,15 @@ class RefusingWorker {
   terminate() {}
 }
 let kernel = null, journal = null; // the current notebook's
-// A notebook's optional package set (plan-modular-packages-r4 §4.4): the one
-// it pins (metadata pkgset), or else the site's latest (pkgset/latest.json,
-// asked once a page), which is then pinned in the notebook and saved before
-// any of its code runs, so it keeps running with the same packages whatever
-// is published later.  Without a published set there is nothing to pin, and
-// nothing changes.  A pin that isn't a set id is refused, never guessed.
+// A notebook's optional package set (plan-modular-packages-r4 §4.4, amended
+// Nov 4): the one it pins (metadata pkgset), or else the site's latest
+// (pkgset/latest.json, asked once a page), given to the interpreter unpinned.
+// The set is pinned at first use of the set, to the same S that import used
+// (pinUsedPkgset, when the interpreter says {pkgsetUsed}), so opening or
+// running a notebook that never imports an optional package never changes it,
+// and one that does keeps running with the same packages whatever is published
+// later.  Without a published set nothing changes.  A pin that isn't a set id
+// is refused, never guessed.
 // (For the notebook `owner`, which must stay shown: one left meanwhile
 // rejects, and its interpreter holds every run until it is shown again.  A
 // pin saved from elsewhere meanwhile that won the merge is the one used:
@@ -801,11 +804,15 @@ let kernel = null, journal = null; // the current notebook's
 // then rechecks the owner and the winning pin; a failed save rejects, and is
 // never taken as success because the metadata holds the pin.)
 let latestPkgset; // undefined: not asked yet; else a promise of the id or null
+// (the notebook being attached to `nb`, and when it is: its interpreter starts before its document is there,
+// openNotebook's useKernel, so what reads its metadata waits for it first, never the previous document's)
+let attaching = { id: null, done: Promise.resolve() };
 async function notebookPkgset(owner) {
   const shown = () => {
     if (current.id !== owner) throw new Error("its notebook was left before its package set was pinned");
   };
   for (let round = 0; round < 4; round++) {
+    if (attaching.id === owner) await attaching.done;
     shown();
     const pin = nb.meta.pkgset;
     if (pin !== undefined) {
@@ -828,10 +835,30 @@ async function notebookPkgset(owner) {
     const S = await latestPkgset;
     shown();
     if (!S) return null;
-    if (nb.meta.pkgset === undefined) nb.setMeta({ pkgset: S });
-    // (the next round waits for it to be durable, and returns the winner)
+    // (unpinned: pinned at its first use; a pin that came meanwhile, another tab's, is the next round's to use)
+    if (nb.meta.pkgset === undefined) return S;
   }
   throw new Error("this notebook's package set pin kept changing");
+}
+// The set given unpinned to an interpreter, at its first use there: pinned
+// in the notebook (if nothing else was pinned meanwhile) and durable before
+// the interpreter's later messages, its run's end among them, are delivered
+// (WorkerKernel.holdMessages).  The notebook left meanwhile: nothing is pinned
+// into another; its next start resolves again.
+async function pinUsedPkgset(owner, S) {
+  if (attaching.id === owner) await attaching.done;
+  if (current.id !== owner) return;
+  const pin = nb.meta.pkgset;
+  if (pin === undefined) nb.setMeta({ pkgset: S });
+  else if (pin !== S) {
+    statusEl.textContent = "this notebook's package set was pinned in another tab meanwhile: restart to use it";
+    return;
+  }
+  try {
+    await nb.saved();
+  } catch (e) {
+    statusEl.textContent = `the notebook's package set pin isn't saved yet: ${String(e?.message ?? e).slice(0, 200)}`;
+  }
 }
 function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
@@ -843,6 +870,7 @@ function makeKernel(owner) {
   // when it arrives, so an earlier worker's late message is never the current one's, astra's NM-ADMIT-1 r2)
   let gen = 0;
   const gens = new WeakMap(); // worker -> its generation
+  const unpinned = new WeakMap(); // worker -> the package set it was given unpinned, until its first use
   const authority = (w) => { const g = gens.get(w); return () => owner === null || (g !== undefined && perms.may(owner, "files") && kernels.get(owner)?.kernel === k && k.worker === w && gen === g); };
   const k = new WorkerKernel({
     createWorker: () => {
@@ -865,10 +893,12 @@ function makeKernel(owner) {
         const at = await ws.pathOf("notebook", owner).catch(() => undefined);
         if (at) w.postMessage({ startDir: at.slice(0, at.lastIndexOf("/")) || "/" });
       }
-      // the notebook's optional package set, pinned, before any code (plan-modular-packages-r4 §4.4;
-      // the kernel holds every run until this is done); a replayed session's is the one it recorded
+      // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4; the kernel holds
+      // every run until this is done): its pin, or the latest unpinned, pinned at its first use (onMessage's
+      // pkgsetUsed); a replayed session's is the one it recorded
       const replayed = j?.replayPkgset();
       const S = replayed !== undefined ? replayed : owner !== null ? await notebookPkgset(owner) : null;
+      if (S && replayed === undefined && owner !== null && current.id === owner && nb.meta.pkgset === undefined) unpinned.set(w, S);
       if (S) w.postMessage({ pkgset: S });
       j?.pkgsetSent(S);
       const old = await j?.replayFiles();
@@ -878,6 +908,17 @@ function makeKernel(owner) {
       await j?.filesSent([...diskFiles, ...(sent ?? [])]);
     },
     onMessage: (m, sender) => {
+      // (the first use of the set this worker was given unpinned: pinned now, that same set, and durable before its
+      // run ends; from another worker, or naming any other set, it pins nothing: the interpreter can only ask for
+      // the set this page chose for it)
+      if (m.pkgsetUsed !== undefined) {
+        const S = unpinned.get(sender);
+        if (sender === k.worker && S !== undefined && m.pkgsetUsed === S) {
+          unpinned.delete(sender);
+          k.holdMessages(pinUsedPkgset(owner, S));
+        }
+        return true;
+      }
       // (a change the interpreter refused: the bar, for the document shown)
       if (m.fsRefused !== undefined) { if (owner !== null && owner === current.id) filesBar(true); return true; }
       if (m.fsChanged === undefined) return false;
@@ -1718,7 +1759,9 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   filesShown();
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
-  const doc = await nb.attach(store);
+  const attachP = nb.attach(store);
+  attaching = { id, done: attachP.then(() => {}, () => {}) };
+  const doc = await attachP;
   attachSeq++;
   if (arrivalWait && arrivalWait.id !== id) {
     if (statusEl.textContent === arrivalWait.said) statusEl.textContent = "";
