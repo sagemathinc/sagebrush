@@ -466,7 +466,7 @@ def polyder_(nargout, a, b=None):
     """polyder(p); polyder(a, b): the derivative of a*b; [q, d] = polyder(b, a): of b/a"""
     A = _poly_row(a)
     if b is None:
-        return _row_value(_trim(_deriv(A)))
+        return _m._finish(_trim(_deriv(A)).reshape((-1, 1)), _m._float_class(a))
     B = _poly_row(b)
     if nargout < 2:
         # (the product a*b: a' b + a b')
@@ -492,7 +492,7 @@ def polyint_(p, k=0.0):
     r = np.zeros(n + 1, dtype=c.dtype)
     r[:n] = c / np.arange(n, 0, -1)
     r[n] = _scalar(k) if not (isinstance(k, complex)) else k
-    return _row_value(r)
+    return _m._finish(r.reshape((-1, 1)), _m._float_class(p, k))
 
 
 @_bs("polyvalm")

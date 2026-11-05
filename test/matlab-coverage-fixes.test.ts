@@ -653,3 +653,15 @@ test("nonzeros retains sparse logical values in a full independent column", () =
     "logical", "[2 1]", "[1;1]", "0", "2", "logical", "1", "double", "[3;2]", "logical", "[1;1]",
   ]);
 });
+
+// Output-class pins from MATLAB R2026b Update 1 (26.2.0.3433840), run o6.
+// Only single-polynomial differentiation is covered; the product and quotient
+// forms retain their existing algorithm.
+test("single-polynomial differentiation and integration retain single outputs", () => {
+  const out = run([
+    "A = polyder(single([1 2 3])); disp(class(A)); disp(mat2str(A));",
+    "A = polyint(single([1 2])); disp(class(A)); disp(mat2str(A));",
+    "disp(class(polyder([1 2 3]))); disp(class(polyint([1 2])));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), ["single", "[2 2]", "single", "[0.5 2 0]", "double", "double"]);
+});
