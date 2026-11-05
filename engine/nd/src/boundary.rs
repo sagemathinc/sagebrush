@@ -180,6 +180,53 @@ pub fn check_solve(desc: u64, d: &[u32; SOLVE_DESC_WORDS], l: &Facts) -> Option<
     Some(SolveJob { a: u(a)?, b: u(b)?, ipiv: u(ipiv)?, work: u(work)?, report: u(report)?, n: nu, nrhs: ru, lda: ldau, ldb: ldbu, work_len: wu, mode })
 }
 
+/// The Cholesky descriptor (`nd_potrf`), u32s at `desc` (4-aligned): [a, work, report, n, lda, work_len,
+/// arena_lo, arena_hi] (byte addresses; A n x n with leading dimension lda, f64; work work_len f64s; report
+/// [`POTRF_REPORT_WORDS`] u32s).
+pub const POTRF_DESC_WORDS: usize = 8;
+/// The Cholesky report: [status, first column whose pivot is not positive (1-based; 0 if none), kernel name
+/// address, kernel name length].
+pub const POTRF_REPORT_WORDS: usize = 4;
+
+/// A Cholesky factorization that passed [`check_potrf`]: byte addresses and sizes.
+pub struct PotrfJob {
+    pub a: usize,
+    pub work: usize,
+    pub report: usize,
+    pub n: usize,
+    pub lda: usize,
+    pub work_len: usize,
+}
+
+/// Every boundary rule for a Cholesky factorization, as [`check_solve`]'s for its three regions (A, work,
+/// report): each in the arena, aligned to its element, above the floor, within memory, at most `max_len`
+/// bytes and pairwise disjoint; the descriptor outside the arena and the caller's frame below it; lda >=
+/// max(n, 1); work at least `potrf_work_len(n)`; every size computed without overflow.
+pub fn check_potrf(desc: u64, d: &[u32; POTRF_DESC_WORDS], l: &Facts) -> Option<PotrfJob> {
+    let rd = desc_region_of(desc, POTRF_DESC_WORDS, l)?;
+    let [a, work, report, n, lda, work_len, lo, hi] = d.map(u64::from);
+    let u = |x: u64| usize::try_from(x).ok();
+    let (nu, ldau, wu) = (u(n)?, u(lda)?, u(work_len)?);
+    if [a, work].iter().any(|x| x % 8 != 0) || report % 4 != 0 {
+        return None;
+    }
+    if wu < crate::chol::potrf_work_len(nu)? {
+        return None;
+    }
+    let arena = span(lo, hi.checked_sub(lo).filter(|&len| len > 0)?, l, l.mem)?;
+    let elems = crate::gemm::span(nu, nu, ldau).and_then(|e| (e as u64).checked_mul(8))?;
+    let regions = [region(a, elems, l)?, region(work, work_len.checked_mul(8)?, l)?, region(report, (POTRF_REPORT_WORDS * 4) as u64, l)?];
+    if overlap(rd, arena) || l.frame >= arena.0 {
+        return None;
+    }
+    for (i, r) in regions.iter().enumerate() {
+        if !within(*r, arena) || regions[i + 1..].iter().any(|q| overlap(*r, *q)) {
+            return None;
+        }
+    }
+    Some(PotrfJob { a: u(a)?, work: u(work)?, report: u(report)?, n: nu, lda: ldau, work_len: wu })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +322,70 @@ mod tests {
         e[6] = 0;
         e[9] = crate::solve::solve_work_len(crate::solve::Mode::Matlab, 0, 0).unwrap() as u32;
         assert!(check_solve(DESC, &e, &L).is_some());
+    }
+
+    /// A good Cholesky layout: n = 10, lda = 12, all in the arena from LO.
+    fn good_potrf() -> [u32; POTRF_DESC_WORDS] {
+        let (n, lda) = (10u64, 12u64);
+        let wl = crate::chol::potrf_work_len(n as usize).unwrap() as u64;
+        let a = LO;
+        let work = a + 8 * (lda * (n - 1) + n);
+        let report = work + 8 * wl;
+        let hi = report + 4 * POTRF_REPORT_WORDS as u64;
+        [a, work, report, n, lda, wl, LO, hi].map(|x| x as u32)
+    }
+
+    #[test]
+    fn potrf_layouts() {
+        let g = good_potrf();
+        assert!(check_potrf(DESC, &g, &L).is_some());
+        let refused = |what: &str, i: usize, v: u32| {
+            let mut d = g;
+            d[i] = v;
+            assert!(check_potrf(DESC, &d, &L).is_none(), "{what}");
+        };
+        // (alignment, null, floor)
+        refused("A misaligned", 0, g[0] + 4);
+        refused("work misaligned", 1, g[1] + 4);
+        refused("report misaligned", 2, g[2] + 2);
+        refused("A at 0", 0, 0);
+        refused("work at 0", 1, 0);
+        refused("report below the floor", 2, 64);
+        // (the layout, the work)
+        refused("lda < n", 4, 9);
+        refused("lda 0", 4, 0);
+        refused("work one short", 5, g[5] - 1);
+        refused("n overflowing", 3, u32::MAX);
+        // (the arena, the descriptor, the frame)
+        refused("report past the arena", 7, g[7] - 4);
+        refused("A before the arena", 6, g[0] + 8);
+        refused("an empty arena", 7, g[6]);
+        for (i, what) in [(0usize, "A"), (1, "work"), (2, "report")] {
+            let mut d = g;
+            d[i] = (g[7] + 64 + 7) / 8 * 8;
+            assert!(check_potrf(DESC, &d, &L).is_none(), "{what} outside the arena");
+            d[7] = d[i] + (16 << 20);
+            assert!(check_potrf(DESC, &d, &L).is_some(), "{what}: the control, inside the extended arena");
+        }
+        assert!(check_potrf(g[0] as u64 + 8, &g, &L).is_none(), "the descriptor on A");
+        assert!(check_potrf(0, &g, &L).is_none(), "the descriptor at 0");
+        assert!(check_potrf(DESC + 2, &g, &L).is_none(), "the descriptor misaligned");
+        assert!(check_potrf(DESC, &g, &Facts { frame: LO + 64, ..L }).is_none(), "the frame in the arena");
+        // (each pair of the three regions, overlapping by placing one on the other)
+        for i in 0..3 {
+            for j in 0..3 {
+                if i != j {
+                    let mut d = g;
+                    d[i] = g[j];
+                    assert!(check_potrf(DESC, &d, &L).is_none(), "region {i} placed on region {j}");
+                }
+            }
+        }
+        // (an empty matrix: n = 0, nothing to place but the work's scratch and the report)
+        let mut e = g;
+        e[3] = 0;
+        e[5] = crate::chol::potrf_work_len(0).unwrap() as u32;
+        assert!(check_potrf(DESC, &e, &L).is_some());
     }
 
     #[test]
