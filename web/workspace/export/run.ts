@@ -71,6 +71,8 @@ type TestHooks = {
   onPlan?(plan: Plan): Promise<void> | void;
   /** preflight about to stream a document to measure it; write about to write a member */
   preflightMember?(path: string): Promise<void> | void;
+  /** (tests) after preflight's name check, before its measuring pass: an entry made here is one that appears mid-export */
+  afterNameCheck?(): Promise<void> | void;
   onMember?(path: string): Promise<void> | void;
   /** the tree check, after its first page of ops (a test trims the log there) */
   duringTreeScan?(): Promise<void> | void;
@@ -352,7 +354,7 @@ export const NO_OPFS_WHY = "This workspace is too large to export in this browse
  * owns (created, and removed on every exit, by openExport: astra's obligations), opened here.  `opfs`: false when the
  * spools are Blob parts, which then count, the records included, toward CAPS.spoolBlob.
  */
-export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean): Promise<Plan> {
+export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean, meta: Spool): Promise<Plan> {
   const t0 = performance.now();
   resetCounts();
   rowStats.rowBytes = 0;
@@ -368,18 +370,26 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
   let lastPre = 0;
   const here: { ids?: Promise<Set<string> | null> } = {};
   // (every member's name first, from the entries' metadata alone, files' and folders' (EXPORT-ZIPNAME-1, astra): one
-  // unsafe name refuses the export before any body is read, the last entry's too; a few kept to say, the rest counted)
+  // unsafe name refuses the export before any body is read, the last entry's too; a few kept to say, the rest counted.
+  // The entries checked are the entries measured (daybreak3's TOCTOU-1): this one enumeration writes each to `meta`, a
+  // spool as bounded as the others, and the pass below reads that spool, never the live workspace again)
   {
     const bad: string[] = [];
     let count = 0;
+    await meta.open(false);
     for await (const page of entries(w)) for (const e of page) {
       stopIf(signal);
       if (unsafeMember(zipName(e), e.kind === "folder") && ++count <= 5) bad.push(e.path);
+      const line = enc.encode(JSON.stringify(e, metaOut) + "\n");
+      if (line.length > SLICE) throw new ExportStopped(`an entry's record is too long to export: ${e.path.slice(0, 80)}…`);
+      { const p = meta.put(line, line.length); if (p) await p; }
+      if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
     }
     if (count) throw new ExportStopped(unsafeNamesWhy(bad, count), true);
   }
-  for await (const page of entries(w)) {
-    for (const e of page) {
+  await T().afterNameCheck?.();
+  for await (const e of metaEntries(meta)) {
+    {
       stopIf(signal);
       { const y = breathe(); if (y) await y; }
       const name = utf8Len(e.path) + 6 + (e.kind === "folder" ? 1 : 0);
@@ -395,7 +405,7 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
         // (P-9: a folder's captured is its observation, here)
         const p = putRow(rows, e, Date.now(), rowStats);
         if (p) await p;
-        if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+        if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
         continue;
       }
       let size: number;
@@ -420,11 +430,12 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
       plan.bytes += size;
       plan.bound += deflateBound(size);
       { const p = putRow(rows, e, 0, rowStats); if (p) await p; }
-      if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+      if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
       if (performance.now() - lastPre > 100) { lastPre = performance.now(); progress({ phase: "preflight", files: plan.files, of: 0, bytes: plan.bytes, total: 0 }); }
       if (plan.bytes > cap("total")) throw new ExportStopped(`the files come to more than ${cap("total") / 2 ** 30} GiB, more than an import takes`);
     }
   }
+  await meta.remove();
   // (the records written out, every slice back: an append's failure is seen here, in preflight)
   await rows.settle();
   // (the manifest: its entries (manSpool) between its head and tail)
@@ -449,7 +460,22 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
 /** The rows spool's record bytes, counted as they are written (the framing's check: no padding). */
 const rowStats = { rowBytes: 0 };
 /** Without OPFS, every spool is held in memory: the spools' bounds and the records so far, past CAPS.spoolBlob (P-8). */
-const blobSpoolsOver = (plan: Plan, rows: Spool) => plan.cdSpool + plan.manSpool + plan.capSpool + rows.size > cap("spoolBlob");
+const blobSpoolsOver = (plan: Plan, rows: Spool, meta = 0) => plan.cdSpool + plan.manSpool + plan.capSpool + rows.size + meta > cap("spoolBlob");
+/** The entries' metadata as preflight's name check saw them (its `meta` spool, JSON lines): numbers JSON can't hold
+ * (NaN, ±Infinity, -0, which a record's times may be) kept as {"\u0000n": text} and restored, so a record is the same
+ * after the spool as before it */
+const metaOut = (_k: string, v: unknown) => (typeof v === "number" && (!Number.isFinite(v) || Object.is(v, -0)) ? { "\u0000n": Object.is(v, -0) ? "-0" : String(v) } : v);
+const metaIn = (_k: string, v: any) => (v && typeof v === "object" && typeof v["\u0000n"] === "string" && Object.keys(v).length === 1 ? Number(v["\u0000n"]) : v);
+async function* metaEntries(meta: Spool): AsyncGenerator<Entry> {
+  const dec = new TextDecoder();
+  let carry = "";
+  for await (const chunk of meta.replay()) {
+    const lines = (carry + dec.decode(chunk, { stream: true })).split("\n");
+    carry = lines.pop() ?? "";
+    for (const l of lines) if (l) yield JSON.parse(l, metaIn) as Entry;
+  }
+  if (carry + dec.decode()) cutShort();
+}
 /** The manifest's head and tail around its entries, at their widest. */
 const MANIFEST_ENDS = 512;
 

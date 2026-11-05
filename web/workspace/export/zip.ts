@@ -206,8 +206,9 @@ export class Spool {
   get buffered() { return this.a?.used ?? 0; }
   /** `signal`: the export's Cancel, after which nothing more is handed to the worker */
   constructor(private name: string, readonly wk: ExportWorker | null, private cap: number, readonly segmented = false, private signal?: AbortSignal) {}
-  async open() {
-    const fail = (globalThis as any).__SB_EXPORT_TEST__?.failOpen;
+  /** (`failable`: whether the tests' failOpen applies, which names the writing phase's spools; preflight's own isn't one) */
+  async open(failable = true) {
+    const fail = failable ? (globalThis as any).__SB_EXPORT_TEST__?.failOpen : undefined;
     if (this.wk) await this.wk.ask("open", { name: this.name, fail: fail === (this.segmented ? "rows" : "spool") ? "truncate" : undefined });
     // (O-2: the rows spool's open failing after its file exists, as a late failure or a Cancel would leave it: its
     // owner must remove it)

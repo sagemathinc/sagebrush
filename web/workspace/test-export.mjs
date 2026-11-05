@@ -521,6 +521,16 @@ try {
     const reads = await ev(`window.__bodyReads`);
     check(listed && !!r.stopped && /2 files' names can't go safely into a \.zip/.test(r.stopped) && r.stopped.includes("bad:dir") && r.stopped.includes("zz/..\\..\\outside.txt") && /Rename them, then export again/.test(r.stopped), "unsafe names (a backslash parent, last in path order; a folder's colon): the export refuses, naming both: " + (r.stopped ?? "not stopped").slice(-400));
     check(reads === 0 && !(await ev(`!!window.__exp`)), "…before any body is read (" + reads + " reads), and nothing is handed over");
+    // (daybreak3's and astra's TOCTOU-1: an entry made after preflight's name check, as a sync or another tab could, an
+    // unsafe notebook last in path order: the measuring pass reads the checked entries' spool, never the live workspace,
+    // so it is never measured; the tree check at the end stops the export, and nothing is handed over)
+    await ev(`(async () => { await ${W}.rename("/zz/..\\\\..\\\\outside.txt", "/zz/early.txt"); await ${W}.rename("/bad:dir", "/bad-early"); return 1; })()`);
+    await hooks(`afterNameCheck: async () => { await window.sagebrush.workspace.create("/zzz/late:nb.ipynb", { content: ${nb("late")} }); }, preflightMember: (p) => { if (p === "/zzz/late:nb.ipynb") window.__lateMeasured = 1; }, beforeCapture: (p) => { if (p === "/zzz/late:nb.ipynb") window.__lateMeasured = 1; }`);
+    await ev(`(() => { delete window.__exp; delete window.__lateMeasured; return 1; })()`);
+    const late = await exportOnce(join(out, "zipnames-late.zip"));
+    const lateMeasured = await ev(`!!window.__lateMeasured`);
+    check(!!late.stopped && /zzz: \"mkdir\" while exporting/.test(late.stopped) && !lateMeasured && !(await ev(`!!window.__exp`)), "an unsafe entry made after the name check (TOCTOU-1): never measured or read, the export stopped by the tree check, nothing handed over: " + JSON.stringify({ lateMeasured }) + " " + (late.stopped ?? "not stopped").slice(-300));
+    await ev(`(async () => { await ${W}.remove("/zzz/late:nb.ipynb").catch(() => {}); await ${W}.rename("/zz/early.txt", "/zz/..\\\\..\\\\outside.txt"); await ${W}.rename("/bad-early", "/bad:dir"); return 1; })()`);
     // (renamed, the same workspace exports, the nested names as they are)
     await ev(`(async () => { await ${W}.rename("/zz/..\\\\..\\\\outside.txt", "/zz/outside.txt"); await ${W}.rename("/bad:dir", "/bad-dir"); return 1; })()`);
     await hooks();
@@ -1202,7 +1212,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       const bytes = (s) => Buffer.byteLength(s);
       const cap13 = 1761900000000;
       // (manifest.json's own central record, 46 + 12 + 13, in the index's bound since #545)
-      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
+      // (and preflight's spool of the entries its name check saw, held until its measuring pass ends: each entry's record
+      // as JSON and a newline, EXPORT-ZIPNAME-1's TOCTOU-1)
+      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length) + bytes(JSON.stringify(e)) + 1, 0);
       await putAll([...saved.filter(keep), ...P8]);
       await reload();
       await only(P8);

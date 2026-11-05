@@ -38,6 +38,11 @@ for (const [name, folder] of allowed) {
   const b = enc.encode(name);
   ok(unsafeMember(name, folder) === null && unsafeMemberBytes(b, b.length, folder) === null, `allowed${folder ? " (folder)" : ""}: ${J(name)}`);
 }
+// (Z12: a folder's name without its "/" is refused as such)
+{
+  const b = enc.encode("files/a");
+  ok(unsafeMemberBytes(b, b.length, true) === "a folder's name without its /", "a folder's name without its / is refused as such: " + unsafeMemberBytes(b, b.length, true));
+}
 // (the bytes route reads only b[0, n): a safe name in a longer buffer, as the writer's name buffer is)
 {
   const buf = new Uint8Array(64), n = enc.encodeInto("files/ok.txt", buf).written;
