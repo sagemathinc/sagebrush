@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "QRPM 1b, pandas on demand for notebooks. (1) No grading context admits pandas: pkgset.ts gradingExcluded, refused by graderAdmission and, while grading is armed, before any optional-set file runs (compile.ts mountOptional, execFile) and at a cached import (modules.ts loader.graded), Q7. (2) The runner's broker fetches the pinned index by exact URL, checks its SHA-256, then only the chunks it pins (one checked-index path with the zone data); before, the runner refused every set. (3) sw.js forwards the broker's omit/no-referrer on package fetches (G5, G8). (4) An index not fetched (offline) is asked for again at the next run (SetUnfetched). (5) The set is pinned at its first use, not on open (index.html pinUsedPkgset, worker-kernel holdMessages). Pandas is a site file. Measured (bun 1.4.4, size-measure.mjs --record) on a probe merge onto master 4e43dee0: worker +1109, notebook +737 (ceiling 237,670), pyjs.cjs +3361; no other row moves. Markers: about 30 B margin.",
+ "bytes": {
+  "cli/pyjs.cjs": 3390,
+  "engine/sagebrush-notebook.js": 770,
+  "engine/sagebrush-worker.js": 1140
+ }
+}
