@@ -5737,7 +5737,7 @@ def mean_(x, *args):
             ok = ~np.isnan(A)
             return np.sum(np.where(ok, A, 0), axis=ax) / np.sum(ok, axis=ax)
         return np.sum(A, axis=ax) / A.shape[ax]
-    return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
+    return _reduce(x, args, m, "mean", empty_value=_math.nan, out_cls="single" if cls == "single" else "double")
 
 
 def _csort(A, ax):
@@ -5800,7 +5800,7 @@ def median_(x, *args):
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
     if cls == "logical":
         R = _arr(r)
         if not np.all((R == 0) | (R == 1)):
@@ -5902,7 +5902,7 @@ def _var_impl(x, args, sq):
         den = n - 1 if (w == 0 and n > 1) else n
         r = np.sum(dev, axis=ax) / den
         return np.sqrt(r) if sq else r
-    return _reduce(x, rest, v, "var", out_cls="double")
+    return _reduce(x, rest, v, "var", empty_value=_math.nan, out_cls="double")
 
 
 @_bs("var")
