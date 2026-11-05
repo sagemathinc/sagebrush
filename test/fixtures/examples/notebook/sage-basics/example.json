@@ -1,0 +1,1 @@
+{"title": "Sage basics", "summary": "Factoring an integer and a polynomial in Sage mode.", "tags": ["number theory"], "level": "intro", "main": "main.ipynb", "files": ["main.ipynb"], "author": "Sagebrush", "license": "MIT", "mode": "sage", "expect": {"0": "641 * 6700417"}}

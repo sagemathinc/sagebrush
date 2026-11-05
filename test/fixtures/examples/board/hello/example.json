@@ -1,0 +1,1 @@
+{"title": "Hello, board", "summary": "The gallery's first board: notes, math and a code item that runs.", "tags": ["basics"], "level": "intro", "main": "main.board.json", "files": ["main.board.json"], "author": "Sagebrush", "license": "MIT", "modes": ["python"]}

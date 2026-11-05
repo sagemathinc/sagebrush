@@ -1,0 +1,1 @@
+{"title": "Hello, Python", "summary": "Exact integers, a loop and a plot: what a fixture notebook runs.", "tags": ["basics", "plots"], "level": "intro", "main": "main.ipynb", "files": ["main.ipynb"], "author": "Sagebrush", "license": "MIT", "mode": "python", "expect": {"0": "1267650600228229401496703205376"}}
