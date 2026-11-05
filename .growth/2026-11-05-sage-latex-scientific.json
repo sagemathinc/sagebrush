@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Sage latex() of reals and complexes in scientific notation as Sage writes it, the exponent as a power of ten (#707, from the explainer pilot's run 017): one shared helper in _sage_real used by RR/RealField, ComplexField, CC, RDF, CDF and Python floats in latex(), plus their examples. Sage library source in the sage group's .src/.pre; measured exactly with bun 1.4.4 and node 24.21.0 against master 8ac67182: sage.pre +5399, sage.src +1775.",
+ "bytes": {
+  "engine/lib/sage.pre": 5399,
+  "engine/lib/sage.src": 1775
+ }
+}
