@@ -6,7 +6,10 @@
 //      its Run outputs [0 1 2] and fetches neither again;
 //   2. the copy's chunk is never fetched ahead, not even at a focus of a cell's editor; the first edit fetches it;
 //   3. the plain chapter: nothing (outcome "nothing");
-//   4. the tests' switch (window.__sbPreloadOff): nothing at idle, nothing at a focus.
+//   4. the tests' switch (window.__sbPreloadOff): nothing at idle, nothing at a focus;
+//   5. import lines only in a markdown cell: nothing (outcome "nothing");
+//   6. a Magma chapter whose code says `import numpy`: exactly its mode's groups' files (Magma's), not sci;
+//   7. a Run asked before the idle preload starts: it stops it (outcome "stopped", nothing fetched by it).
 //   bun web/build.ts && node web/share/test-share-preload.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -56,13 +59,18 @@ for (; end < html.length; end++) { if (html[end] === "{") depth++; else if (html
 const TABLE = new Function(`return (${html.slice(at, end + 1)})`)();
 const SCI = [`/lib/sci.src.${TABLE.groups.sci[1]}.json`, ...(TABLE.groups.sci[2] ? [`/lib/sci.pre.${TABLE.groups.sci[2]}.json`] : [])];
 const COPY = "/sagebrush-share-copy.js";
-const nbJson = (code) => J({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3", display_name: "Python 3", language: "python" } }, cells: [{ cell_type: "code", id: "c1", metadata: {}, source: code, outputs: [], execution_count: null }] });
-const FILES = { "np.ipynb": nbJson("import numpy as np\nprint(np.arange(3))"), "plain.ipynb": nbJson("print('plain')"), "data/points.csv": "x,y\n1,2\n" };
+const PY = { name: "python3", display_name: "Python 3", language: "python" }, MAGMA = { name: "magma", display_name: "Magma", language: "magma" };
+// (a chapter: its cells, code unless given as { md }, and its kernel)
+const nbJson = (cells, ks = PY) => J({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: ks }, cells: [].concat(cells).map((c, i) => (typeof c === "object" ? { cell_type: "markdown", id: "m" + i, metadata: {}, source: c.md } : { cell_type: "code", id: "c" + i, metadata: {}, source: c, outputs: [], execution_count: null })) });
+const FILES = { "np.ipynb": nbJson("import numpy as np\nprint(np.arange(3))"), "plain.ipynb": nbJson("print('plain')"), "md.ipynb": nbJson([{ md: "import numpy" }, "print('md')"]), "magma.ipynb": nbJson("import numpy", MAGMA), "data/points.csv": "x,y\n1,2\n" };
+const filesOf = (g) => [`/lib/${g}.src.${TABLE.groups[g][1]}.json`, ...(TABLE.groups[g][2] ? [`/lib/${g}.pre.${TABLE.groups[g][2]}.json`] : [])];
+const MAGMA_FILES = (TABLE.modes.magma ?? []).flatMap(filesOf);
 const lib = () => requests.filter((p) => p.startsWith("/lib/"));
 const settle = () => until("window.shared?.preload?.outcome !== null && window.shared?.preload?.outcome !== undefined", 30000).then(() => sleep(1500));
 
 try {
   ok(SCI.length === 2, "the build's table: sci's two files " + J(SCI));
+  ok(MAGMA_FILES.length > 0 && !MAGMA_FILES.some((f) => SCI.includes(f)), "…and Magma's mode's groups, without sci: " + J(MAGMA_FILES));
   await send("Page.enable");
   await send("Network.enable");
   // (a headless page has no focus of its own: emulated, so a cell's editor gets its focus events)
@@ -136,6 +144,37 @@ try {
   await sleep(2000);
   ok((await ev("window.shared.preload.outcome")) === "off" && lib().length === 0 && count(COPY) === 0, "the tests' switch: nothing at idle, nothing at a focus: " + J([await ev("window.shared.preload.outcome"), lib(), count(COPY)]));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: off.identifier });
+
+  // ---- 5. import lines only in a markdown cell: not code, so nothing (the grader's C1, on 8b3c24c2)
+  requests.length = 0;
+  await send("Page.navigate", { url: link + "?f=md.ipynb" });
+  await until("!!document.querySelector('#nb .cell')");
+  await settle();
+  await sleep(2000);
+  ok((await ev("window.shared.preload.outcome")) === "nothing" && lib().length === 0, "import lines only in a markdown cell: nothing fetched (outcome nothing): " + J([await ev("window.shared.preload.outcome"), lib()]));
+
+  // ---- 6. a Magma chapter whose code says `import numpy`: its mode's groups' files, each once, and not sci (an import
+  // line names a library group in Python and Sage only; the grader's C2)
+  requests.length = 0;
+  await send("Page.navigate", { url: link + "?f=magma.ipynb" });
+  await until("!!document.querySelector('#nb .cell')");
+  await settle();
+  for (let i = 0; i < 100 && !MAGMA_FILES.every((f) => count(f) >= 1); i++) await sleep(100);
+  await sleep(1000);
+  ok((await ev("window.shared.preload.outcome")) === "fetched" && J([...new Set(lib())].sort()) === J([...MAGMA_FILES].sort()) && MAGMA_FILES.every((f) => count(f) === 1), "a Magma chapter with `import numpy`: exactly Magma's groups' files, each once, not sci: " + J([lib(), await ev("window.shared.preload.urls.map((u) => new URL(u).pathname)")]));
+
+  // ---- 7. a Run asked before the idle preload starts: the page's execute hook stops it (the grader's S1). The page's
+  // idle callback is put off 3 s here, so the Run comes first however soon the page is idle
+  const later = await send("Page.addScriptToEvaluateOnNewDocument", { source: "{ const ric = window.requestIdleCallback.bind(window); window.requestIdleCallback = (f, o) => setTimeout(() => ric(f, o), 3000); }" });
+  requests.length = 0;
+  await send("Page.navigate", { url: link + "?f=np.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && !!document.querySelector('#runall')");
+  ok((await ev("window.shared.preload.outcome")) === null, "(the Run comes before the idle preload)");
+  await ev("document.querySelector('#runall').click()");
+  await settle();
+  await until("(() => { const c = document.querySelector('#nb .cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued'); })()", 120000);
+  ok((await ev("window.shared.preload.outcome")) === "stopped" && (await ev("window.shared.preload.fetched.length")) === 0 && (await ev("document.querySelector('#nb .cell .out').textContent")).includes("[0 1 2]"), "a Run before the idle preload: the preload stopped, nothing fetched by it; the Run's own output: " + J([await ev("JSON.stringify(window.shared.preload)"), lib()]));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: later.identifier });
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
