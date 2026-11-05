@@ -1,0 +1,18 @@
+== limit
+1048576
+== SF500
+('refused', True, True, "read_excel: the decoded-memory budget would be exceeded by the sheet's 500 x 500 cells (6064000 B more, 2285 B in use, limit 1048576 B: Sagebrush's limit 'pandas.decoded_bytes')")
+== SF500 bytes
+4242
+== A1048576
+('refused', True, True, "read_excel: the decoded-memory budget would be exceeded by the sheet's 1048576 x 1 cells (159383552 B more, 2292 B in use, limit 1048576 B: Sagebrush's limit 'pandas.decoded_bytes')")
+== SF1
+(0, 500)
+== J10
+(9, 10)
+== entry past the budget
+('refused', True, True, "read_excel: the decoded-memory budget would be exceeded by a workbook entry (1200151 B more, 2129 B in use, limit 1048576 B: Sagebrush's limit 'pandas.decoded_bytes')")
+== SF500 past nrows
+(1, 2)
+== SF500 without nrows
+('refused', True, True, "read_excel: the decoded-memory budget would be exceeded by the sheet's 500 x 500 cells (6064000 B more, 2385 B in use, limit 1048576 B: Sagebrush's limit 'pandas.decoded_bytes')")

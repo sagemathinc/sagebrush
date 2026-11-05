@@ -110,6 +110,11 @@ export function preloadStop() {
  * once stopped or blocked, or after a failure. A file that sends nothing for `stallMs` is abandoned, and the loop ends.
  * Each request has the runner broker's shape (no cookie, no referrer, no redirect followed: a redirect is a failure,
  * PRELOAD674-REDIRECT-1; web/notebook/runner-worker.js), so it is the same request the worker's own will be. Resolves to the URLs fetched. */
+/** The request header that marks a background fetch. web/sw.js leaves such a request to the network and the HTTP cache
+ * and keeps nothing (its line is bare: sw.js's size ceiling), so a library chunk is kept for offline use only when a
+ * page asks for it itself, at a Run, as without background loading. A package set's chunks go through the service
+ * worker either way (its check comes first), kept by their own bounded ledger */
+export const PRELOAD_HEADER = "X-Sb-Preload";
 export async function preloadFetch(urls: readonly string[], blocked: () => string | null = () => preloadBlocked(), stallMs = 30_000): Promise<string[]> {
   const done: string[] = [];
   for (const u of urls) {
@@ -119,7 +124,9 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
     try {
       arm();
-      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", signal: ac.signal } as RequestInit);
+      // (PRELOAD_HEADER: the service worker leaves the request to the network and the HTTP cache, so a file is kept
+      // offline only once a page really asks for it, as without background loading)
+      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", headers: { [PRELOAD_HEADER]: "1" }, signal: ac.signal } as RequestInit);
       if (!r.ok || !r.body) break;
       const reader = r.body.getReader();
       for (;;) {
@@ -141,18 +148,20 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
  * notebook page shows it as window.sagebrush.preload, for its tests and an agent's look) */
 export const preloadState: { outcome: null | "off" | "stopped" | "save-data" | "slow" | "offline" | "hidden" | "nothing" | "no-room" | "fetched"; urls: string[]; fetched: string[] } = { outcome: null, urls: [], fetched: [] };
 
-/** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched */
+/** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched.
+ * `base`: where the library files are (the page's own address by default, the notebook page's; a shared
+ * collection's page, /s/<id>, gives the site's root, where its runner asks for them) */
 /** `later`: files planned only after the first files are fetched (or found to be none), fetched after them, with the
  * same skips and stop (the package set's chunks: their plan waits for the service worker, which the library's files
  * mustn't wait for, test-pwa's install check) */
-export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; later?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number }) {
+export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; later?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number; base?: string }) {
   const go = async () => {
     // (a test turns it off before the page loads: window.__sbPreloadOff, set by nothing else)
     if ((globalThis as any).__sbPreloadOff === true) return void (preloadState.outcome = "off");
     const why = stopped ? "stopped" : preloadBlocked();
     if (why) return void (preloadState.outcome = why as typeof preloadState.outcome);
     const d = o.doc(), groups = d ? intentGroups(o.table, d.mode, d.codes) : [];
-    const urls = intentUrls(o.table, groups, location.href);
+    const urls = intentUrls(o.table, groups, o.base ?? location.href);
     let bytes = groups.reduce((n, g) => n + o.table.groups[g][0], 0);
     const x = await o.extra?.().catch(() => null);
     if (x) for (const u of x.urls) if (!urls.includes(u)) (urls.push(u), (bytes += x.bytes / x.urls.length));

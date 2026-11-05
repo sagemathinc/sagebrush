@@ -1,0 +1,10 @@
+refused: MATLAB:posdef Matrix must be positive definite.
+double 1x1 2
+double 1x1 2
+double 0x0 []
+double 1x1 1
+double 1x1 1
+double 1x1 2
+double 2x2 [Inf 0;0 1]
+double 1x1 0
+refused: MATLAB:posdef Matrix must be positive definite.

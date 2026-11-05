@@ -227,7 +227,8 @@ class RealDoubleElement(float):
     __str__ = __repr__
 
     def _latex_(self):
-        return repr(self)
+        import _sage_real
+        return _sage_real._sci_latex(repr(self))
 
     def parent(self):
         """RDF.
@@ -819,7 +820,8 @@ class ComplexDoubleElement:
     __str__ = __repr__
 
     def _latex_(self):
-        return repr(self).replace("*I", "i")
+        import _sage_real
+        return _sage_real._sci_latex(repr(self).replace("*I", "i"))
 
     def parent(self):
         """CDF.

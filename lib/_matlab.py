@@ -6973,6 +6973,21 @@ def _svd_finite(M, name):
     return M
 
 
+def _basis_spacing(s, cls):
+    """eps(norm(A)) in the input precision, for null/orth rank decisions."""
+    norm = float(s[0]) if s.size else 0.0
+    single = cls == "single"
+    if single:
+        norm = _single_scalar(norm)
+    if not _math.isfinite(norm):
+        return _math.nan
+    exponent = _math.frexp(norm)[1] - (24 if single else 53)
+    floor = -149 if single else -1074
+    if norm == 0 or exponent < floor:
+        exponent = floor
+    return _math.ldexp(1.0, exponent)
+
+
 @_bs("pinv")
 def pinv_(x):
     M = _mat(x)
@@ -7150,7 +7165,7 @@ def eig_(nargout, x, *args):
         L = None
         if np.array_equal(A, A.T) and np.array_equal(B, B.T):
             try:
-                L = np.linalg.cholesky(B)
+                L = np.linalg._chol(B, False, False)
             except Exception:
                 L = None
         if algo == "chol" and L is None:
@@ -7355,7 +7370,13 @@ def chol_(nargout, x, *args):
     if not lower:
         M = np.conj(M.T)
     if nargout <= 1:
-        L = np.linalg.cholesky(M)
+        try:
+            L = np.linalg._chol(M, False, False)
+        except np.linalg.LinAlgError as e:
+            # (MATLAB's words and identifier, real MATLAB R2026b, /scratch/matlab-tmp/o20 rows 1 and 6)
+            if "not positive definite" not in str(e):
+                raise
+            raise _err("Matrix must be positive definite.", "MATLAB:posdef")
         return _unmat(L if lower else np.conj(L.T))
     if M.dtype.kind == "c":
         raise _err("chol: complex matrices are not supported in Sagebrush.")
@@ -7371,9 +7392,13 @@ def chol_(nargout, x, *args):
 def null_(x):
     M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
-    tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
+    cls = _float_class(x)
+    tol = max(M.shape) * _basis_spacing(s, cls)
+    if cls == "single":
+        s = _single_values(s)
+        tol = _single_scalar(tol)
     r = int(np.sum(s > tol))
-    return _unmat(np.conj(Vh[r:].T))
+    return _finish(np.array(np.conj(Vh[r:])), cls)
 
 
 @_bs("expm")
@@ -8499,15 +8524,55 @@ def str2double_(x):
     return _math.nan if v is None else v
 
 
+def _str2num_eval(text, nargout):
+    """str2num of text that isn't only numbers: MATLAB evaluates [text] in str2num's own workspace,
+    so functions and constants are seen but not the caller's variables, and an error gives [] and false
+    (real MATLAB R2026b, /scratch/matlab-tmp/o19). Here the text is translated as the body of a function
+    of its own and run in an empty namespace. A name Sagebrush refuses or lacks (catalog/matlab
+    absent.json, which the undefined-name message then names) is refused loudly, never given as []:
+    MATLAB would evaluate it. A MATLAB function Sagebrush neither has nor lists gives [], quietly."""
+    import builtins
+    host = getattr(builtins, "__pyjs_host__", None)
+    if host is None:
+        raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
+    py = host("matlab_function_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    fail = np.zeros((0, 0))
+    fail = fail if nargout <= 1 else [fail, False]
+    if py is None:
+        raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
+    if "\ndef sbq__str2num(" not in py:
+        # (a syntax error: the translation only raises it)
+        if '"MATLAB:syntax"' in py:
+            return fail
+        raise _err("str2num of '%s' is not supported in Sagebrush." % text[:40])
+    # (one expression only: text that closes the brackets to run statements of its own is refused, as is
+    # text that defines functions; each statement is one `_L = ` line of the body)
+    body = [ln for ln in py.splitlines() if ln.startswith("        _L = ")]
+    if len(body) != 1 or py.count("\ndef ") != 1:
+        raise _err("str2num of '%s' is not supported in Sagebrush: only one expression is evaluated." % text[:40])
+    ns = {"__name__": "_matlab_str2num"}
+    try:
+        exec(py, ns)
+        out = paren(ns["sbq__str2num"], [], 1)
+    except MatlabError as e:
+        # (what Sagebrush refuses, or a MATLAB function it lacks, says so: MATLAB would give a value;
+        # anything that isn't a MATLAB error, an internal one or out of memory, is raised as well)
+        if "Sagebrush" in e.message:
+            raise
+        return fail
+    return out if nargout <= 1 else [out, True]
+
+
 @_bi("str2num")
 def str2num_(nargout, s):
-    """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
+    """str2num: numbers and matrices of numbers read directly; other text evaluated as MATLAB does"""
     # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
     lines = s.rows() if type(s) is Char else [_text(s)]
     if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
         out = np.zeros((0, 0))
         return out if nargout <= 1 else [out, False]
     t = "\n".join(lines).strip()
+    full = t
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
@@ -8522,10 +8587,8 @@ def str2num_(nargout, s):
                 if p.lower() in ("true", "false"):
                     v = 1.0 if p.lower() == "true" else 0.0
                 else:
-                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB; only
-                    # numbers and true/false are read here, so anything else is refused
-                    # rather than given as [])
-                    raise _err("str2num of '%s' is not supported in Sagebrush: only numbers and true/false are read." % t[:40])
+                    # (str2num evaluates its text: an expression, 2+3, is 5 in MATLAB)
+                    return _str2num_eval(full, nargout)
             else:
                 logical = False
             row.append(v)
