@@ -8,6 +8,8 @@ print(repr(np.concatenate([m, m], axis=1)), repr(np.concatenate([a, a])), repr(n
 print(repr(np.hstack([np.zeros(2), np.ones(3)])), repr(np.column_stack([np.arange(3), np.arange(3)])), repr(np.dstack([m, m]).shape))
 print(repr(np.split(a, 3)), repr(np.array_split(a, 5)), repr(np.split(m, [1], axis=1)))
 print(repr(np.tile(np.array([1, 2]), 3)), repr(np.tile(np.array([1, 2]), (2, 2))), repr(np.repeat(np.array([1, 2]), 2)), repr(np.repeat(m, 2, axis=0).shape))
+# (a zero repetition empties its axis)
+print(repr(np.tile(np.array([[1, 2]]), (0, 1))), repr(np.tile(np.array([1, 2]), 0)), repr(np.tile(np.array([1, 2]), (2, 0)).shape), repr(np.tile(np.zeros((0, 3)), (2, 1)).shape))
 print(repr(np.flip(a)), repr(np.fliplr(m)), repr(np.flipud(m)), repr(np.roll(a, 3)), repr(np.roll(m, 1, axis=1)), repr(np.rot90(m)))
 print(repr(np.moveaxis(np.zeros((2, 3, 4)), 0, -1).shape), repr(np.atleast_2d(a).shape), repr(np.broadcast_to(np.arange(3), (2, 3))))
 print(repr(np.append(a, [99])), repr(np.insert(a, 2, -1)), repr(np.delete(a, [0, 1])), repr(np.pad(np.arange(3), 2)), repr(np.resize(np.arange(3), 7)))

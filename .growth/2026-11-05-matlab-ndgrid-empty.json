@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "MATLAB's ndgrid of empty grid vectors (astra3's campaign MCF-22; real MATLAB R2026b Update 1 results run by @sagebrush-matlab, Nov 5): numpy's tile (lib/numpy/__init__.py) empties an axis for a zero repetition, as NumPy's does, instead of concatenating zero copies, so [X,Y]=ndgrid([],1) gives two 0x1 arrays, and meshgrid and repmat with an empty size work too; ndgrid of one vector with one output (lib/_matlab.py) is numel(x1)-by-1. Growth is numpy (sci) and the MATLAB mode's lib, and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 39427246 (head 7384d166 merged onto master cb9c394e): sci.pre +617, sci.src +148, matlab.pre +305, matlab.src +152, lib.gen +116, pyjs +56; markers with small margins; re-measured after merging master 3264180f (probe onto it: pyjs +132, the rest unchanged), so pyjs is 200 for build-specific bytes.",
+ "bytes": {
+  "engine/lib/sci.pre": 640,
+  "engine/lib/sci.src": 170,
+  "engine/lib/matlab.pre": 330,
+  "engine/lib/matlab.src": 180,
+  "cli/lib.gen.js": 140,
+  "cli/pyjs.cjs": 200
+ }
+}
