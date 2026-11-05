@@ -191,3 +191,13 @@ test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's 
   assert.match(r.out, /rand\s+randi\s+randn\s+randperm/);
   assert.doesNotMatch(r.out, /\braise\b|\brange\b/);
 });
+
+test("Tab completes Magma's names at a --magma prompt: a variable, an intrinsic, a list of intrinsics, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  // (typed a step at a time, as for MATLAB above: one Tab completes a single match, two list several)
+  const r = ttySteps(["--magma"], ["my_total := 5;\n", "my_t", "\t", ";\n", "Factoriz", "\t", "(2026);\n", "Prim", "\t", "\t", ";\n", "quit;\n"]);
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /> my_total;\n5\n/);
+  assert.match(r.out, /> Factorization\(2026\);\n\[ <2, 1>, <1013, 1> \]\n/);
+  assert.match(r.out, /PrimeDivisors\s+PrimeField\s+PrimesInInterval\s+PrimesUpTo\s+PrimitiveElement/);
+  assert.doesNotMatch(r.out, /\braise\b|\brange\b|MagmaError|NameError|Traceback/);
+});

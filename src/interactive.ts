@@ -3,6 +3,7 @@
 import { R } from "./compile";
 import { parse, PySyntaxError } from "./parse";
 import { matlabCompletions } from "./matlab-complete";
+import { magmaCompletions } from "./magma-complete";
 
 // IPython's help syntax (obj?): src/help-syntax.ts
 import { helpSyntax, ipythonSyntax } from "./help-syntax";
@@ -61,6 +62,6 @@ export function complete(main: any, line: string, moduleNames: () => string[]): 
 export function completeIn(mode: string, main: any, line: string, moduleNames: () => string[]): [string[], string] {
   if (mode === "matlab") return matlabCompletions(main, line);
   // (Magma's names: src/magma-complete.ts, @sagebrush-magma's, joins here; until then nothing, as before)
-  if (mode === "magma") return [[], ""];
+  if (mode === "magma") return magmaCompletions(main, line);
   return complete(main, line, moduleNames);
 }
