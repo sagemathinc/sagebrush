@@ -7370,7 +7370,13 @@ def chol_(nargout, x, *args):
     if not lower:
         M = np.conj(M.T)
     if nargout <= 1:
-        L = np.linalg._chol(M, False, False)
+        try:
+            L = np.linalg._chol(M, False, False)
+        except np.linalg.LinAlgError as e:
+            # (MATLAB's words and identifier, real MATLAB R2026b, /scratch/matlab-tmp/o20 rows 1 and 6)
+            if "not positive definite" not in str(e):
+                raise
+            raise _err("Matrix must be positive definite.", "MATLAB:posdef")
         return _unmat(L if lower else np.conj(L.T))
     if M.dtype.kind == "c":
         raise _err("chol: complex matrices are not supported in Sagebrush.")
