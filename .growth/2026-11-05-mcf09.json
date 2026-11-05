@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "MCF09: correct median and movmedian midpoints for infinities and finite overflow. TIGHT growth measured by SIZE against master 6dfcbe3c with the pinned toolchain; exact measured growth except pyjs: 146 bytes plus conventional 64-byte allowance. No dependencies or new chunks.",
+  "bytes": {
+    "engine/lib/matlab.pre": 2924,
+    "engine/lib/matlab.src": 555,
+    "cli/lib.gen.js": 308,
+    "cli/pyjs.cjs": 210
+  }
+}
