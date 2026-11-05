@@ -12,7 +12,7 @@ def rec(*xs):
     for x in xs:
         print(repr(np.asarray(x).tolist()))
 mats = []
-for n in [1, 3, 8, 9, 33, 64]:
+for n in [1, 3, 8, 9, 17, 31, 33, 64]:
     mats += [np.random.rand(n, n), np.random.randn(n, n)]
 r = np.random.rand(20, 3)
 th = 0.7
@@ -37,7 +37,12 @@ for a in mats:
     rec(w.real, w.imag, v.real, v.imag)
     rec(*np.linalg.svd(a))
     rec(*np.linalg.qr(a))
-    rec(a @ a.T, np.linalg.det(a), np.linalg.slogdet(a))
+    rec(a @ a.T)
+    # (from n = 32 det, slogdet, solve and inv run on engine/nd's LU, a backend of its own, pinned in
+    # test/numpy-lu-nd.test.ts: this program checks the kernels below that)
+    if len(a) >= 32:
+        continue
+    rec(np.linalg.det(a), np.linalg.slogdet(a))
     try:
         rec(np.linalg.inv(a), np.linalg.solve(a, np.arange(len(a) * 1.0)))
     except np.linalg.LinAlgError as e:
