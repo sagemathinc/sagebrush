@@ -544,6 +544,28 @@ test("rank-deficient least squares: the published examples' tolerances and basic
   ]);
 });
 
+test("magic(8) \\ ones(8,1): MATLAB's singular-matrix warning, on stderr, and its answer (the oracle William ran on 2026-11-04)", () => {
+  // Real MATLAB (scratch oracle matlab-magic8-2026-11-04.txt): for A = magic(8), min(abs(diag(U))) and rcond(A) are 0;
+  // A\ones(8,1) warns "Matrix is singular to working precision." and gives NaN x5, Inf, -Inf, -0.0312. The pins, per
+  // the grader's notes: x(1:5) NaN only (their order is the elimination's), x(6) and x(7) exactly +-Inf, x(8) in
+  // [-0.03125, -0.03115); the warning's text, that it goes to stderr, once, and its identifier.
+  const { spawnSync } = require("node:child_process");
+  const cli = require("node:path").join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "-c", "A=magic(8); [L,U,P]=lu(A); min(abs(diag(U))), rcond(A), A\\ones(8,1)"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "Warning: Matrix is singular to working precision.\n");
+  const shown = r.stdout.split("\n").map((l: string) => l.trim()).filter((l: string) => l !== "" && l !== "ans =");
+  assert.deepEqual(shown, ["0", "0", "NaN", "NaN", "NaN", "NaN", "NaN", "Inf", "-Inf", "-0.0312"]);
+  const v = spawnSync(process.execPath, [cli, "--matlab", "-c", [
+    "A = magic(8); lastwarn(''); x = A \\ ones(8,1); [msg, id] = lastwarn;",
+    "fprintf('%s|%s\\n', msg, id); fprintf('%d', isnan(x(1:5))); fprintf('\\n%d %d\\n', x(6) == Inf, x(7) == -Inf);",
+    "fprintf('%d\\n', x(8) >= -0.03125 && x(8) < -0.03115);",
+  ].join(" ")], { encoding: "utf8" });
+  assert.equal(v.status, 0, v.stderr);
+  assert.equal(v.stderr, "Warning: Matrix is singular to working precision.\n");
+  assert.deepEqual(v.stdout.trim().split("\n"), ["Matrix is singular to working precision.|MATLAB:singularMatrix", "11111", "1 1", "1"]);
+});
+
 test("linspace as MATLAB documents it: n <= 0, n = 1, a non-integer n, NaN, complex ends, single, and the published examples", () => {
   const { execFileSync } = require("node:child_process");
   const run = (e: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", `x = ${e}; disp(mat2str(x, 5))`], { encoding: "utf8" }).trim();
