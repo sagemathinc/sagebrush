@@ -2729,3 +2729,21 @@ test("median and movmedian preserve infinite middle values without finite overfl
     "[1 1]", "single", "Inf", "[1 2]", "double", "[-Inf -Inf]",
   ]);
 });
+
+
+test("nthroot preserves zero roots, infinities and single class (MCF-13)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/o3/transcript.txt,
+  // SHA256 9c5b8c0c9932b9c3720bc70c44a48d69132ed33b6e131c17b2e691c5a790e094. K1-K6.
+  const calls = ["nthroot(0,-1)", "nthroot([0 0 0],[-1 -2 2])", "nthroot([-8 8],3)",
+    "nthroot(0,0)", "nthroot(single(0),single(-1))"];
+  const code = calls.map((s) => `y=${s}; disp([mat2str(size(y)) '|' class(y) '|' mat2str(y,17)]);`).join("\n") +
+    "\ntry, nthroot(-8,2); catch e, disp(e.identifier); disp(e.message); end";
+  const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 });
+  assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()), [
+    "[1 1]|double|Inf", "[1 3]|double|[Inf Inf 0]", "[1 2]|double|[-2 2]",
+    "[1 1]|double|0", "[1 1]|single|Inf", "MATLAB:nthroot:NegXNotOddIntegerN",
+    "If X is negative, N must be an odd integer.",
+  ]);
+});
