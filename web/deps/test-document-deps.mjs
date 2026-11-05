@@ -136,20 +136,62 @@ open("table.csv")
   eq(r.rows, [
     ["/t/macros.tex", "input", true, true, null, "\\input in main.tex"],
     ["/t/chapters/intro.tex", "input", true, true, null, "\\input in main.tex"],
+    ["/t/figs/fig.png", "graphic", true, true, "/t/chapters/intro.tex", "\\includegraphics in chapters/intro.tex"],
+    ["/t/chapters/deeper.tex", "input", true, true, "/t/chapters/intro.tex", "\\input in chapters/intro.tex"],
     ["/t/appendix.tex", "include", true, true, null, "\\include in main.tex"],
     ["/t/refs.bib", "bibliography", true, true, null, "\\bibliography in main.tex"],
     ["/t/missing.bib", "bibliography", false, false, null, "\\bibliography in main.tex (not found)"],
     ["/t/more.bib", "bibliography", true, true, null, "\\addbibresource in main.tex"],
     ["/t/logo.pdf", "graphic", true, true, null, "\\includegraphics in main.tex"],
     ["/t/nowhere", "graphic", false, false, null, "\\includegraphics in main.tex (not found)"],
-    ["/t/figs/fig.png", "graphic", true, true, "/t/chapters/intro.tex", "\\includegraphics in chapters/intro.tex"],
-    ["/t/chapters/deeper.tex", "input", true, true, "/t/chapters/intro.tex", "\\input in chapters/intro.tex"],
     ["/t/helper.py", "import", true, true, null, "imported in main.tex"],
     ["/t/data.csv", "open", true, true, null, "opened in main.tex"],
     ["/t/table.csv", "open", true, true, null, "opened in main.tex"],
-  ], "LaTeX: \\input (braced, bare, nested, relative to the main file), \\include, the bibliography, pictures through \\graphicspath and .pdf, the code blocks' imports and opens");
+  ], "LaTeX, in TeX's order (an \\input file's references where it is read): \\input (braced, bare, nested, relative to the main file), \\include, the bibliography, pictures through \\graphicspath and .pdf, the code blocks' imports and opens");
   ok(!r.paths.includes("/t/secret.tex") && !r.paths.includes("/t/shown.tex"), "a commented \\input and one in verbatim are not followed");
   ok(r.unfollowed.some((u) => u.at === "main.tex" && /macro/.test(u.why) && u.line === 12), "a name made by a macro is unfollowed, with its line: " + JSON.stringify(r.unfollowed));
+  ok(r.complete, "complete");
+}
+
+// ---- TeX's comments by the run of backslashes before the %: an even run (none, \\) starts one, an odd run (\%) is a
+// percent sign (ENGINE, #731 a2af0f87)
+{
+  const main = String.raw`line\\% \input{even2}
+50\% \input{odd1}
+x\\\% \input{odd3}
+y\\\\% \input{even4}
+%\input{even0}
+`;
+  const files = { "/c/main.tex": main, "/c/even2.tex": "", "/c/odd1.tex": "", "/c/odd3.tex": "", "/c/even4.tex": "", "/c/even0.tex": "" };
+  const r = await run(files, "/c/main.tex", "tex");
+  eq(r.paths, ["/c/odd1.tex", "/c/odd3.tex"], "after %, \\\\% and \\\\\\\\% (even) a comment; after \\% and \\\\\\% (odd) a percent sign");
+}
+
+// ---- \graphicspath set in a followed \input file: for its pictures, and (TeX keeps it) for the main file's after it;
+// a code block in a followed file: its deps come from that file (ENGINE, #731 a2af0f87)
+{
+  const main = String.raw`\documentclass{article}
+\begin{document}
+\includegraphics{a}
+\input{part}
+\includegraphics{b}
+\end{document}
+`;
+  const part = String.raw`\graphicspath{{figs/}}
+\includegraphics{x}
+\begin{pycode}
+import helper
+\end{pycode}
+`;
+  const files = { "/t/main.tex": main, "/t/part.tex": part, "/t/figs/a.png": "x", "/t/figs/x.png": "x", "/t/figs/b.png": "x", "/t/helper.py": "" };
+  const r = await run(files, "/t/main.tex", "tex");
+  eq(r.rows, [
+    ["/t/a", "graphic", false, false, null, "\\includegraphics in main.tex (not found)"],
+    ["/t/part.tex", "input", true, true, null, "\\input in main.tex"],
+    ["/t/figs/x.png", "graphic", true, true, "/t/part.tex", "\\includegraphics in part.tex"],
+    ["/t/figs/b.png", "graphic", true, true, null, "\\includegraphics in main.tex"],
+    ["/t/helper.py", "import", true, true, "/t/part.tex", "imported in part.tex"],
+  ], "\\graphicspath from where it is set on (not before), across files; a followed file's code block has from");
   ok(r.complete, "complete");
 }
 

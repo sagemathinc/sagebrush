@@ -12,8 +12,9 @@
 // LaTeX is read as TeX reads it: names relative to the main file's folder (TeX's working directory, for an \input
 // in an \input file too), \input{x} trying x.tex then x, \include{x} reading x.tex, \includegraphics through
 // \graphicspath (web/latex/images.ts: texCandidates, imageCandidates, graphicsPathOf, as the LaTeX editor
-// resolves them), \bibliography{a,b} naming a.bib and b.bib. Comments and verbatim environments are skipped, and
-// so are the code blocks' own texts (their code is fileDeps').
+// resolves them), \bibliography{a,b} naming a.bib and b.bib; in TeX's order (an \input file is read where it is
+// named, and a \graphicspath counts from where it is set, in any file). Comments (a % after an even run of
+// backslashes) and verbatim environments are skipped, and so are the code blocks' own texts (their code is fileDeps').
 import { fileDeps, type CellKind } from "./file-deps";
 import { fromFile } from "../notebook/ipynb.js";
 import { LANG, scanItems } from "../latex/cells";
@@ -68,8 +69,9 @@ const nth = (n: number) => {
   return `the ${k}${s} cell`;
 };
 const NONE: ReadonlySet<string> = new Set();
-// (LaTeX's references: a command, an optional [...] and its {argument}; or \input followed by a bare name)
-const TEX_REF = /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\}|\\input\s+([^\s{}\\%]+)/g;
+// (LaTeX's references: a command, an optional [...] and its {argument}; or \input followed by a bare name; and
+// \graphicspath, which sets where later \includegraphics look)
+const TEX_REF = /\\(input|include|subfile|bibliography|addbibresource|includegraphics)\*?\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\}|\\input\s+([^\s{}\\%]+)|\\graphicspath\s*\{(?:\s*\{[^{}]*\})*\s*\}/g;
 const VERBATIM = /\\begin\s*\{(verbatim\*?|lstlisting|minted|comment|Verbatim)\}[\s\S]*?\\end\s*\{\1\}/g;
 
 /** A LaTeX text as its references see it: comments, verbatim environments and the code blocks' spans blanked
@@ -80,10 +82,19 @@ function texSkeleton(text: string, spans: { start: number; end: number }[]): str
     for (let i = a; i < b && i < chars.length; i++) if (chars[i] !== "\n") chars[i] = " ";
   };
   for (const s of spans) blank(s.start, s.end);
-  let t = chars.join("");
-  t = t.replace(VERBATIM, (m) => m.replace(/[^\n]/g, " "));
-  // (a % not escaped by a backslash runs to the end of its line)
-  return t.replace(/(^|[^\\])%[^\n]*/g, (m, pre) => pre + " ".repeat(m.length - pre.length));
+  const t = chars.join("").replace(VERBATIM, (m) => m.replace(/[^\n]/g, " ")).split("");
+  // (a % after an even run of backslashes, none or \\ (a line break), runs to the end of its line; after an odd
+  // run it is \%, a percent sign)
+  let run = 0;
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "\\") {
+      run++;
+      continue;
+    }
+    if (t[i] === "%" && run % 2 === 0) while (i < t.length && t[i] !== "\n") t[i++] = " ";
+    run = 0;
+  }
+  return t.join("");
 }
 
 export async function dependencies(path: string, text: string, kind: DocKind, ctx: DocDepsContext): Promise<{ deps: Dep[]; unfollowed: DocUnfollowed[]; complete: boolean }> {
@@ -103,6 +114,8 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
   // ---- the cells fileDeps reads, and what each is called in a reason
   const cells: { index: number; kind: CellKind; source: string }[] = [];
   const cellName = new Map<number, string>();
+  // (a LaTeX code block's file, when it isn't the document: an \input file's pycode)
+  const cellFrom = new Map<number, string>();
   if (kind === "tex") {
     if (!(await latex(path, text))) complete = false;
   } else if (kind === "md") {
@@ -140,7 +153,10 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
       onDep: (p, reason) => {
         const via = VIA[reason.kind] ?? "named";
         const verb = via === "import" ? "imported" : via === "open" ? "opened" : via === "link" ? "linked" : "named";
-        if ("cell" in reason) add({ path: p, via, exists: true, certain: true, why: `${verb} in ${cellName.get(reason.cell) ?? nth(reason.cell)}` });
+        if ("cell" in reason) {
+          const from = cellFrom.get(reason.cell);
+          add({ path: p, via, exists: true, certain: true, ...(from ? { from } : {}), why: `${verb} in ${cellName.get(reason.cell) ?? nth(reason.cell)}` });
+        }
         else add({ path: p, via, exists: true, certain: true, from: reason.by, why: `${verb} in ${label(reason.by)}` });
       },
       onUnfollowed: (u) => unfollowed.push({ at: "cell" in u.where ? (cellName.get(u.where.cell) ?? nth(u.where.cell)) : label(u.where.file), line: u.line, why: u.why }),
@@ -151,15 +167,14 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
   }
   return { deps, unfollowed, complete: complete && !ctx.signal?.aborted };
 
-  // ---- LaTeX: the main file, then each \input/\include/\subfile file, in the order they're named
+  // ---- LaTeX: the main file, each \input/\include/\subfile file read where it is named (TeX's order), once
   async function latex(main: string, mainText: string): Promise<boolean> {
     let ok = true;
-    const dirs = graphicsPathOf(mainText);
-    const queue: { file: string; text: string }[] = [{ file: main, text: mainText }];
+    // (\graphicspath as TeX keeps it: set where it's met, in whichever file, for every later \includegraphics)
+    let dirs: string[] = [];
     const read = new Set<string>([main]);
-    while (queue.length) {
-      if (ctx.signal?.aborted) return false;
-      const { file, text: t } = queue.shift()!;
+    const walk = async (file: string, t: string): Promise<void> => {
+      if (ctx.signal?.aborted) return;
       const by = file === main ? undefined : file;
       const at = label(file);
       // (its code blocks: cells of their language, analysed by fileDeps as the document's code)
@@ -168,9 +183,15 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
         const index = cells.length;
         cells.push({ index, kind: LANG[it.kind], source: it.code });
         cellName.set(index, at);
+        if (by) cellFrom.set(index, by);
       }
       const skel = texSkeleton(t, items);
       for (const m of skel.matchAll(TEX_REF)) {
+        if (ctx.signal?.aborted) return;
+        if (m[0].startsWith("\\graphicspath")) {
+          dirs = graphicsPathOf(m[0]);
+          continue;
+        }
         const cmd = m[1] ?? "input", arg = (m[2] ?? m[3] ?? "").trim();
         const line = skel.slice(0, m.index).split("\n").length;
         if (!arg) continue;
@@ -209,16 +230,20 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
           add({ path: found, via, exists: true, certain: true, ...(by ? { from: by } : {}), why });
           if ((via === "input" || via === "include") && !read.has(found)) {
             read.add(found);
+            let sub: string;
             try {
-              queue.push({ file: found, text: await ctx.readFile(found) });
+              sub = await ctx.readFile(found);
             } catch {
               ok = false;
               unfollowed.push({ at: label(found), line: 0, why: "couldn't be read" });
+              continue;
             }
+            await walk(found, sub);
           }
         }
       }
-    }
-    return ok;
+    };
+    await walk(main, mainText);
+    return ok && !ctx.signal?.aborted;
   }
 }
