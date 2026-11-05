@@ -46,7 +46,13 @@ show_bfgs("bfgs cs", minimize(quad, [0.0, 0.0], jac="cs"))
 show("bfgs scalar x0", minimize(lambda x: (x[0] - 3.0) ** 2, 1.0))
 # CG
 show("cg quad", minimize(quad, [0.0, 0.0], method="CG"))
-show("cg rosen jac", minimize(rosen, [-1.2, 1.0], method="CG", jac=rosen_der))
+# (2-D CG over 36 iterations: NumPy's OpenBLAS dot differs from ours in the last bit, as BFGS's does, so its
+# values are compared within a tolerance, its counts exactly)
+r = minimize(rosen, [-1.2, 1.0], method="CG", jac=rosen_der)
+print("== cg rosen jac", r.success, r.message, r.nit, r.nfev, r.njev)
+check("cg rosen jac x", r.x, 1e-6, 1e-9)
+check("cg rosen jac fun", [r.fun], 1e-6, 1e-12)
+check("cg rosen jac jac", r.jac, 1e-2, 1e-8)
 show("cg gtol", minimize(quad, [5.0, -5.0], method="cg", options={"gtol": 1e-8}))
 # Nelder-Mead
 show("nm rosen", minimize(rosen, [1.3, 0.7], method="Nelder-Mead"))
