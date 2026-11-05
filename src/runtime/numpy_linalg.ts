@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndPath, ndScratch } from "./nd";
+import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -42,12 +42,15 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
 // (the public call, Node: n = 40 0.026 vs 0.028 ms, n = 48 0.038 vs 0.035; daybreak2's VM1 PERF, n = 16 slower on
 // engine/nd; /scratch/matlab-speed/chol1b-xover). Per input, so a given matrix always takes the same path.
 const CHOL_ND_MIN = 48;
-// The smallest n at which solve, det, slogdet and inv run on engine/nd's LU, where that runs; below it, and for an
-// A or B with an Inf or NaN (which the module doesn't compute), lu() and luSolve() run, as before. Steady calls win
-// from n = 32 (solve) and 64 (det, slogdet, inv), but a session's first call there also pays the module's
-// instantiation, about 2 ms: first calls are slower until about n = 256 and clearly faster from 512 (daybreak4's
-// cold PERF on #684; @sagebrush's ruling: one threshold, never slower cold). A preload at idle would let it come down.
-const LU_ND_MIN = 256;
+// The smallest n at which solve (SOLVE_ND_MIN), and det, slogdet and inv (LU_ND_MIN), run on engine/nd's LU, where
+// that runs; below it, and for an A or B with an Inf or NaN (which the module doesn't compute), lu() and luSolve()
+// run, as before. Steady calls win from n = 32 (solve) and 64 (det, slogdet, inv) (daybreak4's PERF on #684). A
+// session's first call also pays the module's instantiation; in the notebook's worker numpy's import has it compiled
+// ahead, at idle (src/runtime/nd.ts ndWarm), so the first call only instantiates it. The CLI has no idle moment: there
+// a script's first call from these sizes up to about 255 pays about 2 ms more, once (@sagebrush's ruling on the
+// preload). Per input, never per warm-up, so a given matrix always takes the same path.
+const SOLVE_ND_MIN = 32;
+const LU_ND_MIN = 64;
 
 // A 2-D float64 matrix's elements, row-major: its own data when contiguous float64, else a copy
 function view(a: NDArray): Float64Array {
@@ -1239,6 +1242,8 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
 // ------------------------------------------------------------------ the module
 
 newBuiltinModule("_nplinalg", (m) => {
+  // (numpy's import: where the host has an idle moment, it compiles engine/nd's module ahead)
+  ndRequestWarm();
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   fn("set_error", (cls: any) => ((globalThis as any).__npLinAlgError = cls, null));
   fn("wasm", () => wasmKernels());
@@ -1282,7 +1287,7 @@ newBuiltinModule("_nplinalg", (m) => {
     // max(n^2, n r) and the scratch, in the module's memory, and X)
     const [r0, c0] = dims(a);
     if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
-    const nd = r0 >= LU_ND_MIN && useNd();
+    const nd = r0 >= SOLVE_ND_MIN && useNd();
     work(5 * r0 * c0 + 6 * b.size + (nd ? ndScratch() + b.size : 0), "solve");
     const vec = b.ndim === 1;
     const bb = vec ? empty([b.shape[0], 1], F64()) : null;
@@ -1383,10 +1388,11 @@ newBuiltinModule("_nplinalg", (m) => {
     const result = out(L, [n, n]);
     return reportFailure ? tuple([result, 0]) : result;
   });
-  // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
+  // which code the nd-backed functions run in this session, and why (src/runtime/nd.ts): (path, kernel, why, the
+  // smallest n of cholesky, of solve and of det/slogdet/inv, the warm-up's state)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, SOLVE_ND_MIN, LU_ND_MIN, ndWarmState()]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of
