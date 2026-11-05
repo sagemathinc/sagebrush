@@ -2173,11 +2173,13 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initia
   const axes = axesArg(axis, a.ndim);
   if (initial === null && (axes === null ? a.size : prod([...new Set(axes)].map((i) => a.shape[i]))) === 0)
     raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
-  const init = initial === null ? (isMax ? -Infinity : Infinity) : toNum(initial, a.dt);
-  // (a tie, as of +0 and -0: maximum/minimum keep the later operand, fmax/fmin (nanmax/nanmin, firstWins) the
+  // (firstWins: fmax/fmin, nanmax/nanmin's reduction: a NaN on either side is skipped, so a slice of NaNs alone
+  // gives NaN and so does a NaN initial with no other values; without initial the fold starts from the first
+  // element, as NumPy's reduce. A tie, as of +0 and -0: maximum/minimum keep the later operand, fmax/fmin the
   // accumulator, as NumPy's element loops)
+  const init = initial !== null ? toNum(initial, a.dt) : firstWins ? NaN : isMax ? -Infinity : Infinity;
   const fold = firstWins
-    ? isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : y > x ? y : x) : (x: number, y: number) => (x !== x || y !== y ? NaN : y < x ? y : x)
+    ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x)
     : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
   return finish(reduceAxes(a, axes, keepdims, a.dt, init, fold), axis, keepdims);
 }

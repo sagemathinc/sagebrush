@@ -125,3 +125,35 @@ for f in ("max", "min"):
     for n in (5, 16, 33, 100):
         a = np.array([N0] + [P0] * (n - 1)); b = np.array([P0] + [N0] * (n - 1))
         print("signbit %s long n=%d -> %s %s %s" % (f, n, sgn(getattr(np, f)(a)), sgn(getattr(np, f)(b)), sgn(getattr(np, f)(a[::-1][::2]))))
+# nanmax/nanmin are fmax/fmin reductions (r5, the runtime's fold skips NaN itself): a NaN on either side is
+# skipped, so a slice of NaNs alone gives NaN (with NumPy's RuntimeWarning, on stderr), a NaN initial is skipped
+# unless nothing else is left, and a masked element takes no part even past a NaN initial. (Complex input keeps the
+# fill but is not pinned: sagebrush's complex max/min are wrong before and after this change, FU-3)
+nan = np.nan
+for f in ("nanmax", "nanmin"):
+    g = getattr(np, f)
+    show("%s all-NaN" % f, lambda: g(np.array([nan, nan])))
+    show("%s all-NaN float32" % f, lambda: g(np.array([nan, nan], np.float32)))
+    show("%s NaN then value float32" % f, lambda: g(np.array([nan, 3.0], np.float32)))
+    show("%s all-NaN column axis=0" % f, lambda: g(np.array([[nan, 1.0], [nan, nan]]), axis=0))
+    show("%s all-NaN row axis=1" % f, lambda: g(np.array([[nan, 1.0], [nan, nan]]), axis=1))
+    show("%s all-NaN keepdims" % f, lambda: g(np.array([[nan, nan], [2.0, nan]]), axis=1, keepdims=True))
+    show("%s initial NaN" % f, lambda: g(np.array([1.0, 2.0]), initial=nan))
+    show("%s initial NaN all-NaN" % f, lambda: g(np.array([nan]), initial=nan))
+    show("%s initial 0 all-NaN" % f, lambda: g(np.array([nan]), initial=0.0))
+    show("%s initial NaN empty" % f, lambda: g(np.zeros((0,)), initial=nan))
+    show("%s initial NaN axis" % f, lambda: g(np.array([[nan, 1.0], [nan, nan]]), axis=0, initial=nan))
+    show("%s where initial -5" % f, lambda: g(np.array([nan, 3.0]), where=np.array([True, False]), initial=-5.0))
+    show("%s where initial NaN" % f, lambda: g(np.array([nan, 3.0]), where=np.array([True, False]), initial=nan))
+    show("%s where initial NaN value" % f, lambda: g(np.array([nan, 3.0, 4.0]), where=np.array([True, False, True]), initial=nan))
+    show("%s -inf and NaN" % f, lambda: g(np.array([-np.inf, nan, np.inf])))
+    show("%s int64" % f, lambda: g(np.array([3, -1, 2])))
+    show("%s int64 initial" % f, lambda: g(np.array([3, -1, 2]), initial=1))
+for f in ("nanmax", "nanmin"):
+    for arr in ([N0, nan, P0], [nan, P0, N0], [nan, N0, P0, nan]):
+        print("signbit %s %s -> %s" % (f, " ".join("nan" if v != v else sgn(v) for v in arr), sgn(getattr(np, f)(np.array(arr)))))
+        for ini in (P0, N0, nan):
+            if len(arr) + 1 > 4:
+                continue  # (NumPy's SIMD fmax/fmin loop, unpinned as above)
+            print("signbit %s %s initial=%r -> %s" % (f, " ".join("nan" if v != v else sgn(v) for v in arr), ini,
+                  sgn(getattr(np, f)(np.array(arr), initial=ini))))

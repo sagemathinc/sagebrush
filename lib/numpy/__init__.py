@@ -1288,8 +1288,9 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
     if mask is not True:
         # (a masked element takes no part: a float one is filled with -inf for max, +inf for min, which loses to
         # any element or initial and ties only itself, so it cannot settle a tie such as +0 against -0; an integer
-        # or bool one with initial, which then changes nothing, as its ties carry no sign)
-        fill = (-inf if is_max else inf) if a.dtype.kind == "f" else ini
+        # or bool one with initial, which then changes nothing, as its ties carry no sign. For fmax/fmin (first),
+        # a float one is NaN, which their fold skips as it skips any NaN, even past a NaN initial)
+        fill = (nan if first else -inf if is_max else inf) if a.dtype.kind == "f" else ini
         a = _np.where3(mask, a, array(fill, dtype=a.dtype))
     return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini, first)
 
@@ -1365,16 +1366,20 @@ def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
 
 def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
     # (NumPy's nanmax/nanmin reduce with fmax/fmin, the names in their errors; a where mask needs initial first)
+    # (the runtime's first-wins fold skips a NaN element itself; only a complex array is filled first)
     name = "fmax" if is_max else "fmin"
+    if initial is None and where is not True:
+        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                         "specify 'initial'" % name)
+    a = asarray(a)
+    if a.dtype.kind == "c":
+        a = _nanfill(a, -inf if is_max else inf)
     if initial is None:
-        if where is not True:
-            raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
-                             "specify 'initial'" % name)
-        a = asarray(a)
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
-        return _out((_np.amax if is_max else _np.amin)(_nanfill(a, -inf if is_max else inf), axis, keepdims, None, True), out)
-    return _out(_minmax(_nanfill(a, -inf if is_max else inf), axis, keepdims, initial, where, is_max, True), out)
+        r = (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, True)
+        return r if out is None else _out(r, out)
+    return _out(_minmax(a, axis, keepdims, initial, where, is_max, True), out)
 
 
 def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):

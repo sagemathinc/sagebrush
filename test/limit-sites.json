@@ -9562,15 +9562,15 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: isMax picks the max or min fold (firstWins: fmax/fmin's tie rule, for nanmax/nanmin)"
  },
- "src/runtime/numpy.ts :: minmax :: ? isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : y > x ? y : x) : (x: number, y: number) => (x !== x || y !== y ? NaN : y < x ? y : x) #0": {
+ "src/runtime/numpy.ts :: minmax :: ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x) #0": {
   "class": "none",
   "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing of a cap: isMax picks the max or min fold (firstWins: fmax/fmin's tie rule, for nanmax/nanmin)"
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fmax or fmin fold (firstWins: nanmax/nanmin, NaN skipped, the accumulator wins ties)"
  },
- "src/runtime/numpy.ts :: minmax :: const init = initial === null ? (isMax ? -Infinity : Infinity) : toNum(initial, a.dt); #0": {
+ "src/runtime/numpy.ts :: minmax :: const init = initial !== null ? toNum(initial, a.dt) : firstWins ? NaN : isMax ? -Infinity : Infinity; #0": {
   "class": "none",
   "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing of a cap: isMax picks the fold's start (-Infinity or +Infinity), or initial= as NumPy's"
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fold's start (-Infinity or +Infinity; NaN for fmax/fmin, so their first element starts), or initial= as NumPy's"
  },
  "src/runtime/numpy.ts :: minmax :: function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null, firstWins = false): any { #0": {
   "class": "none",
