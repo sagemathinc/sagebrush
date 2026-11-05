@@ -4,8 +4,7 @@
 // chapter, a plain one, a data file) is uploaded through the API, then read signed out; every request is recorded:
 //   1. the numpy chapter: at idle, exactly sci's two library files, each once, and no data file, no copy's chunk;
 //      its Run outputs [0 1 2] and fetches neither again;
-//   2. the first focus of a cell's editor fetches the copy's chunk, once (a second focus: nothing more); the edit
-//      that makes the copy then fetches it no more;
+//   2. the copy's chunk is never fetched ahead, not even at a focus of a cell's editor; the first edit fetches it;
 //   3. the plain chapter: nothing (outcome "nothing");
 //   4. the tests' switch (window.__sbPreloadOff): nothing at idle, nothing at a focus.
 //   bun web/build.ts && node web/share/test-share-preload.mjs
@@ -107,27 +106,14 @@ try {
   const runAgain = reqs.slice(r0).filter((x) => SCI.includes(x.path));
   ok(runAgain.every((x) => x.cached || (x.bytes !== null && x.bytes < 2048)) && count(COPY) === 0, "…downloaded neither file again (each asked again answered from the cache), and running fetched no copy's chunk: " + J(runAgain));
 
-  // ---- 2. the first focus of an editor: the copy's chunk, once; the edit that makes the copy fetches it no more
+  // ---- 2. the copy's chunk is never fetched ahead: not by a focus of a cell's editor either (it isn't named by its
+  // content, so the site can't let a browser keep it; daybreak2 on 8dbfb7f4); the first edit fetches it, as before
   await ev("document.querySelector('#nb .cell textarea').focus(); true");
-  for (let i = 0; i < 50 && count(COPY) === 0; i++) await sleep(100);
-  await sleep(800);
-  ok(count(COPY) === 1 && (await ev("window.shared.copyPrefetched")) === true, "the first focus of a cell's editor: the copy's chunk, once");
-  await ev("document.querySelector('#nb .cell textarea').blur(); document.querySelector('#nb .cell textarea').focus(); true");
-  await sleep(800);
-  ok(count(COPY) === 1, "…a second focus: nothing more");
-  const n0 = reqs.length;
+  await sleep(1500);
+  ok(count(COPY) === 0, "a focus of a cell's editor: the copy's chunk not fetched");
   await ev(`(() => { const ta = document.querySelector('#nb .cell textarea'); ta.value = ${J("import numpy as np\nprint(np.arange(3), 'mine')")}; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await until("/This is your copy/.test(document.querySelector('#copyline').textContent) && !document.querySelector('#copyline').hidden", 20000);
-  // (the module import of the chunk is asked again, and answered from the cache: never a second network fetch, which
-  // the page's session sees as a new request with a response; a cache answer reports none (requestServedFromCache))
-  // (the module import asks for it again. Whether that is answered from the prefetch's copy depends on the response's
-  // caching: serve-dev sends every file without a _headers rule as no-store, so here it can't be, and is only reported;
-  // where the response may be kept (the site's own revalidated files), it must not be downloaded again)
-  const copyAgain = reqs.slice(n0).filter((x) => x.path === COPY);
-  const storable = copyAgain.every((x) => !/no-store/i.test(x.cc ?? ""));
-  if (storable) ok(copyAgain.every((x) => x.cached || (x.bytes !== null && x.bytes < 2048) || x.status === 304), "the edit makes the copy: its chunk downloaded no more (each ask answered from the cache or revalidated): " + J(copyAgain));
-  else console.log("note the edit makes the copy: its chunk asked again; this server sends it no-store, so its reuse isn't measurable here: " + J(copyAgain));
-  ok(copyAgain.length <= 1, "…asked at most once more: " + copyAgain.length);
+  ok(count(COPY) === 1, "the first edit makes the copy, fetching its chunk once: " + count(COPY));
 
   // ---- 3. the plain chapter: nothing
   requests.length = 0;
@@ -148,7 +134,7 @@ try {
   await settle();
   await ev("document.querySelector('#nb .cell textarea').focus(); true");
   await sleep(2000);
-  ok((await ev("window.shared.preload.outcome")) === "off" && lib().length === 0 && count(COPY) === 0 && (await ev("window.shared.copyPrefetched")) === false, "the tests' switch: nothing at idle, nothing at a focus: " + J([await ev("window.shared.preload.outcome"), lib(), count(COPY)]));
+  ok((await ev("window.shared.preload.outcome")) === "off" && lib().length === 0 && count(COPY) === 0, "the tests' switch: nothing at idle, nothing at a focus: " + J([await ev("window.shared.preload.outcome"), lib(), count(COPY)]));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: off.identifier });
 } catch (e) {
   failures++;

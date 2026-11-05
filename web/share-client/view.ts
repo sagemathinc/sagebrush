@@ -13,9 +13,9 @@
 //
 // Background loading (web/preload.ts, as on the notebook page): at idle, the library files the open notebook's first
 // Run will fetch, by the page, in the runner broker's request shape (the same cache the runner's requests are answered
-// from; no frame made for it, nothing run); never the collection's data files. The copy's chunk on intent: at the
-// first focus of a cell's editor (an edit makes the copy), never by a run.
-import { preloadBlocked, preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
+// from; no frame made for it, nothing run); never the collection's data files, nor the copy's chunk (it isn't
+// named by its content, so the site can't let a browser keep it: fetched ahead, it would be fetched again, daybreak2).
+import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
@@ -234,19 +234,8 @@ async function main() {
   if (first) await open(first);
   // background loading: the open notebook's library files at idle (its mode's groups, the groups its import lines name)
   preloadSoon({ table: __SB_PRELOAD__, base: new URL("/", location.href).href, doc: () => { if (!nb) return null; const d = nb.snapshot(); return { mode: d.mode ?? nb.mode, codes: d.cells.filter((x: any) => !x.type).map((x: any) => x.code ?? "") }; } });
-  // (the copy's chunk, on the first focus of a cell's editor: once, with the same skips; a Run doesn't stop it, an
-  // edit after a run being exactly its intent. Asked as the module import later asks for it, same-origin credentials
-  // (fetch's own default): Chromium doesn't answer that import from a credential-less fetch's cached copy, measured
-  // by web/share/test-share-preload.mjs)
-  const copyChunk = new URL("/sagebrush-share-copy.js", location.href).href;
-  let copyAsked = false;
-  $("#nb").addEventListener("focusin", (e) => {
-    if (copyAsked || !(e.target instanceof HTMLTextAreaElement) || (globalThis as any).__sbPreloadOff === true || preloadBlocked() || wsP) return;
-    copyAsked = true;
-    void fetch(copyChunk, { priority: "low", redirect: "error" } as RequestInit).then((r) => r.arrayBuffer()).catch(() => {});
-  });
   if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
-  (window as any).shared = { c, kernel, get nb() { return nb; }, preload: preloadState, get copyPrefetched() { return copyAsked; } }; // for tests
+  (window as any).shared = { c, kernel, get nb() { return nb; }, preload: preloadState }; // for tests
 }
 
 function fail(text: string) {
